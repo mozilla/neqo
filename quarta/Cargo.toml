@@ -1,0 +1,7 @@
+[package]
+name = "quarta"
+version = "0.1.0"
+authors = ["EKR <ekr@rtfm.com>"]
+
+[dependencies]
+num-traits = "0.2"
