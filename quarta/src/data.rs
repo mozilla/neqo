@@ -63,6 +63,10 @@ impl Data {
         Ok(needed)
     }
 
+    pub fn remaining(&self) -> usize {
+        self.buf.len() - self.offset
+    }
+
     pub fn decode_byte(&mut self) -> Res<u8> {
         let _ = self.check_remaining(1)?;
 
@@ -76,6 +80,15 @@ impl Data {
         let _ = self.check_remaining(1)?;
 
         let res = self.buf[self.offset];
+
+        Ok(res)
+    }
+
+    pub fn peek_data(&mut self, l: usize) -> Res<Vec<u8>> {
+        let _ = self.check_remaining(l)?;
+
+        let mut res = Vec::with_capacity(l);
+        res.extend(&self.buf[self.offset..]);
 
         Ok(res)
     }
