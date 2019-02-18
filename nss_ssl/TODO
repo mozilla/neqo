@@ -1,0 +1,10 @@
+agent state (not connected/writeable/readable/broken)
+custom extensions
+read/write
+early data
+record layer separation -- NSS changes pending
+secret export -- NSS changes pending
+current aead -- needs NSS changes
+current kdf -- needs NSS changes
+external session ticket
+certificate examination

@@ -1,0 +1,140 @@
+# In this file, every section corresponds to a header file.
+# A corresponding binding file will be created in $OUT_DIR.
+
+[nss_ssl]
+types = [
+    "PRUint16",
+    "PRUint8",
+    "SECStatus",
+    "SSLProtocolVariant",
+    "SSLResumptionTokenCallback",
+]
+functions = [
+    "SSL_AuthCertificateComplete",
+    "SSL_AuthCertificateHook",
+    "SSL_ConfigServerCert",
+    "SSL_ConfigServerSessionIDCache",
+    "SSL_GetExperimentalAPI",
+    "SSL_GetImplementedCiphers",
+    "SSL_GetNumImplementedCiphers",
+    "SSL_ForceHandshake",
+    "SSL_ImportFD",
+    "SSL_OptionGet",
+    "SSL_OptionSet",
+    "SSL_ResetHandshake",
+    "SSL_SetURL",
+    "SSL_VersionRangeSet",
+]
+enums = [
+    "SSLKEAType",
+    "SSLProtocolVariant",
+    "SECStatus",
+]
+variables = [
+    "SSL_NumImplementedCiphers",
+    "SSL_LIBRARY_VERSION_.*",
+]
+opaque = [
+    "CERTCertificate",
+    "PRFileDesc",
+    "SECKEYPrivateKey",
+    "SECKEYPublicKey",
+    "SSLExtraServerCertData",
+]
+
+[nss_sslopt]
+variables = [
+    "SSL_REQUEST_CERTIFICATE",
+    "SSL_REQUIRE_CERTIFICATE",
+    "SSL_NO_LOCKS",
+    "SSL_ENABLE_SESSION_TICKETS",
+    "SSL_ENABLE_OCSP_STAPLING",
+    "SSL_ENABLE_ALPN",
+    "SSL_ENABLE_EXTENDED_MASTER_SECRET",
+    "SSL_ENABLE_SIGNED_CERT_TIMESTAMPS",
+    "SSL_ENABLE_0RTT_DATA",
+    "SSL_RECORD_SIZE_LIMIT",
+    "SSL_ENABLE_TLS13_COMPAT_MODE",
+    "SSL_ENABLE_HELLO_DOWNGRADE_CHECK",
+]
+
+[nss_secerr]
+types = ["SECErrorCodes"]
+enums = ["SECErrorCodes"]
+
+[nss_sslerr]
+types = ["SSLErrorCodes"]
+enums = ["SSLErrorCodes"]
+
+[nss_init]
+functions = [
+    "NSS_Initialize",
+    "NSS_IsInitialized",
+    "NSS_NoDB_Init",
+    "NSS_SetDomesticPolicy",
+    "NSS_Shutdown",
+]
+variables = [
+    "NSS_INIT_READONLY",
+    "SECMOD_DB",
+]
+
+[nss_p11]
+functions = [
+    "CERT_DestroyCertificate",
+    "PK11_FindCertFromNickname",
+    "PK11_FindKeyByAnyCert",
+    "SECKEY_DestroyPrivateKey",
+]
+opaque = [
+    "CERTCertificate",
+    "SECKEYPublicKey",
+    "SECKEYPrivateKey",
+]
+
+[nspr_err]
+# NSPR doesn't use an enum for errors, so we have to pull in everything in the header file.
+# Specifying no types, functions, or variables does that, but then exclude some.
+exclude = [
+    "nspr_.*",
+    "PR_MAX_ERROR",
+    "ERROR_TABLE_BASE_nspr"
+]
+
+[nspr_error]
+functions = [
+    "PR_ErrorToName",
+    "PR_ErrorToString",
+    "PR_GetError",
+    "PR_SetError",
+]
+variables = [
+    "PR_LANGUAGE_I_DEFAULT",
+]
+
+[nspr_io]
+types = ["PRIOMethods"]
+functions = [
+    "PR_CreateIOLayerStub",
+    "PR_GetUniqueIdentity",
+    "PR_Read",
+    "PR_Write",
+]
+variables = [
+    "PR_AF_INET",
+]
+# opaque is for the stuff we don't plan to use, but we need for function signatures.
+opaque = [
+    "PRFileInfo",
+    "PRFileInfo64",
+    "PRFilePrivate",
+    "PRIOVec",
+    "PRSendFileData",
+]
+enums = [
+    "PRDescType",
+    "PRStatus",
+    "PRSeekWhence",
+    "PRSockOption",
+    "PRTransmitFileFlags",
+]
