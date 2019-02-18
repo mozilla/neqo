@@ -2,7 +2,6 @@ extern crate num_traits;
 pub mod data;
 pub mod frame;
 pub mod varint;
-pub mod packet;
 
 #[derive(PartialEq, Debug)]
 pub enum Error {
