@@ -14,6 +14,7 @@ pub mod connection;
 pub mod data;
 pub mod frame;
 pub mod packet;
+pub mod stream;
 pub mod varint;
 
 #[derive(PartialEq, Debug)]
