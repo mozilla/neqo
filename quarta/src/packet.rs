@@ -272,7 +272,6 @@ fn decrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<Vec<u
     Ok(ctx.aead_decrypt(hdr.pn, hdr.epoch, &hdrbytes, &pkt[hdr.hdr_len..])?)
 }
 
-
 fn encode_packet_short(ctx: &PacketCtx, d: &mut Data, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
     // Leading byte.
     let pnl = ctx.pn_length(hdr.pn);    
@@ -425,11 +424,12 @@ mod tests {
         Ok((phdr, body))
     }
 
-    fn test_encrypt_decrypt(f: &TestFixture, hdr: &mut PacketHdr, body: &[u8]) {
+    fn test_encrypt_decrypt(f: &TestFixture, hdr: &mut PacketHdr, body: &[u8]) -> PacketHdr{
         let packet = encode_packet(f, hdr, &TEST_BODY).unwrap();
         let res = test_decrypt_packet(&f, packet).unwrap();
         assert_headers_equal(&hdr, &res.0);
-        assert_eq!(body.to_vec(), res.1)
+        assert_eq!(body.to_vec(), res.1);
+        res.0
     }
     
     #[test]
@@ -450,12 +450,46 @@ mod tests {
     }
 
     #[test]    
-    fn test_long_packet() {
+    fn test_handshake_packet() {
         let f = TestFixture{};
         let mut hdr = default_hdr();
         hdr.tipe = PacketType::Handshake;
         hdr.scid = Some(ConnectionId(vec![9,8,7,6,5,4,3,2]));
         test_encrypt_decrypt(&f, &mut hdr, &TEST_BODY);
+    }
+
+    #[test]    
+    fn test_handshake_packet_damaged() {
+        let f = TestFixture{};
+        let mut hdr = default_hdr();
+        hdr.tipe = PacketType::Handshake;
+        hdr.scid = Some(ConnectionId(vec![9,8,7,6,5,4,3,2]));
+        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY).unwrap();
+        let plen = packet.len();
+        packet[plen-1] ^= 0x7;
+        assert!(test_decrypt_packet(&f, packet).is_err());
+    }
+
+    #[test]    
+    fn test_initial_packet() {
+        let f = TestFixture{};
+        let mut hdr = default_hdr();
+        let tipe = PacketType::Initial(vec![0x0,0x0,0x0,0x0]);
+        hdr.tipe = tipe;
+        hdr.scid = Some(ConnectionId(vec![9,8,7,6,5,4,3,2]));
+        test_encrypt_decrypt(&f, &mut hdr, &TEST_BODY);
+    }
+
+    #[test]    
+    fn test_initial_packet_damaged() {
+        let f = TestFixture{};
+        let mut hdr = default_hdr();
+        hdr.tipe = PacketType::Initial(vec![0x0,0x0,0x0,0x0]);
+        hdr.scid = Some(ConnectionId(vec![9,8,7,6,5,4,3,2]));
+        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY).unwrap();
+        let plen = packet.len();
+        packet[plen-1] ^= 0x7;
+        assert!(test_decrypt_packet(&f, packet).is_err());
     }
 }
 
