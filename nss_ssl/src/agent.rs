@@ -1,5 +1,5 @@
-pub use crate::agentio::SslRecordList;
-use crate::agentio::{AgentIo, METHODS};
+use crate::agentio::{record_layer_write, AgentIo, METHODS};
+pub use crate::agentio::{SslRecord, SslRecordList};
 use crate::err::{Error, Res};
 use crate::initialized;
 use crate::p11;
@@ -118,6 +118,17 @@ impl Agent {
         Ok(())
     }
 
+    fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
+        self.st = match result::result_or_blocked(rv)? {
+            true => match *self.auth_required {
+                true => HandshakeState::AuthenticationPending,
+                false => HandshakeState::InProgress,
+            },
+            false => HandshakeState::Complete,
+        };
+        Ok(())
+    }
+
     // Drive the TLS handshake, taking bytes from @input and putting
     // any bytes necessary into @output.
     // This takes the current time as @now.
@@ -131,32 +142,53 @@ impl Agent {
         input: &[u8],
         output: &mut [u8],
     ) -> Res<(HandshakeState, usize)> {
-        let (_h, out) = self.io.wrap(input, output);
-        let rv = match *self.auth_required {
-            true => {
-                *self.auth_required = false;
-                unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) }
-            }
-            _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
+        let (rv, written) = {
+            // Within this scope, _h maintains a mutable reference to self.io.
+            let (_h, out) = self.io.wrap(input, output);
+            (
+                match *self.auth_required {
+                    true => {
+                        *self.auth_required = false;
+                        unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) }
+                    }
+                    _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
+                },
+                out.written(),
+            )
         };
-        self.st = match result::result_or_blocked(rv)? {
-            true => match *self.auth_required {
-                true => HandshakeState::AuthenticationPending,
-                false => HandshakeState::InProgress,
-            },
-            false => HandshakeState::Complete,
-        };
-        Ok((self.st.clone(), out.written()))
+        self.update_state(rv)?;
+        Ok((self.st.clone(), written))
     }
 
     // Drive the TLS handshake, but get the raw content of records, not
     // protected records as bytes. This function is incompatible with
     // handshake(); use either this or handshake() exclusively.
-    // fn handshake_raw<'a, 'b>(&mut self,
-    //     _now: &std::time::SystemTime,
-    //     input: SslRecord<'b>,
-    //     output: &'a mut [u8],
-    // ) -> Res<(HandshakeState, SslRecordList<'a>)>;
+    fn handshake_raw<'a, 'b>(
+        &mut self,
+        _now: &std::time::SystemTime,
+        input: SslRecord<'b>,
+        output: &'a mut [u8],
+    ) -> Res<(HandshakeState, SslRecordList<'a>)> {
+        // TODO check SSL_GetCurrentEpoch
+
+        let mut records = Box::new(SslRecordList::new(output));
+        let records_ptr = &mut *records as *mut SslRecordList as *mut c_void;
+        let rv = unsafe {
+            ssl::SSL_RecordLayerWriteCallback(self.fd, Some(record_layer_write), records_ptr)
+        };
+        result::result(rv)?;
+
+        match *self.auth_required {
+            true => {
+                *self.auth_required = false;
+                let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
+                result::result(rv)?;
+            }
+            _ => input.write(self.fd)?,
+        };
+        self.update_state(rv)?;
+        Ok((self.st.clone(), *records))
+    }
 
     // State returns the status of the handshake.
     pub fn state(&self) -> &HandshakeState {
@@ -234,7 +266,6 @@ impl Server {
         Ok(Server { agent })
     }
 }
-
 
 impl Deref for Server {
     type Target = Agent;

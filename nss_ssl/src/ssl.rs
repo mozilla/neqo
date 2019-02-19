@@ -99,7 +99,7 @@ experimental_api!(SSL_RecordLayerData(
     fd: *mut PRFileDesc,
     epoch: u16,
     ct: SSLContentType::Type,
-    data: *mut u8,
+    data: *const u8,
     len: c_uint,
 ));
 experimental_api!(SSL_GetCurrentEpoch(

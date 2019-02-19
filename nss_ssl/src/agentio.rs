@@ -1,11 +1,12 @@
 use crate::err::{Error, NSPRErrorCodes, PR_SetError, Res};
 use crate::prio;
-use crate::ssl::SSLContentType;
+use crate::result;
+use crate::ssl;
 
 use std::cmp::min;
 use std::collections::linked_list::{Iter, LinkedList};
 use std::mem;
-use std::os::raw::c_void;
+use std::os::raw::{c_uint, c_void};
 use std::ptr::{null, null_mut};
 
 // Alias common types.
@@ -18,7 +19,7 @@ const PR_FAILURE: PrStatus = prio::PRStatus::PR_FAILURE;
 #[derive(Default, Debug)]
 struct SslRecordLength {
     epoch: u16,
-    ct: SSLContentType::Type,
+    ct: ssl::SSLContentType::Type,
     len: usize,
 }
 
@@ -26,8 +27,23 @@ struct SslRecordLength {
 #[derive(Default, Debug)]
 pub struct SslRecord<'a> {
     epoch: u16,
-    ct: SSLContentType::Type,
+    ct: ssl::SSLContentType::Type,
     data: &'a [u8],
+}
+
+impl<'a> SslRecord<'a> {
+    pub fn write(&self, fd: *mut ssl::PRFileDesc) -> Res<()> {
+        let rv = unsafe {
+            ssl::SSL_RecordLayerData(
+                fd,
+                self.epoch,
+                self.ct,
+                self.data.as_ptr(),
+                self.data.len() as c_uint,
+            )
+        };
+        result::result(rv)
+    }
 }
 
 /// An iterator over the items in SslRecordList.
@@ -72,7 +88,7 @@ impl<'a> SslRecordList<'a> {
         }
     }
 
-    fn write(&mut self, epoch: u16, ct: SSLContentType::Type, data: &[u8]) -> Res<()> {
+    fn write(&mut self, epoch: u16, ct: ssl::SSLContentType::Type, data: &[u8]) -> Res<()> {
         let end = self.len + data.len();
         assert!(end <= data.len());
         self.buf[self.len..end].copy_from_slice(data);
@@ -138,6 +154,24 @@ impl<'a> SslRecordList<'a> {
 
     fn available(&self) -> usize {
         self.buf.len() - self.len
+    }
+}
+
+pub unsafe extern "C" fn record_layer_write(
+    _fd: *mut ssl::PRFileDesc,
+    epoch: ssl::PRUint16,
+    ct: ssl::SSLContentType::Type,
+    data: *const ssl::PRUint8,
+    len: c_uint,
+    arg: *mut c_void,
+) -> ssl::SECStatus {
+    let a = arg as *mut SslRecordList;
+    let records = a.as_mut().unwrap();
+
+    let slice = std::slice::from_raw_parts(data, len as usize);
+    match records.write(epoch, ct, slice) {
+        Ok(()) => ssl::SECSuccess,
+        _ => ssl::SECFailure,
     }
 }
 
