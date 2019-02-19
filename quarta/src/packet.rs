@@ -180,11 +180,6 @@ fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
         return Ok(p);
     }
 
-    // Long header.
-    if p.tbyte & 0x40 != 0 {
-        return Err(Error::ErrInvalidPacket);
-    }
-
     let v = d.decode_uint(4)? as u32;
     let idl = decode_cidl(d.decode_byte()?);
 
@@ -226,8 +221,9 @@ fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
         }
     }
 
+    p.body_len = d.decode_varint()? as usize;
     p.hdr_len = d.offset();
-    p.body_len = d.remaining();
+
 
     Ok(p)
 }
@@ -248,7 +244,6 @@ fn decrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<Vec<u
 
     // Now put together a raw header to work on.
     let pn_len = decode_pnl((hdr.tbyte ^ mask[0]) & 0x3);
-    println!("pn_len = {}", pn_len);
     let mut hdrbytes = pkt[0..(hdr.hdr_len + pn_len)].to_vec();
 
     // Un-mask the leading byte.
@@ -318,7 +313,7 @@ fn encrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, d: &mut Data, body: &[u8
     let mask = ctx.compute_mask(&ct[0..SAMPLE_SIZE]).unwrap();
     let ret = d.as_mut_vec();
     ret[0] ^= mask[0] & 0x1f;
-    for i in hdr_len-4..hdr_len {
+    for i in hdr_len-ctx.pn_length(hdr.pn)..hdr_len {
         ret[i] ^= mask[1 + 1];
     }
     Ok(ret.to_vec())
@@ -346,6 +341,8 @@ mod tests {
     
     struct TestFixture {}
 
+    const AEAD_MASK: u8 = 0;
+    
     impl TestFixture {
         fn auth_tag(hdr: &[u8], body: &[u8]) -> [u8; 16] {
             [0; 16]
@@ -369,7 +366,7 @@ mod tests {
             let mut pt = body.to_vec();
             
             for i in 0..pt.len() {
-                pt[i] ^= 0x7;
+                pt[i] ^= AEAD_MASK;
             }
             let pt_len = pt.len()-16;
             let at = TestFixture::auth_tag(hdr, &pt[0..pt_len]);
@@ -387,7 +384,7 @@ mod tests {
             d.encode_vec(&TestFixture::auth_tag(hdr, body));
             let v = d.as_mut_vec();
             for i in 0..v.len() {
-                v[i] ^= 0x7;
+                v[i] ^= AEAD_MASK;
             }
 
             Ok(v.to_vec())
@@ -407,7 +404,7 @@ mod tests {
             version: Some(31),
             dcid: ConnectionId(vec![1,2,3,4,5]),
             scid: None,
-            pn: 12345,
+            pn: 0x0505,
             epoch: 0,
             hdr_len: 0,
             body_len: 0
@@ -433,6 +430,7 @@ mod tests {
         test_encrypt_decrypt(&f, &mut hdr, &TEST_BODY);
     }
 
+    #[test]    
     fn test_short_packet_damaged() {
         let f = TestFixture{};
         let mut hdr = default_hdr();
@@ -440,6 +438,15 @@ mod tests {
         let plen = packet.len();
         packet[plen-1] ^= 0x7;
         assert!(test_decrypt_packet(&f, packet).is_err());
+    }
+
+    #[test]    
+    fn test_long_packet() {
+        let f = TestFixture{};
+        let mut hdr = default_hdr();
+        hdr.tipe = PacketType::Handshake;
+        hdr.scid = Some(ConnectionId(vec![9,8,7,6,5,4,3,2]));
+        test_encrypt_decrypt(&f, &mut hdr, &TEST_BODY);
     }
 }
 
