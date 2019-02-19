@@ -1,4 +1,6 @@
 extern crate num_traits;
+#[macro_use]
+extern crate derive_more;
 
 // Cribbed from the |matches| crate, for simplicity.
 macro_rules! matches {
