@@ -27,8 +27,7 @@ impl Default for PacketType {
 
 #[derive(Default)]
 struct Version(u32);
-#[derive(Default)]
-struct PacketNumber(u64);
+type PacketNumber = u64;
 #[derive(Default)]
 struct ConnectionId(Vec<u8>);
 
@@ -40,6 +39,7 @@ struct PacketHdr {
     dcid: ConnectionId,
     scid: Option<ConnectionId>,
     pn: PacketNumber,
+    epoch: u64,
     hdr_len: usize,
     body_len: usize,
 }
@@ -51,8 +51,8 @@ trait PacketDecoder {
 trait PacketConn {
     fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]>;
     fn decode_pn(&self, pn: u64) -> Res<PacketNumber>;
-    fn aead_decrypt(&self, p: &PacketHdr) -> Res<Vec<u8>>;
-    fn aead_encrypt(&self, p: &PacketHdr) -> Res<Vec<u8>>;
+    fn aead_decrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
+    fn aead_encrypt(&self, h: &PacketHdr) -> Res<Vec<u8>>;
 }
 
 fn decode_packet(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
@@ -113,7 +113,7 @@ fn decode_packet(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     Ok(p)
 }
 
-fn decrypt_packet(ctx: &PacketConn, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<()> {
+fn decrypt_packet(ctx: &PacketConn, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<Vec<u8>> {
     assert!(!matches!(
         hdr.tipe,
         PacketType::Retry(..) | PacketType::VN(..)
@@ -154,6 +154,6 @@ fn decrypt_packet(ctx: &PacketConn, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<()> 
     hdr.pn = ctx.decode_pn(pn_encoded)?;
 
     // Finally, decrypt.
-
-    Ok(())
+    Ok(ctx.aead_decrypt(hdr.pn, hdr.epoch, &hdrbytes, &pkt[hdr.hdr_len..])?)
 }
+
