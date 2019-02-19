@@ -14,6 +14,7 @@ const PACKET_BIT_FIXED_QUIC: u8 = 0x40;
 
 const SAMPLE_SIZE: usize = 16;
 
+#[derive(Debug,PartialEq)]
 enum PacketType {
     Short,
     ZeroRTT,
@@ -43,7 +44,7 @@ impl PacketType {
 
 type Version = u32;
 type PacketNumber = u64;
-#[derive(Default,Deref)]
+#[derive(Default,Deref,Debug,PartialEq)]
 struct ConnectionId(Vec<u8>);
 
 #[derive(Default)]
@@ -411,6 +412,13 @@ mod tests {
         }
     }
 
+    fn assert_headers_equal(left: &PacketHdr, right: &PacketHdr) {
+        assert_eq!(left.tipe, right.tipe);
+        assert_eq!(left.dcid, right.dcid);
+        assert_eq!(left.scid, right.scid);
+        assert_eq!(left.pn, right.pn);
+    }
+
     fn test_decrypt_packet(f: &TestFixture, packet: Vec<u8>) -> Res<(PacketHdr, Vec<u8>)> {
         let mut phdr = decode_packet_hdr(f, &packet)?;
         let body = decrypt_packet(f, &mut phdr, &packet)?;
@@ -420,6 +428,7 @@ mod tests {
     fn test_encrypt_decrypt(f: &TestFixture, hdr: &mut PacketHdr, body: &[u8]) {
         let packet = encode_packet(f, hdr, &TEST_BODY).unwrap();
         let res = test_decrypt_packet(&f, packet).unwrap();
+        assert_headers_equal(&hdr, &res.0);
         assert_eq!(body.to_vec(), res.1)
     }
     
