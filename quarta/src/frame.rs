@@ -33,7 +33,7 @@ const STREAM_FRAME_BIT_LEN: u8 = 0x02;
 const STREAM_FRAME_BIT_OFF: u8 = 0x04;
 
 #[derive(PartialEq, Debug)]
-enum StreamType {
+pub enum StreamType {
     BiDi,
     UniDi,
 }
@@ -54,7 +54,7 @@ impl StreamType {
 }
 
 #[derive(PartialEq, Debug)]
-enum CloseType {
+pub enum CloseType {
     Transport,
     Application,
 }
@@ -75,13 +75,13 @@ impl CloseType {
 }
 
 #[derive(PartialEq, Debug, Default)]
-struct AckRange {
+pub struct AckRange {
     gap: u64,
     range: u64,
 }
 
 #[derive(PartialEq, Debug)]
-enum Frame {
+pub enum Frame {
     Padding,
     Ping,
     Ack {
@@ -313,7 +313,7 @@ impl Frame {
     }
 }
 
-fn decode_frame(d: &mut Data) -> Res<Frame> {
+pub fn decode_frame(d: &mut Data) -> Res<Frame> {
     // TODO(ekr@rtfm.com): check for minimal encoding
     let t = d.decode_byte()?;
 

@@ -10,6 +10,7 @@ macro_rules! matches {
     }
 }
 
+pub mod connection;
 pub mod data;
 pub mod frame;
 pub mod packet;
