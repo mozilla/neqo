@@ -52,7 +52,7 @@ trait PacketDecoder {
     fn get_cid_len(&self) -> usize;
 }
 
-trait PacketConn {
+trait PacketCtx {
     fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]>;
     fn decode_pn(&self, pn: u64) -> Res<PacketNumber>;
     fn aead_decrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
@@ -165,7 +165,7 @@ fn decode_packet(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     Ok(p)
 }
 
-fn decrypt_packet(ctx: &PacketConn, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<Vec<u8>> {
+fn decrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<Vec<u8>> {
     assert!(!matches!(
         hdr.tipe,
         PacketType::Retry(..) | PacketType::VN(..)
@@ -210,7 +210,7 @@ fn decrypt_packet(ctx: &PacketConn, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<Vec<
 }
 
 
-fn encode_packet_short(ctx: &PacketConn, d: &mut Data, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
+fn encode_packet_short(ctx: &PacketCtx, d: &mut Data, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
     // Leading byte.
     d.encode_byte(PACKET_BIT_SHORT |
                   PACKET_BIT_FIXED_QUIC |
@@ -218,17 +218,15 @@ fn encode_packet_short(ctx: &PacketConn, d: &mut Data, hdr: &mut PacketHdr, body
     d.encode_vec(&hdr.dcid.0);
     d.encode_uint(hdr.pn, 4);
 
-    
-
-    Err(Error::ErrInternal)
+    encrypt_packet(ctx, hdr, d, body)
 }
 
-fn encrypt_packet(ctx: &PacketConn, hdr: &mut PacketHdr, d: &mut Data, body: &[u8]) -> Res<Vec<u8>> {
-    let hdr_len = d.offset();
+fn encrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, d: &mut Data, body: &[u8]) -> Res<Vec<u8>> {
+    let hdr_len = d.remaining();
     // Encrypt the packet. This has too many copies.
     let ct = ctx.aead_encrypt(hdr.pn, hdr.epoch, d.as_mut_vec(), body).unwrap();
     d.encode_vec(&ct);
-    let mask = ctx.compute_mask(&body[0..SAMPLE_SIZE]).unwrap();
+    let mask = ctx.compute_mask(&ct[0..SAMPLE_SIZE]).unwrap();
     let ret = d.as_mut_vec();
     ret[0] ^= mask[0] & 0x1f;
     for i in hdr_len-4..hdr_len {
@@ -237,7 +235,7 @@ fn encrypt_packet(ctx: &PacketConn, hdr: &mut PacketHdr, d: &mut Data, body: &[u
     Ok(ret.to_vec())
 }
 
-fn encode_packet(ctx: &PacketConn, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
+fn encode_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
     let mut d = Data::default();
 
     match hdr.tipe {
@@ -249,7 +247,72 @@ fn encode_packet(ctx: &PacketConn, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<
         _ => unimplemented!()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestFixture {}
+
+    impl TestFixture {
+        fn auth_tag(hdr: &[u8], body: &[u8]) -> [u8; 16] {
+            [0; 16]
+        }
+    }
     
+    impl PacketCtx for TestFixture {
+        fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]> {
+            Ok([0xa5,0xa5,0xa5,0xa5,0xa5])
+        }
+
+        fn decode_pn(&self, pn: u64) -> Res<PacketNumber> {
+            Ok(pn)
+        }
+
+        fn aead_decrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+            unimplemented!()
+        }
+        fn aead_encrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>
+        {
+            let mut d = Data::from_slice(body);
+            d.encode_vec(&TestFixture::auth_tag(hdr, body));
+            let v = d.as_mut_vec();
+            for i in 0..v.len() {
+                v[i] ^= 0x7;
+            }
+
+            Ok(v.to_vec())
+        }
+    }
+
+    impl PacketDecoder for TestFixture {
+        fn get_cid_len(&self) -> usize {
+            5
+        }
+    }
+
+    fn default_hdr() -> PacketHdr {
+        PacketHdr {
+            tbyte: 0,
+            tipe: PacketType::Short,
+            version: Some(Version(31)),
+            dcid: ConnectionId(vec![1,2,3,4,5]),
+            scid: None,
+            pn: 12345,
+            epoch: 0,
+            hdr_len: 0,
+            body_len: 0
+        }
+    }
+    
+    #[test]
+    fn test_short_packet() {
+        let f = TestFixture{};
+        let mut hdr = default_hdr();
+        let body = [0x01, 0x23, 0x45, 0x67, 0x89, 0x10];
+        let packet = encode_packet(&f, &mut hdr, &body).unwrap();
+    }
+}
 /*    
     if matches!(hdr.tipe, PacketType::Short) {
         return 
