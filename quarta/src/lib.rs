@@ -20,6 +20,7 @@ pub enum Error {
     ErrNoMoreData,
     ErrUnknownFrameType,
     ErrInternal,
+    ErrInvalidPacket,
 }
 
 pub type Res<T> = std::result::Result<T, Error>;

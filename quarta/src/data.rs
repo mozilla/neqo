@@ -10,6 +10,13 @@ pub struct Data {
 }
 
 impl Data {
+    pub fn from_slice(data: &[u8]) -> Data {
+        Data {
+            buf: data.to_vec(),
+            offset: 0,
+        }
+    }
+
     pub fn encode_byte(&mut self, b: u8) {
         self.buf.push(b)
     }
@@ -61,6 +68,10 @@ impl Data {
             return Err(Error::ErrNoMoreData);
         }
         Ok(needed)
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
     }
 
     pub fn remaining(&self) -> usize {
