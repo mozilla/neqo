@@ -1,17 +1,20 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::stream::Stream;
-use crate::Res;
+use crate::{Error, Res};
 
 #[allow(unused_variables)]
 #[derive(Debug, Default)]
 pub struct Connection {
     max_data: Option<u64>,
     max_streams: Option<u64>,
+    highest_stream: Option<u64>,
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
-    streams: HashSet<(u64, Stream)>,         // (stream id, stream)
+    max_used_stream_id: Option<u64>,
+    streams: HashMap<u64, Stream>,      // stream id, stream
+    outgoing_packets: Vec<(u64, Data)>, // (offset, data)
 }
 
 impl Connection {
@@ -50,7 +53,9 @@ impl Connection {
                 stream_id,
                 offset,
                 data,
-            } => {} // TODO tell above that some data is available
+            } => {
+                self.process_inbound_stream_frame(fin, stream_id, offset, data);
+            }
             Frame::MaxData { maximum_data } => {} // TODO set self.max_data?
             Frame::MaxStreamData {
                 stream_id,
@@ -90,7 +95,36 @@ impl Connection {
         Ok(())
     }
 
-    pub fn stream_write(&mut self, _stream: Stream) -> Res<()> {
+    pub fn process_inbound_stream_frame(
+        &mut self,
+        fin: bool,
+        stream_id: u64,
+        offset: u64,
+        data: Vec<u8>,
+    ) {
+        // TODO check against list of ooo frames and maybe make some data available
+    }
+
+    // Returns new stream id
+    pub fn stream_create(&mut self) -> u64 {
+        let next_stream_id = self.max_used_stream_id.unwrap_or_default() + 1;
+        self.streams.insert(next_stream_id, Stream::new());
+        self.max_used_stream_id = Some(next_stream_id);
+        next_stream_id
+    }
+
+    pub fn stream_write(&mut self, stream_id: u64, data: Data) -> Res<()> {
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+
+        let remaining = data.remaining() as u64;
+        self.outgoing_packets.push((stream.offset(), data)); // TODO give needed info to make a STREAM frame
+        stream.add_to_offset(remaining);
+
+        // TODO poke packet scheduler to maybe send some outgoing packets
+
         Ok(())
     }
 }

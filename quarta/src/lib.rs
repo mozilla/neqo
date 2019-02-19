@@ -24,6 +24,7 @@ pub enum Error {
     ErrInternal,
     ErrInvalidPacket,
     ErrDecryptError,
+    ErrInvalidStreamId,
 }
 
 pub type Res<T> = std::result::Result<T, Error>;
