@@ -146,6 +146,11 @@ impl Data {
         self.buf.truncate(0);
         self.offset = 0;
     }
+
+    pub fn as_mut_vec(&mut self) -> &mut [u8] {
+        &mut *self.buf
+    }
+     
 }
 
 #[cfg(test)]

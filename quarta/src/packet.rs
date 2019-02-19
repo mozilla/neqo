@@ -8,6 +8,10 @@ const PACKET_TYPE_0RTT: u8 = 0x01;
 const PACKET_TYPE_HANDSHAKE: u8 = 0x2;
 const PACKET_TYPE_RETRY: u8 = 0x03;
 
+const PACKET_BIT_SHORT: u8 = 0x80;
+const PACKET_BIT_FIXED_QUIC: u8 = 0x40;
+const PACKET_BIT_PN_LENGTH: u8 = 0x03;
+
 const SAMPLE_SIZE: usize = 16;
 
 enum PacketType {
@@ -52,9 +56,41 @@ trait PacketConn {
     fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]>;
     fn decode_pn(&self, pn: u64) -> Res<PacketNumber>;
     fn aead_decrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
-    fn aead_encrypt(&self, h: &PacketHdr) -> Res<Vec<u8>>;
+    fn aead_encrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
 }
 
+/*
+   Short Header
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+
+   |0|1|S|R|R|K|P P|
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                Destination Connection ID (0..144)           ...
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                     Packet Number (8/16/24/32)              ...
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                     Protected Payload (*)                   ...
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+   
+   Long Header
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+
+   |1|1|T T|X X X X|
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                         Version (32)                          |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |DCIL(4)|SCIL(4)|
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |               Destination Connection ID (0/32..144)         ...
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                 Source Connection ID (0/32..144)            ...
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+*/
 fn decode_packet(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     let mut p = PacketHdr::default();
 
@@ -62,12 +98,17 @@ fn decode_packet(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
 
     // Get the type byte
     p.tbyte = d.decode_byte()?;
+    if p.tbyte & 0x40 == 0{
+        return Err(Error::ErrInvalidPacket);
+    }
+    
     if (p.tbyte & 0x80) == 0 {
         // Short Header.
         p.tipe = PacketType::Short;
         p.dcid = ConnectionId(d.decode_data(dec.get_cid_len())?);
         p.hdr_len = d.offset();
         p.body_len = d.remaining();
+        p.epoch = 3; // TODO(ekr@rtfm.com): Decode key phase bits.
         return Ok(p);
     }
 
@@ -78,6 +119,8 @@ fn decode_packet(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
 
     let v = d.decode_uint(4)? as u32;
     let idl = d.decode_byte()?;
+    // TODO(ekr@rtfm.com): Do the right decoder. for CIDL
+    unimplemented!();
     p.dcid = ConnectionId(d.decode_data((idl >> 4) as usize)?);
     p.scid = Some(ConnectionId(d.decode_data((idl & 0xf) as usize)?));
     if v == 0 {
@@ -94,9 +137,18 @@ fn decode_packet(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     } else {
         p.tipe = match (p.tbyte >> 4) & 0x3 {
             // TODO(ekr@rtfm.com): Check the 0 bits.
-            PACKET_TYPE_INITIAL => PacketType::Initial(d.decode_data_and_len()?),
-            PACKET_TYPE_0RTT => PacketType::ZeroRTT,
-            PACKET_TYPE_HANDSHAKE => PacketType::Handshake,
+            PACKET_TYPE_INITIAL => {
+                p.epoch = 0;
+                PacketType::Initial(d.decode_data_and_len()?)
+            },
+            PACKET_TYPE_0RTT => {
+                p.epoch = 1;
+                PacketType::ZeroRTT
+            },
+            PACKET_TYPE_HANDSHAKE => {
+                p.epoch = 2;
+                PacketType::Handshake
+            },
             // TODO(ekr@rtfm.com): Read ODCIL.
             PACKET_TYPE_RETRY => PacketType::Retry(d.decode_remainder()?),
             _ => unreachable!(),
@@ -156,4 +208,83 @@ fn decrypt_packet(ctx: &PacketConn, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<Vec<
     // Finally, decrypt.
     Ok(ctx.aead_decrypt(hdr.pn, hdr.epoch, &hdrbytes, &pkt[hdr.hdr_len..])?)
 }
+
+
+fn encode_packet_short(ctx: &PacketConn, d: &mut Data, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
+    // Leading byte.
+    d.encode_byte(PACKET_BIT_SHORT |
+                  PACKET_BIT_FIXED_QUIC |
+                  PACKET_BIT_PN_LENGTH);
+    d.encode_vec(&hdr.dcid.0);
+    d.encode_uint(hdr.pn, 4);
+
+    
+
+    Err(Error::ErrInternal)
+}
+
+fn encrypt_packet(ctx: &PacketConn, hdr: &mut PacketHdr, d: &mut Data, body: &[u8]) -> Res<Vec<u8>> {
+    let hdr_len = d.offset();
+    // Encrypt the packet. This has too many copies.
+    let ct = ctx.aead_encrypt(hdr.pn, hdr.epoch, d.as_mut_vec(), body).unwrap();
+    d.encode_vec(&ct);
+    let mask = ctx.compute_mask(&body[0..SAMPLE_SIZE]).unwrap();
+    let ret = d.as_mut_vec();
+    ret[0] ^= mask[0] & 0x1f;
+    for i in hdr_len-4..hdr_len {
+        ret[i] ^= mask[1 + 1];
+    }
+    Ok(ret.to_vec())
+}
+
+fn encode_packet(ctx: &PacketConn, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
+    let mut d = Data::default();
+
+    match hdr.tipe {
+        PacketType::Short => encode_packet_short(ctx, &mut d, hdr, body),
+        /*
+        PacketType::VN(..) => encode_packet_vn(ctx, &d, hdr, body),
+        PacketType::Retry(..) => encode_retry(ctx, &d, hdr, body),
+        _ => encode_packet_long(ctx, hdr, body)*/
+        _ => unimplemented!()
+    }
+}
+    
+/*    
+    if matches!(hdr.tipe, PacketType::Short) {
+        return 
+    }
+
+    
+        t = 0x12;
+        // TODO(ekr@rtfm.com): Key phase.
+        t |= 0x3; // 32-bit packet number.
+    } else {
+        // Look up the type bits.
+        let tf = match hdr.tipe {
+            PacketType::ZeroRTT => PACKET_TYPE_0RTT,
+            PacketType::Handshake => PACKET_TYPE_HANDSHAKE,
+            PacketType::Initial(..) => PACKET_TYPE_INITIAL,
+            PacketType::Retry(..) => PACKET_TYPE_RETRY,
+            // TODO(ekr@rtfm.com): Randomize VN.
+            _ => unimplemented!()
+        };
+
+        // This is the top-half of the header byte.
+        t = 0x40 | tf << 4;
+
+        // Now the type-specific low-order bits.
+        t |= match hdr.tipe {
+            // Always use the 32-bit packet # size.
+            PacketType::ZeroRTT | PacketType::Handshake | PacketType::Initial(..) => 0x3,
+            PacketType::Retry(..) => unimplemented!(), // ODCIL.
+            _ => unimplemented!()
+        };
+    }
+
+    // Finally, encode the byte.
+    d.encode_byte(t);
+
+    
+    Err(Error::ErrInternal)*/
 
