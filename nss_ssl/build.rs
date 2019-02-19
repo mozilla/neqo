@@ -43,7 +43,8 @@ fn nss_dir() -> PathBuf {
     let dir = match env::var("NSS_DIR") {
         Ok(dir) => PathBuf::from(dir.trim()),
         Err(_) => {
-            let dir = Path::new("./nss");
+            let out_dir = env::var("OUT_DIR").unwrap();
+            let dir = Path::new(&out_dir).join("nss");
             if !dir.exists() {
                 Command::new("hg")
                     .args(&[
@@ -54,7 +55,7 @@ fn nss_dir() -> PathBuf {
                     .status()
                     .expect("can't clone nss");
             }
-            let nspr_dir = Path::new("./nspr");
+            let nspr_dir = Path::new(&out_dir).join("nspr");
             if !nspr_dir.exists() {
                 Command::new("hg")
                     .args(&[
