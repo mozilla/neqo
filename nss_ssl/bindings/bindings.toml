@@ -8,6 +8,8 @@ types = [
     "SECStatus",
     "SSLProtocolVariant",
     "SSLResumptionTokenCallback",
+    "SSLSecretCallback",
+    "SSLRecordWriteCallback",
 ]
 functions = [
     "SSL_AuthCertificateComplete",
@@ -26,6 +28,7 @@ functions = [
     "SSL_VersionRangeSet",
 ]
 enums = [
+    "SSLContentType",
     "SSLKEAType",
     "SSLProtocolVariant",
     "SECStatus",

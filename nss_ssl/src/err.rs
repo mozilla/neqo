@@ -23,6 +23,7 @@ pub enum Error {
         code: PRErrorCode,
         desc: String,
     },
+    OverrunError,
     UnexpectedError,
 }
 

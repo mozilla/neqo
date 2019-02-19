@@ -1,4 +1,4 @@
-use nss_ssl::{init_db, Agent, Client, HandshakeState, Server};
+use nss_ssl::{init_db, Client, HandshakeState, Server};
 use std::time::SystemTime;
 
 #[test]

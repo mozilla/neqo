@@ -3,8 +3,9 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use std::ffi::{c_void, CString};
-use std::mem::transmute;
+use std::ffi::CString;
+use std::mem;
+use std::os::raw::{c_uint, c_void};
 
 include!(concat!(env!("OUT_DIR"), "/nss_ssl.rs"));
 mod SSLOption {
@@ -70,7 +71,7 @@ macro_rules! experimental_api {
             if f.is_null() {
                 return SECFailure;
             }
-            let f: unsafe extern "C" fn( $( $t ),* ) -> SECStatus = transmute(f);
+            let f: unsafe extern "C" fn( $( $t ),* ) -> SECStatus = mem::transmute(f);
             f( $( $a ),* )
         }
     };
@@ -82,7 +83,29 @@ macro_rules! experimental_api {
 experimental_api!(SSL_SetResumptionTokenCallback(
     fd: *mut PRFileDesc,
     cb: SSLResumptionTokenCallback,
-    ctx: *mut c_void
+    arg: *mut c_void,
+));
+experimental_api!(SSL_SecretCallback(
+    fd: *mut PRFileDesc,
+    cb: SSLSecretCallback,
+    arg: *mut c_void,
+));
+experimental_api!(SSL_RecordLayerWriteCallback(
+    fd: *mut PRFileDesc,
+    cb: SSLRecordWriteCallback,
+    arg: *mut c_void,
+));
+experimental_api!(SSL_RecordLayerData(
+    fd: *mut PRFileDesc,
+    epoch: u16,
+    ct: SSLContentType::Type,
+    data: *mut u8,
+    len: c_uint,
+));
+experimental_api!(SSL_GetCurrentEpoch(
+    fd: *mut PRFileDesc,
+    read_epoch: *mut PRUint16,
+    write_epoch: *mut PRUint16,
 ));
 
 #[cfg(test)]

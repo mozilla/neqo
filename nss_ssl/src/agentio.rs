@@ -1,7 +1,10 @@
 use crate::err::{Error, NSPRErrorCodes, PR_SetError, Res};
 use crate::prio;
+use crate::ssl::SSLContentType;
 
 use std::cmp::min;
+use std::collections::linked_list::{Iter, LinkedList};
+use std::mem;
 use std::os::raw::c_void;
 use std::ptr::{null, null_mut};
 
@@ -11,29 +14,153 @@ type PrStatus = prio::PRStatus::Type;
 const PR_SUCCESS: PrStatus = prio::PRStatus::PR_SUCCESS;
 const PR_FAILURE: PrStatus = prio::PRStatus::PR_FAILURE;
 
+// This holds the length of the slice, not the slice itself.
+#[derive(Default, Debug)]
+struct SslRecordLength {
+    epoch: u16,
+    ct: SSLContentType::Type,
+    len: usize,
+}
+
+/// A slice of the output.
+#[derive(Default, Debug)]
+pub struct SslRecord<'a> {
+    epoch: u16,
+    ct: SSLContentType::Type,
+    data: &'a [u8],
+}
+
+/// An iterator over the items in SslRecordList.
+pub struct SslRecordListIter<'a> {
+    output: &'a SslRecordList<'a>,
+    iter: Iter<'a, SslRecordLength>,
+    offset: usize,
+}
+
+impl<'a> Iterator for SslRecordListIter<'a> {
+    type Item = SslRecord<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.iter.next() {
+            Some(item) => {
+                let start = self.offset;
+                self.offset = start + item.len;
+                assert!(self.offset <= self.output.buf.len());
+                Some(SslRecord {
+                    epoch: item.epoch,
+                    ct: item.ct,
+                    data: &self.output.buf[start..self.offset],
+                })
+            }
+            None => None,
+        }
+    }
+}
+
+pub struct SslRecordList<'a> {
+    buf: &'a mut [u8],
+    sizes: LinkedList<SslRecordLength>,
+    len: usize,
+}
+
+impl<'a> SslRecordList<'a> {
+    pub fn new(b: &'a mut [u8]) -> SslRecordList<'a> {
+        SslRecordList {
+            buf: b,
+            sizes: Default::default(),
+            len: 0usize,
+        }
+    }
+
+    fn write(&mut self, epoch: u16, ct: SSLContentType::Type, data: &[u8]) -> Res<()> {
+        let end = self.len + data.len();
+        assert!(end <= data.len());
+        self.buf[self.len..end].copy_from_slice(data);
+        // Check if the last thing matches epoch and content type.
+        // This assumes that NSS won't be sending multiple different
+        // content types for the same epoch, such that we would have
+        // to coalesce differently.  By current reckoning, the only
+        // way in which different content types might be produced is
+        // if an alert is sent after some data.  That would be a
+        // terminal condition, so don't stress.
+        let add = match self.sizes.back() {
+            Some(SslRecordLength {
+                epoch: e, ct: c, ..
+            }) => {
+                assert!(*e <= epoch);
+                *e != epoch || *c != ct
+            }
+            _ => true,
+        };
+        if add {
+            self.sizes.push_back(SslRecordLength {
+                epoch,
+                ct,
+                len: data.len(),
+            });
+        } else {
+            self.sizes.back_mut().unwrap().len += data.len();
+        }
+        self.len = end;
+        Ok(())
+    }
+
+    pub fn iter(&'a self) -> SslRecordListIter<'a> {
+        SslRecordListIter {
+            output: self,
+            iter: self.sizes.iter(),
+            offset: 0,
+        }
+    }
+
+    pub fn slice(&'a self, epoch: u16) -> &'a [u8] {
+        let mut start = 0usize;
+        let mut end = start;
+        for SslRecordLength {
+            epoch: e, len: sz, ..
+        } in self.sizes.iter()
+        {
+            if *e == epoch {
+                end = start + sz;
+                break;
+            }
+            assert!(*e < epoch);
+            start += sz;
+        }
+        assert!(start <= self.buf.len());
+        assert!(end <= self.buf.len());
+        &self.buf[start..end]
+    }
+
+    pub fn written(&self) -> usize {
+        self.len
+    }
+
+    fn available(&self) -> usize {
+        self.buf.len() - self.len
+    }
+}
+
+pub struct AgentIoContext<'a> {
+    io: &'a mut AgentIo,
+}
+
+impl<'a> Drop for AgentIoContext<'a> {
+    fn drop(&mut self) {
+        self.io.reset();
+    }
+}
+
 pub struct AgentIo {
     // input is data that is read by TLS.
     input: *const u8,
     // input_available is how much data is left for reading.
     input_available: usize,
-    // output is data that is written by TLS.
-    output: *mut u8,
-    // output_available is how much space is left for writing.
-    output_available: usize,
-    // output_written is how much data has already been written.
-    output_written: usize,
-}
-
-pub struct AgentIoCleanup<'a> {
-    io: &'a mut AgentIo,
-}
-
-impl<'a> Into<usize> for AgentIoCleanup<'a> {
-    fn into(self) -> usize {
-        let written = self.io.output_written;
-        self.io.reset();
-        written
-    }
+    // output contains data that is written by TLS.
+    // This uses a static lifetime, because we don't care and
+    // are using unsafe to access this anyway.  We police lifetime
+    // rules on this manually.
+    output: *mut SslRecordList<'static>,
 }
 
 impl AgentIo {
@@ -42,29 +169,35 @@ impl AgentIo {
             input: null(),
             input_available: 0,
             output: null_mut(),
-            output_available: 0,
-            output_written: 0,
         }
     }
 
-    unsafe fn borrow<'a>(fd: PrFd) -> &'a mut AgentIo {
-        let io = (*fd).secret as *mut AgentIo;
+    unsafe fn borrow<'a>(fd: &'a PrFd) -> &'a mut AgentIo {
+        let io = (**fd).secret as *mut AgentIo;
         io.as_mut().unwrap()
     }
 
-    pub fn setup<'a>(&'a mut self, input: &[u8], output: &mut [u8]) -> AgentIoCleanup<'a> {
+    pub fn wrap<'a: 'c, 'b: 'c, 'c>(
+        &'a mut self,
+        input: &'b [u8],
+        output: &'b mut [u8],
+    ) -> (AgentIoContext<'c>, Box<SslRecordList<'b>>) {
+        assert!(self.input.is_null());
+        assert!(self.output.is_null());
         self.input = input.as_ptr();
         self.input_available = input.len();
-        self.output = output.as_mut_ptr();
-        self.output_available = output.len();
-        self.output_written = 0;
-        AgentIoCleanup { io: self }
+        let mut out = Box::new(SslRecordList::new(output));
+        // Lifetime hack because we need to assign this pointer to AgentIo
+        // and AgentIo lives longer than out.  We guarantee that this pointer
+        // is set to null before the memory goes out of scope using AgentIoContext.
+        self.output = unsafe { mem::transmute(&mut *out) };
+        (AgentIoContext { io: self }, out)
     }
 
     fn reset(&mut self) {
+        self.input = null();
         self.input_available = 0;
-        self.output_available = 0;
-        self.output_written = 0;
+        self.output = null_mut();
     }
 
     // Signal that we're blocked.
@@ -91,14 +224,10 @@ impl AgentIo {
 
     // Stage output from TLS into the output buffer.
     fn write_output(&mut self, buf: *const u8, count: usize) -> Res<usize> {
-        let amount = min(self.output_available, count);
+        let out = unsafe { self.output.as_mut().unwrap() };
+        let amount = min(out.available(), count);
         AgentIo::blocked(amount)?;
-        let src = unsafe { std::slice::from_raw_parts(buf, amount) };
-        let dst = unsafe { std::slice::from_raw_parts_mut(self.output, amount) };
-        dst.copy_from_slice(src);
-        self.output = self.output.wrapping_offset(amount as isize);
-        self.output_available -= amount;
-        self.output_written += amount;
+        out.write(0, 0, unsafe { std::slice::from_raw_parts(buf, amount) })?;
         Ok(amount)
     }
 }
@@ -112,7 +241,7 @@ unsafe extern "C" fn agent_close(fd: PrFd) -> PrStatus {
 }
 
 unsafe extern "C" fn agent_read(fd: PrFd, buf: *mut c_void, amount: prio::PRInt32) -> PrStatus {
-    let agent = AgentIo::borrow(fd);
+    let agent = AgentIo::borrow(&fd);
     if amount <= 0 {
         return PR_FAILURE;
     }
@@ -129,7 +258,7 @@ unsafe extern "C" fn agent_recv(
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    let agent = AgentIo::borrow(fd);
+    let agent = AgentIo::borrow(&fd);
     if amount <= 0 || flags != 0 {
         return PR_FAILURE;
     }
@@ -140,7 +269,7 @@ unsafe extern "C" fn agent_recv(
 }
 
 unsafe extern "C" fn agent_write(fd: PrFd, buf: *const c_void, amount: prio::PRInt32) -> PrStatus {
-    let agent = AgentIo::borrow(fd);
+    let agent = AgentIo::borrow(&fd);
     if amount <= 0 {
         return PR_FAILURE;
     }
@@ -157,8 +286,8 @@ unsafe extern "C" fn agent_send(
     flags: prio::PRIntn,
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
-    let agent = AgentIo::borrow(fd);
-    println!("send fd {:p} agent {:p}", fd, &agent);
+    let agent = AgentIo::borrow(&fd);
+    println!("send fd {:p} agent {:p} amount {:?}", fd, &agent, amount);
 
     if amount <= 0 || flags != 0 {
         return PR_FAILURE;
@@ -170,12 +299,12 @@ unsafe extern "C" fn agent_send(
 }
 
 unsafe extern "C" fn agent_available(fd: PrFd) -> prio::PRInt32 {
-    let agent = AgentIo::borrow(fd);
+    let agent = AgentIo::borrow(&fd);
     agent.input_available as prio::PRInt32
 }
 
 unsafe extern "C" fn agent_available64(fd: PrFd) -> prio::PRInt64 {
-    let agent = AgentIo::borrow(fd);
+    let agent = AgentIo::borrow(&fd);
     agent.input_available as prio::PRInt64
 }
 
