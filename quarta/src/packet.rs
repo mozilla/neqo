@@ -253,6 +253,8 @@ fn encode_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u
 mod tests {
     use super::*;
 
+    const TEST_BODY: [u8; 6]= [0x01, 0x23, 0x45, 0x67, 0x89, 0x10];
+    
     struct TestFixture {}
 
     impl TestFixture {
@@ -318,17 +320,32 @@ mod tests {
             body_len: 0
         }
     }
+
+    fn test_decrypt_packet(f: &TestFixture, packet: Vec<u8>) -> Res<(PacketHdr, Vec<u8>)> {
+        let mut phdr = decode_packet_hdr(f, &packet)?;
+        let body = decrypt_packet(f, &mut phdr, &packet)?;
+        Ok((phdr, body))
+    }
+
     
     #[test]
     fn test_short_packet() {
         let f = TestFixture{};
         let mut hdr = default_hdr();
-        let body = [0x01, 0x23, 0x45, 0x67, 0x89, 0x10];
-        let packet = encode_packet(&f, &mut hdr, &body).unwrap();
-        let mut phdr = decode_packet_hdr(&f, &packet).unwrap();
-        let body = decrypt_packet(&f, &mut phdr, &packet).unwrap();
+        let packet = encode_packet(&f, &mut hdr, &TEST_BODY).unwrap();
+        let res = test_decrypt_packet(&f, packet).unwrap();
+    }
+
+    fn test_short_packet_damaged() {
+        let f = TestFixture{};
+        let mut hdr = default_hdr();
+        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY).unwrap();
+        let plen = packet.len();
+        packet[plen-1] ^= 0x7;
+        assert!(test_decrypt_packet(&f, packet).is_err());
     }
 }
+
 /*    
     if matches!(hdr.tipe, PacketType::Short) {
         return 

@@ -376,7 +376,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
             if (t & STREAM_FRAME_BIT_OFF) != 0 {
                 o = d.decode_varint()?;
             }
-            let mut l: u64;
+            let l: u64;
             let mut data: Vec<u8>;
             println!("{}", t);
             if (t & STREAM_FRAME_BIT_LEN) != 0 {
