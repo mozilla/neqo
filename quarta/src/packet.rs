@@ -8,7 +8,8 @@ const PACKET_TYPE_0RTT: u8 = 0x01;
 const PACKET_TYPE_HANDSHAKE: u8 = 0x2;
 const PACKET_TYPE_RETRY: u8 = 0x03;
 
-const PACKET_BIT_SHORT: u8 = 0x80;
+const PACKET_BIT_LONG: u8 = 0x80;
+const PACKET_BIT_SHORT: u8 = 0x00;
 const PACKET_BIT_FIXED_QUIC: u8 = 0x40;
 const PACKET_BIT_PN_LENGTH: u8 = 0x03;
 
@@ -91,7 +92,7 @@ trait PacketCtx {
    |                 Source Connection ID (0/32..144)            ...
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
-fn decode_packet(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
+fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     let mut p = PacketHdr::default();
 
     let mut d = Data::from_slice(pd);
@@ -270,8 +271,21 @@ mod tests {
         }
 
         fn aead_decrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-            unimplemented!()
+            let mut pt = body.to_vec();
+            
+            for i in 0..pt.len() {
+                pt[i] ^= 0x7;
+            }
+            let pt_len = pt.len()-16;
+            let at = TestFixture::auth_tag(hdr, &pt[0..pt_len]);
+            for i in 0..16 {
+                if at[i] != pt[pt_len + i] {
+                    return Err(Error::ErrDecryptError);
+                }
+            }
+            Ok(pt[0..pt_len].to_vec())
         }
+        
         fn aead_encrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>
         {
             let mut d = Data::from_slice(body);
@@ -311,6 +325,8 @@ mod tests {
         let mut hdr = default_hdr();
         let body = [0x01, 0x23, 0x45, 0x67, 0x89, 0x10];
         let packet = encode_packet(&f, &mut hdr, &body).unwrap();
+        let mut phdr = decode_packet_hdr(&f, &packet).unwrap();
+        let body = decrypt_packet(&f, &mut phdr, &packet).unwrap();
     }
 }
 /*    

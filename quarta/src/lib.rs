@@ -22,6 +22,7 @@ pub enum Error {
     ErrUnknownFrameType,
     ErrInternal,
     ErrInvalidPacket,
+    ErrDecryptError,
 }
 
 pub type Res<T> = std::result::Result<T, Error>;
