@@ -1,4 +1,4 @@
-use std::cmp::max;
+use std::cmp::{max, min};
 use std::collections::{BTreeMap, VecDeque};
 
 use crate::Res;
@@ -62,7 +62,10 @@ impl Stream {
                 // already got all these bytes, do nothing
             } else if self.rx_offset > *start_offset {
                 // frame data has some new contig bytes after some old bytes
-                let copy_offset = start_offset - self.rx_offset; // convert to offset into data vec
+
+                // convert to offset into data vec and move past bytes we
+                // already have
+                let copy_offset = max(*start_offset, self.rx_offset) - start_offset;
                 let copy_slc = &data[copy_offset as usize..];
                 self.ready_to_go.extend(copy_slc);
                 self.rx_offset += copy_slc.len() as u64;
@@ -106,13 +109,15 @@ impl Stream {
     /// caller has been told data is available on a stream, and they want to
     /// retrieve it.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
-        let ret_bytes = max(self.ready_to_go.len(), buf.len());
+        let ret_bytes = min(self.ready_to_go.len(), buf.len());
 
         let remaining = self.ready_to_go.split_off(ret_bytes);
 
         let (slc1, slc2) = self.ready_to_go.as_slices();
-        buf.copy_from_slice(slc1);
-        buf.copy_from_slice(slc2);
+        let slc1_len = slc1.len();
+        let slc2_len = ret_bytes - slc1_len;
+        buf[..slc1.len()].copy_from_slice(slc1);
+        buf[slc1_len..slc1_len + slc2_len].copy_from_slice(slc2);
         self.ready_to_go = remaining;
 
         if self.ready_to_go.len() == 0 {
@@ -120,5 +125,42 @@ impl Stream {
         }
 
         Ok(ret_bytes as u64)
+    }
+}
+
+mod test {
+
+    use super::*;
+
+    #[test]
+    fn test_stream_rx() {
+        let frame1 = vec![0; 10];
+        let frame2 = vec![0; 12];
+        let frame3 = vec![0; 8];
+        let frame4 = vec![0; 6];
+
+        let mut s = Stream::new();
+
+        // test receiving a contig frame and reading it works
+        s.inbound_stream_frame(false, 0, frame1).unwrap();
+        assert_eq!(s.data_ready(), true);
+        let mut buf = vec![0u8; 100];
+        assert_eq!(s.read(&mut buf).unwrap(), 10);
+        assert_eq!(s.rx_offset, 10);
+        assert_eq!(s.ready_to_go.len(), 0);
+
+        // test receiving a noncontig frame
+        s.inbound_stream_frame(false, 12, frame2).unwrap();
+        assert_eq!(s.data_ready(), false);
+        assert_eq!(s.read(&mut buf).unwrap(), 0);
+
+        // another frame that overlaps the first
+        s.inbound_stream_frame(false, 14, frame3).unwrap();
+        assert_eq!(s.data_ready(), false);
+
+        // fill in the gap
+        s.inbound_stream_frame(false, 10, frame4).unwrap();
+        assert_eq!(s.data_ready(), true);
+        assert_eq!(s.read(&mut buf).unwrap(), 14);
     }
 }
