@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
@@ -10,9 +11,31 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
 
+
+#[derive(Debug, PartialEq)]
+pub enum Role {
+    Client,
+    Server
+}
+
+#[derive(Debug, PartialEq)]
+enum State {
+    Init,
+    WaitInitial,
+}
+
+pub struct Datagram {
+    src: SocketAddr,
+    dst: SocketAddr,
+    d: Vec<u8>,
+}
+
 #[allow(unused_variables)]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Connection {
+    role: Role,
+    state: State,
+    deadline: u64,
     max_data: u64,
     max_streams: u64,
     highest_stream: Option<u64>,
@@ -23,11 +46,39 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new() -> Connection {
-        Connection::default()
+    pub fn new(r: Role) -> Connection {
+        Connection{
+            role: r,
+            state: match r { Role::Client => State::Init, Role::Server => State::WaitInitial },
+            deadline: 0,
+            max_data: 0,
+            max_streams: 0,
+            highest_stream: None,
+            connection_ids: HashSet::new(),
+            next_stream_id: 0,
+            streams: HashMap::new(),
+            outgoing_pkts: Vec::new()
+        }
     }
 
-    pub fn process_inbound_datagram(&mut self, frame: &[u8]) -> Res<()> {
+    pub fn input(&mut self, d: &Datagram, now: u64) -> Res<(&Datagram, u64)> {
+        // TODO(ekr@rtfm.com): Process the incoming packets.
+        
+        if now > deadline {
+            // Timer expired.
+            match self.state {
+                State::Init => self.client_start(),
+                _ => unimplemented!()
+            }
+        }
+    }
+
+    fn client_start(&mut self) -> Res<(&Datagram, u64)> {
+        
+
+    }
+    
+    pub fn process_input_frame(&mut self, frame: &[u8]) -> Res<()> {
         let mut data = Data::from_slice(frame);
         let frame = decode_frame(&mut data)?;
 
