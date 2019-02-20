@@ -65,7 +65,7 @@ impl Opt {
 macro_rules! experimental_api {
     ( $n:ident ( $( $a:ident : $t:ty ),* ) ) => {
         pub unsafe fn $n ( $( $a : $t ),* ) -> SECStatus {
-            const EXP_FUNCTION: &str = "$n";
+            const EXP_FUNCTION: &str = stringify!($n);
             let n = CString::new(EXP_FUNCTION).unwrap();
             let f = SSL_GetExperimentalAPI(n.as_ptr());
             if f.is_null() {

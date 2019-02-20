@@ -17,6 +17,7 @@ pub type Res<T> = Result<T, Error>;
 pub enum Error {
     CertificateLoading,
     CreateSslSocket,
+    MixedHandshakeMethod,
     NoDataAvailable,
     NssError {
         name: String,

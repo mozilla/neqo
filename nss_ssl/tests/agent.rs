@@ -56,3 +56,47 @@ fn handshake() {
     assert_eq!(state, HandshakeState::Complete);
     assert_eq!(bytes, 0);
 }
+
+#[test]
+fn handshake_raw() {
+    init_db("./db");
+    let mut client = Client::new("server.example").expect("should create client");
+    println!("client {:p}", &client);
+    let mut server = Server::new(&["key"]).expect("should create server");
+    println!("server {:p}", &server);
+
+    let mut c2s = [0u8; 4096];
+    let mut s2c = [0u8; 4096];
+    let now = SystemTime::now();
+
+    let (state, client_records) = client
+        .handshake_raw(&now, Default::default(), &mut c2s)
+        .expect("send CH");
+    assert_eq!(state, HandshakeState::InProgress);
+    assert!(client_records.len() > 0);
+
+    let (state, server_records) = server
+        .handshake_raw(&now, client_records, &mut s2c)
+        .expect("read CH, send SH");
+    assert_eq!(state, HandshakeState::InProgress);
+    assert!(server_records.len() > 0);
+
+    let (state, client_records) = client
+        .handshake_raw(&now, server_records, &mut c2s)
+        .expect("send CF");
+    assert_eq!(state, HandshakeState::AuthenticationPending);
+    assert_eq!(client_records.len(), 0);
+
+    // Calling handshake() again indicates that we're happy with the cert.
+    let (state, client_records) = client
+        .handshake_raw(&now, Default::default(), &mut c2s)
+        .expect("send CF");
+    assert_eq!(state, HandshakeState::Complete);
+    assert!(client_records.len() > 0);
+
+    let (state, server_records) = server
+        .handshake_raw(&now, client_records, &mut s2c)
+        .expect("finish");
+    assert_eq!(state, HandshakeState::Complete);
+    assert_eq!(server_records.len(), 0);
+}

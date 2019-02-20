@@ -32,7 +32,8 @@ pub struct SslRecord<'a> {
 }
 
 impl<'a> SslRecord<'a> {
-    pub fn write(&self, fd: *mut ssl::PRFileDesc) -> Res<()> {
+    // Shoves this record into the socket, returns true if blocked.
+    fn write(&self, fd: *mut ssl::PRFileDesc) -> Res<bool> {
         let rv = unsafe {
             ssl::SSL_RecordLayerData(
                 fd,
@@ -42,7 +43,7 @@ impl<'a> SslRecord<'a> {
                 self.data.len() as c_uint,
             )
         };
-        result::result(rv)
+        result::result_or_blocked(rv)
     }
 }
 
@@ -73,10 +74,11 @@ impl<'a> Iterator for SslRecordListIter<'a> {
     }
 }
 
+#[derive(Default)]
 pub struct SslRecordList<'a> {
     buf: &'a mut [u8],
     sizes: LinkedList<SslRecordLength>,
-    len: usize,
+    used: usize,
 }
 
 impl<'a> SslRecordList<'a> {
@@ -84,14 +86,14 @@ impl<'a> SslRecordList<'a> {
         SslRecordList {
             buf: b,
             sizes: Default::default(),
-            len: 0usize,
+            used: 0usize,
         }
     }
 
-    fn write(&mut self, epoch: u16, ct: ssl::SSLContentType::Type, data: &[u8]) -> Res<()> {
-        let end = self.len + data.len();
-        assert!(end <= data.len());
-        self.buf[self.len..end].copy_from_slice(data);
+    fn ingest(&mut self, epoch: u16, ct: ssl::SSLContentType::Type, data: &[u8]) -> Res<()> {
+        let end = self.used + data.len();
+        assert!(end <= self.buf.len());
+        self.buf[self.used..end].copy_from_slice(data);
         // Check if the last thing matches epoch and content type.
         // This assumes that NSS won't be sending multiple different
         // content types for the same epoch, such that we would have
@@ -117,7 +119,7 @@ impl<'a> SslRecordList<'a> {
         } else {
             self.sizes.back_mut().unwrap().len += data.len();
         }
-        self.len = end;
+        self.used = end;
         Ok(())
     }
 
@@ -129,35 +131,16 @@ impl<'a> SslRecordList<'a> {
         }
     }
 
-    pub fn slice(&'a self, epoch: u16) -> &'a [u8] {
-        let mut start = 0usize;
-        let mut end = start;
-        for SslRecordLength {
-            epoch: e, len: sz, ..
-        } in self.sizes.iter()
-        {
-            if *e == epoch {
-                end = start + sz;
-                break;
-            }
-            assert!(*e < epoch);
-            start += sz;
-        }
-        assert!(start <= self.buf.len());
-        assert!(end <= self.buf.len());
-        &self.buf[start..end]
-    }
-
-    pub fn written(&self) -> usize {
-        self.len
+    pub fn len(&self) -> usize {
+        self.used
     }
 
     fn available(&self) -> usize {
-        self.buf.len() - self.len
+        self.buf.len() - self.used
     }
 }
 
-pub unsafe extern "C" fn record_layer_write(
+pub unsafe extern "C" fn ingest_record(
     _fd: *mut ssl::PRFileDesc,
     epoch: ssl::PRUint16,
     ct: ssl::SSLContentType::Type,
@@ -169,9 +152,32 @@ pub unsafe extern "C" fn record_layer_write(
     let records = a.as_mut().unwrap();
 
     let slice = std::slice::from_raw_parts(data, len as usize);
-    match records.write(epoch, ct, slice) {
+    match records.ingest(epoch, ct, slice) {
         Ok(()) => ssl::SECSuccess,
         _ => ssl::SECFailure,
+    }
+}
+
+pub fn emit_records(fd: *mut ssl::PRFileDesc, records: SslRecordList) -> Res<bool> {
+    let mut blocked = true;
+    let mut fallback = true;
+    for i in records.iter() {
+        if !blocked {
+            // Technically we can handle non-handshake and handshake data at the same
+            // time, but that complicates this considerably.  For post-handshake stuff,
+            // accept only one thing at a time.
+            return Err(Error::OverrunError);
+        }
+        blocked = i.write(fd)?;
+        fallback = false;
+    }
+    if fallback {
+        // There is nothing to run, but we can force the handshake, which might be
+        // needed to get things moving.
+        let rv = unsafe { ssl::SSL_ForceHandshake(fd) };
+        result::result_or_blocked(rv)
+    } else {
+        Ok(blocked)
     }
 }
 
@@ -261,7 +267,7 @@ impl AgentIo {
         let out = unsafe { self.output.as_mut().unwrap() };
         let amount = min(out.available(), count);
         AgentIo::blocked(amount)?;
-        out.write(0, 0, unsafe { std::slice::from_raw_parts(buf, amount) })?;
+        out.ingest(0, 0, unsafe { std::slice::from_raw_parts(buf, amount) })?;
         Ok(amount)
     }
 }

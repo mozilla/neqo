@@ -1,4 +1,4 @@
-use crate::agentio::{record_layer_write, AgentIo, METHODS};
+use crate::agentio::{emit_records, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{SslRecord, SslRecordList};
 use crate::err::{Error, Res};
 use crate::initialized;
@@ -25,6 +25,7 @@ pub enum HandshakeState {
 // Agent holds the common parts of client and server.
 pub struct Agent {
     fd: *mut ssl::PRFileDesc,
+    raw: Option<bool>,
     io: Box<AgentIo>,
     st: HandshakeState,
     auth_required: Box<bool>,
@@ -34,6 +35,7 @@ impl Agent {
     fn new() -> Res<Agent> {
         let mut agent = Agent {
             fd: null_mut(),
+            raw: None,
             io: Box::new(AgentIo::new()),
             st: HandshakeState::New,
             auth_required: Box::new(false),
@@ -118,15 +120,31 @@ impl Agent {
         Ok(())
     }
 
-    fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
-        self.st = match result::result_or_blocked(rv)? {
+    fn set_raw(&mut self, r: bool) -> Res<()> {
+        if self.raw.is_none() {
+            self.raw = Some(r);
+            Ok(())
+        } else if self.raw.unwrap() == r {
+            Ok(())
+        } else {
+            Err(Error::MixedHandshakeMethod)
+        }
+    }
+
+    fn update_state_inner(&mut self, r: Res<bool>) -> Res<()> {
+        self.st = match r? {
             true => match *self.auth_required {
                 true => HandshakeState::AuthenticationPending,
                 false => HandshakeState::InProgress,
             },
             false => HandshakeState::Complete,
         };
+        println!("state = {:?}", &self.st);
         Ok(())
+    }
+
+    fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
+        self.update_state_inner(result::result_or_blocked(rv))
     }
 
     // Drive the TLS handshake, taking bytes from @input and putting
@@ -142,6 +160,8 @@ impl Agent {
         input: &[u8],
         output: &mut [u8],
     ) -> Res<(HandshakeState, usize)> {
+                    self.set_raw(false)?;
+
         let (rv, written) = {
             // Within this scope, _h maintains a mutable reference to self.io.
             let (_h, out) = self.io.wrap(input, output);
@@ -153,7 +173,7 @@ impl Agent {
                     }
                     _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
                 },
-                out.written(),
+                out.len(),
             )
         };
         self.update_state(rv)?;
@@ -163,30 +183,38 @@ impl Agent {
     // Drive the TLS handshake, but get the raw content of records, not
     // protected records as bytes. This function is incompatible with
     // handshake(); use either this or handshake() exclusively.
-    fn handshake_raw<'a, 'b>(
+    //
+    // Ideally, this only includes records from the current epoch.
+    // If you send data from multiple epochs, you might end up being sad.
+    pub fn handshake_raw<'a, 'b>(
         &mut self,
         _now: &std::time::SystemTime,
-        input: SslRecord<'b>,
+        input: SslRecordList<'b>,
         output: &'a mut [u8],
     ) -> Res<(HandshakeState, SslRecordList<'a>)> {
-        // TODO check SSL_GetCurrentEpoch
+        self.set_raw(true)?;
 
+        // Setup for accepting records.
         let mut records = Box::new(SslRecordList::new(output));
         let records_ptr = &mut *records as *mut SslRecordList as *mut c_void;
         let rv = unsafe {
-            ssl::SSL_RecordLayerWriteCallback(self.fd, Some(record_layer_write), records_ptr)
-        };
-        result::result(rv)?;
-
-        match *self.auth_required {
-            true => {
-                *self.auth_required = false;
-                let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
-                result::result(rv)?;
-            }
-            _ => input.write(self.fd)?,
+            ssl::SSL_RecordLayerWriteCallback(self.fd, Some(ingest_record), records_ptr)
         };
         self.update_state(rv)?;
+
+        // Fire off any authentication we might need to complete.
+        if *self.auth_required {
+            *self.auth_required = false;
+            let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
+            println!("SSL_AuthCertificateComplete: {:?}", rv);
+            self.update_state(rv)?;
+            if self.st == HandshakeState::Complete {
+                return Ok((self.st.clone(), *records));
+            }
+        }
+        // Feed in any records.
+        let res = emit_records(self.fd, input);
+        self.update_state_inner(res)?;
         Ok((self.st.clone(), *records))
     }
 
