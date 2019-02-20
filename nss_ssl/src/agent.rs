@@ -22,7 +22,8 @@ pub enum HandshakeState {
     Failed(Error),
 }
 
-// Agent holds the common parts of client and server.
+// SecretAgent holds the common parts of client and server.
+#[derive(Debug)]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
     raw: Option<bool>,
@@ -131,26 +132,22 @@ impl SecretAgent {
         }
     }
 
-    fn update_state_inner(&mut self, r: Res<bool>) -> Res<()> {
-        self.st = match r? {
+    fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
+        self.st = match result::result_or_blocked(rv)? {
             true => match *self.auth_required {
                 true => HandshakeState::AuthenticationPending,
                 false => HandshakeState::InProgress,
             },
             false => HandshakeState::Complete,
         };
-        println!("state = {:?}", &self.st);
+        println!("{:?} state = {:?}", self.fd, &self.st);
         Ok(())
-    }
-
-    fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
-        self.update_state_inner(result::result_or_blocked(rv))
     }
 
     fn set_failed(&mut self) -> Error {
         let e = result::result(ssl::SECFailure).unwrap_err();
         self.st = HandshakeState::Failed(e.clone());
-        return e
+        return e;
     }
 
     // Drive the TLS handshake, taking bytes from @input and putting
@@ -166,7 +163,7 @@ impl SecretAgent {
         input: &[u8],
         output: &mut [u8],
     ) -> Res<(HandshakeState, usize)> {
-                    self.set_raw(false)?;
+        self.set_raw(false)?;
 
         let (rv, written) = {
             // Within this scope, _h maintains a mutable reference to self.io.
@@ -203,11 +200,10 @@ impl SecretAgent {
         // Setup for accepting records.
         let mut records = Box::new(SslRecordList::new(output));
         let records_ptr = &mut *records as *mut SslRecordList as *mut c_void;
-        let rv = unsafe {
-            ssl::SSL_RecordLayerWriteCallback(self.fd, Some(ingest_record), records_ptr)
-        };
+        let rv =
+            unsafe { ssl::SSL_RecordLayerWriteCallback(self.fd, Some(ingest_record), records_ptr) };
         if rv != ssl::SECSuccess {
-            return Err(self.set_failed())
+            return Err(self.set_failed());
         }
 
         // Fire off any authentication we might need to complete.
@@ -220,9 +216,17 @@ impl SecretAgent {
                 return Ok((self.st.clone(), *records));
             }
         }
+
         // Feed in any records.
         let res = emit_records(self.fd, input);
-        self.update_state_inner(res)?;
+        if let Err(_) = res {
+            return Err(self.set_failed());
+        }
+
+        // Drive the handshake once more.
+        let rv = unsafe { ssl::SSL_ForceHandshake(self.fd) };
+        self.update_state(rv)?;
+
         Ok((self.st.clone(), *records))
     }
 
@@ -233,6 +237,7 @@ impl SecretAgent {
 }
 
 // A TLS Client.
+#[derive(Debug)]
 pub struct Client {
     agent: SecretAgent,
 }
@@ -263,6 +268,7 @@ impl DerefMut for Client {
     }
 }
 
+#[derive(Debug)]
 pub struct Server {
     agent: SecretAgent,
 }

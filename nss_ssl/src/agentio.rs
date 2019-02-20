@@ -33,8 +33,13 @@ pub struct SslRecord<'a> {
 
 impl<'a> SslRecord<'a> {
     // Shoves this record into the socket, returns true if blocked.
-    fn write(&self, fd: *mut ssl::PRFileDesc) -> Res<bool> {
-        println!("write record {:?} {:?}", self.epoch, self.ct);
+    fn write(&self, fd: *mut ssl::PRFileDesc) -> Res<()> {
+        println!(
+            "write record {:?} {:?} {:?}",
+            self.epoch,
+            self.ct,
+            self.data.len()
+        );
         let rv = unsafe {
             ssl::SSL_RecordLayerData(
                 fd,
@@ -44,7 +49,11 @@ impl<'a> SslRecord<'a> {
                 self.data.len() as c_uint,
             )
         };
-        result::result_or_blocked(rv)
+        // It's alright if this blocks.
+        // That happens if we are waiting on authentication.
+        // No need to propagate that because we use the callback.
+        let _ = result::result_or_blocked(rv)?;
+        Ok(())
     }
 }
 
@@ -159,27 +168,11 @@ pub unsafe extern "C" fn ingest_record(
     }
 }
 
-pub fn emit_records(fd: *mut ssl::PRFileDesc, records: SslRecordList) -> Res<bool> {
-    let mut blocked = true;
-    let mut fallback = true;
+pub fn emit_records(fd: *mut ssl::PRFileDesc, records: SslRecordList) -> Res<()> {
     for i in records.iter() {
-        if !blocked {
-            // Technically we can handle non-handshake and handshake data at the same
-            // time, but that complicates this considerably.  For post-handshake stuff,
-            // accept only one thing at a time.
-            return Err(Error::OverrunError);
-        }
-        blocked = i.write(fd)?;
-        fallback = false;
+        i.write(fd)?;
     }
-    if fallback {
-        // There is nothing to run, but we can force the handshake, which might be
-        // needed to get things moving.
-        let rv = unsafe { ssl::SSL_ForceHandshake(fd) };
-        result::result_or_blocked(rv)
-    } else {
-        Ok(blocked)
-    }
+    Ok(())
 }
 
 pub struct AgentIoContext<'a> {
@@ -192,6 +185,7 @@ impl<'a> Drop for AgentIoContext<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct AgentIo {
     // input is data that is read by TLS.
     input: *const u8,

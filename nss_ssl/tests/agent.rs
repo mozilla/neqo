@@ -61,9 +61,9 @@ fn handshake() {
 fn handshake_raw() {
     init_db("./db");
     let mut client = Client::new("server.example").expect("should create client");
-    println!("client {:p}", &client);
+    println!("client {:?}", client);
     let mut server = Server::new(&["key"]).expect("should create server");
-    println!("server {:p}", &server);
+    println!("server {:?}", server);
 
     let mut c2s = [0u8; 4096];
     let mut s2c = [0u8; 4096];
