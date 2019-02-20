@@ -87,7 +87,7 @@ pub fn init_db(dir: &str) {
                 nss::SECMOD_DB.as_ptr() as *const i8,
                 nss::NSS_INIT_READONLY,
             );
-            result(st).expect("NSS_NoDB_Init failed");
+            result(st).expect("NSS_Initialize failed");
 
             let st = nss::NSS_SetDomesticPolicy();
             result(st).expect("NSS_SetDomesticPolicy failed");
