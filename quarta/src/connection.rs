@@ -6,7 +6,6 @@ use crate::frame::{decode_frame, Frame};
 use crate::stream::Stream;
 use crate::{Error, Res};
 use qinterface::{QInterface, StreamStateQuery, StateInfo, StreamInfo, ConnState, InterfaceError};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
