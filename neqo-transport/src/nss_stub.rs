@@ -87,7 +87,7 @@ impl SecretAgent {
         Res<(HandshakeState, SslRecordList)>
     {
         let mut output = SslRecordList::default();
-
+        println!("Handshake raw");
         // First read any input, but choke if we're not expecting it.
         for r in input.recs {
             if HANDSHAKE_MESSAGES[self.next].client == self.client {

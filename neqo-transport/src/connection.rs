@@ -23,6 +23,7 @@ enum State {
     WaitInitial,
 }
 
+
 pub struct Datagram {
     src: SocketAddr,
     dst: SocketAddr,
@@ -69,10 +70,9 @@ impl Connection {
         }
     }
 
-    pub fn input(&mut self, _d: &Datagram, now: u64) -> Res<(&Datagram, u64)> {
+    pub fn input(&mut self, _d: Option<Datagram>, now: u64) -> Res<(Option<Datagram>, u64)> {
         // TODO(ekr@rtfm.com): Process the incoming packets.
-
-        if now > self.deadline {
+        if now >= self.deadline {
             // Timer expired.
             match self.state {
                 State::Init => {
@@ -82,16 +82,18 @@ impl Connection {
             }
         }
 
-        Err(Error::ErrInternal)
+        Ok((None, 0))
     }
 
     fn client_start(&mut self) -> Res<()> {
-        self.handshake(0, 0, &[])
+        self.handshake(1, 0, None)
     }
 
-    fn handshake(&mut self, now: u64, epoch: u16, data: &[u8]) -> Res<()> {
+    fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         let mut recs = SslRecordList::default();
-        recs.recs.push_back(SslRecord{epoch, data: data.to_vec()});
+        if let Some(d) = data {
+            recs.recs.push_back(SslRecord{epoch, data: d.to_vec()});
+        }
         
         let _ = self.tls.handshake_raw(now, recs)?;
         Ok(())
@@ -203,7 +205,8 @@ mod tests {
     
     #[test]
     fn test_handshake() {
-        let client = Connection::new_client(&"example.com");
+        let mut client = Connection::new_client(&"example.com");
+        client.input(None, 0).unwrap();
     }
         
 
