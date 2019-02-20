@@ -22,6 +22,29 @@ pub enum HandshakeState {
     Failed(Error),
 }
 
+#[derive(Debug, Default)]
+pub struct SecretAgentInfo {
+    ver : u16,
+    cipher : u16,
+    early_data : bool,
+}
+
+impl SecretAgentInfo {
+    fn update(&mut self, fd : *mut ssl::PRFileDesc) -> Res<()> {
+        let mut info: ssl::SSLChannelInfo = unsafe { mem::uninitialized() };
+        let rv = unsafe{ ssl::SSL_GetChannelInfo(fd, &mut info, mem::size_of::<ssl::SSLChannelInfo>() as ssl::PRUint32)};
+        result::result(rv)?;
+        self.ver = info.protocolVersion as u16;
+        self.cipher = info.cipherSuite as u16;
+        self.early_data = info.earlyDataAccepted != 0;
+        Ok(())
+    }
+
+    pub fn version(&self) -> u16 { self.ver }
+    pub fn cipher_suite(&self) -> u16 { self.cipher }
+    pub fn early_data_accepted(&self) -> bool { self.early_data }
+}
+
 // SecretAgent holds the common parts of client and server.
 #[derive(Debug)]
 pub struct SecretAgent {
@@ -30,6 +53,8 @@ pub struct SecretAgent {
     io: Box<AgentIo>,
     st: HandshakeState,
     auth_required: Box<bool>,
+
+    inf: SecretAgentInfo,
 }
 
 impl SecretAgent {
@@ -40,6 +65,8 @@ impl SecretAgent {
             io: Box::new(AgentIo::new()),
             st: HandshakeState::New,
             auth_required: Box::new(false),
+
+            inf: Default::default(),
         };
         agent.create_fd()?;
         Ok(agent)
@@ -132,9 +159,7 @@ impl SecretAgent {
         }
     }
 
-    fn update_info(&mut self) -> Res<()> {
-        Ok(())
-    }
+    pub fn info(&self) -> &SecretAgentInfo { &self.inf }
 
     fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
         self.st = match result::result_or_blocked(rv)? {
@@ -143,7 +168,7 @@ impl SecretAgent {
                 false => HandshakeState::InProgress,
             },
             false => {
-                self.update_info()?;
+                self.inf.update(self.fd)?;
                 HandshakeState::Complete
             },
         };

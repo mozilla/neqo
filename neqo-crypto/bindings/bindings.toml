@@ -30,9 +30,16 @@ functions = [
     "SSL_VersionRangeSet",
 ]
 enums = [
+    "SSLAuthType",
+    "SSLCipherAlgorithm",
+    "SSLCompressionMethod",
     "SSLContentType",
     "SSLKEAType",
+    "SSLMACAlgorithm",
+    "SSLNamedGroup",
     "SSLProtocolVariant",
+    "SSLSecretDirection",
+    "SSLSignatureScheme",
     "SECStatus",
 ]
 variables = [
