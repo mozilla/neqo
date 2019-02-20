@@ -30,11 +30,13 @@ where
 
 fn result_helper(rv: ssl::SECStatus, allow_blocked: bool) -> Res<bool> {
     if rv == ssl::_SECStatus_SECSuccess {
+        println!("success");
         return Ok(false);
     }
 
     let code = unsafe { PR_GetError() };
     if allow_blocked && code == NSPRErrorCodes::PR_WOULD_BLOCK_ERROR {
+        println!("blocked");
         return Ok(true);
     }
 
@@ -43,6 +45,7 @@ fn result_helper(rv: ssl::SECStatus, allow_blocked: bool) -> Res<bool> {
         || unsafe { PR_ErrorToString(code, PR_LANGUAGE_I_DEFAULT) },
         "...",
     );
+    println!("error");
     Err(Error::NssError { name, code, desc })
 }
 

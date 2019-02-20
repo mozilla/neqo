@@ -34,6 +34,7 @@ pub struct SslRecord<'a> {
 impl<'a> SslRecord<'a> {
     // Shoves this record into the socket, returns true if blocked.
     fn write(&self, fd: *mut ssl::PRFileDesc) -> Res<bool> {
+        println!("write record {:?} {:?}", self.epoch, self.ct);
         let rv = unsafe {
             ssl::SSL_RecordLayerData(
                 fd,

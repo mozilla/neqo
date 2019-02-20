@@ -23,7 +23,7 @@ pub enum HandshakeState {
 }
 
 // Agent holds the common parts of client and server.
-pub struct Agent {
+pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
     raw: Option<bool>,
     io: Box<AgentIo>,
@@ -31,9 +31,9 @@ pub struct Agent {
     auth_required: Box<bool>,
 }
 
-impl Agent {
-    fn new() -> Res<Agent> {
-        let mut agent = Agent {
+impl SecretAgent {
+    fn new() -> Res<SecretAgent> {
+        let mut agent = SecretAgent {
             fd: null_mut(),
             raw: None,
             io: Box::new(AgentIo::new()),
@@ -92,7 +92,7 @@ impl Agent {
         result::result(unsafe {
             ssl::SSL_AuthCertificateHook(
                 self.fd,
-                Some(Agent::auth_complete_hook),
+                Some(SecretAgent::auth_complete_hook),
                 &mut *self.auth_required as *mut bool as *mut c_void,
             )
         })?;
@@ -145,6 +145,12 @@ impl Agent {
 
     fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
         self.update_state_inner(result::result_or_blocked(rv))
+    }
+
+    fn set_failed(&mut self) -> Error {
+        let e = result::result(ssl::SECFailure).unwrap_err();
+        self.st = HandshakeState::Failed(e.clone());
+        return e
     }
 
     // Drive the TLS handshake, taking bytes from @input and putting
@@ -200,7 +206,9 @@ impl Agent {
         let rv = unsafe {
             ssl::SSL_RecordLayerWriteCallback(self.fd, Some(ingest_record), records_ptr)
         };
-        self.update_state(rv)?;
+        if rv != ssl::SECSuccess {
+            return Err(self.set_failed())
+        }
 
         // Fire off any authentication we might need to complete.
         if *self.auth_required {
@@ -226,12 +234,12 @@ impl Agent {
 
 // A TLS Client.
 pub struct Client {
-    agent: Agent,
+    agent: SecretAgent,
 }
 
 impl Client {
     pub fn new(server_name: &str) -> Res<Self> {
-        let mut agent = Agent::new()?;
+        let mut agent = SecretAgent::new()?;
         let url = CString::new(server_name.to_string());
         if url.is_err() {
             return Err(Error::UnexpectedError);
@@ -243,20 +251,20 @@ impl Client {
 }
 
 impl Deref for Client {
-    type Target = Agent;
-    fn deref(&self) -> &Agent {
+    type Target = SecretAgent;
+    fn deref(&self) -> &SecretAgent {
         &self.agent
     }
 }
 
 impl DerefMut for Client {
-    fn deref_mut(&mut self) -> &mut Agent {
+    fn deref_mut(&mut self) -> &mut SecretAgent {
         &mut self.agent
     }
 }
 
 pub struct Server {
-    agent: Agent,
+    agent: SecretAgent,
 }
 
 impl Server {
@@ -265,7 +273,7 @@ impl Server {
         T: IntoIterator,
         T::Item: ToString,
     {
-        let mut agent = Agent::new()?;
+        let mut agent = SecretAgent::new()?;
 
         for n in certificates {
             let c = CString::new(n.to_string());
@@ -296,14 +304,39 @@ impl Server {
 }
 
 impl Deref for Server {
-    type Target = Agent;
-    fn deref(&self) -> &Agent {
+    type Target = SecretAgent;
+    fn deref(&self) -> &SecretAgent {
         &self.agent
     }
 }
 
 impl DerefMut for Server {
-    fn deref_mut(&mut self) -> &mut Agent {
+    fn deref_mut(&mut self) -> &mut SecretAgent {
         &mut self.agent
+    }
+}
+
+/// A generic container for Client or Server.
+pub enum Agent {
+    Client(crate::agent::Client),
+    Server(crate::agent::Server),
+}
+
+impl Deref for Agent {
+    type Target = SecretAgent;
+    fn deref(&self) -> &SecretAgent {
+        match self {
+            Agent::Client(c) => c.deref(),
+            Agent::Server(s) => s.deref(),
+        }
+    }
+}
+
+impl DerefMut for Agent {
+    fn deref_mut(&mut self) -> &mut SecretAgent {
+        match self {
+            Agent::Client(c) => c.deref_mut(),
+            Agent::Server(s) => s.deref_mut(),
+        }
     }
 }
