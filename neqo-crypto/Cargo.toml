@@ -1,5 +1,5 @@
 [package]
-name = "nss_ssl"
+name = "neqo-crypto"
 version = "0.1.0"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2018"

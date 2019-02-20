@@ -1,11 +1,6 @@
-[package]
-name = "neqo"
-version = "0.1.0"
-authors = ["Eric Rescorla <ekr@mozilla.com>", "Martin Thomson <mt@lowentropy.net>"]
-description = "QUIC implementation"
-repository = "https://github.com/mozilla/neqo"
-license = "MPL-2.0"
-
-[dependencies]
-nss_ssl = { version = "0.1.0", path = "nss_ssl" }
-quarta = { version = "0.1.0", path = "quarta" }
+[workspace]
+members = [
+  "neqo-common",
+  "neqo-crypto",
+  "neqo-transport",
+]

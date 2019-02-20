@@ -1,5 +1,5 @@
 [package]
-name = "quarta"
+name = "neqo-transport"
 version = "0.1.0"
 authors = ["EKR <ekr@rtfm.com>"]
 edition = "2018"
