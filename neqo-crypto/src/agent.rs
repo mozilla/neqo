@@ -223,8 +223,8 @@ impl SecretAgent {
     // If you send data from multiple epochs, you might end up being sad.
     pub fn handshake_raw<'a, 'b>(
         &mut self,
-        _now: &std::time::SystemTime,
-        input: SslRecordList<'b>,
+        _now: &std::time::SystemTime,  // TODO(mt) : u64
+        input: SslRecordList<'b>,  // TODO(mt) : just take one record
         output: &'a mut [u8],
     ) -> Res<(HandshakeState, SslRecordList<'a>)> {
         self.set_raw(true)?;
