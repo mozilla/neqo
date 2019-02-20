@@ -18,6 +18,7 @@ pub mod frame;
 pub mod packet;
 pub mod stream;
 pub mod varint;
+mod nss_stub;
 
 #[derive(PartialEq, Debug)]
 pub enum Error {

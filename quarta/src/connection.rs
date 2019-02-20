@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{SocketAddr};
 
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
@@ -12,7 +12,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 struct Packet(Vec<u8>);
 
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Role {
     Client,
     Server
@@ -61,21 +61,22 @@ impl Connection {
         }
     }
 
-    pub fn input(&mut self, d: &Datagram, now: u64) -> Res<(&Datagram, u64)> {
+    pub fn input(&mut self, _d: &Datagram, now: u64) -> Res<(&Datagram, u64)> {
         // TODO(ekr@rtfm.com): Process the incoming packets.
         
-        if now > deadline {
+        if now > self.deadline {
             // Timer expired.
             match self.state {
-                State::Init => self.client_start(),
+                State::Init => { self.client_start()?;}
                 _ => unimplemented!()
             }
         }
+
+        Err(Error::ErrInternal)
     }
 
     fn client_start(&mut self) -> Res<(&Datagram, u64)> {
-        
-
+        Err(Error::ErrInternal)        
     }
     
     pub fn process_input_frame(&mut self, frame: &[u8]) -> Res<()> {
