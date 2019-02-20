@@ -110,7 +110,7 @@ impl Connection {
                 offset,
                 data,
             } => {
-                self.process_inbound_stream_frame(fin, stream_id, offset, data);
+                self.process_inbound_stream_frame(fin, stream_id, offset, data)?;
             }
             Frame::MaxData { maximum_data } => {} // TODO set self.max_data?
             Frame::MaxStreamData {
@@ -164,12 +164,17 @@ impl Connection {
             .get_mut(&stream_id)
             .ok_or_else(|| return Error::ErrInvalidStreamId)?;
 
-        let end_offset = offset + data.len() as u64;
+        //let end_offset = offset + data.len() as u64;
         if offset == stream.next_rx_offset() {
             // in order!
             // TODO make data available to upper layers
-            //
+            stream.data_ready(&data);
+            // TODO generate ACK frames
         }
+        if fin {
+            println!("fin set!")
+        }
+        // TODO: handle ooo, fin
         Ok(())
     }
 
@@ -179,21 +184,6 @@ impl Connection {
         self.streams.insert(stream_id, Stream::new());
         self.next_stream_id += 1;
         stream_id
-    }
-
-    pub fn stream_write(&mut self, stream_id: u64, data: Data) -> Res<()> {
-        let stream = self
-            .streams
-            .get_mut(&stream_id)
-            .ok_or_else(|| return Error::ErrInvalidStreamId)?;
-
-        let remaining = data.remaining() as u64;
-        self.outgoing_pkts.push(Packet(Vec::new())); // TODO give needed info to make a STREAM frame
-        stream.add_to_tx_offset(remaining);
-
-        // TODO poke packet scheduler to maybe send some outgoing packets
-
-        Ok(())
     }
 }
 
