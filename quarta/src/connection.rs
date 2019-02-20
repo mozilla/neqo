@@ -5,7 +5,7 @@ use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::stream::Stream;
 use crate::{Error, Res};
-use qinterface::{QInterface, StreamStateQuery, StateInfo, StreamInfo, ConnState, InterfaceError};
+//use qinterface::{QInterface, StreamStateQuery, StateInfo, StreamInfo, ConnState, InterfaceError};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -187,6 +187,7 @@ impl Connection {
     }
 }
 
+/*
 impl QInterface<Stream> for Connection {
   fn incoming_datagram(&mut self, path: SocketAddr, frame: &[u8], time: u64, streamStateQuery: StreamStateQuery) -> std::result::Result<StateInfo, InterfaceError> {
     Err(InterfaceError::NOT_IMPLEMENTED)
@@ -196,3 +197,4 @@ impl QInterface<Stream> for Connection {
      self.streams.get(&streamId)
   }
 }
+*/

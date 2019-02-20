@@ -7,4 +7,4 @@ edition = "2018"
 [dependencies]
 num-traits = "0.2"
 derive_more = "0.13"
-qinterface = { version = "0.1.0", path = "./../qinterface" }
+#qinterface = { version = "0.1.0", path = "./../qinterface" }
