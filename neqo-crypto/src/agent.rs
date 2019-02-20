@@ -132,13 +132,20 @@ impl SecretAgent {
         }
     }
 
+    fn update_info(&mut self) -> Res<()> {
+        Ok(())
+    }
+
     fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
         self.st = match result::result_or_blocked(rv)? {
             true => match *self.auth_required {
                 true => HandshakeState::AuthenticationPending,
                 false => HandshakeState::InProgress,
             },
-            false => HandshakeState::Complete,
+            false => {
+                self.update_info()?;
+                HandshakeState::Complete
+            },
         };
         println!("{:?} state = {:?}", self.fd, &self.st);
         Ok(())
