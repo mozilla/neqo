@@ -190,21 +190,3 @@ impl Connection {
         stream_id
     }
 }
-
-/*
-impl QInterface<Stream> for Connection {
-    fn incoming_datagram(
-        &mut self,
-        path: SocketAddr,
-        frame: &[u8],
-        time: u64,
-        streamStateQuery: StreamStateQuery,
-    ) -> std::result::Result<StateInfo, InterfaceError> {
-        Err(InterfaceError::NOT_IMPLEMENTED)
-    }
-
-    fn GetStream(&self, streamId: u64) -> Option<&Stream> {
-        self.streams.get(&streamId)
-    }
-}
-*/
