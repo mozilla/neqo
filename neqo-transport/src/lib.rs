@@ -28,6 +28,7 @@ pub enum Error {
     ErrInvalidPacket,
     ErrDecryptError,
     ErrInvalidStreamId,
+    ErrDecodingFrame,
 }
 
 pub type Res<T> = std::result::Result<T, Error>;

@@ -22,6 +22,25 @@ pub fn encode_varint(d: &mut Data, v: u64) {
     panic!("Varint value too large")
 }
 
+pub fn get_varint_len(v: u64) -> u64 {
+    if v < (1 << 6) {
+        return 1;
+    }
+    if v < (1 << 14) {
+        return 2;
+    }
+
+    if v < (1 << 30) {
+        return 4;
+    }
+
+    if v < (1 << 62) {
+        return 8;
+    }
+
+    panic!("Varint value too large")
+}
+
 fn decode_uint(d: &mut Data, l: usize) -> Res<u64> {
     let mut res: u64 = 0;
     let mut mask = 0x3f;
@@ -44,6 +63,17 @@ pub fn decode_varint(d: &mut Data) -> Res<u64> {
         _ => panic!("Can't happen"),
     };
     decode_uint(d, l)
+}
+
+pub fn decode_varint_size(d: &mut Data) -> Res<usize> {
+    let l = match (d.peek_byte()? & 0xc0) >> 6 {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        3 => 8,
+        _ => panic!("Can't happen"),
+    };
+    Ok(l)
 }
 
 #[cfg(test)]

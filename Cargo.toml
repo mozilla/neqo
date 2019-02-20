@@ -3,4 +3,5 @@ members = [
   "neqo-common",
   "neqo-crypto",
   "neqo-transport",
+  "neqo-http3",
 ]

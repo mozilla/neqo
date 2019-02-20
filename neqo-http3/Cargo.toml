@@ -1,0 +1,8 @@
+[package]
+name = "http3"
+version = "0.1.0"
+authors = ["draganadamjanovic"]
+edition = "2018"
+
+[dependencies]
+neqo-transport = { version = "0.1.0", path = "./../neqo-transport" }

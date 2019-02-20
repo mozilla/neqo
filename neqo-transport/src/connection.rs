@@ -5,7 +5,6 @@ use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::stream::Stream;
 use crate::{Error, Res};
-//use qinterface::{ConnState, InterfaceError, QInterface, StateInfo, StreamInfo, StreamStateQuery};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
