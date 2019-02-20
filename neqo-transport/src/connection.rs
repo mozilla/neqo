@@ -167,7 +167,9 @@ impl Connection {
             .get_mut(&stream_id)
             .ok_or_else(|| return Error::ErrInvalidStreamId)?;
 
-        stream.inbound_stream_frame(fin, offset, data)
+        let _new_bytes_available = stream.inbound_stream_frame(fin, offset, data)?;
+
+        Ok(())
     }
 
     // Returns new stream id
