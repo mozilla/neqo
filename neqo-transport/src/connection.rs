@@ -4,6 +4,8 @@ use std::net::SocketAddr;
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::stream::Stream;
+use crate::nss_stub::*;
+
 use crate::{Error, Res};
 
 #[derive(Debug, Default)]
@@ -32,6 +34,7 @@ pub struct Datagram {
 pub struct Connection {
     role: Role,
     state: State,
+    tls: Agent,
     deadline: u64,
     max_data: u64,
     max_streams: u64,
@@ -43,13 +46,18 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new(r: Role) -> Connection {
-        Connection {
+    pub fn new_client(server_name: &str) -> Connection {
+        Connection::new(Role::Client, Agent::Client(Client::new(server_name).unwrap()))
+    }
+
+    pub fn new(r: Role, agent: Agent) -> Connection {
+        Connection{
             role: r,
             state: match r {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
             },
+            tls: agent,
             deadline: 0,
             max_data: 0,
             max_streams: 0,
@@ -77,10 +85,18 @@ impl Connection {
         Err(Error::ErrInternal)
     }
 
-    fn client_start(&mut self) -> Res<(&Datagram, u64)> {
-        Err(Error::ErrInternal)
+    fn client_start(&mut self) -> Res<()> {
+        self.handshake(0, 0, &[])
     }
 
+    fn handshake(&mut self, now: u64, epoch: u16, data: &[u8]) -> Res<()> {
+        let mut recs = SslRecordList::default();
+        recs.recs.push_back(SslRecord{epoch, data: data.to_vec()});
+        
+        let _ = self.tls.handshake_raw(now, recs)?;
+        Ok(())
+    }
+    
     pub fn process_input_frame(&mut self, frame: &[u8]) -> Res<()> {
         let mut data = Data::from_slice(frame);
         let frame = decode_frame(&mut data)?;
@@ -179,4 +195,16 @@ impl Connection {
         self.next_stream_id += 1;
         stream_id
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_handshake() {
+        let client = Connection::new_client(&"example.com");
+    }
+        
+
 }

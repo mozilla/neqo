@@ -31,12 +31,14 @@ mod nss_stub;
 #[derive(PartialEq, Debug)]
 pub enum Error {
     ErrNoMoreData,
+    ErrTooMuchData,
     ErrUnknownFrameType,
     ErrInternal,
     ErrInvalidPacket,
     ErrDecryptError,
     ErrInvalidStreamId,
     ErrDecodingFrame,
+    ErrUnexpectedMessage,
 }
 
 pub type Res<T> = std::result::Result<T, Error>;
