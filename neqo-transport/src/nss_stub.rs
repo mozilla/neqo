@@ -17,6 +17,7 @@ pub struct HandshakeMessage {
     client: bool,
 }
 
+
 lazy_static! {
     pub static ref HANDSHAKE_MESSAGES: [HandshakeMessage; 7] = [
         HandshakeMessage {
