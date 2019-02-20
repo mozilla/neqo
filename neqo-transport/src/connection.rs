@@ -167,18 +167,7 @@ impl Connection {
             .get_mut(&stream_id)
             .ok_or_else(|| return Error::ErrInvalidStreamId)?;
 
-        //let end_offset = offset + data.len() as u64;
-        if offset == stream.next_rx_offset() {
-            // in order!
-            // TODO(agrover@mozilla.com): make data available to upper layers
-            stream.data_ready(&data);
-            // TODO(agrover@mozilla.com): generate ACK frames
-        }
-        if fin {
-            println!("fin set!")
-        }
-        // TODO: handle ooo, fin
-        Ok(())
+        stream.inbound_stream_frame(fin, offset, data)
     }
 
     // Returns new stream id
