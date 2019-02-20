@@ -5,16 +5,19 @@ use crate::frame::{decode_frame, Frame};
 use crate::stream::Stream;
 use crate::{Error, Res};
 
+#[derive(Debug, Default)]
+struct Packet(Vec<u8>);
+
 #[allow(unused_variables)]
 #[derive(Debug, Default)]
 pub struct Connection {
-    max_data: Option<u64>,
-    max_streams: Option<u64>,
+    max_data: u64,
+    max_streams: u64,
     highest_stream: Option<u64>,
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
-    max_used_stream_id: Option<u64>,
-    streams: HashMap<u64, Stream>,      // stream id, stream
-    outgoing_packets: Vec<(u64, Data)>, // (offset, data)
+    next_stream_id: u64,
+    streams: HashMap<u64, Stream>, // stream id, stream
+    outgoing_pkts: Vec<Packet>,    // (offset, data)
 }
 
 impl Connection {
@@ -101,16 +104,28 @@ impl Connection {
         stream_id: u64,
         offset: u64,
         data: Vec<u8>,
-    ) {
+    ) -> Res<()> {
         // TODO check against list of ooo frames and maybe make some data available
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+
+        let end_offset = offset + data.len() as u64;
+        if offset == stream.next_rx_offset() {
+            // in order!
+            // TODO make data available to upper layers
+            //
+        }
+        Ok(())
     }
 
     // Returns new stream id
     pub fn stream_create(&mut self) -> u64 {
-        let next_stream_id = self.max_used_stream_id.unwrap_or_default() + 1;
-        self.streams.insert(next_stream_id, Stream::new());
-        self.max_used_stream_id = Some(next_stream_id);
-        next_stream_id
+        let stream_id = self.next_stream_id;
+        self.streams.insert(stream_id, Stream::new());
+        self.next_stream_id += 1;
+        stream_id
     }
 
     pub fn stream_write(&mut self, stream_id: u64, data: Data) -> Res<()> {
@@ -120,8 +135,8 @@ impl Connection {
             .ok_or_else(|| return Error::ErrInvalidStreamId)?;
 
         let remaining = data.remaining() as u64;
-        self.outgoing_packets.push((stream.offset(), data)); // TODO give needed info to make a STREAM frame
-        stream.add_to_offset(remaining);
+        self.outgoing_pkts.push(Packet(Vec::new())); // TODO give needed info to make a STREAM frame
+        stream.add_to_tx_offset(remaining);
 
         // TODO poke packet scheduler to maybe send some outgoing packets
 
