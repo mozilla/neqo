@@ -150,7 +150,6 @@ impl Data {
     pub fn as_mut_vec(&mut self) -> &mut [u8] {
         &mut *self.buf
     }
-     
 }
 
 #[cfg(test)]

@@ -7,7 +7,11 @@ use std::ops::Deref;
 
 include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 
-// TODO these really look like they would be better with a macro.
+macro_rules! scoped_ptr {
+    ($scoped:ident, $target:ident, $dtor:ident) => {
+        // TODO(mt) build the macro
+    };
+}
 
 pub struct ScopedCertificate(pub *mut CERTCertificate);
 

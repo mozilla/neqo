@@ -4,11 +4,10 @@
 use super::data::*;
 //use super::packet::*;
 use super::*;
-use std::collections::linked_list::{LinkedList};
-use std::ops::{Deref, DerefMut};
-use std::string::{String};
 use lazy_static::*;
-
+use std::collections::linked_list::LinkedList;
+use std::ops::{Deref, DerefMut};
+use std::string::String;
 
 #[derive(PartialEq, Debug)]
 pub struct HandshakeMessage {
@@ -16,7 +15,6 @@ pub struct HandshakeMessage {
     epoch: u16,
     client: bool,
 }
-
 
 lazy_static! {
     pub static ref HANDSHAKE_MESSAGES: [HandshakeMessage; 7] = [
@@ -35,22 +33,22 @@ lazy_static! {
             epoch: 2,
             client: false
         },
-        HandshakeMessage{
+        HandshakeMessage {
             name: String::from("Certificate"),
             epoch: 2,
             client: false
         },
-        HandshakeMessage{
+        HandshakeMessage {
             name: String::from("CertificateVerify"),
             epoch: 2,
             client: false
         },
-        HandshakeMessage{
+        HandshakeMessage {
             name: String::from("Finished"),
             epoch: 2,
             client: false,
         },
-        HandshakeMessage{
+        HandshakeMessage {
             name: String::from("Finished"),
             epoch: 2,
             client: true
@@ -77,19 +75,19 @@ pub struct SecretAgent {
 }
 
 #[derive(Default, Debug)]
-pub struct HandshakeState {
-}
+pub struct HandshakeState {}
 
 // This is a very bad simulation of the TLS handshake.
 // Right now it just sends one message per record.
 impl SecretAgent {
-    pub fn handshake_raw(&mut self, _now: u64, input: SslRecordList) ->
-        Res<(HandshakeState, SslRecordList)>
-    {
-        debug!("handshake_raw self.next={} m={:?} client={}",
-               self.next,
-               HANDSHAKE_MESSAGES[self.next],
-               self.client
+    pub fn handshake_raw(
+        &mut self,
+        _now: u64,
+        input: SslRecordList,
+    ) -> Res<(HandshakeState, SslRecordList)> {
+        debug!(
+            "handshake_raw self.next={} m={:?} client={}",
+            self.next, HANDSHAKE_MESSAGES[self.next], self.client
         );
         let mut output = SslRecordList::default();
         // First read any input, but choke if we're not expecting it.
@@ -108,19 +106,17 @@ impl SecretAgent {
         while HANDSHAKE_MESSAGES[self.next].client == self.client {
             let m = self.send_message(&HANDSHAKE_MESSAGES[self.next]);
             debug!("Sending message: {:?}", HANDSHAKE_MESSAGES[self.next]);
-            output.recs.push_back(
-                SslRecord{
-                    data: m,
-                    epoch: self.write_epoch
-                });
+            output.recs.push_back(SslRecord {
+                data: m,
+                epoch: self.write_epoch,
+            });
             self.next += 1;
         }
 
-
-        Ok((HandshakeState{}, output))
+        Ok((HandshakeState {}, output))
     }
 
-    fn send_message(&mut self, m: &HandshakeMessage) -> Vec<u8>{
+    fn send_message(&mut self, m: &HandshakeMessage) -> Vec<u8> {
         let mut d = Data::default();
         d.encode_vec_and_len(&m.name.clone().into_bytes());
         d.as_mut_vec().to_vec()
@@ -132,10 +128,10 @@ impl SecretAgent {
         if d.remaining() > 0 {
             return Err(Error::ErrTooMuchData);
         }
-        Ok(HandshakeMessage{
+        Ok(HandshakeMessage {
             name: String::from_utf8(v).unwrap(),
             epoch: self.read_epoch,
-            client: self.client
+            client: self.client,
         })
     }
 }
@@ -149,7 +145,7 @@ impl Client {
     pub fn new(server_name: &str) -> Res<Self> {
         let mut a = SecretAgent::default();
         a.client = true;
-        Ok(Client{agent: a})
+        Ok(Client { agent: a })
     }
 }
 
@@ -175,9 +171,9 @@ impl Server {
     pub fn new<T>(certificates: T) -> Res<Self>
     where
         T: IntoIterator,
-        T::Item: ToString
+        T::Item: ToString,
     {
-        Ok(Server{
+        Ok(Server {
             agent: SecretAgent::default(),
         })
     }
@@ -196,11 +192,10 @@ impl DerefMut for Server {
     }
 }
 
-
 /// A generic container for Client or Server.
 #[derive(Debug)]
 pub enum Agent {
-    Client(Client),     
+    Client(Client),
     Server(Server),
 }
 

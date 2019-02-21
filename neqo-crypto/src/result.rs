@@ -95,7 +95,7 @@ mod tests {
         let r = result(ssl::SECFailure);
         assert!(r.is_err());
         match r.unwrap_err() {
-            Error::NssError { name, code, desc } => {
+            Error::NssError { name, code, .. } => {
                 assert_eq!(name, "UNKNOWN_ERROR");
                 assert_eq!(code, 0);
                 // TODO(mt): This fails on OSX with the message: |Undefined error: 0|

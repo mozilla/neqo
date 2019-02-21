@@ -5,7 +5,7 @@
 
 use std::ffi::CString;
 use std::mem;
-use std::os::raw::{c_uint, c_void};
+use std::os::raw::{c_char, c_uint, c_void};
 
 include!(concat!(env!("OUT_DIR"), "/nss_ssl.rs"));
 mod SSLOption {
@@ -104,6 +104,14 @@ experimental_api!(SSL_GetCurrentEpoch(
     fd: *mut PRFileDesc,
     read_epoch: *mut PRUint16,
     write_epoch: *mut PRUint16,
+));
+pub enum SSLAeadContext {}
+experimental_api!(SSL_MakeAead(
+    secret: *mut PK11SymKey,
+    cipherSuite: PRUint16,
+    labelPrefix: *const c_char,
+    labelPrefixLen: c_uint,
+    ctx: *mut *mut SSLAeadContext,
 ));
 
 #[cfg(test)]

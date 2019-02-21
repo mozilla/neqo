@@ -115,7 +115,7 @@ impl HFrame {
     }
 
     fn encode(&self, d: &mut Data) -> Res<()> {
-println!("DDD {}", self.get_type());
+        println!("DDD {}", self.get_type());
         d.encode_varint(self.get_type());
 
         match self {
@@ -191,10 +191,10 @@ println!("DDD {}", self.get_type());
     }
 }
 pub fn decode_hframe(d: &mut Data) -> Res<HFrame> {
-let c=  d.peek_byte()?;
-println!("DDD3 {}", c);
+    let c = d.peek_byte()?;
+    println!("DDD3 {}", c);
     let t = d.decode_varint()?;
-println!("DDD2 {}", t);
+    println!("DDD2 {}", t);
     let mut len = d.decode_varint()?;
 
     match t {
@@ -352,97 +352,92 @@ mod tests {
     #[test]
     fn test_priority_frame1() {
         let f = HFrame::Priority {
-        priorized_elem_type: PrioritizedElementType::RequestStream,
-        elem_dependensy_type: ElementDependencyType::RequestStream,
-        priority_elem_id: 2,
-        elem_dependency_id: 1,
-        weight: 3,
-    };
-    enc_dec(&f, "020400020103");
+            priorized_elem_type: PrioritizedElementType::RequestStream,
+            elem_dependensy_type: ElementDependencyType::RequestStream,
+            priority_elem_id: 2,
+            elem_dependency_id: 1,
+            weight: 3,
+        };
+        enc_dec(&f, "020400020103");
     }
 
     #[test]
     fn test_priority_frame2() {
         let f = HFrame::Priority {
-        priorized_elem_type: PrioritizedElementType::PushStream,
-        elem_dependensy_type: ElementDependencyType::PushStream,
-        priority_elem_id: 2,
-        elem_dependency_id: 1,
-        weight: 3,
-    };
-    enc_dec(&f, "020405020103");
+            priorized_elem_type: PrioritizedElementType::PushStream,
+            elem_dependensy_type: ElementDependencyType::PushStream,
+            priority_elem_id: 2,
+            elem_dependency_id: 1,
+            weight: 3,
+        };
+        enc_dec(&f, "020405020103");
     }
 
     #[test]
     fn test_priority_frame3() {
         let f = HFrame::Priority {
-        priorized_elem_type: PrioritizedElementType::Placeholder,
-        elem_dependensy_type: ElementDependencyType::Placeholder,
-        priority_elem_id: 2,
-        elem_dependency_id: 1,
-        weight: 3,
-    };
-    enc_dec(&f, "02040a020103");
+            priorized_elem_type: PrioritizedElementType::Placeholder,
+            elem_dependensy_type: ElementDependencyType::Placeholder,
+            priority_elem_id: 2,
+            elem_dependency_id: 1,
+            weight: 3,
+        };
+        enc_dec(&f, "02040a020103");
     }
 
     #[test]
     fn test_priority_frame4() {
         let f = HFrame::Priority {
-        priorized_elem_type: PrioritizedElementType::CurrentStream,
-        elem_dependensy_type: ElementDependencyType::Root,
-        priority_elem_id: 2,
-        elem_dependency_id: 1,
-        weight: 3,
-    };
-    enc_dec(&f, "02040f020103");
-   } 
-
-   #[test]
-    fn test_cancel_push_frame4() {
-        let f = HFrame::CancelPush {
-        push_id: 5,
+            priorized_elem_type: PrioritizedElementType::CurrentStream,
+            elem_dependensy_type: ElementDependencyType::Root,
+            priority_elem_id: 2,
+            elem_dependency_id: 1,
+            weight: 3,
         };
-      enc_dec(&f, "030105");
+        enc_dec(&f, "02040f020103");
+    }
+
+    #[test]
+    fn test_cancel_push_frame4() {
+        let f = HFrame::CancelPush { push_id: 5 };
+        enc_dec(&f, "030105");
     }
 
     #[test]
     fn test_settings_frame4() {
         let f = HFrame::Settings {
-        settings: vec![(SettingType::MaxHeaderListSize, 4), (SettingType::NumPlaceholders, 4)],
-    };
-      enc_dec(&f, "040406040804");
+            settings: vec![
+                (SettingType::MaxHeaderListSize, 4),
+                (SettingType::NumPlaceholders, 4),
+            ],
+        };
+        enc_dec(&f, "040406040804");
     }
 
     #[test]
     fn test_push_promise_frame4() {
         let f = HFrame::PushPromise {
-        push_id: 4,
-        data: vec![1,2,3],
-    };
-      enc_dec(&f, "050404010203");
+            push_id: 4,
+            data: vec![1, 2, 3],
+        };
+        enc_dec(&f, "050404010203");
     }
 
     #[test]
     fn test_goaway_frame4() {
-        let f = HFrame::Goaway {
-        stream_id: 5,
-    };
-      enc_dec(&f, "060105");
+        let f = HFrame::Goaway { stream_id: 5 };
+        enc_dec(&f, "060105");
     }
 
     #[test]
     fn test_max_push_id_frame4() {
-        let f = HFrame::MaxPushId {
-        push_id: 5,
-    };
-      enc_dec(&f, "070105");
+        let f = HFrame::MaxPushId { push_id: 5 };
+        enc_dec(&f, "070105");
     }
 
     #[test]
     fn test_duplicate_push_frame4() {
-        let f = HFrame::DuplicatePush {
-        push_id: 5,
-    };
-      enc_dec(&f, "080105");
+        let f = HFrame::DuplicatePush { push_id: 5 };
+        enc_dec(&f, "080105");
     }
 }

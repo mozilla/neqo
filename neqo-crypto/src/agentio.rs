@@ -4,10 +4,11 @@ use crate::result;
 use crate::ssl;
 
 use std::cmp::min;
-use std::collections::linked_list::{Iter, LinkedList};
 use std::mem;
 use std::os::raw::{c_uint, c_void};
 use std::ptr::{null, null_mut};
+use std::slice::Iter;
+use std::vec::Vec;
 
 // Alias common types.
 type PrFd = *mut prio::PRFileDesc;
@@ -87,7 +88,7 @@ impl<'a> Iterator for SslRecordListIter<'a> {
 #[derive(Default)]
 pub struct SslRecordList<'a> {
     buf: &'a mut [u8],
-    sizes: LinkedList<SslRecordLength>,
+    sizes: Vec<SslRecordLength>,
     used: usize,
 }
 
@@ -111,7 +112,7 @@ impl<'a> SslRecordList<'a> {
         // way in which different content types might be produced is
         // if an alert is sent after some data.  That would be a
         // terminal condition, so don't stress.
-        let add = match self.sizes.back() {
+        let add = match self.sizes.last() {
             Some(SslRecordLength {
                 epoch: e, ct: c, ..
             }) => {
@@ -121,13 +122,13 @@ impl<'a> SslRecordList<'a> {
             _ => true,
         };
         if add {
-            self.sizes.push_back(SslRecordLength {
+            self.sizes.push(SslRecordLength {
                 epoch,
                 ct,
                 len: data.len(),
             });
         } else {
-            self.sizes.back_mut().unwrap().len += data.len();
+            self.sizes.last_mut().unwrap().len += data.len();
         }
         self.used = end;
         Ok(())

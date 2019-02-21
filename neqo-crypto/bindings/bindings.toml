@@ -6,6 +6,7 @@ types = [
     "PRUint16",
     "PRUint8",
     "SECStatus",
+    "SSLAeadContext",
     "SSLProtocolVariant",
     "SSLResumptionTokenCallback",
     "SSLSecretCallback",
@@ -103,10 +104,12 @@ functions = [
     "CERT_DestroyCertificate",
     "PK11_FindCertFromNickname",
     "PK11_FindKeyByAnyCert",
+    "PK11_FreeSymKey",
     "SECKEY_DestroyPrivateKey",
 ]
 opaque = [
     "CERTCertificate",
+    "PK11SymKey",
     "SECKEYPublicKey",
     "SECKEYPrivateKey",
 ]

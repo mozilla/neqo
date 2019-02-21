@@ -23,10 +23,10 @@ macro_rules! trace { ($($arg:tt)*) => ( println!($($arg)*);) }
 pub mod connection;
 pub mod data;
 pub mod frame;
+mod nss_stub;
 pub mod packet;
 pub mod stream;
 pub mod varint;
-mod nss_stub;
 
 #[derive(PartialEq, Debug)]
 pub enum Error {
