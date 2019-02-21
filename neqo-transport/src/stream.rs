@@ -4,11 +4,23 @@ use std::cmp::{max, min};
 use std::collections::{BTreeMap, LinkedList, VecDeque};
 use std::fmt::Debug;
 
+use crate::frame::Frame;
+use crate::Error;
+use crate::Res;
+
 const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
 
+#[allow(dead_code)]
+enum PostStreamAction {
+    Ok,
+    EndConnection,
+    SendFrame(Frame),
+}
+
 pub trait Recvable: Debug {
-    /// Read buffered data from stream.
-    fn read(&mut self, buf: &mut [u8]) -> Res<u64>;
+    /// Read buffered data from stream. bool says whether is final data on
+    /// stream.
+    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)>;
 
     /// The number of bytes that can be read from the stream.
     fn recv_data_ready(&self) -> u64;
@@ -175,6 +187,7 @@ impl RxStreamOrderer {
 
     /// Caller has been told data is available on a stream, and they want to
     /// retrieve it.
+    /// Returns bytes copied and if this was final bytes.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
         let ret_bytes = min(self.ready_to_go.len(), buf.len());
 
@@ -272,50 +285,58 @@ impl Sendable for SendStream {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct RecvStream {
-    final_offset: Option<u64>,
+    final_size: Option<u64>,
     rx_done: u64,
     rx_window: u64,
-    rx: RxStreamOrderer,
+    rx_orderer: RxStreamOrderer,
 }
 
 impl RecvStream {
     pub fn new() -> RecvStream {
         RecvStream {
-            final_offset: None,
+            final_size: None,
             rx_done: 0,
             rx_window: RX_STREAM_DATA_WINDOW,
-            rx: RxStreamOrderer::new(),
+            rx_orderer: RxStreamOrderer::new(),
         }
     }
 }
 
 impl Recvable for RecvStream {
     fn recv_data_ready(&self) -> u64 {
-        self.rx.data_ready()
+        self.rx_orderer.data_ready()
     }
 
     /// caller has been told data is available on a stream, and they want to
     /// retrieve it.
     fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
-        let read_bytes = self.rx.read(buf)?;
+        let read_bytes = self.rx_orderer.read(buf)?;
         self.rx_done += read_bytes;
         Ok(read_bytes)
     }
 
     fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
-        if fin && self.final_offset == None {
-            // TODO(agrover@mozilla.com): handle fin better
-            self.final_offset = Some(offset + data.len() as u64)
+        if let Some(final_size) = self.final_size {
+            if offset + data.len() as u64 > final_size
+                || (fin && offset + data.len() as u64 != final_size)
+            {
+                return Err(Error::ErrFinalSizeError); // super bad.
+            }
         }
 
-        self.rx.inbound_frame(offset, data)
+        if fin && self.final_size == None {
+            // TODO(agrover@mozilla.com): handle fin better
+            self.final_size = Some(offset + data.len() as u64)
+        }
+
+        self.rx_orderer.inbound_frame(offset, data)
     }
 
     /// If we should tell the sender they have more credit, return an offset
     fn needs_flowc_update(&mut self) -> Option<u64> {
         let lowater = RX_STREAM_DATA_WINDOW / 2;
         let new_window = self.rx_done + RX_STREAM_DATA_WINDOW;
-        if self.final_offset.is_none() && new_window > lowater + self.rx_window {
+        if self.final_size.is_none() && new_window > lowater + self.rx_window {
             self.rx_window = new_window;
             Some(new_window)
         } else {
@@ -324,6 +345,7 @@ impl Recvable for RecvStream {
     }
 }
 
+#[cfg(test)]
 mod test {
 
     use super::*;
@@ -342,8 +364,8 @@ mod test {
         assert_eq!(s.recv_data_ready(), 10);
         let mut buf = vec![0u8; 100];
         assert_eq!(s.read(&mut buf).unwrap(), 10);
-        assert_eq!(s.rx.rx.rx_offset, 10);
-        assert_eq!(s.rx.rx.ready_to_go.len(), 0);
+        assert_eq!(s.rx.rx_orderer.rx_offset(), 10);
+        assert_eq!(s.rx.rx_orderer.ready_to_go.len(), 0);
 
         // test receiving a noncontig frame
         s.inbound_stream_frame(false, 12, frame2).unwrap();
