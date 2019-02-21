@@ -49,6 +49,7 @@ variables = [
 ]
 opaque = [
     "CERTCertificate",
+    "PK11SymKey",
     "PRFileDesc",
     "SECKEYPrivateKey",
     "SECKEYPublicKey",

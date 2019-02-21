@@ -3,46 +3,44 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
 
 include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 
 macro_rules! scoped_ptr {
-    ($scoped:ident, $target:ident, $dtor:ident) => {
-        // TODO(mt) build the macro
+    ($scoped:ident, $target:path, $dtor:path) => {
+        pub struct $scoped {
+            ptr: *mut $target,
+        }
+
+        impl $scoped {
+            pub fn new(ptr: NonNull<$target>) -> $scoped {
+                $scoped { ptr: ptr.as_ptr() }
+            }
+        }
+
+        impl Deref for $scoped {
+            type Target = *mut $target;
+            fn deref(&self) -> &*mut $target {
+                &self.ptr
+            }
+        }
+
+        impl DerefMut for $scoped {
+            fn deref_mut(&mut self) -> &mut *mut $target {
+                &mut self.ptr
+            }
+        }
+
+        impl Drop for $scoped {
+            fn drop(&mut self) {
+                unsafe { $dtor(self.ptr) };
+            }
+        }
     };
 }
 
-pub struct ScopedCertificate(pub *mut CERTCertificate);
-
-impl Drop for ScopedCertificate {
-    fn drop(&mut self) {
-        unsafe {
-            CERT_DestroyCertificate(self.0);
-        }
-    }
-}
-
-impl Deref for ScopedCertificate {
-    type Target = *mut CERTCertificate;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-pub struct ScopedPrivateKey(pub *mut SECKEYPrivateKey);
-
-impl Drop for ScopedPrivateKey {
-    fn drop(&mut self) {
-        unsafe {
-            SECKEY_DestroyPrivateKey(self.0);
-        }
-    }
-}
-
-impl Deref for ScopedPrivateKey {
-    type Target = *mut SECKEYPrivateKey;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+scoped_ptr!(ScopedCertificate, CERTCertificate, CERT_DestroyCertificate);
+scoped_ptr!(ScopedPrivateKey, SECKEYPrivateKey, SECKEY_DestroyPrivateKey);
+scoped_ptr!(ScopedSymKey, PK11SymKey, PK11_FreeSymKey);

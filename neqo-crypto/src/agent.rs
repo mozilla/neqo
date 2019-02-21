@@ -12,7 +12,7 @@ use std::ffi::CString;
 use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::os::raw::c_void;
-use std::ptr::{null, null_mut};
+use std::ptr::{null, null_mut, NonNull};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HandshakeState {
@@ -334,18 +334,18 @@ impl Server {
                 return Err(Error::CertificateLoading);
             }
             let c = c.unwrap();
-            let cert = p11::ScopedCertificate(unsafe {
+            let cert = match NonNull::new(unsafe {
                 p11::PK11_FindCertFromNickname(c.as_ptr(), null_mut())
-            });
-            if cert.is_null() {
-                return Err(Error::CertificateLoading);
-            }
-            let key = p11::ScopedPrivateKey(unsafe {
+            }) {
+                None => return Err(Error::CertificateLoading),
+                Some(ptr) => p11::ScopedCertificate::new(ptr),
+            };
+            let key = match NonNull::new(unsafe {
                 p11::PK11_FindKeyByAnyCert(*cert.deref(), null_mut())
-            });
-            if key.is_null() {
-                return Err(Error::CertificateLoading);
-            }
+            }) {
+                None => return Err(Error::CertificateLoading),
+                Some(ptr) => p11::ScopedPrivateKey::new(ptr),
+            };
             result::result(unsafe {
                 ssl::SSL_ConfigServerCert(agent.fd, *cert.deref(), *key.deref(), null(), 0)
             })?;

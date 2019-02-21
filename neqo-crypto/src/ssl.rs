@@ -107,11 +107,12 @@ experimental_api!(SSL_GetCurrentEpoch(
 ));
 experimental_api!(SSL_MakeAead(
     secret: *mut PK11SymKey,
-    cipherSuite: PRUint16,
-    labelPrefix: *const c_char,
-    labelPrefixLen: c_uint,
+    cipher: PRUint16,
+    label_prefix: *const c_char,
+    label_prefix_len: c_uint,
     ctx: *mut *mut SSLAeadContext,
 ));
+experimental_api!(SSL_DestroyAead(ctx: *mut SSLAeadContext,));
 
 #[cfg(test)]
 mod tests {

@@ -1,8 +1,11 @@
+#[macro_use]
+mod p11;
+
+mod aead;
 mod agent;
 mod agentio;
 mod constants;
 mod err;
-mod p11;
 mod prio;
 mod result;
 mod ssl;
