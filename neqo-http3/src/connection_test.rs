@@ -1,4 +1,4 @@
-use crate::stream_test::{Stream, get_stream_type};
+use crate::stream_test::{get_stream_type, Stream};
 use neqo_transport::connection::{Datagram, Role, State};
 use neqo_transport::frame::StreamType;
 use neqo_transport::{Error, Res};
@@ -48,7 +48,8 @@ impl Connection {
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         let stream_id = self.next_stream_id;
-        self.streams.insert(stream_id, Stream::new(get_stream_type(self.role, st)));
+        self.streams
+            .insert(stream_id, Stream::new(get_stream_type(self.role, st)));
         self.next_stream_id += 1;
         Ok(stream_id)
     }
