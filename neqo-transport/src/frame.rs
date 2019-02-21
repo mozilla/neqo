@@ -196,7 +196,7 @@ impl Frame {
         }
     }
 
-    fn marshal(&self, d: &mut Data) -> Res<()> {
+    pub fn marshal(&self, d: &mut Data) -> Res<()> {
         d.encode_byte(self.get_type());
 
         match self {

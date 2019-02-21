@@ -5,6 +5,7 @@ use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::nss_stub::*;
 use crate::stream::{BidiStream, Recvable};
+use std::fmt::Debug;
 
 use crate::{Error, Res};
 
@@ -29,12 +30,25 @@ pub struct Datagram {
     d: Vec<u8>,
 }
 
+pub enum TxMode {
+    Normal,
+    Pto,
+}
+
+type FrameGenerator = fn(&mut Connection, u64, TxMode, usize) -> Option<Frame>;
+
+/*trait FrameGenerator: Debug {
+    fn next_frame(&mut self, conn: &mut Connection, now: u64, mode: TxMode, left: usize) -> Option<Frame>;
+}*/
+
 #[allow(unused_variables)]
 #[derive(Debug)]
 pub struct Connection {
     role: Role,
     state: State,
     tls: Agent,
+    // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
+    generators: Vec<FrameGenerator>,
     deadline: u64,
     max_data: u64,
     max_streams: u64,
@@ -43,6 +57,7 @@ pub struct Connection {
     next_stream_id: u64,
     streams: HashMap<u64, BidiStream>, // stream id, stream
     outgoing_pkts: Vec<Packet>,        // (offset, data)
+    pmtu: usize,
 }
 
 impl Connection {
@@ -61,6 +76,7 @@ impl Connection {
                 Role::Server => State::WaitInitial,
             },
             tls: agent,
+            generators: Vec::new(),
             deadline: 0,
             max_data: 0,
             max_streams: 0,
@@ -69,10 +85,11 @@ impl Connection {
             next_stream_id: 0,
             streams: HashMap::new(),
             outgoing_pkts: Vec::new(),
+            pmtu: 1280,
         }
     }
 
-    pub fn input(&mut self, _d: Option<Datagram>, now: u64) -> Res<(Option<Datagram>, u64)> {
+    pub fn process(&mut self, _d: Option<Datagram>, now: u64) -> Res<(Option<Datagram>, u64)> {
         // TODO(ekr@rtfm.com): Process the incoming packets.
         if now >= self.deadline {
             // Timer expired.
@@ -84,7 +101,28 @@ impl Connection {
             }
         }
 
-        Ok((None, 0))
+        let dgram = self.output(now)?;
+
+        Ok((dgram, 0)) // TODO(ekr@rtfm.com): When to call back next.
+    }
+
+    // Iterate through all the generators, inserting as many frames as will
+    // fit.
+    fn output(&mut self, now: u64) -> Res<Option<Datagram>> {
+        let mut d = Data::default();
+        let len = self.generators.len();
+        for i in 0..len {
+            {
+                // TODO(ekr@rtfm.com): Fix TxMode
+                if let Some(f) =
+                    self.generators[i](self, now, TxMode::Normal, self.pmtu - d.remaining())
+                {
+                    f.marshal(&mut d)?;
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     fn client_start(&mut self) -> Res<()> {
@@ -99,7 +137,7 @@ impl Connection {
                 data: d.to_vec(),
             });
         }
-        
+
         let (_, msgs) = self.tls.handshake_raw(now, recs)?;
         debug!("Handshake emitted {} messages", msgs.recs.len());
 
@@ -213,7 +251,7 @@ mod tests {
     #[test]
     fn test_handshake() {
         let mut client = Connection::new_client(&"example.com");
-        client.input(None, 0).unwrap();
+        client.process(None, 0).unwrap();
     }
 
 }

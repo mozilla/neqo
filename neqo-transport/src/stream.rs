@@ -1,8 +1,8 @@
-use std::cmp::{max, min};
-use std::collections::{BTreeMap, VecDeque};
-use std::fmt::Debug;
-
+use crate::connection::TxMode;
 use crate::Res;
+use std::cmp::{max, min};
+use std::collections::{BTreeMap, LinkedList, VecDeque};
+use std::fmt::Debug;
 
 const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
 
@@ -28,6 +28,68 @@ pub trait Sendable: Debug {
 
     /// Access the bytes that are ready to be sent.
     fn send_buffer(&mut self) -> &mut VecDeque<u8>;
+}
+
+#[derive(PartialEq)]
+enum TxChunkState {
+    Unsent,
+    Sent(u64),
+    Lost,
+}
+
+struct TxChunk {
+    offset: usize,
+    data: Vec<u8>,
+    state: TxChunkState,
+}
+
+pub struct TxBuffer {
+    offset: usize,
+    chunks: LinkedList<TxChunk>,
+}
+
+impl TxBuffer {
+    pub fn send(&mut self, buf: &[u8]) {
+        self.chunks.push_back(TxChunk {
+            offset: self.offset,
+            data: Vec::from(buf),
+            state: TxChunkState::Unsent,
+        })
+    }
+
+    fn find_first_chunk_by_state(&self, state: TxChunkState) -> Option<&TxChunk> {
+        for c in &self.chunks {
+            if c.state == state {
+                return Some(c);
+            }
+        }
+        None
+    }
+
+    pub fn next_bytes(&self, _mode: TxMode, l: usize) -> Option<(usize, &[u8])> {
+        // First try to find some unsent stuff.
+        if let Some(c) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
+            Some((c.offset, &c.data))
+        }
+        // How about some lost stuff.
+        else if let Some(c) = self.find_first_chunk_by_state(TxChunkState::Lost) {
+            Some((c.offset, &c.data))
+        } else {
+            None
+        }
+    }
+
+    fn sent_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
+        unimplemented!();
+    }
+
+    fn lost_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
+        unimplemented!();
+    }
+
+    fn acked_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
+        unimplemented!();
+    }
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -263,7 +325,7 @@ mod test {
 
     use super::*;
 
-    #[test]
+    // #[test]
     fn test_stream_rx() {
         let frame1 = vec![0; 10];
         let frame2 = vec![0; 12];
