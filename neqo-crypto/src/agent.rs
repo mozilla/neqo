@@ -25,15 +25,21 @@ pub enum HandshakeState {
 
 #[derive(Debug, Default)]
 pub struct SecretAgentInfo {
-    ver : u16,
-    cipher : u16,
-    early_data : bool,
+    ver: u16,
+    cipher: u16,
+    early_data: bool,
 }
 
 impl SecretAgentInfo {
-    fn update(&mut self, fd : *mut ssl::PRFileDesc) -> Res<()> {
+    fn update(&mut self, fd: *mut ssl::PRFileDesc) -> Res<()> {
         let mut info: ssl::SSLChannelInfo = unsafe { mem::uninitialized() };
-        let rv = unsafe{ ssl::SSL_GetChannelInfo(fd, &mut info, mem::size_of::<ssl::SSLChannelInfo>() as ssl::PRUint32)};
+        let rv = unsafe {
+            ssl::SSL_GetChannelInfo(
+                fd,
+                &mut info,
+                mem::size_of::<ssl::SSLChannelInfo>() as ssl::PRUint32,
+            )
+        };
         result::result(rv)?;
         self.ver = info.protocolVersion as u16;
         self.cipher = info.cipherSuite as u16;
@@ -41,9 +47,15 @@ impl SecretAgentInfo {
         Ok(())
     }
 
-    pub fn version(&self) -> u16 { self.ver }
-    pub fn cipher_suite(&self) -> u16 { self.cipher }
-    pub fn early_data_accepted(&self) -> bool { self.early_data }
+    pub fn version(&self) -> u16 {
+        self.ver
+    }
+    pub fn cipher_suite(&self) -> u16 {
+        self.cipher
+    }
+    pub fn early_data_accepted(&self) -> bool {
+        self.early_data
+    }
 }
 
 // SecretAgent holds the common parts of client and server.
@@ -160,7 +172,9 @@ impl SecretAgent {
         }
     }
 
-    pub fn info(&self) -> &SecretAgentInfo { &self.inf }
+    pub fn info(&self) -> &SecretAgentInfo {
+        &self.inf
+    }
 
     fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
         self.st = match result::result_or_blocked(rv)? {
@@ -171,7 +185,7 @@ impl SecretAgent {
             false => {
                 self.inf.update(self.fd)?;
                 HandshakeState::Complete
-            },
+            }
         };
         println!("{:?} state = {:?}", self.fd, &self.st);
         Ok(())
@@ -224,8 +238,8 @@ impl SecretAgent {
     // If you send data from multiple epochs, you might end up being sad.
     pub fn handshake_raw<'a, 'b>(
         &mut self,
-        _now: &std::time::SystemTime,  // TODO(mt) : u64
-        input: SslRecordList<'b>,  // TODO(mt) : just take one record
+        _now: &std::time::SystemTime, // TODO(mt) : u64
+        input: SslRecordList<'b>,     // TODO(mt) : just take one record
         output: &'a mut [u8],
     ) -> Res<(HandshakeState, SslRecordList<'a>)> {
         self.set_raw(true)?;
