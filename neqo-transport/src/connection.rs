@@ -99,8 +99,10 @@ impl Connection {
                 data: d.to_vec(),
             });
         }
+        
+        let (_, msgs) = self.tls.handshake_raw(now, recs)?;
+        debug!("Handshake emitted {} messages", msgs.recs.len());
 
-        let _ = self.tls.handshake_raw(now, recs)?;
         Ok(())
     }
 
