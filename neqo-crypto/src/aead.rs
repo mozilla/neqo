@@ -1,3 +1,5 @@
+#![allow(dead_code)] // TODO(mt) remove
+
 use crate::err::{Error, Res};
 use crate::p11;
 use crate::result;
