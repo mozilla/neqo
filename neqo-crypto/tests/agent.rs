@@ -1,4 +1,5 @@
 use neqo_crypto::{init_db, Client, HandshakeState, Server};
+use neqo_crypto::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 use std::time::SystemTime;
 
 #[test]
@@ -49,6 +50,9 @@ fn handshake() {
         .expect("send CF");
     assert_eq!(state, HandshakeState::Complete);
     assert!(bytes > 0);
+
+    assert_eq!(TLS_VERSION_1_3, client.info().version());
+    assert_eq!(TLS_AES_128_GCM_SHA256, client.info().cipher_suite());
 
     let (state, bytes) = server
         .handshake(&now, &c2s[0..bytes], &mut s2c)

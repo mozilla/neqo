@@ -1,5 +1,6 @@
 use crate::agentio::{emit_records, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{SslRecord, SslRecordList};
+use crate::constants::*;
 use crate::err::{Error, Res};
 use crate::initialized;
 use crate::p11;
@@ -142,7 +143,7 @@ impl SecretAgent {
 
     // Common configuration.
     pub fn configure(&self) -> Res<()> {
-        self.set_version_range(ssl::TLS_VERSION_1_3, ssl::TLS_VERSION_1_3)?;
+        self.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
         self.set_option(ssl::Opt::Locking, false)?;
         self.set_option(ssl::Opt::Tickets, false)?;
         Ok(())

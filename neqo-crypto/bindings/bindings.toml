@@ -70,6 +70,13 @@ variables = [
     "SSL_ENABLE_HELLO_DOWNGRADE_CHECK",
 ]
 
+[nss_ciphers]
+variables = [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
+]
+
 [nss_secerr]
 types = ["SECErrorCodes"]
 enums = ["SECErrorCodes"]

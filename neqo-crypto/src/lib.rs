@@ -1,5 +1,6 @@
 mod agent;
 mod agentio;
+mod constants;
 mod err;
 mod p11;
 mod prio;
@@ -7,6 +8,7 @@ mod result;
 mod ssl;
 
 pub use crate::agent::{Agent, Client, HandshakeState, Server};
+pub use crate::constants::*;
 use crate::err::Res;
 
 use std::ffi::CString;

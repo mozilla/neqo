@@ -1,8 +1,8 @@
 agent state (not connected/writeable/readable/broken)
 custom extensions
+set ciphersuites
 read/write
 early data -- laters
-record layer separation -- NSS changes pending
 secret export -- NSS changes pending
 current aead -- needs NSS changes
 current kdf -- needs NSS changes
