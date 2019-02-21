@@ -3,8 +3,8 @@ use std::net::SocketAddr;
 
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
-use crate::stream::Stream;
 use crate::nss_stub::*;
+use crate::stream::{BidiStream, RxStream};
 
 use crate::{Error, Res};
 
@@ -22,7 +22,6 @@ enum State {
     Init,
     WaitInitial,
 }
-
 
 pub struct Datagram {
     src: SocketAddr,
@@ -42,17 +41,20 @@ pub struct Connection {
     highest_stream: Option<u64>,
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
     next_stream_id: u64,
-    streams: HashMap<u64, Stream>, // stream id, stream
-    outgoing_pkts: Vec<Packet>,    // (offset, data)
+    streams: HashMap<u64, BidiStream>, // stream id, stream
+    outgoing_pkts: Vec<Packet>,        // (offset, data)
 }
 
 impl Connection {
     pub fn new_client(server_name: &str) -> Connection {
-        Connection::new(Role::Client, Agent::Client(Client::new(server_name).unwrap()))
+        Connection::new(
+            Role::Client,
+            Agent::Client(Client::new(server_name).unwrap()),
+        )
     }
 
     pub fn new(r: Role, agent: Agent) -> Connection {
-        Connection{
+        Connection {
             role: r,
             state: match r {
                 Role::Client => State::Init,
@@ -92,13 +94,16 @@ impl Connection {
     fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         let mut recs = SslRecordList::default();
         if let Some(d) = data {
-            recs.recs.push_back(SslRecord{epoch, data: d.to_vec()});
+            recs.recs.push_back(SslRecord {
+                epoch,
+                data: d.to_vec(),
+            });
         }
-        
+
         let _ = self.tls.handshake_raw(now, recs)?;
         Ok(())
     }
-    
+
     pub fn process_input_frame(&mut self, frame: &[u8]) -> Res<()> {
         let mut data = Data::from_slice(frame);
         let frame = decode_frame(&mut data)?;
@@ -193,7 +198,7 @@ impl Connection {
     // Returns new stream id
     pub fn stream_create(&mut self) -> u64 {
         let stream_id = self.next_stream_id;
-        self.streams.insert(stream_id, Stream::new());
+        self.streams.insert(stream_id, BidiStream::new());
         self.next_stream_id += 1;
         stream_id
     }
@@ -202,12 +207,11 @@ impl Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_handshake() {
         let mut client = Connection::new_client(&"example.com");
         client.input(None, 0).unwrap();
     }
-        
 
 }
