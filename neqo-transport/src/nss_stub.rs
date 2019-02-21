@@ -86,8 +86,12 @@ impl SecretAgent {
     pub fn handshake_raw(&mut self, _now: u64, input: SslRecordList) ->
         Res<(HandshakeState, SslRecordList)>
     {
+        debug!("handshake_raw self.next={} m={:?} client={}",
+               self.next,
+               HANDSHAKE_MESSAGES[self.next],
+               self.client
+        );
         let mut output = SslRecordList::default();
-        println!("Handshake raw");
         // First read any input, but choke if we're not expecting it.
         for r in input.recs {
             if HANDSHAKE_MESSAGES[self.next].client == self.client {
@@ -103,7 +107,7 @@ impl SecretAgent {
         // Now generate our output.
         while HANDSHAKE_MESSAGES[self.next].client == self.client {
             let m = self.send_message(&HANDSHAKE_MESSAGES[self.next]);
-            println!("Sending message: {:?}", HANDSHAKE_MESSAGES[self.next]);
+            debug!("Sending message: {:?}", HANDSHAKE_MESSAGES[self.next]);
             output.recs.push_back(
                 SslRecord{
                     data: m,
@@ -143,9 +147,9 @@ pub struct Client {
 
 impl Client {
     pub fn new(server_name: &str) -> Res<Self> {
-        Ok(Client{
-            agent: SecretAgent::default(),
-        })
+        let mut a = SecretAgent::default();
+        a.client = true;
+        Ok(Client{agent: a})
     }
 }
 
