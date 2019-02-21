@@ -4,13 +4,16 @@ use std::net::SocketAddr;
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::nss_stub::*;
-use crate::stream::{BidiStream, Recvable};
+use crate::packet::*;
+use crate::stream::{BidiStream, Recvable, TxBuffer};
 use std::fmt::Debug;
 
 use crate::{Error, Res};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
+
+const QUIC_VERSION: u32 = 0xff000012;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Role {
@@ -24,6 +27,7 @@ enum State {
     WaitInitial,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct Datagram {
     src: SocketAddr,
     dst: SocketAddr,
@@ -44,10 +48,18 @@ type FrameGenerator = fn(&mut Connection, u64, TxMode, usize) -> Option<Frame>;
 #[allow(unused_variables)]
 #[derive(Debug)]
 pub struct Connection {
+    version: Version,
+    local_addr: Option<SocketAddr>,
+    remote_addr: Option<SocketAddr>,
     role: Role,
     state: State,
     tls: Agent,
+    scid: Vec<u8>,
+    dcid: Vec<u8>,
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
+    send_epoch: u16,
+    recv_epoch: u16,
+    crypto_stream_out: [TxBuffer; 4],
     generators: Vec<FrameGenerator>,
     deadline: u64,
     max_data: u64,
@@ -62,21 +74,37 @@ pub struct Connection {
 
 impl Connection {
     pub fn new_client(server_name: &str) -> Connection {
-        Connection::new(
+        let mut c = Connection::new(
             Role::Client,
             Agent::Client(Client::new(server_name).unwrap()),
-        )
+        );
+        c.local_addr = Some("127.0.0.1:0".parse().unwrap());
+        c.remote_addr = Some("127.0.0.1:0".parse().unwrap());
+        c
     }
 
     pub fn new(r: Role, agent: Agent) -> Connection {
-        Connection {
+        let mut c = Connection {
+            version: QUIC_VERSION,
+            local_addr: None,
+            remote_addr: None,
             role: r,
             state: match r {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
             },
             tls: agent,
-            generators: Vec::new(),
+            scid: Vec::new(),
+            dcid: Vec::new(),
+            send_epoch: 0,
+            recv_epoch: 0,
+            crypto_stream_out: [
+                TxBuffer::default(),
+                TxBuffer::default(),
+                TxBuffer::default(),
+                TxBuffer::default(),
+            ],
+            generators: vec![generate_crypto_frames],
             deadline: 0,
             max_data: 0,
             max_streams: 0,
@@ -86,7 +114,14 @@ impl Connection {
             streams: HashMap::new(),
             outgoing_pkts: Vec::new(),
             pmtu: 1280,
+        };
+
+        c.scid = c.generate_cid();
+        if c.role == Role::Client {
+            c.dcid = c.generate_cid();
         }
+
+        c
     }
 
     pub fn process(&mut self, _d: Option<Datagram>, now: u64) -> Res<(Option<Datagram>, u64)> {
@@ -114,6 +149,7 @@ impl Connection {
         for i in 0..len {
             {
                 // TODO(ekr@rtfm.com): Fix TxMode
+                // TODO(ekr@rtfm.com): Epoch
                 if let Some(f) =
                     self.generators[i](self, now, TxMode::Normal, self.pmtu - d.remaining())
                 {
@@ -122,7 +158,28 @@ impl Connection {
             }
         }
 
-        Ok(None)
+        debug!("Need to send a packet of size {}", d.remaining());
+
+        let mut hdr = PacketHdr {
+            tbyte: 0,
+            tipe: PacketType::Initial(Vec::new()),
+            version: Some(self.version),
+            dcid: ConnectionId(self.dcid.clone()),
+            scid: Some(ConnectionId(self.scid.clone())),
+            pn: 0,    // TODO(ekr@rtfm.com): Implement
+            epoch: 0, // TODO(ekr@rtfm.com): Implement
+            hdr_len: 0,
+            body_len: 0,
+        };
+
+        let mut packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
+
+        debug!("Packet length: {} {:0x?}", packet.len(), packet);
+        Ok(Some(Datagram {
+            src: self.local_addr.unwrap(),
+            dst: self.remote_addr.unwrap(),
+            d: packet.to_vec(),
+        }))
     }
 
     fn client_start(&mut self) -> Res<()> {
@@ -140,6 +197,10 @@ impl Connection {
 
         let (_, msgs) = self.tls.handshake_raw(now, recs)?;
         debug!("Handshake emitted {} messages", msgs.recs.len());
+
+        for m in msgs.recs {
+            self.crypto_stream_out[m.epoch as usize].send(&m.data);
+        }
 
         Ok(())
     }
@@ -242,6 +303,80 @@ impl Connection {
         self.next_stream_id += 1;
         stream_id
     }
+
+    fn generate_cid(&mut self) -> Vec<u8> {
+        // TODO(ekr@rtfm.com): Implement.
+        return vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    }
+}
+
+// Mock for the crypto pieces
+const AEAD_MASK: u8 = 0;
+
+fn auth_tag(hdr: &[u8], body: &[u8]) -> [u8; 16] {
+    [0; 16]
+}
+
+impl PacketCtx for Connection {
+    fn pn_length(&self, pn: PacketNumber) -> usize {
+        3
+    }
+
+    fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]> {
+        Ok([0xa5, 0xa5, 0xa5, 0xa5, 0xa5])
+    }
+
+    fn decode_pn(&self, pn: u64) -> Res<PacketNumber> {
+        Ok(pn)
+    }
+
+    fn aead_decrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+        let mut pt = body.to_vec();
+
+        for i in 0..pt.len() {
+            pt[i] ^= AEAD_MASK;
+        }
+        let pt_len = pt.len() - 16;
+        let at = auth_tag(hdr, &pt[0..pt_len]);
+        for i in 0..16 {
+            if at[i] != pt[pt_len + i] {
+                return Err(Error::ErrDecryptError);
+            }
+        }
+        Ok(pt[0..pt_len].to_vec())
+    }
+
+    fn aead_encrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+        let mut d = Data::from_slice(body);
+        d.encode_vec(&auth_tag(hdr, body));
+        let v = d.as_mut_vec();
+        for i in 0..v.len() {
+            v[i] ^= AEAD_MASK;
+        }
+
+        Ok(v.to_vec())
+    }
+}
+
+impl PacketDecoder for Connection {
+    fn get_cid_len(&self) -> usize {
+        5
+    }
+}
+
+fn generate_crypto_frames(
+    conn: &mut Connection,
+    now: u64,
+    mode: TxMode,
+    remaining: usize,
+) -> Option<Frame> {
+    if let Some((offset, data)) = conn.crypto_stream_out[0].next_bytes(mode, remaining) {
+        return Some(Frame::Crypto {
+            offset,
+            data: data.to_vec(),
+        });
+    }
+    None
 }
 
 #[cfg(test)]
@@ -251,7 +386,10 @@ mod tests {
     #[test]
     fn test_handshake() {
         let mut client = Connection::new_client(&"example.com");
-        client.process(None, 0).unwrap();
+        let res = client.process(None, 0).unwrap();
+        assert_ne!(None, res.0);
+        assert_eq!(0, res.1);
+        debug!("{:?}", res.0);
     }
 
 }

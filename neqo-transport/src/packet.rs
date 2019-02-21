@@ -15,7 +15,7 @@ const PACKET_BIT_FIXED_QUIC: u8 = 0x40;
 const SAMPLE_SIZE: usize = 16;
 
 #[derive(Debug, PartialEq)]
-enum PacketType {
+pub enum PacketType {
     Short,
     ZeroRTT,
     Handshake,
@@ -42,29 +42,29 @@ impl PacketType {
     }
 }
 
-type Version = u32;
-type PacketNumber = u64;
+pub type Version = u32;
+pub type PacketNumber = u64;
 #[derive(Default, Deref, Debug, PartialEq)]
-struct ConnectionId(Vec<u8>);
+pub struct ConnectionId(pub Vec<u8>);
 
 #[derive(Default)]
-struct PacketHdr {
-    tbyte: u8,
-    tipe: PacketType,
-    version: Option<Version>,
-    dcid: ConnectionId,
-    scid: Option<ConnectionId>,
-    pn: PacketNumber,
-    epoch: u64,
-    hdr_len: usize,
-    body_len: usize,
+pub struct PacketHdr {
+    pub tbyte: u8,
+    pub tipe: PacketType,
+    pub version: Option<Version>,
+    pub dcid: ConnectionId,
+    pub scid: Option<ConnectionId>,
+    pub pn: PacketNumber,
+    pub epoch: u64,
+    pub hdr_len: usize,
+    pub body_len: usize,
 }
 
-trait PacketDecoder {
+pub trait PacketDecoder {
     fn get_cid_len(&self) -> usize;
 }
 
-trait PacketCtx {
+pub trait PacketCtx {
     fn pn_length(&self, pn: PacketNumber) -> usize;
     fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]>;
     fn decode_pn(&self, pn: u64) -> Res<PacketNumber>;
@@ -328,7 +328,7 @@ fn encrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, d: &mut Data, body: &[u8
     Ok(ret.to_vec())
 }
 
-fn encode_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
+pub fn encode_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
     let mut d = Data::default();
 
     match hdr.tipe {

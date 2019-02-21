@@ -30,21 +30,23 @@ pub trait Sendable: Debug {
     fn send_buffer(&mut self) -> &mut VecDeque<u8>;
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum TxChunkState {
     Unsent,
     Sent(u64),
     Lost,
 }
 
+#[derive(Debug)]
 struct TxChunk {
-    offset: usize,
+    offset: u64,
     data: Vec<u8>,
     state: TxChunkState,
 }
 
+#[derive(Default, Debug)]
 pub struct TxBuffer {
-    offset: usize,
+    offset: u64,
     chunks: LinkedList<TxChunk>,
 }
 
@@ -66,7 +68,8 @@ impl TxBuffer {
         None
     }
 
-    pub fn next_bytes(&self, _mode: TxMode, l: usize) -> Option<(usize, &[u8])> {
+    pub fn next_bytes(&self, _mode: TxMode, l: usize) -> Option<(u64, &[u8])> {
+        // TODO(ekr@rtfm.com): Send a slice that fits in |l|.
         // First try to find some unsent stuff.
         if let Some(c) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
             Some((c.offset, &c.data))
