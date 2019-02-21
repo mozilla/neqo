@@ -16,6 +16,7 @@ pub type Res<T> = Result<T, Error>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     AeadInitFailure,
+    AeadError,
     CertificateLoading,
     CreateSslSocket,
     InvalidEpoch,

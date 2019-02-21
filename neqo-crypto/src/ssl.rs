@@ -112,7 +112,29 @@ experimental_api!(SSL_MakeAead(
     label_prefix_len: c_uint,
     ctx: *mut *mut SSLAeadContext,
 ));
-experimental_api!(SSL_DestroyAead(ctx: *mut SSLAeadContext,));
+experimental_api!(SSL_AeadEncrypt(
+    ctx: *const SSLAeadContext,
+    counter: PRUint64,
+    aad: *const PRUint8,
+    aad_len: c_uint,
+    input: *const PRUint8,
+    input_len: c_uint,
+    output: *const PRUint8,
+    output_len: *mut c_uint,
+    max_output: c_uint
+));
+experimental_api!(SSL_AeadDecrypt(
+    ctx: *const SSLAeadContext,
+    counter: PRUint64,
+    aad: *const PRUint8,
+    aad_len: c_uint,
+    input: *const PRUint8,
+    input_len: c_uint,
+    output: *const PRUint8,
+    output_len: *mut c_uint,
+    max_output: c_uint
+));
+experimental_api!(SSL_DestroyAead(ctx: *mut SSLAeadContext));
 
 #[cfg(test)]
 mod tests {

@@ -4,6 +4,7 @@
 [nss_ssl]
 types = [
     "PRUint16",
+    "PRUint64",
     "PRUint8",
     "SECStatus",
     "SSLAeadContext",

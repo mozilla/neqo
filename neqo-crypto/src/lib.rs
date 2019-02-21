@@ -13,8 +13,8 @@ mod ssl;
 pub use crate::aead::Aead;
 pub use crate::agent::{Agent, Client, HandshakeState, Server};
 pub use crate::constants::*;
-pub use crate::p11::SymKey;
 use crate::err::Res;
+pub use crate::p11::SymKey;
 
 use std::ffi::CString;
 use std::path::Path;
