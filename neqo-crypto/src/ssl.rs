@@ -105,7 +105,6 @@ experimental_api!(SSL_GetCurrentEpoch(
     read_epoch: *mut PRUint16,
     write_epoch: *mut PRUint16,
 ));
-pub enum SSLAeadContext {}
 experimental_api!(SSL_MakeAead(
     secret: *mut PK11SymKey,
     cipherSuite: PRUint16,
