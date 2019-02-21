@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::nss_stub::*;
-use crate::stream::{BidiStream, RxStream};
+use crate::stream::{BidiStream, Recvable};
 
 use crate::{Error, Res};
 

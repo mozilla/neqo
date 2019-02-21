@@ -1,18 +1,33 @@
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, VecDeque};
+use std::fmt::Debug;
 
 use crate::Res;
 
-pub trait RxStream {
+const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
+
+pub trait Recvable: Debug {
+    /// Read buffered data from stream.
     fn read(&mut self, buf: &mut [u8]) -> Res<u64>;
-    fn rx_data_ready(&self) -> bool;
-    fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<u64>;
+
+    /// The number of bytes that can be read from the stream.
+    fn recv_data_ready(&self) -> u64;
+
+    /// Handle a received stream data frame.
+    fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()>;
+
+    fn needs_flowc_update(&mut self) -> Option<u64>;
 }
 
-pub trait TxStream {
+pub trait Sendable: Debug {
+    /// Send data on the stream.
     fn send(&mut self, buf: &[u8]);
-    fn tx_data_ready(&self) -> bool;
-    fn tx_buffer(&mut self) -> &mut VecDeque<u8>;
+
+    /// Number of bytes that is queued for sending.
+    fn send_data_ready(&self) -> u64;
+
+    /// Access the bytes that are ready to be sent.
+    fn send_buffer(&mut self) -> &mut VecDeque<u8>;
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -20,7 +35,6 @@ pub struct RxStreamOrderer {
     rx_offset: u64,                          // bytes already received and ready
     ooo_data: BTreeMap<(u64, u64), Vec<u8>>, // ((start_offset, end_offset), data)
     ready_to_go: VecDeque<u8>,
-    data_ready: bool,
 }
 
 impl RxStreamOrderer {
@@ -33,7 +47,9 @@ impl RxStreamOrderer {
     /// (ooo) or if the frame fills a gap.
     /// Returns bytes that are now retired, since this is relevant for flow
     /// control.
-    pub fn inbound_frame(&mut self, offset: u64, data: Vec<u8>) -> Res<u64> {
+    pub fn inbound_frame(&mut self, offset: u64, data: Vec<u8>) -> Res<()> {
+        // TODO(agrover@mozilla.com): limit ooo data, and possibly cull
+        // duplicate ranges
         self.ooo_data
             .insert((offset, offset + data.len() as u64), data);
 
@@ -42,7 +58,7 @@ impl RxStreamOrderer {
         // See if maybe we have some contig data now
         for ((start_offset, end_offset), data) in &self.ooo_data {
             if self.rx_offset >= *end_offset {
-                // Slready got all these bytes, do nothing
+                // Already got all these bytes, do nothing
             } else if self.rx_offset > *start_offset {
                 // Frame data has some new contig bytes after some old bytes
 
@@ -68,7 +84,7 @@ impl RxStreamOrderer {
         let to_remove = self
             .ooo_data
             .keys()
-            .filter(|(_, end)| self.rx_offset >= *end)
+            .take_while(|(_, end)| self.rx_offset >= *end)
             .cloned()
             .collect::<Vec<_>>();
         for key in to_remove {
@@ -78,14 +94,18 @@ impl RxStreamOrderer {
         // Tell client we got some new in-order data for them
         let new_bytes_available = self.rx_offset - orig_rx_offset;
         if new_bytes_available != 0 {
-            self.data_ready = true;
+            // poke somebody?
         }
 
-        Ok(new_bytes_available)
+        Ok(())
     }
 
-    pub fn data_ready(&self) -> bool {
-        self.data_ready
+    pub fn data_ready(&self) -> u64 {
+        self.ready_to_go.len() as u64
+    }
+
+    pub fn rx_offset(&self) -> u64 {
+        self.rx_offset
     }
 
     /// Caller has been told data is available on a stream, and they want to
@@ -102,65 +122,140 @@ impl RxStreamOrderer {
         buf[slc1_len..slc1_len + slc2_len].copy_from_slice(slc2);
         self.ready_to_go = remaining;
 
-        if self.ready_to_go.len() == 0 {
-            self.data_ready = false
-        }
-
         Ok(ret_bytes as u64)
     }
 }
 
 #[derive(Debug, Default, PartialEq)]
 pub struct BidiStream {
-    // TX
-    next_tx_offset: u64, // how many bytes have been enqueued for this stream
-    tx_queue: VecDeque<u8>,
-    bytes_acked: u64,
-
-    // RX
-    final_offset: Option<u64>,
-    rx: RxStreamOrderer,
+    tx: SendStream,
+    rx: RecvStream,
 }
 
 impl BidiStream {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new() -> BidiStream {
+        BidiStream {
+            tx: SendStream::new(),
+            rx: RecvStream::new(),
+        }
     }
 }
 
-impl TxStream for BidiStream {
+impl Recvable for BidiStream {
+    fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
+        self.rx.read(buf)
+    }
+
+    fn recv_data_ready(&self) -> u64 {
+        self.rx.recv_data_ready()
+    }
+
+    fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
+        self.rx.inbound_stream_frame(fin, offset, data)
+    }
+
+    fn needs_flowc_update(&mut self) -> Option<u64> {
+        self.rx.needs_flowc_update()
+    }
+}
+
+impl Sendable for BidiStream {
+    fn send(&mut self, buf: &[u8]) {
+        self.tx.send(buf)
+    }
+
+    fn send_data_ready(&self) -> u64 {
+        self.tx.send_data_ready()
+    }
+
+    fn send_buffer(&mut self) -> &mut VecDeque<u8> {
+        self.tx.send_buffer()
+    }
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct SendStream {
+    next_tx_offset: u64, // how many bytes have been enqueued for this stream
+    tx_queue: VecDeque<u8>,
+    bytes_acked: u64,
+}
+
+impl SendStream {
+    pub fn new() -> SendStream {
+        SendStream {
+            next_tx_offset: 0,
+            tx_queue: VecDeque::new(),
+            bytes_acked: 0,
+        }
+    }
+}
+
+impl Sendable for SendStream {
     /// Enqueue some bytes to send
     fn send(&mut self, buf: &[u8]) {
         self.tx_queue.extend(buf)
     }
 
-    fn tx_data_ready(&self) -> bool {
-        self.tx_queue.len() != 0
+    fn send_data_ready(&self) -> u64 {
+        self.tx_queue.len() as u64
     }
 
-    fn tx_buffer(&mut self) -> &mut VecDeque<u8> {
+    fn send_buffer(&mut self) -> &mut VecDeque<u8> {
         &mut self.tx_queue
     }
 }
 
-impl RxStream for BidiStream {
-    fn rx_data_ready(&self) -> bool {
+#[derive(Debug, Default, PartialEq)]
+pub struct RecvStream {
+    final_offset: Option<u64>,
+    rx_done: u64,
+    rx_window: u64,
+    rx: RxStreamOrderer,
+}
+
+impl RecvStream {
+    pub fn new() -> RecvStream {
+        RecvStream {
+            final_offset: None,
+            rx_done: 0,
+            rx_window: RX_STREAM_DATA_WINDOW,
+            rx: RxStreamOrderer::new(),
+        }
+    }
+}
+
+impl Recvable for RecvStream {
+    fn recv_data_ready(&self) -> u64 {
         self.rx.data_ready()
     }
 
     /// caller has been told data is available on a stream, and they want to
     /// retrieve it.
     fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
-        self.rx.read(buf)
+        let read_bytes = self.rx.read(buf)?;
+        self.rx_done += read_bytes;
+        Ok(read_bytes)
     }
 
-    fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<u64> {
-        if fin {
+    fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
+        if fin && self.final_offset == None {
             // TODO(agrover@mozilla.com): handle fin better
             self.final_offset = Some(offset + data.len() as u64)
         }
 
         self.rx.inbound_frame(offset, data)
+    }
+
+    /// If we should tell the sender they have more credit, return an offset
+    fn needs_flowc_update(&mut self) -> Option<u64> {
+        let lowater = RX_STREAM_DATA_WINDOW / 2;
+        let new_window = self.rx_done + RX_STREAM_DATA_WINDOW;
+        if self.final_offset.is_none() && new_window > lowater + self.rx_window {
+            self.rx_window = new_window;
+            Some(new_window)
+        } else {
+            None
+        }
     }
 }
 
@@ -179,24 +274,41 @@ mod test {
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, frame1).unwrap();
-        assert_eq!(s.rx_data_ready(), true);
+        assert_eq!(s.recv_data_ready(), 10);
         let mut buf = vec![0u8; 100];
         assert_eq!(s.read(&mut buf).unwrap(), 10);
-        assert_eq!(s.rx.rx_offset, 10);
-        assert_eq!(s.rx.ready_to_go.len(), 0);
+        assert_eq!(s.rx.rx.rx_offset, 10);
+        assert_eq!(s.rx.rx.ready_to_go.len(), 0);
 
         // test receiving a noncontig frame
         s.inbound_stream_frame(false, 12, frame2).unwrap();
-        assert_eq!(s.rx_data_ready(), false);
+        assert_eq!(s.recv_data_ready(), 0);
         assert_eq!(s.read(&mut buf).unwrap(), 0);
 
         // another frame that overlaps the first
         s.inbound_stream_frame(false, 14, frame3).unwrap();
-        assert_eq!(s.rx_data_ready(), false);
+        assert_eq!(s.recv_data_ready(), 0);
 
         // fill in the gap
         s.inbound_stream_frame(false, 10, frame4).unwrap();
-        assert_eq!(s.rx_data_ready(), true);
+        assert_eq!(s.recv_data_ready(), 14);
         assert_eq!(s.read(&mut buf).unwrap(), 14);
+    }
+
+    #[test]
+    fn test_stream_flowc_update() {
+        let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
+
+        let mut s = BidiStream::new();
+
+        let mut buf = vec![0u8; RX_STREAM_DATA_WINDOW as usize * 4]; // Make it overlarge
+
+        assert_eq!(s.needs_flowc_update(), None);
+        s.inbound_stream_frame(false, 0, frame1).unwrap();
+        assert_eq!(s.needs_flowc_update(), None);
+        assert_eq!(s.read(&mut buf).unwrap(), RX_STREAM_DATA_WINDOW);
+        assert_eq!(s.recv_data_ready(), 0);
+        assert_eq!(s.needs_flowc_update(), Some(RX_STREAM_DATA_WINDOW * 2));
+        assert_eq!(s.needs_flowc_update(), None);
     }
 }
