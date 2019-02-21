@@ -389,7 +389,7 @@ mod tests {
         let res = client.process(None, 0).unwrap();
         assert_ne!(None, res.0);
         assert_eq!(0, res.1);
-        debug!("{:?}", res.0);
+        debug!("Output={:?}", res.0);
     }
 
 }
