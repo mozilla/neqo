@@ -338,13 +338,13 @@ impl Server {
                 p11::PK11_FindCertFromNickname(c.as_ptr(), null_mut())
             }) {
                 None => return Err(Error::CertificateLoading),
-                Some(ptr) => p11::ScopedCertificate::new(ptr),
+                Some(ptr) => p11::Certificate::new(ptr),
             };
             let key = match NonNull::new(unsafe {
                 p11::PK11_FindKeyByAnyCert(*cert.deref(), null_mut())
             }) {
                 None => return Err(Error::CertificateLoading),
-                Some(ptr) => p11::ScopedPrivateKey::new(ptr),
+                Some(ptr) => p11::PrivateKey::new(ptr),
             };
             result::result(unsafe {
                 ssl::SSL_ConfigServerCert(agent.fd, *cert.deref(), *key.deref(), null(), 0)
