@@ -1,5 +1,6 @@
 mod agent;
 mod agentio;
+mod constants;
 mod err;
 mod p11;
 mod prio;
@@ -7,6 +8,7 @@ mod result;
 mod ssl;
 
 pub use crate::agent::{Agent, Client, HandshakeState, Server};
+pub use crate::constants::*;
 use crate::err::Res;
 
 use std::ffi::CString;
@@ -87,7 +89,7 @@ pub fn init_db(dir: &str) {
                 nss::SECMOD_DB.as_ptr() as *const i8,
                 nss::NSS_INIT_READONLY,
             );
-            result(st).expect("NSS_NoDB_Init failed");
+            result(st).expect("NSS_Initialize failed");
 
             let st = nss::NSS_SetDomesticPolicy();
             result(st).expect("NSS_SetDomesticPolicy failed");

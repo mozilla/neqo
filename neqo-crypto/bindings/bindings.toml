@@ -16,9 +16,11 @@ functions = [
     "SSL_AuthCertificateHook",
     "SSL_ConfigServerCert",
     "SSL_ConfigServerSessionIDCache",
+    "SSL_GetChannelInfo",
     "SSL_GetExperimentalAPI",
     "SSL_GetImplementedCiphers",
     "SSL_GetNumImplementedCiphers",
+    "SSL_GetPreliminaryChannelInfo",
     "SSL_ForceHandshake",
     "SSL_ImportFD",
     "SSL_OptionGet",
@@ -28,9 +30,16 @@ functions = [
     "SSL_VersionRangeSet",
 ]
 enums = [
+    "SSLAuthType",
+    "SSLCipherAlgorithm",
+    "SSLCompressionMethod",
     "SSLContentType",
     "SSLKEAType",
+    "SSLMACAlgorithm",
+    "SSLNamedGroup",
     "SSLProtocolVariant",
+    "SSLSecretDirection",
+    "SSLSignatureScheme",
     "SECStatus",
 ]
 variables = [
@@ -59,6 +68,13 @@ variables = [
     "SSL_RECORD_SIZE_LIMIT",
     "SSL_ENABLE_TLS13_COMPAT_MODE",
     "SSL_ENABLE_HELLO_DOWNGRADE_CHECK",
+]
+
+[nss_ciphers]
+variables = [
+    "TLS_AES_128_GCM_SHA256",
+    "TLS_AES_256_GCM_SHA384",
+    "TLS_CHACHA20_POLY1305_SHA256",
 ]
 
 [nss_secerr]

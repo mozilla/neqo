@@ -16,8 +16,6 @@ mod SSLOption {
 pub enum PRFileDesc {}
 
 // Remap some constants.
-pub const TLS_VERSION_1_2: u16 = SSL_LIBRARY_VERSION_TLS_1_2 as u16;
-pub const TLS_VERSION_1_3: u16 = SSL_LIBRARY_VERSION_TLS_1_3 as u16;
 pub const SECSuccess: SECStatus = _SECStatus_SECSuccess;
 pub const SECFailure: SECStatus = _SECStatus_SECFailure;
 

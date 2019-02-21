@@ -3,7 +3,9 @@ use std::net::SocketAddr;
 
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
-use crate::stream::Stream;
+use crate::nss_stub::*;
+use crate::stream::{BidiStream, RxStream};
+
 use crate::{Error, Res};
 
 #[derive(Debug, Default)]
@@ -32,24 +34,33 @@ pub struct Datagram {
 pub struct Connection {
     role: Role,
     state: State,
+    tls: Agent,
     deadline: u64,
     max_data: u64,
     max_streams: u64,
     highest_stream: Option<u64>,
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
     next_stream_id: u64,
-    streams: HashMap<u64, Stream>, // stream id, stream
-    outgoing_pkts: Vec<Packet>,    // (offset, data)
+    streams: HashMap<u64, BidiStream>, // stream id, stream
+    outgoing_pkts: Vec<Packet>,        // (offset, data)
 }
 
 impl Connection {
-    pub fn new(r: Role) -> Connection {
+    pub fn new_client(server_name: &str) -> Connection {
+        Connection::new(
+            Role::Client,
+            Agent::Client(Client::new(server_name).unwrap()),
+        )
+    }
+
+    pub fn new(r: Role, agent: Agent) -> Connection {
         Connection {
             role: r,
             state: match r {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
             },
+            tls: agent,
             deadline: 0,
             max_data: 0,
             max_streams: 0,
@@ -61,10 +72,9 @@ impl Connection {
         }
     }
 
-    pub fn input(&mut self, _d: &Datagram, now: u64) -> Res<(&Datagram, u64)> {
+    pub fn input(&mut self, _d: Option<Datagram>, now: u64) -> Res<(Option<Datagram>, u64)> {
         // TODO(ekr@rtfm.com): Process the incoming packets.
-
-        if now > self.deadline {
+        if now >= self.deadline {
             // Timer expired.
             match self.state {
                 State::Init => {
@@ -74,11 +84,24 @@ impl Connection {
             }
         }
 
-        Err(Error::ErrInternal)
+        Ok((None, 0))
     }
 
-    fn client_start(&mut self) -> Res<(&Datagram, u64)> {
-        Err(Error::ErrInternal)
+    fn client_start(&mut self) -> Res<()> {
+        self.handshake(1, 0, None)
+    }
+
+    fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
+        let mut recs = SslRecordList::default();
+        if let Some(d) = data {
+            recs.recs.push_back(SslRecord {
+                epoch,
+                data: d.to_vec(),
+            });
+        }
+
+        let _ = self.tls.handshake_raw(now, recs)?;
+        Ok(())
     }
 
     pub fn process_input_frame(&mut self, frame: &[u8]) -> Res<()> {
@@ -167,25 +190,28 @@ impl Connection {
             .get_mut(&stream_id)
             .ok_or_else(|| return Error::ErrInvalidStreamId)?;
 
-        //let end_offset = offset + data.len() as u64;
-        if offset == stream.next_rx_offset() {
-            // in order!
-            // TODO(agrover@mozilla.com): make data available to upper layers
-            stream.data_ready(&data);
-            // TODO(agrover@mozilla.com): generate ACK frames
-        }
-        if fin {
-            println!("fin set!")
-        }
-        // TODO: handle ooo, fin
+        let _new_bytes_available = stream.inbound_stream_frame(fin, offset, data)?;
+
         Ok(())
     }
 
     // Returns new stream id
     pub fn stream_create(&mut self) -> u64 {
         let stream_id = self.next_stream_id;
-        self.streams.insert(stream_id, Stream::new());
+        self.streams.insert(stream_id, BidiStream::new());
         self.next_stream_id += 1;
         stream_id
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_handshake() {
+        let mut client = Connection::new_client(&"example.com");
+        client.input(None, 0).unwrap();
+    }
+
 }

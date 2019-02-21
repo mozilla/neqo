@@ -7,3 +7,4 @@ edition = "2018"
 [dependencies]
 num-traits = "0.2"
 derive_more = "0.13"
+lazy_static = "1.0"
