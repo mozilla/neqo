@@ -180,6 +180,9 @@ impl Connection {
                 State::Init => {
                     self.client_start()?;
                 }
+                State::Handshaking => {
+                    // Nothing to do.
+                }
                 _ => unimplemented!(),
             }
         }
@@ -227,7 +230,7 @@ impl Connection {
         // TODO(ekr@rtfm.com): Filter for valid for this epoch.
 
         if matches!(self.state, State::WaitInitial) {
-            self.state = State::Handshaking;
+            self.set_state(State::Handshaking);
         }
 
         let mut d = Data::from_slice(&body);
@@ -296,7 +299,9 @@ impl Connection {
     }
 
     fn client_start(&mut self) -> Res<()> {
-        self.handshake(1, 0, None)
+        self.handshake(1, 0, None)?;
+        self.set_state(State::WaitInitial);
+        Ok(())
     }
 
     fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
@@ -406,6 +411,13 @@ impl Connection {
         };
 
         Ok(())
+    }
+
+    fn set_state(&mut self, state: State) {
+        if state != self.state {
+            info!("State change from {:?} -> {:?}", self.state, state);
+            self.state = state;
+        }
     }
 
     pub fn process_inbound_stream_frame(
@@ -531,14 +543,23 @@ mod tests {
 
     #[test]
     fn test_handshake() {
+        // 0 -> CH
         let mut client = Connection::new_client(&"example.com");
         let res = client.process(None, 0).unwrap();
         assert_ne!(None, res.0);
         assert_eq!(0, res.1);
         debug!("Output={:?}", res.0);
 
+        // CH -> SH
         let mut server = Connection::new_server(&[String::from("example.com")]);
-        server.process(res.0, 0).unwrap();
+        let res = server.process(res.0, 0).unwrap();
+        assert_ne!(None, res.0);
+        assert_eq!(0, res.1);
+        debug!("Output={:?}", res.0);
+
+        // SH -> 0
+        let res = client.process(res.0, 0).unwrap();
+        assert_eq!(None, res.0);
     }
 
 }
