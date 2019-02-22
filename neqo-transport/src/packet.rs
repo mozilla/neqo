@@ -1,5 +1,8 @@
 // TODO(ekr@rtfm.com): Remove this once I've implemented everything.
 #![allow(unused_variables, dead_code)]
+
+use ::derive_more::*;
+
 use super::data::*;
 use super::*;
 

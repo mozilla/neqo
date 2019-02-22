@@ -330,16 +330,16 @@ impl Connection {
 // Mock for the crypto pieces
 const AEAD_MASK: u8 = 0;
 
-fn auth_tag(hdr: &[u8], body: &[u8]) -> [u8; 16] {
-    [0; 16]
+fn auth_tag(_hdr: &[u8], _body: &[u8]) -> [u8; 16] {
+    [0xaa; 16]
 }
 
 impl PacketCtx for Connection {
-    fn pn_length(&self, pn: PacketNumber) -> usize {
+    fn pn_length(&self, _pn: PacketNumber) -> usize {
         3
     }
 
-    fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]> {
+    fn compute_mask(&self, _sample: &[u8]) -> Res<[u8; 5]> {
         Ok([0xa5, 0xa5, 0xa5, 0xa5, 0xa5])
     }
 
@@ -347,7 +347,7 @@ impl PacketCtx for Connection {
         Ok(pn)
     }
 
-    fn aead_decrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    fn aead_decrypt(&self, _pn: PacketNumber, _epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         let mut pt = body.to_vec();
 
         for i in 0..pt.len() {
@@ -363,7 +363,7 @@ impl PacketCtx for Connection {
         Ok(pt[0..pt_len].to_vec())
     }
 
-    fn aead_encrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    fn aead_encrypt(&self, _pn: PacketNumber, _epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         let mut d = Data::from_slice(body);
         d.encode_vec(&auth_tag(hdr, body));
         let v = d.as_mut_vec();
@@ -383,7 +383,7 @@ impl PacketDecoder for Connection {
 
 fn generate_crypto_frames(
     conn: &mut Connection,
-    now: u64,
+    _now: u64,
     mode: TxMode,
     remaining: usize,
 ) -> Option<Frame> {

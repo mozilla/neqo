@@ -1,5 +1,5 @@
-#[macro_use]
-extern crate derive_more;
+
+#![allow(unused_macros)]
 
 // Cribbed from the |matches| crate, for simplicity.
 macro_rules! matches {
