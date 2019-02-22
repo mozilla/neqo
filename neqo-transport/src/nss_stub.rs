@@ -9,11 +9,18 @@ use std::collections::linked_list::LinkedList;
 use std::ops::{Deref, DerefMut};
 use std::string::String;
 
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 pub struct HandshakeMessage {
     name: String,
     epoch: u16,
     client: bool,
+}
+
+// TODO(ekr@rtfm.com): Temporary override for PartialEq until we fix the epochs.
+impl PartialEq for HandshakeMessage {
+    fn eq(&self, other: &HandshakeMessage) -> bool {
+        self.name == other.name && self.client == other.client
+    }
 }
 
 lazy_static! {
@@ -108,7 +115,9 @@ impl SecretAgent {
         }
 
         // Now generate our output.
-        while HANDSHAKE_MESSAGES[self.next].client == self.client {
+        while self.next < HANDSHAKE_MESSAGES.len()
+            && HANDSHAKE_MESSAGES[self.next].client == self.client
+        {
             let m = self.send_message(&HANDSHAKE_MESSAGES[self.next]);
             debug!("Sending message: {:?}", HANDSHAKE_MESSAGES[self.next]);
             output.recs.push_back(SslRecord {
@@ -118,6 +127,11 @@ impl SecretAgent {
             self.next += 1;
         }
 
+        debug!("handshake_raw() completed");
+
+        if self.next == HANDSHAKE_MESSAGES.len() {
+            info!("Handshake completed");
+        }
         Ok((HandshakeState {}, output))
     }
 

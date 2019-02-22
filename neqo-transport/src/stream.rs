@@ -65,6 +65,7 @@ impl TxBuffer {
             data: Vec::from(buf),
             state: TxChunkState::Unsent,
         });
+        self.offset += buf.len() as u64;
         len
     }
 
@@ -77,16 +78,18 @@ impl TxBuffer {
         None
     }
 
-    pub fn next_bytes(&mut self, _mode: TxMode, l: usize) -> Option<(u64, Vec<u8>)> {
+    pub fn next_bytes(&mut self, _mode: TxMode, now: u64, l: usize) -> Option<(u64, Vec<u8>)> {
         // TODO(ekr@rtfm.com): Send a slice that fits in |l|.
         // First try to find some unsent stuff.
         if let Some(c) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
             let d = c.data.to_vec();
+            c.state = TxChunkState::Sent(now);
             Some((c.offset, d))
         }
         // How about some lost stuff.
         else if let Some(c) = self.find_first_chunk_by_state(TxChunkState::Lost) {
             let d = c.data.to_vec();
+            c.state = TxChunkState::Sent(now);
             Some((c.offset, d))
         } else {
             None

@@ -86,16 +86,9 @@ pub struct Connection {
     scid: Vec<u8>,
     dcid: Vec<u8>,
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
-<<<<<<< HEAD
-    send_epoch: Epoch,
-    recv_epoch: Epoch,
-    crypto_stream_out: [TxBuffer; 4],
-    crypto_stream_in: 
-=======
     send_epoch: u16,
     recv_epoch: u16,
     crypto_streams: [CryptoStream; 4],
->>>>>>> Server emits handshake messages
     generators: Vec<FrameGenerator>,
     deadline: u64,
     max_data: u64,
@@ -215,6 +208,9 @@ impl Connection {
 
                 // Imprint on the remote parameters.
                 self.dcid = dcid.clone();
+            }
+            State::Handshaking => {
+                // No-op.
             }
             _ => unimplemented!(),
         }
@@ -527,7 +523,7 @@ fn generate_crypto_frames(
 ) -> Option<Frame> {
     if let Some((offset, data)) = conn.crypto_streams[epoch as usize]
         .tx
-        .next_bytes(mode, remaining)
+        .next_bytes(mode, now, remaining)
     {
         return Some(Frame::Crypto {
             offset,
@@ -559,6 +555,52 @@ mod tests {
 
         // SH -> 0
         let res = client.process(res.0, 0).unwrap();
+        assert_eq!(None, res.0);
+
+        // 0 -> EE.
+        let res = server.process(None, 0).unwrap();
+        assert_ne!(None, res.0);
+        assert_eq!(0, res.1);
+        debug!("Output={:?}", res.0);
+
+        // EE -> 0
+        let res = client.process(res.0, 0).unwrap();
+        assert_eq!(None, res.0);
+
+        // 0 -> CERT.
+        let res = server.process(None, 0).unwrap();
+        assert_ne!(None, res.0);
+        assert_eq!(0, res.1);
+        debug!("Output={:?}", res.0);
+
+        // CERT -> 0
+        let res = client.process(res.0, 0).unwrap();
+        assert_eq!(None, res.0);
+
+        // 0 -> CV.
+        let res = server.process(None, 0).unwrap();
+        assert_ne!(None, res.0);
+        assert_eq!(0, res.1);
+        debug!("Output={:?}", res.0);
+
+        // CV -> 0
+        let res = client.process(res.0, 0).unwrap();
+        assert_eq!(None, res.0);
+
+        // 0 -> FIN.
+        let res = server.process(None, 0).unwrap();
+        assert_ne!(None, res.0);
+        assert_eq!(0, res.1);
+        debug!("Output={:?}", res.0);
+
+        // FIN -> FIN
+        let res = client.process(res.0, 0).unwrap();
+        assert_ne!(None, res.0);
+        assert_eq!(0, res.1);
+        debug!("Output={:?}", res.0);
+
+        // FIN -> 0
+        let res = server.process(res.0, 0).unwrap();
         assert_eq!(None, res.0);
     }
 
