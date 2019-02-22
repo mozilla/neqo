@@ -77,12 +77,14 @@ impl TxBuffer {
         // First try to find some unsent stuff.
         if let Some(i) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
             let c = &mut self.chunks[i];
+            assert!(c.data.len() <= l); // We don't allow partial writes yet.
             c.state = TxChunkState::Sent(now);
             return Some((c.offset, &c.data));
         }
         // How about some lost stuff.
         if let Some(i) = self.find_first_chunk_by_state(TxChunkState::Lost) {
             let c = &mut self.chunks[i];
+            assert!(c.data.len() <= l); // We don't allow partial writes yet.
             c.state = TxChunkState::Sent(now);
             return Some((c.offset, &c.data));
         }
