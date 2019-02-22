@@ -4,15 +4,11 @@ use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::nss_stub::*;
 use crate::packet::*;
-<<<<<<< HEAD
-use crate::stream::{BidiStream, Recvable, TxBuffer};
 use crate::{Error, Res};
 use neqo_crypto::Epoch;
 
-use std::collections::{HashMap, HashSet};
-=======
 use crate::stream::{BidiStream, Recvable, RxStreamOrderer, TxBuffer};
->>>>>>> Server emits handshake messages
+use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
 use std::ops;
@@ -33,6 +29,7 @@ enum State {
     Init,
     WaitInitial,
     Handshaking,
+    Connected,
 }
 
 #[derive(Debug, PartialEq)]
@@ -263,9 +260,16 @@ impl Connection {
             if d.remaining() > 0 {
                 debug!("Need to send a packet of size {}", d.remaining());
 
+                
                 let mut hdr = PacketHdr {
                     tbyte: 0,
-                    tipe: PacketType::Initial(Vec::new()),
+                    tipe: match epoch {
+                        // TODO(ekr@rtfm.com): Retry token
+                        0 => PacketType::Initial(Vec::new()),
+                        1 => PacketType::ZeroRTT,
+                        2 => PacketType::Handshake,
+                        3 => PacketType::Short,
+                    }
                     version: Some(self.version),
                     dcid: ConnectionId(self.dcid.clone()),
                     scid: Some(ConnectionId(self.scid.clone())),
@@ -318,6 +322,10 @@ impl Connection {
             self.crypto_streams[m.epoch as usize].tx.send(&m.data);
         }
 
+        if tls.completed() {
+            info!("TLS handshake completed");
+            self.set_state(State: Connected);
+        }
         Ok(())
     }
 

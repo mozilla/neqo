@@ -129,12 +129,15 @@ impl SecretAgent {
 
         debug!("handshake_raw() completed");
 
-        if self.next == HANDSHAKE_MESSAGES.len() {
+        if self.completed() {
             info!("Handshake completed");
         }
         Ok((HandshakeState {}, output))
     }
 
+    fn completed() -> bool {
+        self.next == HANDSHAKE_MESSAGES.len()
+    }
     fn send_message(&mut self, m: &HandshakeMessage) -> Vec<u8> {
         let mut d = Data::default();
         d.encode_vec_and_len(&m.name.clone().into_bytes());
