@@ -5,6 +5,7 @@
 
 use crate::constants::*;
 use crate::err::{Error, Res};
+use crate::result;
 
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_uchar, c_uint};
@@ -13,7 +14,7 @@ use std::ptr::{null_mut, NonNull};
 include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 
 macro_rules! scoped_ptr {
-    ($scoped:ident, $target:path, $dtor:path) => {
+    ($scoped:ident, $target:ty, $dtor:path) => {
         pub struct $scoped {
             ptr: *mut $target,
         }
@@ -77,6 +78,22 @@ impl SymKey {
                 null_mut(),
             )
         };
-        Err(Error::InternalError)
+        match NonNull::new(key_ptr) {
+            None => Err(Error::InternalError),
+            Some(p) => Ok(SymKey::new(p)),
+        }
+    }
+
+    /// You really don't want to use this.
+    pub fn as_bytes(&self) -> Res<&[u8]> {
+        let rv = unsafe { PK11_ExtractKeyValue(self.ptr) };
+        result::result(rv)?;
+
+        let key_item = unsafe { PK11_GetKeyData(self.ptr) };
+        // This is accessing a value attached to the key, so we can treat this as a borrow.
+        match unsafe { key_item.as_mut() } {
+            None => Err(Error::InternalError),
+            Some(key) => Ok(unsafe { std::slice::from_raw_parts(key.data, key.len as usize) }),
+        }
     }
 }

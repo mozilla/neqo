@@ -1,3 +1,4 @@
+// TODO(mt) consider naming this just KDF.
 use crate::constants::*;
 use crate::err::{Error, Res};
 use crate::p11::{PK11SymKey, SymKey};
