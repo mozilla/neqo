@@ -376,7 +376,7 @@ impl Connection {
                     // a length parameter.
                     let read = rx.read(&mut buf)?;
                     qdebug!("Read {} bytes", read);
-                    self.handshake(0, epoch, Some(&buf))?;
+                    self.handshake(0, epoch, Some(&buf[0..(read as usize)]))?;
                 }
             }
             Frame::NewToken { token } => {} // TODO(agrover@mozilla.com): stick the new token somewhere
