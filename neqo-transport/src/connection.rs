@@ -77,6 +77,7 @@ pub struct Connection {
     send_epoch: Epoch,
     recv_epoch: Epoch,
     crypto_stream_out: [TxBuffer; 4],
+    crypto_stream_in: 
     generators: Vec<FrameGenerator>,
     deadline: u64,
     max_data: u64,
@@ -172,9 +173,39 @@ impl Connection {
 
     pub fn input(&mut self, d: Datagram, now: u64) -> Res<()> {
         let mut hdr = decode_packet_hdr(self, &d.d)?;
-        let mut body = decrypt_packet(self, &mut hdr, &d.d)?;
 
-        debug!("Decrypted packet {:?}", hdr);
+        // TODO(ekr@rtfm.com): Check for bogus versions and reject.
+        // TODO(ekr@rtfm.com): Set up masking.
+
+        
+
+
+        match self.state {
+            State::Init => {
+                info!("Received message while in Init state");
+                return Err(Error:::ErrUnexpectedMessage);
+            }
+            State::WaitInitial => {
+                let dcid = hdr.scid.as_ref().unwrap().0;
+                if self.role == Role::Server {
+                    if dcid.0.len() < 8 {
+                        warn!("Peer CID is too short");
+                        return Err(Error:::ErrInvalidPacket);
+                    }
+                    self.remote_addr = Some(d.src);
+                }
+                
+                // Imprint on the remote parameters.                
+                self.dcid = dcid.clone();
+            }
+            _ => unimplemented!();
+        }
+
+        debug!("Received unverified packet {:?}", hdr);
+        
+        let body = decrypt_packet(self, &mut hdr, &d.d)?;
+
+        
         Ok(())
     }
 
@@ -211,7 +242,7 @@ impl Connection {
                     body_len: 0,
                 };
 
-                let mut packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
+                let packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
 
                 debug!("Packet length: {} {:0x?}", packet.len(), packet);
                 return Ok(Some(Datagram {
@@ -222,6 +253,9 @@ impl Connection {
             }
 
             // TODO(ekr@rtfm.com): Pack >1 packet into a datagram.
+            // TODO(ekr@rtfm.com): Pad the Client Initial.
+
+            // TODO(ekr@rtfm.com): Update PN.
         }
 
         return Ok(None);
