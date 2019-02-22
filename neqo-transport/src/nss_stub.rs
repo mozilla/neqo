@@ -84,7 +84,7 @@ impl SecretAgent {
         _now: u64,
         input: SslRecordList,
     ) -> Res<(HandshakeState, SslRecordList)> {
-        debug!(
+        qdebug!(
             "handshake_raw self.next={} m={:?} client={}",
             self.next, HANDSHAKE_MESSAGES[self.next], self.client
         );
@@ -92,12 +92,12 @@ impl SecretAgent {
         // First read any input, but choke if we're not expecting it.
         for r in input.recs {
             if HANDSHAKE_MESSAGES[self.next].client == self.client {
-                warn!("Receiving a handshake message when not expected");
+                qwarn!("Receiving a handshake message when not expected");
                 return Err(Error::ErrUnexpectedMessage);
             }
             let m = self.process_message(&r)?;
             if m != HANDSHAKE_MESSAGES[self.next] {
-                warn!(
+                qwarn!(
                     "Received message {:?} when expected {:?}",
                     &m, &HANDSHAKE_MESSAGES[self.next]
                 );
@@ -114,7 +114,7 @@ impl SecretAgent {
                 break;
             }
             let m = self.send_message(msg);
-            debug!("Sending message: {:?}", msg);
+            qdebug!("Sending message: {:?}", msg);
             output.recs.push_back(SslRecord {
                 data: m,
                 epoch: msg.epoch,
@@ -122,10 +122,10 @@ impl SecretAgent {
             self.next += 1;
         }
 
-        debug!("handshake_raw() completed");
+        qdebug!("handshake_raw() completed");
 
         if self.completed() {
-            info!("Handshake completed");
+            qinfo!("Handshake completed");
         }
         Ok((HandshakeState {}, output))
     }

@@ -135,7 +135,7 @@ impl RxStreamOrderer {
         // Avoid copies and duplicated data.
         // Get entry before where new entry would go, so we can see if we already
         // have the new bytes.
-        trace!("Inbound data offset={} len={}", new_start, new_data.len());
+        qtrace!("Inbound data offset={} len={}", new_start, new_data.len());
 
         let new_end = new_start + new_data.len() as u64;
         let (insert_new, remove_prev) = if let Some((&prev_start, prev_vec)) =
@@ -221,7 +221,7 @@ impl RxStreamOrderer {
     /// retrieve it.
     /// Returns bytes copied.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
-        trace!(
+        qtrace!(
             "Being asked to read {} bytes, {} available",
             buf.len(),
             self.buffered()
