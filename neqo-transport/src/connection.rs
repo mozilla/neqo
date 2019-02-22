@@ -95,8 +95,16 @@ impl Connection {
             Role::Client,
             Agent::Client(Client::new(server_name).unwrap()),
         );
+        // TODO(ekr@rtfm.com): Need addresses.
         c.local_addr = Some("127.0.0.1:0".parse().unwrap());
         c.remote_addr = Some("127.0.0.1:0".parse().unwrap());
+        c
+    }
+
+    pub fn new_server(certs: &[String]) -> Connection {
+        let mut c = Connection::new(Role::Server, Agent::Server(Server::new(certs).unwrap()));
+        // TODO(ekr@rtfm.com): Need addresses.
+        c.local_addr = Some("127.0.0.1:0".parse().unwrap());
         c
     }
 
@@ -163,7 +171,11 @@ impl Connection {
     }
 
     pub fn input(&mut self, d: Datagram, now: u64) -> Res<()> {
-        unimplemented!();
+        let mut hdr = decode_packet_hdr(self, &d.d)?;
+        let mut body = decrypt_packet(self, &mut hdr, &d.d)?;
+
+        debug!("Decrypted packet {:?}", hdr);
+        Ok(())
     }
 
     // Iterate through all the generators, inserting as many frames as will
@@ -435,6 +447,9 @@ mod tests {
         assert_ne!(None, res.0);
         assert_eq!(0, res.1);
         debug!("Output={:?}", res.0);
+
+        let mut server = Connection::new_server(&[String::from("example.com")]);
+        server.process(res.0, 0).unwrap();
     }
 
 }

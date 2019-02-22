@@ -50,7 +50,7 @@ pub type PacketNumber = u64;
 #[derive(Default, Deref, Debug, PartialEq)]
 pub struct ConnectionId(pub Vec<u8>);
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct PacketHdr {
     pub tbyte: u8,
     pub tipe: PacketType,
@@ -163,7 +163,7 @@ fn decode_pnl(u: u8) -> usize {
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 
-fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
+pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     let mut p = PacketHdr::default();
 
     let mut d = Data::from_slice(pd);
@@ -231,7 +231,7 @@ fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     Ok(p)
 }
 
-fn decrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<Vec<u8>> {
+pub fn decrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<Vec<u8>> {
     assert!(!matches!(
         hdr.tipe,
         PacketType::Retry(..) | PacketType::VN(..)
