@@ -107,18 +107,27 @@ functions = [
     "CERT_DestroyCertificate",
     "PK11_FindCertFromNickname",
     "PK11_FindKeyByAnyCert",
+    "PK11_FreeSlot",
     "PK11_FreeSymKey",
+    "PK11_GetInternalSlot",
     "PK11_ImportSymKey",
     "SECKEY_DestroyPrivateKey",
 ]
 enums = [
     "PK11Origin",
+    "SECItemType",
 ]
 opaque = [
     "CERTCertificate",
+    "PK11SlotInfo",
     "PK11SymKey",
     "SECKEYPublicKey",
     "SECKEYPrivateKey",
+]
+variables = [
+    "CKA_DERIVE",
+    "CKM_NSS_HKDF_SHA256",
+    "CKM_NSS_HKDF_SHA384",
 ]
 
 [nspr_err]

@@ -136,7 +136,6 @@ impl<'a> Drop for AgentIoInputContext<'a> {
     }
 }
 
-
 #[derive(Debug)]
 struct AgentIoInput {
     // input is data that is read by TLS.
@@ -195,7 +194,7 @@ impl AgentIo {
         io.as_mut().unwrap()
     }
 
-    pub fn wrap<'a:'c, 'b:'c, 'c>(&'a mut self, input: &'b [u8]) -> AgentIoInputContext<'c> {
+    pub fn wrap<'a: 'c, 'b: 'c, 'c>(&'a mut self, input: &'b [u8]) -> AgentIoInputContext<'c> {
         assert_eq!(self.output.len(), 0);
         self.input.wrap(input)
     }

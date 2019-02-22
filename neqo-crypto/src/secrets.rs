@@ -1,7 +1,7 @@
 use crate::aead::Aead;
 use crate::constants::*;
 use crate::err::{Error, Res};
-use crate::p11:: SymKey;
+use crate::p11::SymKey;
 use crate::ssl::SSLSecretDirection;
 
 #[derive(Default)]

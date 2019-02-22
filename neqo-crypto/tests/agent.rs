@@ -72,9 +72,7 @@ fn handshake_raw() {
     let mut server = Server::new(&["key"]).expect("should create server");
     println!("server {:?}", server);
 
-    let (state, client_records) = client
-        .handshake_raw(NOW, None)
-        .expect("send CH");
+    let (state, client_records) = client.handshake_raw(NOW, None).expect("send CH");
     assert!(client_records.len() > 0);
     assert_eq!(state, HandshakeState::InProgress);
 
@@ -87,9 +85,7 @@ fn handshake_raw() {
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
     // Calling handshake() again indicates that we're happy with the cert.
-    let (state, client_records) = client
-        .handshake_raw(NOW, None)
-        .expect("send CF");
+    let (state, client_records) = client.handshake_raw(NOW, None).expect("send CF");
     assert!(client_records.len() > 0);
     assert_eq!(state, HandshakeState::Complete);
 
