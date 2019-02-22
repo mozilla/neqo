@@ -6,7 +6,8 @@ use crate::frame::{decode_frame, Frame};
 use crate::nss_stub::*;
 use crate::packet::*;
 use crate::stream::{BidiStream, Recvable, TxBuffer};
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
+use std::ops;
 
 use crate::{Error, Res};
 
@@ -39,7 +40,21 @@ pub enum TxMode {
     Pto,
 }
 
-type FrameGenerator = fn(&mut Connection, u64, TxMode, usize) -> Option<Frame>;
+type FrameGeneratorFn = fn(&mut Connection, u64, TxMode, usize) -> Option<Frame>;
+struct FrameGenerator(FrameGeneratorFn);
+
+impl Debug for FrameGenerator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("<FrameGenerator Function>")
+    }
+}
+
+impl ops::Deref for FrameGenerator {
+    type Target = FrameGeneratorFn;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /*trait FrameGenerator: Debug {
     fn next_frame(&mut self, conn: &mut Connection, now: u64, mode: TxMode, left: usize) -> Option<Frame>;
@@ -104,7 +119,7 @@ impl Connection {
                 TxBuffer::default(),
                 TxBuffer::default(),
             ],
-            generators: vec![generate_crypto_frames],
+            generators: vec![FrameGenerator(generate_crypto_frames)],
             deadline: 0,
             max_data: 0,
             max_streams: 0,
