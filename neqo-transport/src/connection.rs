@@ -141,8 +141,12 @@ impl Connection {
         c
     }
 
-    pub fn process(&mut self, _d: Option<Datagram>, now: u64) -> Res<(Option<Datagram>, u64)> {
+    pub fn process(&mut self, d: Option<Datagram>, now: u64) -> Res<(Option<Datagram>, u64)> {
         // TODO(ekr@rtfm.com): Process the incoming packets.
+        if let Some(dgram) = d {
+            self.input(dgram, now)?;
+        }
+
         if now >= self.deadline {
             // Timer expired.
             match self.state {
@@ -156,6 +160,10 @@ impl Connection {
         let dgram = self.output(now)?;
 
         Ok((dgram, 0)) // TODO(ekr@rtfm.com): When to call back next.
+    }
+
+    pub fn input(&mut self, d: Datagram, now: u64) -> Res<()> {
+        unimplemented!();
     }
 
     // Iterate through all the generators, inserting as many frames as will
@@ -200,6 +208,8 @@ impl Connection {
                     d: packet.to_vec(),
                 }));
             }
+
+            // TODO(ekr@rtfm.com): Pack >1 packet into a datagram.
         }
 
         return Ok(None);
