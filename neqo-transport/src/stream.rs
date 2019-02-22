@@ -1,21 +1,12 @@
-use crate::connection::TxMode;
-use crate::Res;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, LinkedList, VecDeque};
 use std::fmt::Debug;
 
-use crate::frame::Frame;
+use crate::connection::TxMode;
 use crate::Error;
 use crate::Res;
 
 const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
-
-#[allow(dead_code)]
-enum PostStreamAction {
-    Ok,
-    EndConnection,
-    SendFrame(Frame),
-}
 
 pub trait Recvable: Debug {
     /// Read buffered data from stream. bool says whether is final data on
@@ -32,16 +23,14 @@ pub trait Recvable: Debug {
 }
 
 pub trait Sendable: Debug {
-    /// Send data on the stream.
-    fn send(&mut self, buf: &[u8]);
+    /// Send data on the stream. Returns bytes sent.
+    fn send(&mut self, buf: &[u8]) -> u64;
 
     /// Number of bytes that is queued for sending.
     fn send_data_ready(&self) -> u64;
-
-    /// Access the bytes that are ready to be sent.
-    fn send_buffer(&mut self) -> &mut VecDeque<u8>;
 }
 
+#[allow(dead_code, unused_variables)]
 #[derive(Debug, PartialEq)]
 enum TxChunkState {
     Unsent,
@@ -56,6 +45,12 @@ struct TxChunk {
     state: TxChunkState,
 }
 
+impl TxChunk {
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct TxBuffer {
     offset: u64,
@@ -63,12 +58,14 @@ pub struct TxBuffer {
 }
 
 impl TxBuffer {
-    pub fn send(&mut self, buf: &[u8]) {
+    pub fn send(&mut self, buf: &[u8]) -> u64 {
+        let len = buf.len() as u64;
         self.chunks.push_back(TxChunk {
             offset: self.offset,
             data: Vec::from(buf),
             state: TxChunkState::Unsent,
-        })
+        });
+        len
     }
 
     fn find_first_chunk_by_state(&self, state: TxChunkState) -> Option<&TxChunk> {
@@ -80,7 +77,8 @@ impl TxBuffer {
         None
     }
 
-    pub fn next_bytes(&self, _mode: TxMode, l: usize) -> Option<(u64, &[u8])> {
+    #[allow(dead_code, unused_variables)]
+    pub fn next_bytes(&self, mode: TxMode, l: usize) -> Option<(u64, &[u8])> {
         // TODO(ekr@rtfm.com): Send a slice that fits in |l|.
         // First try to find some unsent stuff.
         if let Some(c) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
@@ -94,16 +92,23 @@ impl TxBuffer {
         }
     }
 
+    #[allow(dead_code, unused_variables)]
     fn sent_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
         unimplemented!();
     }
 
+    #[allow(dead_code, unused_variables)]
     fn lost_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
         unimplemented!();
     }
 
+    #[allow(dead_code, unused_variables)]
     fn acked_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
         unimplemented!();
+    }
+
+    fn data_ready(&self) -> u64 {
+        self.chunks.iter().map(|c| c.len() as u64).sum()
     }
 }
 
@@ -209,7 +214,7 @@ impl RxStreamOrderer {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub struct BidiStream {
     tx: SendStream,
     rx: RecvStream,
@@ -243,48 +248,40 @@ impl Recvable for BidiStream {
 }
 
 impl Sendable for BidiStream {
-    fn send(&mut self, buf: &[u8]) {
+    fn send(&mut self, buf: &[u8]) -> u64 {
         self.tx.send(buf)
     }
 
     fn send_data_ready(&self) -> u64 {
         self.tx.send_data_ready()
     }
-
-    fn send_buffer(&mut self) -> &mut VecDeque<u8> {
-        self.tx.send_buffer()
-    }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub struct SendStream {
     next_tx_offset: u64, // how many bytes have been enqueued for this stream
-    tx_queue: VecDeque<u8>,
     bytes_acked: u64,
+    tx_buffer: TxBuffer,
 }
 
 impl SendStream {
     pub fn new() -> SendStream {
         SendStream {
             next_tx_offset: 0,
-            tx_queue: VecDeque::new(),
             bytes_acked: 0,
+            tx_buffer: TxBuffer::default(),
         }
     }
 }
 
 impl Sendable for SendStream {
     /// Enqueue some bytes to send
-    fn send(&mut self, buf: &[u8]) {
-        self.tx_queue.extend(buf)
+    fn send(&mut self, buf: &[u8]) -> u64 {
+        self.tx_buffer.send(buf)
     }
 
     fn send_data_ready(&self) -> u64 {
-        self.tx_queue.len() as u64
-    }
-
-    fn send_buffer(&mut self) -> &mut VecDeque<u8> {
-        &mut self.tx_queue
+        self.tx_buffer.data_ready()
     }
 }
 
@@ -369,7 +366,7 @@ mod test {
 
     use super::*;
 
-    // #[test]
+    #[test]
     fn test_stream_rx() {
         let frame1 = vec![0; 10];
         let frame2 = vec![0; 12];
