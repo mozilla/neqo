@@ -19,7 +19,12 @@ pub trait Recvable: Debug {
     /// Handle a received stream data frame.
     fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()>;
 
+    /// Maybe returns what should be communicated to the sender as the new max
+    /// stream offset.
     fn needs_flowc_update(&mut self) -> Option<u64>;
+
+    /// Close the stream.
+    fn close(&mut self);
 }
 
 pub trait Sendable: Debug {
@@ -27,7 +32,7 @@ pub trait Sendable: Debug {
     fn send(&mut self, buf: &[u8]) -> u64;
 
     /// Number of bytes that is queued for sending.
-    fn send_data_ready(&self) -> u64;
+    fn send_data_ready(&self) -> bool;
 }
 
 #[allow(dead_code, unused_variables)]
@@ -107,8 +112,8 @@ impl TxBuffer {
         unimplemented!();
     }
 
-    fn data_ready(&self) -> u64 {
-        self.chunks.iter().map(|c| c.len() as u64).sum()
+    fn data_ready(&self) -> bool {
+        self.chunks.iter().any(|c| c.len() != 0)
     }
 }
 
@@ -214,7 +219,7 @@ impl RxStreamOrderer {
 
     /// Caller has been told data is available on a stream, and they want to
     /// retrieve it.
-    /// Returns bytes copied and if this was final bytes.
+    /// Returns bytes copied.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
         trace!(
             "Being asked to read {} bytes, {} available",
@@ -291,7 +296,7 @@ impl Sendable for SendStream {
         self.tx_buffer.send(buf)
     }
 
-    fn send_data_ready(&self) -> u64 {
+    fn send_data_ready(&self) -> bool {
         self.tx_buffer.data_ready()
     }
 }
@@ -367,6 +372,8 @@ impl Recvable for RecvStream {
             None
         }
     }
+
+    fn close(&mut self) {}
 }
 
 #[derive(Debug, Default)]
@@ -400,6 +407,10 @@ impl Recvable for BidiStream {
     fn needs_flowc_update(&mut self) -> Option<u64> {
         self.rx.needs_flowc_update()
     }
+
+    fn close(&mut self) {
+        self.rx.close()
+    }
 }
 
 impl Sendable for BidiStream {
@@ -407,7 +418,7 @@ impl Sendable for BidiStream {
         self.tx.send(buf)
     }
 
-    fn send_data_ready(&self) -> u64 {
+    fn send_data_ready(&self) -> bool {
         self.tx.send_data_ready()
     }
 }
