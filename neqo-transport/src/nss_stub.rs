@@ -16,13 +16,6 @@ pub struct HandshakeMessage {
     client: bool,
 }
 
-/*// TODO(ekr@rtfm.com): Temporary override for PartialEq until we fix the epochs.
-impl PartialEq for HandshakeMessage {
-    fn eq(&self, other: &HandshakeMessage) -> bool {
-        self.name == other.name && self.client == other.client
-    }
-}*/
-
 lazy_static! {
     pub static ref HANDSHAKE_MESSAGES: [HandshakeMessage; 7] = [
         HandshakeMessage {

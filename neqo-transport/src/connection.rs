@@ -8,6 +8,7 @@ use crate::{Error, Res};
 use neqo_crypto::Epoch;
 
 use crate::stream::{BidiStream, Recvable, RxStreamOrderer, TxBuffer};
+use rand::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
@@ -159,7 +160,6 @@ impl Connection {
     }
 
     pub fn process(&mut self, d: Option<Datagram>, now: u64) -> Res<(Option<Datagram>, u64)> {
-        // TODO(ekr@rtfm.com): Process the incoming packets.
         if let Some(dgram) = d {
             self.input(dgram, now)?;
         }
@@ -461,8 +461,9 @@ impl Connection {
     }
 
     fn generate_cid(&mut self) -> Vec<u8> {
-        // TODO(ekr@rtfm.com): Implement.
-        return vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let mut v: [u8; 8] = [0; 8];
+        rand::thread_rng().fill(&mut v);
+        v.to_vec()
     }
 }
 
