@@ -1,5 +1,5 @@
-use crate::agentio::{emit_records, ingest_record, AgentIo, METHODS};
-pub use crate::agentio::{SslRecord, SslRecordList};
+use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
+pub use crate::agentio::{Record, RecordList};
 use crate::constants::*;
 use crate::err::{Error, Res};
 use crate::initialized;
@@ -204,30 +204,25 @@ impl SecretAgent {
     // is complete and how many bytes were written to @output, respectively.
     // If the state is HandshakeState::AuthenticationPending, then ONLY call this
     // function if you want to proceed, because this will mark the certificate as OK.
-    pub fn handshake(
-        &mut self,
-        _now: &std::time::SystemTime,
-        input: &[u8],
-        output: &mut [u8],
-    ) -> Res<(HandshakeState, usize)> {
+    pub fn handshake(&mut self, _now: u64, input: &[u8]) -> Res<(HandshakeState, Vec<u8>)> {
         self.set_raw(false)?;
 
-        let (rv, written) = {
+        let rv = {
             // Within this scope, _h maintains a mutable reference to self.io.
-            let (_h, out) = self.io.wrap(input, output);
-            (
-                match *self.auth_required {
-                    true => {
-                        *self.auth_required = false;
-                        unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) }
-                    }
-                    _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
-                },
-                out.len(),
-            )
+            let _h = self.io.wrap(input);
+            match *self.auth_required {
+                true => {
+                    *self.auth_required = false;
+                    unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) }
+                }
+                _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
+            }
         };
+        // Take before updating state so that we leave the output buffer empty
+        // even if there is an error.
+        let output = self.io.take_output();
         self.update_state(rv)?;
-        Ok((self.st.clone(), written))
+        Ok((self.st.clone(), output))
     }
 
     // Drive the TLS handshake, but get the raw content of records, not
@@ -236,17 +231,12 @@ impl SecretAgent {
     //
     // Ideally, this only includes records from the current epoch.
     // If you send data from multiple epochs, you might end up being sad.
-    pub fn handshake_raw<'a, 'b>(
-        &mut self,
-        _now: &std::time::SystemTime, // TODO(mt) : u64
-        input: SslRecordList<'b>,     // TODO(mt) : just take one record
-        output: &'a mut [u8],
-    ) -> Res<(HandshakeState, SslRecordList<'a>)> {
+    pub fn handshake_raw(&mut self, _now: u64, input: Option<Record>) -> Res<(HandshakeState, RecordList)> {
         self.set_raw(true)?;
 
         // Setup for accepting records.
-        let mut records = Box::new(SslRecordList::new(output));
-        let records_ptr = &mut *records as *mut SslRecordList as *mut c_void;
+        let mut records: Box<RecordList> = Default::default();
+        let records_ptr = &mut *records as *mut RecordList as *mut c_void;
         let rv =
             unsafe { ssl::SSL_RecordLayerWriteCallback(self.fd, Some(ingest_record), records_ptr) };
         if rv != ssl::SECSuccess {
@@ -265,9 +255,11 @@ impl SecretAgent {
         }
 
         // Feed in any records.
-        let res = emit_records(self.fd, input);
-        if let Err(_) = res {
-            return Err(self.set_failed());
+        if let Some(rec) = input {
+            let res = emit_record(self.fd, rec);
+            if let Err(_) = res {
+                return Err(self.set_failed());
+            }
         }
 
         // Drive the handshake once more.

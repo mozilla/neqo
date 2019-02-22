@@ -13,9 +13,9 @@ mod prio;
 mod result;
 mod ssl;
 
-pub use self::agent::{Agent, Client, HandshakeState, Server};
+pub use self::agent::{Agent, Client, HandshakeState, Record, RecordList, SecretAgent, Server};
 pub use self::constants::*;
-use self::err::Res;
+pub use self::err::{Error, Res};
 pub use self::p11::SymKey;
 
 use std::ffi::CString;
