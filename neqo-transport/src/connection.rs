@@ -24,8 +24,8 @@ pub enum Role {
     Server,
 }
 
-#[derive(Debug, PartialEq)]
-enum State {
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum State {
     Init,
     WaitInitial,
     Handshaking,
@@ -173,6 +173,9 @@ impl Connection {
                 State::Handshaking => {
                     // Nothing to do.
                 }
+                State::Connected => {
+                    // Nothing to do.
+                }
                 _ => unimplemented!(),
             }
         }
@@ -235,6 +238,10 @@ impl Connection {
         Ok(())
     }
 
+    pub fn state(&self) -> State {
+        self.state
+    }
+
     // Iterate through all the generators, inserting as many frames as will
     // fit.
     fn output(&mut self, now: u64) -> Res<Option<Datagram>> {
@@ -260,7 +267,6 @@ impl Connection {
             if d.remaining() > 0 {
                 debug!("Need to send a packet of size {}", d.remaining());
 
-                
                 let mut hdr = PacketHdr {
                     tbyte: 0,
                     tipe: match epoch {
@@ -269,7 +275,8 @@ impl Connection {
                         1 => PacketType::ZeroRTT,
                         2 => PacketType::Handshake,
                         3 => PacketType::Short,
-                    }
+                        _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
+                    },
                     version: Some(self.version),
                     dcid: ConnectionId(self.dcid.clone()),
                     scid: Some(ConnectionId(self.scid.clone())),
@@ -322,9 +329,9 @@ impl Connection {
             self.crypto_streams[m.epoch as usize].tx.send(&m.data);
         }
 
-        if tls.completed() {
+        if self.tls.completed() {
             info!("TLS handshake completed");
-            self.set_state(State: Connected);
+            self.set_state(State::Connected);
         }
         Ok(())
     }
@@ -610,6 +617,9 @@ mod tests {
         // FIN -> 0
         let res = server.process(res.0, 0).unwrap();
         assert_eq!(None, res.0);
+
+        assert_eq!(client.state(), State::Connected);
+        assert_eq!(server.state(), State::Connected);
     }
 
 }

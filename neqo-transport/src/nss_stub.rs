@@ -135,7 +135,7 @@ impl SecretAgent {
         Ok((HandshakeState {}, output))
     }
 
-    fn completed() -> bool {
+    pub fn completed(&self) -> bool {
         self.next == HANDSHAKE_MESSAGES.len()
     }
     fn send_message(&mut self, m: &HandshakeMessage) -> Vec<u8> {
