@@ -370,16 +370,13 @@ impl Connection {
                 );
                 let rx = &mut self.crypto_streams[epoch as usize].rx;
                 rx.inbound_frame(offset, data)?;
-                let toread = rx.data_ready() as usize;
-                if toread > 0 {
+                let mut buf = [0; 4096];
+                if rx.data_ready() {
                     // TODO(ekr@rtfm.com): This is a hack, let's just have
                     // a length parameter.
-                    let mut v = Vec::<u8>::with_capacity(toread);
-                    v.resize(toread, 0);
-                    let read = rx.read(&mut v)?;
-                    qdebug!(self, "Read {} bytes", read);
-                    assert_eq!(toread as u64, read);
-                    self.handshake(0, epoch, Some(&v))?;
+                    let read = rx.read(&mut buf)?;
+                    qdebug!("Read {} bytes", read);
+                    self.handshake(0, epoch, Some(&buf))?;
                 }
             }
             Frame::NewToken { token } => {} // TODO(agrover@mozilla.com): stick the new token somewhere
