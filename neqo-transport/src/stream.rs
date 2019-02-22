@@ -227,49 +227,6 @@ impl RxStreamOrderer {
 }
 
 #[derive(Debug, Default)]
-pub struct BidiStream {
-    tx: SendStream,
-    rx: RecvStream,
-}
-
-impl BidiStream {
-    pub fn new() -> BidiStream {
-        BidiStream {
-            tx: SendStream::new(),
-            rx: RecvStream::new(),
-        }
-    }
-}
-
-impl Recvable for BidiStream {
-    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
-        self.rx.read(buf)
-    }
-
-    fn recv_data_ready(&self) -> u64 {
-        self.rx.recv_data_ready()
-    }
-
-    fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
-        self.rx.inbound_stream_frame(fin, offset, data)
-    }
-
-    fn needs_flowc_update(&mut self) -> Option<u64> {
-        self.rx.needs_flowc_update()
-    }
-}
-
-impl Sendable for BidiStream {
-    fn send(&mut self, buf: &[u8]) -> u64 {
-        self.tx.send(buf)
-    }
-
-    fn send_data_ready(&self) -> u64 {
-        self.tx.send_data_ready()
-    }
-}
-
-#[derive(Debug, Default)]
 pub struct SendStream {
     next_tx_offset: u64, // how many bytes have been enqueued for this stream
     bytes_acked: u64,
@@ -370,6 +327,49 @@ impl Recvable for RecvStream {
         } else {
             None
         }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct BidiStream {
+    tx: SendStream,
+    rx: RecvStream,
+}
+
+impl BidiStream {
+    pub fn new() -> BidiStream {
+        BidiStream {
+            tx: SendStream::new(),
+            rx: RecvStream::new(),
+        }
+    }
+}
+
+impl Recvable for BidiStream {
+    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
+        self.rx.read(buf)
+    }
+
+    fn recv_data_ready(&self) -> u64 {
+        self.rx.recv_data_ready()
+    }
+
+    fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
+        self.rx.inbound_stream_frame(fin, offset, data)
+    }
+
+    fn needs_flowc_update(&mut self) -> Option<u64> {
+        self.rx.needs_flowc_update()
+    }
+}
+
+impl Sendable for BidiStream {
+    fn send(&mut self, buf: &[u8]) -> u64 {
+        self.tx.send(buf)
+    }
+
+    fn send_data_ready(&self) -> u64 {
+        self.tx.send_data_ready()
     }
 }
 
