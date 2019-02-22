@@ -68,8 +68,8 @@ impl TxBuffer {
         len
     }
 
-    fn find_first_chunk_by_state(&self, state: TxChunkState) -> Option<&TxChunk> {
-        for c in &self.chunks {
+    fn find_first_chunk_by_state(&mut self, state: TxChunkState) -> Option<&mut TxChunk> {
+        for c in &mut self.chunks {
             if c.state == state {
                 return Some(c);
             }
@@ -77,16 +77,17 @@ impl TxBuffer {
         None
     }
 
-    #[allow(dead_code, unused_variables)]
-    pub fn next_bytes(&self, mode: TxMode, l: usize) -> Option<(u64, &[u8])> {
+    pub fn next_bytes(&mut self, _mode: TxMode, l: usize) -> Option<(u64, Vec<u8>)> {
         // TODO(ekr@rtfm.com): Send a slice that fits in |l|.
         // First try to find some unsent stuff.
         if let Some(c) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
-            Some((c.offset, &c.data))
+            let d = c.data.to_vec();
+            Some((c.offset, d))
         }
         // How about some lost stuff.
         else if let Some(c) = self.find_first_chunk_by_state(TxChunkState::Lost) {
-            Some((c.offset, &c.data))
+            let d = c.data.to_vec();
+            Some((c.offset, d))
         } else {
             None
         }
