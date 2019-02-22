@@ -202,6 +202,11 @@ impl RxStreamOrderer {
 
         Ok(ret_bytes as u64)
     }
+
+    pub fn highest_seen_offset(&self) -> u64 {
+        let maybe_ooo_last = self.ooo_data.keys().next_back().map(|(_, end)| *end);
+        maybe_ooo_last.unwrap_or(self.rx_offset)
+    }
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -220,7 +225,7 @@ impl BidiStream {
 }
 
 impl Recvable for BidiStream {
-    fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
+    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
         self.rx.read(buf)
     }
 
@@ -309,10 +314,21 @@ impl Recvable for RecvStream {
 
     /// caller has been told data is available on a stream, and they want to
     /// retrieve it.
-    fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
+    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
         let read_bytes = self.rx_orderer.read(buf)?;
         self.rx_done += read_bytes;
-        Ok(read_bytes)
+
+        let fin = if let Some(final_size) = self.final_size {
+            if dbg!(final_size) == dbg!(self.rx_done) {
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        Ok((read_bytes, fin))
     }
 
     fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
@@ -320,13 +336,16 @@ impl Recvable for RecvStream {
             if offset + data.len() as u64 > final_size
                 || (fin && offset + data.len() as u64 != final_size)
             {
-                return Err(Error::ErrFinalSizeError); // super bad.
+                return Err(Error::ErrFinalSizeError);
             }
         }
 
         if fin && self.final_size == None {
-            // TODO(agrover@mozilla.com): handle fin better
-            self.final_size = Some(offset + data.len() as u64)
+            let final_size = offset + data.len() as u64;
+            if final_size < self.rx_orderer.highest_seen_offset() {
+                return Err(Error::ErrFinalSizeError);
+            }
+            self.final_size = Some(offset + data.len() as u64);
         }
 
         self.rx_orderer.inbound_frame(offset, data)
@@ -356,6 +375,8 @@ mod test {
         let frame2 = vec![0; 12];
         let frame3 = vec![0; 8];
         let frame4 = vec![0; 6];
+        let frame5 = vec![0; 10];
+        let frame6 = vec![0; 18];
 
         let mut s = BidiStream::new();
 
@@ -363,23 +384,33 @@ mod test {
         s.inbound_stream_frame(false, 0, frame1).unwrap();
         assert_eq!(s.recv_data_ready(), 10);
         let mut buf = vec![0u8; 100];
-        assert_eq!(s.read(&mut buf).unwrap(), 10);
+        assert_eq!(s.read(&mut buf).unwrap(), (10, false));
         assert_eq!(s.rx.rx_orderer.rx_offset(), 10);
         assert_eq!(s.rx.rx_orderer.ready_to_go.len(), 0);
 
         // test receiving a noncontig frame
         s.inbound_stream_frame(false, 12, frame2).unwrap();
         assert_eq!(s.recv_data_ready(), 0);
-        assert_eq!(s.read(&mut buf).unwrap(), 0);
+        assert_eq!(s.read(&mut buf).unwrap(), (0, false));
 
         // another frame that overlaps the first
         s.inbound_stream_frame(false, 14, frame3).unwrap();
         assert_eq!(s.recv_data_ready(), 0);
 
+        // fill in the with a FIN
+        s.inbound_stream_frame(true, 10, frame4).unwrap_err();
+        assert_eq!(s.recv_data_ready(), 0);
+        assert_eq!(s.read(&mut buf).unwrap(), (0, false));
+
         // fill in the gap
-        s.inbound_stream_frame(false, 10, frame4).unwrap();
-        assert_eq!(s.recv_data_ready(), 14);
-        assert_eq!(s.read(&mut buf).unwrap(), 14);
+        s.inbound_stream_frame(false, 10, frame5).unwrap();
+        dbg!(s.rx.rx_orderer.rx_offset());
+
+        // a legit FIN
+        s.inbound_stream_frame(true, 24, frame6).unwrap();
+        assert_eq!(s.recv_data_ready(), 32);
+        assert_eq!(s.read(&mut buf).unwrap(), (32, true));
+        assert_eq!(s.read(&mut buf).unwrap(), (0, true));
     }
 
     #[test]
@@ -393,7 +424,7 @@ mod test {
         assert_eq!(s.needs_flowc_update(), None);
         s.inbound_stream_frame(false, 0, frame1).unwrap();
         assert_eq!(s.needs_flowc_update(), None);
-        assert_eq!(s.read(&mut buf).unwrap(), RX_STREAM_DATA_WINDOW);
+        assert_eq!(s.read(&mut buf).unwrap(), (RX_STREAM_DATA_WINDOW, false));
         assert_eq!(s.recv_data_ready(), 0);
         assert_eq!(s.needs_flowc_update(), Some(RX_STREAM_DATA_WINDOW * 2));
         assert_eq!(s.needs_flowc_update(), None);
