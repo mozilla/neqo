@@ -1,6 +1,5 @@
 #![allow(unused_variables)]
 
-
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::nss_stub::*;
@@ -164,40 +163,46 @@ impl Connection {
     fn output(&mut self, now: u64) -> Res<Option<Datagram>> {
         let mut d = Data::default();
         let len = self.generators.len();
-        for i in 0..len {
-            {
-                // TODO(ekr@rtfm.com): Fix TxMode
-                // TODO(ekr@rtfm.com): Epoch
-                if let Some(f) =
-                    self.generators[i](self, now, TxMode::Normal, self.pmtu - d.remaining())
+
+        for epoch in 0..=self.send_epoch {
+            for i in 0..len {
                 {
-                    f.marshal(&mut d)?;
+                    // TODO(ekr@rtfm.com): Fix TxMode
+                    if let Some(f) =
+                        self.generators[i](self, now, TxMode::Normal, self.pmtu - d.remaining())
+                    {
+                        f.marshal(&mut d)?;
+                    }
                 }
+            }
+
+            if d.remaining() > 0 {
+                debug!("Need to send a packet of size {}", d.remaining());
+
+                let mut hdr = PacketHdr {
+                    tbyte: 0,
+                    tipe: PacketType::Initial(Vec::new()),
+                    version: Some(self.version),
+                    dcid: ConnectionId(self.dcid.clone()),
+                    scid: Some(ConnectionId(self.scid.clone())),
+                    pn: 0, // TODO(ekr@rtfm.com): Implement
+                    epoch: epoch as u64,
+                    hdr_len: 0,
+                    body_len: 0,
+                };
+
+                let mut packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
+
+                debug!("Packet length: {} {:0x?}", packet.len(), packet);
+                return Ok(Some(Datagram {
+                    src: self.local_addr.unwrap(),
+                    dst: self.remote_addr.unwrap(),
+                    d: packet.to_vec(),
+                }));
             }
         }
 
-        debug!("Need to send a packet of size {}", d.remaining());
-
-        let mut hdr = PacketHdr {
-            tbyte: 0,
-            tipe: PacketType::Initial(Vec::new()),
-            version: Some(self.version),
-            dcid: ConnectionId(self.dcid.clone()),
-            scid: Some(ConnectionId(self.scid.clone())),
-            pn: 0,    // TODO(ekr@rtfm.com): Implement
-            epoch: 0, // TODO(ekr@rtfm.com): Implement
-            hdr_len: 0,
-            body_len: 0,
-        };
-
-        let packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
-
-        debug!("Packet length: {} {:0x?}", packet.len(), packet);
-        Ok(Some(Datagram {
-            src: self.local_addr.unwrap(),
-            dst: self.remote_addr.unwrap(),
-            d: packet.to_vec(),
-        }))
+        return Ok(None);
     }
 
     fn client_start(&mut self) -> Res<()> {
