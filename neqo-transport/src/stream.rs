@@ -1,5 +1,5 @@
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 use crate::connection::TxMode;
@@ -14,7 +14,7 @@ pub trait Recvable: Debug {
     fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)>;
 
     /// The number of bytes that can be read from the stream.
-    fn recv_data_ready(&self) -> u64;
+    fn recv_data_ready(&self) -> bool;
 
     /// Handle a received stream data frame.
     fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()>;
@@ -114,9 +114,8 @@ impl TxBuffer {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct RxStreamOrderer {
-    rx_offset: u64,                          // bytes already received and ready
-    ooo_data: BTreeMap<(u64, u64), Vec<u8>>, // ((start_offset, end_offset), data)
-    ready_to_go: VecDeque<u8>,
+    data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
+    retired: u64,                        // Number of bytes the application has read
 }
 
 impl RxStreamOrderer {
@@ -124,123 +123,166 @@ impl RxStreamOrderer {
         Self::default()
     }
 
-    /// Process an incoming stream frame off the wire. This may result in more
-    /// data being available to upper layers (if frame is not out of order
-    /// (ooo) or if the frame fills a gap.
-    /// Returns bytes that are now retired, since this is relevant for flow
-    /// control.
-    pub fn inbound_frame(&mut self, offset: u64, data: Vec<u8>) -> Res<()> {
-        // TODO(agrover@mozilla.com): limit ooo data, and possibly cull
-        // duplicate ranges
-        trace!(
-            "Inbound data rx_offset={} offset={} len={}",
-            self.rx_offset,
-            offset,
-            data.len()
-        );
-        self.ooo_data
-            .insert((offset, offset + data.len() as u64), data);
+    /// Process an incoming stream frame off the wire. This may result in data
+    /// being available to upper layers if frame is not out of order (ooo) or
+    /// if the frame fills a gap.
+    pub fn inbound_frame(&mut self, new_start: u64, mut new_data: Vec<u8>) -> Res<()> {
+        // Avoid copies and duplicated data.
+        // Get entry before where new entry would go, so we can see if we already
+        // have the new bytes.
+        trace!("Inbound data offset={} len={}", new_start, new_data.len());
 
-        let orig_rx_offset = self.rx_offset;
-
-        // See if maybe we have some contig data now
-        for ((start_offset, end_offset), data) in &self.ooo_data {
-            if self.rx_offset >= *end_offset {
-                // Already got all these bytes, do nothing
-            } else if self.rx_offset > *start_offset {
-                // Frame data has some new contig bytes after some old bytes
-
-                // Convert to offset into data vec and move past bytes we
-                // already have
-                let copy_offset = max(*start_offset, self.rx_offset) - start_offset;
-                let copy_slc = &data[copy_offset as usize..];
-                self.ready_to_go.extend(copy_slc);
-                self.rx_offset += copy_slc.len() as u64;
-            } else if self.rx_offset == *start_offset {
-                // In-order, woot
-                self.ready_to_go.extend(data);
-                self.rx_offset += data.len() as u64;
-                trace!("In-order data, new rx-offset={}", self.rx_offset);
-            } else {
-                // self.rx_offset < start_offset
-                // Start offset later than rx offset, we have a gap. Since
-                // BTreeMap is ordered no other ooo frames will fill the gap.
-                break;
+        let new_end = new_start + new_data.len() as u64;
+        let (insert_new, remove_prev) = if let Some((&prev_start, prev_vec)) =
+            self.data_ranges.range_mut(..new_start + 1).next_back()
+        {
+            let prev_end = prev_start + prev_vec.len() as u64;
+            match (new_start > prev_start, new_end > prev_end) {
+                (true, true) => {
+                    // PPPPPP    ->  PP
+                    //   NNNNNN        NNNNNN
+                    // Truncate prev if overlap. Insert new.
+                    // (In-order frames will take this path, with no overlap)
+                    let overlap = prev_end.saturating_sub(new_start);
+                    if overlap != 0 {
+                        let truncate_to = new_data.len() - overlap as usize;
+                        prev_vec.truncate(truncate_to)
+                    }
+                    (true, None)
+                }
+                (true, false) => {
+                    // PPPPPP    ->  PPPPPP
+                    //   NNNN
+                    // Do nothing
+                    (false, None)
+                }
+                (false, true) => {
+                    // PPPP      ->  NNNNNN
+                    // NNNNNN
+                    // Drop Prev, Insert New
+                    (true, Some(prev_start))
+                }
+                (false, false) => {
+                    // PPPPPP    ->  PPPPPP
+                    // NNNN
+                    // Do nothing
+                    (false, None)
+                }
             }
-        }
+        } else {
+            (true, None) // Nothing previous
+        };
 
-        // Remove map items that are consumed
-        let to_remove = self
-            .ooo_data
-            .keys()
-            .take_while(|(_, end)| self.rx_offset >= *end)
-            .cloned()
-            .collect::<Vec<_>>();
-        for key in to_remove {
-            self.ooo_data.remove(&key);
-        }
+        if insert_new {
+            // Now handle possible overlap with next entry
+            let next = self.data_ranges.range_mut(new_start..).next();
+            if let Some((&next_start, _)) = next {
+                let overlap = new_end.saturating_sub(next_start);
+                if overlap != 0 {
+                    let truncate_to = new_data.len() - overlap as usize;
+                    new_data.truncate(truncate_to);
+                }
+            }
+            self.data_ranges.insert(new_start, new_data);
+        };
 
-        // Tell client we got some new in-order data for them
-        let new_bytes_available = self.rx_offset - orig_rx_offset;
-        if new_bytes_available != 0 {
-            // poke somebody?
+        if let Some(remove_prev) = &remove_prev {
+            self.data_ranges.remove(remove_prev);
         }
 
         Ok(())
     }
 
-    pub fn data_ready(&self) -> u64 {
-        self.ready_to_go.len() as u64
+    pub fn data_ready(&self) -> bool {
+        self.data_ranges
+            .keys()
+            .next()
+            .map(|&start| start <= self.retired)
+            .unwrap_or(false)
     }
 
-    pub fn rx_offset(&self) -> u64 {
-        self.rx_offset
+    pub fn retired(&self) -> u64 {
+        self.retired
+    }
+
+    pub fn buffered(&self) -> u64 {
+        self.data_ranges
+            .iter()
+            .map(|(&start, data)| data.len() as u64 - (self.retired.saturating_sub(start)))
+            .sum()
     }
 
     /// Caller has been told data is available on a stream, and they want to
     /// retrieve it.
     /// Returns bytes copied and if this was final bytes.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
-        debug!(
+        trace!(
             "Being asked to read {} bytes, {} available",
             buf.len(),
-            self.ready_to_go.len()
+            self.buffered()
         );
-        let ret_bytes = min(self.ready_to_go.len(), buf.len());
+        let mut buf_remaining = buf.len();
+        let mut copied = 0;
 
-        let remaining = self.ready_to_go.split_off(ret_bytes);
+        for (&range_start, range_data) in &mut self.data_ranges {
+            if self.retired >= range_start {
+                // Frame data has some new contig bytes after some old bytes
 
-        let (slc1, slc2) = self.ready_to_go.as_slices();
-        let slc1_len = slc1.len();
-        let slc2_len = ret_bytes - slc1_len;
-        buf[..slc1.len()].copy_from_slice(slc1);
-        buf[slc1_len..slc1_len + slc2_len].copy_from_slice(slc2);
-        self.ready_to_go = remaining;
+                // Convert to offset into data vec and move past bytes we
+                // already have
+                let copy_offset = (max(range_start, self.retired) - range_start) as usize;
+                let copy_bytes = min(range_data.len() - copy_offset as usize, buf_remaining);
+                let copy_slc = &mut range_data[copy_offset as usize..copy_offset + copy_bytes];
+                buf[copied..copied + copy_bytes].copy_from_slice(copy_slc);
+                copied += copy_bytes;
+                buf_remaining -= copy_bytes;
+                self.retired += copy_bytes as u64;
+            } else {
+                break; // we're missing bytes
+            }
+        }
 
-        Ok(ret_bytes as u64)
+        // Remove map items that are consumed
+        let to_remove = self
+            .data_ranges
+            .iter()
+            .take_while(|(start, data)| self.retired >= *start + data.len() as u64)
+            .map(|(k, _)| *k)
+            .collect::<Vec<_>>();
+        for key in to_remove {
+            self.data_ranges.remove(&key);
+        }
+
+        Ok(copied as u64)
     }
 
     pub fn highest_seen_offset(&self) -> u64 {
-        let maybe_ooo_last = self.ooo_data.keys().next_back().map(|(_, end)| *end);
-        maybe_ooo_last.unwrap_or(self.rx_offset)
+        let maybe_ooo_last = self
+            .data_ranges
+            .iter()
+            .next_back()
+            .map(|(start, data)| *start + data.len() as u64);
+        maybe_ooo_last.unwrap_or(self.retired)
     }
 }
 
 #[derive(Debug, Default)]
 pub struct SendStream {
-    next_tx_offset: u64, // how many bytes have been enqueued for this stream
-    bytes_acked: u64,
+    max_stream_data: u64,
     tx_buffer: TxBuffer,
 }
 
 impl SendStream {
     pub fn new() -> SendStream {
         SendStream {
-            next_tx_offset: 0,
-            bytes_acked: 0,
+            max_stream_data: 0,
             tx_buffer: TxBuffer::default(),
         }
     }
+
+    // fn avail_credits(&self) -> u64 {
+    //     self.max_stream_data
+    // }
 }
 
 impl Sendable for SendStream {
@@ -257,7 +299,6 @@ impl Sendable for SendStream {
 #[derive(Debug, Default, PartialEq)]
 pub struct RecvStream {
     final_size: Option<u64>,
-    rx_done: u64,
     rx_window: u64,
     rx_orderer: RxStreamOrderer,
 }
@@ -266,7 +307,6 @@ impl RecvStream {
     pub fn new() -> RecvStream {
         RecvStream {
             final_size: None,
-            rx_done: 0,
             rx_window: RX_STREAM_DATA_WINDOW,
             rx_orderer: RxStreamOrderer::new(),
         }
@@ -274,7 +314,7 @@ impl RecvStream {
 }
 
 impl Recvable for RecvStream {
-    fn recv_data_ready(&self) -> u64 {
+    fn recv_data_ready(&self) -> bool {
         self.rx_orderer.data_ready()
     }
 
@@ -282,10 +322,9 @@ impl Recvable for RecvStream {
     /// retrieve it.
     fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
         let read_bytes = self.rx_orderer.read(buf)?;
-        self.rx_done += read_bytes;
 
         let fin = if let Some(final_size) = self.final_size {
-            if dbg!(final_size) == dbg!(self.rx_done) {
+            if final_size == self.rx_orderer.retired() {
                 true
             } else {
                 false
@@ -320,7 +359,7 @@ impl Recvable for RecvStream {
     /// If we should tell the sender they have more credit, return an offset
     fn needs_flowc_update(&mut self) -> Option<u64> {
         let lowater = RX_STREAM_DATA_WINDOW / 2;
-        let new_window = self.rx_done + RX_STREAM_DATA_WINDOW;
+        let new_window = self.rx_orderer.retired() + RX_STREAM_DATA_WINDOW;
         if self.final_size.is_none() && new_window > lowater + self.rx_window {
             self.rx_window = new_window;
             Some(new_window)
@@ -350,7 +389,7 @@ impl Recvable for BidiStream {
         self.rx.read(buf)
     }
 
-    fn recv_data_ready(&self) -> u64 {
+    fn recv_data_ready(&self) -> bool {
         self.rx.recv_data_ready()
     }
 
@@ -374,50 +413,53 @@ impl Sendable for BidiStream {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
 
     use super::*;
 
     #[test]
     fn test_stream_rx() {
-        let frame1 = vec![0; 10];
-        let frame2 = vec![0; 12];
-        let frame3 = vec![0; 8];
-        let frame4 = vec![0; 6];
-        let frame5 = vec![0; 10];
-        let frame6 = vec![0; 18];
-
         let mut s = BidiStream::new();
 
         // test receiving a contig frame and reading it works
-        s.inbound_stream_frame(false, 0, frame1).unwrap();
-        assert_eq!(s.recv_data_ready(), 10);
+        s.inbound_stream_frame(false, 0, vec![1; 10]).unwrap();
+        assert_eq!(s.recv_data_ready(), true);
         let mut buf = vec![0u8; 100];
         assert_eq!(s.read(&mut buf).unwrap(), (10, false));
-        assert_eq!(s.rx.rx_orderer.rx_offset(), 10);
-        assert_eq!(s.rx.rx_orderer.ready_to_go.len(), 0);
+        assert_eq!(s.rx.rx_orderer.retired(), 10);
+        assert_eq!(s.rx.rx_orderer.buffered(), 0);
 
         // test receiving a noncontig frame
-        s.inbound_stream_frame(false, 12, frame2).unwrap();
-        assert_eq!(s.recv_data_ready(), 0);
+        s.inbound_stream_frame(false, 12, vec![2; 12]).unwrap();
+        assert_eq!(s.recv_data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
+        assert_eq!(s.rx.rx_orderer.retired(), 10);
+        assert_eq!(s.rx.rx_orderer.buffered(), 12);
 
         // another frame that overlaps the first
-        s.inbound_stream_frame(false, 14, frame3).unwrap();
-        assert_eq!(s.recv_data_ready(), 0);
+        s.inbound_stream_frame(false, 14, vec![3; 8]).unwrap();
+        assert_eq!(s.recv_data_ready(), false);
+        assert_eq!(s.rx.rx_orderer.retired(), 10);
+        assert_eq!(s.rx.rx_orderer.buffered(), 12);
 
-        // fill in the with a FIN
-        s.inbound_stream_frame(true, 10, frame4).unwrap_err();
-        assert_eq!(s.recv_data_ready(), 0);
+        // fill in the gap, but with a FIN
+        s.inbound_stream_frame(true, 10, vec![4; 6]).unwrap_err();
+        assert_eq!(s.recv_data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
+        assert_eq!(s.rx.rx_orderer.retired(), 10);
+        assert_eq!(s.rx.rx_orderer.buffered(), 12);
 
         // fill in the gap
-        s.inbound_stream_frame(false, 10, frame5).unwrap();
-        dbg!(s.rx.rx_orderer.rx_offset());
+        s.inbound_stream_frame(false, 10, vec![5; 10]).unwrap();
+        assert_eq!(s.recv_data_ready(), true);
+        assert_eq!(s.rx.rx_orderer.retired(), 10);
+        assert_eq!(s.rx.rx_orderer.buffered(), 14);
 
         // a legit FIN
-        s.inbound_stream_frame(true, 24, frame6).unwrap();
-        assert_eq!(s.recv_data_ready(), 32);
+        s.inbound_stream_frame(true, 24, vec![6; 18]).unwrap();
+        assert_eq!(s.rx.rx_orderer.retired(), 10);
+        assert_eq!(s.rx.rx_orderer.buffered(), 32);
+        assert_eq!(s.recv_data_ready(), true);
         assert_eq!(s.read(&mut buf).unwrap(), (32, true));
         assert_eq!(s.read(&mut buf).unwrap(), (0, true));
     }
@@ -434,7 +476,7 @@ mod test {
         s.inbound_stream_frame(false, 0, frame1).unwrap();
         assert_eq!(s.needs_flowc_update(), None);
         assert_eq!(s.read(&mut buf).unwrap(), (RX_STREAM_DATA_WINDOW, false));
-        assert_eq!(s.recv_data_ready(), 0);
+        assert_eq!(s.recv_data_ready(), false);
         assert_eq!(s.needs_flowc_update(), Some(RX_STREAM_DATA_WINDOW * 2));
         assert_eq!(s.needs_flowc_update(), None);
     }
