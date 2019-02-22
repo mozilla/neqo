@@ -1,5 +1,5 @@
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, LinkedList, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt::Debug;
 
 use crate::connection::TxMode;
@@ -54,13 +54,13 @@ impl TxChunk {
 #[derive(Default, Debug)]
 pub struct TxBuffer {
     offset: u64,
-    chunks: LinkedList<TxChunk>,
+    chunks: Vec<TxChunk>,
 }
 
 impl TxBuffer {
     pub fn send(&mut self, buf: &[u8]) -> u64 {
         let len = buf.len() as u64;
-        self.chunks.push_back(TxChunk {
+        self.chunks.push(TxChunk {
             offset: self.offset,
             data: Vec::from(buf),
             state: TxChunkState::Unsent,
@@ -69,31 +69,25 @@ impl TxBuffer {
         len
     }
 
-    fn find_first_chunk_by_state(&mut self, state: TxChunkState) -> Option<&mut TxChunk> {
-        for c in &mut self.chunks {
-            if c.state == state {
-                return Some(c);
-            }
-        }
-        None
+    fn find_first_chunk_by_state(&mut self, state: TxChunkState) -> Option<usize> {
+        self.chunks.iter().position(|c| c.state == state)
     }
 
-    pub fn next_bytes(&mut self, _mode: TxMode, now: u64, l: usize) -> Option<(u64, Vec<u8>)> {
-        // TODO(ekr@rtfm.com): Send a slice that fits in |l|.
+    pub fn next_bytes(&mut self, _mode: TxMode, now: u64, l: usize) -> Option<(u64, &[u8])> {
         // First try to find some unsent stuff.
-        if let Some(c) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
-            let d = c.data.to_vec();
+        if let Some(i) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
+            let c = &mut self.chunks[i];
             c.state = TxChunkState::Sent(now);
-            Some((c.offset, d))
+            return Some((c.offset, &c.data));
         }
         // How about some lost stuff.
-        else if let Some(c) = self.find_first_chunk_by_state(TxChunkState::Lost) {
-            let d = c.data.to_vec();
+        if let Some(i) = self.find_first_chunk_by_state(TxChunkState::Lost) {
+            let c = &mut self.chunks[i];
             c.state = TxChunkState::Sent(now);
-            Some((c.offset, d))
-        } else {
-            None
+            return Some((c.offset, &c.data));
         }
+
+        None
     }
 
     #[allow(dead_code, unused_variables)]
