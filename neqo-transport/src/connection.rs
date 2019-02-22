@@ -1,17 +1,18 @@
 #![allow(unused_variables)]
 
-use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
 
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::nss_stub::*;
 use crate::packet::*;
 use crate::stream::{BidiStream, Recvable, TxBuffer};
-use std::fmt::{self, Debug};
-use std::ops;
-
 use crate::{Error, Res};
+use neqo_crypto::Epoch;
+
+use std::collections::{HashMap, HashSet};
+use std::fmt::{self, Debug};
+use std::net::SocketAddr;
+use std::ops;
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -74,8 +75,8 @@ pub struct Connection {
     scid: Vec<u8>,
     dcid: Vec<u8>,
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
-    send_epoch: u16,
-    recv_epoch: u16,
+    send_epoch: Epoch,
+    recv_epoch: Epoch,
     crypto_stream_out: [TxBuffer; 4],
     generators: Vec<FrameGenerator>,
     deadline: u64,
@@ -347,7 +348,13 @@ impl PacketCtx for Connection {
         Ok(pn)
     }
 
-    fn aead_decrypt(&self, _pn: PacketNumber, _epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    fn aead_decrypt(
+        &self,
+        _pn: PacketNumber,
+        _epoch: u64,
+        hdr: &[u8],
+        body: &[u8],
+    ) -> Res<Vec<u8>> {
         let mut pt = body.to_vec();
 
         for i in 0..pt.len() {
@@ -363,7 +370,13 @@ impl PacketCtx for Connection {
         Ok(pt[0..pt_len].to_vec())
     }
 
-    fn aead_encrypt(&self, _pn: PacketNumber, _epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    fn aead_encrypt(
+        &self,
+        _pn: PacketNumber,
+        _epoch: u64,
+        hdr: &[u8],
+        body: &[u8],
+    ) -> Res<Vec<u8>> {
         let mut d = Data::from_slice(body);
         d.encode_vec(&auth_tag(hdr, body));
         let v = d.as_mut_vec();

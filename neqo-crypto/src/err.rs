@@ -19,6 +19,8 @@ pub enum Error {
     AeadError,
     CertificateLoading,
     CreateSslSocket,
+    HkdfError,
+    InternalError,
     InvalidEpoch,
     MixedHandshakeMethod,
     NoDataAvailable,
@@ -28,7 +30,6 @@ pub enum Error {
         desc: String,
     },
     OverrunError,
-    UnexpectedError,
 }
 
 impl std::error::Error for Error {

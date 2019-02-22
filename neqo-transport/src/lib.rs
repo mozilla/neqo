@@ -1,4 +1,3 @@
-
 #![allow(unused_macros)]
 
 // Cribbed from the |matches| crate, for simplicity.

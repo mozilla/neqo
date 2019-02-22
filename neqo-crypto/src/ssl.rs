@@ -3,9 +3,9 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use std::ffi::CString;
-use std::mem;
-use std::os::raw::{c_char, c_uint, c_void};
+use crate::constants::*;
+
+use std::os::raw::{c_uint, c_void};
 
 include!(concat!(env!("OUT_DIR"), "/nss_ssl.rs"));
 mod SSLOption {
@@ -60,24 +60,6 @@ impl Opt {
     }
 }
 
-macro_rules! experimental_api {
-    ( $n:ident ( $( $a:ident : $t:ty ),* ) ) => {
-        pub unsafe fn $n ( $( $a : $t ),* ) -> SECStatus {
-            const EXP_FUNCTION: &str = stringify!($n);
-            let n = CString::new(EXP_FUNCTION).unwrap();
-            let f = SSL_GetExperimentalAPI(n.as_ptr());
-            if f.is_null() {
-                return SECFailure;
-            }
-            let f: unsafe extern "C" fn( $( $t ),* ) -> SECStatus = mem::transmute(f);
-            f( $( $a ),* )
-        }
-    };
-    ( $n:ident ( $( $a:ident : $t:ty , )* ) ) => {
-        experimental_api!($n( $( $a : $t ),* ));
-    };
-}
-
 experimental_api!(SSL_SetResumptionTokenCallback(
     fd: *mut PRFileDesc,
     cb: SSLResumptionTokenCallback,
@@ -95,7 +77,7 @@ experimental_api!(SSL_RecordLayerWriteCallback(
 ));
 experimental_api!(SSL_RecordLayerData(
     fd: *mut PRFileDesc,
-    epoch: u16,
+    epoch: Epoch,
     ct: SSLContentType::Type,
     data: *const u8,
     len: c_uint,
@@ -105,36 +87,6 @@ experimental_api!(SSL_GetCurrentEpoch(
     read_epoch: *mut PRUint16,
     write_epoch: *mut PRUint16,
 ));
-experimental_api!(SSL_MakeAead(
-    secret: *mut PK11SymKey,
-    cipher: PRUint16,
-    label_prefix: *const c_char,
-    label_prefix_len: c_uint,
-    ctx: *mut *mut SSLAeadContext,
-));
-experimental_api!(SSL_AeadEncrypt(
-    ctx: *const SSLAeadContext,
-    counter: PRUint64,
-    aad: *const PRUint8,
-    aad_len: c_uint,
-    input: *const PRUint8,
-    input_len: c_uint,
-    output: *const PRUint8,
-    output_len: *mut c_uint,
-    max_output: c_uint
-));
-experimental_api!(SSL_AeadDecrypt(
-    ctx: *const SSLAeadContext,
-    counter: PRUint64,
-    aad: *const PRUint8,
-    aad_len: c_uint,
-    input: *const PRUint8,
-    input_len: c_uint,
-    output: *const PRUint8,
-    output_len: *mut c_uint,
-    max_output: c_uint
-));
-experimental_api!(SSL_DestroyAead(ctx: *mut SSLAeadContext));
 
 #[cfg(test)]
 mod tests {

@@ -1,20 +1,22 @@
 #[macro_use]
+mod exp;
+#[macro_use]
 mod p11;
 
-mod aead;
+pub mod aead;
 mod agent;
 mod agentio;
-mod constants;
+pub mod constants;
 mod err;
+pub mod hkdf;
 mod prio;
 mod result;
 mod ssl;
 
-pub use crate::aead::Aead;
-pub use crate::agent::{Agent, Client, HandshakeState, Server};
-pub use crate::constants::*;
-use crate::err::Res;
-pub use crate::p11::SymKey;
+pub use self::agent::{Agent, Client, HandshakeState, Server};
+pub use self::constants::*;
+use self::err::Res;
+pub use self::p11::SymKey;
 
 use std::ffi::CString;
 use std::path::Path;

@@ -25,8 +25,8 @@ pub enum HandshakeState {
 
 #[derive(Debug, Default)]
 pub struct SecretAgentInfo {
-    ver: u16,
-    cipher: u16,
+    ver: Version,
+    cipher: Cipher,
     early_data: bool,
 }
 
@@ -41,16 +41,16 @@ impl SecretAgentInfo {
             )
         };
         result::result(rv)?;
-        self.ver = info.protocolVersion as u16;
-        self.cipher = info.cipherSuite as u16;
+        self.ver = info.protocolVersion as Version;
+        self.cipher = info.cipherSuite as Cipher;
         self.early_data = info.earlyDataAccepted != 0;
         Ok(())
     }
 
-    pub fn version(&self) -> u16 {
+    pub fn version(&self) -> Version {
         self.ver
     }
-    pub fn cipher_suite(&self) -> u16 {
+    pub fn cipher_suite(&self) -> Cipher {
         self.cipher
     }
     pub fn early_data_accepted(&self) -> bool {
@@ -141,7 +141,7 @@ impl SecretAgent {
         result::result(unsafe { ssl::SSL_ResetHandshake(self.fd, is_server as ssl::PRBool) })
     }
 
-    pub fn set_version_range(&self, min: u16, max: u16) -> Res<()> {
+    pub fn set_version_range(&self, min: Version, max: Version) -> Res<()> {
         let range = ssl::SSLVersionRange {
             min: min as ssl::PRUint16,
             max: max as ssl::PRUint16,
@@ -294,7 +294,7 @@ impl Client {
         let mut agent = SecretAgent::new()?;
         let url = CString::new(server_name.to_string());
         if url.is_err() {
-            return Err(Error::UnexpectedError);
+            return Err(Error::InternalError);
         }
         result::result(unsafe { ssl::SSL_SetURL(agent.fd, url.unwrap().as_ptr()) })?;
         agent.ready(false)?;

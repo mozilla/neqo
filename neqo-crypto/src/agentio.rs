@@ -1,3 +1,4 @@
+use crate::constants::*;
 use crate::err::{Error, NSPRErrorCodes, PR_SetError, Res};
 use crate::prio;
 use crate::result;
@@ -19,7 +20,7 @@ const PR_FAILURE: PrStatus = prio::PRStatus::PR_FAILURE;
 // This holds the length of the slice, not the slice itself.
 #[derive(Default, Debug)]
 struct SslRecordLength {
-    epoch: u16,
+    epoch: Epoch,
     ct: ssl::SSLContentType::Type,
     len: usize,
 }
@@ -27,7 +28,7 @@ struct SslRecordLength {
 /// A slice of the output.
 #[derive(Default, Debug)]
 pub struct SslRecord<'a> {
-    epoch: u16,
+    epoch: Epoch,
     ct: ssl::SSLContentType::Type,
     data: &'a [u8],
 }
@@ -101,7 +102,7 @@ impl<'a> SslRecordList<'a> {
         }
     }
 
-    fn ingest(&mut self, epoch: u16, ct: ssl::SSLContentType::Type, data: &[u8]) -> Res<()> {
+    fn ingest(&mut self, epoch: Epoch, ct: ssl::SSLContentType::Type, data: &[u8]) -> Res<()> {
         let end = self.used + data.len();
         assert!(end <= self.buf.len());
         self.buf[self.used..end].copy_from_slice(data);
