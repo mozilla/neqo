@@ -132,6 +132,12 @@ impl RxStreamOrderer {
     pub fn inbound_frame(&mut self, offset: u64, data: Vec<u8>) -> Res<()> {
         // TODO(agrover@mozilla.com): limit ooo data, and possibly cull
         // duplicate ranges
+        trace!(
+            "Inbound data rx_offset={} offset={} len={}",
+            self.rx_offset,
+            offset,
+            data.len()
+        );
         self.ooo_data
             .insert((offset, offset + data.len() as u64), data);
 
@@ -154,6 +160,7 @@ impl RxStreamOrderer {
                 // In-order, woot
                 self.ready_to_go.extend(data);
                 self.rx_offset += data.len() as u64;
+                trace!("In-order data, new rx-offset={}", self.rx_offset);
             } else {
                 // self.rx_offset < start_offset
                 // Start offset later than rx offset, we have a gap. Since
@@ -194,6 +201,11 @@ impl RxStreamOrderer {
     /// retrieve it.
     /// Returns bytes copied and if this was final bytes.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
+        debug!(
+            "Being asked to read {} bytes, {} available",
+            buf.len(),
+            self.ready_to_go.len()
+        );
         let ret_bytes = min(self.ready_to_go.len(), buf.len());
 
         let remaining = self.ready_to_go.split_off(ret_bytes);

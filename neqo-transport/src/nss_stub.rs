@@ -93,10 +93,15 @@ impl SecretAgent {
         // First read any input, but choke if we're not expecting it.
         for r in input.recs {
             if HANDSHAKE_MESSAGES[self.next].client == self.client {
+                warn!("Receiving a handshake message when not expected");
                 return Err(Error::ErrUnexpectedMessage);
             }
             let m = self.process_message(&r)?;
             if m != HANDSHAKE_MESSAGES[self.next] {
+                warn!(
+                    "Received message {:?} when expected {:?}",
+                    &m, &HANDSHAKE_MESSAGES[self.next]
+                );
                 return Err(Error::ErrUnexpectedMessage);
             }
             self.next += 1;
@@ -131,7 +136,7 @@ impl SecretAgent {
         Ok(HandshakeMessage {
             name: String::from_utf8(v).unwrap(),
             epoch: self.read_epoch,
-            client: self.client,
+            client: !self.client,
         })
     }
 }

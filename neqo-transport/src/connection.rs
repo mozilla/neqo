@@ -4,11 +4,15 @@ use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
 use crate::nss_stub::*;
 use crate::packet::*;
+<<<<<<< HEAD
 use crate::stream::{BidiStream, Recvable, TxBuffer};
 use crate::{Error, Res};
 use neqo_crypto::Epoch;
 
 use std::collections::{HashMap, HashSet};
+=======
+use crate::stream::{BidiStream, Recvable, RxStreamOrderer, TxBuffer};
+>>>>>>> Server emits handshake messages
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
 use std::ops;
@@ -28,6 +32,7 @@ pub enum Role {
 enum State {
     Init,
     WaitInitial,
+    Handshaking,
 }
 
 #[derive(Debug, PartialEq)]
@@ -42,7 +47,7 @@ pub enum TxMode {
     Pto,
 }
 
-type FrameGeneratorFn = fn(&mut Connection, u64, TxMode, usize) -> Option<Frame>;
+type FrameGeneratorFn = fn(&mut Connection, u64, u16, TxMode, usize) -> Option<Frame>;
 struct FrameGenerator(FrameGeneratorFn);
 
 impl Debug for FrameGenerator {
@@ -58,9 +63,16 @@ impl ops::Deref for FrameGenerator {
     }
 }
 
-/*trait FrameGenerator: Debug {
-    fn next_frame(&mut self, conn: &mut Connection, now: u64, mode: TxMode, left: usize) -> Option<Frame>;
-}*/
+#[derive(Debug)]
+pub struct CryptoState {
+    pn: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct CryptoStream {
+    tx: TxBuffer,
+    rx: RxStreamOrderer,
+}
 
 #[allow(unused_variables)]
 #[derive(Debug)]
@@ -74,10 +86,16 @@ pub struct Connection {
     scid: Vec<u8>,
     dcid: Vec<u8>,
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
+<<<<<<< HEAD
     send_epoch: Epoch,
     recv_epoch: Epoch,
     crypto_stream_out: [TxBuffer; 4],
     crypto_stream_in: 
+=======
+    send_epoch: u16,
+    recv_epoch: u16,
+    crypto_streams: [CryptoStream; 4],
+>>>>>>> Server emits handshake messages
     generators: Vec<FrameGenerator>,
     deadline: u64,
     max_data: u64,
@@ -124,11 +142,11 @@ impl Connection {
             dcid: Vec::new(),
             send_epoch: 0,
             recv_epoch: 0,
-            crypto_stream_out: [
-                TxBuffer::default(),
-                TxBuffer::default(),
-                TxBuffer::default(),
-                TxBuffer::default(),
+            crypto_streams: [
+                CryptoStream::default(),
+                CryptoStream::default(),
+                CryptoStream::default(),
+                CryptoStream::default(),
             ],
             generators: vec![FrameGenerator(generate_crypto_frames)],
             deadline: 0,
@@ -177,35 +195,47 @@ impl Connection {
         // TODO(ekr@rtfm.com): Check for bogus versions and reject.
         // TODO(ekr@rtfm.com): Set up masking.
 
-        
-
-
         match self.state {
             State::Init => {
                 info!("Received message while in Init state");
-                return Err(Error:::ErrUnexpectedMessage);
+                return Err(Error::ErrUnexpectedMessage);
             }
             State::WaitInitial => {
-                let dcid = hdr.scid.as_ref().unwrap().0;
+                let dcid = &hdr.scid.as_ref().unwrap().0;
                 if self.role == Role::Server {
-                    if dcid.0.len() < 8 {
+                    if dcid.len() < 8 {
                         warn!("Peer CID is too short");
-                        return Err(Error:::ErrInvalidPacket);
+                        return Err(Error::ErrInvalidPacket);
                     }
                     self.remote_addr = Some(d.src);
                 }
-                
-                // Imprint on the remote parameters.                
+
+                // Imprint on the remote parameters.
                 self.dcid = dcid.clone();
             }
-            _ => unimplemented!();
+            _ => unimplemented!(),
         }
 
         debug!("Received unverified packet {:?}", hdr);
-        
+
         let body = decrypt_packet(self, &mut hdr, &d.d)?;
 
-        
+        // OK, we have a valid packet.
+
+        // TODO(ekr@rtfm.com): Check for duplicates.
+        // TODO(ekr@rtfm.com): Mark this packet received.
+        // TODO(ekr@rtfm.com): Filter for valid for this epoch.
+
+        if matches!(self.state, State::WaitInitial) {
+            self.state = State::Handshaking;
+        }
+
+        let mut d = Data::from_slice(&body);
+        while d.remaining() > 0 {
+            let f = decode_frame(&mut d)?;
+            self.process_input_frame(hdr.epoch as u16, f)?;
+        }
+
         Ok(())
     }
 
@@ -219,9 +249,13 @@ impl Connection {
             for i in 0..len {
                 {
                     // TODO(ekr@rtfm.com): Fix TxMode
-                    if let Some(f) =
-                        self.generators[i](self, now, TxMode::Normal, self.pmtu - d.remaining())
-                    {
+                    if let Some(f) = self.generators[i](
+                        self,
+                        now,
+                        epoch as u16,
+                        TxMode::Normal,
+                        self.pmtu - d.remaining(),
+                    ) {
                         f.marshal(&mut d)?;
                     }
                 }
@@ -267,7 +301,9 @@ impl Connection {
 
     fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         let mut recs = SslRecordList::default();
+
         if let Some(d) = data {
+            debug!("Handshake received {:0x?} ", d.to_vec());
             recs.recs.push_back(SslRecord {
                 epoch,
                 data: d.to_vec(),
@@ -278,16 +314,13 @@ impl Connection {
         debug!("Handshake emitted {} messages", msgs.recs.len());
 
         for m in msgs.recs {
-            self.crypto_stream_out[m.epoch as usize].send(&m.data);
+            self.crypto_streams[m.epoch as usize].tx.send(&m.data);
         }
 
         Ok(())
     }
 
-    pub fn process_input_frame(&mut self, frame: &[u8]) -> Res<()> {
-        let mut data = Data::from_slice(frame);
-        let frame = decode_frame(&mut data)?;
-
+    pub fn process_input_frame(&mut self, epoch: u16, frame: Frame) -> Res<()> {
         #[allow(unused_variables)]
         match frame {
             Frame::Padding => {
@@ -308,7 +341,25 @@ impl Connection {
             Frame::StopSending {
                 application_error_code,
             } => {} // TODO(agrover@mozilla.com): stop sending on a stream
-            Frame::Crypto { offset, data } => {} // TODO(agrover@mozilla.com): pass to crypto handling code
+            Frame::Crypto { offset, data } => {
+                debug!(
+                    "Crypto frame on epoch={} offset={}, data={:0x?}",
+                    epoch, offset, &data
+                );
+                let rx = &mut self.crypto_streams[epoch as usize].rx;
+                rx.inbound_frame(offset, data)?;
+                let toread = rx.data_ready() as usize;
+                if toread > 0 {
+                    // TODO(ekr@rtfm.com): This is a hack, let's just have
+                    // a length parameter.
+                    let mut v = Vec::<u8>::with_capacity(toread);
+                    v.resize(toread, 0);
+                    let read = rx.read(&mut v)?;
+                    debug!("Read {} bytes", read);
+                    assert_eq!(toread as u64, read);
+                    self.handshake(0, epoch, Some(&v))?;
+                }
+            }
             Frame::NewToken { token } => {} // TODO(agrover@mozilla.com): stick the new token somewhere
             Frame::Stream {
                 fin,
@@ -457,11 +508,15 @@ impl PacketDecoder for Connection {
 
 fn generate_crypto_frames(
     conn: &mut Connection,
-    _now: u64,
+    now: u64,
+    epoch: u16,
     mode: TxMode,
     remaining: usize,
 ) -> Option<Frame> {
-    if let Some((offset, data)) = conn.crypto_stream_out[0].next_bytes(mode, remaining) {
+    if let Some((offset, data)) = conn.crypto_streams[epoch as usize]
+        .tx
+        .next_bytes(mode, remaining)
+    {
         return Some(Frame::Crypto {
             offset,
             data: data.to_vec(),
