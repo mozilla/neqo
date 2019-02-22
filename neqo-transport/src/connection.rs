@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 
@@ -187,7 +189,7 @@ impl Connection {
             body_len: 0,
         };
 
-        let mut packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
+        let packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
 
         debug!("Packet length: {} {:0x?}", packet.len(), packet);
         Ok(Some(Datagram {
