@@ -9,19 +9,19 @@ use std::collections::linked_list::LinkedList;
 use std::ops::{Deref, DerefMut};
 use std::string::String;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct HandshakeMessage {
     name: String,
     epoch: u16,
     client: bool,
 }
 
-// TODO(ekr@rtfm.com): Temporary override for PartialEq until we fix the epochs.
+/*// TODO(ekr@rtfm.com): Temporary override for PartialEq until we fix the epochs.
 impl PartialEq for HandshakeMessage {
     fn eq(&self, other: &HandshakeMessage) -> bool {
         self.name == other.name && self.client == other.client
     }
-}
+}*/
 
 lazy_static! {
     pub static ref HANDSHAKE_MESSAGES: [HandshakeMessage; 7] = [
@@ -63,6 +63,7 @@ lazy_static! {
     ];
 }
 
+#[derive(Debug)]
 pub struct SslRecord {
     pub epoch: u16,
     pub data: Vec<u8>,
@@ -77,8 +78,6 @@ pub struct SslRecordList {
 pub struct SecretAgent {
     client: bool,
     next: usize,
-    write_epoch: u16,
-    read_epoch: u16,
 }
 
 #[derive(Default, Debug)]
@@ -115,14 +114,17 @@ impl SecretAgent {
         }
 
         // Now generate our output.
-        while self.next < HANDSHAKE_MESSAGES.len()
-            && HANDSHAKE_MESSAGES[self.next].client == self.client
-        {
-            let m = self.send_message(&HANDSHAKE_MESSAGES[self.next]);
-            debug!("Sending message: {:?}", HANDSHAKE_MESSAGES[self.next]);
+        while self.next < HANDSHAKE_MESSAGES.len() {
+            let msg = &HANDSHAKE_MESSAGES[self.next];
+
+            if msg.client != self.client {
+                break;
+            }
+            let m = self.send_message(msg);
+            debug!("Sending message: {:?}", msg);
             output.recs.push_back(SslRecord {
                 data: m,
-                epoch: self.write_epoch,
+                epoch: msg.epoch,
             });
             self.next += 1;
         }
@@ -152,7 +154,7 @@ impl SecretAgent {
         }
         Ok(HandshakeMessage {
             name: String::from_utf8(v).unwrap(),
-            epoch: self.read_epoch,
+            epoch: r.epoch,
             client: !self.client,
         })
     }

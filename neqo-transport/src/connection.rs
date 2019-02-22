@@ -248,7 +248,8 @@ impl Connection {
         let mut d = Data::default();
         let len = self.generators.len();
 
-        for epoch in 0..=self.send_epoch {
+        // TOOD(ekr@rtfm.com): Be smarter about what epochs we actually have.
+        for epoch in 0..4 {
             for i in 0..len {
                 {
                     // TODO(ekr@rtfm.com): Fix TxMode
@@ -312,6 +313,7 @@ impl Connection {
     }
 
     fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
+        debug!("Handshake epoch={} data={:0x?}", epoch, data);
         let mut recs = SslRecordList::default();
 
         if let Some(d) = data {
@@ -326,6 +328,7 @@ impl Connection {
         debug!("Handshake emitted {} messages", msgs.recs.len());
 
         for m in msgs.recs {
+            debug!("Inserting message {:?}", m);
             self.crypto_streams[m.epoch as usize].tx.send(&m.data);
         }
 
