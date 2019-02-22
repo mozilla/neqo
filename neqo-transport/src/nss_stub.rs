@@ -86,7 +86,9 @@ impl SecretAgent {
     ) -> Res<(HandshakeState, SslRecordList)> {
         qdebug!(
             "handshake_raw self.next={} m={:?} client={}",
-            self.next, HANDSHAKE_MESSAGES[self.next], self.client
+            self.next,
+            HANDSHAKE_MESSAGES[self.next],
+            self.client
         );
         let mut output = SslRecordList::default();
         // First read any input, but choke if we're not expecting it.
@@ -99,7 +101,8 @@ impl SecretAgent {
             if m != HANDSHAKE_MESSAGES[self.next] {
                 qwarn!(
                     "Received message {:?} when expected {:?}",
-                    &m, &HANDSHAKE_MESSAGES[self.next]
+                    &m,
+                    &HANDSHAKE_MESSAGES[self.next]
                 );
                 return Err(Error::ErrUnexpectedMessage);
             }

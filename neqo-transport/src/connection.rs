@@ -364,7 +364,9 @@ impl Connection {
                 qdebug!(
                     self,
                     "Crypto frame on epoch={} offset={}, data={:0x?}",
-                    epoch, offset, &data
+                    epoch,
+                    offset,
+                    &data
                 );
                 let rx = &mut self.crypto_streams[epoch as usize].rx;
                 rx.inbound_frame(offset, data)?;

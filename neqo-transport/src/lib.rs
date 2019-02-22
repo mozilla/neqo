@@ -12,7 +12,13 @@ macro_rules! matches {
 
 // Map logging to println for now until we can figure out how to get it in
 // unit tests without putting env_logger::try_init() at the top of every test.
-enum Level { Error, Warn, Info, Debug, Trace }
+enum Level {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
 macro_rules! log { ($lvl:expr, $($arg:tt)+) => (println!($($arg)+)) }
 macro_rules! log_with_ctx { ($lvl:expr, $ctx: expr, $($arg:tt)*) => ( log!($lvl, "[{}] {}", $ctx.label(), format!($($arg)*));) }
 macro_rules! qerror {
