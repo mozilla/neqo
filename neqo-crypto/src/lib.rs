@@ -11,6 +11,7 @@ mod err;
 pub mod hkdf;
 mod prio;
 mod result;
+mod secrets;
 mod ssl;
 
 pub use self::agent::{Agent, Client, HandshakeState, Record, RecordList, SecretAgent, Server};

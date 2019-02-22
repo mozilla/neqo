@@ -3,6 +3,8 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
+use crate::err::{Error, Res};
+
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
@@ -44,3 +46,24 @@ macro_rules! scoped_ptr {
 scoped_ptr!(Certificate, CERTCertificate, CERT_DestroyCertificate);
 scoped_ptr!(PrivateKey, SECKEYPrivateKey, SECKEY_DestroyPrivateKey);
 scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey);
+
+impl SymKey {
+    pub fn import(buf: &[u8]) -> Res<SymKey> {
+        // SECItem zeroItem = {
+        //     siBuffer,
+        //     (unsigned char *)zeroKeyBuf,
+        //     kTlsHkdfInfo[baseHash].hashSize
+        // };
+        // slot = PK11_GetInternalSlot();
+        // if (!slot) {
+        //     return SECFailure;
+        // }
+        // zeroKey = PK11_ImportSymKey(slot,
+        //                             kTlsHkdfInfo[baseHash].pkcs11Mech,
+        //                             PK11_OriginUnwrap,
+        //                             CKA_DERIVE, &zeroItem, NULL);
+        // if (!zeroKey)
+        //     return SECFailure;
+        Err(Error::InternalError)
+    }
+}

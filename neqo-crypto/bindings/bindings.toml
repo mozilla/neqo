@@ -102,12 +102,17 @@ variables = [
 ]
 
 [nss_p11]
+types = ["SECItem"]
 functions = [
     "CERT_DestroyCertificate",
     "PK11_FindCertFromNickname",
     "PK11_FindKeyByAnyCert",
     "PK11_FreeSymKey",
+    "PK11_ImportSymKey",
     "SECKEY_DestroyPrivateKey",
+]
+enums = [
+    "PK11Origin",
 ]
 opaque = [
     "CERTCertificate",
