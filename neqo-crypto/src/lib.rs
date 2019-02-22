@@ -3,6 +3,9 @@ mod exp;
 #[macro_use]
 mod p11;
 
+#[macro_use]
+extern crate neqo_common;
+
 pub mod aead;
 mod agent;
 mod agentio;
