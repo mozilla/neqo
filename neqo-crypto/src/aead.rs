@@ -85,7 +85,13 @@ impl Aead {
         }
     }
 
-    pub fn encrypt(&self, count: u64, aad: &[u8], input: &[u8], output: &mut [u8]) -> Res<usize> {
+    pub fn encrypt<'a>(
+        &self,
+        count: u64,
+        aad: &[u8],
+        input: &[u8],
+        output: &'a mut [u8],
+    ) -> Res<&'a [u8]> {
         let mut l: c_uint = 0;
         let rv = unsafe {
             SSL_AeadEncrypt(
@@ -101,10 +107,16 @@ impl Aead {
             )
         };
         result::result(rv)?;
-        return Ok(l as usize);
+        return Ok(&output[0..l as usize]);
     }
 
-    pub fn decrypt(&self, count: u64, aad: &[u8], input: &[u8], output: &mut [u8]) -> Res<usize> {
+    pub fn decrypt<'a>(
+        &self,
+        count: u64,
+        aad: &[u8],
+        input: &[u8],
+        output: &'a mut [u8],
+    ) -> Res<&'a [u8]> {
         let mut l: c_uint = 0;
         let rv = unsafe {
             SSL_AeadDecrypt(
@@ -120,6 +132,6 @@ impl Aead {
             )
         };
         result::result(rv)?;
-        return Ok(l as usize);
+        return Ok(&output[0..l as usize]);
     }
 }
