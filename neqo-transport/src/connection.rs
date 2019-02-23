@@ -2,10 +2,9 @@
 
 use crate::data::Data;
 use crate::frame::{decode_frame, Frame};
-use crate::nss_stub::*;
+use crate::nss::*;
 use crate::packet::*;
 use crate::{Error, Res};
-use neqo_crypto::Epoch;
 
 use crate::stream::{BidiStream, Recvable, RxStreamOrderer, TxBuffer};
 use rand::prelude::*;

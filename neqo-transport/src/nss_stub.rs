@@ -9,6 +9,8 @@ use std::collections::linked_list::LinkedList;
 use std::ops::{Deref, DerefMut};
 use std::string::String;
 
+pub type Epoch = u16;
+
 #[derive(Debug, PartialEq)]
 pub struct HandshakeMessage {
     name: String,

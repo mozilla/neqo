@@ -3,9 +3,13 @@ name = "neqo-transport"
 version = "0.1.0"
 authors = ["EKR <ekr@rtfm.com>"]
 edition = "2018"
-          
+
+[features]
+#default = ["crypto"]
+crypto = ["neqo-crypto"]
+
 [dependencies]
-neqo-crypto = { version = "0.1", path = "../neqo-crypto" }
+neqo-crypto = { version = "0.1", path = "../neqo-crypto", optional = true }
 neqo-common = { version = "0.1", path = "../neqo-common" }
 num-traits = "0.2"
 derive_more = "0.13"

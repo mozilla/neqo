@@ -4,6 +4,7 @@ extern crate neqo_common;
 pub mod connection;
 pub mod data;
 pub mod frame;
+mod nss;
 mod nss_stub;
 pub mod packet;
 pub mod stream;
