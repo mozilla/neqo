@@ -281,6 +281,14 @@ impl SecretAgent {
     pub fn state(&self) -> &HandshakeState {
         &self.st
     }
+
+    pub fn read_secret(&self, epoch: Epoch) -> Option<&p11::SymKey> {
+        self.secrets.read().get(epoch)
+    }
+
+    pub fn write_secret(&self, epoch: Epoch) -> Option<&p11::SymKey> {
+        self.secrets.write().get(epoch)
+    }
 }
 
 // A TLS Client.

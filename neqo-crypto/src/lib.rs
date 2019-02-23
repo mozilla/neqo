@@ -18,6 +18,7 @@ pub use self::agent::{Agent, Client, HandshakeState, Record, RecordList, SecretA
 pub use self::constants::*;
 pub use self::err::{Error, Res};
 pub use self::p11::SymKey;
+pub use self::secrets::SecretDirection;
 
 use std::ffi::CString;
 use std::path::Path;

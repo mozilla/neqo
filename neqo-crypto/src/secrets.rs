@@ -62,10 +62,10 @@ impl Secrets {
             None => panic!("NSS shouldn't be passing out NULL secrets"),
             Some(p) => SymKey::new(p),
         };
-        self.put(epoch, dir.into(), key);
+        self.put(dir.into(), epoch, key);
     }
 
-    pub fn put(&mut self, epoch: Epoch, dir: SecretDirection, key: SymKey) {
+    pub fn put(&mut self, dir: SecretDirection, epoch: Epoch, key: SymKey) {
         println!("{:?} secret for {:?}", dir, epoch);
         let keys = match dir {
             SecretDirection::Read => &mut self.r,
@@ -97,20 +97,9 @@ impl DirectionalSecrets {
         self.secrets[i] = Some(key);
     }
 
-    pub fn make_aead<S: Into<String>>(
-        &self,
-        epoch: Epoch,
-        version: Version,
-        cipher: Cipher,
-        prefix: S,
-    ) -> Res<Aead> {
+    pub fn get(&self, epoch: Epoch) -> Option<&SymKey> {
         let i = epoch as usize;
-        if i >= self.secrets.len() {
-            return Err(Error::InvalidEpoch);
-        }
-        match &self.secrets[i] {
-            None => Err(Error::InvalidEpoch),
-            Some(secret) => Aead::new(version, cipher, &secret, prefix),
-        }
+        assert!(i < self.secrets.len());
+        self.secrets[i].as_ref()
     }
 }
