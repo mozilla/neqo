@@ -14,6 +14,22 @@ experimental_api!(SSL_SecretCallback(
     arg: *mut c_void,
 ));
 
+#[derive(Clone, Copy, Debug)]
+pub enum SecretDirection {
+    Read,
+    Write,
+}
+
+impl From<SSLSecretDirection::Type> for SecretDirection {
+    fn from(dir: SSLSecretDirection::Type) -> Self {
+        match dir {
+            SSLSecretDirection::ssl_secret_read => SecretDirection::Read,
+            SSLSecretDirection::ssl_secret_write => SecretDirection::Write,
+            _ => unreachable!(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Secrets {
     r: DirectionalSecrets,
@@ -46,14 +62,14 @@ impl Secrets {
             None => panic!("NSS shouldn't be passing out NULL secrets"),
             Some(p) => SymKey::new(p),
         };
-        self.put(epoch, dir, key);
+        self.put(epoch, dir.into(), key);
     }
 
-    pub fn put(&mut self, epoch: Epoch, dir: SSLSecretDirection::Type, key: SymKey) {
+    pub fn put(&mut self, epoch: Epoch, dir: SecretDirection, key: SymKey) {
+        println!("{:?} secret for {:?}", dir, epoch);
         let keys = match dir {
-            SSLSecretDirection::ssl_secret_read => &mut self.r,
-            SSLSecretDirection::ssl_secret_write => &mut self.w,
-            _ => unreachable!(),
+            SecretDirection::Read => &mut self.r,
+            SecretDirection::Write => &mut self.w,
         };
         keys.put(epoch, key);
     }
