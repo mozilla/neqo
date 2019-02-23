@@ -39,6 +39,7 @@ fn make_aead(cipher: Cipher) -> Aead {
 
 #[test]
 fn aead_encrypt_decrypt() {
+    const TOGGLE: u8 = 77;
     let aead = make_aead(TLS_AES_128_GCM_SHA256);
     let ciphertext_buf = &mut [0; 1024]; // Can't use PLAINTEXT.len() here.
     let ciphertext = aead
@@ -55,4 +56,56 @@ fn aead_encrypt_decrypt() {
         0x72, 0x71, 0x28, 0x1c, 0xcb, 0x54, 0xdf, 0x78, 0x84,
     ];
     assert_eq!(ciphertext, expected_ciphertext);
+
+    let plaintext_buf = &mut [0; 1024]; // Can't use PLAINTEXT.len() here.
+    let plaintext = aead
+        .decrypt(1, AAD, ciphertext, plaintext_buf)
+        .expect("decrypt should also work");
+    assert_eq!(plaintext, PLAINTEXT);
+
+    // Decryption failures...
+    // Different counter.
+    let res = aead.decrypt(2, AAD, ciphertext, plaintext_buf);
+    assert!(res.is_err());
+
+    // Front-truncate ciphertext.
+    let res = aead.decrypt(1, AAD, &ciphertext[1..], plaintext_buf);
+    assert!(res.is_err());
+
+    // End-truncate ciphertext.
+    let ciphertext_last = ciphertext.len() - 1;
+    let res = aead.decrypt(1, AAD, &ciphertext[..ciphertext_last], plaintext_buf);
+    assert!(res.is_err());
+
+    // Mess with the buffer.
+    let mut scratch = Vec::new();
+    scratch.extend_from_slice(ciphertext);
+
+    // Toggle first octet.
+    scratch[0] ^= TOGGLE;
+    let res = aead.decrypt(1, AAD, &scratch[..], plaintext_buf);
+    assert!(res.is_err());
+
+    // Toggle the auth tag.
+    scratch[0] ^= TOGGLE;
+    scratch[ciphertext_last] ^= TOGGLE;
+    let res = aead.decrypt(1, AAD, &scratch[..], plaintext_buf);
+    assert!(res.is_err());
+
+    // Mess with the AAD.
+    scratch.clear();
+    scratch.extend_from_slice(AAD);
+
+    // Front-truncate.
+    let res = aead.decrypt(1, &scratch[1..], ciphertext, plaintext_buf);
+    assert!(res.is_err());
+
+    // End-truncate.
+    let aad_last = AAD.len() - 1;
+    let res = aead.decrypt(1, &scratch[..aad_last], ciphertext, plaintext_buf);
+    assert!(res.is_err());
+
+    scratch[0] ^= TOGGLE;
+    let res = aead.decrypt(1, &scratch[..], ciphertext, plaintext_buf);
+    assert!(res.is_err());
 }
