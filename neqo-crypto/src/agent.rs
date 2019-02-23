@@ -370,6 +370,7 @@ impl DerefMut for Server {
 }
 
 /// A generic container for Client or Server.
+#[derive(Debug)]
 pub enum Agent {
     Client(crate::agent::Client),
     Server(crate::agent::Server),

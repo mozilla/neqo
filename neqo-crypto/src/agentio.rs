@@ -29,9 +29,9 @@ struct RecordLength {
 /// A slice of the output.
 #[derive(Default)]
 pub struct Record {
-    epoch: Epoch,
-    ct: ssl::SSLContentType::Type,
-    data: Vec<u8>,
+    pub epoch: Epoch,
+    pub ct: ssl::SSLContentType::Type,
+    pub data: Vec<u8>,
 }
 
 impl Record {

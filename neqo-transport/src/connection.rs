@@ -74,7 +74,7 @@ pub struct CryptoStream {
 #[allow(unused_variables)]
 #[derive(Debug)]
 pub struct Connection {
-    version: Version,
+    version: crate::packet::Version,
     local_addr: Option<SocketAddr>,
     remote_addr: Option<SocketAddr>,
     role: Role,
@@ -313,25 +313,39 @@ impl Connection {
 
     fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         qdebug!("Handshake epoch={} data={:0x?}", epoch, data);
-        let mut recs = SslRecordList::default();
+        let mut rec: Option<Record> = None;
 
         if let Some(d) = data {
             qdebug!(self, "Handshake received {:0x?} ", d.to_vec());
-            recs.recs.push_back(SslRecord {
+            rec = Some(Record {
+                ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
                 epoch,
                 data: d.to_vec(),
             });
         }
 
-        let (_, msgs) = self.tls.handshake_raw(now, recs)?;
-        qdebug!(self, "Handshake emitted {} messages", msgs.recs.len());
+        let mut m = self.tls.handshake_raw(now, rec);
 
-        for m in msgs.recs {
-            qdebug!("Inserting message {:?}", m);
-            self.crypto_streams[m.epoch as usize].tx.send(&m.data);
+        if matches!(m, Ok((HandshakeState::AuthenticationPending, _))) {
+            // TODO(ekr@rtfm.com): IMPORTANT: This overrides
+            // authentication and so is fantastically dangerous.
+            // Fix before shipping.
+            qwarn!(self, "Re-running handshake after AuthenticationPending");
+            m = self.tls.handshake_raw(now, None);
         }
-
-        if self.tls.completed() {
+        match m {
+            Err(_) => {
+                qwarn!(self, "Handshake failed");
+                return Err(Error::ErrHandshakeFailed);
+            }
+            Ok((_, msgs)) => {
+                for m in msgs {
+                    qdebug!("Inserting message {:?}", m);
+                    self.crypto_streams[m.epoch as usize].tx.send(&m.data);
+                }
+            }
+        }
+        if *self.tls.state() == HandshakeState::Complete {
             qinfo!(self, "TLS handshake completed");
             self.set_state(State::Connected);
         }
@@ -561,15 +575,16 @@ mod tests {
 
     #[test]
     fn test_handshake() {
+        init_db("./db");
         // 0 -> CH
-        let mut client = Connection::new_client(&"example.com");
+        let mut client = Connection::new_client("example.com");
         let res = client.process(None, 0).unwrap();
         assert_ne!(None, res.0);
         assert_eq!(0, res.1);
         qdebug!("Output={:?}", res.0);
 
         // CH -> SH
-        let mut server = Connection::new_server(&[String::from("example.com")]);
+        let mut server = Connection::new_server(&[String::from("key")]);
         let res = server.process(res.0, 0).unwrap();
         assert_ne!(None, res.0);
         assert_eq!(0, res.1);
@@ -579,43 +594,13 @@ mod tests {
         let res = client.process(res.0, 0).unwrap();
         assert_eq!(None, res.0);
 
-        // 0 -> EE.
+        // 0 -> EE, CERT, CV, FIN
         let res = server.process(None, 0).unwrap();
         assert_ne!(None, res.0);
         assert_eq!(0, res.1);
         qdebug!("Output={:?}", res.0);
 
-        // EE -> 0
-        let res = client.process(res.0, 0).unwrap();
-        assert_eq!(None, res.0);
-
-        // 0 -> CERT.
-        let res = server.process(None, 0).unwrap();
-        assert_ne!(None, res.0);
-        assert_eq!(0, res.1);
-        qdebug!("Output={:?}", res.0);
-
-        // CERT -> 0
-        let res = client.process(res.0, 0).unwrap();
-        assert_eq!(None, res.0);
-
-        // 0 -> CV.
-        let res = server.process(None, 0).unwrap();
-        assert_ne!(None, res.0);
-        assert_eq!(0, res.1);
-        qdebug!("Output={:?}", res.0);
-
-        // CV -> 0
-        let res = client.process(res.0, 0).unwrap();
-        assert_eq!(None, res.0);
-
-        // 0 -> FIN.
-        let res = server.process(None, 0).unwrap();
-        assert_ne!(None, res.0);
-        assert_eq!(0, res.1);
-        qdebug!("Output={:?}", res.0);
-
-        // FIN -> FIN
+        // EE, CERT, CV, FIN -> FIN
         let res = client.process(res.0, 0).unwrap();
         assert_ne!(None, res.0);
         assert_eq!(0, res.1);

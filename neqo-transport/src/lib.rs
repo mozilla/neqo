@@ -33,6 +33,7 @@ pub enum Error {
     ErrInvalidStreamId,
     ErrDecodingFrame,
     ErrUnexpectedMessage,
+    ErrHandshakeFailed,
 }
 
 pub type Res<T> = std::result::Result<T, Error>;
