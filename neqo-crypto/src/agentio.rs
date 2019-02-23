@@ -77,6 +77,7 @@ pub struct RecordList {
 }
 
 impl RecordList {
+    // TODO define an enum for content type.
     fn append(&mut self, epoch: Epoch, ct: ssl::SSLContentType::Type, data: &[u8]) {
         self.records.push(Record::new(epoch, ct, data));
     }

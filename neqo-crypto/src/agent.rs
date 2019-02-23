@@ -6,6 +6,7 @@ use crate::initialized;
 use crate::p11;
 use crate::prio;
 use crate::result;
+use crate::secrets::Secrets;
 use crate::ssl;
 
 use std::ffi::CString;
@@ -62,6 +63,7 @@ impl SecretAgentInfo {
 #[derive(Debug)]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
+    secrets: Secrets,
     raw: Option<bool>,
     io: Box<AgentIo>,
     st: HandshakeState,
@@ -74,6 +76,7 @@ impl SecretAgent {
     fn new() -> Res<SecretAgent> {
         let mut agent = SecretAgent {
             fd: null_mut(),
+            secrets: Default::default(),
             raw: None,
             io: Box::new(AgentIo::new()),
             st: HandshakeState::New,
@@ -163,6 +166,7 @@ impl SecretAgent {
 
     fn set_raw(&mut self, r: bool) -> Res<()> {
         if self.raw.is_none() {
+            self.secrets.register(self.fd)?;
             self.raw = Some(r);
             Ok(())
         } else if self.raw.unwrap() == r {

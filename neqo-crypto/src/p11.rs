@@ -97,3 +97,10 @@ impl SymKey {
         }
     }
 }
+
+impl std::fmt::Debug for SymKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "SymKey")
+    }
+}
+
