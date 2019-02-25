@@ -1,17 +1,19 @@
 #![allow(unused_variables)]
 
-use crate::data::Data;
-use crate::frame::{decode_frame, Frame};
-use crate::nss::*;
-use crate::packet::*;
-use crate::{Error, Res};
-
-use crate::stream::{BidiStream, Recvable, RxStreamOrderer, TxBuffer};
-use rand::prelude::*;
+use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
 use std::ops;
+
+use rand::prelude::*;
+
+use crate::data::Data;
+use crate::frame::{decode_frame, Frame};
+use crate::nss::*;
+use crate::packet::*;
+use crate::stream::{BidiStream, Recvable, RxStreamOrderer, TxBuffer};
+use crate::{Error, Res};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -401,7 +403,7 @@ impl Connection {
             } => {
                 self.process_inbound_stream_frame(fin, stream_id, offset, data)?;
             }
-            Frame::MaxData { maximum_data } => {} // TODO(agrover@mozilla.com): set self.max_data?
+            Frame::MaxData { maximum_data } => self.max_data = max(self.max_data, maximum_data),
             Frame::MaxStreamData {
                 stream_id,
                 maximum_stream_data,
