@@ -132,12 +132,18 @@ impl RxStreamOrderer {
     /// being available to upper layers if frame is not out of order (ooo) or
     /// if the frame fills a gap.
     pub fn inbound_frame(&mut self, new_start: u64, mut new_data: Vec<u8>) -> Res<()> {
-        // Avoid copies and duplicated data.
-        // Get entry before where new entry would go, so we can see if we already
-        // have the new bytes.
         qtrace!("Inbound data offset={} len={}", new_start, new_data.len());
 
+        // Get entry before where new entry would go, so we can see if we already
+        // have the new bytes.
+        // Avoid copies and duplicated data.
         let new_end = new_start + new_data.len() as u64;
+
+        if new_end <= self.retired {
+            // Range already read by application, this frame is very late and unneeded.
+            return Ok(());
+        }
+
         let (insert_new, remove_prev) = if let Some((&prev_start, prev_vec)) =
             self.data_ranges.range_mut(..new_start + 1).next_back()
         {
@@ -153,47 +159,97 @@ impl RxStreamOrderer {
                         let truncate_to = new_data.len() - overlap as usize;
                         prev_vec.truncate(truncate_to)
                     }
+                    qtrace!(
+                        "New frame {}-{} received, overlap: {}",
+                        new_start,
+                        new_end,
+                        overlap
+                    );
                     (true, None)
                 }
                 (true, false) => {
                     // PPPPPP    ->  PPPPPP
                     //   NNNN
                     // Do nothing
+                    qtrace!(
+                        "Dropping frame with already-received range {}-{}",
+                        new_start,
+                        new_end
+                    );
                     (false, None)
                 }
                 (false, true) => {
                     // PPPP      ->  NNNNNN
                     // NNNNNN
                     // Drop Prev, Insert New
+                    qtrace!(
+                        "New frame with {}-{} replaces existing {}-{}",
+                        new_start,
+                        new_end,
+                        prev_start,
+                        prev_end
+                    );
                     (true, Some(prev_start))
                 }
                 (false, false) => {
                     // PPPPPP    ->  PPPPPP
                     // NNNN
                     // Do nothing
+                    qtrace!(
+                        "Dropping frame with already-received range {}-{}",
+                        new_start,
+                        new_end
+                    );
                     (false, None)
                 }
             }
         } else {
+            qtrace!("New frame {}-{} received", new_start, new_end);
             (true, None) // Nothing previous
-        };
-
-        if insert_new {
-            // Now handle possible overlap with next entry
-            let next = self.data_ranges.range_mut(new_start..).next();
-            if let Some((&next_start, _)) = next {
-                let overlap = new_end.saturating_sub(next_start);
-                if overlap != 0 {
-                    let truncate_to = new_data.len() - overlap as usize;
-                    new_data.truncate(truncate_to);
-                }
-            }
-            self.data_ranges.insert(new_start, new_data);
         };
 
         if let Some(remove_prev) = &remove_prev {
             self.data_ranges.remove(remove_prev);
         }
+
+        if insert_new {
+            // Now handle possible overlap with next entries
+            let mut to_remove = Vec::new(); // TODO(agrover@mozilla.com): use smallvec?
+            for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
+                let next_end = next_start + next_data.len() as u64;
+                let overlap = new_end.saturating_sub(next_start);
+                if overlap == 0 {
+                    break;
+                } else {
+                    if next_end > new_end {
+                        let truncate_to = new_data.len() - overlap as usize;
+                        new_data.truncate(truncate_to);
+                        qtrace!(
+                            "New frame {}-{} overlaps with next frame by {}, truncating",
+                            new_start,
+                            new_end,
+                            overlap
+                        );
+                        break;
+                    } else {
+                        qtrace!(
+                            "New frame {}-{} spans entire next frame {}-{}, replacing",
+                            new_start,
+                            new_end,
+                            next_start,
+                            next_end
+                        );
+                        to_remove.push(next_start);
+                    }
+                }
+            }
+
+            for start in to_remove {
+                self.data_ranges.remove(&start);
+            }
+
+            self.data_ranges.insert(new_start, new_data);
+        };
 
         Ok(())
     }
@@ -221,11 +277,7 @@ impl RxStreamOrderer {
     /// retrieve it.
     /// Returns bytes copied.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
-        qtrace!(
-            "Being asked to read {} bytes, {} available",
-            buf.len(),
-            self.buffered()
-        );
+        qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
         let mut buf_remaining = buf.len();
         let mut copied = 0;
 
@@ -473,6 +525,92 @@ mod tests {
         assert_eq!(s.recv_data_ready(), true);
         assert_eq!(s.read(&mut buf).unwrap(), (32, true));
         assert_eq!(s.read(&mut buf).unwrap(), (0, true));
+    }
+
+    #[test]
+    fn test_stream_rx_dedupe() {
+        let mut s = BidiStream::new();
+
+        let mut buf = vec![0u8; 100];
+
+        // test receiving a contig frame and reading it works
+        s.inbound_stream_frame(false, 0, vec![1; 6]).unwrap();
+
+        // See inbound_frame(). Test (true, true) case
+        s.inbound_stream_frame(false, 2, vec![2; 6]).unwrap();
+        {
+            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 0);
+            assert_eq!(item.1.len(), 2);
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 2);
+            assert_eq!(item.1.len(), 6);
+        }
+
+        // Test (true, false) case
+        s.inbound_stream_frame(false, 4, vec![3; 4]).unwrap();
+        {
+            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 0);
+            assert_eq!(item.1.len(), 2);
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 2);
+            assert_eq!(item.1.len(), 6);
+        }
+
+        // Test (false, true) case
+        s.inbound_stream_frame(false, 2, vec![4; 8]).unwrap();
+        {
+            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 0);
+            assert_eq!(item.1.len(), 2);
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 2);
+            assert_eq!(item.1.len(), 8);
+        }
+
+        // Test (false, false) case
+        s.inbound_stream_frame(false, 2, vec![5; 2]).unwrap();
+        {
+            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 0);
+            assert_eq!(item.1.len(), 2);
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 2);
+            assert_eq!(item.1.len(), 8);
+        }
+
+        assert_eq!(s.read(&mut buf).unwrap(), (10, false));
+        assert_eq!(buf[..10], [1, 1, 4, 4, 4, 4, 4, 4, 4, 4]);
+
+        // Test truncation/span-drop on insert
+        s.inbound_stream_frame(false, 100, vec![6; 6]).unwrap();
+        // a. insert where new frame gets truncated
+        s.inbound_stream_frame(false, 99, vec![7; 6]).unwrap();
+        {
+            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 99);
+            assert_eq!(item.1.len(), 1);
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 100);
+            assert_eq!(item.1.len(), 6);
+            assert_eq!(i.next(), None);
+        }
+
+        // b. insert where new frame spans next frame
+        s.inbound_stream_frame(false, 98, vec![8; 10]).unwrap();
+        {
+            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let item = i.next().unwrap();
+            assert_eq!(*item.0, 98);
+            assert_eq!(item.1.len(), 10);
+            assert_eq!(i.next(), None);
+        }
     }
 
     #[test]
