@@ -23,6 +23,8 @@ pub trait Recvable: Debug {
     /// stream offset.
     fn needs_flowc_update(&mut self) -> Option<u64>;
 
+    fn final_size(&self) -> Option<u64>;
+
     /// Close the stream.
     fn close(&mut self);
 }
@@ -353,82 +355,148 @@ impl Sendable for SendStream {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
-pub struct RecvStream {
-    final_size: Option<u64>,
-    rx_window: u64,
-    rx_orderer: RxStreamOrderer,
+#[derive(Debug, PartialEq)]
+enum RecvStreamState {
+    Open {
+        rx_window: u64,
+        rx_orderer: RxStreamOrderer,
+    },
+    Closed,
 }
 
-impl RecvStream {
-    pub fn new() -> RecvStream {
-        RecvStream {
-            final_size: None,
+impl RecvStreamState {
+    fn new() -> RecvStreamState {
+        RecvStreamState::Open {
             rx_window: RX_STREAM_DATA_WINDOW,
             rx_orderer: RxStreamOrderer::new(),
         }
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub struct RecvStream {
+    final_size: Option<u64>,
+    state: RecvStreamState,
+}
+
+impl RecvStream {
+    pub fn new() -> RecvStream {
+        RecvStream {
+            final_size: None,
+            state: RecvStreamState::new(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn orderer(&self) -> Option<&RxStreamOrderer> {
+        match &self.state {
+            RecvStreamState::Open {
+                rx_window: _,
+                rx_orderer,
+            } => Some(&rx_orderer),
+            RecvStreamState::Closed => None,
+        }
+    }
+}
+
 impl Recvable for RecvStream {
     fn recv_data_ready(&self) -> bool {
-        self.rx_orderer.data_ready()
+        match &self.state {
+            RecvStreamState::Open {
+                rx_window: _,
+                rx_orderer,
+            } => rx_orderer.data_ready(),
+            RecvStreamState::Closed => false,
+        }
     }
 
     /// caller has been told data is available on a stream, and they want to
     /// retrieve it.
     fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
-        let read_bytes = self.rx_orderer.read(buf)?;
+        match &mut self.state {
+            RecvStreamState::Closed => return Err(Error::ErrNoMoreData),
+            RecvStreamState::Open {
+                rx_window: _,
+                rx_orderer,
+            } => {
+                let read_bytes = rx_orderer.read(buf)?;
 
-        let fin = if let Some(final_size) = self.final_size {
-            if final_size == self.rx_orderer.retired() {
-                true
-            } else {
-                false
+                let fin = if let Some(final_size) = self.final_size {
+                    if final_size == rx_orderer.retired() {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                Ok((read_bytes, fin))
             }
-        } else {
-            false
-        };
-
-        Ok((read_bytes, fin))
+        }
     }
 
     fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
+        let new_end = offset + data.len() as u64;
+
+        // Send final size errors even if stream is closed
         if let Some(final_size) = self.final_size {
-            if offset + data.len() as u64 > final_size
-                || (fin && offset + data.len() as u64 != final_size)
-            {
+            if new_end > final_size || (fin && new_end != final_size) {
                 return Err(Error::ErrFinalSizeError);
             }
         }
 
-        if fin && self.final_size == None {
-            let final_size = offset + data.len() as u64;
-            if final_size < self.rx_orderer.highest_seen_offset() {
-                return Err(Error::ErrFinalSizeError);
+        match &mut self.state {
+            RecvStreamState::Closed => {
+                Err(Error::ErrTooMuchData) // send STOP_SENDING
             }
-            self.final_size = Some(offset + data.len() as u64);
-        }
+            RecvStreamState::Open {
+                rx_window: _,
+                rx_orderer,
+            } => {
+                if fin && self.final_size == None {
+                    let final_size = offset + data.len() as u64;
+                    if final_size < rx_orderer.highest_seen_offset() {
+                        return Err(Error::ErrFinalSizeError);
+                    }
+                    self.final_size = Some(offset + data.len() as u64);
+                }
 
-        self.rx_orderer.inbound_frame(offset, data)
+                rx_orderer.inbound_frame(offset, data)
+            }
+        }
     }
 
     /// If we should tell the sender they have more credit, return an offset
     fn needs_flowc_update(&mut self) -> Option<u64> {
-        let lowater = RX_STREAM_DATA_WINDOW / 2;
-        let new_window = self.rx_orderer.retired() + RX_STREAM_DATA_WINDOW;
-        if self.final_size.is_none() && new_window > lowater + self.rx_window {
-            self.rx_window = new_window;
-            Some(new_window)
-        } else {
-            None
+        match &mut self.state {
+            RecvStreamState::Closed => None,
+            RecvStreamState::Open {
+                rx_window,
+                rx_orderer,
+            } => {
+                let lowater = RX_STREAM_DATA_WINDOW / 2;
+                let new_window = rx_orderer.retired() + RX_STREAM_DATA_WINDOW;
+                if self.final_size.is_none() && new_window > lowater + *rx_window {
+                    *rx_window = new_window;
+                    Some(new_window)
+                } else {
+                    None
+                }
+            }
         }
     }
 
-    fn close(&mut self) {}
+    fn close(&mut self) {
+        self.state = RecvStreamState::Closed
+    }
+
+    fn final_size(&self) -> Option<u64> {
+        self.final_size
+    }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BidiStream {
     tx: SendStream,
     rx: RecvStream,
@@ -463,6 +531,10 @@ impl Recvable for BidiStream {
     fn close(&mut self) {
         self.rx.close()
     }
+
+    fn final_size(&self) -> Option<u64> {
+        self.rx.final_size()
+    }
 }
 
 impl Sendable for BidiStream {
@@ -489,39 +561,39 @@ mod tests {
         assert_eq!(s.recv_data_ready(), true);
         let mut buf = vec![0u8; 100];
         assert_eq!(s.read(&mut buf).unwrap(), (10, false));
-        assert_eq!(s.rx.rx_orderer.retired(), 10);
-        assert_eq!(s.rx.rx_orderer.buffered(), 0);
+        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
+        assert_eq!(s.rx.orderer().unwrap().buffered(), 0);
 
         // test receiving a noncontig frame
         s.inbound_stream_frame(false, 12, vec![2; 12]).unwrap();
         assert_eq!(s.recv_data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
-        assert_eq!(s.rx.rx_orderer.retired(), 10);
-        assert_eq!(s.rx.rx_orderer.buffered(), 12);
+        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
+        assert_eq!(s.rx.orderer().unwrap().buffered(), 12);
 
         // another frame that overlaps the first
         s.inbound_stream_frame(false, 14, vec![3; 8]).unwrap();
         assert_eq!(s.recv_data_ready(), false);
-        assert_eq!(s.rx.rx_orderer.retired(), 10);
-        assert_eq!(s.rx.rx_orderer.buffered(), 12);
+        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
+        assert_eq!(s.rx.orderer().unwrap().buffered(), 12);
 
         // fill in the gap, but with a FIN
         s.inbound_stream_frame(true, 10, vec![4; 6]).unwrap_err();
         assert_eq!(s.recv_data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
-        assert_eq!(s.rx.rx_orderer.retired(), 10);
-        assert_eq!(s.rx.rx_orderer.buffered(), 12);
+        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
+        assert_eq!(s.rx.orderer().unwrap().buffered(), 12);
 
         // fill in the gap
         s.inbound_stream_frame(false, 10, vec![5; 10]).unwrap();
         assert_eq!(s.recv_data_ready(), true);
-        assert_eq!(s.rx.rx_orderer.retired(), 10);
-        assert_eq!(s.rx.rx_orderer.buffered(), 14);
+        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
+        assert_eq!(s.rx.orderer().unwrap().buffered(), 14);
 
         // a legit FIN
         s.inbound_stream_frame(true, 24, vec![6; 18]).unwrap();
-        assert_eq!(s.rx.rx_orderer.retired(), 10);
-        assert_eq!(s.rx.rx_orderer.buffered(), 32);
+        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
+        assert_eq!(s.rx.orderer().unwrap().buffered(), 32);
         assert_eq!(s.recv_data_ready(), true);
         assert_eq!(s.read(&mut buf).unwrap(), (32, true));
         assert_eq!(s.read(&mut buf).unwrap(), (0, true));
@@ -539,7 +611,7 @@ mod tests {
         // See inbound_frame(). Test (true, true) case
         s.inbound_stream_frame(false, 2, vec![2; 6]).unwrap();
         {
-            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -551,7 +623,7 @@ mod tests {
         // Test (true, false) case
         s.inbound_stream_frame(false, 4, vec![3; 4]).unwrap();
         {
-            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -563,7 +635,7 @@ mod tests {
         // Test (false, true) case
         s.inbound_stream_frame(false, 2, vec![4; 8]).unwrap();
         {
-            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -575,7 +647,7 @@ mod tests {
         // Test (false, false) case
         s.inbound_stream_frame(false, 2, vec![5; 2]).unwrap();
         {
-            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -592,7 +664,7 @@ mod tests {
         // a. insert where new frame gets truncated
         s.inbound_stream_frame(false, 99, vec![7; 6]).unwrap();
         {
-            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 99);
             assert_eq!(item.1.len(), 1);
@@ -605,7 +677,7 @@ mod tests {
         // b. insert where new frame spans next frame
         s.inbound_stream_frame(false, 98, vec![8; 10]).unwrap();
         {
-            let mut i = s.rx.rx_orderer.data_ranges.iter();
+            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 98);
             assert_eq!(item.1.len(), 10);
