@@ -451,7 +451,7 @@ impl Recvable for RecvStream {
                 Err(Error::ErrTooMuchData) // send STOP_SENDING
             }
             RecvStreamState::Open {
-                rx_window: _,
+                rx_window,
                 rx_orderer,
             } => {
                 if fin && self.final_size == None {
@@ -460,6 +460,11 @@ impl Recvable for RecvStream {
                         return Err(Error::ErrFinalSizeError);
                     }
                     self.final_size = Some(offset + data.len() as u64);
+                }
+
+                if new_end > *rx_window {
+                    qtrace!("Stream RX window {} exceeded: {}", rx_window, new_end);
+                    return Err(Error::ErrFlowControlError);
                 }
 
                 rx_orderer.inbound_frame(offset, data)
@@ -700,5 +705,17 @@ mod tests {
         assert_eq!(s.recv_data_ready(), false);
         assert_eq!(s.needs_flowc_update(), Some(RX_STREAM_DATA_WINDOW * 2));
         assert_eq!(s.needs_flowc_update(), None);
+    }
+
+    #[test]
+    fn test_stream_rx_window() {
+        let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
+
+        let mut s = BidiStream::new();
+
+        assert_eq!(s.needs_flowc_update(), None);
+        s.inbound_stream_frame(false, 0, frame1).unwrap();
+        s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, vec![1; 1])
+            .unwrap_err();
     }
 }
