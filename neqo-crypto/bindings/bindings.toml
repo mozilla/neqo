@@ -102,9 +102,10 @@ variables = [
 ]
 
 [nss_p11]
-types = ["SECItem"]
+types = ["SECItem", "CK_ULONG"]
 functions = [
     "CERT_DestroyCertificate",
+    "PK11_Encrypt",
     "PK11_ExtractKeyValue",
     "PK11_FindCertFromNickname",
     "PK11_FindKeyByAnyCert",
@@ -112,6 +113,7 @@ functions = [
     "PK11_FreeSymKey",
     "PK11_GetInternalSlot",
     "PK11_GetKeyData",
+    "PK11_GetMechanism",
     "PK11_ImportSymKey",
     "PK11_ReferenceSymKey",
     "SECKEY_DestroyPrivateKey",
@@ -129,6 +131,9 @@ opaque = [
 ]
 variables = [
     "CKA_DERIVE",
+    "CKM_AES_ECB",
+    "CKM_AES_GCM",
+    "CKM_NSS_CHACHA20_POLY1305",
     "CKM_NSS_HKDF_SHA256",
     "CKM_NSS_HKDF_SHA384",
 ]

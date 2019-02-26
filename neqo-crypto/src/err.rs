@@ -30,6 +30,7 @@ pub enum Error {
         desc: String,
     },
     OverrunError,
+    UnsupportedCipher,
 }
 
 impl std::error::Error for Error {

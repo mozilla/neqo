@@ -7,6 +7,7 @@ pub mod aead;
 mod agent;
 mod agentio;
 pub mod constants;
+pub mod ecb;
 mod err;
 pub mod hkdf;
 mod prio;
@@ -17,7 +18,7 @@ mod ssl;
 pub use self::agent::{Agent, Client, HandshakeState, Record, RecordList, SecretAgent, Server};
 pub use self::constants::*;
 pub use self::err::{Error, Res};
-pub use self::p11::SymKey;
+pub use self::p11::{SymKey, SymKeyTarget};
 pub use self::secrets::SecretDirection;
 
 use std::ffi::CString;

@@ -49,7 +49,7 @@ impl Secrets {
     }
 
     pub fn register(&mut self, fd: *mut PRFileDesc) -> Res<()> {
-        let p: *const c_void = self as *const Secrets as *const _;
+        let p = self as *const Secrets as *const c_void;
         let rv =
             unsafe { SSL_SecretCallback(fd, Some(Secrets::secret_available), p as *mut c_void) };
         result::result(rv)

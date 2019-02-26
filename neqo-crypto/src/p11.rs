@@ -51,8 +51,14 @@ scoped_ptr!(PrivateKey, SECKEYPrivateKey, SECKEY_DestroyPrivateKey);
 scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey);
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
+#[derive(Clone, Copy, Debug)]
+pub enum SymKeyTarget {
+    Hkdf(Cipher),
+    Ecb(Cipher),
+}
+
 impl SymKey {
-    pub fn import(cipher: Cipher, buf: &[u8]) -> Res<SymKey> {
+    pub fn import(target: SymKeyTarget, buf: &[u8]) -> Res<SymKey> {
         let mut item = SECItem {
             type_: SECItemType::siBuffer,
             data: buf.as_ptr() as *mut c_uchar,
@@ -63,17 +69,24 @@ impl SymKey {
             None => return Err(Error::InternalError),
             Some(p) => Slot::new(p),
         };
-        let mech = match cipher {
-            TLS_AES_128_GCM_SHA256 | TLS_CHACHA20_POLY1305_SHA256 => CKM_NSS_HKDF_SHA256,
-            TLS_AES_256_GCM_SHA384 => CKM_NSS_HKDF_SHA384,
-            _ => return Err(Error::InternalError),
+        let mech = match target {
+            SymKeyTarget::Hkdf(cipher) => match cipher {
+                TLS_AES_128_GCM_SHA256 | TLS_CHACHA20_POLY1305_SHA256 => CKM_NSS_HKDF_SHA256,
+                TLS_AES_256_GCM_SHA384 => CKM_NSS_HKDF_SHA384,
+                _ => return Err(Error::InternalError),
+            },
+            SymKeyTarget::Ecb(cipher) => match cipher {
+                TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => CKM_AES_ECB,
+                TLS_CHACHA20_POLY1305_SHA256 => return Err(Error::UnsupportedCipher),
+                _ => return Err(Error::InternalError),
+            },
         };
         let key_ptr = unsafe {
             PK11_ImportSymKey(
                 *slot,
-                mech as u64,
+                mech as CK_ULONG,
                 PK11Origin::PK11_OriginUnwrap,
-                CKA_DERIVE as u64,
+                CKA_DERIVE as CK_ULONG,
                 &mut item,
                 null_mut(),
             )
