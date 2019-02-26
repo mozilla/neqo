@@ -11,6 +11,7 @@ macro_rules! matches {
 
 // Map logging to println for now until we can figure out how to get it in
 // unit tests without putting env_logger::try_init() at the top of every test.
+#[allow(dead_code)]
 enum Level {
     Error,
     Warn,

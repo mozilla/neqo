@@ -1,6 +1,5 @@
-use crate::aead::Aead;
 use crate::constants::*;
-use crate::err::{Error, Res};
+use crate::err::Res;
 use crate::p11::{PK11SymKey, PK11_ReferenceSymKey, SymKey};
 use crate::result;
 use crate::ssl::{PRFileDesc, SSLSecretCallback, SSLSecretDirection};
