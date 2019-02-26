@@ -1,10 +1,5 @@
-agent state (not connected/writeable/readable/broken)
 custom extensions
-set ciphersuites
-read/write
-early data -- laters
-secret export -- NSS changes pending
-current aead -- needs NSS changes
-current kdf -- needs NSS changes
-external session ticket
 certificate examination
+external session ticket
+early data
+read/write
