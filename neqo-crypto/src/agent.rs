@@ -12,7 +12,7 @@ use crate::ssl;
 use std::ffi::CString;
 use std::mem;
 use std::ops::{Deref, DerefMut};
-use std::os::raw::c_void;
+use std::os::raw::{c_uint, c_void};
 use std::ptr::{null, null_mut, NonNull};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -29,6 +29,7 @@ pub enum HandshakeState {
 pub struct SecretAgentInfo {
     ver: Version,
     cipher: Cipher,
+    group: Group,
     early_data: bool,
 }
 
@@ -46,6 +47,7 @@ impl SecretAgentInfo {
         self.ver = info.protocolVersion as Version;
         self.cipher = info.cipherSuite as Cipher;
         self.early_data = info.earlyDataAccepted != 0;
+        self.group = info.keaGroup as Group;
         Ok(())
     }
 
@@ -54,6 +56,9 @@ impl SecretAgentInfo {
     }
     pub fn cipher_suite(&self) -> Cipher {
         self.cipher
+    }
+    pub fn key_exchange(&self) -> Group {
+        self.group
     }
     pub fn early_data_accepted(&self) -> bool {
         self.early_data
@@ -169,6 +174,18 @@ impl SecretAgent {
         Ok(())
     }
 
+    pub fn set_groups(&mut self, groups: &[Group]) -> Res<()> {
+        // SSLNamedGroup is a different size to Group, so copy one by one.
+        let group_vec: Vec<_> = groups
+            .iter()
+            .map(|&g| g as ssl::SSLNamedGroup::Type)
+            .collect();
+
+        let ptr = group_vec.as_slice().as_ptr();
+        let rv = unsafe { ssl::SSL_NamedGroupConfig(self.fd, ptr, group_vec.len() as c_uint) };
+        result::result(rv)
+    }
+
     pub fn set_option(&mut self, opt: ssl::Opt, value: bool) -> Res<()> {
         result::result(unsafe { ssl::SSL_OptionSet(self.fd, opt.as_int(), opt.map_enabled(value)) })
     }
@@ -241,8 +258,9 @@ impl SecretAgent {
             // Within this scope, _h maintains a mutable reference to self.io.
             let _h = self.io.wrap(input);
             match self.st {
-                HandshakeState::Authenticated =>
-                    unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) },
+                HandshakeState::Authenticated => unsafe {
+                    ssl::SSL_AuthCertificateComplete(self.fd, 0)
+                },
                 _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
             }
         };

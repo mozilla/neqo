@@ -1,7 +1,5 @@
 use crate::err::Res;
-use crate::p11::{
-    PK11SymKey, PK11_Encrypt, PK11_GetMechanism, SymKey,
-};
+use crate::p11::{PK11SymKey, PK11_Encrypt, PK11_GetMechanism, SymKey};
 use crate::result;
 
 use std::os::raw::c_uint;

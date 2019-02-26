@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use neqo_crypto::aead::Aead;
 use neqo_crypto::constants::*;
 use neqo_crypto::{init_db, SymKey, SymKeyTarget};

@@ -14,3 +14,9 @@ pub const TLS_AES_256_GCM_SHA384: Cipher = ciphers::TLS_AES_256_GCM_SHA384 as Ci
 pub const TLS_CHACHA20_POLY1305_SHA256: Cipher = ciphers::TLS_CHACHA20_POLY1305_SHA256 as Cipher;
 
 pub type Epoch = u16;
+
+pub type Group = u16;
+pub const TLS_GRP_EC_SECP256R1: Group = ssl::SSLNamedGroup::ssl_grp_ec_secp256r1 as Group;
+pub const TLS_GRP_EC_SECP384R1: Group = ssl::SSLNamedGroup::ssl_grp_ec_secp384r1 as Group;
+pub const TLS_GRP_EC_SECP521R1: Group = ssl::SSLNamedGroup::ssl_grp_ec_secp521r1 as Group;
+pub const TLS_GRP_EC_X25519: Group = ssl::SSLNamedGroup::ssl_grp_ec_curve25519 as Group;

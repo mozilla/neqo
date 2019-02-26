@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 #[macro_use]
 mod exp;
 #[macro_use]
@@ -27,10 +29,7 @@ use std::ptr::null;
 use std::sync::Once;
 
 mod nss {
-    #![allow(dead_code)]
     #![allow(non_upper_case_globals)]
-    #![allow(non_camel_case_types)]
-    #![allow(non_snake_case)]
 
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }

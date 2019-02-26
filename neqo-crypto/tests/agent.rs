@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use neqo_crypto::*;
 
 use std::mem;
@@ -125,9 +127,25 @@ fn chacha_client() {
     init_db("./db");
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
-    client.enable_ciphers(&[TLS_CHACHA20_POLY1305_SHA256]).expect("ciphers set");
+    client
+        .enable_ciphers(&[TLS_CHACHA20_POLY1305_SHA256])
+        .expect("ciphers set");
 
     connect(&mut client, &mut server);
 
     assert_eq!(client.info().cipher_suite(), TLS_CHACHA20_POLY1305_SHA256);
+}
+
+#[test]
+fn p256_server() {
+    init_db("./db");
+    let mut client = Client::new("server.example").expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server
+        .set_groups(&[TLS_GRP_EC_SECP256R1])
+        .expect("groups set");
+
+    connect(&mut client, &mut server);
+
+    assert_eq!(client.info().key_exchange(), TLS_GRP_EC_SECP256R1);
 }

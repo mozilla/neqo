@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use neqo_crypto::constants::*;
 use neqo_crypto::hkdf;
 use neqo_crypto::{init_db, SymKey, SymKeyTarget};

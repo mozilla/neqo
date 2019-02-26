@@ -26,6 +26,7 @@ functions = [
     "SSL_GetPreliminaryChannelInfo",
     "SSL_ForceHandshake",
     "SSL_ImportFD",
+    "SSL_NamedGroupConfig",
     "SSL_OptionGet",
     "SSL_OptionSet",
     "SSL_ResetHandshake",
@@ -164,8 +165,9 @@ types = ["PRIOMethods"]
 functions = [
     "PR_CreateIOLayerStub",
     "PR_GetUniqueIdentity",
-    "PR_Read",
-    "PR_Write",
+    # These aren't being used yet.
+    # "PR_Read",
+    # "PR_Write",
 ]
 variables = [
     "PR_AF_INET",

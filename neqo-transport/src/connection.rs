@@ -119,7 +119,14 @@ impl Connection {
         c
     }
 
-    pub fn new(r: Role, agent: Agent) -> Connection {
+    pub fn new(r: Role, mut agent: Agent) -> Connection {
+        agent
+            .enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])
+            .unwrap();
+        agent
+            .set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)
+            .unwrap();
+
         let mut c = Connection {
             version: QUIC_VERSION,
             local_addr: None,
