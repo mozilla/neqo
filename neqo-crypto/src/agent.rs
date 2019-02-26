@@ -157,7 +157,7 @@ impl SecretAgent {
         let all_ciphers = unsafe { ssl::SSL_GetImplementedCiphers() };
         let cipher_count = unsafe { ssl::SSL_GetNumImplementedCiphers() } as usize;
         for i in 0..cipher_count {
-            let p = all_ciphers.wrapping_add(i * mem::size_of::<Cipher>());
+            let p = all_ciphers.wrapping_add(i);
             let rv = unsafe { ssl::SSL_CipherPrefSet(self.fd, *p as i32, false as ssl::PRBool) };
             result::result(rv)?;
         }

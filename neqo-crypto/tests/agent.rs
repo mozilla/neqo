@@ -1,5 +1,7 @@
 use neqo_crypto::*;
 
+use std::mem;
+
 const NOW: u64 = 20;
 
 #[test]
@@ -101,4 +103,31 @@ fn handshake_raw() {
     let server_records = forward_records(&mut server, client_records).expect("finish");
     assert_eq!(server_records.len(), 0);
     assert_eq!(*server.state(), HandshakeState::Complete);
+}
+
+fn connect(client: &mut SecretAgent, server: &mut SecretAgent) {
+    let mut a = client;
+    let mut b = server;
+    let (_, mut records) = a.handshake_raw(NOW, None).unwrap();
+    while *a.state() != HandshakeState::Complete && *b.state() != HandshakeState::Complete {
+        records = forward_records(&mut b, records).unwrap();
+        if *b.state() == HandshakeState::AuthenticationPending {
+            b.authenticated();
+            let (_, rec) = b.handshake_raw(NOW, None).unwrap();
+            records = rec;
+        }
+        b = mem::replace(&mut a, b);
+    }
+}
+
+#[test]
+fn chacha_client() {
+    init_db("./db");
+    let mut client = Client::new("server.example").expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    client.enable_ciphers(&[TLS_CHACHA20_POLY1305_SHA256]).expect("ciphers set");
+
+    connect(&mut client, &mut server);
+
+    assert_eq!(client.info().cipher_suite(), TLS_CHACHA20_POLY1305_SHA256);
 }
