@@ -156,7 +156,11 @@ impl AgentIoInput {
     // Take the data provided as input and provide it to the TLS stack.
     fn read_input(&mut self, buf: *mut u8, count: usize) -> Res<usize> {
         let amount = min(self.available, count);
-        AgentIo::blocked(amount)?;
+        if amount == 0 {
+            unsafe { PR_SetError(NSPRErrorCodes::PR_WOULD_BLOCK_ERROR, 0) };
+            return Err(Error::NoDataAvailable);
+        }
+
         let src = unsafe { std::slice::from_raw_parts(self.input, amount) };
         let dst = unsafe { std::slice::from_raw_parts_mut(buf, amount) };
         dst.copy_from_slice(&src);
@@ -173,6 +177,7 @@ impl AgentIoInput {
 
 #[derive(Debug)]
 pub struct AgentIo {
+    // input collects the input we might provide to TLS.
     input: AgentIoInput,
 
     // output contains data that is written by TLS.
@@ -198,16 +203,6 @@ impl AgentIo {
     pub fn wrap<'a: 'c, 'b: 'c, 'c>(&'a mut self, input: &'b [u8]) -> AgentIoInputContext<'c> {
         assert_eq!(self.output.len(), 0);
         self.input.wrap(input)
-    }
-
-    // Signal that we're blocked.
-    fn blocked(amount: usize) -> Res<()> {
-        if amount == 0 {
-            unsafe { PR_SetError(NSPRErrorCodes::PR_WOULD_BLOCK_ERROR, 0) };
-            Err(Error::NoDataAvailable)
-        } else {
-            Ok(())
-        }
     }
 
     // Stage output from TLS into the output buffer.
