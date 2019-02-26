@@ -16,6 +16,7 @@ types = [
 functions = [
     "SSL_AuthCertificateComplete",
     "SSL_AuthCertificateHook",
+    "SSL_CipherPrefSet",
     "SSL_ConfigServerCert",
     "SSL_ConfigServerSessionIDCache",
     "SSL_GetChannelInfo",

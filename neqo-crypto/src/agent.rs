@@ -144,7 +144,7 @@ impl SecretAgent {
         result::result(unsafe { ssl::SSL_ResetHandshake(self.fd, is_server as ssl::PRBool) })
     }
 
-    pub fn set_version_range(&self, min: Version, max: Version) -> Res<()> {
+    pub fn set_version_range(&mut self, min: Version, max: Version) -> Res<()> {
         let range = ssl::SSLVersionRange {
             min: min as ssl::PRUint16,
             max: max as ssl::PRUint16,
@@ -152,12 +152,28 @@ impl SecretAgent {
         result::result(unsafe { ssl::SSL_VersionRangeSet(self.fd, &range) })
     }
 
-    pub fn set_option(&self, opt: ssl::Opt, value: bool) -> Res<()> {
+    pub fn enable_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
+        let all_ciphers = unsafe { ssl::SSL_GetImplementedCiphers() };
+        let cipher_count = unsafe { ssl::SSL_GetNumImplementedCiphers() } as usize;
+        for i in 0..cipher_count {
+            let p = all_ciphers.wrapping_add(i * mem::size_of::<Cipher>());
+            let rv = unsafe { ssl::SSL_CipherPrefSet(self.fd, *p as i32, false as ssl::PRBool) };
+            result::result(rv)?;
+        }
+
+        for c in ciphers {
+            let rv = unsafe { ssl::SSL_CipherPrefSet(self.fd, *c as i32, true as ssl::PRBool) };
+            result::result(rv)?;
+        }
+        Ok(())
+    }
+
+    pub fn set_option(&mut self, opt: ssl::Opt, value: bool) -> Res<()> {
         result::result(unsafe { ssl::SSL_OptionSet(self.fd, opt.as_int(), opt.map_enabled(value)) })
     }
 
     // Common configuration.
-    pub fn configure(&self) -> Res<()> {
+    pub fn configure(&mut self) -> Res<()> {
         self.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
         self.set_option(ssl::Opt::Locking, false)?;
         self.set_option(ssl::Opt::Tickets, false)?;

@@ -45,6 +45,9 @@ fn handshake() {
     let (state, bytes) = server.handshake(NOW, &bytes[..]).expect("finish");
     assert_eq!(bytes.len(), 0);
     assert_eq!(state, HandshakeState::Complete);
+
+    assert_eq!(TLS_VERSION_1_3, server.info().version());
+    assert_eq!(TLS_AES_128_GCM_SHA256, server.info().cipher_suite());
 }
 
 fn forward_records(agent: &mut SecretAgent, records_in: RecordList) -> Res<RecordList> {
