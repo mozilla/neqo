@@ -34,6 +34,9 @@ fn handshake() {
     assert_eq!(bytes.len(), 0);
     assert_eq!(state, HandshakeState::AuthenticationPending);
 
+    client.authenticated();
+    assert_eq!(*client.state(), HandshakeState::Authenticated);
+
     // Calling handshake() again indicates that we're happy with the cert.
     let (state, bytes) = client.handshake(NOW, &[]).expect("send CF");
     assert!(bytes.len() > 0);
@@ -86,6 +89,9 @@ fn handshake_raw() {
     let client_records = forward_records(&mut client, server_records).expect("send CF");
     assert_eq!(client_records.len(), 0);
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
+
+    client.authenticated();
+    assert_eq!(*client.state(), HandshakeState::Authenticated);
 
     // Calling handshake() again indicates that we're happy with the cert.
     let (state, client_records) = client.handshake_raw(NOW, None).expect("send CF");

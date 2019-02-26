@@ -332,7 +332,8 @@ impl Connection {
             // TODO(ekr@rtfm.com): IMPORTANT: This overrides
             // authentication and so is fantastically dangerous.
             // Fix before shipping.
-            qwarn!(self, "Re-running handshake after AuthenticationPending");
+            qwarn!(self, "marking connection as authenticated without checking");
+            self.tls.authenticated();
             m = self.tls.handshake_raw(now, None);
         }
         match m {

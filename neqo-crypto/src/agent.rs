@@ -20,6 +20,7 @@ pub enum HandshakeState {
     New,
     InProgress,
     AuthenticationPending,
+    Authenticated,
     Complete,
     Failed(Error),
 }
@@ -196,6 +197,15 @@ impl SecretAgent {
         &self.inf
     }
 
+    /// Call this function to mark the peer as authenticated.
+    /// Only call this function if handshake/handshake_raw returns
+    /// HandshakeState::AuthenticationPending, or it will panic.
+    pub fn authenticated(&mut self) {
+        assert_eq!(self.st, HandshakeState::AuthenticationPending);
+        *self.auth_required = false;
+        self.st = HandshakeState::Authenticated;
+    }
+
     fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
         self.st = match result::result_or_blocked(rv)? {
             true => match *self.auth_required {
@@ -230,11 +240,9 @@ impl SecretAgent {
         let rv = {
             // Within this scope, _h maintains a mutable reference to self.io.
             let _h = self.io.wrap(input);
-            match *self.auth_required {
-                true => {
-                    *self.auth_required = false;
-                    unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) }
-                }
+            match self.st {
+                HandshakeState::Authenticated =>
+                    unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) },
                 _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
             }
         };
@@ -268,8 +276,7 @@ impl SecretAgent {
         }
 
         // Fire off any authentication we might need to complete.
-        if *self.auth_required {
-            *self.auth_required = false;
+        if self.st == HandshakeState::Authenticated {
             let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
             println!("SSL_AuthCertificateComplete: {:?}", rv);
             self.update_state(rv)?;
