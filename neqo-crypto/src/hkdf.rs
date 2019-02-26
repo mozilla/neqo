@@ -14,10 +14,12 @@ experimental_api!(SSL_HkdfExtract(
     ikm: *mut PK11SymKey,
     prk: *mut *mut PK11SymKey,
 ));
-experimental_api!(SSL_HkdfDeriveSecret(
+experimental_api!(SSL_HkdfExpandLabel(
     version: Version,
     cipher: Cipher,
     prk: *mut PK11SymKey,
+    handshake_hash: *const u8,
+    handshake_hash_len: c_uint,
     label: *const c_char,
     label_len: c_uint,
     secret: *mut *mut PK11SymKey,
@@ -33,20 +35,26 @@ pub fn extract(version: Version, cipher: Cipher, salt: &SymKey, ikm: &SymKey) ->
     }
 }
 
-pub fn derive_secret<S: Into<String>>(
+pub fn expand_label<S: Into<String>>(
     version: Version,
     cipher: Cipher,
     prk: &SymKey,
+    handshake_hash: &[u8],
     label: S,
 ) -> Res<SymKey> {
     let label_str = label.into();
     let l = label_str.as_bytes();
     let mut secret: *mut PK11SymKey = null_mut();
+
+    // Note that this doesn't allow for passing null() for the handshake hash.
+    // A zero-length slice produces an identical result.
     let rv = unsafe {
-        SSL_HkdfDeriveSecret(
+        SSL_HkdfExpandLabel(
             version,
             cipher,
             **prk,
+            handshake_hash.as_ptr(),
+            handshake_hash.len() as c_uint,
             l.as_ptr() as *const c_char,
             l.len() as c_uint,
             &mut secret,
