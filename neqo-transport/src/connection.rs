@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
 use std::ops;
+use std::time::Instant;
 
 use rand::prelude::*;
 
@@ -46,7 +47,7 @@ pub enum TxMode {
     Pto,
 }
 
-type FrameGeneratorFn = fn(&mut Connection, u64, u16, TxMode, usize) -> Option<Frame>;
+type FrameGeneratorFn = fn(&mut Connection, Epoch, TxMode, usize) -> Option<Frame>;
 struct FrameGenerator(FrameGeneratorFn);
 
 impl Debug for FrameGenerator {
@@ -85,11 +86,11 @@ pub struct Connection {
     scid: Vec<u8>,
     dcid: Vec<u8>,
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
-    send_epoch: u16,
-    recv_epoch: u16,
+    send_epoch: Epoch,
+    recv_epoch: Epoch,
     crypto_streams: [CryptoStream; 4],
     generators: Vec<FrameGenerator>,
-    deadline: u64,
+    deadline: Instant,
     max_data: u64,
     max_streams: u64,
     highest_stream: Option<u64>,
@@ -148,7 +149,7 @@ impl Connection {
                 CryptoStream::default(),
             ],
             generators: vec![FrameGenerator(generate_crypto_frames)],
-            deadline: 0,
+            deadline: Instant::now(),
             max_data: 0,
             max_streams: 0,
             highest_stream: None,
@@ -167,12 +168,12 @@ impl Connection {
         c
     }
 
-    pub fn process(&mut self, d: Option<Datagram>, now: u64) -> Res<(Option<Datagram>, u64)> {
+    pub fn process(&mut self, d: Option<Datagram>) -> Res<(Option<Datagram>, u64)> {
         if let Some(dgram) = d {
-            self.input(dgram, now)?;
+            self.input(dgram)?;
         }
 
-        if now >= self.deadline {
+        if Instant::now() >= self.deadline {
             // Timer expired.
             match self.state {
                 State::Init => {
@@ -188,12 +189,12 @@ impl Connection {
             }
         }
 
-        let dgram = self.output(now)?;
+        let dgram = self.output()?;
 
         Ok((dgram, 0)) // TODO(ekr@rtfm.com): When to call back next.
     }
 
-    pub fn input(&mut self, d: Datagram, now: u64) -> Res<()> {
+    pub fn input(&mut self, d: Datagram) -> Res<()> {
         let mut hdr = decode_packet_hdr(self, &d.d)?;
 
         // TODO(ekr@rtfm.com): Check for bogus versions and reject.
@@ -252,7 +253,7 @@ impl Connection {
 
     // Iterate through all the generators, inserting as many frames as will
     // fit.
-    fn output(&mut self, now: u64) -> Res<Option<Datagram>> {
+    fn output(&mut self) -> Res<Option<Datagram>> {
         let mut d = Data::default();
         let len = self.generators.len();
 
@@ -263,7 +264,6 @@ impl Connection {
                     // TODO(ekr@rtfm.com): Fix TxMode
                     if let Some(f) = self.generators[i](
                         self,
-                        now,
                         epoch as u16,
                         TxMode::Normal,
                         self.pmtu - d.remaining(),
@@ -290,7 +290,7 @@ impl Connection {
                     dcid: ConnectionId(self.dcid.clone()),
                     scid: Some(ConnectionId(self.scid.clone())),
                     pn: 0, // TODO(ekr@rtfm.com): Implement
-                    epoch: epoch as u64,
+                    epoch: epoch,
                     hdr_len: 0,
                     body_len: 0,
                 };
@@ -315,12 +315,12 @@ impl Connection {
     }
 
     fn client_start(&mut self) -> Res<()> {
-        self.handshake(1, 0, None)?;
+        self.handshake(0, None)?;
         self.set_state(State::WaitInitial);
         Ok(())
     }
 
-    fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
+    fn handshake(&mut self, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         qdebug!("Handshake epoch={} data={:0x?}", epoch, data);
         let mut rec: Option<Record> = None;
 
@@ -333,7 +333,7 @@ impl Connection {
             });
         }
 
-        let mut m = self.tls.handshake_raw(now, rec);
+        let mut m = self.tls.handshake_raw(rec);
 
         if matches!(m, Ok((HandshakeState::AuthenticationPending, _))) {
             // TODO(ekr@rtfm.com): IMPORTANT: This overrides
@@ -341,7 +341,7 @@ impl Connection {
             // Fix before shipping.
             qwarn!(self, "marking connection as authenticated without checking");
             self.tls.authenticated();
-            m = self.tls.handshake_raw(now, None);
+            m = self.tls.handshake_raw(None);
         }
         match m {
             Err(_) => {
@@ -399,7 +399,7 @@ impl Connection {
                     // a length parameter.
                     let read = rx.read(&mut buf)?;
                     qdebug!("Read {} bytes", read);
-                    self.handshake(0, epoch, Some(&buf[0..(read as usize)]))?;
+                    self.handshake(epoch, Some(&buf[0..(read as usize)]))?;
                 }
             }
             Frame::NewToken { token } => {} // TODO(agrover@mozilla.com): stick the new token somewhere
@@ -517,7 +517,7 @@ impl PacketCtx for Connection {
     fn aead_decrypt(
         &self,
         _pn: PacketNumber,
-        _epoch: u64,
+        _epoch: Epoch,
         hdr: &[u8],
         body: &[u8],
     ) -> Res<Vec<u8>> {
@@ -539,7 +539,7 @@ impl PacketCtx for Connection {
     fn aead_encrypt(
         &self,
         _pn: PacketNumber,
-        _epoch: u64,
+        _epoch: Epoch,
         hdr: &[u8],
         body: &[u8],
     ) -> Res<Vec<u8>> {
@@ -562,14 +562,13 @@ impl PacketDecoder for Connection {
 
 fn generate_crypto_frames(
     conn: &mut Connection,
-    now: u64,
     epoch: u16,
     mode: TxMode,
     remaining: usize,
 ) -> Option<Frame> {
     if let Some((offset, data)) = conn.crypto_streams[epoch as usize]
         .tx
-        .next_bytes(mode, now, remaining)
+        .next_bytes(mode, remaining)
     {
         return Some(Frame::Crypto {
             offset,

@@ -1,6 +1,7 @@
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use std::time::Instant;
 
 use crate::connection::TxMode;
 use crate::Error;
@@ -41,7 +42,7 @@ pub trait Sendable: Debug {
 #[derive(Debug, PartialEq)]
 enum TxChunkState {
     Unsent,
-    Sent(u64),
+    Sent(Instant),
     Lost,
 }
 
@@ -80,19 +81,19 @@ impl TxBuffer {
         self.chunks.iter().position(|c| c.state == state)
     }
 
-    pub fn next_bytes(&mut self, _mode: TxMode, now: u64, l: usize) -> Option<(u64, &[u8])> {
+    pub fn next_bytes(&mut self, _mode: TxMode, l: usize) -> Option<(u64, &[u8])> {
         // First try to find some unsent stuff.
         if let Some(i) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
             let c = &mut self.chunks[i];
             assert!(c.data.len() <= l); // We don't allow partial writes yet.
-            c.state = TxChunkState::Sent(now);
+            c.state = TxChunkState::Sent(Instant::now());
             return Some((c.offset, &c.data));
         }
         // How about some lost stuff.
         if let Some(i) = self.find_first_chunk_by_state(TxChunkState::Lost) {
             let c = &mut self.chunks[i];
             assert!(c.data.len() <= l); // We don't allow partial writes yet.
-            c.state = TxChunkState::Sent(now);
+            c.state = TxChunkState::Sent(Instant::now());
             return Some((c.offset, &c.data));
         }
 

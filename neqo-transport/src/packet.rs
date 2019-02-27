@@ -6,6 +6,8 @@ use ::derive_more::*;
 use super::data::*;
 use super::*;
 
+use crate::nss_stub::Epoch;
+
 const PACKET_TYPE_INITIAL: u8 = 0x0;
 const PACKET_TYPE_0RTT: u8 = 0x01;
 const PACKET_TYPE_HANDSHAKE: u8 = 0x2;
@@ -58,7 +60,7 @@ pub struct PacketHdr {
     pub dcid: ConnectionId,
     pub scid: Option<ConnectionId>,
     pub pn: PacketNumber,
-    pub epoch: u64,
+    pub epoch: Epoch,
     pub hdr_len: usize,
     pub body_len: usize,
 }
@@ -71,8 +73,10 @@ pub trait PacketCtx {
     fn pn_length(&self, pn: PacketNumber) -> usize;
     fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]>;
     fn decode_pn(&self, pn: u64) -> Res<PacketNumber>;
-    fn aead_decrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
-    fn aead_encrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
+    fn aead_decrypt(&self, pn: PacketNumber, epoch: Epoch, hdr: &[u8], body: &[u8])
+        -> Res<Vec<u8>>;
+    fn aead_encrypt(&self, pn: PacketNumber, epoch: Epoch, hdr: &[u8], body: &[u8])
+        -> Res<Vec<u8>>;
 }
 
 fn encode_cidl_half(l: usize) -> u8 {
@@ -378,7 +382,7 @@ mod tests {
         fn aead_decrypt(
             &self,
             pn: PacketNumber,
-            epoch: u64,
+            epoch: Epoch,
             hdr: &[u8],
             body: &[u8],
         ) -> Res<Vec<u8>> {
@@ -400,7 +404,7 @@ mod tests {
         fn aead_encrypt(
             &self,
             pn: PacketNumber,
-            epoch: u64,
+            epoch: Epoch,
             hdr: &[u8],
             body: &[u8],
         ) -> Res<Vec<u8>> {
