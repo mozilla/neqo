@@ -34,7 +34,7 @@ pub trait Sendable: Debug {
     /// Send data on the stream. Returns bytes sent.
     fn send(&mut self, buf: &[u8]) -> u64;
 
-    /// Number of bytes that is queued for sending.
+    /// Data is ready for sending
     fn send_data_ready(&self) -> bool;
 }
 
@@ -81,18 +81,18 @@ impl TxBuffer {
         self.chunks.iter().position(|c| c.state == state)
     }
 
-    pub fn next_bytes(&mut self, _mode: TxMode, l: usize) -> Option<(u64, &[u8])> {
+    pub fn next_bytes(&mut self, _mode: TxMode, avail: usize) -> Option<(u64, &[u8])> {
         // First try to find some unsent stuff.
         if let Some(i) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
             let c = &mut self.chunks[i];
-            assert!(c.data.len() <= l); // We don't allow partial writes yet.
+            assert!(c.data.len() <= avail); // We don't allow partial writes yet.
             c.state = TxChunkState::Sent(Instant::now());
             return Some((c.offset, &c.data));
         }
         // How about some lost stuff.
         if let Some(i) = self.find_first_chunk_by_state(TxChunkState::Lost) {
             let c = &mut self.chunks[i];
-            assert!(c.data.len() <= l); // We don't allow partial writes yet.
+            assert!(c.data.len() <= avail); // We don't allow partial writes yet.
             c.state = TxChunkState::Sent(Instant::now());
             return Some((c.offset, &c.data));
         }
@@ -348,6 +348,8 @@ impl SendStream {
 impl Sendable for SendStream {
     /// Enqueue some bytes to send
     fn send(&mut self, buf: &[u8]) -> u64 {
+        // TODO(agrover@mozilla.com): limit buffered amount based on recv
+        // buffer space
         self.tx_buffer.send(buf)
     }
 

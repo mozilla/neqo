@@ -21,6 +21,8 @@ struct Packet(Vec<u8>);
 
 const QUIC_VERSION: u32 = 0xff000012;
 
+const NUM_EPOCHS: Epoch = 4;
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Role {
     Client,
@@ -168,8 +170,10 @@ impl Connection {
         c
     }
 
-    pub fn process(&mut self, d: Option<Datagram>) -> Res<(Option<Datagram>, u64)> {
-        if let Some(dgram) = d {
+    /// Call in to process activity on the connection. Either new packets have
+    /// arrived or a timeout has expired (or both).
+    pub fn process(&mut self, d: Vec<Datagram>) -> Res<Vec<Datagram>> {
+        for dgram in d {
             self.input(dgram)?;
         }
 
@@ -189,59 +193,68 @@ impl Connection {
             }
         }
 
-        let dgram = self.output()?;
+        let out_dgrams = self.output()?;
 
-        Ok((dgram, 0)) // TODO(ekr@rtfm.com): When to call back next.
+        Ok(out_dgrams) // TODO(ekr@rtfm.com): When to call back next.
     }
 
     pub fn input(&mut self, d: Datagram) -> Res<()> {
-        let mut hdr = decode_packet_hdr(self, &d.d)?;
+        let mut slc = &d.d[..];
 
-        // TODO(ekr@rtfm.com): Check for bogus versions and reject.
-        // TODO(ekr@rtfm.com): Set up masking.
+        // Handle each packet in the datagram
+        while !slc.is_empty() {
+            let mut hdr = decode_packet_hdr(self, slc)?;
 
-        match self.state {
-            State::Init => {
-                qinfo!(self, "Received message while in Init state");
-                return Err(Error::ErrUnexpectedMessage);
-            }
-            State::WaitInitial => {
-                let dcid = &hdr.scid.as_ref().unwrap().0;
-                if self.role == Role::Server {
-                    if dcid.len() < 8 {
-                        qwarn!(self, "Peer CID is too short");
-                        return Err(Error::ErrInvalidPacket);
-                    }
-                    self.remote_addr = Some(d.src);
+            // TODO(ekr@rtfm.com): Check for bogus versions and reject.
+            // TODO(ekr@rtfm.com): Set up masking.
+
+            match self.state {
+                State::Init => {
+                    qinfo!(self, "Received message while in Init state");
+                    return Err(Error::ErrUnexpectedMessage);
                 }
+                State::WaitInitial => {
+                    let dcid = &hdr.scid.as_ref().unwrap().0;
+                    if self.role == Role::Server {
+                        if dcid.len() < 8 {
+                            qwarn!(self, "Peer CID is too short");
+                            return Err(Error::ErrInvalidPacket);
+                        }
+                        self.remote_addr = Some(d.src);
+                    }
 
-                // Imprint on the remote parameters.
-                self.dcid = dcid.clone();
+                    // Imprint on the remote parameters.
+                    self.dcid = dcid.clone();
+                }
+                State::Handshaking => {
+                    // No-op.
+                }
+                _ => unimplemented!(),
             }
-            State::Handshaking => {
-                // No-op.
+
+            qdebug!(self, "Received unverified packet {:?}", hdr);
+
+            let body = decrypt_packet(self, &mut hdr, slc)?;
+
+            // OK, we have a valid packet.
+
+            // TODO(ekr@rtfm.com): Check for duplicates.
+            // TODO(ekr@rtfm.com): Mark this packet received.
+            // TODO(ekr@rtfm.com): Filter for valid for this epoch.
+
+            if matches!(self.state, State::WaitInitial) {
+                self.set_state(State::Handshaking);
             }
-            _ => unimplemented!(),
-        }
 
-        qdebug!(self, "Received unverified packet {:?}", hdr);
+            let mut d = Data::from_slice(&body);
 
-        let body = decrypt_packet(self, &mut hdr, &d.d)?;
+            // Handle each frame in the packet
+            while d.remaining() > 0 {
+                let f = decode_frame(&mut d)?;
+                self.process_input_frame(hdr.epoch, f)?;
+            }
 
-        // OK, we have a valid packet.
-
-        // TODO(ekr@rtfm.com): Check for duplicates.
-        // TODO(ekr@rtfm.com): Mark this packet received.
-        // TODO(ekr@rtfm.com): Filter for valid for this epoch.
-
-        if matches!(self.state, State::WaitInitial) {
-            self.set_state(State::Handshaking);
-        }
-
-        let mut d = Data::from_slice(&body);
-        while d.remaining() > 0 {
-            let f = decode_frame(&mut d)?;
-            self.process_input_frame(hdr.epoch as u16, f)?;
+            slc = &slc[hdr.hdr_len + hdr.encrypted_body_len()..];
         }
 
         Ok(())
@@ -253,65 +266,80 @@ impl Connection {
 
     // Iterate through all the generators, inserting as many frames as will
     // fit.
-    fn output(&mut self) -> Res<Option<Datagram>> {
-        let mut d = Data::default();
-        let len = self.generators.len();
+    fn output(&mut self) -> Res<Vec<Datagram>> {
+        let mut out_packets = Vec::new();
 
-        // TOOD(ekr@rtfm.com): Be smarter about what epochs we actually have.
-        for epoch in 0..4 {
-            for i in 0..len {
+        // TODO(ekr@rtfm.com): Be smarter about what epochs we actually have.
+
+        // Frames for different epochs must go in different packets, but then these
+        // packets can go in a single datagram
+        for epoch in 0..NUM_EPOCHS {
+            let mut d = Data::default();
+            for i in 0..self.generators.len() {
+                // TODO(ekr@rtfm.com): Fix TxMode
+
+                while let Some(frame) =
+                    self.generators[i](self, epoch, TxMode::Normal, self.pmtu - d.remaining())
                 {
-                    // TODO(ekr@rtfm.com): Fix TxMode
-                    if let Some(f) = self.generators[i](
-                        self,
-                        epoch as u16,
-                        TxMode::Normal,
-                        self.pmtu - d.remaining(),
-                    ) {
-                        f.marshal(&mut d)?;
-                    }
+                    frame.marshal(&mut d)?;
+                }
+
+                if d.remaining() > 0 {
+                    qdebug!(self, "Need to send a packet of size {}", d.remaining());
+
+                    let mut hdr = PacketHdr::new(
+                        0,
+                        match epoch {
+                            // TODO(ekr@rtfm.com): Retry token
+                            0 => PacketType::Initial(Vec::new()),
+                            1 => PacketType::ZeroRTT,
+                            2 => PacketType::Handshake,
+                            3 => PacketType::Short,
+                            _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
+                        },
+                        Some(self.version),
+                        ConnectionId(self.dcid.clone()),
+                        Some(ConnectionId(self.scid.clone())),
+                        0, // TODO(ekr@rtfm.com): Implement PN
+                        epoch,
+                        0,
+                    );
+
+                    let packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
+                    out_packets.push(packet);
+                    // TODO(ekr@rtfm.com): Pad the Client Initial.
+
+                    // TODO(ekr@rtfm.com): Update PN.
                 }
             }
-
-            if d.remaining() > 0 {
-                qdebug!(self, "Need to send a packet of size {}", d.remaining());
-
-                let mut hdr = PacketHdr {
-                    tbyte: 0,
-                    tipe: match epoch {
-                        // TODO(ekr@rtfm.com): Retry token
-                        0 => PacketType::Initial(Vec::new()),
-                        1 => PacketType::ZeroRTT,
-                        2 => PacketType::Handshake,
-                        3 => PacketType::Short,
-                        _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
-                    },
-                    version: Some(self.version),
-                    dcid: ConnectionId(self.dcid.clone()),
-                    scid: Some(ConnectionId(self.scid.clone())),
-                    pn: 0, // TODO(ekr@rtfm.com): Implement
-                    epoch: epoch,
-                    hdr_len: 0,
-                    body_len: 0,
-                };
-
-                let packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
-
-                qdebug!(self, "Packet length: {} {:0x?}", packet.len(), packet);
-                return Ok(Some(Datagram {
-                    src: self.local_addr.unwrap(),
-                    dst: self.remote_addr.unwrap(),
-                    d: packet.to_vec(),
-                }));
-            }
-
-            // TODO(ekr@rtfm.com): Pack >1 packet into a datagram.
-            // TODO(ekr@rtfm.com): Pad the Client Initial.
-
-            // TODO(ekr@rtfm.com): Update PN.
         }
 
-        return Ok(None);
+        // Put packets in UDP datagrams
+        let out_dgrams = out_packets
+            .into_iter()
+            .inspect(|p| qdebug!(self, "Packet length: {} {:0x?}", p.len(), p))
+            .fold(Vec::new(), |mut vec: Vec<Datagram>, packet| {
+                let new_dgram: bool = vec
+                    .last()
+                    .map(|dgram| dgram.d.len() + packet.len() > self.pmtu)
+                    .unwrap_or(true);
+                if new_dgram {
+                    vec.push(Datagram {
+                        src: self.local_addr.unwrap(),
+                        dst: self.remote_addr.unwrap(),
+                        d: packet,
+                    });
+                } else {
+                    vec.last_mut().unwrap().d.extend(packet);
+                }
+                vec
+            });
+
+        out_dgrams
+            .iter()
+            .for_each(|dgram| qdebug!(self, "Datagram length: {}", dgram.d.len()));
+
+        return Ok(out_dgrams);
     }
 
     fn client_start(&mut self) -> Res<()> {
@@ -325,7 +353,7 @@ impl Connection {
         let mut rec: Option<Record> = None;
 
         if let Some(d) = data {
-            qdebug!(self, "Handshake received {:0x?} ", d.to_vec());
+            qdebug!(self, "Handshake received {:0x?} ", d);
             rec = Some(Record {
                 ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
                 epoch,
@@ -424,7 +452,7 @@ impl Connection {
             Frame::StreamDataBlocked {
                 stream_id,
                 stream_data_limit,
-            } => {} // TODO(agrover@mozilla.com): do something
+            } => {} // TODO(agrover@mozilla.com): generate MaxStreamData
             Frame::StreamsBlocked {
                 stream_type,
                 stream_limit,
@@ -436,7 +464,9 @@ impl Connection {
             } => {
                 self.connection_ids.insert((sequence_number, connection_id));
             }
-            Frame::RetireConnectionId { sequence_number } => {} // TODO(agrover@mozilla.com): remove from list of connection IDs
+            Frame::RetireConnectionId { sequence_number } => {
+                //self.connection_ids.insert((sequence_number, connection_id));
+            } // TODO(agrover@mozilla.com): remove from list of connection IDs
             Frame::PathChallenge { data } => {} // TODO(agrover@mozilla.com): generate PATH_RESPONSE
             Frame::PathResponse { data } => {}  // TODO(agrover@mozilla.com): do something
             Frame::ConnectionClose {
@@ -586,38 +616,40 @@ mod tests {
     fn test_handshake() {
         init_db("./db");
         // 0 -> CH
+        qdebug!("---- client");
         let mut client = Connection::new_client("example.com");
-        let res = client.process(None, 0).unwrap();
-        assert_ne!(None, res.0);
-        assert_eq!(0, res.1);
-        qdebug!("Output={:?}", res.0);
+        let res = client.process(Vec::new()).unwrap();
+        assert_eq!(res.len(), 1);
+        qdebug!("Output={:0x?}", res);
 
         // CH -> SH
+        qdebug!("---- server");
         let mut server = Connection::new_server(&[String::from("key")]);
-        let res = server.process(res.0, 0).unwrap();
-        assert_ne!(None, res.0);
-        assert_eq!(0, res.1);
-        qdebug!("Output={:?}", res.0);
+        let res = server.process(res).unwrap();
+        assert_eq!(res.len(), 1);
+        qdebug!("Output={:0x?}", res);
 
         // SH -> 0
-        let res = client.process(res.0, 0).unwrap();
-        assert_eq!(None, res.0);
+        qdebug!("---- client");
+        let res = client.process(res).unwrap();
+        assert_eq!(res.len(), 1);
 
         // 0 -> EE, CERT, CV, FIN
-        let res = server.process(None, 0).unwrap();
-        assert_ne!(None, res.0);
-        assert_eq!(0, res.1);
-        qdebug!("Output={:?}", res.0);
+        qdebug!("---- server");
+        let res = server.process(res).unwrap();
+        assert!(res.is_empty());
+        qdebug!("Output={:0x?}", res);
 
         // EE, CERT, CV, FIN -> FIN
-        let res = client.process(res.0, 0).unwrap();
-        assert_ne!(None, res.0);
-        assert_eq!(0, res.1);
-        qdebug!("Output={:?}", res.0);
+        qdebug!("---- client");
+        let res = client.process(res).unwrap();
+        assert!(res.is_empty());
+        qdebug!("Output={:0x?}", res);
 
         // FIN -> 0
-        let res = server.process(res.0, 0).unwrap();
-        assert_eq!(None, res.0);
+        qdebug!("---- server");
+        let res = server.process(res).unwrap();
+        assert!(res.is_empty());
 
         assert_eq!(client.state(), State::Connected);
         assert_eq!(server.state(), State::Connected);
