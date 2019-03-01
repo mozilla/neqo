@@ -1,5 +1,4 @@
 use super::data::*;
-use super::*;
 
 // Encode a QUIC-style variable length integer
 

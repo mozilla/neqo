@@ -3,7 +3,7 @@
 use crate::stream_test::{get_stream_type, Stream};
 use neqo_transport::connection::{ConnState, Datagram, Role, State};
 use neqo_transport::frame::StreamType;
-use neqo_transport::stream::{as_recvable, as_sendable, Recvable, Sendable};
+use neqo_transport::stream::{Recvable, Sendable};
 use neqo_transport::{CError, Error, HError, Res};
 use std::collections::HashMap;
 
@@ -45,24 +45,32 @@ impl Connection {
         }
     }
 
-    pub fn stream_create(&mut self, st: StreamType) -> u64 {
+    pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         let stream_id = self.next_stream_id;
         self.streams
             .insert(stream_id, Stream::new(get_stream_type(self.role, st)));
         self.next_stream_id += 1;
-        stream_id
+        Ok(stream_id)
     }
 
     pub fn get_readable_streams<'a>(
         &'a mut self,
     ) -> Box<Iterator<Item = (u64, &mut dyn Recvable)> + 'a> {
-        Box::new(self.streams.iter_mut().map(|(x, y)| (*x, as_recvable(y))))
+        Box::new(
+            self.streams
+                .iter_mut()
+                .map(|(x, y)| (*x, y as &mut Recvable)),
+        )
     }
 
     pub fn get_writable_streams<'a>(
         &'a mut self,
     ) -> Box<Iterator<Item = (u64, &mut dyn Sendable)> + 'a> {
-        Box::new(self.streams.iter_mut().map(|(x, y)| (*x, as_sendable(y))))
+        Box::new(
+            self.streams
+                .iter_mut()
+                .map(|(x, y)| (*x, y as &mut Sendable)),
+        )
     }
 
     pub fn close_receive_side(&mut self, id: u64) {

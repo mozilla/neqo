@@ -38,12 +38,16 @@ pub trait Recvable: Debug {
 
 pub trait Sendable: Debug {
     /// Send data on the stream. Returns bytes sent.
-    fn send(&mut self, buf: &[u8]) -> u64;
+    fn send(&mut self, buf: &[u8]) -> Res<u64>;
 
     /// Data is ready for sending
     fn send_data_ready(&self) -> bool;
 
     fn close(&mut self) {}
+
+    fn next_bytes(&mut self, _mode: TxMode, avail: usize) -> Option<(u64, &[u8])>;
+
+    fn final_size(&self) -> Option<u64>;
 }
 
 #[allow(dead_code, unused_variables)]
@@ -75,6 +79,8 @@ pub struct TxBuffer {
 
 impl TxBuffer {
     pub fn send(&mut self, buf: &[u8]) -> u64 {
+        // TODO(agrover@mozilla.com): Check stream credits to see if we can
+        // take the whole thing
         let len = buf.len() as u64;
         self.chunks.push(TxChunk {
             offset: self.offset,
@@ -345,6 +351,7 @@ impl RxStreamOrderer {
 pub struct SendStream {
     max_stream_data: u64,
     tx_buffer: TxBuffer,
+    final_size: Option<u64>,
 }
 
 impl SendStream {
@@ -352,6 +359,7 @@ impl SendStream {
         SendStream {
             max_stream_data: 0,
             tx_buffer: TxBuffer::default(),
+            final_size: None,
         }
     }
 
@@ -362,17 +370,29 @@ impl SendStream {
 
 impl Sendable for SendStream {
     /// Enqueue some bytes to send
-    fn send(&mut self, buf: &[u8]) -> u64 {
-        // TODO(agrover@mozilla.com): limit buffered amount based on recv
-        // buffer space
-        self.tx_buffer.send(buf)
+    fn send(&mut self, buf: &[u8]) -> Res<u64> {
+        if self.final_size.is_some() {
+            return Err(Error::ErrFinalSizeError);
+        }
+
+        Ok(self.tx_buffer.send(buf))
     }
 
     fn send_data_ready(&self) -> bool {
         self.tx_buffer.data_ready()
     }
 
-    fn close(&mut self) {}
+    fn close(&mut self) {
+        self.final_size = Some(self.tx_buffer.offset)
+    }
+
+    fn next_bytes(&mut self, mode: TxMode, avail: usize) -> Option<(u64, &[u8])> {
+        self.tx_buffer.next_bytes(mode, avail)
+    }
+
+    fn final_size(&self) -> Option<u64> {
+        self.final_size
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -580,7 +600,7 @@ impl Recvable for BidiStream {
 }
 
 impl Sendable for BidiStream {
-    fn send(&mut self, buf: &[u8]) -> u64 {
+    fn send(&mut self, buf: &[u8]) -> Res<u64> {
         self.tx.send(buf)
     }
 
@@ -588,7 +608,17 @@ impl Sendable for BidiStream {
         self.tx.send_data_ready()
     }
 
-    fn close(&mut self) {}
+    fn close(&mut self) {
+        self.tx.close()
+    }
+
+    fn next_bytes(&mut self, mode: TxMode, avail: usize) -> Option<(u64, &[u8])> {
+        self.tx.tx_buffer.next_bytes(mode, avail)
+    }
+
+    fn final_size(&self) -> Option<u64> {
+        self.tx.final_size
+    }
 }
 
 #[cfg(test)]
@@ -756,12 +786,4 @@ mod tests {
         s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, vec![1; 1])
             .unwrap_err();
     }
-}
-
-pub fn as_recvable(t: &mut Recvable) -> &mut Recvable {
-    t
-}
-
-pub fn as_sendable(t: &mut Sendable) -> &mut Sendable {
-    t
 }

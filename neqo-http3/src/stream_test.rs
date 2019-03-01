@@ -1,6 +1,6 @@
 #![allow(unused_variables, dead_code)]
 
-use neqo_transport::connection::Role;
+use neqo_transport::connection::{Role, TxMode};
 use neqo_transport::frame::StreamType;
 use neqo_transport::stream::{Recvable, Sendable};
 use neqo_transport::{HError, Res};
@@ -32,9 +32,9 @@ pub fn get_stream_type(r: Role, st: StreamType) -> StreamTypeWithRole {
 
 impl Sendable for Stream {
     /// Enqueue some bytes to send
-    fn send(&mut self, buf: &[u8]) -> u64 {
+    fn send(&mut self, buf: &[u8]) -> Res<u64> {
         self.send_buf.extend(buf);
-        buf.len() as u64
+        Ok(buf.len() as u64)
     }
 
     fn send_data_ready(&self) -> bool {
@@ -43,6 +43,19 @@ impl Sendable for Stream {
 
     fn close(&mut self) {
         self.send_side_closed = true;
+    }
+
+    fn next_bytes(&mut self, mode: TxMode, avail: usize) -> Option<(u64, &[u8])> {
+        let len = self.send_buf.len() as u64;
+        if len > 0 {
+            Some((len, &self.send_buf))
+        } else {
+            None
+        }
+    }
+
+    fn final_size(&self) -> Option<u64> {
+        None
     }
 }
 

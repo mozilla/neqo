@@ -137,13 +137,13 @@ impl ClientRequest {
     }
 
     // TODO: Currently we cannot send data with a request
-    pub fn send(&mut self, s: &mut Sendable) {
+    pub fn send(&mut self, s: &mut Sendable) -> Result<(), CError> {
         if self.state == ClientRequestState::SendingRequest {
             if let None = self.request.buf {
                 self.request.encode_request();
             }
             if let Some(d) = &mut self.request.buf {
-                let sent = s.send(d.as_mut_vec());
+                let sent = s.send(d.as_mut_vec())?;
                 if sent == d.remaining() as u64 {
                     self.request.buf = None;
                     s.close();
@@ -153,6 +153,7 @@ impl ClientRequest {
                 }
             }
         }
+        Ok(())
     }
 
     fn get_frame(&mut self, s: &mut Recvable) -> Result<(), CError> {
@@ -304,15 +305,16 @@ impl ControlStreamLocal {
     pub fn send_frame(&mut self, f: HFrame) {
         f.encode(&mut self.buf).unwrap();
     }
-    pub fn send(&mut self, s: &mut Sendable) {
+    pub fn send(&mut self, s: &mut Sendable) -> Result<(), CError> {
         if self.buf.remaining() != 0 {
-            let sent = s.send(self.buf.as_mut_vec());
+            let sent = s.send(self.buf.as_mut_vec())?;
             if sent == self.buf.remaining() as u64 {
                 self.buf.clear();
             } else {
                 self.buf.read(sent as usize);
             }
         }
+        Ok(())
     }
 }
 
@@ -425,7 +427,7 @@ impl HttpConn {
                 if s.connected {
                     match self.state {
                         HState::Connecting => {
-                            self.on_connected();
+                            self.on_connected()?;
                         }
                         HState::Connected => {
                             if let Err(e) = self.check_streams() {
@@ -443,20 +445,21 @@ impl HttpConn {
         }
     }
 
-    fn on_connected(&mut self) {
+    fn on_connected(&mut self) -> Res<()> {
         self.state = HState::Connected;
-        self.create_control_stream();
+        self.control_stream_local = self.create_control_stream()?;
         self.create_settings();
+        Ok(())
     }
 
-    fn create_control_stream(&mut self) {
-        let id = self.conn.stream_create(StreamType::UniDi);
+    fn create_control_stream(&mut self) -> Res<Option<ControlStreamLocal>> {
+        let id = self.conn.stream_create(StreamType::UniDi)?;
         let mut cs = ControlStreamLocal {
             stream_id: id,
             buf: Data::default(),
         };
         cs.buf.encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
-        self.control_stream_local = Some(cs);
+        Ok(Some(cs))
     }
 
     fn create_settings(&mut self) {
@@ -475,10 +478,10 @@ impl HttpConn {
         let lw = self.conn.get_writable_streams();
         for (id, ws) in lw {
             if let Some(cs) = &mut self.client_requests.get_mut(&id) {
-                cs.send(ws);
+                cs.send(ws)?;
             } else if let Some(s) = &mut self.control_stream_local {
                 if id == s.stream_id {
-                    s.send(ws);
+                    s.send(ws)?;
                 }
             }
         }
@@ -559,7 +562,7 @@ impl HttpConn {
     }
 
     pub fn fetch(&mut self, method: String, target: String, headers: HeaderList) -> Res<()> {
-        let id = self.conn.stream_create(StreamType::BiDi);
+        let id = self.conn.stream_create(StreamType::BiDi)?;
         self.client_requests
             .insert(id, ClientRequest::new(self.role, method, target, headers));
         Ok(())
@@ -718,7 +721,7 @@ mod tests {
         }
 
         // create server control stream
-        hconn.conn.stream_create(StreamType::UniDi);
+        hconn.conn.stream_create(StreamType::UniDi).unwrap();
         // send server settings.
         match hconn.conn.streams.get_mut(&2) {
             Some(s) => {
@@ -781,7 +784,7 @@ mod tests {
         r = hconn.process(Vec::new());
         check_return_value(r);
 
-        hconn.conn.stream_create(StreamType::UniDi);
+        hconn.conn.stream_create(StreamType::UniDi).unwrap();
         // send stream type
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -930,7 +933,7 @@ mod tests {
         check_return_value(r);
 
         // create server control stream
-        hconn.conn.stream_create(StreamType::UniDi);
+        hconn.conn.stream_create(StreamType::UniDi).unwrap();
         // send server settings.
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -966,7 +969,7 @@ mod tests {
         check_return_value(r);
 
         // create server control stream
-        hconn.conn.stream_create(StreamType::UniDi);
+        hconn.conn.stream_create(StreamType::UniDi).unwrap();
         // send server settings.
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -998,7 +1001,7 @@ mod tests {
         check_return_value(r);
 
         // create server control stream
-        hconn.conn.stream_create(StreamType::UniDi);
+        hconn.conn.stream_create(StreamType::UniDi).unwrap();
         // send server settings.
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -1039,7 +1042,7 @@ mod tests {
         check_return_value(r);
 
         // create server control stream
-        hconn.conn.stream_create(StreamType::UniDi);
+        hconn.conn.stream_create(StreamType::UniDi).unwrap();
         // send server settings.
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -1107,7 +1110,7 @@ mod tests {
         check_return_value(r);
 
         // create server control stream
-        hconn.conn.stream_create(StreamType::UniDi);
+        hconn.conn.stream_create(StreamType::UniDi).unwrap();
         // send server settings.
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -1145,7 +1148,7 @@ mod tests {
         check_return_value(r);
 
         // create server control stream
-        hconn.conn.stream_create(StreamType::UniDi);
+        hconn.conn.stream_create(StreamType::UniDi).unwrap();
         // send server settings.
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
