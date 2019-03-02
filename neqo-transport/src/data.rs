@@ -3,11 +3,35 @@ use super::*;
 use num_traits::Num;
 use std::convert::Into;
 
+pub trait DataBuf<E> {
+  fn decode_byte(&mut self) -> Result<u8, E>;
+  fn peek_byte(&mut self) -> Result<u8, E>;
+}
+
 #[derive(Default, Debug, PartialEq)]
 pub struct Data {
     buf: Vec<u8>,
     offset: usize,
     read: usize,
+}
+
+impl DataBuf<Error> for Data {
+   fn peek_byte(&mut self) -> Res<u8> {
+        let _ = self.check_remaining(1)?;
+
+        let res = self.buf[self.offset];
+
+        Ok(res)
+    }
+
+    fn decode_byte(&mut self) -> Res<u8> {
+        let _ = self.check_remaining(1)?;
+
+        let res = self.buf[self.offset];
+        self.offset += 1;
+
+        Ok(res)
+    }
 }
 
 impl Data {
@@ -78,23 +102,6 @@ impl Data {
 
     pub fn remaining(&self) -> usize {
         self.buf.len() - self.offset
-    }
-
-    pub fn decode_byte(&mut self) -> Res<u8> {
-        let _ = self.check_remaining(1)?;
-
-        let res = self.buf[self.offset];
-        self.offset += 1;
-
-        Ok(res)
-    }
-
-    pub fn peek_byte(&mut self) -> Res<u8> {
-        let _ = self.check_remaining(1)?;
-
-        let res = self.buf[self.offset];
-
-        Ok(res)
     }
 
     pub fn peek_data(&mut self, l: usize) -> Res<Vec<u8>> {

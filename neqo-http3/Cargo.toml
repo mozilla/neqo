@@ -6,3 +6,5 @@ edition = "2018"
 
 [dependencies]
 neqo-transport = { version = "0.1.0", path = "./../neqo-transport" }
+neqo-crypto = { version = "0.1", path = "./../neqo-crypto" }
+num-traits = "0.2"

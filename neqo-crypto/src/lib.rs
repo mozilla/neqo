@@ -6,7 +6,7 @@ mod exp;
 mod p11;
 
 pub mod aead;
-mod agent;
+pub mod agent;
 mod agentio;
 pub mod constants;
 pub mod ecb;

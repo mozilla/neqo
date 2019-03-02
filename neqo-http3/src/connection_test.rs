@@ -4,7 +4,7 @@ use crate::stream_test::{get_stream_type, Stream};
 use neqo_transport::connection::{ConnState, Datagram, Role, State};
 use neqo_transport::frame::StreamType;
 use neqo_transport::stream::{as_recvable, as_sendable, Recvable, Sendable};
-use neqo_transport::{Error, Res};
+use neqo_transport::{CError, Error, HError, Res};
 use std::collections::HashMap;
 
 pub struct Connection {
@@ -14,8 +14,7 @@ pub struct Connection {
     deadline: u64,
     next_stream_id: u64,
     pub streams: HashMap<u64, Stream>,
-    pub closed_streams: Option<Vec<u64>>,
-    error: Option<Error>,
+    error: CError,
 }
 
 pub struct Agent {}
@@ -29,12 +28,11 @@ impl Connection {
             deadline: 0,
             next_stream_id: 0,
             streams: HashMap::new(),
-            closed_streams: None,
-            error: None,
+            error: CError::Error(Error::ErrNoError),
         }
     }
 
-    pub fn input(&mut self, _d: Option<Datagram>, _now: u64) -> Res<(Option<Datagram>, u64)> {
+    pub fn process(&mut self, _d: Option<Datagram>, _now: u64) -> Res<(Option<Datagram>, u64)> {
         self.state = State::Connected;
         Ok((None, self.deadline))
     }
@@ -42,7 +40,7 @@ impl Connection {
     pub fn get_state(&self) -> ConnState {
         ConnState {
             connected: self.state == State::Connected,
-            error: None,
+            error: self.error.clone(),
             closed: self.state == State::Closed,
         }
     }
@@ -67,32 +65,20 @@ impl Connection {
         Box::new(self.streams.iter_mut().map(|(x, y)| (*x, as_sendable(y))))
     }
 
-    pub fn get_closed_streams(&mut self) -> Option<Vec<u64>> {
-        let r = self.closed_streams.clone();
-        self.closed_streams = None;
-        r
-    }
-
     pub fn close_receive_side(&mut self, id: u64) {
         if let Some(s) = self.streams.get_mut(&id) {
             s.receive_close();
-            if let None = self.closed_streams {
-                self.closed_streams = Some(Vec::new());
-            }
-            if let Some(v) = &mut self.closed_streams {
-                v.push(id);
-            }
         }
     }
 
-    pub fn reset_stream(&mut self, id: u64, err: Error) {
+    pub fn reset_stream(&mut self, id: u64, err: HError) {
         if let Some(s) = self.streams.get_mut(&id) {
             s.reset(err);
         }
     }
 
-    pub fn close(&mut self, error: Option<Error>) {
+    pub fn close(&mut self, err: HError) {
         self.state = State::Closed;
-        self.error = error;
+        self.error = CError::HError(err);
     }
 }

@@ -4,7 +4,7 @@
 use neqo_transport::data::*;
 use neqo_transport::stream::Recvable;
 use neqo_transport::varint::*;
-use neqo_transport::{Error, Res};
+use neqo_transport::{CError, HError, Res};
 
 const H3_FRAME_TYPE_DATA: u64 = 0x0;
 const H3_FRAME_TYPE_HEADERS: u64 = 0x1;
@@ -15,6 +15,8 @@ const H3_FRAME_TYPE_PUSH_PROMISE: u64 = 0x5;
 const H3_FRAME_TYPE_GOAWAY: u64 = 0x7;
 const H3_FRAME_TYPE_MAX_PUSH_ID: u64 = 0xd;
 const H3_FRAME_TYPE_DUPLICATE_PUSH: u64 = 0xe;
+
+const H3_FRAME_TYPE_UNKNOWN: u64 = 0xff; // this is only internal!!!
 
 const SETTINGS_MAX_HEADER_LIST_SIZE: u64 = 0x6;
 const SETTINGS_NUM_PLACEHOLDERS: u64 = 0x8;
@@ -34,13 +36,13 @@ pub enum PrioritizedElementType {
     CurrentStream,
 }
 
-fn prior_elem_from_byte(b: u8) -> Res<PrioritizedElementType> {
-    match b {
-        0x0 => Ok(PrioritizedElementType::RequestStream),
-        0x1 => Ok(PrioritizedElementType::PushStream),
-        0x2 => Ok(PrioritizedElementType::Placeholder),
-        0x3 => Ok(PrioritizedElementType::CurrentStream),
-        _ => Err(Error::ErrDecodingFrame),
+fn prior_elem_from_byte(b: u8) -> PrioritizedElementType {
+    match b & 0x3 {
+        0x0 => PrioritizedElementType::RequestStream,
+        0x1 => PrioritizedElementType::PushStream,
+        0x2 => PrioritizedElementType::Placeholder,
+        0x3 => PrioritizedElementType::CurrentStream,
+        _ => panic!("Can't happen"),
     }
 }
 
@@ -52,13 +54,13 @@ pub enum ElementDependencyType {
     Root,
 }
 
-fn elem_dep_from_byte(b: u8) -> Res<ElementDependencyType> {
-    match b {
-        0x0 => Ok(ElementDependencyType::RequestStream),
-        0x1 => Ok(ElementDependencyType::PushStream),
-        0x2 => Ok(ElementDependencyType::Placeholder),
-        0x3 => Ok(ElementDependencyType::Root),
-        _ => Err(Error::ErrDecodingFrame),
+fn elem_dep_from_byte(b: u8) -> ElementDependencyType {
+    match (b & (0x3 << 2)) >> 2 {
+        0x0 => ElementDependencyType::RequestStream,
+        0x1 => ElementDependencyType::PushStream,
+        0x2 => ElementDependencyType::Placeholder,
+        0x3 => ElementDependencyType::Root,
+        _ => panic!("Can't happen"),
     }
 }
 
@@ -261,122 +263,157 @@ impl HFrame {
         }
     }
 }
-pub fn decode_hframe(d: &mut Data) -> Res<HFrame> {
-    let t = d.decode_varint()?;
-    let len = d.decode_varint()?;
-    decode_payload(d, t, len)
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+enum ReadBufState {
+    Uninit,
+    CollectingVarint,
+    CollectingLen,
+    Done,
 }
 
-fn decode_payload(d: &mut Data, t: u64, mut len: u64) -> Res<HFrame> {
-    match t {
-        H3_FRAME_TYPE_DATA => Ok(HFrame::Data { len: len }),
-        H3_FRAME_TYPE_HEADERS => Ok(HFrame::Headers { len: len }),
-        H3_FRAME_TYPE_PRIORITY => {
-            if len < 1 {
-                return Err(Error::ErrNoMoreData);
-            }
-            let tb = d.decode_byte()?;
-            len -= 1;
-            let mut s: u64 = decode_varint_size(d)? as u64;
-            if len < s {
-                return Err(Error::ErrNoMoreData);
-            }
-            let pe = d.decode_varint()?;
-            len -= s;
-            s = decode_varint_size(d)? as u64;
-            if len < s {
-                return Err(Error::ErrNoMoreData);
-            }
-            let de = d.decode_varint()?;
-            len -= s;
-            if len < 1 {
-                return Err(Error::ErrNoMoreData);
-            }
-            let w = d.decode_byte()?;
-            Ok(HFrame::Priority {
-                priorized_elem_type: prior_elem_from_byte(tb & 0x3)?,
-                elem_dependensy_type: elem_dep_from_byte((tb & (0x3 << 2)) >> 2)?,
-                priority_elem_id: pe,
-                elem_dependency_id: de,
-                weight: w,
-            })
+pub struct ReadBuf {
+    state: ReadBufState,
+    buf: Vec<u8>,
+    offset: usize,
+    len: usize,
+    hframe_type: u64, // we need this to get a proper frame error.
+}
+
+impl DataBuf<HError> for ReadBuf {
+    fn peek_byte(&mut self) -> Result<u8, HError> {
+        let _ = self.check_remaining(1)?;
+
+        let res = self.buf[self.offset];
+
+        Ok(res)
+    }
+
+    fn decode_byte(&mut self) -> Result<u8, HError> {
+        let _ = self.check_remaining(1)?;
+
+        let res = self.buf[self.offset];
+        self.offset += 1;
+
+        Ok(res)
+    }
+}
+
+impl ReadBuf {
+    pub fn new() -> ReadBuf {
+        ReadBuf {
+            state: ReadBufState::Uninit,
+            buf: vec![0; 2], //TODO set this to a better value. I set it to 2 for better testing.
+            offset: 0,       // tihs offse is first used for writing, than for reading data.
+            len: 0,
+            hframe_type: H3_FRAME_TYPE_UNKNOWN,
         }
-        H3_FRAME_TYPE_CANCEL_PUSH => {
-            if len < decode_varint_size(d)? as u64 {
-                return Err(Error::ErrNoMoreData);
-            }
-            Ok(HFrame::CancelPush {
-                push_id: d.decode_varint()?,
-            })
+    }
+
+    pub fn done(&self) -> bool {
+        self.state == ReadBufState::Done
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn set_hframe_type(&mut self, t: u64) {
+        self.hframe_type = t;
+    }
+
+    // We need to propagate fin as well.
+    // returns number of read byte and bool (stream has been closed or not)
+    pub fn get_varint(&mut self, s: &mut Recvable) -> Result<(u64, bool), CError> {
+        if self.state == ReadBufState::Uninit {
+            self.state = ReadBufState::CollectingVarint;
+            self.offset = 0;
+            self.len = 1; // this will get updated when we get varint length.
         }
-        H3_FRAME_TYPE_SETTINGS => {
-            let mut settings: Vec<(HSettingType, u64)> = Vec::new();
-            while len > 0 {
-                let mut s: u64 = decode_varint_size(d)? as u64;
-                if len < s {
-                    return Err(Error::ErrNoMoreData);
-                }
-                let st_read = d.decode_varint()?;
-                len -= s;
-                let mut st = HSettingType::UnknownType;
-                match st_read {
-                    SETTINGS_MAX_HEADER_LIST_SIZE => {
-                        st = HSettingType::MaxHeaderListSize;
-                    }
-                    SETTINGS_NUM_PLACEHOLDERS => {
-                        st = HSettingType::NumPlaceholders;
-                    }
-                    _ => {}
-                }
-                s = decode_varint_size(d)? as u64;
-                if len < s {
-                    return Err(Error::ErrNoMoreData);
-                }
-                let v = d.decode_varint()?;
-                len -= s;
-                if st != HSettingType::UnknownType {
-                    settings.push((st, v));
-                }
-            }
-            Ok(HFrame::Settings { settings: settings })
+
+        assert!(self.len - self.offset > 0);
+
+        let (rv, fin) = self.recv(s)?;
+        if rv == 0 {
+            return Ok((rv, fin));
         }
-        H3_FRAME_TYPE_PUSH_PROMISE => {
-            let s: u64 = decode_varint_size(d)? as u64;
-            if len < s {
-                return Err(Error::ErrNoMoreData);
-            }
-            let p = d.decode_varint()?;
-            len -= s;
-            Ok(HFrame::PushPromise {
-                push_id: p,
-                len: len,
-            })
+
+        if self.len == 1 && self.offset == 1 {
+            // we have the first byte, get the varint length.
+            self.len = decode_varint_size_from_byte(self.buf[0]);
         }
-        H3_FRAME_TYPE_GOAWAY => {
-            let s: u64 = decode_varint_size(d)? as u64;
-            if len < s {
-                return Err(Error::ErrNoMoreData);
-            }
-            let id = d.decode_varint()?;
-            Ok(HFrame::Goaway { stream_id: id })
+
+        if self.len == self.offset {
+            self.state = ReadBufState::Done;
+            self.offset = 0;
         }
-        H3_FRAME_TYPE_MAX_PUSH_ID => {
-            let s: u64 = decode_varint_size(d)? as u64;
-            if len < s {
-                return Err(Error::ErrNoMoreData);
-            }
-            let id = d.decode_varint()?;
-            Ok(HFrame::MaxPushId { push_id: id })
+
+        return Ok((rv, fin));
+    }
+
+    pub fn get_len(&mut self, len: u64) {
+        if self.state == ReadBufState::Uninit {
+            self.state = ReadBufState::CollectingLen;
+            self.offset = 0;
+            self.len = len as usize;
         }
-        H3_FRAME_TYPE_DUPLICATE_PUSH => {
-            let s: u64 = decode_varint_size(d)? as u64;
-            if len < s {
-                return Err(Error::ErrNoMoreData);
-            }
-            let id = d.decode_varint()?;
-            Ok(HFrame::DuplicatePush { push_id: id })
+    }
+
+    // We need to propagate fin as well.
+    // returns number of read byte and bool (stream has been closed or not)
+    pub fn get(&mut self, s: &mut Recvable) -> Result<(u64, bool), CError> {
+        let r = self.recv(s)?;
+        if self.len == self.offset {
+            self.state = ReadBufState::Done;
+            self.offset = 0;
         }
-        _ => Err(Error::ErrUnknownFrameType),
+        Ok(r)
+    }
+
+    fn recv(&mut self, s: &mut Recvable) -> Result<(u64, bool), CError> {
+        assert!(
+            self.state == ReadBufState::CollectingVarint
+                || self.state == ReadBufState::CollectingLen
+        );
+        assert!(self.len - self.offset > 0);
+
+        if self.len > self.buf.len() {
+            let ext = self.len - self.buf.len();
+            self.buf.append(&mut vec![0; ext]);
+        }
+
+        let (rv, fin) = s.read_with_amount(
+            &mut self.buf[self.offset..],
+            (self.len - self.offset) as u64,
+        )?;
+
+        self.offset += rv as usize;
+        Ok((rv, fin))
+    }
+
+    fn check_remaining(&mut self, needs: usize) -> Result<usize, HError> {
+        if (self.len - self.offset) < needs || self.buf.len() - self.offset < needs {
+            return Err(get_hframe_malformated_error(self.hframe_type));
+        }
+        Ok(needs)
+    }
+
+    fn remaining(&self) -> u64 {
+        (self.len - self.offset) as u64
+    }
+
+    fn decode_byte(&mut self) -> Result<u8, HError> {
+        let _ = self.check_remaining(1)?;
+        let res = self.buf[self.offset];
+        self.offset += 1;
+
+        Ok(res)
+    }
+
+    pub fn reset(&mut self) {
+        self.offset = 0;
+        self.len = 0;
+        self.state = ReadBufState::Uninit;
     }
 }
 
@@ -391,9 +428,7 @@ enum HFrameReaderState {
 
 pub struct HFrameReader {
     state: HFrameReaderState,
-    buf: Vec<u8>,
-    offset: usize,
-    needs: usize,
+    reader: ReadBuf,
     hframe_type: u64,
     hframe_len: u64,
 }
@@ -402,84 +437,102 @@ impl HFrameReader {
     pub fn new() -> HFrameReader {
         HFrameReader {
             state: HFrameReaderState::GetType,
-            offset: 0,
-            needs: 1,
             hframe_type: 0,
             hframe_len: 0,
-            buf: vec![0; 2], //TODO set this to a better value. I set it to 2 for better testing.
+            reader: ReadBuf::new(),
         }
     }
 
     pub fn reset(&mut self) {
         self.state = HFrameReaderState::GetType;
-        self.offset = 0;
-        self.needs = 1;
+        self.reader.reset();
     }
 
-    pub fn receive(&mut self, s: &mut Recvable) -> Res<bool> {
+    // returns true if quic stream was closed.
+    pub fn receive(&mut self, s: &mut Recvable) -> Result<bool, CError> {
         let r = loop {
             match self.state {
                 HFrameReaderState::GetType => {
-                    if let Some(v) = self.get_varint(s)? {
-                        self.hframe_type = v;
+                    let (rv, fin) = self.reader.get_varint(s)?;
+                    if rv == 0 {
+                        break Ok(fin);
+                    }
+
+                    if self.reader.done() {
+                        self.hframe_type = decode_varint(&mut self.reader)?;
+                        self.reader.set_hframe_type(self.hframe_type);
+                        self.reader.reset();
                         self.state = HFrameReaderState::GetLength;
-                        self.offset = 0;
-                        self.needs = 1;
-                    } else {
-                        break Ok(false);
+                    }
+
+                    if fin {
+                        break Ok(fin);
                     }
                 }
 
                 HFrameReaderState::GetLength => {
-                    if let Some(v) = self.get_varint(s)? {
-                        self.hframe_len = v;
+                    let (rv, fin) = self.reader.get_varint(s)?;
+                    if rv == 0 {
+                        break Ok(fin);
+                    }
+                    if self.reader.done() {
+                        self.hframe_len = decode_varint(&mut self.reader)?;
+                        self.reader.reset();
+
+                        // DATA and HEADERS payload are left on the quic stream and picked up separately
                         if self.hframe_type == H3_FRAME_TYPE_DATA
                             || self.hframe_type == H3_FRAME_TYPE_HEADERS
                         {
                             self.state = HFrameReaderState::Done;
-                            self.offset = 0;
-                            self.needs = 0;
+
+                        // For push frame we only decode the first varint. Headers blocks will be picked up separately.
                         } else if self.hframe_type == H3_FRAME_TYPE_PUSH_PROMISE {
-                            self.offset = 0;
-                            self.needs = 1;
                             self.state = HFrameReaderState::GetPushPromiseData;
+
+                        // for othere frame get all data before decoding.
                         } else {
-                            self.offset = 0;
-                            self.needs = self.hframe_len as usize;
-                            self.state = HFrameReaderState::GetData;
+                            if self.hframe_len > 0 {
+                                self.reader.get_len(self.hframe_len);
+                                self.state = HFrameReaderState::GetData;
+                            } else {
+                                self.state = HFrameReaderState::Done;
+                            }
                         }
-                    } else {
-                        break Ok(false);
+                    }
+
+                    if fin {
+                        break Ok(fin);
                     }
                 }
                 HFrameReaderState::GetPushPromiseData => {
-                    assert!(self.needs > 0);
-                    if self.get(s)? == 0 {
-                        break Ok(false);
+                    let (rv, fin) = self.reader.get_varint(s)?;
+                    if rv == 0 {
+                        break Ok(fin);
                     }
-                    if self.needs == 0 {
-                        if self.offset == 1 {
-                            self.needs = decode_varint_size_from_byte(self.buf[0])? - 1;
-                            if self.needs == 0 {
-                                self.state = HFrameReaderState::Done;
-                            }
-                        } else {
-                            self.state = HFrameReaderState::Done;
-                        }
+                    if self.reader.done() {
+                        // we will read payload when we decode th frame.
+                        self.state = HFrameReaderState::Done
+                    }
+
+                    if fin {
+                        break Ok(fin);
                     }
                 }
                 HFrameReaderState::GetData => {
-                    if self.needs != 0 && self.get(s)? == 0 {
-                        break Ok(false);
+                    let (rv, fin) = self.reader.get(s)?;
+                    if rv == 0 {
+                        break Ok(fin);
                     }
-                    if self.needs == 0 {
+                    if self.reader.done() {
                         self.state = HFrameReaderState::Done;
-                    } else {
-                        break Ok(false);
+                    }
+
+                    if fin {
+                        break Ok(fin);
                     }
                 }
                 HFrameReaderState::Done => {
-                    break Ok(true);
+                    break Ok(false);
                 }
             }
         };
@@ -490,98 +543,146 @@ impl HFrameReader {
         self.state == HFrameReaderState::Done
     }
 
-    pub fn get_frame(&self) -> Res<HFrame> {
-        let mut d = Data::from_slice(&self.buf);
-        decode_payload(&mut d, self.hframe_type, self.hframe_len)
-    }
-
-    fn get_varint(&mut self, s: &mut Recvable) -> Res<Option<u64>> {
-        assert!(self.needs > 0);
-        if self.get(s)? == 0 {
-            return Ok(None);
-        }
-        if self.needs == 0 {
-            if self.offset == 1 {
-                self.needs = decode_varint_size_from_byte(self.buf[0])? - 1;
-                if self.needs == 0 {
-                    let v = decode_varint(&self.buf)?;
-                    return Ok(Some(v));
+    pub fn get_frame(&mut self) -> Result<HFrame, HError> {
+        if self.state != HFrameReaderState::Done {
+            Err(HError::ErrHttpNotEnoughData)
+        } else {
+            let f = match self.hframe_type {
+                H3_FRAME_TYPE_DATA => HFrame::Data {
+                    len: self.hframe_len,
+                },
+                H3_FRAME_TYPE_HEADERS => HFrame::Headers {
+                    len: self.hframe_len,
+                },
+                H3_FRAME_TYPE_PRIORITY => {
+                    let tb = self.reader.decode_byte()?;
+                    let pe = decode_varint(&mut self.reader)?;
+                    let de = decode_varint(&mut self.reader)?;
+                    let w = self.reader.decode_byte()?;
+                    HFrame::Priority {
+                        priorized_elem_type: prior_elem_from_byte(tb),
+                        elem_dependensy_type: elem_dep_from_byte(tb),
+                        priority_elem_id: pe,
+                        elem_dependency_id: de,
+                        weight: w,
+                    }
                 }
-            } else {
-                let v = decode_varint(&self.buf)?;
-                return Ok(Some(v));
-            }
+                H3_FRAME_TYPE_CANCEL_PUSH => HFrame::CancelPush {
+                    push_id: decode_varint(&mut self.reader)?,
+                },
+                H3_FRAME_TYPE_SETTINGS => {
+                    let mut settings: Vec<(HSettingType, u64)> = Vec::new();
+                    while self.reader.remaining() > 0 {
+                        let st_read = decode_varint(&mut self.reader)?;
+                        let mut st = HSettingType::UnknownType;
+                        match st_read {
+                            SETTINGS_MAX_HEADER_LIST_SIZE => {
+                                st = HSettingType::MaxHeaderListSize;
+                            }
+                            SETTINGS_NUM_PLACEHOLDERS => {
+                                st = HSettingType::NumPlaceholders;
+                            }
+                            _ => {}
+                        }
+                        let v = decode_varint(&mut self.reader)?;
+                        if st != HSettingType::UnknownType {
+                            settings.push((st, v));
+                        }
+                    }
+                    HFrame::Settings { settings: settings }
+                }
+                H3_FRAME_TYPE_PUSH_PROMISE => {
+                    let p = decode_varint(&mut self.reader)?;
+                    let len = self.hframe_len - self.reader.len() as u64;
+                    HFrame::PushPromise {
+                        push_id: p,
+                        len: len,
+                    }
+                }
+                H3_FRAME_TYPE_GOAWAY => HFrame::Goaway {
+                    stream_id: decode_varint(&mut self.reader)?,
+                },
+                H3_FRAME_TYPE_MAX_PUSH_ID => HFrame::MaxPushId {
+                    push_id: decode_varint(&mut self.reader)?,
+                },
+                H3_FRAME_TYPE_DUPLICATE_PUSH => HFrame::DuplicatePush {
+                    push_id: decode_varint(&mut self.reader)?,
+                },
+                _ => panic!("We should not be in sate Done with unknown frame type!"),
+            };
+            self.reset();
+            Ok(f)
         }
-        return Ok(None);
-    }
-    fn get(&mut self, s: &mut Recvable) -> Res<usize> {
-        if self.needs > (self.buf.len() - self.offset) {
-            let ext = self.needs - (self.buf.len() - self.offset);
-            self.buf.append(&mut vec![0; ext]);
-        }
-        let r = s.read_with_amount(&mut self.buf[self.offset..], self.needs as u64)?;
-        self.needs -= r as usize;
-        self.offset += r as usize;
-        Ok(r as usize)
     }
 }
 
-pub fn decode_varint_size_from_byte(b: u8) -> Res<usize> {
-    let l = match (b & 0xc0) >> 6 {
-        0 => 1,
-        1 => 2,
-        2 => 4,
-        3 => 8,
+fn get_hframe_malformated_error(t: u64) -> HError {
+    match t {
+        H3_FRAME_TYPE_DATA => HError::ErrHttpMalformatedFrameData,
+        H3_FRAME_TYPE_HEADERS => HError::ErrHttpMalformatedFrameHeaders,
+        H3_FRAME_TYPE_PRIORITY => HError::ErrHttpMalformatedFramePriority,
+        H3_FRAME_TYPE_CANCEL_PUSH => HError::ErrHttpMalformatedFrameCancelPush,
+        H3_FRAME_TYPE_SETTINGS => HError::ErrHttpMalformatedFrameSettings,
+        H3_FRAME_TYPE_PUSH_PROMISE => HError::ErrHttpMalformatedFramePushPromise,
+        H3_FRAME_TYPE_GOAWAY => HError::ErrHttpMalformatedFrameGoaway,
+        H3_FRAME_TYPE_MAX_PUSH_ID => HError::ErrHttpMalformatedFrameMaxPushId,
+        H3_FRAME_TYPE_DUPLICATE_PUSH => HError::ErrHttpMalformatedFrameDuplicatePush,
         _ => panic!("Can't happen"),
-    };
-    Ok(l as usize)
-}
-
-pub fn decode_varint(b: &[u8]) -> Res<u64> {
-    if b.len() < 1 {
-        return Err(Error::ErrDecodingFrame);
     }
-    let l = decode_varint_size_from_byte(b[0])?;
-
-    if b.len() < l {
-        return Err(Error::ErrDecodingFrame);
-    }
-    let mut res: u64 = 0;
-    let mut mask = 0x3f;
-    for i in 0..l {
-        res <<= 8;
-        let z = b[i] & mask;
-        mask = 0xff;
-        res += z as u64;
-    }
-
-    Ok(res)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num_traits::Num;
 
-    fn enc_dec(f: &HFrame, s: &str) {
+    fn enc_dec(f: &HFrame, st: &str, r: usize) {
         let mut d = Data::default();
 
         f.encode(&mut d).unwrap();
-        assert_eq!(d, Data::from_hex(s));
 
-        let f2 = decode_hframe(&mut d).unwrap();
-        assert_eq!(*f, f2);
+        // For data, headers and push_promise we do not read all bytes from the buffer
+        let mut d2 = Data::from_hex(st);
+        let len = d2.remaining();
+        assert_eq!(d.as_mut_vec()[..], d2.as_mut_vec()[..len - r]);
+
+        let mut s = Stream::new(get_stream_type(Role::Client, StreamType::UniDi));
+        let mut fr: HFrameReader = HFrameReader::new();
+
+        // conver string into u8 vector
+        let mut buf: Vec<u8> = Vec::new();
+        if st.len() % 2 != 0 {
+            panic!("Needs to be even length");
+        }
+        for i in 0..st.len() / 2 {
+            let x = st.get(i * 2..i * 2 + 2);
+            let v = <u8 as Num>::from_str_radix(x.unwrap(), 16).unwrap();
+            buf.push(v);
+        }
+        s.recv_buf.extend(buf);
+
+        assert_eq!(Ok(false), fr.receive(&mut s));
+        assert_eq!(s.recv_data_ready_amount(), r);
+        if !fr.done() {
+            assert!(false);
+        }
+        if let Ok(f2) = fr.get_frame() {
+            assert_eq!(*f, f2);
+        } else {
+            assert!(false)
+        }
     }
 
     #[test]
     fn test_data_frame() {
         let f = HFrame::Data { len: 3 };
-        enc_dec(&f, "0003");
+        enc_dec(&f, "0003010203", 3);
     }
 
     #[test]
     fn test_headers_frame() {
         let f = HFrame::Headers { len: 3 };
-        enc_dec(&f, "0103");
+        enc_dec(&f, "0103010203", 3);
     }
 
     #[test]
@@ -593,7 +694,7 @@ mod tests {
             elem_dependency_id: 1,
             weight: 3,
         };
-        enc_dec(&f, "020400020103");
+        enc_dec(&f, "020400020103", 0);
     }
 
     #[test]
@@ -605,7 +706,7 @@ mod tests {
             elem_dependency_id: 1,
             weight: 3,
         };
-        enc_dec(&f, "020405020103");
+        enc_dec(&f, "020405020103", 0);
     }
 
     #[test]
@@ -617,7 +718,7 @@ mod tests {
             elem_dependency_id: 1,
             weight: 3,
         };
-        enc_dec(&f, "02040a020103");
+        enc_dec(&f, "02040a020103", 0);
     }
 
     #[test]
@@ -629,13 +730,13 @@ mod tests {
             elem_dependency_id: 1,
             weight: 3,
         };
-        enc_dec(&f, "02040f020103");
+        enc_dec(&f, "02040f020103", 0);
     }
 
     #[test]
     fn test_cancel_push_frame4() {
         let f = HFrame::CancelPush { push_id: 5 };
-        enc_dec(&f, "030105");
+        enc_dec(&f, "030105", 0);
     }
 
     #[test]
@@ -646,31 +747,31 @@ mod tests {
                 (HSettingType::NumPlaceholders, 4),
             ],
         };
-        enc_dec(&f, "040406040804");
+        enc_dec(&f, "040406040804", 0);
     }
 
     #[test]
     fn test_push_promise_frame4() {
         let f = HFrame::PushPromise { push_id: 4, len: 4 };
-        enc_dec(&f, "050504");
+        enc_dec(&f, "05050401020304", 4);
     }
 
     #[test]
     fn test_goaway_frame4() {
         let f = HFrame::Goaway { stream_id: 5 };
-        enc_dec(&f, "070105");
+        enc_dec(&f, "070105", 0);
     }
 
     #[test]
     fn test_max_push_id_frame4() {
         let f = HFrame::MaxPushId { push_id: 5 };
-        enc_dec(&f, "0d0105");
+        enc_dec(&f, "0d0105", 0);
     }
 
     #[test]
     fn test_duplicate_push_frame4() {
         let f = HFrame::DuplicatePush { push_id: 5 };
-        enc_dec(&f, "0e0105");
+        enc_dec(&f, "0e0105", 0);
     }
 
     use crate::stream_test::{get_stream_type, Stream};
@@ -691,22 +792,22 @@ mod tests {
         // Read settings frame 040406040804
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x6]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x8]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x4]);
-        assert_eq!(Ok(true), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert_eq!(Ok(false), fr.receive(&mut s));
+        assert!(!s.recv_data_ready());
         if !fr.done() {
             assert!(false);
         }
@@ -736,26 +837,26 @@ mod tests {
         assert_eq!(Ok(false), fr.receive(&mut s));
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x6]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x6]);
         assert_eq!(Ok(false), fr.receive(&mut s));
         s.recv_buf.extend(vec![0x40]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x8]);
         assert_eq!(Ok(false), fr.receive(&mut s));
         s.recv_buf.extend(vec![0x41]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x0]);
-        assert_eq!(Ok(true), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert_eq!(Ok(false), fr.receive(&mut s));
+        assert!(!s.recv_data_ready());
         if !fr.done() {
             assert!(false);
         }
@@ -782,18 +883,18 @@ mod tests {
         // Read pushpromise frame 05054101010203
         s.recv_buf.extend(vec![0x5]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x5]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x41]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 0);
+        assert!(!s.recv_data_ready());
         s.recv_buf.extend(vec![0x1, 0x1, 0x2, 0x3]);
-        assert_eq!(Ok(true), fr.receive(&mut s));
+        assert_eq!(Ok(false), fr.receive(&mut s));
 
         // headers are still on the stream.
-        assert!(s.recv_data_ready() == 3);
+        assert_eq!(s.recv_data_ready_amount(), 3);
         if !fr.done() {
             assert!(false);
         }
@@ -818,8 +919,8 @@ mod tests {
 
         // Read data frame 0003010203
         s.recv_buf.extend(vec![0x0, 0x3, 0x1, 0x2, 0x3]);
-        assert_eq!(Ok(true), fr.receive(&mut s));
-        assert!(s.recv_data_ready() == 3);
+        assert_eq!(Ok(false), fr.receive(&mut s));
+        assert!(s.recv_data_ready_amount() == 3);
         if !fr.done() {
             assert!(false);
         }

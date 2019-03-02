@@ -41,7 +41,7 @@ pub fn get_varint_len(v: u64) -> u64 {
     panic!("Varint value too large")
 }
 
-fn decode_uint(d: &mut Data, l: usize) -> Res<u64> {
+fn decode_uint<E>(d: &mut DataBuf<E>, l: usize) -> Result<u64, E> {
     let mut res: u64 = 0;
     let mut mask = 0x3f;
     for _ in 0..l {
@@ -54,7 +54,7 @@ fn decode_uint(d: &mut Data, l: usize) -> Res<u64> {
     Ok(res)
 }
 
-pub fn decode_varint(d: &mut Data) -> Res<u64> {
+pub fn decode_varint<E>(d: &mut DataBuf<E>) -> Result<u64, E> {
     let l = match (d.peek_byte()? & 0xc0) >> 6 {
         0 => 1,
         1 => 2,
@@ -65,15 +65,18 @@ pub fn decode_varint(d: &mut Data) -> Res<u64> {
     decode_uint(d, l)
 }
 
-pub fn decode_varint_size(d: &mut Data) -> Res<usize> {
-    let l = match (d.peek_byte()? & 0xc0) >> 6 {
+pub fn decode_varint_size<E>(d: &mut DataBuf<E>) -> Result<usize, E> {
+    Ok(decode_varint_size_from_byte(d.peek_byte()?))
+}
+
+pub fn decode_varint_size_from_byte(b: u8) -> usize {
+   match (b & 0xc0) >> 6 {
         0 => 1,
         1 => 2,
         2 => 4,
         3 => 8,
         _ => panic!("Can't happen"),
-    };
-    Ok(l)
+    }
 }
 
 #[cfg(test)]
