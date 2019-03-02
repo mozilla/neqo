@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use std::time::Instant;
 
 use crate::connection::TxMode;
+
 use crate::Error;
 use crate::HError;
 use crate::Res;
@@ -44,7 +45,6 @@ pub trait Sendable: Debug {
 
     fn close(&mut self) {}
 }
-
 
 #[allow(dead_code, unused_variables)]
 #[derive(Debug, PartialEq)]
@@ -117,7 +117,6 @@ impl TxBuffer {
     fn lost_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
         unimplemented!();
     }
-
 
     #[allow(dead_code, unused_variables)]
     fn acked_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
@@ -278,7 +277,6 @@ impl RxStreamOrderer {
         self.retired
     }
 
-
     pub fn buffered(&self) -> u64 {
         self.data_ranges
             .iter()
@@ -374,8 +372,7 @@ impl Sendable for SendStream {
         self.tx_buffer.data_ready()
     }
 
-    fn close(&mut self) {
-    }
+    fn close(&mut self) {}
 }
 
 #[derive(Debug, PartialEq)]
@@ -579,8 +576,7 @@ impl Recvable for BidiStream {
         self.rx.final_size()
     }
 
-    fn stop_sending(&mut self, _err: HError) {
-    }
+    fn stop_sending(&mut self, _err: HError) {}
 }
 
 impl Sendable for BidiStream {
@@ -592,13 +588,12 @@ impl Sendable for BidiStream {
         self.tx.send_data_ready()
     }
 
-    fn close(&mut self) {
-    }
-
+    fn close(&mut self) {}
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     #[test]
     fn test_stream_rx() {
