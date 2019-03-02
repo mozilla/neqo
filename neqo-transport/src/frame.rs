@@ -32,7 +32,7 @@ const STREAM_FRAME_BIT_FIN: u8 = 0x01;
 const STREAM_FRAME_BIT_LEN: u8 = 0x02;
 const STREAM_FRAME_BIT_OFF: u8 = 0x04;
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Copy, Clone)]
 pub enum StreamType {
     BiDi,
     UniDi,

@@ -4,6 +4,7 @@ use std::fmt::Debug;
 
 use crate::connection::TxMode;
 use crate::Error;
+use crate::HError;
 use crate::Res;
 
 const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
@@ -12,6 +13,8 @@ pub trait Recvable: Debug {
     /// Read buffered data from stream. bool says whether is final data on
     /// stream.
     fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)>;
+
+    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)>;
 
     /// The number of bytes that can be read from the stream.
     fn recv_data_ready(&self) -> bool;
@@ -27,6 +30,8 @@ pub trait Recvable: Debug {
 
     /// Close the stream.
     fn close(&mut self);
+
+    fn stop_sending(&mut self, err: HError);
 }
 
 pub trait Sendable: Debug {
@@ -35,7 +40,10 @@ pub trait Sendable: Debug {
 
     /// Number of bytes that is queued for sending.
     fn send_data_ready(&self) -> bool;
+
+    fn close(&mut self) {}
 }
+
 
 #[allow(dead_code, unused_variables)]
 #[derive(Debug, PartialEq)]
@@ -108,6 +116,7 @@ impl TxBuffer {
     fn lost_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
         unimplemented!();
     }
+
 
     #[allow(dead_code, unused_variables)]
     fn acked_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
@@ -268,6 +277,7 @@ impl RxStreamOrderer {
         self.retired
     }
 
+
     pub fn buffered(&self) -> u64 {
         self.data_ranges
             .iter()
@@ -279,8 +289,15 @@ impl RxStreamOrderer {
     /// retrieve it.
     /// Returns bytes copied.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
-        qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
-        let mut buf_remaining = buf.len();
+        self.read_with_amount(buf, buf.len() as u64)
+    }
+
+    /// Caller has been told data is available on a stream, and they want to
+    /// retrieve it.
+    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<u64> {
+        assert!(buf.len() >= amount as usize);
+        qtrace!("Reading {} bytes, {} available", amount, self.buffered());
+        let mut buf_remaining = amount as usize;
         let mut copied = 0;
 
         for (&range_start, range_data) in &mut self.data_ranges {
@@ -353,6 +370,9 @@ impl Sendable for SendStream {
     fn send_data_ready(&self) -> bool {
         self.tx_buffer.data_ready()
     }
+
+    fn close(&mut self) {
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -413,13 +433,19 @@ impl Recvable for RecvStream {
     /// caller has been told data is available on a stream, and they want to
     /// retrieve it.
     fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
+        self.read_with_amount(buf, buf.len() as u64)
+    }
+
+    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)> {
+        assert!(buf.len() >= amount as usize);
+
         match &mut self.state {
             RecvStreamState::Closed => return Err(Error::ErrNoMoreData),
             RecvStreamState::Open {
                 rx_window: _,
                 rx_orderer,
             } => {
-                let read_bytes = rx_orderer.read(buf)?;
+                let read_bytes = rx_orderer.read_with_amount(buf, amount)?;
 
                 let fin = if let Some(final_size) = self.final_size {
                     if final_size == rx_orderer.retired() {
@@ -499,6 +525,11 @@ impl Recvable for RecvStream {
     fn final_size(&self) -> Option<u64> {
         self.final_size
     }
+
+    #[allow(dead_code, unused_variables)]
+    fn stop_sending(&mut self, err: HError) {
+        unimplemented!();
+    }
 }
 
 #[derive(Debug)]
@@ -521,6 +552,10 @@ impl Recvable for BidiStream {
         self.rx.read(buf)
     }
 
+    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)> {
+        self.rx.read_with_amount(buf, amount)
+    }
+
     fn recv_data_ready(&self) -> bool {
         self.rx.recv_data_ready()
     }
@@ -540,6 +575,9 @@ impl Recvable for BidiStream {
     fn final_size(&self) -> Option<u64> {
         self.rx.final_size()
     }
+
+    fn stop_sending(&mut self, _err: HError) {
+    }
 }
 
 impl Sendable for BidiStream {
@@ -550,12 +588,14 @@ impl Sendable for BidiStream {
     fn send_data_ready(&self) -> bool {
         self.tx.send_data_ready()
     }
+
+    fn close(&mut self) {
+    }
+
 }
 
 #[cfg(test)]
 mod tests {
-
-    use super::*;
 
     #[test]
     fn test_stream_rx() {
@@ -718,4 +758,12 @@ mod tests {
         s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, vec![1; 1])
             .unwrap_err();
     }
+}
+
+pub fn as_recvable(t: &mut Recvable) -> &mut Recvable {
+    t
+}
+
+pub fn as_sendable(t: &mut Sendable) -> &mut Sendable {
+    t
 }

@@ -9,11 +9,12 @@ use std::ops;
 use rand::prelude::*;
 
 use crate::data::Data;
-use crate::frame::{decode_frame, Frame};
+use crate::frame::{decode_frame, Frame, StreamType};
 use crate::nss::*;
 use crate::packet::*;
-use crate::stream::{BidiStream, Recvable, RxStreamOrderer, TxBuffer};
-use crate::{Error, Res};
+use crate::stream::{BidiStream, Recvable, Sendable, as_recvable, as_sendable, RxStreamOrderer, TxBuffer};
+
+use crate::{Error, HError, CError, Res};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -32,6 +33,7 @@ pub enum State {
     WaitInitial,
     Handshaking,
     Connected,
+    Closed,
 }
 
 #[derive(Debug, PartialEq)]
@@ -320,6 +322,8 @@ impl Connection {
         Ok(())
     }
 
+    pub fn close(&mut self, _error: HError) {}
+
     fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         qdebug!("Handshake epoch={} data={:0x?}", epoch, data);
         let mut rec: Option<Record> = None;
@@ -476,7 +480,7 @@ impl Connection {
     }
 
     // Returns new stream id
-    pub fn stream_create(&mut self) -> u64 {
+    pub fn stream_create(&mut self, _st: StreamType) -> u64 {
         let stream_id = self.next_stream_id;
         self.streams.insert(stream_id, BidiStream::new());
         self.next_stream_id += 1;
@@ -492,6 +496,30 @@ impl Connection {
     pub fn label(&self) -> String {
         String::from("Connection {id=xxx}")
     }
+    pub fn get_state(&self) -> ConnState {
+        ConnState {
+            connected: self.state == State::Connected,
+            error: CError::Error(Error::ErrNoError), // TODO
+            closed: self.state == State::Closed,
+        }
+    }
+
+    pub fn get_readable_streams<'a>(&'a mut self) -> Box<Iterator<Item=(u64, &mut dyn Recvable)> + 'a> {
+Box::new(self.streams.iter_mut().map(|(x, y)|  (*x, as_recvable(y))))
+    }
+
+    pub fn get_writable_streams<'a>(&'a mut self) -> Box<Iterator<Item=(u64, &mut dyn Sendable)> + 'a>  {
+       Box::new(self.streams.iter_mut().map(|(x, y)|  (*x, as_sendable(y))))
+    }
+
+    pub fn reset_stream(&mut self, _id:u64, _err: HError) {
+    }
+}
+
+pub struct ConnState {
+    pub connected: bool,
+    pub error: CError,
+    pub closed: bool,
 }
 
 // Mock for the crypto pieces

@@ -7,6 +7,7 @@ use std::convert::Into;
 pub struct Data {
     buf: Vec<u8>,
     offset: usize,
+    read: usize,
 }
 
 impl Data {
@@ -14,6 +15,7 @@ impl Data {
         Data {
             buf: data.to_vec(),
             offset: 0,
+            read: 0,
         }
     }
 
@@ -145,10 +147,18 @@ impl Data {
     pub fn clear(&mut self) {
         self.buf.truncate(0);
         self.offset = 0;
+        self.read = 0;
     }
 
     pub fn as_mut_vec(&mut self) -> &mut [u8] {
-        &mut *self.buf
+        &mut (self.buf[self.read..])
+    }
+
+    pub fn read(&mut self, l: usize) {
+      if l > self.remaining() {
+         panic!("want to set more byte read than remaing in the buffer.");
+      }
+      self.read += l;
     }
 }
 
