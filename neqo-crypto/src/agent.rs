@@ -277,11 +277,7 @@ impl SecretAgent {
     //
     // Ideally, this only includes records from the current epoch.
     // If you send data from multiple epochs, you might end up being sad.
-    pub fn handshake_raw(
-        &mut self,
-        _now: u64,
-        input: Option<Record>,
-    ) -> Res<(HandshakeState, RecordList)> {
+    pub fn handshake_raw(&mut self, input: Option<Record>) -> Res<(HandshakeState, RecordList)> {
         self.set_raw(true)?;
 
         // Setup for accepting records.

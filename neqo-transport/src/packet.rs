@@ -1,10 +1,12 @@
 // TODO(ekr@rtfm.com): Remove this once I've implemented everything.
 #![allow(unused_variables, dead_code)]
 
-use ::derive_more::*;
+use derive_more::*;
 
 use super::data::*;
 use super::*;
+
+use crate::nss_stub::Epoch;
 
 const PACKET_TYPE_INITIAL: u8 = 0x0;
 const PACKET_TYPE_0RTT: u8 = 0x01;
@@ -16,6 +18,8 @@ const PACKET_BIT_SHORT: u8 = 0x00;
 const PACKET_BIT_FIXED_QUIC: u8 = 0x40;
 
 const SAMPLE_SIZE: usize = 16;
+
+const AUTH_TAG_LEN: usize = 16;
 
 #[derive(Debug, PartialEq)]
 pub enum PacketType {
@@ -58,9 +62,42 @@ pub struct PacketHdr {
     pub dcid: ConnectionId,
     pub scid: Option<ConnectionId>,
     pub pn: PacketNumber,
-    pub epoch: u64,
+    pub epoch: Epoch,
     pub hdr_len: usize,
-    pub body_len: usize,
+    body_len: usize,
+}
+
+impl PacketHdr {
+    pub fn new(
+        tbyte: u8,
+        tipe: PacketType,
+        version: Option<Version>,
+        dcid: ConnectionId,
+        scid: Option<ConnectionId>,
+        pn: PacketNumber,
+        epoch: Epoch,
+        hdr_len: usize,
+    ) -> PacketHdr {
+        PacketHdr {
+            tbyte,
+            tipe,
+            version,
+            dcid,
+            scid,
+            pn,
+            epoch,
+            hdr_len,
+            body_len: 0,
+        }
+    }
+
+    pub fn plain_body_len(&self) -> usize {
+        self.body_len
+    }
+
+    pub fn encrypted_body_len(&self) -> usize {
+        self.body_len + AUTH_TAG_LEN
+    }
 }
 
 pub trait PacketDecoder {
@@ -71,8 +108,10 @@ pub trait PacketCtx {
     fn pn_length(&self, pn: PacketNumber) -> usize;
     fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]>;
     fn decode_pn(&self, pn: u64) -> Res<PacketNumber>;
-    fn aead_decrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
-    fn aead_encrypt(&self, pn: PacketNumber, epoch: u64, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
+    fn aead_decrypt(&self, pn: PacketNumber, epoch: Epoch, hdr: &[u8], body: &[u8])
+        -> Res<Vec<u8>>;
+    fn aead_encrypt(&self, pn: PacketNumber, epoch: Epoch, hdr: &[u8], body: &[u8])
+        -> Res<Vec<u8>>;
 }
 
 fn encode_cidl_half(l: usize) -> u8 {
@@ -179,7 +218,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
         p.tipe = PacketType::Short;
         p.dcid = ConnectionId(d.decode_data(dec.get_cid_len())?);
         p.hdr_len = d.offset();
-        p.body_len = d.remaining();
+        p.body_len = d.remaining() - AUTH_TAG_LEN;
         p.epoch = 3; // TODO(ekr@rtfm.com): Decode key phase bits.
         return Ok(p);
     }
@@ -271,7 +310,12 @@ pub fn decrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<V
     hdr.pn = ctx.decode_pn(pn_encoded)?;
 
     // Finally, decrypt.
-    Ok(ctx.aead_decrypt(hdr.pn, hdr.epoch, &hdrbytes, &pkt[hdr.hdr_len..])?)
+    Ok(ctx.aead_decrypt(
+        hdr.pn,
+        hdr.epoch,
+        &hdrbytes,
+        &pkt[hdr.hdr_len..hdr.hdr_len + hdr.encrypted_body_len()],
+    )?)
 }
 
 fn encode_packet_short(
@@ -357,8 +401,8 @@ mod tests {
     const AEAD_MASK: u8 = 0;
 
     impl TestFixture {
-        fn auth_tag(hdr: &[u8], body: &[u8]) -> [u8; 16] {
-            [0; 16]
+        fn auth_tag(hdr: &[u8], body: &[u8]) -> [u8; AUTH_TAG_LEN] {
+            [0; AUTH_TAG_LEN]
         }
     }
 
@@ -378,7 +422,7 @@ mod tests {
         fn aead_decrypt(
             &self,
             pn: PacketNumber,
-            epoch: u64,
+            epoch: Epoch,
             hdr: &[u8],
             body: &[u8],
         ) -> Res<Vec<u8>> {
@@ -387,7 +431,7 @@ mod tests {
             for i in 0..pt.len() {
                 pt[i] ^= AEAD_MASK;
             }
-            let pt_len = pt.len() - 16;
+            let pt_len = pt.len() - AUTH_TAG_LEN;
             let at = TestFixture::auth_tag(hdr, &pt[0..pt_len]);
             for i in 0..16 {
                 if at[i] != pt[pt_len + i] {
@@ -400,7 +444,7 @@ mod tests {
         fn aead_encrypt(
             &self,
             pn: PacketNumber,
-            epoch: u64,
+            epoch: Epoch,
             hdr: &[u8],
             body: &[u8],
         ) -> Res<Vec<u8>> {

@@ -316,7 +316,7 @@ impl Frame {
 pub fn decode_frame(d: &mut Data) -> Res<Frame> {
     // TODO(ekr@rtfm.com): check for minimal encoding
     let t = d.decode_byte()?;
-    qdebug!("Frame type byte={}", t);
+    qdebug!("Frame type byte={:0x}", t);
     match t {
         FRAME_TYPE_PADDING => Ok(Frame::Padding),
         FRAME_TYPE_PING => Ok(Frame::Ping),
