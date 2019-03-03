@@ -3,7 +3,7 @@
 #[macro_use]
 mod exp;
 #[macro_use]
-mod p11;
+pub mod p11;
 
 pub mod aead;
 pub mod agent;

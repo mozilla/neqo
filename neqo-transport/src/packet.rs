@@ -104,14 +104,14 @@ pub trait PacketDecoder {
     fn get_cid_len(&self) -> usize;
 }
 
-pub trait PacketCtx {
-    fn pn_length(&self, pn: PacketNumber) -> usize;
+pub trait CryptoCtx {
     fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]>;
+    fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
+    fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
+}
+
+pub trait PacketNumberCtx {
     fn decode_pn(&self, pn: u64) -> Res<PacketNumber>;
-    fn aead_decrypt(&self, pn: PacketNumber, epoch: Epoch, hdr: &[u8], body: &[u8])
-        -> Res<Vec<u8>>;
-    fn aead_encrypt(&self, pn: PacketNumber, epoch: Epoch, hdr: &[u8], body: &[u8])
-        -> Res<Vec<u8>>;
 }
 
 fn encode_cidl_half(l: usize) -> u8 {
@@ -270,7 +270,12 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     Ok(p)
 }
 
-pub fn decrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<Vec<u8>> {
+pub fn decrypt_packet(
+    crypto: &CryptoCtx,
+    pn: &PacketNumberCtx,
+    hdr: &mut PacketHdr,
+    pkt: &[u8],
+) -> Res<Vec<u8>> {
     assert!(!matches!(
         hdr.tipe,
         PacketType::Retry(..) | PacketType::VN(..)
@@ -282,7 +287,7 @@ pub fn decrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<V
     if payload.len() < (4 + SAMPLE_SIZE) {
         return Err(Error::ErrNoMoreData);
     }
-    let mask = ctx.compute_mask(&payload[4..(SAMPLE_SIZE + 4)])?;
+    let mask = crypto.compute_mask(&payload[4..(SAMPLE_SIZE + 4)])?;
 
     // Now put together a raw header to work on.
     let pn_len = decode_pnl((hdr.tbyte ^ mask[0]) & 0x3);
@@ -307,40 +312,39 @@ pub fn decrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, pkt: &[u8]) -> Res<V
     hdr.body_len -= pn_len;
 
     // Now call out to expand the PN.
-    hdr.pn = ctx.decode_pn(pn_encoded)?;
+    hdr.pn = pn.decode_pn(pn_encoded)?;
 
     // Finally, decrypt.
-    Ok(ctx.aead_decrypt(
+    Ok(crypto.aead_decrypt(
         hdr.pn,
-        hdr.epoch,
         &hdrbytes,
         &pkt[hdr.hdr_len..hdr.hdr_len + hdr.encrypted_body_len()],
     )?)
 }
 
 fn encode_packet_short(
-    ctx: &PacketCtx,
+    crypto: &CryptoCtx,
     d: &mut Data,
     hdr: &mut PacketHdr,
     body: &[u8],
 ) -> Res<Vec<u8>> {
     // Leading byte.
-    let pnl = ctx.pn_length(hdr.pn);
+    let pnl = pn_length(hdr.pn);
     d.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | encode_pnl(pnl));
     d.encode_vec(&hdr.dcid.0);
     d.encode_uint(hdr.pn, pnl);
 
-    encrypt_packet(ctx, hdr, d, body)
+    encrypt_packet(crypto, hdr, d, body)
 }
 
 /* Hanlde Initial, 0-RTT, Handshake. */
 fn encode_packet_long(
-    ctx: &PacketCtx,
+    crypto: &CryptoCtx,
     d: &mut Data,
     hdr: &mut PacketHdr,
     body: &[u8],
 ) -> Res<Vec<u8>> {
-    let pnl = ctx.pn_length(hdr.pn);
+    let pnl = pn_length(hdr.pn);
     d.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | hdr.tipe.code() << 4 | encode_pnl(pnl));
     d.encode_uint(hdr.version.unwrap(), 4);
     d.encode_byte(encode_cidl(
@@ -356,35 +360,43 @@ fn encode_packet_long(
     d.encode_varint((pnl + body.len()) as u64);
     d.encode_uint(hdr.pn, pnl);
 
-    encrypt_packet(ctx, hdr, d, body)
+    encrypt_packet(crypto, hdr, d, body)
 }
 
-fn encrypt_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, d: &mut Data, body: &[u8]) -> Res<Vec<u8>> {
+fn encrypt_packet(
+    crypto: &CryptoCtx,
+    hdr: &mut PacketHdr,
+    d: &mut Data,
+    body: &[u8],
+) -> Res<Vec<u8>> {
     let hdr_len = d.remaining();
     // Encrypt the packet. This has too many copies.
-    let ct = ctx
-        .aead_encrypt(hdr.pn, hdr.epoch, d.as_mut_vec(), body)
-        .unwrap();
+    let ct = crypto.aead_encrypt(hdr.pn, d.as_mut_vec(), body).unwrap();
     d.encode_vec(&ct);
-    let mask = ctx.compute_mask(&ct[0..SAMPLE_SIZE]).unwrap();
+    let mask = crypto.compute_mask(&ct[0..SAMPLE_SIZE]).unwrap();
     let ret = d.as_mut_vec();
     ret[0] ^= mask[0] & 0x1f;
-    for i in hdr_len - ctx.pn_length(hdr.pn)..hdr_len {
+    for i in hdr_len - pn_length(hdr.pn)..hdr_len {
         ret[i] ^= mask[1 + 1];
     }
     Ok(ret.to_vec())
 }
 
-pub fn encode_packet(ctx: &PacketCtx, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
+// TODO(ekr@rtfm.com): Minimal packet number lengths.
+fn pn_length(pn: PacketNumber) -> usize {
+    return 3;
+}
+
+pub fn encode_packet(crypto: &CryptoCtx, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
     let mut d = Data::default();
 
     match hdr.tipe {
-        PacketType::Short => encode_packet_short(ctx, &mut d, hdr, body),
+        PacketType::Short => encode_packet_short(crypto, &mut d, hdr, body),
         /*
         PacketType::VN(..) => encode_packet_vn(ctx, &d, hdr, body),
         PacketType::Retry(..) => encode_retry(ctx, &d, hdr, body), */
         PacketType::Initial(..) | PacketType::Handshake | PacketType::Retry(..) => {
-            encode_packet_long(ctx, &mut d, hdr, body)
+            encode_packet_long(crypto, &mut d, hdr, body)
         }
         _ => unimplemented!(),
     }
@@ -406,26 +418,12 @@ mod tests {
         }
     }
 
-    impl PacketCtx for TestFixture {
-        fn pn_length(&self, pn: PacketNumber) -> usize {
-            3
-        }
-
+    impl CryptoCtx for TestFixture {
         fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]> {
             Ok([0xa5, 0xa5, 0xa5, 0xa5, 0xa5])
         }
 
-        fn decode_pn(&self, pn: u64) -> Res<PacketNumber> {
-            Ok(pn)
-        }
-
-        fn aead_decrypt(
-            &self,
-            pn: PacketNumber,
-            epoch: Epoch,
-            hdr: &[u8],
-            body: &[u8],
-        ) -> Res<Vec<u8>> {
+        fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
             let mut pt = body.to_vec();
 
             for i in 0..pt.len() {
@@ -441,13 +439,7 @@ mod tests {
             Ok(pt[0..pt_len].to_vec())
         }
 
-        fn aead_encrypt(
-            &self,
-            pn: PacketNumber,
-            epoch: Epoch,
-            hdr: &[u8],
-            body: &[u8],
-        ) -> Res<Vec<u8>> {
+        fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
             let mut d = Data::from_slice(body);
             d.encode_vec(&TestFixture::auth_tag(hdr, body));
             let v = d.as_mut_vec();
@@ -459,6 +451,11 @@ mod tests {
         }
     }
 
+    impl PacketNumberCtx for TestFixture {
+        fn decode_pn(&self, pn: u64) -> Res<PacketNumber> {
+            Ok(pn)
+        }
+    }
     impl PacketDecoder for TestFixture {
         fn get_cid_len(&self) -> usize {
             5
@@ -488,7 +485,7 @@ mod tests {
 
     fn test_decrypt_packet(f: &TestFixture, packet: Vec<u8>) -> Res<(PacketHdr, Vec<u8>)> {
         let mut phdr = decode_packet_hdr(f, &packet)?;
-        let body = decrypt_packet(f, &mut phdr, &packet)?;
+        let body = decrypt_packet(f, f, &mut phdr, &packet)?;
         Ok((phdr, body))
     }
 

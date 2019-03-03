@@ -34,6 +34,7 @@ pub enum Error {
     ErrDecodingFrame,
     ErrUnexpectedMessage,
     ErrHandshakeFailed,
+    ErrKeysNotFound,
 }
 
 #[derive(PartialEq, Debug, Copy, Clone)]
@@ -96,6 +97,15 @@ impl From<HError> for CError {
 }
 
 pub type Res<T> = std::result::Result<T, Error>;
+
+pub fn hex(label: &str, buf: &[u8]) -> String {
+    let mut ret = String::with_capacity(label.len() + 10 + buf.len() * 3);
+    ret.push_str(&format!("{}[{}]: ", label, buf.len()));
+    for b in buf {
+        ret.push_str(&format!("{:02x}", b));
+    }
+    ret
+}
 
 #[cfg(test)]
 mod tests {}

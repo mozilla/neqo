@@ -5,6 +5,7 @@ use crate::result;
 use crate::ssl;
 use crate::ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext};
 
+use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_char, c_uint};
 use std::ptr::{null_mut, NonNull};
@@ -133,5 +134,11 @@ impl Aead {
         };
         result::result(rv)?;
         return Ok(&output[0..l as usize]);
+    }
+}
+
+impl fmt::Debug for Aead {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[AEAD Context]")
     }
 }

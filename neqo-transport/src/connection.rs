@@ -14,16 +14,19 @@ use crate::frame::{decode_frame, Frame, StreamType};
 use crate::nss::*;
 use crate::packet::*;
 use crate::stream::{RecvStream, Recvable, RxStreamOrderer, SendStream, Sendable, TxBuffer};
-use crate::varint::get_varint_len;
-
-use crate::{CError, Error, HError, Res};
+use crate::varint::*;
+use crate::{hex, CError, Error, HError, Res};
+use neqo_crypto::aead::Aead;
+use neqo_crypto::constants::*;
+use neqo_crypto::hkdf;
+use neqo_crypto::p11::*;
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
 
 const QUIC_VERSION: u32 = 0xff000012;
-
 const NUM_EPOCHS: Epoch = 4;
+const MAX_AUTH_TAG: usize = 32;
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Role {
@@ -70,12 +73,51 @@ impl ops::Deref for FrameGenerator {
 }
 
 #[derive(Debug)]
-pub struct CryptoState {
-    pn: u64,
+struct CryptoDxState {
+    label: String,
+    aead: Aead,
+}
+
+impl CryptoDxState {
+    fn new<S: Into<String>>(label: S, secret: &SymKey, cipher: Cipher) -> CryptoDxState {
+        log!(Level::Error, "Making CryptoDxState, cipher={}", cipher);
+        CryptoDxState {
+            label: label.into(),
+            aead: Aead::new(TLS_VERSION_1_3, cipher, secret, "quic ").unwrap(),
+        }
+    }
+
+    fn new_initial<S: Into<String> + Clone>(label: S, dcid: &[u8]) -> CryptoDxState {
+        let cipher = TLS_AES_128_GCM_SHA256;
+        let initial_salt = Data::from_hex("ef4fb0abb47470c41befcf8031334fae485e09a0");
+        let initial_secret = hkdf::extract(
+            TLS_VERSION_1_3,
+            cipher,
+            SymKey::import(SymKeyTarget::Hkdf(cipher), initial_salt.as_vec())
+                .as_ref()
+                .unwrap(),
+            SymKey::import(SymKeyTarget::Hkdf(cipher), dcid)
+                .as_ref()
+                .unwrap(),
+        )
+        .unwrap();
+
+        let secret =
+            hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label.clone())
+                .unwrap();
+
+        CryptoDxState::new(label.clone(), &secret, cipher)
+    }
+}
+
+#[derive(Debug)]
+struct CryptoState {
+    rx: CryptoDxState,
+    tx: CryptoDxState,
 }
 
 #[derive(Debug, Default)]
-pub struct CryptoStream {
+struct CryptoStream {
     tx: TxBuffer,
     rx: RxStreamOrderer,
 }
@@ -95,6 +137,8 @@ pub struct Connection {
     send_epoch: Epoch,
     recv_epoch: Epoch,
     crypto_streams: [CryptoStream; 4],
+    crypto_states: [Option<CryptoState>; 4],
+    tx_pns: [u64; 4],
     generators: Vec<FrameGenerator>,
     deadline: Instant,
     max_data: u64,
@@ -160,6 +204,8 @@ impl Connection {
                 FrameGenerator(generate_crypto_frames),
                 FrameGenerator(generate_stream_frames),
             ],
+            crypto_states: [None, None, None, None],
+            tx_pns: [0; 4],
             deadline: Instant::now(),
             max_data: 0,
             max_streams: 0,
@@ -176,6 +222,7 @@ impl Connection {
         c.scid = c.generate_cid();
         if c.role == Role::Client {
             c.dcid = c.generate_cid();
+            c.create_initial_crypto_state(&c.dcid.clone()); // Stupid borrow checker.
         }
 
         c
@@ -225,17 +272,19 @@ impl Connection {
                     return Err(Error::ErrUnexpectedMessage);
                 }
                 State::WaitInitial => {
-                    let dcid = &hdr.scid.as_ref().unwrap().0;
+                    // Out DCID is the other side's SCID.
+                    let scid = &hdr.scid.as_ref().unwrap().0;
                     if self.role == Role::Server {
-                        if dcid.len() < 8 {
-                            qwarn!(self, "Peer CID is too short");
+                        if hdr.dcid.len() < 8 {
+                            qwarn!(self, "Peer DCID is too short");
                             return Err(Error::ErrInvalidPacket);
                         }
                         self.remote_addr = Some(d.src);
+                        self.create_initial_crypto_state(&hdr.dcid);
                     }
 
                     // Imprint on the remote parameters.
-                    self.dcid = dcid.clone();
+                    self.dcid = scid.clone();
                 }
                 State::Handshaking => {
                     // No-op.
@@ -250,8 +299,12 @@ impl Connection {
 
             qdebug!(self, "Received unverified packet {:?}", hdr);
 
-            let body = decrypt_packet(self, &mut hdr, slc)?;
-
+            // If the state isn't available, we return error.
+            let cs = self.ensure_crypto_state(hdr.epoch)?;
+            let body = decrypt_packet(&cs.rx, &PnCtx {}, &mut hdr, slc)?;
+            // TODO(ekr@rtfm.com): Have the server blow away the initial
+            // crypto state if this fails? Otherwise, we will get a panic
+            // on the assert for doesn't exist.
             // OK, we have a valid packet.
 
             // TODO(ekr@rtfm.com): Check for duplicates.
@@ -327,16 +380,17 @@ impl Connection {
                     Some(self.version),
                     ConnectionId(self.dcid.clone()),
                     Some(ConnectionId(self.scid.clone())),
-                    0, // TODO(ekr@rtfm.com): Implement PN
+                    self.tx_pns[Connection::pn_space(epoch) as usize],
                     epoch,
                     0,
                 );
-
-                let packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
+                self.tx_pns[Connection::pn_space(epoch) as usize] += 1;
+                // Failure to have the state here is an internal error.
+                let cs = self.ensure_crypto_state(hdr.epoch).unwrap();
+                let packet = encode_packet(&cs.tx, &mut hdr, d.as_mut_vec())?;
                 out_packets.push(packet);
-                // TODO(ekr@rtfm.com): Pad the Client Initial.
 
-                // TODO(ekr@rtfm.com): Update PN.
+                // TODO(ekr@rtfm.com): Pad the Client Initial.
             }
         }
 
@@ -524,6 +578,67 @@ impl Connection {
         }
     }
 
+    // Create the initial crypto state.
+    fn create_initial_crypto_state(&mut self, dcid: &[u8]) {
+        qinfo!(
+            self,
+            "Creating initial cipher state DCID={:?} role={:?}",
+            dcid,
+            self.role
+        );
+        //assert!(matches!(None, self.crypto_states[0]));
+
+        let cds = CryptoDxState::new_initial("client in", dcid);
+        let sds = CryptoDxState::new_initial("server in", dcid);
+
+        self.crypto_states[0] = Some(match self.role {
+            Role::Client => CryptoState { tx: cds, rx: sds },
+            Role::Server => CryptoState { tx: sds, rx: cds },
+        });
+    }
+
+    // Get a crypto state, making it if possible, otherwise return an error.
+    fn ensure_crypto_state(&mut self, epoch: Epoch) -> Res<&CryptoState> {
+        let cs = &self.crypto_states[epoch as usize];
+
+        // Note: I had originally written an early return, but the
+        // familiar non-lexical lifetimes Rust bug for returns
+        // tripped me up, so I went with this.
+        if matches!(cs, None) {
+            qinfo!(self, "No crypto state for epoch {}", epoch);
+            assert!(epoch != 0); // This state is made directly.
+
+            let rso = self.tls.read_secret(epoch);
+            if matches!(rso, None) {
+                qinfo!(self, "Keying material not available for epoch {}", epoch);
+                return Err(Error::ErrKeysNotFound);
+            }
+            let rs = rso.unwrap();
+            // This must succced because the secrets are made at the same time.
+            let ws = self.tls.write_secret(epoch).unwrap();
+
+            // TODO(ekr@rtfm.com): The match covers up a bug in
+            // neqo-crypto where we set up the state too late. Fix when that
+            // gets fixed.
+            let cipher = match self.tls.info().as_ref() {
+                Some(info) => info.cipher_suite(),
+                None => TLS_AES_128_GCM_SHA256 as u16,
+            };
+            self.crypto_states[epoch as usize] = Some(CryptoState {
+                rx: CryptoDxState::new(format!("read_epoch={}", epoch), rs, cipher),
+                tx: CryptoDxState::new(format!("write_epoch={}", epoch), ws, cipher),
+            });
+        }
+
+        Ok(self.crypto_states[epoch as usize].as_ref().unwrap())
+    }
+
+    fn pn_space(epoch: Epoch) -> Epoch {
+        if epoch >= 3 {
+            return 1;
+        }
+        return epoch;
+    }
     pub fn process_inbound_stream_frame(
         &mut self,
         fin: bool,
@@ -674,62 +789,69 @@ fn auth_tag(_hdr: &[u8], _body: &[u8]) -> [u8; 16] {
     [0xaa; 16]
 }
 
-impl PacketCtx for Connection {
-    fn pn_length(&self, _pn: PacketNumber) -> usize {
-        3
-    }
-
+impl CryptoCtx for CryptoDxState {
     fn compute_mask(&self, _sample: &[u8]) -> Res<[u8; 5]> {
         Ok([0xa5, 0xa5, 0xa5, 0xa5, 0xa5])
     }
 
-    fn decode_pn(&self, pn: u64) -> Res<PacketNumber> {
-        Ok(pn)
+    fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+        log!(
+            Level::Info,
+            "aead_decrypt label={} pn={} {} {}",
+            &self.label,
+            pn,
+            hex("hdr", hdr),
+            hex("body", body)
+        );
+        let mut out = Vec::with_capacity(body.len());
+        out.resize(body.len(), 0);
+        let res = do_crypto(self.aead.decrypt(pn, hdr, body, &mut out))?;
+        Ok(res.to_vec())
     }
 
-    fn aead_decrypt(
-        &self,
-        _pn: PacketNumber,
-        _epoch: Epoch,
-        hdr: &[u8],
-        body: &[u8],
-    ) -> Res<Vec<u8>> {
-        let mut pt = body.to_vec();
+    fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+        log!(
+            Level::Info,
+            "aead_encrypt label={} pn={} {} {}",
+            self.label,
+            pn,
+            hex("hdr", hdr),
+            hex("body", body)
+        );
 
-        for i in 0..pt.len() {
-            pt[i] ^= AEAD_MASK;
-        }
-        let pt_len = pt.len() - 16;
-        let at = auth_tag(hdr, &pt[0..pt_len]);
-        for i in 0..16 {
-            if at[i] != pt[pt_len + i] {
-                return Err(Error::ErrDecryptError);
-            }
-        }
-        Ok(pt[0..pt_len].to_vec())
+        let size = body.len() + MAX_AUTH_TAG;
+        let mut out = Vec::with_capacity(size);
+        out.resize(size, 0);
+        let res = do_crypto(self.aead.encrypt(pn, hdr, body, &mut out))?;
+
+        log!(Level::Info, "aead_encrypt {}", hex("ct", res),);
+
+        Ok(res.to_vec())
     }
+}
 
-    fn aead_encrypt(
-        &self,
-        _pn: PacketNumber,
-        _epoch: Epoch,
-        hdr: &[u8],
-        body: &[u8],
-    ) -> Res<Vec<u8>> {
-        let mut d = Data::from_slice(body);
-        d.encode_vec(&auth_tag(hdr, body));
-        let v = d.as_mut_vec();
-        for i in 0..v.len() {
-            v[i] ^= AEAD_MASK;
+fn do_crypto<T, U>(res: Result<T, U>) -> Res<T> {
+    match res {
+        Err(_) => {
+            qinfo!("Crypto operation failed");
+            Err(Error::ErrInternalError)
         }
-
-        Ok(v.to_vec())
+        Ok(t) => Ok(t),
     }
 }
 
 impl PacketDecoder for Connection {
     fn get_cid_len(&self) -> usize {
         8
+    }
+}
+
+// TODO(ekr@rtfm.com): Really implement this.
+// TODO(ekr@rtfm.com): This is a kludge.
+struct PnCtx {}
+impl PacketNumberCtx for PnCtx {
+    fn decode_pn(&self, pn: u64) -> Res<PacketNumber> {
+        Ok(pn)
     }
 }
 

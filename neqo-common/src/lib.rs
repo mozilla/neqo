@@ -20,7 +20,7 @@ enum Level {
     Trace,
 }
 #[macro_export]
-macro_rules! log { ($lvl:expr, $($arg:tt)+) => (println!($($arg)+)) }
+macro_rules! log { ($lvl:expr, $($arg:tt)+) => (eprintln!($($arg)+)) }
 #[macro_export]
 macro_rules! log_with_ctx { ($lvl:expr, $ctx: expr, $($arg:tt)*) => ( log!($lvl, "[{}] {}", $ctx.label(), format!($($arg)*));) }
 #[macro_export]

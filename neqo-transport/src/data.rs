@@ -163,6 +163,10 @@ impl Data {
         &mut (self.buf[self.read..])
     }
 
+    pub fn as_vec(&self) -> &[u8] {
+        &(self.buf[self.read..])
+    }
+
     pub fn read(&mut self, l: usize) {
         if l > self.remaining() {
             panic!("want to set more byte read than remaing in the buffer.");
