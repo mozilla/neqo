@@ -32,9 +32,9 @@ impl Connection {
         }
     }
 
-    pub fn process(&mut self, _d: Option<Datagram>, _now: u64) -> Res<(Option<Datagram>, u64)> {
+    pub fn process(&mut self, _d: Vec<Datagram>) -> Res<Vec<Datagram>> {
         self.state = State::Connected;
-        Ok((None, self.deadline))
+        Ok(Vec::new())
     }
 
     pub fn get_state(&self) -> ConnState {

@@ -417,12 +417,8 @@ impl HttpConn {
         }
     }
 
-    pub fn process(
-        &mut self,
-        d: Option<Datagram>,
-        now: u64,
-    ) -> Result<(Option<Datagram>, u64), CError> {
-        match self.conn.process(d, now) {
+    pub fn process(&mut self, d: Vec<Datagram>) -> Result<(Vec<Datagram>), CError> {
+        match self.conn.process(d) {
             Err(e) => Err(CError::Error(e)),
             Ok(r) => {
                 let s = self.conn.get_state();
@@ -660,9 +656,9 @@ fn is_stream_error(e: HError) -> bool {
 mod tests {
     use super::*;
 
-    fn check_return_value(r: Result<(Option<Datagram>, u64), CError>) {
+    fn check_return_value(r: Result<Vec<Datagram>, CError>) {
         if let Ok(v) = r {
-            assert_eq!(v, (None, 0));
+            assert_eq!(v, Vec::new());
         } else {
             assert!(false);
         }
@@ -672,10 +668,10 @@ mod tests {
     fn test_connect() {
         let mut hconn = HttpConn::new(Role::Client, Agent {});
         assert_eq!(hconn.state, HState::Connecting);
-        let mut r = hconn.process(None, 0);
+        let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(hconn.state, HState::Connected);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         if let Some(s) = hconn.conn.streams.get(&0) {
             assert_eq!(s.send_buf, vec![0x0, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
@@ -686,10 +682,10 @@ mod tests {
     fn fetch() {
         let mut hconn = HttpConn::new(Role::Client, Agent {});
         assert_eq!(hconn.state, HState::Connecting);
-        let mut r = hconn.process(None, 0);
+        let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(hconn.state, HState::Connected);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get(&0) {
             Some(s) => {
@@ -706,7 +702,7 @@ mod tests {
             hconn.fetch("GET".to_string(), "something.com".to_string(), headers),
             Ok(())
         );
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         if let Some(s) = hconn.conn.streams.get(&1) {
@@ -748,13 +744,13 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&2) {
             Some(s) => {
@@ -779,10 +775,10 @@ mod tests {
     fn test_frame_reading() {
         let mut hconn = HttpConn::new(Role::Client, Agent {});
         assert_eq!(hconn.state, HState::Connecting);
-        let mut r = hconn.process(None, 0);
+        let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(hconn.state, HState::Connected);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         hconn.conn.stream_create(StreamType::UniDi);
@@ -795,7 +791,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         // start sending SETTINGS frame
         match hconn.conn.streams.get_mut(&1) {
@@ -807,7 +803,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -818,7 +814,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -829,7 +825,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -840,7 +836,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -851,7 +847,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -862,7 +858,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -883,9 +879,9 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -896,7 +892,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -909,7 +905,7 @@ mod tests {
         }
 
         // PUSH_PROMISE on a control stream will cause an error
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         if let Err(e) = r {
             assert_eq!(e, CError::HError(HError::ErrHttpWrongStream));
         }
@@ -927,10 +923,10 @@ mod tests {
     fn test_close_cotrol_stream() {
         let mut hconn = HttpConn::new(Role::Client, Agent {});
         assert_eq!(hconn.state, HState::Connecting);
-        let mut r = hconn.process(None, 0);
+        let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(hconn.state, HState::Connected);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         // create server control stream
@@ -944,10 +940,10 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         hconn.conn.close_receive_side(1);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         if let Err(e) = r {
             assert_eq!(e, CError::HError(HError::ErrHttpClosedCriticalStream));
         }
@@ -963,10 +959,10 @@ mod tests {
     fn test_missing_settings() {
         let mut hconn = HttpConn::new(Role::Client, Agent {});
         assert_eq!(hconn.state, HState::Connecting);
-        let mut r = hconn.process(None, 0);
+        let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(hconn.state, HState::Connected);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         // create server control stream
@@ -980,9 +976,9 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         if let Err(e) = r {
             assert_eq!(e, CError::HError(HError::ErrHttpMissingSettings));
         }
@@ -995,10 +991,10 @@ mod tests {
     fn test_receive_settings_twice() {
         let mut hconn = HttpConn::new(Role::Client, Agent {});
         assert_eq!(hconn.state, HState::Connecting);
-        let mut r = hconn.process(None, 0);
+        let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(hconn.state, HState::Connected);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         // create server control stream
@@ -1012,7 +1008,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -1022,9 +1018,9 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         if let Err(e) = r {
             assert_eq!(e, CError::HError(HError::ErrHttpUnexpectedFrame));
         }
@@ -1036,10 +1032,10 @@ mod tests {
     fn test_wrong_frame_on_control_stream(v: &Vec<u8>) {
         let mut hconn = HttpConn::new(Role::Client, Agent {});
         assert_eq!(hconn.state, HState::Connecting);
-        let mut r = hconn.process(None, 0);
+        let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(hconn.state, HState::Connected);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         // create server control stream
@@ -1053,7 +1049,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
@@ -1063,9 +1059,9 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         if let Err(e) = r {
             assert_eq!(e, CError::HError(HError::ErrHttpWrongStream));
         }
@@ -1104,10 +1100,10 @@ mod tests {
     fn test_received_unknown_stream() {
         let mut hconn = HttpConn::new(Role::Client, Agent {});
         assert_eq!(hconn.state, HState::Connecting);
-        let mut r = hconn.process(None, 0);
+        let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(hconn.state, HState::Connected);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         // create server control stream
@@ -1115,13 +1111,14 @@ mod tests {
         // send server settings.
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                s.recv_buf.extend(vec![0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
+                s.recv_buf
+                    .extend(vec![0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
             }
             None => {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         match hconn.conn.streams.get_mut(&1) {
@@ -1141,10 +1138,10 @@ mod tests {
     fn test_received_push_stream() {
         let mut hconn = HttpConn::new(Role::Client, Agent {});
         assert_eq!(hconn.state, HState::Connecting);
-        let mut r = hconn.process(None, 0);
+        let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(hconn.state, HState::Connected);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         // create server control stream
@@ -1158,7 +1155,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         match hconn.conn.streams.get_mut(&1) {
@@ -1177,10 +1174,10 @@ mod tests {
     fn test_wrong_frame_on_request_stream(v: &Vec<u8>, err: HError) {
         let mut hconn = HttpConn::new(Role::Client, Agent {});
         assert_eq!(hconn.state, HState::Connecting);
-        let mut r = hconn.process(None, 0);
+        let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(hconn.state, HState::Connected);
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get(&0) {
             Some(s) => {
@@ -1197,7 +1194,7 @@ mod tests {
             hconn.fetch("GET".to_string(), "something.com".to_string(), headers),
             Ok(())
         );
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
 
         match hconn.conn.streams.get_mut(&1) {
@@ -1208,7 +1205,7 @@ mod tests {
                 assert!(false);
             }
         }
-        r = hconn.process(None, 0);
+        r = hconn.process(Vec::new());
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
