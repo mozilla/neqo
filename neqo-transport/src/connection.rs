@@ -368,7 +368,7 @@ impl Connection {
             });
         }
 
-        let mut m = self.tls.handshake_raw(rec);
+        let mut m = self.tls.handshake_raw(0, rec);
 
         if matches!(m, Ok((HandshakeState::AuthenticationPending, _))) {
             // TODO(ekr@rtfm.com): IMPORTANT: This overrides
@@ -376,7 +376,7 @@ impl Connection {
             // Fix before shipping.
             qwarn!(self, "marking connection as authenticated without checking");
             self.tls.authenticated();
-            m = self.tls.handshake_raw(None);
+            m = self.tls.handshake_raw(0, None);
         }
         match m {
             Err(_) => {
