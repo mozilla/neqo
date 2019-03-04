@@ -48,8 +48,9 @@ enums = [
     "SECStatus",
 ]
 variables = [
-    "SSL_NumImplementedCiphers",
     "SSL_LIBRARY_VERSION_.*",
+    "SSL_NumImplementedCiphers",
+    "ssl_preinfo_.*",
 ]
 opaque = [
     "CERTCertificate",

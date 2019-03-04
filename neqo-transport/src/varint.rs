@@ -70,7 +70,7 @@ pub fn decode_varint_size<E>(d: &mut DataBuf<E>) -> Result<usize, E> {
 }
 
 pub fn decode_varint_size_from_byte(b: u8) -> usize {
-   match (b & 0xc0) >> 6 {
+    match (b & 0xc0) >> 6 {
         0 => 1,
         1 => 2,
         2 => 4,

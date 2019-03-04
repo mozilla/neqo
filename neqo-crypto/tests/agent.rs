@@ -46,15 +46,17 @@ fn handshake() {
     assert!(bytes.len() > 0);
     assert_eq!(state, HandshakeState::Complete);
 
-    assert_eq!(TLS_VERSION_1_3, client.info().version());
-    assert_eq!(TLS_AES_128_GCM_SHA256, client.info().cipher_suite());
+    let client_info = client.info().expect("got info");
+    assert_eq!(TLS_VERSION_1_3, client_info.version());
+    assert_eq!(TLS_AES_128_GCM_SHA256, client_info.cipher_suite());
 
     let (state, bytes) = server.handshake(NOW, &bytes[..]).expect("finish");
     assert_eq!(bytes.len(), 0);
     assert_eq!(state, HandshakeState::Complete);
 
-    assert_eq!(TLS_VERSION_1_3, server.info().version());
-    assert_eq!(TLS_AES_128_GCM_SHA256, server.info().cipher_suite());
+    let server_info = server.info().expect("got info");
+    assert_eq!(TLS_VERSION_1_3, server_info.version());
+    assert_eq!(TLS_AES_128_GCM_SHA256, server_info.cipher_suite());
 }
 
 fn forward_records(agent: &mut SecretAgent, records_in: RecordList) -> Res<RecordList> {
@@ -86,9 +88,23 @@ fn handshake_raw() {
     assert!(client_records.len() > 0);
     assert_eq!(state, HandshakeState::InProgress);
 
+    let client_preinfo = client.preinfo().expect("get preinfo");
+    assert_eq!(client_preinfo.version(), None);
+    assert_eq!(client_preinfo.cipher_suite(), None);
+    assert_eq!(client_preinfo.early_data(), false);
+    assert_eq!(client_preinfo.early_data_cipher(), None);
+    assert_eq!(client_preinfo.max_early_data(), 0);
+
     let server_records = forward_records(&mut server, client_records).expect("read CH, send SH");
     assert!(server_records.len() > 0);
     assert_eq!(*server.state(), HandshakeState::InProgress);
+
+    let server_preinfo = server.preinfo().expect("get preinfo");
+    assert_eq!(server_preinfo.version(), Some(TLS_VERSION_1_3));
+    assert_eq!(server_preinfo.cipher_suite(), Some(TLS_AES_128_GCM_SHA256));
+    assert_eq!(server_preinfo.early_data(), false);
+    assert_eq!(server_preinfo.early_data_cipher(), None);
+    assert_eq!(server_preinfo.max_early_data(), 0);
 
     let client_records = forward_records(&mut client, server_records).expect("send CF");
     assert_eq!(client_records.len(), 0);
@@ -133,7 +149,10 @@ fn chacha_client() {
 
     connect(&mut client, &mut server);
 
-    assert_eq!(client.info().cipher_suite(), TLS_CHACHA20_POLY1305_SHA256);
+    assert_eq!(
+        client.info().unwrap().cipher_suite(),
+        TLS_CHACHA20_POLY1305_SHA256
+    );
 }
 
 #[test]
@@ -147,5 +166,5 @@ fn p256_server() {
 
     connect(&mut client, &mut server);
 
-    assert_eq!(client.info().key_exchange(), TLS_GRP_EC_SECP256R1);
+    assert_eq!(client.info().unwrap().key_exchange(), TLS_GRP_EC_SECP256R1);
 }

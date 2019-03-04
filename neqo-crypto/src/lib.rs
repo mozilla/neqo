@@ -17,7 +17,10 @@ mod result;
 mod secrets;
 mod ssl;
 
-pub use self::agent::{Agent, Client, HandshakeState, Record, RecordList, SecretAgent, Server};
+pub use self::agent::{
+    Agent, Client, HandshakeState, Record, RecordList, SecretAgent, SecretAgentInfo,
+    SecretAgentPreInfo, Server,
+};
 pub use self::constants::*;
 pub use self::err::{Error, Res};
 pub use self::p11::{SymKey, SymKeyTarget};

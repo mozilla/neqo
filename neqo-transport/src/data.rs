@@ -4,8 +4,8 @@ use num_traits::Num;
 use std::convert::Into;
 
 pub trait DataBuf<E> {
-  fn decode_byte(&mut self) -> Result<u8, E>;
-  fn peek_byte(&mut self) -> Result<u8, E>;
+    fn decode_byte(&mut self) -> Result<u8, E>;
+    fn peek_byte(&mut self) -> Result<u8, E>;
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -16,7 +16,7 @@ pub struct Data {
 }
 
 impl DataBuf<Error> for Data {
-   fn peek_byte(&mut self) -> Res<u8> {
+    fn peek_byte(&mut self) -> Res<u8> {
         let _ = self.check_remaining(1)?;
 
         let res = self.buf[self.offset];
@@ -162,10 +162,10 @@ impl Data {
     }
 
     pub fn read(&mut self, l: usize) {
-      if l > self.remaining() {
-         panic!("want to set more byte read than remaing in the buffer.");
-      }
-      self.read += l;
+        if l > self.remaining() {
+            panic!("want to set more byte read than remaing in the buffer.");
+        }
+        self.read += l;
     }
 }
 

@@ -78,8 +78,8 @@ pub enum HError {
 
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum CError {
-  Error(Error),
-  HError(HError),
+    Error(Error),
+    HError(HError),
 }
 
 impl From<Error> for CError {

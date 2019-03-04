@@ -13,9 +13,11 @@ use crate::data::Data;
 use crate::frame::{decode_frame, Frame, StreamType};
 use crate::nss::*;
 use crate::packet::*;
-use crate::stream::{BidiStream, Recvable, Sendable, as_recvable, as_sendable, RxStreamOrderer, TxBuffer};
+use crate::stream::{
+    as_recvable, as_sendable, BidiStream, Recvable, RxStreamOrderer, Sendable, TxBuffer,
+};
 
-use crate::{Error, HError, CError, Res};
+use crate::{CError, Error, HError, Res};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -537,16 +539,19 @@ impl Connection {
         }
     }
 
-    pub fn get_readable_streams<'a>(&'a mut self) -> Box<Iterator<Item=(u64, &mut dyn Recvable)> + 'a> {
-Box::new(self.streams.iter_mut().map(|(x, y)|  (*x, as_recvable(y))))
+    pub fn get_readable_streams<'a>(
+        &'a mut self,
+    ) -> Box<Iterator<Item = (u64, &mut dyn Recvable)> + 'a> {
+        Box::new(self.streams.iter_mut().map(|(x, y)| (*x, as_recvable(y))))
     }
 
-    pub fn get_writable_streams<'a>(&'a mut self) -> Box<Iterator<Item=(u64, &mut dyn Sendable)> + 'a>  {
-       Box::new(self.streams.iter_mut().map(|(x, y)|  (*x, as_sendable(y))))
+    pub fn get_writable_streams<'a>(
+        &'a mut self,
+    ) -> Box<Iterator<Item = (u64, &mut dyn Sendable)> + 'a> {
+        Box::new(self.streams.iter_mut().map(|(x, y)| (*x, as_sendable(y))))
     }
 
-    pub fn reset_stream(&mut self, _id:u64, _err: HError) {
-    }
+    pub fn reset_stream(&mut self, _id: u64, _err: HError) {}
 }
 
 pub struct ConnState {

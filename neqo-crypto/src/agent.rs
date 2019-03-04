@@ -25,6 +25,56 @@ pub enum HandshakeState {
     Failed(Error),
 }
 
+pub struct SecretAgentPreInfo {
+    info: ssl::SSLPreliminaryChannelInfo,
+}
+
+macro_rules! preinfo_arg {
+    ($v:ident, $m:ident, $f:ident: $t:ident) => {
+        pub fn $v(&self) -> Option<$t> {
+            match self.info.valuesSet & ssl::$m {
+                0 => None,
+                _ => Some(self.info.$f as $t)
+            }
+        }
+    };
+    ($v:ident, $m:ident, $f:ident: $t:ident,) => {
+        preinfo_arg!($v, $m, $f: $t);
+    }
+}
+
+impl SecretAgentPreInfo {
+    fn new(fd: *mut ssl::PRFileDesc) -> Res<SecretAgentPreInfo> {
+        let mut info: ssl::SSLPreliminaryChannelInfo = unsafe { mem::uninitialized() };
+        let rv = unsafe {
+            ssl::SSL_GetPreliminaryChannelInfo(
+                fd,
+                &mut info,
+                mem::size_of::<ssl::SSLPreliminaryChannelInfo>() as ssl::PRUint32,
+            )
+        };
+        result::result(rv)?;
+        Ok(SecretAgentPreInfo { info })
+    }
+
+    preinfo_arg!(version, ssl_preinfo_version, protocolVersion: Version);
+    preinfo_arg!(cipher_suite, ssl_preinfo_cipher_suite, cipherSuite: Cipher);
+
+    pub fn early_data(&self) -> bool {
+        self.info.canSendEarlyData != 0
+    }
+
+    pub fn max_early_data(&self) -> usize {
+        self.info.maxEarlyDataSize as usize
+    }
+
+    preinfo_arg!(
+        early_data_cipher,
+        ssl_preinfo_0rtt_cipher_suite,
+        zeroRttCipherSuite: Cipher,
+    );
+}
+
 #[derive(Debug, Default)]
 pub struct SecretAgentInfo {
     ver: Version,
@@ -34,7 +84,7 @@ pub struct SecretAgentInfo {
 }
 
 impl SecretAgentInfo {
-    fn update(&mut self, fd: *mut ssl::PRFileDesc) -> Res<()> {
+    fn new(fd: *mut ssl::PRFileDesc) -> Res<SecretAgentInfo> {
         let mut info: ssl::SSLChannelInfo = unsafe { mem::uninitialized() };
         let rv = unsafe {
             ssl::SSL_GetChannelInfo(
@@ -44,11 +94,12 @@ impl SecretAgentInfo {
             )
         };
         result::result(rv)?;
-        self.ver = info.protocolVersion as Version;
-        self.cipher = info.cipherSuite as Cipher;
-        self.early_data = info.earlyDataAccepted != 0;
-        self.group = info.keaGroup as Group;
-        Ok(())
+        Ok(SecretAgentInfo {
+            ver: info.protocolVersion as Version,
+            cipher: info.cipherSuite as Cipher,
+            group: info.keaGroup as Group,
+            early_data: info.earlyDataAccepted != 0,
+        })
     }
 
     pub fn version(&self) -> Version {
@@ -75,7 +126,7 @@ pub struct SecretAgent {
     st: HandshakeState,
     auth_required: Box<bool>,
 
-    inf: SecretAgentInfo,
+    inf: Option<SecretAgentInfo>,
 }
 
 impl SecretAgent {
@@ -210,8 +261,12 @@ impl SecretAgent {
         }
     }
 
-    pub fn info(&self) -> &SecretAgentInfo {
-        &self.inf
+    pub fn info(&self) -> Option<&SecretAgentInfo> {
+        self.inf.as_ref()
+    }
+
+    pub fn preinfo(&self) -> Res<SecretAgentPreInfo> {
+        SecretAgentPreInfo::new(self.fd)
     }
 
     /// Call this function to mark the peer as authenticated.
@@ -230,7 +285,7 @@ impl SecretAgent {
                 false => HandshakeState::InProgress,
             },
             false => {
-                self.inf.update(self.fd)?;
+                self.inf = Some(SecretAgentInfo::new(self.fd)?);
                 HandshakeState::Complete
             }
         };
@@ -277,7 +332,11 @@ impl SecretAgent {
     //
     // Ideally, this only includes records from the current epoch.
     // If you send data from multiple epochs, you might end up being sad.
-    pub fn handshake_raw(&mut self, _now: u64, input: Option<Record>) -> Res<(HandshakeState, RecordList)> {
+    pub fn handshake_raw(
+        &mut self,
+        _now: u64,
+        input: Option<Record>,
+    ) -> Res<(HandshakeState, RecordList)> {
         self.set_raw(true)?;
 
         // Setup for accepting records.
