@@ -1,7 +1,9 @@
-use super::varint::*;
-use super::*;
-use num_traits::Num;
 use std::convert::Into;
+
+use num_traits::Num;
+
+use crate::varint::{decode_varint, encode_varint};
+use crate::{Error, Res};
 
 pub trait DataBuf<E> {
     fn decode_byte(&mut self) -> Result<u8, E>;

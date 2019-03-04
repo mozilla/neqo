@@ -1,7 +1,7 @@
 #![allow(unused_variables)]
 
 use std::cmp::max;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
 use std::ops;
@@ -13,9 +13,7 @@ use crate::data::Data;
 use crate::frame::{decode_frame, Frame, StreamType};
 use crate::nss::*;
 use crate::packet::*;
-use crate::stream::{
-    as_recvable, as_sendable, BidiStream, Recvable, RxStreamOrderer, Sendable, TxBuffer,
-};
+use crate::stream::{BidiStream, Recvable, RxStreamOrderer, Sendable, TxBuffer};
 
 use crate::{CError, Error, HError, Res};
 
@@ -48,6 +46,7 @@ pub struct Datagram {
     d: Vec<u8>,
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TxMode {
     Normal,
     Pto,
@@ -102,8 +101,8 @@ pub struct Connection {
     highest_stream: Option<u64>,
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
     next_stream_id: u64,
-    streams: HashMap<u64, BidiStream>, // stream id, stream
-    outgoing_pkts: Vec<Packet>,        // (offset, data)
+    streams: BTreeMap<u64, BidiStream>, // stream id, stream
+    outgoing_pkts: Vec<Packet>,         // (offset, data)
     pmtu: usize,
 }
 
@@ -154,14 +153,17 @@ impl Connection {
                 CryptoStream::default(),
                 CryptoStream::default(),
             ],
-            generators: vec![FrameGenerator(generate_crypto_frames)],
+            generators: vec![
+                FrameGenerator(generate_crypto_frames),
+                FrameGenerator(generate_stream_frames),
+            ],
             deadline: Instant::now(),
             max_data: 0,
             max_streams: 0,
             highest_stream: None,
             connection_ids: HashSet::new(),
             next_stream_id: 0,
-            streams: HashMap::new(),
+            streams: BTreeMap::new(),
             outgoing_pkts: Vec::new(),
             pmtu: 1280,
         };
@@ -233,7 +235,12 @@ impl Connection {
                 State::Handshaking => {
                     // No-op.
                 }
-                _ => unimplemented!(),
+                State::Connected => {
+                    // No-op.
+                }
+                State::Closed => {
+                    // TODO(agrover@mozilla.com): send STOP_SENDING?
+                }
             }
 
             qdebug!(self, "Received unverified packet {:?}", hdr);
@@ -287,34 +294,39 @@ impl Connection {
                 {
                     frame.marshal(&mut d)?;
                 }
+            }
 
-                if d.remaining() > 0 {
-                    qdebug!(self, "Need to send a packet of size {}", d.remaining());
+            if d.remaining() > 0 {
+                qdebug!(
+                    self,
+                    "Need to send a packet of size {}:{:0x?}",
+                    d.remaining(),
+                    d
+                );
 
-                    let mut hdr = PacketHdr::new(
-                        0,
-                        match epoch {
-                            // TODO(ekr@rtfm.com): Retry token
-                            0 => PacketType::Initial(Vec::new()),
-                            1 => PacketType::ZeroRTT,
-                            2 => PacketType::Handshake,
-                            3 => PacketType::Short,
-                            _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
-                        },
-                        Some(self.version),
-                        ConnectionId(self.dcid.clone()),
-                        Some(ConnectionId(self.scid.clone())),
-                        0, // TODO(ekr@rtfm.com): Implement PN
-                        epoch,
-                        0,
-                    );
+                let mut hdr = PacketHdr::new(
+                    0,
+                    match epoch {
+                        // TODO(ekr@rtfm.com): Retry token
+                        0 => PacketType::Initial(Vec::new()),
+                        1 => PacketType::ZeroRTT,
+                        2 => PacketType::Handshake,
+                        3 => PacketType::Short,
+                        _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
+                    },
+                    Some(self.version),
+                    ConnectionId(self.dcid.clone()),
+                    Some(ConnectionId(self.scid.clone())),
+                    0, // TODO(ekr@rtfm.com): Implement PN
+                    epoch,
+                    0,
+                );
 
-                    let packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
-                    out_packets.push(packet);
-                    // TODO(ekr@rtfm.com): Pad the Client Initial.
+                let packet = encode_packet(self, &mut hdr, d.as_mut_vec())?;
+                out_packets.push(packet);
+                // TODO(ekr@rtfm.com): Pad the Client Initial.
 
-                    // TODO(ekr@rtfm.com): Update PN.
-                }
+                // TODO(ekr@rtfm.com): Update PN.
             }
         }
 
@@ -399,7 +411,7 @@ impl Connection {
         Ok(())
     }
 
-    pub fn process_input_frame(&mut self, epoch: u16, frame: Frame) -> Res<()> {
+    pub fn process_input_frame(&mut self, epoch: Epoch, frame: Frame) -> Res<()> {
         #[allow(unused_variables)]
         match frame {
             Frame::Padding => {
@@ -503,11 +515,15 @@ impl Connection {
         offset: u64,
         data: Vec<u8>,
     ) -> Res<()> {
-        // TODO(agrover@mozilla.com): check against list of ooo frames and maybe make some data available
-        let stream = self
-            .streams
-            .get_mut(&stream_id)
-            .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+        // TODO(agrover@mozilla.com): more checking here
+
+        let stream_type = match stream_id & 0x1 == 0 {
+            true => StreamType::BiDi,
+            false => StreamType::UniDi,
+        };
+
+        // TODO(agrover@mozilla.com): May create a stream so check against streams_max
+        let stream = self.streams.entry(stream_id).or_insert(BidiStream::new());
 
         let _new_bytes_available = stream.inbound_stream_frame(fin, offset, data)?;
 
@@ -515,11 +531,40 @@ impl Connection {
     }
 
     // Returns new stream id
-    pub fn stream_create(&mut self, _st: StreamType) -> u64 {
-        let stream_id = self.next_stream_id;
-        self.streams.insert(stream_id, BidiStream::new());
+    pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
+        // TODO(agrover@mozilla.com): Check against max_stream_id
+        let mut stream_id = self.next_stream_id << 2;
+        if self.role == Role::Server {
+            stream_id += 1;
+        }
+        if st == StreamType::UniDi {
+            stream_id += 2;
+        }
+        self.streams.insert(stream_id, BidiStream::new()); // TODO(agrover@mozilla.com): always bidi??
         self.next_stream_id += 1;
-        stream_id
+        Ok(stream_id)
+    }
+
+    /// Send data on a stream.
+    /// Returns how many bytes were successfully sent. Could be less
+    /// than total, based on receiver credit space available, etc.
+    pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<u64> {
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+
+        stream.send(data)
+    }
+
+    pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
+        let stream = self
+            .streams
+            .get_mut(&stream_id)
+            .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+
+        Sendable::close(stream);
+        Ok(())
     }
 
     fn generate_cid(&mut self) -> Vec<u8> {
@@ -539,16 +584,42 @@ impl Connection {
         }
     }
 
+    pub fn get_recv_streams<'a>(
+        &'a mut self,
+    ) -> Box<Iterator<Item = (u64, &mut dyn Recvable)> + 'a> {
+        Box::new(
+            self.streams
+                .iter_mut()
+                .map(|(x, y)| (*x, y as &mut Recvable)),
+        )
+    }
+
     pub fn get_readable_streams<'a>(
         &'a mut self,
     ) -> Box<Iterator<Item = (u64, &mut dyn Recvable)> + 'a> {
-        Box::new(self.streams.iter_mut().map(|(x, y)| (*x, as_recvable(y))))
+        Box::new(
+            self.get_recv_streams()
+                .filter(|(_, stream)| stream.recv_data_ready()),
+        )
+    }
+
+    pub fn get_send_streams<'a>(
+        &'a mut self,
+    ) -> Box<Iterator<Item = (u64, &mut dyn Sendable)> + 'a> {
+        Box::new(
+            self.streams
+                .iter_mut()
+                .map(|(x, y)| (*x, y as &mut Sendable)),
+        )
     }
 
     pub fn get_writable_streams<'a>(
         &'a mut self,
     ) -> Box<Iterator<Item = (u64, &mut dyn Sendable)> + 'a> {
-        Box::new(self.streams.iter_mut().map(|(x, y)| (*x, as_sendable(y))))
+        Box::new(
+            self.get_send_streams()
+                .filter(|(_, stream)| stream.send_data_ready()),
+        )
     }
 
     pub fn reset_stream(&mut self, _id: u64, _err: HError) {}
@@ -622,7 +693,7 @@ impl PacketCtx for Connection {
 
 impl PacketDecoder for Connection {
     fn get_cid_len(&self) -> usize {
-        5
+        8
     }
 }
 
@@ -644,12 +715,59 @@ fn generate_crypto_frames(
     None
 }
 
+fn generate_stream_frames(
+    conn: &mut Connection,
+    epoch: u16,
+    mode: TxMode,
+    remaining: usize,
+) -> Option<Frame> {
+    // only send in 1rtt epoch?
+    if epoch != 3 {
+        return None;
+    }
+
+    for (&stream_id, stream) in &mut conn.streams {
+        if stream.send_data_ready() {
+            let fin = Sendable::final_size(stream);
+            if let Some((offset, data)) = stream.next_bytes(mode, remaining) {
+                let fin = match fin {
+                    None => false,
+                    Some(fin) => {
+                        if fin == offset + data.len() as u64 {
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                };
+                qtrace!(
+                    "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
+                    stream_id,
+                    offset,
+                    offset + data.len() as u64,
+                    epoch,
+                    mode,
+                    remaining
+                );
+                return Some(Frame::Stream {
+                    fin: fin,
+                    stream_id,
+                    offset,
+                    data: data.to_vec(),
+                });
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frame::StreamType;
 
     #[test]
-    fn test_handshake() {
+    fn test_conn_handshake() {
         init_db("./db");
         // 0 -> CH
         qdebug!("---- client");
@@ -669,6 +787,7 @@ mod tests {
         qdebug!("---- client");
         let res = client.process(res).unwrap();
         assert_eq!(res.len(), 1);
+        qdebug!("Output={:0x?}", res);
 
         // 0 -> EE, CERT, CV, FIN
         qdebug!("---- server");
@@ -691,4 +810,77 @@ mod tests {
         assert_eq!(server.state(), State::Connected);
     }
 
+    #[test]
+    // tests stream send/recv after connection is established.
+    // TODO(agrover@mozilla.com): Add a test that sends data before connection
+    // is fully established.
+    fn test_conn_stream() {
+        init_db("./db");
+
+        let mut client = Connection::new_client("example.com");
+        let mut server = Connection::new_server(&[String::from("key")]);
+
+        qdebug!("---- client");
+        let res = client.process(Vec::new()).unwrap();
+        assert_eq!(res.len(), 1);
+        qdebug!("Output={:0x?}", res);
+        // -->> Initial[0]: CRYPTO[CH]
+
+        qdebug!("---- server");
+        let res = server.process(res).unwrap();
+        assert_eq!(res.len(), 1);
+        qdebug!("Output={:0x?}", res);
+        // TODO(agrover@mozilla.com): ACKs
+        // <<-- Initial[0]: CRYPTO[SH] ACK[0]
+        // <<-- Handshake[0]: CRYPTO[EE, CERT, CV, FIN]
+
+        qdebug!("---- client");
+        let res = client.process(res).unwrap();
+        assert_eq!(res.len(), 1);
+        assert_eq!(client.state(), State::Connected);
+        qdebug!("Output={:0x?}", res);
+        // -->> Initial[1]: ACK[0]
+        // -->> Handshake[0]: CRYPTO[FIN], ACK[0]
+
+        qdebug!("---- server");
+        let res = server.process(res).unwrap();
+        assert!(res.is_empty());
+        assert_eq!(server.state(), State::Connected);
+        qdebug!("Output={:0x?}", res);
+        // -->> nothing
+
+        qdebug!("---- client");
+        // Send
+        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        client.stream_send(client_stream_id, &vec![6; 100]).unwrap();
+        client.stream_send(client_stream_id, &vec![7; 40]).unwrap();
+
+        // Send to another stream but some data after fin has been set
+        let client_stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
+        client.stream_send(client_stream_id2, &vec![6; 60]).unwrap();
+        client.stream_close_send(client_stream_id2).unwrap();
+        client
+            .stream_send(client_stream_id2, &vec![7; 50])
+            .unwrap_err();
+        let res = client.process(res).unwrap();
+
+        qdebug!("---- server");
+        let res = server.process(res).unwrap();
+        assert!(res.is_empty());
+        assert_eq!(server.state(), State::Connected);
+        qdebug!("Output={:0x?}", res);
+
+        let mut buf = vec![0; 512];
+
+        let mut iter = server.get_readable_streams();
+        let (stream_id, stream) = iter.next().unwrap();
+        let (received, fin) = stream.read(&mut buf).unwrap();
+        assert_eq!(received, 140);
+        assert_eq!(fin, false);
+
+        let (stream_id, stream) = iter.next().unwrap();
+        let (received, fin) = stream.read(&mut buf).unwrap();
+        assert_eq!(received, 60);
+        assert_eq!(fin, true);
+    }
 }
