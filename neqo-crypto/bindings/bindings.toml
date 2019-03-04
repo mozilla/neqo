@@ -29,6 +29,7 @@ functions = [
     "SSL_NamedGroupConfig",
     "SSL_OptionGet",
     "SSL_OptionSet",
+    "SSL_PeerCertificateChain",
     "SSL_ResetHandshake",
     "SSL_SetURL",
     "SSL_VersionRangeSet",
@@ -53,6 +54,7 @@ variables = [
 opaque = [
     "CERTCertificate",
     "PK11SymKey",
+    "PLArenaPool",
     "PRFileDesc",
     "SECKEYPrivateKey",
     "SECKEYPublicKey",
