@@ -87,8 +87,7 @@ pub struct SecretAgentInfo {
 impl SecretAgentInfo {
     fn new(fd: *mut ssl::PRFileDesc) -> Res<SecretAgentInfo> {
         let mut alpn_state = ssl::SSLNextProtoState::SSL_NEXT_PROTO_NO_SUPPORT;
-        let mut chosen: Vec<u8> = Vec::with_capacity(255);
-        chosen.resize(255, 0);
+        let mut chosen = vec![0u8; 255];
         let mut chosen_len: c_uint = 0;
         let rv = unsafe {
             ssl::SSL_GetNextProto(
