@@ -81,10 +81,37 @@ pub struct SecretAgentInfo {
     cipher: Cipher,
     group: Group,
     early_data: bool,
+    alpn: Option<String>,
 }
 
 impl SecretAgentInfo {
     fn new(fd: *mut ssl::PRFileDesc) -> Res<SecretAgentInfo> {
+        let mut alpn_state = ssl::SSLNextProtoState::SSL_NEXT_PROTO_NO_SUPPORT;
+        let mut chosen: Vec<u8> = Vec::with_capacity(255);
+        chosen.resize(255, 0);
+        let mut chosen_len: c_uint = 0;
+        let rv = unsafe {
+            ssl::SSL_GetNextProto(
+                fd,
+                &mut alpn_state,
+                chosen.as_mut_ptr(),
+                &mut chosen_len,
+                chosen.len() as c_uint,
+            )
+        };
+        result::result(rv)?;
+        let alpn = match alpn_state {
+            ssl::SSLNextProtoState::SSL_NEXT_PROTO_NEGOTIATED
+            | ssl::SSLNextProtoState::SSL_NEXT_PROTO_SELECTED => {
+                chosen.truncate(chosen_len as usize);
+                Some(match String::from_utf8(chosen) {
+                    Ok(a) => a,
+                    _ => return Err(Error::InternalError),
+                })
+            }
+            _ => None,
+        };
+
         let mut info: ssl::SSLChannelInfo = unsafe { mem::uninitialized() };
         let rv = unsafe {
             ssl::SSL_GetChannelInfo(
@@ -99,6 +126,7 @@ impl SecretAgentInfo {
             cipher: info.cipherSuite as Cipher,
             group: info.keaGroup as Group,
             early_data: info.earlyDataAccepted != 0,
+            alpn,
         })
     }
 
@@ -113,6 +141,9 @@ impl SecretAgentInfo {
     }
     pub fn early_data_accepted(&self) -> bool {
         self.early_data
+    }
+    pub fn alpn(&self) -> Option<&String> {
+        self.alpn.as_ref()
     }
 }
 
@@ -241,6 +272,55 @@ impl SecretAgent {
         result::result(unsafe { ssl::SSL_OptionSet(self.fd, opt.as_int(), opt.map_enabled(value)) })
     }
 
+    /// set_alpn sets a list of preferred protocols, starting with the most preferred.
+    /// Though ALPN [RFC7301] permits octet sequences, this only allows for UTF-8-encoded
+    /// strings.
+    ///
+    /// This asserts if no items are provided, or if any individual item is longer than
+    /// 255 octets in length.
+    pub fn set_alpn<A: ToString, I: IntoIterator<Item = A>>(&mut self, protocols: I) -> Res<()> {
+        // Validate and set length.
+        // Unfortunately, this means that we need to run the iterator twice.
+        let alpn: Vec<String> = protocols.into_iter().map(|v| v.to_string()).collect();
+        let mut encoded_len = alpn.len();
+        for v in alpn.iter() {
+            assert!(v.len() < 256);
+            encoded_len += v.len();
+        }
+
+        // Prepare to encode.
+        let mut encoded = Vec::with_capacity(encoded_len);
+        let mut cursor = 0usize;
+        let mut add = |v: String| {
+            encoded.push(v.len() as u8);
+            cursor += 1;
+            encoded.extend_from_slice(v.as_bytes());
+            cursor += v.len();
+        };
+
+        // NSS inherited an idiosyncratic API as a result of having implemented NPN
+        // before ALPN.  For that reason, we need to put the "best" option last.
+        let mut alpn_i = alpn.into_iter();
+        let best = alpn_i
+            .next()
+            .expect("at least one ALPN value needs to be provided");
+        for v in alpn_i {
+            add(v);
+        }
+        add(best);
+        assert_eq!(encoded_len, encoded.len());
+
+        // Now give the result to NSS.
+        let rv = unsafe {
+            ssl::SSL_SetNextProtoNego(
+                self.fd,
+                encoded.as_slice().as_ptr(),
+                encoded.len() as c_uint,
+            )
+        };
+        result::result(rv)
+    }
+
     // Common configuration.
     pub fn configure(&mut self) -> Res<()> {
         self.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
@@ -261,6 +341,8 @@ impl SecretAgent {
         }
     }
 
+    // TODO(mt) consider whether this info should instead be attached
+    // to the Completed state.
     pub fn info(&self) -> Option<&SecretAgentInfo> {
         self.inf.as_ref()
     }
@@ -425,11 +507,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new<T>(certificates: T) -> Res<Self>
-    where
-        T: IntoIterator,
-        T::Item: ToString,
-    {
+    pub fn new<A: ToString, I: IntoIterator<Item = A>>(certificates: I) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
 
         for n in certificates {

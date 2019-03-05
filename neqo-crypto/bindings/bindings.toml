@@ -22,6 +22,7 @@ functions = [
     "SSL_GetChannelInfo",
     "SSL_GetExperimentalAPI",
     "SSL_GetImplementedCiphers",
+    "SSL_GetNextProto",
     "SSL_GetNumImplementedCiphers",
     "SSL_GetPreliminaryChannelInfo",
     "SSL_ForceHandshake",
@@ -31,6 +32,7 @@ functions = [
     "SSL_OptionSet",
     "SSL_PeerCertificateChain",
     "SSL_ResetHandshake",
+    "SSL_SetNextProtoNego",
     "SSL_SetURL",
     "SSL_VersionRangeSet",
 ]
@@ -42,6 +44,7 @@ enums = [
     "SSLKEAType",
     "SSLMACAlgorithm",
     "SSLNamedGroup",
+    "SSLNextProtoState",
     "SSLProtocolVariant",
     "SSLSecretDirection",
     "SSLSignatureScheme",
