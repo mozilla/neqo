@@ -98,7 +98,7 @@ impl SymKey {
     }
 
     /// You really don't want to use this.
-    pub fn as_bytes(&self) -> Res<&[u8]> {
+    pub fn as_bytes<'a>(&'a self) -> Res<&'a [u8]> {
         let rv = unsafe { PK11_ExtractKeyValue(self.ptr) };
         result::result(rv)?;
 
