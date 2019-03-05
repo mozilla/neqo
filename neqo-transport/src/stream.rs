@@ -552,121 +552,52 @@ impl Recvable for RecvStream {
     }
 }
 
-#[derive(Debug)]
-pub struct BidiStream {
-    tx: SendStream,
-    rx: RecvStream,
-}
-
-impl BidiStream {
-    pub fn new() -> BidiStream {
-        BidiStream {
-            tx: SendStream::new(),
-            rx: RecvStream::new(),
-        }
-    }
-}
-
-impl Recvable for BidiStream {
-    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
-        self.rx.read(buf)
-    }
-
-    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)> {
-        self.rx.read_with_amount(buf, amount)
-    }
-
-    fn recv_data_ready(&self) -> bool {
-        self.rx.recv_data_ready()
-    }
-
-    fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
-        self.rx.inbound_stream_frame(fin, offset, data)
-    }
-
-    fn needs_flowc_update(&mut self) -> Option<u64> {
-        self.rx.needs_flowc_update()
-    }
-
-    fn close(&mut self) {
-        self.rx.close()
-    }
-
-    fn final_size(&self) -> Option<u64> {
-        self.rx.final_size()
-    }
-
-    fn stop_sending(&mut self, _err: HError) {}
-}
-
-impl Sendable for BidiStream {
-    fn send(&mut self, buf: &[u8]) -> Res<u64> {
-        self.tx.send(buf)
-    }
-
-    fn send_data_ready(&self) -> bool {
-        self.tx.send_data_ready()
-    }
-
-    fn close(&mut self) {
-        self.tx.close()
-    }
-
-    fn next_bytes(&mut self, mode: TxMode, avail: usize) -> Option<(u64, &[u8])> {
-        self.tx.tx_buffer.next_bytes(mode, avail)
-    }
-
-    fn final_size(&self) -> Option<u64> {
-        self.tx.final_size
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_stream_rx() {
-        let mut s = BidiStream::new();
+        let mut s = RecvStream::new();
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, vec![1; 10]).unwrap();
         assert_eq!(s.recv_data_ready(), true);
         let mut buf = vec![0u8; 100];
         assert_eq!(s.read(&mut buf).unwrap(), (10, false));
-        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
-        assert_eq!(s.rx.orderer().unwrap().buffered(), 0);
+        assert_eq!(s.orderer().unwrap().retired(), 10);
+        assert_eq!(s.orderer().unwrap().buffered(), 0);
 
         // test receiving a noncontig frame
         s.inbound_stream_frame(false, 12, vec![2; 12]).unwrap();
         assert_eq!(s.recv_data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
-        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
-        assert_eq!(s.rx.orderer().unwrap().buffered(), 12);
+        assert_eq!(s.orderer().unwrap().retired(), 10);
+        assert_eq!(s.orderer().unwrap().buffered(), 12);
 
         // another frame that overlaps the first
         s.inbound_stream_frame(false, 14, vec![3; 8]).unwrap();
         assert_eq!(s.recv_data_ready(), false);
-        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
-        assert_eq!(s.rx.orderer().unwrap().buffered(), 12);
+        assert_eq!(s.orderer().unwrap().retired(), 10);
+        assert_eq!(s.orderer().unwrap().buffered(), 12);
 
         // fill in the gap, but with a FIN
         s.inbound_stream_frame(true, 10, vec![4; 6]).unwrap_err();
         assert_eq!(s.recv_data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
-        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
-        assert_eq!(s.rx.orderer().unwrap().buffered(), 12);
+        assert_eq!(s.orderer().unwrap().retired(), 10);
+        assert_eq!(s.orderer().unwrap().buffered(), 12);
 
         // fill in the gap
         s.inbound_stream_frame(false, 10, vec![5; 10]).unwrap();
         assert_eq!(s.recv_data_ready(), true);
-        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
-        assert_eq!(s.rx.orderer().unwrap().buffered(), 14);
+        assert_eq!(s.orderer().unwrap().retired(), 10);
+        assert_eq!(s.orderer().unwrap().buffered(), 14);
 
         // a legit FIN
         s.inbound_stream_frame(true, 24, vec![6; 18]).unwrap();
-        assert_eq!(s.rx.orderer().unwrap().retired(), 10);
-        assert_eq!(s.rx.orderer().unwrap().buffered(), 32);
+        assert_eq!(s.orderer().unwrap().retired(), 10);
+        assert_eq!(s.orderer().unwrap().buffered(), 32);
         assert_eq!(s.recv_data_ready(), true);
         assert_eq!(s.read(&mut buf).unwrap(), (32, true));
         assert_eq!(s.read(&mut buf).unwrap(), (0, true));
@@ -674,7 +605,7 @@ mod tests {
 
     #[test]
     fn test_stream_rx_dedupe() {
-        let mut s = BidiStream::new();
+        let mut s = RecvStream::new();
 
         let mut buf = vec![0u8; 100];
 
@@ -684,7 +615,7 @@ mod tests {
         // See inbound_frame(). Test (true, true) case
         s.inbound_stream_frame(false, 2, vec![2; 6]).unwrap();
         {
-            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
+            let mut i = s.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -696,7 +627,7 @@ mod tests {
         // Test (true, false) case
         s.inbound_stream_frame(false, 4, vec![3; 4]).unwrap();
         {
-            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
+            let mut i = s.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -708,7 +639,7 @@ mod tests {
         // Test (false, true) case
         s.inbound_stream_frame(false, 2, vec![4; 8]).unwrap();
         {
-            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
+            let mut i = s.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -720,7 +651,7 @@ mod tests {
         // Test (false, false) case
         s.inbound_stream_frame(false, 2, vec![5; 2]).unwrap();
         {
-            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
+            let mut i = s.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -737,7 +668,7 @@ mod tests {
         // a. insert where new frame gets truncated
         s.inbound_stream_frame(false, 99, vec![7; 6]).unwrap();
         {
-            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
+            let mut i = s.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 99);
             assert_eq!(item.1.len(), 1);
@@ -750,7 +681,7 @@ mod tests {
         // b. insert where new frame spans next frame
         s.inbound_stream_frame(false, 98, vec![8; 10]).unwrap();
         {
-            let mut i = s.rx.orderer().unwrap().data_ranges.iter();
+            let mut i = s.orderer().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 98);
             assert_eq!(item.1.len(), 10);
@@ -762,7 +693,7 @@ mod tests {
     fn test_stream_flowc_update() {
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = BidiStream::new();
+        let mut s = RecvStream::new();
 
         let mut buf = vec![0u8; RX_STREAM_DATA_WINDOW as usize * 4]; // Make it overlarge
 
@@ -779,7 +710,7 @@ mod tests {
     fn test_stream_rx_window() {
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = BidiStream::new();
+        let mut s = RecvStream::new();
 
         assert_eq!(s.needs_flowc_update(), None);
         s.inbound_stream_frame(false, 0, frame1).unwrap();
