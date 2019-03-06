@@ -2,6 +2,7 @@ use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{Record, RecordList};
 use crate::constants::*;
 use crate::err::{Error, Res};
+use crate::ext::{ExtensionHandler, ExtensionTracker};
 use crate::initialized;
 use crate::p11;
 use crate::prio;
@@ -156,6 +157,7 @@ pub struct SecretAgent {
     st: HandshakeState,
     auth_required: Box<bool>,
 
+    extension_handlers: Vec<ExtensionTracker>,
     inf: Option<SecretAgentInfo>,
 }
 
@@ -169,6 +171,7 @@ impl SecretAgent {
             st: HandshakeState::New,
             auth_required: Box::new(false),
 
+            extension_handlers: Default::default(),
             inf: Default::default(),
         };
         agent.create_fd()?;
@@ -318,6 +321,16 @@ impl SecretAgent {
             )
         };
         result::result(rv)
+    }
+
+    pub fn add_extension_handler(
+        &mut self,
+        ext: Extension,
+        handler: Box<dyn ExtensionHandler>,
+    ) -> Res<()> {
+        let tracker = ExtensionTracker::new(self.fd, ext, handler)?;
+        self.extension_handlers.push(tracker);
+        Ok(())
     }
 
     // Common configuration.

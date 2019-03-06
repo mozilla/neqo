@@ -11,6 +11,7 @@ mod agentio;
 pub mod constants;
 pub mod ecb;
 mod err;
+mod ext;
 pub mod hkdf;
 mod prio;
 mod result;
@@ -23,6 +24,7 @@ pub use self::agent::{
 };
 pub use self::constants::*;
 pub use self::err::{Error, Res};
+pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
 pub use self::p11::{SymKey, SymKeyTarget};
 pub use self::secrets::SecretDirection;
 
