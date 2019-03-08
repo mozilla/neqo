@@ -53,14 +53,14 @@ pub struct ExtensionTracker {
 }
 
 impl ExtensionTracker {
-    // type InnerBox = Box<Rc<RefCell<dyn ExtensionHandler>>>;
-
-    fn wrap_handler_call<F, T>(arg: *mut c_void, f: F) -> T
+    // Technically the as_mut() call here is the only unsafe bit,
+    // but don't call this function lightly.
+    unsafe fn wrap_handler_call<F, T>(arg: *mut c_void, f: F) -> T
     where
         F: FnOnce(&mut dyn ExtensionHandler) -> T,
     {
         let handler_ptr = arg as *mut Box<Rc<RefCell<dyn ExtensionHandler>>>;
-        let rc = unsafe { handler_ptr.as_mut().unwrap() };
+        let rc = handler_ptr.as_mut().unwrap();
         f(rc.borrow_mut().deref_mut())
     }
 
@@ -109,6 +109,13 @@ impl ExtensionTracker {
         extension: Extension,
         handler: Rc<RefCell<dyn ExtensionHandler>>,
     ) -> Res<ExtensionTracker> {
+        // The ergonomics here aren't great for users of this API, but it's
+        // even worse here. The double box is used to allow us to own a reference
+        // to the handler AND also pass a bare pointer to the inner box to C.
+        // That allows us to create the object in the callback. The inner box prevents
+        // the access in the callback from decrementing the Rc counters when the
+        // duped instance is dropped.  That would result in the object being dropped
+        // in the callbacks (and the UAF that follows).
         let mut tracker = ExtensionTracker {
             extension,
             handler: Box::new(Box::new(handler)),
