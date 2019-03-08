@@ -124,6 +124,7 @@ functions = [
     "PK11_FindKeyByAnyCert",
     "PK11_FreeSlot",
     "PK11_FreeSymKey",
+    "PK11_GetBlockSize",
     "PK11_GetInternalSlot",
     "PK11_GetKeyData",
     "PK11_GetMechanism",
