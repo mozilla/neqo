@@ -2,9 +2,8 @@
 
 use neqo_crypto::*;
 
-use std::mem;
-
-const NOW: u64 = 20;
+mod handshake;
+use crate::handshake::*;
 
 #[test]
 fn make_client() {
@@ -19,7 +18,7 @@ fn make_server() {
 }
 
 #[test]
-fn handshake() {
+fn basic() {
     init_db("./db");
     let mut client = Client::new("server.example").expect("should create client");
     println!("client {:p}", &client);
@@ -59,25 +58,8 @@ fn handshake() {
     assert_eq!(TLS_AES_128_GCM_SHA256, server_info.cipher_suite());
 }
 
-fn forward_records(agent: &mut SecretAgent, records_in: RecordList) -> Res<RecordList> {
-    let mut expected_state = match agent.state() {
-        HandshakeState::New => HandshakeState::New,
-        _ => HandshakeState::InProgress,
-    };
-    let mut records_out: RecordList = Default::default();
-    for record in records_in.into_iter() {
-        assert_eq!(records_out.len(), 0);
-        assert_eq!(*agent.state(), expected_state);
-
-        let (_state, rec_out) = agent.handshake_raw(NOW, Some(record))?;
-        records_out = rec_out;
-        expected_state = HandshakeState::InProgress;
-    }
-    Ok(records_out)
-}
-
 #[test]
-fn handshake_raw() {
+fn raw() {
     init_db("./db");
     let mut client = Client::new("server.example").expect("should create client");
     println!("client {:?}", client);
@@ -123,21 +105,6 @@ fn handshake_raw() {
     assert_eq!(*server.state(), HandshakeState::Complete);
 }
 
-fn connect(client: &mut SecretAgent, server: &mut SecretAgent) {
-    let mut a = client;
-    let mut b = server;
-    let (_, mut records) = a.handshake_raw(NOW, None).unwrap();
-    while *a.state() != HandshakeState::Complete && *b.state() != HandshakeState::Complete {
-        records = forward_records(&mut b, records).unwrap();
-        if *b.state() == HandshakeState::AuthenticationPending {
-            b.authenticated();
-            let (_, rec) = b.handshake_raw(NOW, None).unwrap();
-            records = rec;
-        }
-        b = mem::replace(&mut a, b);
-    }
-}
-
 #[test]
 fn chacha_client() {
     init_db("./db");
@@ -151,6 +118,10 @@ fn chacha_client() {
 
     assert_eq!(
         client.info().unwrap().cipher_suite(),
+        TLS_CHACHA20_POLY1305_SHA256
+    );
+    assert_eq!(
+        server.info().unwrap().cipher_suite(),
         TLS_CHACHA20_POLY1305_SHA256
     );
 }
@@ -167,4 +138,97 @@ fn p256_server() {
     connect(&mut client, &mut server);
 
     assert_eq!(client.info().unwrap().key_exchange(), TLS_GRP_EC_SECP256R1);
+    assert_eq!(server.info().unwrap().key_exchange(), TLS_GRP_EC_SECP256R1);
+}
+
+#[test]
+fn alpn() {
+    init_db("./db");
+    let mut client = Client::new("server.example").expect("should create client");
+    client.set_alpn(&["alpn"]).expect("should set ALPN");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server.set_alpn(&["alpn"]).expect("should set ALPN");
+
+    connect(&mut client, &mut server);
+
+    let expected = Some(String::from("alpn"));
+    assert_eq!(expected.as_ref(), client.info().unwrap().alpn());
+    assert_eq!(expected.as_ref(), server.info().unwrap().alpn());
+}
+
+#[test]
+fn alpn_multi() {
+    init_db("./db");
+    let mut client = Client::new("server.example").expect("should create client");
+    client
+        .set_alpn(&["dummy", "alpn"])
+        .expect("should set ALPN");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server
+        .set_alpn(&["alpn", "other"])
+        .expect("should set ALPN");
+
+    connect(&mut client, &mut server);
+
+    let expected = Some(String::from("alpn"));
+    assert_eq!(expected.as_ref(), client.info().unwrap().alpn());
+    assert_eq!(expected.as_ref(), server.info().unwrap().alpn());
+}
+
+#[test]
+fn alpn_server_pref() {
+    init_db("./db");
+    let mut client = Client::new("server.example").expect("should create client");
+    client
+        .set_alpn(&["dummy", "alpn"])
+        .expect("should set ALPN");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server
+        .set_alpn(&["alpn", "dummy"])
+        .expect("should set ALPN");
+
+    connect(&mut client, &mut server);
+
+    let expected = Some(String::from("alpn"));
+    assert_eq!(expected.as_ref(), client.info().unwrap().alpn());
+    assert_eq!(expected.as_ref(), server.info().unwrap().alpn());
+}
+
+#[test]
+fn alpn_no_protocol() {
+    init_db("./db");
+    let mut client = Client::new("server.example").expect("should create client");
+    client.set_alpn(&["a"]).expect("should set ALPN");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server.set_alpn(&["b"]).expect("should set ALPN");
+
+    connect_fail(&mut client, &mut server);
+
+    // TODO(mt) check the error code
+}
+
+#[test]
+fn alpn_client_only() {
+    init_db("./db");
+    let mut client = Client::new("server.example").expect("should create client");
+    client.set_alpn(&["alpn"]).expect("should set ALPN");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    connect(&mut client, &mut server);
+
+    assert_eq!(None, client.info().unwrap().alpn());
+    assert_eq!(None, server.info().unwrap().alpn());
+}
+
+#[test]
+fn alpn_server_only() {
+    init_db("./db");
+    let mut client = Client::new("server.example").expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    server.set_alpn(&["alpn"]).expect("should set ALPN");
+
+    connect(&mut client, &mut server);
+
+    assert_eq!(None, client.info().unwrap().alpn());
+    assert_eq!(None, server.info().unwrap().alpn());
 }

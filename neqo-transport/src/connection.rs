@@ -13,7 +13,7 @@ use crate::data::Data;
 use crate::frame::{decode_frame, Frame, StreamType};
 use crate::nss::*;
 use crate::packet::*;
-use crate::stream::{BidiStream, Recvable, RxStreamOrderer, Sendable, TxBuffer};
+use crate::stream::{RecvStream, Recvable, RxStreamOrderer, SendStream, Sendable, TxBuffer};
 
 use crate::{CError, Error, HError, Res};
 
@@ -101,8 +101,9 @@ pub struct Connection {
     highest_stream: Option<u64>,
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
     next_stream_id: u64,
-    streams: BTreeMap<u64, BidiStream>, // stream id, stream
-    outgoing_pkts: Vec<Packet>,         // (offset, data)
+    send_streams: BTreeMap<u64, SendStream>, // stream id, stream
+    recv_streams: BTreeMap<u64, RecvStream>, // stream id, stream
+    outgoing_pkts: Vec<Packet>,              // (offset, data)
     pmtu: usize,
 }
 
@@ -163,7 +164,8 @@ impl Connection {
             highest_stream: None,
             connection_ids: HashSet::new(),
             next_stream_id: 0,
-            streams: BTreeMap::new(),
+            send_streams: BTreeMap::new(),
+            recv_streams: BTreeMap::new(),
             outgoing_pkts: Vec::new(),
             pmtu: 1280,
         };
@@ -523,7 +525,10 @@ impl Connection {
         };
 
         // TODO(agrover@mozilla.com): May create a stream so check against streams_max
-        let stream = self.streams.entry(stream_id).or_insert(BidiStream::new());
+        let stream = self
+            .recv_streams
+            .entry(stream_id)
+            .or_insert(RecvStream::new());
 
         let _new_bytes_available = stream.inbound_stream_frame(fin, offset, data)?;
 
@@ -539,8 +544,11 @@ impl Connection {
         }
         if st == StreamType::UniDi {
             stream_id += 2;
+            self.send_streams.insert(stream_id, SendStream::new());
+        } else {
+            self.send_streams.insert(stream_id, SendStream::new());
+            self.recv_streams.insert(stream_id, RecvStream::new());
         }
-        self.streams.insert(stream_id, BidiStream::new()); // TODO(agrover@mozilla.com): always bidi??
         self.next_stream_id += 1;
         Ok(stream_id)
     }
@@ -550,7 +558,7 @@ impl Connection {
     /// than total, based on receiver credit space available, etc.
     pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<u64> {
         let stream = self
-            .streams
+            .send_streams
             .get_mut(&stream_id)
             .ok_or_else(|| return Error::ErrInvalidStreamId)?;
 
@@ -559,7 +567,7 @@ impl Connection {
 
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
         let stream = self
-            .streams
+            .send_streams
             .get_mut(&stream_id)
             .ok_or_else(|| return Error::ErrInvalidStreamId)?;
 
@@ -588,7 +596,7 @@ impl Connection {
         &'a mut self,
     ) -> Box<Iterator<Item = (u64, &mut dyn Recvable)> + 'a> {
         Box::new(
-            self.streams
+            self.recv_streams
                 .iter_mut()
                 .map(|(x, y)| (*x, y as &mut Recvable)),
         )
@@ -607,7 +615,7 @@ impl Connection {
         &'a mut self,
     ) -> Box<Iterator<Item = (u64, &mut dyn Sendable)> + 'a> {
         Box::new(
-            self.streams
+            self.send_streams
                 .iter_mut()
                 .map(|(x, y)| (*x, y as &mut Sendable)),
         )
@@ -726,7 +734,7 @@ fn generate_stream_frames(
         return None;
     }
 
-    for (&stream_id, stream) in &mut conn.streams {
+    for (&stream_id, stream) in &mut conn.send_streams {
         if stream.send_data_ready() {
             let fin = Sendable::final_size(stream);
             if let Some((offset, data)) = stream.next_bytes(mode, remaining) {
