@@ -10,11 +10,13 @@ use crate::result;
 use crate::secrets::Secrets;
 use crate::ssl;
 
+use std::cell::RefCell;
 use std::ffi::CString;
 use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_uint, c_void};
 use std::ptr::{null, null_mut, NonNull};
+use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HandshakeState {
@@ -323,10 +325,10 @@ impl SecretAgent {
         result::result(rv)
     }
 
-    pub fn add_extension_handler(
+    pub fn extension_handler(
         &mut self,
         ext: Extension,
-        handler: Box<dyn ExtensionHandler>,
+        handler: Rc<RefCell<dyn ExtensionHandler>>,
     ) -> Res<()> {
         let tracker = ExtensionTracker::new(self.fd, ext, handler)?;
         self.extension_handlers.push(tracker);

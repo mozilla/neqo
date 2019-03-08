@@ -1,5 +1,5 @@
 macro_rules! experimental_api {
-    ( $n:ident ( $( $a:ident : $t:ty ),* ) ) => {
+    ( $n:ident ( $( $a:ident : $t:ty ),* $(,)? ) ) => {
         #[allow(non_snake_case)]
         pub unsafe fn $n ( $( $a : $t ),* ) -> crate::ssl::SECStatus {
             const EXP_FUNCTION: &str = stringify!($n);
@@ -11,8 +11,5 @@ macro_rules! experimental_api {
             let f: unsafe extern "C" fn( $( $t ),* ) -> crate::ssl::SECStatus = ::std::mem::transmute(f);
             f( $( $a ),* )
         }
-    };
-    ( $n:ident ( $( $a:ident : $t:ty , )* ) ) => {
-        experimental_api!($n( $( $a : $t ),* ));
     };
 }

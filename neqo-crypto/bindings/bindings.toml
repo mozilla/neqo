@@ -10,6 +10,7 @@ types = [
     "SSLAeadContext",
     "SSLExtensionHandler",
     "SSLExtensionWriter",
+    "SSLExtensionType", # TODO this shouldn't be here
     "SSLProtocolVariant",
     "SSLResumptionTokenCallback",
     "SSLSecretCallback",
