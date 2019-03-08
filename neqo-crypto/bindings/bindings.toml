@@ -10,7 +10,6 @@ types = [
     "SSLAeadContext",
     "SSLExtensionHandler",
     "SSLExtensionWriter",
-    "SSLExtensionType", # TODO this shouldn't be here
     "SSLProtocolVariant",
     "SSLResumptionTokenCallback",
     "SSLSecretCallback",
@@ -88,10 +87,10 @@ variables = [
 ]
 
 [nss_ciphers]
-variables = [
-    "TLS_AES_128_GCM_SHA256",
-    "TLS_AES_256_GCM_SHA384",
-    "TLS_CHACHA20_POLY1305_SHA256",
+variables = ["TLS_.*"]
+exclude = [
+    ".*_(?:EXPORT(?:1024)?|anon|DES|RC4)_.*",
+    ".*_(?:MD5|NULL_SHA)",
 ]
 
 [nss_secerr]

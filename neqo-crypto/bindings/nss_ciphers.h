@@ -1,1 +1,2 @@
+#define SSL_DISABLE_DEPRECATED_CIPHER_SUITE_NAMES
 #include "sslproto.h"

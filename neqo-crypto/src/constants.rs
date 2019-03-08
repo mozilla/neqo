@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::ssl;
 
 // Ideally all of these would be enums, but size matters and we need to allow
