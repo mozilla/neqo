@@ -1,5 +1,5 @@
 mod connection;
 mod connection_test;
 mod hconnection;
-mod hframe;
+pub mod hframe;
 mod stream_test;

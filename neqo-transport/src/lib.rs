@@ -74,6 +74,7 @@ pub enum HError {
     ErrHttpNoMoreData,
     ErrHttpDecodingFrame,
     ErrHttpNotEnoughData,
+    ErrHttpUnexpected,
 }
 
 #[derive(PartialEq, Debug, Copy, Clone)]

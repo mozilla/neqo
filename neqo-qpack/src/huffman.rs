@@ -1,4 +1,10 @@
+// TOTO(dragana) remove this
+#![allow(unused_variables, dead_code)]
+
+use crate::huffman_decode_helper::{HuffmanDecodeTable, HUFFMAN_DECODE_ROOT};
 use crate::huffman_table::HUFFMAN_TABLE;
+use neqo_http3::hframe::ReadBuf;
+use neqo_transport::HError;
 
 pub fn encode_header_block(input: &[u8], output: &mut Vec<u8>) {
     let mut left: u8 = 8;
@@ -37,6 +43,82 @@ pub fn encode_header_block(input: &[u8], output: &mut Vec<u8>) {
         saved = saved | v;
         output.push(saved);
     }
+}
+
+pub fn decode_header_block(input: &mut ReadBuf, output: &mut Vec<u8>) -> Result<(), HError> {
+    let mut byte: u8 = 0;
+    let mut bits_left: u8 = 0;
+    while input.remaining() > 0 {
+        if let Some(c) =
+            decode_huffman_character(HUFFMAN_DECODE_ROOT, input, &mut byte, &mut bits_left)?
+        {
+            output.push(c);
+        }
+    }
+
+    if bits_left > 7 {
+        return Err(HError::ErrHttpUnexpected);
+    }
+    if bits_left > 0 {
+        let mask: u8 = ((1 << bits_left) - 1) << (8 - bits_left);
+        let bits: u8 = byte & mask;
+        if bits != mask {
+            return Err(HError::ErrHttpUnexpected);
+        }
+    }
+    Ok(())
+}
+
+fn extract_byte(input: &mut ReadBuf, byte: &mut u8, bits_left: &mut u8) -> Result<(), HError> {
+    if *bits_left != 0 {
+        let (c, left) = input.read_bits(8 - *bits_left);
+        *byte = *byte | (c << ((8 - *bits_left) - left));
+        *bits_left += left;
+        Ok(())
+    } else {
+        let (c, left) = input.read_bits(8);
+        *byte = c << (8 - left);
+        *bits_left = left;
+        Ok(())
+    }
+}
+
+fn decode_huffman_character(
+    table: &HuffmanDecodeTable,
+    input: &mut ReadBuf,
+    byte: &mut u8,
+    bits_left: &mut u8,
+) -> Result<Option<u8>, HError> {
+    extract_byte(input, byte, bits_left)?;
+
+    if table.index_has_a_next_table(*byte) {
+        if input.remaining() == 0 {
+            // This is the last bit and it is padding.
+            return Ok(None);
+        }
+
+        *bits_left = 0;
+        return decode_huffman_character(table.next_table(*byte), input, byte, &mut *bits_left);
+    }
+
+    let entry = table.entry(*byte);
+    if entry.val == 256 {
+        return Err(HError::ErrHttpUnexpected);
+    }
+
+    if entry.prefix_len > *bits_left as u16 {
+        assert!(input.remaining() == 0);
+        // This is the last bit and it is padding.
+        return Ok(None);
+    }
+    let c = entry.val as u8;
+
+    *bits_left -= entry.prefix_len as u8;
+    if *bits_left != 0 {
+        // move bits to the beginning of the byte.
+        *byte <<= entry.prefix_len;
+    }
+    Ok(Some(c))
 }
 
 #[cfg(test)]
@@ -104,6 +186,10 @@ mod tests {
                 0x3d, 0x50, 0x07,
             ],
         },
+        TestElement {
+            val: b"<?\\ >",
+            res: &[0xff, 0xf9, 0xfe, 0x7f, 0xff, 0x05, 0x3f, 0xef],
+        },
     ];
 
     #[test]
@@ -113,6 +199,19 @@ mod tests {
             encode_header_block(e.val, &mut out);
 
             assert_eq!(out[..], *e.res);
+        }
+    }
+
+    #[test]
+    fn test_decoder() {
+        for e in TEST_CASES {
+            let mut out: Vec<u8> = Vec::new();
+            assert_eq!(
+                Ok(()),
+                decode_header_block(&mut ReadBuf::from(e.res), &mut out)
+            );
+
+            assert_eq!(out[..], *e.val);
         }
     }
 }

@@ -808,5 +808,8 @@ pub const HUFFMAN_TABLE: &'static [HuffmanTableEntry] = &[
         len: 26,
         val: 0x3ffffee,
     },
-    //        HuffmanTableEntry { len: 30, val: 0x3fffffff},
+    HuffmanTableEntry {
+        len: 30,
+        val: 0x3fffffff,
+    },
 ];
