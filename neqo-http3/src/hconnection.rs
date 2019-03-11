@@ -475,7 +475,7 @@ impl HttpConn {
 
     // If this return an error the connection must be closed.
     fn check_streams(&mut self) -> Result<(), CError> {
-        let lw = self.conn.get_writable_streams();
+        let lw = self.conn.get_sendable_streams();
         for (id, ws) in lw {
             if let Some(cs) = &mut self.client_requests.get_mut(&id) {
                 cs.send(ws)?;
@@ -488,7 +488,7 @@ impl HttpConn {
 
         // TODO see if we can do this better (with better solution I am getting cannot borrow `*self` as mutable more than once at a time)
         let mut s_err: Vec<(u64, HError)> = Vec::new();
-        for (id, rs) in self.conn.get_readable_streams() {
+        for (id, rs) in self.conn.get_recvable_streams() {
             if let Some(cs) = &mut self.client_requests.get_mut(&id) {
                 if let Err(e) = cs.receive(rs) {
                     match e {

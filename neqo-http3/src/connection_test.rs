@@ -53,7 +53,7 @@ impl Connection {
         Ok(stream_id)
     }
 
-    pub fn get_readable_streams<'a>(
+    pub fn get_recvable_streams<'a>(
         &'a mut self,
     ) -> Box<Iterator<Item = (u64, &mut dyn Recvable)> + 'a> {
         Box::new(
@@ -63,7 +63,7 @@ impl Connection {
         )
     }
 
-    pub fn get_writable_streams<'a>(
+    pub fn get_sendable_streams<'a>(
         &'a mut self,
     ) -> Box<Iterator<Item = (u64, &mut dyn Sendable)> + 'a> {
         Box::new(

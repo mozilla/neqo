@@ -45,7 +45,7 @@ impl Sendable for Stream {
         self.send_side_closed = true;
     }
 
-    fn next_bytes(&mut self, mode: TxMode, avail: usize) -> Option<(u64, &[u8])> {
+    fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
         let len = self.send_buf.len() as u64;
         if len > 0 {
             Some((len, &self.send_buf))
@@ -53,6 +53,8 @@ impl Sendable for Stream {
             None
         }
     }
+
+    fn mark_as_sent(&mut self, offset: u64, len: usize) {}
 
     fn final_size(&self) -> Option<u64> {
         None
