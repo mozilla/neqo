@@ -32,9 +32,9 @@ pub fn get_stream_type(r: Role, st: StreamType) -> StreamTypeWithRole {
 
 impl Sendable for Stream {
     /// Enqueue some bytes to send
-    fn send(&mut self, buf: &[u8]) -> Res<u64> {
+    fn send(&mut self, buf: &[u8]) -> Res<usize> {
         self.send_buf.extend(buf);
-        Ok(buf.len() as u64)
+        Ok(buf.len())
     }
 
     fn send_data_ready(&self) -> bool {

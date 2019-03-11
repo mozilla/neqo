@@ -144,12 +144,12 @@ impl ClientRequest {
             }
             if let Some(d) = &mut self.request.buf {
                 let sent = s.send(d.as_mut_vec())?;
-                if sent == d.remaining() as u64 {
+                if sent == d.remaining() {
                     self.request.buf = None;
                     s.close();
                     self.state = ClientRequestState::WaitingForResponseHeaders;
                 } else {
-                    d.read(sent as usize);
+                    d.read(sent);
                 }
             }
         }
@@ -308,10 +308,10 @@ impl ControlStreamLocal {
     pub fn send(&mut self, s: &mut Sendable) -> Result<(), CError> {
         if self.buf.remaining() != 0 {
             let sent = s.send(self.buf.as_mut_vec())?;
-            if sent == self.buf.remaining() as u64 {
+            if sent == self.buf.remaining() {
                 self.buf.clear();
             } else {
-                self.buf.read(sent as usize);
+                self.buf.read(sent);
             }
         }
         Ok(())
