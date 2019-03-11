@@ -1,7 +1,8 @@
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::time::Instant;
+
+use slice_deque::SliceDeque;
 
 use crate::connection::TxMode;
 
@@ -10,6 +11,7 @@ use crate::HError;
 use crate::Res;
 
 const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
+const TX_STREAM_DATA_WINDOW: usize = 0xFFFF; // 64 KiB
 
 pub trait Recvable: Debug {
     /// Read buffered data from stream. bool says whether is final data on
@@ -38,80 +40,91 @@ pub trait Recvable: Debug {
 
 pub trait Sendable: Debug {
     /// Send data on the stream. Returns bytes sent.
-    fn send(&mut self, buf: &[u8]) -> Res<u64>;
+    fn send(&mut self, buf: &[u8]) -> Res<usize>;
 
     /// Data is ready for sending
     fn send_data_ready(&self) -> bool;
 
     fn close(&mut self) {}
 
-    fn next_bytes(&mut self, _mode: TxMode, avail: usize) -> Option<(u64, &[u8])>;
+    fn next_bytes(&mut self, _mode: TxMode) -> Option<(u64, &[u8])>;
+
+    fn mark_as_sent(&mut self, offset: u64, len: usize);
 
     fn final_size(&self) -> Option<u64>;
 }
 
-#[allow(dead_code, unused_variables)]
-#[derive(Debug, PartialEq)]
-enum TxChunkState {
-    Unsent,
-    Sent(Instant),
-    Lost,
-}
-
-#[derive(Debug)]
-struct TxChunk {
-    offset: u64,
-    data: Vec<u8>,
-    state: TxChunkState,
-}
-
-impl TxChunk {
-    fn len(&self) -> usize {
-        self.data.len()
-    }
-}
-
-#[derive(Default, Debug)]
+#[derive(Debug, Default)]
 pub struct TxBuffer {
-    offset: u64,
-    chunks: Vec<TxChunk>,
+    acked_offset: u64, // contig acked bytes, no longer in buffer
+    next_send_offset: u64,
+    send_buf: SliceDeque<u8>,
+    acked_ranges: BTreeMap<u64, usize>, // ranges that have been acked
 }
 
 impl TxBuffer {
-    pub fn send(&mut self, buf: &[u8]) -> u64 {
-        // TODO(agrover@mozilla.com): Check stream credits to see if we can
-        // take the whole thing
-        let len = buf.len() as u64;
-        self.chunks.push(TxChunk {
-            offset: self.offset,
-            data: Vec::from(buf),
-            state: TxChunkState::Unsent,
-        });
-        self.offset += buf.len() as u64;
-        len
+    pub fn new() -> TxBuffer {
+        TxBuffer {
+            send_buf: SliceDeque::with_capacity(TX_STREAM_DATA_WINDOW),
+            ..TxBuffer::default()
+        }
     }
 
-    fn find_first_chunk_by_state(&mut self, state: TxChunkState) -> Option<usize> {
-        self.chunks.iter().position(|c| c.state == state)
+    pub fn send(&mut self, buf: &[u8]) -> usize {
+        let can_send = min(TX_STREAM_DATA_WINDOW - self.buffered(), buf.len());
+        if can_send > 0 {
+            self.send_buf.extend(&buf[..can_send]);
+            assert!(self.send_buf.len() <= TX_STREAM_DATA_WINDOW);
+        }
+        can_send
     }
 
-    pub fn next_bytes(&mut self, _mode: TxMode, avail: usize) -> Option<(u64, &[u8])> {
-        // First try to find some unsent stuff.
-        if let Some(i) = self.find_first_chunk_by_state(TxChunkState::Unsent) {
-            let c = &mut self.chunks[i];
-            assert!(c.data.len() <= avail); // We don't allow partial writes yet.
-            c.state = TxChunkState::Sent(Instant::now());
-            return Some((c.offset, &c.data));
-        }
-        // How about some lost stuff.
-        if let Some(i) = self.find_first_chunk_by_state(TxChunkState::Lost) {
-            let c = &mut self.chunks[i];
-            assert!(c.data.len() <= avail); // We don't allow partial writes yet.
-            c.state = TxChunkState::Sent(Instant::now());
-            return Some((c.offset, &c.data));
-        }
+    pub fn next_bytes(&mut self, _mode: TxMode, allow_partial: bool) -> Option<(u64, &[u8])> {
+        let buffered_bytes_sent_not_acked = self.next_send_offset - self.acked_offset;
+        let buffered_bytes_not_sent = self.send_buf.len() as u64 - buffered_bytes_sent_not_acked;
 
-        None
+        if buffered_bytes_not_sent > 0 {
+            if !allow_partial {
+                self.mark_as_sent(
+                    self.acked_offset + buffered_bytes_sent_not_acked,
+                    self.send_buf[buffered_bytes_sent_not_acked as usize..].len(),
+                )
+            }
+            Some((
+                self.acked_offset + buffered_bytes_sent_not_acked,
+                &self.send_buf[buffered_bytes_sent_not_acked as usize..],
+            ))
+        } else {
+            None
+        }
+    }
+
+    pub fn mark_as_sent(&mut self, new_sent_offset: u64, len: usize) {
+        assert!(new_sent_offset >= self.next_send_offset);
+        self.next_send_offset = new_sent_offset + len as u64;
+    }
+
+    // pub fn mark_as_ackedTODO(&mut self, offset: u64, len: usize) {
+    //     let end_off = offset + len as u64;
+    //     let (prev_sent_start, prev_len) = self
+    //         .sent_ranges
+    //         .range_mut(..offset + 1)
+    //         .next_back()
+    //         .expect("must exist");
+    //     let prev_sent_end: u64 = prev_sent_start + *prev_len as u64;
+    //     match prev_sent_end.cmp(&offset) {
+    //         Ordering::Less => *prev_len = max(prev_sent_end as usize, end_off as usize),
+    //         Ordering::Equal => {
+    //             *prev_len = max(prev_sent_end as usize, end_off as usize);
+    //         }
+    //         Ordering::Greater => {
+    //             panic!("should never happen, why are we sending out of order?");
+    //         }
+    //     }
+    // }
+
+    fn sent_not_acked_bytes(&self) -> usize {
+        self.next_send_offset as usize - self.acked_offset as usize
     }
 
     #[allow(dead_code, unused_variables)]
@@ -130,7 +143,11 @@ impl TxBuffer {
     }
 
     fn data_ready(&self) -> bool {
-        self.chunks.iter().any(|c| c.len() != 0)
+        self.send_buf.len() != self.sent_not_acked_bytes()
+    }
+
+    fn buffered(&self) -> usize {
+        self.send_buf.len()
     }
 }
 
@@ -358,7 +375,7 @@ impl SendStream {
     pub fn new() -> SendStream {
         SendStream {
             max_stream_data: 0,
-            tx_buffer: TxBuffer::default(),
+            tx_buffer: TxBuffer::new(),
             final_size: None,
         }
     }
@@ -370,7 +387,7 @@ impl SendStream {
 
 impl Sendable for SendStream {
     /// Enqueue some bytes to send
-    fn send(&mut self, buf: &[u8]) -> Res<u64> {
+    fn send(&mut self, buf: &[u8]) -> Res<usize> {
         if self.final_size.is_some() {
             return Err(Error::ErrFinalSizeError);
         }
@@ -383,11 +400,15 @@ impl Sendable for SendStream {
     }
 
     fn close(&mut self) {
-        self.final_size = Some(self.tx_buffer.offset)
+        self.final_size = Some(self.tx_buffer.acked_offset + self.tx_buffer.buffered() as u64)
     }
 
-    fn next_bytes(&mut self, mode: TxMode, avail: usize) -> Option<(u64, &[u8])> {
-        self.tx_buffer.next_bytes(mode, avail)
+    fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
+        self.tx_buffer.next_bytes(mode, true)
+    }
+
+    fn mark_as_sent(&mut self, offset: u64, len: usize) {
+        self.tx_buffer.mark_as_sent(offset, len)
     }
 
     fn final_size(&self) -> Option<u64> {

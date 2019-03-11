@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use std::cmp::max;
+use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
@@ -14,6 +14,7 @@ use crate::frame::{decode_frame, Frame, StreamType};
 use crate::nss::*;
 use crate::packet::*;
 use crate::stream::{RecvStream, Recvable, RxStreamOrderer, SendStream, Sendable, TxBuffer};
+use crate::varint::get_varint_len;
 
 use crate::{CError, Error, HError, Res};
 
@@ -288,23 +289,28 @@ impl Connection {
         // packets can go in a single datagram
         for epoch in 0..NUM_EPOCHS {
             let mut d = Data::default();
+            let mut ds = Vec::new();
             for i in 0..self.generators.len() {
                 // TODO(ekr@rtfm.com): Fix TxMode
 
-                while let Some(frame) =
-                    self.generators[i](self, epoch, TxMode::Normal, self.pmtu - d.remaining())
-                {
+                let left = self.pmtu - d.remaining();
+                while let Some(frame) = self.generators[i](self, epoch, TxMode::Normal, left) {
+                    qtrace!("pmtu {} remaining {}", self.pmtu, d.remaining());
                     frame.marshal(&mut d)?;
+                    assert!(d.remaining() <= self.pmtu);
+                    if d.remaining() == self.pmtu {
+                        // Filled this packet, get another one.
+                        ds.push(d);
+                        d = Data::default();
+                    }
                 }
             }
-
             if d.remaining() > 0 {
-                qdebug!(
-                    self,
-                    "Need to send a packet of size {}:{:0x?}",
-                    d.remaining(),
-                    d
-                );
+                ds.push(d)
+            }
+
+            for mut d in ds {
+                qdebug!(self, "Need to send a packet");
 
                 let mut hdr = PacketHdr::new(
                     0,
@@ -556,7 +562,7 @@ impl Connection {
     /// Send data on a stream.
     /// Returns how many bytes were successfully sent. Could be less
     /// than total, based on receiver credit space available, etc.
-    pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<u64> {
+    pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
         let stream = self
             .send_streams
             .get_mut(&stream_id)
@@ -602,7 +608,7 @@ impl Connection {
         )
     }
 
-    pub fn get_readable_streams<'a>(
+    pub fn get_recvable_streams<'a>(
         &'a mut self,
     ) -> Box<Iterator<Item = (u64, &mut dyn Recvable)> + 'a> {
         Box::new(
@@ -621,7 +627,7 @@ impl Connection {
         )
     }
 
-    pub fn get_writable_streams<'a>(
+    pub fn get_sendable_streams<'a>(
         &'a mut self,
     ) -> Box<Iterator<Item = (u64, &mut dyn Sendable)> + 'a> {
         Box::new(
@@ -713,7 +719,7 @@ fn generate_crypto_frames(
 ) -> Option<Frame> {
     if let Some((offset, data)) = conn.crypto_streams[epoch as usize]
         .tx
-        .next_bytes(mode, remaining)
+        .next_bytes(mode, false)
     {
         return Some(Frame::Crypto {
             offset,
@@ -721,6 +727,18 @@ fn generate_crypto_frames(
         });
     }
     None
+}
+
+/// Calculate the frame header size so we know how much data we can fit
+fn stream_frame_hdr_len(stream_id: u64, offset: u64, remaining: usize) -> usize {
+    let mut hdr_len = 1; // for frame type
+    hdr_len += get_varint_len(stream_id);
+    if offset > 0 {
+        hdr_len += get_varint_len(offset);
+    }
+
+    // We always specify length
+    hdr_len as usize + get_varint_len(remaining as u64) as usize
 }
 
 fn generate_stream_frames(
@@ -734,10 +752,10 @@ fn generate_stream_frames(
         return None;
     }
 
-    for (&stream_id, stream) in &mut conn.send_streams {
+    for (stream_id, stream) in &mut conn.get_sendable_streams() {
         if stream.send_data_ready() {
             let fin = Sendable::final_size(stream);
-            if let Some((offset, data)) = stream.next_bytes(mode, remaining) {
+            if let Some((offset, data)) = stream.next_bytes(mode) {
                 let fin = match fin {
                     None => false,
                     Some(fin) => {
@@ -748,6 +766,7 @@ fn generate_stream_frames(
                         }
                     }
                 };
+                let frame_hdr_len = stream_frame_hdr_len(stream_id, offset, remaining);
                 qtrace!(
                     "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
                     stream_id,
@@ -757,12 +776,15 @@ fn generate_stream_frames(
                     mode,
                     remaining
                 );
-                return Some(Frame::Stream {
-                    fin: fin,
+                let data_len = min(data.len(), remaining - frame_hdr_len);
+                let frame = Some(Frame::Stream {
+                    fin,
                     stream_id,
                     offset,
-                    data: data.to_vec(),
+                    data: data[..data_len].to_vec(),
                 });
+                stream.mark_as_sent(offset, data_len);
+                return frame;
             }
         }
     }
@@ -862,6 +884,9 @@ mod tests {
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
         client.stream_send(client_stream_id, &vec![6; 100]).unwrap();
         client.stream_send(client_stream_id, &vec![7; 40]).unwrap();
+        client
+            .stream_send(client_stream_id, &vec![8; 4000])
+            .unwrap();
 
         // Send to another stream but some data after fin has been set
         let client_stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
@@ -871,6 +896,7 @@ mod tests {
             .stream_send(client_stream_id2, &vec![7; 50])
             .unwrap_err();
         let res = client.process(res).unwrap();
+        assert_eq!(res.len(), 4);
 
         qdebug!("---- server");
         let res = server.process(res).unwrap();
@@ -878,10 +904,12 @@ mod tests {
         assert_eq!(server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
 
-        let mut buf = vec![0; 512];
+        let mut buf = vec![0; 4000];
 
-        let mut iter = server.get_readable_streams();
+        let mut iter = server.get_recvable_streams();
         let (stream_id, stream) = iter.next().unwrap();
+        let (received, fin) = stream.read(&mut buf).unwrap();
+        assert_eq!(received, 4000);
         let (received, fin) = stream.read(&mut buf).unwrap();
         assert_eq!(received, 140);
         assert_eq!(fin, false);
