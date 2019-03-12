@@ -775,16 +775,6 @@ fn generate_stream_frames(
         if stream.send_data_ready() {
             let fin = Sendable::final_size(stream);
             if let Some((offset, data)) = stream.next_bytes(mode) {
-                let fin = match fin {
-                    None => false,
-                    Some(fin) => {
-                        if fin == offset + data.len() as u64 {
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                };
                 qtrace!(
                     "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
                     stream_id,
@@ -796,6 +786,16 @@ fn generate_stream_frames(
                 );
                 let frame_hdr_len = stream_frame_hdr_len(stream_id, offset, remaining);
                 let data_len = min(data.len(), remaining - frame_hdr_len);
+                let fin = match fin {
+                    None => false,
+                    Some(fin) => {
+                        if fin == offset + data_len as u64 {
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                };
                 let frame = Some(Frame::Stream {
                     fin,
                     stream_id,
