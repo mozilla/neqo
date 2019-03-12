@@ -109,7 +109,7 @@ impl TxBuffer {
     }
 
     pub fn mark_as_sent(&mut self, new_sent_offset: u64, len: usize) {
-        assert!(new_sent_offset >= self.next_send_offset);
+        assert!(new_sent_offset == self.next_send_offset);
         self.next_send_offset = new_sent_offset + len as u64;
     }
 
@@ -301,6 +301,7 @@ impl RxStreamOrderer {
         Ok(())
     }
 
+    /// Are any bytes readable?
     pub fn data_ready(&self) -> bool {
         self.data_ranges
             .keys()
@@ -309,10 +310,33 @@ impl RxStreamOrderer {
             .unwrap_or(false)
     }
 
+    /// how many bytes are readable?
+    fn bytes_ready(&self) -> usize {
+        let mut prev_end = self.retired;
+        self.data_ranges
+            .iter()
+            .take_while(|(start_offset, data)| {
+                if **start_offset <= prev_end {
+                    // all ranges don't overlap but we could have partially
+                    // retired some of the FIRST entry's data.
+                    let off = prev_end - *start_offset;
+                    prev_end += data.len() as u64 - off;
+                    true
+                } else {
+                    false
+                }
+            })
+            .map(|(_, data)| data.len())
+            .sum()
+    }
+
+    /// Bytes read by the application.
     pub fn retired(&self) -> u64 {
         self.retired
     }
 
+    /// Data bytes buffered. Could be more than bytes_readable if there are
+    /// ranges missing.
     pub fn buffered(&self) -> u64 {
         self.data_ranges
             .iter()
@@ -325,6 +349,12 @@ impl RxStreamOrderer {
     /// Returns bytes copied.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
         self.read_with_amount(buf, buf.len() as u64)
+    }
+
+    pub fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Res<u64> {
+        let orig_len = buf.len();
+        buf.resize(orig_len + self.bytes_ready(), 0);
+        self.read(&mut buf[orig_len..])
     }
 
     /// Caller has been told data is available on a stream, and they want to

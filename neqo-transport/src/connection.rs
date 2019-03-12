@@ -460,13 +460,11 @@ impl Connection {
                 );
                 let rx = &mut self.crypto_streams[epoch as usize].rx;
                 rx.inbound_frame(offset, data)?;
-                let mut buf = [0; 4096];
                 if rx.data_ready() {
-                    // TODO(ekr@rtfm.com): This is a hack, let's just have
-                    // a length parameter.
-                    let read = rx.read(&mut buf)?;
+                    let mut buf = Vec::new();
+                    let read = rx.read_to_end(&mut buf)?;
                     qdebug!("Read {} bytes", read);
-                    self.handshake(epoch, Some(&buf[0..(read as usize)]))?;
+                    self.handshake(epoch, Some(&buf))?;
                 }
             }
             Frame::NewToken { token } => {} // TODO(agrover@mozilla.com): stick the new token somewhere
