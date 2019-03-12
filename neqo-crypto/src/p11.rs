@@ -54,7 +54,7 @@ scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 #[derive(Clone, Copy, Debug)]
 pub enum SymKeyTarget {
     Hkdf(Cipher),
-    Ecb(Cipher),
+    HpMask(Cipher),
 }
 
 impl SymKey {
@@ -73,20 +73,23 @@ impl SymKey {
             SymKeyTarget::Hkdf(cipher) => match cipher {
                 TLS_AES_128_GCM_SHA256 | TLS_CHACHA20_POLY1305_SHA256 => CKM_NSS_HKDF_SHA256,
                 TLS_AES_256_GCM_SHA384 => CKM_NSS_HKDF_SHA384,
-                _ => return Err(Error::InternalError),
+                _ => CKM_INVALID_MECHANISM,
             },
-            SymKeyTarget::Ecb(cipher) => match cipher {
+            SymKeyTarget::HpMask(cipher) => match cipher {
                 TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => CKM_AES_ECB,
-                TLS_CHACHA20_POLY1305_SHA256 => return Err(Error::UnsupportedCipher),
-                _ => return Err(Error::InternalError),
+                #[cfg(feature = "chacha")] TLS_CHACHA20_POLY1305_SHA256 => CKM_NSS_CHACHA20_CTR,
+                _ => CKM_INVALID_MECHANISM,
             },
         };
+        if mech == CKM_INVALID_MECHANISM {
+            return Err(Error::InternalError);
+        }
         let key_ptr = unsafe {
             PK11_ImportSymKey(
                 *slot,
-                mech as CK_ULONG,
+                mech as CK_MECHANISM_TYPE,
                 PK11Origin::PK11_OriginUnwrap,
-                CKA_DERIVE as CK_ULONG,
+                CKA_DERIVE as CK_ATTRIBUTE_TYPE,
                 &mut item,
                 null_mut(),
             )

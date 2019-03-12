@@ -80,27 +80,28 @@ fn static_link() {
     let debug_dir = nss_dir().join("out").join("Debug");
     println!("cargo:rustc-link-search={}", debug_dir.to_str().unwrap());
     for lib in &[
-        "smime",
-        "ssl",
-        "nss_static",
-        "pkcs12",
-        "pkcs7",
+        "certdb",
         "certhi",
         "cryptohi",
-        "certdb",
-        "nsspki",
-        "nssdev",
-        "nssb",
-        "pk11wrap",
-        "softokn",
-        "freebl",
         "dbm",
+        "freebl",
+        "nss_static",
+        "nssb",
+        "nssdev",
+        "nsspki",
+        "nssutil",
+        "pk11wrap",
+        "pkcs12",
+        "pkcs7",
+        "smime",
+        "softokn_static",
+        "ssl",
     ] {
         println!("cargo:rustc-link-lib=static={}", lib);
     }
 
     for lib in &[
-        "nssutil3", "sqlite3", "pthread", "dl", "c", "z", "plds4", "plc4", "nspr4",
+        "sqlite3", "pthread", "dl", "c", "z", "plds4", "plc4", "nspr4",
     ] {
         println!("cargo:rustc-link-lib={}", lib);
     }
@@ -149,8 +150,12 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[&Path]) {
 fn main() {
     println!("cargo:rerun-if-env-changed=NSS_DIR");
     let nss = nss_dir();
+    let mut build_nss = vec!["-c", "./build.sh"];
+    if is_debug() {
+        build_nss.push("--test");
+    }
     Command::new("bash")
-        .args(&["-c", "./build.sh"])
+        .args(build_nss)
         .current_dir(nss.clone())
         .status()
         .expect("NSS build failed");

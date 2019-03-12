@@ -115,7 +115,7 @@ variables = [
 ]
 
 [nss_p11]
-types = ["SECItem", "CK_ULONG"]
+types = ["SECItem", "CK_ATTRIBUTE_TYPE", "CK_MECHANISM_TYPE"]
 functions = [
     "CERT_DestroyCertificate",
     "PK11_Encrypt",
@@ -147,7 +147,9 @@ variables = [
     "CKA_DERIVE",
     "CKM_AES_ECB",
     "CKM_AES_GCM",
+    "CKM_INVALID_MECHANISM",
     "CKM_NSS_CHACHA20_POLY1305",
+    "CKM_NSS_CHACHA20_CTR",
     "CKM_NSS_HKDF_SHA256",
     "CKM_NSS_HKDF_SHA384",
 ]
