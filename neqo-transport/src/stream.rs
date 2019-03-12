@@ -18,43 +18,51 @@ pub trait Recvable: Debug {
     /// stream.
     fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)>;
 
+    /// Read with defined amount.
     fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)>;
 
-    /// The number of bytes that can be read from the stream.
+    /// Application is no longer interested in this stream.
+    fn stop_sending(&mut self, err: HError);
+
+    /// Close the stream.
+    fn close(&mut self);
+
+    // Following methods are used by packet generator, not application
+
+    /// Bytes can be read from the stream.
     fn recv_data_ready(&self) -> bool;
 
     /// Handle a received stream data frame.
     fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()>;
 
-    /// Maybe returns what should be communicated to the sender as the new max
-    /// stream offset.
+    /// What should be communicated to the sender as the new max stream
+    /// offset.
     fn needs_flowc_update(&mut self) -> Option<u64>;
 
+    /// The final size of the stream.
     fn final_size(&self) -> Option<u64>;
-
-    /// Close the stream.
-    fn close(&mut self);
-
-    fn stop_sending(&mut self, err: HError);
 }
 
 pub trait Sendable: Debug {
-    /// Send data on the stream. Returns bytes sent.
+    /// Enqueue data to send on the stream. Returns bytes enqueued.
     fn send(&mut self, buf: &[u8]) -> Res<usize>;
 
     /// Data is ready for sending
     fn send_data_ready(&self) -> bool;
 
+    /// Close the stream
     fn close(&mut self) {}
+
+    /// Abandon transmission of stream data
+    fn reset(&mut self) -> Res<()>;
+
+    // Following methods are used by packet generator, not application
 
     fn next_bytes(&mut self, _mode: TxMode) -> Option<(u64, &[u8])>;
 
     fn mark_as_sent(&mut self, offset: u64, len: usize);
 
     fn final_size(&self) -> Option<u64>;
-
-    /// Abandon transmission of stream data
-    fn reset(&mut self) -> Res<()>;
 }
 
 #[derive(Debug, Default)]
@@ -391,7 +399,6 @@ impl SendStream {
 }
 
 impl Sendable for SendStream {
-    /// Enqueue some bytes to send
     fn send(&mut self, buf: &[u8]) -> Res<usize> {
         if self.final_size.is_some() {
             return Err(Error::ErrFinalSizeError);
