@@ -101,7 +101,8 @@ pub struct Connection {
     max_streams: u64,
     highest_stream: Option<u64>,
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
-    next_stream_id: u64,
+    next_uni_stream_id: u64,
+    next_bi_stream_id: u64,
     send_streams: BTreeMap<u64, SendStream>, // stream id, stream
     recv_streams: BTreeMap<u64, RecvStream>, // stream id, stream
     outgoing_pkts: Vec<Packet>,              // (offset, data)
@@ -164,7 +165,8 @@ impl Connection {
             max_streams: 0,
             highest_stream: None,
             connection_ids: HashSet::new(),
-            next_stream_id: 0,
+            next_uni_stream_id: 0,
+            next_bi_stream_id: 0,
             send_streams: BTreeMap::new(),
             recv_streams: BTreeMap::new(),
             outgoing_pkts: Vec::new(),
@@ -544,7 +546,7 @@ impl Connection {
             .entry(stream_id)
             .or_insert(RecvStream::new());
 
-        let _new_bytes_available = stream.inbound_stream_frame(fin, offset, data)?;
+        stream.inbound_stream_frame(fin, offset, data)?;
 
         Ok(())
     }
@@ -552,19 +554,25 @@ impl Connection {
     // Returns new stream id
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         // TODO(agrover@mozilla.com): Check against max_stream_id
-        let mut stream_id = self.next_stream_id << 2;
-        if self.role == Role::Server {
-            stream_id += 1;
-        }
-        if st == StreamType::UniDi {
-            stream_id += 2;
-            self.send_streams.insert(stream_id, SendStream::new());
-        } else {
-            self.send_streams.insert(stream_id, SendStream::new());
-            self.recv_streams.insert(stream_id, RecvStream::new());
-        }
-        self.next_stream_id += 1;
-        Ok(stream_id)
+        let role_val = match self.role {
+            Role::Server => 1,
+            Role::Client => 0,
+        };
+        Ok(match st {
+            StreamType::BiDi => {
+                let new_id = (self.next_bi_stream_id << 2) + role_val;
+                self.next_bi_stream_id += 1;
+                self.send_streams.insert(new_id, SendStream::new());
+                new_id
+            }
+            StreamType::UniDi => {
+                let new_id = (self.next_uni_stream_id << 2) + 2 + role_val;
+                self.next_uni_stream_id += 1;
+                self.send_streams.insert(new_id, SendStream::new());
+                self.recv_streams.insert(new_id, RecvStream::new());
+                new_id
+            }
+        })
     }
 
     /// Send data on a stream.
@@ -814,6 +822,23 @@ fn generate_stream_frames(
 mod tests {
     use super::*;
     use crate::frame::StreamType;
+
+    #[test]
+    fn test_conn_stream_create() {
+        init_db("./db");
+
+        let mut client = Connection::new_client("example.com");
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
+        assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
+        assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 4);
+
+        let mut server = Connection::new_server(&[String::from("key")]);
+        assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 3);
+        assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 7);
+        assert_eq!(server.stream_create(StreamType::BiDi).unwrap(), 1);
+        assert_eq!(server.stream_create(StreamType::BiDi).unwrap(), 5);
+    }
 
     #[test]
     fn test_conn_handshake() {
