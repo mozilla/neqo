@@ -543,10 +543,10 @@ impl HttpConn {
         self.handle_control_frame()?;
 
         // handle stream errors
-        for (id, e) in s_err.iter() {
-            // TODO we need to infprm app about this reset.
+        for (id, e) in s_err {
+            // TODO we need to inform app about this reset.
             self.client_requests.remove(&id);
-            self.conn.reset_stream(*id, *e);
+            self.conn.stream_reset(id, e)?;
         }
 
         self.new_streams.retain(|_, v| !v.fin);

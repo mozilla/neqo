@@ -440,7 +440,14 @@ impl Connection {
             Frame::StopSending {
                 stream_id,
                 application_error_code,
-            } => {} // TODO(agrover@mozilla.com): stop sending on a stream
+            } => {
+                let stream = self
+                    .send_streams
+                    .get_mut(&stream_id)
+                    .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+
+                stream.reset()?
+            }
             Frame::Crypto { offset, data } => {
                 qdebug!(
                     self,
@@ -582,6 +589,16 @@ impl Connection {
         Ok(())
     }
 
+    pub fn stream_reset(&mut self, stream_id: u64, _err: HError) -> Res<()> {
+        // TODO(agrover@mozilla.com): reset can create a stream
+        let stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+
+        stream.reset()
+    }
+
     fn generate_cid(&mut self) -> Vec<u8> {
         let mut v: [u8; 8] = [0; 8];
         rand::thread_rng().fill(&mut v);
@@ -636,8 +653,6 @@ impl Connection {
                 .filter(|(_, stream)| stream.send_data_ready()),
         )
     }
-
-    pub fn reset_stream(&mut self, _id: u64, _err: HError) {}
 }
 
 pub struct ConnState {
@@ -718,16 +733,19 @@ fn generate_crypto_frames(
     mode: TxMode,
     remaining: usize,
 ) -> Option<Frame> {
-    if let Some((offset, data)) = conn.crypto_streams[epoch as usize]
-        .tx
-        .next_bytes(mode, false)
-    {
-        return Some(Frame::Crypto {
+    let tx_stream = &mut conn.crypto_streams[epoch as usize].tx;
+    if let Some((offset, data)) = tx_stream.next_bytes(mode) {
+        let data_len = data.len();
+        let frame = Frame::Crypto {
             offset,
             data: data.to_vec(),
-        });
+        };
+        tx_stream.mark_as_sent(offset, data_len);
+
+        Some(frame)
+    } else {
+        None
     }
-    None
 }
 
 /// Calculate the frame header size so we know how much data we can fit
@@ -767,7 +785,6 @@ fn generate_stream_frames(
                         }
                     }
                 };
-                let frame_hdr_len = stream_frame_hdr_len(stream_id, offset, remaining);
                 qtrace!(
                     "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
                     stream_id,
@@ -777,6 +794,7 @@ fn generate_stream_frames(
                     mode,
                     remaining
                 );
+                let frame_hdr_len = stream_frame_hdr_len(stream_id, offset, remaining);
                 let data_len = min(data.len(), remaining - frame_hdr_len);
                 let frame = Some(Frame::Stream {
                     fin,
@@ -911,6 +929,7 @@ mod tests {
         let (stream_id, stream) = iter.next().unwrap();
         let (received, fin) = stream.read(&mut buf).unwrap();
         assert_eq!(received, 4000);
+        assert_eq!(fin, false);
         let (received, fin) = stream.read(&mut buf).unwrap();
         assert_eq!(received, 140);
         assert_eq!(fin, false);

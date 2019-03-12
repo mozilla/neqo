@@ -52,14 +52,17 @@ pub trait Sendable: Debug {
     fn mark_as_sent(&mut self, offset: u64, len: usize);
 
     fn final_size(&self) -> Option<u64>;
+
+    /// Abandon transmission of stream data
+    fn reset(&mut self) -> Res<()>;
 }
 
 #[derive(Debug, Default)]
 pub struct TxBuffer {
-    acked_offset: u64, // contig acked bytes, no longer in buffer
-    next_send_offset: u64,
-    send_buf: SliceDeque<u8>,
-    acked_ranges: BTreeMap<u64, usize>, // ranges that have been acked
+    acked_offset: u64,                  // contig acked bytes, no longer in buffer
+    next_send_offset: u64,              // differentiates bytes buffered from bytes sent
+    send_buf: SliceDeque<u8>,           // buffer of not-acked bytes
+    acked_ranges: BTreeMap<u64, usize>, // non-contig ranges in buffer that have been acked
 }
 
 impl TxBuffer {
@@ -79,23 +82,21 @@ impl TxBuffer {
         can_send
     }
 
-    pub fn next_bytes(&mut self, _mode: TxMode, allow_partial: bool) -> Option<(u64, &[u8])> {
+    pub fn next_bytes(&mut self, _mode: TxMode) -> Option<(u64, &[u8])> {
+        // TODO(agrover@mozilla.com): this returns
         let buffered_bytes_sent_not_acked = self.next_send_offset - self.acked_offset;
         let buffered_bytes_not_sent = self.send_buf.len() as u64 - buffered_bytes_sent_not_acked;
 
-        if buffered_bytes_not_sent > 0 {
-            if !allow_partial {
-                self.mark_as_sent(
-                    self.acked_offset + buffered_bytes_sent_not_acked,
-                    self.send_buf[buffered_bytes_sent_not_acked as usize..].len(),
-                )
-            }
+        if buffered_bytes_not_sent == 0 {
+            None
+        } else {
+            // Present all bytes for sending, but frame generator may or may
+            // not take all of them (how much indicated by calling
+            // mark_as_sent())
             Some((
                 self.acked_offset + buffered_bytes_sent_not_acked,
                 &self.send_buf[buffered_bytes_sent_not_acked as usize..],
             ))
-        } else {
-            None
         }
     }
 
@@ -148,6 +149,10 @@ impl TxBuffer {
 
     fn buffered(&self) -> usize {
         self.send_buf.len()
+    }
+
+    fn clear(&mut self) {
+        self.send_buf.clear()
     }
 }
 
@@ -404,7 +409,7 @@ impl Sendable for SendStream {
     }
 
     fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
-        self.tx_buffer.next_bytes(mode, true)
+        self.tx_buffer.next_bytes(mode)
     }
 
     fn mark_as_sent(&mut self, offset: u64, len: usize) {
@@ -413,6 +418,13 @@ impl Sendable for SendStream {
 
     fn final_size(&self) -> Option<u64> {
         self.final_size
+    }
+
+    fn reset(&mut self) -> Res<()> {
+        self.tx_buffer.clear();
+        // TODO(agrover@mozilla.com): send RESET_STREAM
+        // TODO(agrover@mozilla.com): implement recv stream state machine
+        Ok(())
     }
 }
 

@@ -79,10 +79,11 @@ impl Connection {
         }
     }
 
-    pub fn reset_stream(&mut self, id: u64, err: HError) {
+    pub fn stream_reset(&mut self, id: u64, err: HError) -> Res<()> {
         if let Some(s) = self.streams.get_mut(&id) {
             s.reset(err);
         }
+        Ok(())
     }
 
     pub fn close(&mut self, err: HError) {
