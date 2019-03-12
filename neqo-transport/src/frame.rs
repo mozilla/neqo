@@ -96,6 +96,7 @@ pub enum Frame {
         final_size: u64,
     },
     StopSending {
+        stream_id: u64,
         application_error_code: u16,
     },
     Crypto {
@@ -227,8 +228,10 @@ impl Frame {
                 d.encode_varint(*final_size);
             }
             Frame::StopSending {
+                stream_id,
                 application_error_code,
             } => {
+                d.encode_varint(*stream_id);
                 d.encode_uint(*application_error_code, 2);
             }
             Frame::Crypto { offset, data } => {
@@ -354,6 +357,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
             })
         }
         FRAME_TYPE_STOP_SENDING => Ok(Frame::StopSending {
+            stream_id: d.decode_varint()?,
             application_error_code: d.decode_uint(2)? as u16,
         }),
         FRAME_TYPE_CRYPTO => {
@@ -522,10 +526,11 @@ mod tests {
     #[test]
     fn test_stop_sending() {
         let f = Frame::StopSending {
+            stream_id: 63,
             application_error_code: 0x77,
         };
 
-        enc_dec(&f, "050077")
+        enc_dec(&f, "053F0077")
     }
 
     #[test]

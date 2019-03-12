@@ -438,6 +438,7 @@ impl Connection {
                 final_size,
             } => {} // TODO(agrover@mozilla.com): reset a stream
             Frame::StopSending {
+                stream_id,
                 application_error_code,
             } => {} // TODO(agrover@mozilla.com): stop sending on a stream
             Frame::Crypto { offset, data } => {
