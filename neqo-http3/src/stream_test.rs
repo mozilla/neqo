@@ -41,6 +41,8 @@ impl Sendable for Stream {
         Ok(())
     }
 
+    fn reset_acked(&mut self) {}
+
     fn send_data_ready(&self) -> bool {
         self.send_buf.len() > 0
     }

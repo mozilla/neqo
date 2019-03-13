@@ -1,6 +1,7 @@
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use std::mem;
 
 use slice_deque::SliceDeque;
 
@@ -63,6 +64,8 @@ pub trait Sendable: Debug {
     fn mark_as_sent(&mut self, offset: u64, len: usize);
 
     fn final_size(&self) -> Option<u64>;
+
+    fn reset_acked(&mut self);
 }
 
 #[derive(Debug, Default)]
@@ -157,10 +160,6 @@ impl TxBuffer {
 
     fn buffered(&self) -> usize {
         self.send_buf.len()
-    }
-
-    fn clear(&mut self) {
-        self.send_buf.clear()
     }
 }
 
@@ -407,61 +406,161 @@ impl RxStreamOrderer {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
+enum SendStreamState {
+    Ready,
+    Send(TxBuffer),
+    DataSent(TxBuffer, u64),
+    DataRecvd(u64),
+    ResetSent,
+    ResetRecvd,
+}
+
+impl SendStreamState {
+    fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
+        match self {
+            SendStreamState::Send(buf) => Some(buf),
+            SendStreamState::DataSent(buf, _) => Some(buf),
+            SendStreamState::Ready
+            | SendStreamState::DataRecvd(_)
+            | SendStreamState::ResetSent
+            | SendStreamState::ResetRecvd => None,
+        }
+    }
+
+    fn tx_buf(&self) -> Option<&TxBuffer> {
+        match self {
+            SendStreamState::Send(buf) => Some(buf),
+            SendStreamState::DataSent(buf, _) => Some(buf),
+            SendStreamState::Ready
+            | SendStreamState::DataRecvd(_)
+            | SendStreamState::ResetSent
+            | SendStreamState::ResetRecvd => None,
+        }
+    }
+
+    fn final_size(&self) -> Option<u64> {
+        match self {
+            SendStreamState::DataSent(_, size) => Some(*size),
+            SendStreamState::DataRecvd(size) => Some(*size),
+            SendStreamState::Ready
+            | SendStreamState::Send(_)
+            | SendStreamState::ResetSent
+            | SendStreamState::ResetRecvd => None,
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            SendStreamState::Ready => "Ready",
+            SendStreamState::Send(_) => "Send",
+            SendStreamState::DataSent(_, _) => "DataSent",
+            SendStreamState::DataRecvd(_) => "DataRecvd",
+            SendStreamState::ResetSent => "ResetSent",
+            SendStreamState::ResetRecvd => "ResetRecvd",
+        }
+    }
+
+    fn transition(&mut self, new_state: SendStreamState) {
+        qtrace!("SendStream state {} -> {}", self.name(), new_state.name());
+        *self = new_state;
+    }
+}
+
+#[derive(Debug)]
 pub struct SendStream {
-    max_stream_data: u64,
-    tx_buffer: TxBuffer,
-    final_size: Option<u64>,
+    state: SendStreamState,
 }
 
 impl SendStream {
     pub fn new() -> SendStream {
         SendStream {
-            max_stream_data: 0,
-            tx_buffer: TxBuffer::new(),
-            final_size: None,
+            state: SendStreamState::Ready,
         }
     }
-
-    // fn avail_credits(&self) -> u64 {
-    //     self.max_stream_data
-    // }
 }
 
 impl Sendable for SendStream {
     fn send(&mut self, buf: &[u8]) -> Res<usize> {
-        if self.final_size.is_some() {
-            return Err(Error::ErrFinalSizeError);
-        }
-
-        Ok(self.tx_buffer.send(buf))
+        Ok(match self.state {
+            SendStreamState::Ready => {
+                let mut tx_buf = TxBuffer::new();
+                let sent = tx_buf.send(buf);
+                self.state.transition(SendStreamState::Send(tx_buf));
+                sent
+            }
+            SendStreamState::Send(ref mut tx_buf) => tx_buf.send(buf),
+            SendStreamState::DataSent(_, _) => return Err(Error::ErrFinalSizeError),
+            SendStreamState::DataRecvd(_) => return Err(Error::ErrFinalSizeError),
+            SendStreamState::ResetSent => return Err(Error::ErrFinalSizeError),
+            SendStreamState::ResetRecvd => return Err(Error::ErrFinalSizeError),
+        })
     }
 
     fn send_data_ready(&self) -> bool {
-        self.tx_buffer.data_ready()
+        self.state
+            .tx_buf()
+            .map(|buf| buf.data_ready())
+            .unwrap_or(false)
     }
 
     fn close(&mut self) {
-        self.final_size = Some(self.tx_buffer.acked_offset + self.tx_buffer.buffered() as u64)
+        match self.state {
+            SendStreamState::Ready => {
+                self.state.transition(SendStreamState::DataRecvd(0));
+            }
+            SendStreamState::Send(ref mut tx_buf) => {
+                let final_size = tx_buf.acked_offset + tx_buf.buffered() as u64;
+                let owned_buf = mem::replace(tx_buf, TxBuffer::new());
+                self.state
+                    .transition(SendStreamState::DataSent(owned_buf, final_size));
+            }
+            SendStreamState::DataSent(_, _) => qtrace!("already in DataSent state"),
+            SendStreamState::DataRecvd(_) => qtrace!("already in DataRecvd state"),
+            SendStreamState::ResetSent => qtrace!("already in ResetSent state"),
+            SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
+        }
     }
 
     fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
-        self.tx_buffer.next_bytes(mode)
+        self.state.tx_buf_mut().and_then(|buf| buf.next_bytes(mode))
     }
 
     fn mark_as_sent(&mut self, offset: u64, len: usize) {
-        self.tx_buffer.mark_as_sent(offset, len)
+        self.state
+            .tx_buf_mut()
+            .map(|buf| buf.mark_as_sent(offset, len));
     }
 
     fn final_size(&self) -> Option<u64> {
-        self.final_size
+        self.state.final_size()
     }
 
     fn reset(&mut self) -> Res<()> {
-        self.tx_buffer.clear();
-        // TODO(agrover@mozilla.com): send RESET_STREAM
-        // TODO(agrover@mozilla.com): implement recv stream state machine
+        match self.state {
+            SendStreamState::Ready | SendStreamState::Send(_) | SendStreamState::DataSent(_, _) => {
+                // TODO(agrover@mozilla.com): send RESET_STREAM
+                self.state.transition(SendStreamState::ResetSent);
+            }
+            SendStreamState::DataRecvd(_) => qtrace!("already in DataRecvd state"),
+            SendStreamState::ResetSent => qtrace!("already in ResetSent state"),
+            SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
+        };
+
         Ok(())
+    }
+
+    fn reset_acked(&mut self) {
+        match self.state {
+            SendStreamState::Ready
+            | SendStreamState::Send(_)
+            | SendStreamState::DataSent(_, _)
+            | SendStreamState::DataRecvd(_) => {
+                qtrace!("Reset acked while in {} state?", self.state.name())
+            }
+            SendStreamState::ResetSent => self.state.transition(SendStreamState::ResetRecvd),
+            SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
+        };
     }
 }
 
