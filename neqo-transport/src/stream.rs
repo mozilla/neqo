@@ -314,18 +314,21 @@ impl RxStreamOrderer {
         let mut prev_end = self.retired;
         self.data_ranges
             .iter()
-            .take_while(|(start_offset, data)| {
+            .map(|(start_offset, data)| {
+                // All ranges don't overlap but we could have partially
+                // retired some of the first entry's data.
+                let data_len = data.len() as u64 - self.retired.saturating_sub(*start_offset);
+                (start_offset, data_len)
+            })
+            .take_while(|(start_offset, data_len)| {
                 if **start_offset <= prev_end {
-                    // all ranges don't overlap but we could have partially
-                    // retired some of the FIRST entry's data.
-                    let off = prev_end - *start_offset;
-                    prev_end += data.len() as u64 - off;
+                    prev_end += data_len;
                     true
                 } else {
                     false
                 }
             })
-            .map(|(_, data)| data.len())
+            .map(|(_, data_len)| data_len as usize)
             .sum()
     }
 
@@ -886,4 +889,37 @@ mod tests {
         s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, vec![1; 1])
             .unwrap_err();
     }
+
+    #[test]
+    fn test_stream_orderer_bytes_ready() {
+        let mut rx_ord = RxStreamOrderer::new();
+
+        let mut buf = vec![0u8; 100];
+
+        rx_ord.inbound_frame(0, vec![1; 6]).unwrap();
+        assert_eq!(rx_ord.bytes_ready(), 6);
+        assert_eq!(rx_ord.buffered(), 6);
+        assert_eq!(rx_ord.retired(), 0);
+        // read some so there's an offset into the first frame
+        rx_ord.read(&mut buf[..2]).unwrap();
+        assert_eq!(rx_ord.bytes_ready(), 4);
+        assert_eq!(rx_ord.buffered(), 4);
+        assert_eq!(rx_ord.retired(), 2);
+        // an overlapping frame
+        rx_ord.inbound_frame(5, vec![2; 6]).unwrap();
+        assert_eq!(rx_ord.bytes_ready(), 9);
+        assert_eq!(rx_ord.buffered(), 9);
+        assert_eq!(rx_ord.retired(), 2);
+        // a noncontig frame
+        rx_ord.inbound_frame(20, vec![3; 6]).unwrap();
+        assert_eq!(rx_ord.bytes_ready(), 9);
+        assert_eq!(rx_ord.buffered(), 15);
+        assert_eq!(rx_ord.retired(), 2);
+        // an old frame
+        rx_ord.inbound_frame(0, vec![4; 2]).unwrap();
+        assert_eq!(rx_ord.bytes_ready(), 9);
+        assert_eq!(rx_ord.buffered(), 15);
+        assert_eq!(rx_ord.retired(), 2);
+    }
+
 }
