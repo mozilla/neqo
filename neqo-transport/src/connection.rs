@@ -19,6 +19,7 @@ use crate::{hex, CError, Error, HError, Res};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::constants::*;
 use neqo_crypto::hkdf;
+use neqo_crypto::hpmask;
 use neqo_crypto::p11::*;
 
 #[derive(Debug, Default)]
@@ -76,6 +77,7 @@ impl ops::Deref for FrameGenerator {
 struct CryptoDxState {
     label: String,
     aead: Aead,
+    hpkey: SymKey,
 }
 
 impl CryptoDxState {
@@ -84,6 +86,7 @@ impl CryptoDxState {
         CryptoDxState {
             label: label.into(),
             aead: Aead::new(TLS_VERSION_1_3, cipher, secret, "quic ").unwrap(),
+            hpkey: hkdf::expand_label(TLS_VERSION_1_3, cipher, secret, &[], "quic hp").unwrap(),
         }
     }
 
@@ -785,8 +788,8 @@ pub struct ConnState {
 }
 
 impl CryptoCtx for CryptoDxState {
-    fn compute_mask(&self, _sample: &[u8]) -> Res<[u8; 5]> {
-        Ok([0xa5, 0xa5, 0xa5, 0xa5, 0xa5])
+    fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
+        do_crypto(hpmask::hpmask(&self.hpkey, sample))
     }
 
     fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {

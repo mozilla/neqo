@@ -105,7 +105,7 @@ pub trait PacketDecoder {
 }
 
 pub trait CryptoCtx {
-    fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]>;
+    fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>>;
     fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
     fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
 }
@@ -419,8 +419,8 @@ mod tests {
     }
 
     impl CryptoCtx for TestFixture {
-        fn compute_mask(&self, sample: &[u8]) -> Res<[u8; 5]> {
-            Ok([0xa5, 0xa5, 0xa5, 0xa5, 0xa5])
+        fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
+            Ok(vec![0xa5, 0xa5, 0xa5, 0xa5, 0xa5])
         }
 
         fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
