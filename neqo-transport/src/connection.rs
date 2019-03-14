@@ -402,7 +402,7 @@ impl Connection {
         // Put packets in UDP datagrams
         let out_dgrams = out_packets
             .into_iter()
-            .inspect(|p| qdebug!(self, "Packet length: {} {:0x?}", p.len(), p))
+            .inspect(|p| qdebug!(self, "{}", hex("Packet", p)))
             .fold(Vec::new(), |mut vec: Vec<Datagram>, packet| {
                 let new_dgram: bool = vec
                     .last()
@@ -789,7 +789,14 @@ pub struct ConnState {
 
 impl CryptoCtx for CryptoDxState {
     fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
-        do_crypto(self.hpkey.mask(sample))
+        let mask = do_crypto(self.hpkey.mask(sample))?;
+        log!(
+            Level::Debug,
+            "HP {} {}",
+            hex("sample", sample),
+            hex("mask", &mask)
+        );
+        Ok(mask)
     }
 
     fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
@@ -822,7 +829,7 @@ impl CryptoCtx for CryptoDxState {
         out.resize(size, 0);
         let res = do_crypto(self.aead.encrypt(pn, hdr, body, &mut out))?;
 
-        log!(Level::Info, "aead_encrypt {}", hex("ct", res),);
+        log!(Level::Debug, "aead_encrypt {}", hex("ct", res),);
 
         Ok(res.to_vec())
     }
