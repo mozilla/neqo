@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 mod connection;
 mod connection_test;
 mod hconnection;

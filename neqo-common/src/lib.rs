@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 // Cribbed from the |matches| crate, for simplicity.
 #[macro_export]
 macro_rules! matches {

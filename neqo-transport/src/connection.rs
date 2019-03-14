@@ -782,13 +782,6 @@ pub struct ConnState {
     pub closed: bool,
 }
 
-// Mock for the crypto pieces
-const AEAD_MASK: u8 = 0;
-
-fn auth_tag(_hdr: &[u8], _body: &[u8]) -> [u8; 16] {
-    [0xaa; 16]
-}
-
 impl CryptoCtx for CryptoDxState {
     fn compute_mask(&self, _sample: &[u8]) -> Res<[u8; 5]> {
         Ok([0xa5, 0xa5, 0xa5, 0xa5, 0xa5])

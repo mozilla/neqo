@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 pub mod huffman;
 mod huffman_decode_helper;
 pub mod huffman_table;
