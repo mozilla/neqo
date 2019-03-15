@@ -248,7 +248,7 @@ impl Connection {
             let msg = String::from("");
             self.set_state(State::Closing(
                 ConnectionError::Transport(v.clone()),
-                frame_tytpe,
+                frame_type,
                 msg,
             ));
         }
