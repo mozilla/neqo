@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 
+use crate::constants::Alert;
+
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
 include!(concat!(env!("OUT_DIR"), "/nss_secerr.rs"));
 include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
@@ -15,6 +17,7 @@ pub type Res<T> = Result<T, Error>;
 pub enum Error {
     AeadInitFailure,
     AeadError,
+    Alert(Alert),
     CertificateLoading,
     CreateSslSocket,
     HkdfError,
@@ -30,6 +33,15 @@ pub enum Error {
     OverrunError,
     UnsupportedCipher,
     UnsupportedVersion,
+}
+
+impl Error {
+    pub fn alert(&self) -> Option<Alert> {
+        match self {
+            Error::Alert(a) => Some(*a),
+            _ => None,
+        }
+    }
 }
 
 impl std::error::Error for Error {

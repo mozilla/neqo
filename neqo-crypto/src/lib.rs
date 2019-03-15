@@ -46,6 +46,7 @@ fn result(code: nss::SECStatus) -> Res<()> {
 
 enum NssLoaded {
     NotLoaded,
+    LoadedExternally,
     LoadedNoDb,
     LoadedDb(Box<Path>),
 }
@@ -64,13 +65,22 @@ impl Drop for NssLoaded {
 static mut INITIALIZED: NssLoaded = NssLoaded::NotLoaded;
 static INIT_ONCE: Once = Once::new();
 
-// Grab one of these to make sure that NSS is initialized.
+unsafe fn already_initialized() -> bool {
+    match nss::NSS_IsInitialized() {
+        0 => false,
+        _ => {
+            INITIALIZED = NssLoaded::LoadedExternally;
+            true
+        },
+    }
+}
+
+/// Initialize NSS.  This only executes the initialization routines once, so if there is any chance that
 pub fn init() {
     unsafe {
         INIT_ONCE.call_once(|| {
-            let initialized = nss::NSS_IsInitialized() != 0;
-            if initialized {
-                panic!("Already initialized")
+            if already_initialized() {
+                return;
             }
 
             let st = nss::NSS_NoDB_Init(null());
@@ -86,9 +96,8 @@ pub fn init() {
 pub fn init_db(dir: &str) {
     unsafe {
         INIT_ONCE.call_once(|| {
-            let initialized = nss::NSS_IsInitialized() != 0;
-            if initialized {
-                panic!("NSS is already initialized")
+            if already_initialized() {
+                return;
             }
 
             let path = Path::new(dir);
