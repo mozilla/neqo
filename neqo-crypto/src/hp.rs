@@ -84,7 +84,6 @@ impl HpKey {
         let zero = vec![0u8; block_size];
         let (iv, inbuf) = match () {
             _ if mech == CKM_AES_ECB as CK_MECHANISM_TYPE => (null_mut(), sample),
-            #[c]
             _ if mech == CKM_NSS_CHACHA20_CTR as CK_MECHANISM_TYPE => {
                 (&mut item as *mut SECItem, &zero[..])
             }

@@ -112,24 +112,6 @@ impl SymKey {
             Some(key) => Ok(unsafe { std::slice::from_raw_parts(key.data, key.len as usize) }),
         }
     }
-
-    /// Temporary hack.
-    pub fn into_hpmask(self, cipher: Cipher) -> Res<SymKey> {
-        let (mech, size) = match cipher {
-            TLS_AES_128_GCM_SHA256 => (CKM_AES_ECB, 16),
-            TLS_AES_256_GCM_SHA384 => (CKM_AES_ECB, 32),
-            TLS_CHACHA20_POLY1305_SHA256 => (CKM_NSS_CHACHA20_CTR, 32),
-            _ => unreachable!(),
-        };
-        if mech == CKM_INVALID_MECHANISM {
-            return Err(Error::InternalError);
-        }
-        let slice = self.as_bytes()?;
-        if slice.len() < size {
-            return Err(Error::InternalError);
-        }
-        SymKey::import(SymKeyTarget::HpMask(cipher), &slice[0..size])
-    }
 }
 
 impl std::fmt::Debug for SymKey {
