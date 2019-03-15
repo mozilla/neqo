@@ -71,7 +71,7 @@ unsafe fn already_initialized() -> bool {
         _ => {
             INITIALIZED = NssLoaded::LoadedExternally;
             true
-        },
+        }
     }
 }
 

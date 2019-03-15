@@ -1,20 +1,19 @@
 #![allow(unused_variables, dead_code)]
 
-use crate::stream_test::{get_stream_type, Stream};
-use neqo_transport::connection::{ConnState, Datagram, Role, State};
+use super::test_stream::{get_stream_type, Stream};
+use neqo_transport::connection::{Datagram, Role, State};
 use neqo_transport::frame::StreamType;
 use neqo_transport::stream::{Recvable, Sendable};
-use neqo_transport::{CError, Error, HError, Res};
+use neqo_transport::{AppError, ConnectionError, Res};
 use std::collections::HashMap;
 
 pub struct Connection {
     role: Role,
     agent: Agent,
-    state: State,
+    st: State,
     deadline: u64,
     next_stream_id: u64,
     pub streams: HashMap<u64, Stream>,
-    error: CError,
 }
 
 pub struct Agent {}
@@ -24,25 +23,16 @@ impl Connection {
         Connection {
             role: r,
             agent: agent,
-            state: State::Init,
+            st: State::Init,
             deadline: 0,
             next_stream_id: 0,
             streams: HashMap::new(),
-            error: CError::Error(Error::ErrNoError),
         }
     }
 
     pub fn process(&mut self, _d: Vec<Datagram>) -> Res<Vec<Datagram>> {
-        self.state = State::Connected;
+        self.st = State::Connected;
         Ok(Vec::new())
-    }
-
-    pub fn get_state(&self) -> ConnState {
-        ConnState {
-            connected: self.state == State::Connected,
-            error: self.error.clone(),
-            closed: self.state == State::Closed,
-        }
     }
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
@@ -79,15 +69,18 @@ impl Connection {
         }
     }
 
-    pub fn stream_reset(&mut self, id: u64, err: HError) -> Res<()> {
+    pub fn stream_reset(&mut self, id: u64, err: AppError) -> Res<()> {
         if let Some(s) = self.streams.get_mut(&id) {
             s.reset(err);
         }
         Ok(())
     }
 
-    pub fn close(&mut self, err: HError) {
-        self.state = State::Closed;
-        self.error = CError::HError(err);
+    pub fn close<S: Into<String>>(&mut self, err: AppError, _msg: S) {
+        self.st = State::Closed(ConnectionError::Application(err));
+    }
+
+    pub fn state(&self) -> &State {
+        &self.st
     }
 }

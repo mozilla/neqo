@@ -7,9 +7,7 @@ use slice_deque::SliceDeque;
 
 use crate::connection::TxMode;
 
-use crate::Error;
-use crate::HError;
-use crate::Res;
+use crate::{AppError, Error, Res};
 
 const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
 const TX_STREAM_DATA_WINDOW: usize = 0xFFFF; // 64 KiB
@@ -23,7 +21,7 @@ pub trait Recvable: Debug {
     fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)>;
 
     /// Application is no longer interested in this stream.
-    fn stop_sending(&mut self, err: HError);
+    fn stop_sending(&mut self, err: AppError);
 
     /// Close the stream.
     fn close(&mut self);
@@ -55,7 +53,7 @@ pub trait Sendable: Debug {
     fn close(&mut self) {}
 
     /// Abandon transmission of stream data
-    fn reset(&mut self) -> Res<()>;
+    fn reset(&mut self, err: AppError) -> Res<()>;
 
     // Following methods are used by packet generator, not application
 
@@ -493,10 +491,10 @@ impl Sendable for SendStream {
                 sent
             }
             SendStreamState::Send(ref mut tx_buf) => tx_buf.send(buf),
-            SendStreamState::DataSent(_, _) => return Err(Error::ErrFinalSizeError),
-            SendStreamState::DataRecvd(_) => return Err(Error::ErrFinalSizeError),
-            SendStreamState::ResetSent => return Err(Error::ErrFinalSizeError),
-            SendStreamState::ResetRecvd => return Err(Error::ErrFinalSizeError),
+            SendStreamState::DataSent(_, _) => return Err(Error::FinalSizeError),
+            SendStreamState::DataRecvd(_) => return Err(Error::FinalSizeError),
+            SendStreamState::ResetSent => return Err(Error::FinalSizeError),
+            SendStreamState::ResetRecvd => return Err(Error::FinalSizeError),
         })
     }
 
@@ -539,7 +537,7 @@ impl Sendable for SendStream {
         self.state.final_size()
     }
 
-    fn reset(&mut self) -> Res<()> {
+    fn reset(&mut self, _err: AppError) -> Res<()> {
         match self.state {
             SendStreamState::Ready | SendStreamState::Send(_) | SendStreamState::DataSent(_, _) => {
                 // TODO(agrover@mozilla.com): send RESET_STREAM
@@ -632,7 +630,7 @@ impl Recvable for RecvStream {
         assert!(buf.len() >= amount as usize);
 
         match &mut self.state {
-            RecvStreamState::Closed => return Err(Error::ErrNoMoreData),
+            RecvStreamState::Closed => return Err(Error::NoMoreData),
             RecvStreamState::Open {
                 rx_window: _,
                 rx_orderer,
@@ -660,13 +658,13 @@ impl Recvable for RecvStream {
         // Send final size errors even if stream is closed
         if let Some(final_size) = self.final_size {
             if new_end > final_size || (fin && new_end != final_size) {
-                return Err(Error::ErrFinalSizeError);
+                return Err(Error::FinalSizeError);
             }
         }
 
         match &mut self.state {
             RecvStreamState::Closed => {
-                Err(Error::ErrTooMuchData) // send STOP_SENDING
+                Err(Error::TooMuchData) // send STOP_SENDING
             }
             RecvStreamState::Open {
                 rx_window,
@@ -675,14 +673,14 @@ impl Recvable for RecvStream {
                 if fin && self.final_size == None {
                     let final_size = offset + data.len() as u64;
                     if final_size < rx_orderer.highest_seen_offset() {
-                        return Err(Error::ErrFinalSizeError);
+                        return Err(Error::FinalSizeError);
                     }
                     self.final_size = Some(offset + data.len() as u64);
                 }
 
                 if new_end > *rx_window {
                     qtrace!("Stream RX window {} exceeded: {}", rx_window, new_end);
-                    return Err(Error::ErrFlowControlError);
+                    return Err(Error::FlowControlError);
                 }
 
                 rx_orderer.inbound_frame(offset, data)
@@ -719,7 +717,7 @@ impl Recvable for RecvStream {
     }
 
     #[allow(dead_code, unused_variables)]
-    fn stop_sending(&mut self, err: HError) {
+    fn stop_sending(&mut self, err: AppError) {
         unimplemented!();
     }
 }

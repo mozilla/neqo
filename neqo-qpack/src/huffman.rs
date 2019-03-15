@@ -3,8 +3,8 @@
 
 use crate::huffman_decode_helper::{HuffmanDecodeTable, HUFFMAN_DECODE_ROOT};
 use crate::huffman_table::HUFFMAN_TABLE;
-use neqo_http3::hframe::ReadBuf;
-use neqo_transport::HError;
+use crate::{Error, Res};
+use neqo_common::readbuf::ReadBuf;
 
 pub fn encode_header_block(input: &[u8], output: &mut Vec<u8>) {
     let mut left: u8 = 8;
@@ -45,7 +45,7 @@ pub fn encode_header_block(input: &[u8], output: &mut Vec<u8>) {
     }
 }
 
-pub fn decode_header_block(input: &mut ReadBuf, output: &mut Vec<u8>) -> Result<(), HError> {
+pub fn decode_header_block(input: &mut ReadBuf, output: &mut Vec<u8>) -> Res<()> {
     let mut byte: u8 = 0;
     let mut bits_left: u8 = 0;
     while input.remaining() > 0 {
@@ -57,19 +57,19 @@ pub fn decode_header_block(input: &mut ReadBuf, output: &mut Vec<u8>) -> Result<
     }
 
     if bits_left > 7 {
-        return Err(HError::ErrHttpUnexpected);
+        return Err(Error::DecompressionFailed);
     }
     if bits_left > 0 {
         let mask: u8 = ((1 << bits_left) - 1) << (8 - bits_left);
         let bits: u8 = byte & mask;
         if bits != mask {
-            return Err(HError::ErrHttpUnexpected);
+            return Err(Error::DecompressionFailed);
         }
     }
     Ok(())
 }
 
-fn extract_byte(input: &mut ReadBuf, byte: &mut u8, bits_left: &mut u8) -> Result<(), HError> {
+fn extract_byte(input: &mut ReadBuf, byte: &mut u8, bits_left: &mut u8) -> Res<()> {
     if *bits_left != 0 {
         let (c, left) = input.read_bits(8 - *bits_left);
         *byte = *byte | (c << ((8 - *bits_left) - left));
@@ -88,7 +88,7 @@ fn decode_huffman_character(
     input: &mut ReadBuf,
     byte: &mut u8,
     bits_left: &mut u8,
-) -> Result<Option<u8>, HError> {
+) -> Res<Option<u8>> {
     extract_byte(input, byte, bits_left)?;
 
     if table.index_has_a_next_table(*byte) {
@@ -103,7 +103,7 @@ fn decode_huffman_character(
 
     let entry = table.entry(*byte);
     if entry.val == 256 {
-        return Err(HError::ErrHttpUnexpected);
+        return Err(Error::DecompressionFailed);
     }
 
     if entry.prefix_len > *bits_left as u16 {

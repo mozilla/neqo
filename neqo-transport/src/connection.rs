@@ -7,19 +7,19 @@ use std::net::SocketAddr;
 use std::ops;
 use std::time::Instant;
 
-use rand::prelude::*;
-
-use crate::data::Data;
-use crate::frame::{decode_frame, Frame, StreamType};
-use crate::nss::*;
-use crate::packet::*;
-use crate::stream::{RecvStream, Recvable, RxStreamOrderer, SendStream, Sendable, TxBuffer};
-use crate::varint::*;
-use crate::{hex, CError, Error, HError, Res};
+use neqo_common::data::Data;
+use neqo_common::varint::*;
 use neqo_crypto::aead::Aead;
 use neqo_crypto::constants::*;
 use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
+use rand::prelude::*;
+
+use crate::frame::{decode_frame, Frame, FrameType, StreamType};
+use crate::nss::*;
+use crate::packet::*;
+use crate::stream::{RecvStream, Recvable, RxStreamOrderer, SendStream, Sendable, TxBuffer};
+use crate::{hex, AppError, ConnectionError, Error, Res};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -34,13 +34,14 @@ pub enum Role {
     Server,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum State {
     Init,
     WaitInitial,
     Handshaking,
     Connected,
-    Closed,
+    Closing(ConnectionError, FrameType, String),
+    Closed(ConnectionError),
 }
 
 #[derive(Debug, PartialEq)]
@@ -232,11 +233,34 @@ impl Connection {
         c
     }
 
+    /// Get the state of the connection.
+    pub fn state(&self) -> &State {
+        &self.state
+    }
+
+    // This function wraps a call to another function and sets the connection state
+    // properly if that call fails.
+    fn capture_error<T>(&mut self, frame_type: FrameType, res: Res<T>) -> Res<T> {
+        if let Err(v) = &res {
+            #[cfg(debug_assertions)]
+            let msg = String::from(format!("{:?}", v));
+            #[cfg(not(debug_assertions))]
+            let msg = String::from("");
+            self.set_state(State::Closing(
+                ConnectionError::Transport(v.clone()),
+                frame_type,
+                msg,
+            ));
+        }
+        res
+    }
+
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
     pub fn process(&mut self, d: Vec<Datagram>) -> Res<Vec<Datagram>> {
         for dgram in d {
-            self.input(dgram)?;
+            let res = self.input(dgram);
+            self.capture_error(0, res)?;
         }
 
         if Instant::now() >= self.deadline {
@@ -265,7 +289,13 @@ impl Connection {
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
-            let mut hdr = decode_packet_hdr(self, slc)?;
+            let mut hdr = match decode_packet_hdr(self, slc) {
+                Ok(h) => h,
+                _ => {
+                    qinfo!(self, "Received indecipherable packet header {:?}", slc);
+                    return Ok(()); // Drop the remainder of the datagram.
+                }
+            };
 
             // TODO(ekr@rtfm.com): Check for bogus versions and reject.
             // TODO(ekr@rtfm.com): Set up masking.
@@ -273,7 +303,7 @@ impl Connection {
             match self.state {
                 State::Init => {
                     qinfo!(self, "Received message while in Init state");
-                    return Err(Error::ErrUnexpectedMessage);
+                    return Ok(());
                 }
                 State::WaitInitial => {
                     // Out DCID is the other side's SCID.
@@ -281,7 +311,7 @@ impl Connection {
                     if self.role == Role::Server {
                         if hdr.dcid.len() < 8 {
                             qwarn!(self, "Peer DCID is too short");
-                            return Err(Error::ErrInvalidPacket);
+                            return Ok(());
                         }
                         self.remote_addr = Some(d.src);
                         self.create_initial_crypto_state(&hdr.dcid);
@@ -296,16 +326,31 @@ impl Connection {
                 State::Connected => {
                     // No-op.
                 }
-                State::Closed => {
-                    // TODO(agrover@mozilla.com): send STOP_SENDING?
+                State::Closing(..) | State::Closed(..) => {
+                    // Don't bother processing the packet.
+                    // output() will generate a new closing packet.
+                    return Ok(());
                 }
             }
 
             qdebug!(self, "Received unverified packet {:?}", hdr);
 
-            // If the state isn't available, we return error.
-            let cs = self.ensure_crypto_state(hdr.epoch)?;
-            let body = decrypt_packet(&cs.rx, &PnCtx {}, &mut hdr, slc)?;
+            // Decryption failure, or not having keys is not fatal.
+            // If the state isn't available, or we can't decrypt the packet, drop
+            // the rest of the datagram on the floor, but don't generate an error.
+            let res = match self.ensure_crypto_state(hdr.epoch) {
+                Ok(cs) => decrypt_packet(&cs.rx, &PnCtx {}, &mut hdr, slc),
+                Err(e) => Err(e),
+            };
+            slc = &slc[hdr.hdr_len + hdr.encrypted_body_len()..];
+            let body = match res {
+                Ok(b) => b,
+                _ => {
+                    // TODO(mt): Check for stateless reset, which is fatal.
+                    continue;
+                }
+            };
+
             // TODO(ekr@rtfm.com): Have the server blow away the initial
             // crypto state if this fails? Otherwise, we will get a panic
             // on the assert for doesn't exist.
@@ -319,22 +364,22 @@ impl Connection {
                 self.set_state(State::Handshaking);
             }
 
-            let mut d = Data::from_slice(&body);
-
-            // Handle each frame in the packet
-            while d.remaining() > 0 {
-                let f = decode_frame(&mut d)?;
-                self.process_input_frame(hdr.epoch, f)?;
-            }
-
-            slc = &slc[hdr.hdr_len + hdr.encrypted_body_len()..];
+            self.input_packet(hdr.epoch, Data::from_slice(&body))?;
         }
 
         Ok(())
     }
 
-    pub fn state(&self) -> State {
-        self.state
+    fn input_packet(&mut self, epoch: Epoch, mut d: Data) -> Res<()> {
+        // Handle each frame in the packet
+        while d.remaining() > 0 {
+            let f = decode_frame(&mut d)?;
+            let t = f.get_type();
+            let res = self.input_frame(epoch, f);
+            self.capture_error(t, res)?;
+        }
+
+        Ok(())
     }
 
     // Iterate through all the generators, inserting as many frames as will
@@ -432,9 +477,39 @@ impl Connection {
         Ok(())
     }
 
+    fn send_close(&self) -> Option<Frame> {
+        if let State::Closing(cerr, frame_type, reason) = self.state() {
+            Some(Frame::ConnectionClose {
+                close_type: cerr.into(),
+                error_code: match cerr {
+                    ConnectionError::Application(e) => *e,
+                    ConnectionError::Transport(e) => e.code(),
+                },
+                frame_type: *frame_type,
+                reason_phrase: Vec::from(reason.clone()),
+            })
+        } else {
+            None
+        }
+    }
+
+    fn generate_close(
+        c: &mut Connection,
+        e: Epoch,
+        mode: TxMode,
+        remaining: usize,
+    ) -> Option<Frame> {
+        c.send_close()
+    }
+
     #[allow(dead_code, unused_variables)]
-    pub fn close(&mut self, _error: HError) {
-        unimplemented!()
+    pub fn close<S: Into<String>>(&mut self, error: AppError, msg: S) {
+        // TODO(mt): Set closing timer.
+        self.set_state(State::Closing(
+            ConnectionError::Application(error),
+            0,
+            msg.into(),
+        ));
     }
 
     fn handshake(&mut self, epoch: u16, data: Option<&[u8]>) -> Res<()> {
@@ -463,7 +538,7 @@ impl Connection {
         match m {
             Err(_) => {
                 qwarn!(self, "Handshake failed");
-                return Err(Error::ErrHandshakeFailed);
+                return Err(Error::HandshakeFailed);
             }
             Ok((_, msgs)) => {
                 for m in msgs {
@@ -479,7 +554,7 @@ impl Connection {
         Ok(())
     }
 
-    pub fn process_input_frame(&mut self, epoch: Epoch, frame: Frame) -> Res<()> {
+    pub fn input_frame(&mut self, epoch: Epoch, frame: Frame) -> Res<()> {
         #[allow(unused_variables)]
         match frame {
             Frame::Padding => {
@@ -504,9 +579,9 @@ impl Connection {
                 let stream = self
                     .send_streams
                     .get_mut(&stream_id)
-                    .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+                    .ok_or_else(|| return Error::InvalidStreamId)?;
 
-                stream.reset()?
+                stream.reset(application_error_code)?
             }
             Frame::Crypto { offset, data } => {
                 qdebug!(
@@ -579,6 +654,11 @@ impl Connection {
         if state != self.state {
             qinfo!(self, "State change from {:?} -> {:?}", self.state, state);
             self.state = state;
+            if let State::Closing(..) = &self.state {
+                self.generators.clear();
+                self.generators
+                    .push(FrameGenerator(Connection::generate_close));
+            }
         }
     }
 
@@ -615,7 +695,7 @@ impl Connection {
             let rso = self.tls.read_secret(epoch);
             if matches!(rso, None) {
                 qinfo!(self, "Keying material not available for epoch {}", epoch);
-                return Err(Error::ErrKeysNotFound);
+                return Err(Error::KeysNotFound);
             }
             let rs = rso.unwrap();
             // This must succced because the secrets are made at the same time.
@@ -699,7 +779,7 @@ impl Connection {
         let stream = self
             .send_streams
             .get_mut(&stream_id)
-            .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+            .ok_or_else(|| return Error::InvalidStreamId)?;
 
         stream.send(data)
     }
@@ -708,20 +788,20 @@ impl Connection {
         let stream = self
             .send_streams
             .get_mut(&stream_id)
-            .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+            .ok_or_else(|| return Error::InvalidStreamId)?;
 
         Sendable::close(stream);
         Ok(())
     }
 
-    pub fn stream_reset(&mut self, stream_id: u64, _err: HError) -> Res<()> {
+    pub fn stream_reset(&mut self, stream_id: u64, err: AppError) -> Res<()> {
         // TODO(agrover@mozilla.com): reset can create a stream
         let stream = self
             .send_streams
             .get_mut(&stream_id)
-            .ok_or_else(|| return Error::ErrInvalidStreamId)?;
+            .ok_or_else(|| return Error::InvalidStreamId)?;
 
-        stream.reset()
+        stream.reset(err)
     }
 
     fn generate_cid(&mut self) -> Vec<u8> {
@@ -732,13 +812,6 @@ impl Connection {
 
     pub fn label(&self) -> String {
         String::from("Connection {id=xxx}")
-    }
-    pub fn get_state(&self) -> ConnState {
-        ConnState {
-            connected: self.state == State::Connected,
-            error: CError::Error(Error::ErrNoError), // TODO
-            closed: self.state == State::Closed,
-        }
     }
 
     pub fn get_recv_streams<'a>(
@@ -780,15 +853,9 @@ impl Connection {
     }
 }
 
-pub struct ConnState {
-    pub connected: bool,
-    pub error: CError,
-    pub closed: bool,
-}
-
 impl CryptoCtx for CryptoDxState {
     fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
-        let mask = do_crypto(self.hpkey.mask(sample))?;
+        let mask = self.hpkey.mask(sample)?;
         log!(
             Level::Debug,
             "HP {} {}",
@@ -809,7 +876,7 @@ impl CryptoCtx for CryptoDxState {
         );
         let mut out = Vec::with_capacity(body.len());
         out.resize(body.len(), 0);
-        let res = do_crypto(self.aead.decrypt(pn, hdr, body, &mut out))?;
+        let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
         Ok(res.to_vec())
     }
 
@@ -826,21 +893,11 @@ impl CryptoCtx for CryptoDxState {
         let size = body.len() + MAX_AUTH_TAG;
         let mut out = Vec::with_capacity(size);
         out.resize(size, 0);
-        let res = do_crypto(self.aead.encrypt(pn, hdr, body, &mut out))?;
+        let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
 
         log!(Level::Debug, "aead_encrypt {}", hex("ct", res),);
 
         Ok(res.to_vec())
-    }
-}
-
-fn do_crypto<T, U>(res: Result<T, U>) -> Res<T> {
-    match res {
-        Err(_) => {
-            qinfo!("Crypto operation failed");
-            Err(Error::ErrInternalError)
-        }
-        Ok(t) => Ok(t),
     }
 }
 
@@ -1004,8 +1061,8 @@ mod tests {
         let res = server.process(res).unwrap();
         assert!(res.is_empty());
 
-        assert_eq!(client.state(), State::Connected);
-        assert_eq!(server.state(), State::Connected);
+        assert_eq!(*client.state(), State::Connected);
+        assert_eq!(*server.state(), State::Connected);
     }
 
     #[test]
@@ -1035,7 +1092,7 @@ mod tests {
         qdebug!("---- client");
         let res = client.process(res).unwrap();
         assert_eq!(res.len(), 1);
-        assert_eq!(client.state(), State::Connected);
+        assert_eq!(*client.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
         // -->> Initial[1]: ACK[0]
         // -->> Handshake[0]: CRYPTO[FIN], ACK[0]
@@ -1043,7 +1100,7 @@ mod tests {
         qdebug!("---- server");
         let res = server.process(res).unwrap();
         assert!(res.is_empty());
-        assert_eq!(server.state(), State::Connected);
+        assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
         // -->> nothing
 
@@ -1069,7 +1126,7 @@ mod tests {
         qdebug!("---- server");
         let res = server.process(res).unwrap();
         assert!(res.is_empty());
-        assert_eq!(server.state(), State::Connected);
+        assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
 
         let mut buf = vec![0; 4000];

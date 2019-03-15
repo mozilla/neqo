@@ -1,25 +1,32 @@
 // TOTO(dragana) remove this
 #![allow(unused_variables, dead_code)]
 
-use neqo_transport::data::*;
+use neqo_common::data::*;
+use neqo_common::readbuf::ReadBuf;
+use neqo_common::varint::*;
 use neqo_transport::stream::Recvable;
-use neqo_transport::varint::*;
-use neqo_transport::{CError, HError, Res};
 
-const H3_FRAME_TYPE_DATA: u64 = 0x0;
-const H3_FRAME_TYPE_HEADERS: u64 = 0x1;
-const H3_FRAME_TYPE_PRIORITY: u64 = 0x2;
-const H3_FRAME_TYPE_CANCEL_PUSH: u64 = 0x3;
-const H3_FRAME_TYPE_SETTINGS: u64 = 0x4;
-const H3_FRAME_TYPE_PUSH_PROMISE: u64 = 0x5;
-const H3_FRAME_TYPE_GOAWAY: u64 = 0x7;
-const H3_FRAME_TYPE_MAX_PUSH_ID: u64 = 0xd;
-const H3_FRAME_TYPE_DUPLICATE_PUSH: u64 = 0xe;
+use crate::recvable::RecvableWrapper;
+use crate::{Error, Res};
+
+pub type HFrameType = u64;
+
+const H3_FRAME_TYPE_DATA: HFrameType = 0x0;
+const H3_FRAME_TYPE_HEADERS: HFrameType = 0x1;
+const H3_FRAME_TYPE_PRIORITY: HFrameType = 0x2;
+const H3_FRAME_TYPE_CANCEL_PUSH: HFrameType = 0x3;
+const H3_FRAME_TYPE_SETTINGS: HFrameType = 0x4;
+const H3_FRAME_TYPE_PUSH_PROMISE: HFrameType = 0x5;
+const H3_FRAME_TYPE_GOAWAY: HFrameType = 0x7;
+const H3_FRAME_TYPE_MAX_PUSH_ID: HFrameType = 0xd;
+const H3_FRAME_TYPE_DUPLICATE_PUSH: HFrameType = 0xe;
 
 const H3_FRAME_TYPE_UNKNOWN: u64 = 0xff; // this is only internal!!!
 
-const SETTINGS_MAX_HEADER_LIST_SIZE: u64 = 0x6;
-const SETTINGS_NUM_PLACEHOLDERS: u64 = 0x8;
+type SettingsType = u64;
+
+const SETTINGS_MAX_HEADER_LIST_SIZE: SettingsType = 0x6;
+const SETTINGS_NUM_PLACEHOLDERS: SettingsType = 0x8;
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum HStreamType {
@@ -109,7 +116,7 @@ pub enum HFrame {
 }
 
 impl HFrame {
-    fn get_type(&self) -> u64 {
+    fn get_type(&self) -> HFrameType {
         match self {
             HFrame::Data { .. } => H3_FRAME_TYPE_DATA,
             HFrame::Headers { .. } => H3_FRAME_TYPE_HEADERS,
@@ -264,224 +271,6 @@ impl HFrame {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-enum ReadBufState {
-    Uninit,
-    CollectingVarint,
-    CollectingLen,
-    Done,
-}
-
-pub struct ReadBuf {
-    state: ReadBufState,
-    buf: Vec<u8>,
-    offset: usize,
-    bits_read: u8, // use for bit reading. It is number of bits read in buf[offset] byte.
-    len: usize,
-    hframe_type: u64, // we need this to get a proper frame error.
-}
-
-impl DataBuf<HError> for ReadBuf {
-    fn peek_byte(&mut self) -> Result<u8, HError> {
-        let _ = self.check_remaining(1)?;
-
-        let res = self.buf[self.offset];
-
-        Ok(res)
-    }
-
-    fn decode_byte(&mut self) -> Result<u8, HError> {
-        let _ = self.check_remaining(1)?;
-
-        let res = self.buf[self.offset];
-        self.offset += 1;
-
-        Ok(res)
-    }
-}
-
-impl ReadBuf {
-    pub fn new() -> ReadBuf {
-        ReadBuf {
-            state: ReadBufState::Uninit,
-            buf: vec![0; 2], //TODO set this to a better value. I set it to 2 for better testing.
-            offset: 0,       // this offset is first used for writing then for reading.
-            bits_read: 0,
-            len: 0,
-            hframe_type: H3_FRAME_TYPE_UNKNOWN,
-        }
-    }
-
-    // Use for tests
-    pub fn from(v: &[u8]) -> ReadBuf {
-        let len = v.len();
-        ReadBuf {
-            state: ReadBufState::Done,
-            buf: Vec::from(v),
-            offset: 0,
-            bits_read: 0,
-            len: len,
-            hframe_type: H3_FRAME_TYPE_UNKNOWN,
-        }
-    }
-
-    pub fn done(&self) -> bool {
-        self.state == ReadBufState::Done
-    }
-
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    pub fn set_hframe_type(&mut self, t: u64) {
-        self.hframe_type = t;
-    }
-
-    // We need to propagate fin as well.
-    // returns number of read byte and bool (stream has been closed or not)
-    pub fn get_varint(&mut self, s: &mut Recvable) -> Result<(u64, bool), CError> {
-        if self.state == ReadBufState::Uninit {
-            self.state = ReadBufState::CollectingVarint;
-            self.offset = 0;
-            self.len = 1; // this will get updated when we get varint length.
-        }
-
-        assert!(self.len - self.offset > 0);
-
-        let (rv, fin) = self.recv(s)?;
-        if rv == 0 {
-            return Ok((rv, fin));
-        }
-
-        if self.len == 1 && self.offset == 1 {
-            // we have the first byte, get the varint length.
-            self.len = decode_varint_size_from_byte(self.buf[0]);
-        }
-
-        if self.len == self.offset {
-            self.state = ReadBufState::Done;
-            self.offset = 0;
-            self.bits_read = 0;
-        }
-
-        return Ok((rv, fin));
-    }
-
-    pub fn get_len(&mut self, len: u64) {
-        if self.state == ReadBufState::Uninit {
-            self.state = ReadBufState::CollectingLen;
-            self.offset = 0;
-            self.len = len as usize;
-        }
-    }
-
-    // We need to propagate fin as well.
-    // returns number of read byte and bool (stream has been closed or not)
-    pub fn get(&mut self, s: &mut Recvable) -> Result<(u64, bool), CError> {
-        let r = self.recv(s)?;
-        if self.len == self.offset {
-            self.state = ReadBufState::Done;
-            self.offset = 0;
-            self.bits_read = 0;
-        }
-        Ok(r)
-    }
-
-    fn recv(&mut self, s: &mut Recvable) -> Result<(u64, bool), CError> {
-        assert!(
-            self.state == ReadBufState::CollectingVarint
-                || self.state == ReadBufState::CollectingLen
-        );
-        assert!(self.len - self.offset > 0);
-
-        if self.len > self.buf.len() {
-            let ext = self.len - self.buf.len();
-            self.buf.append(&mut vec![0; ext]);
-        }
-
-        let (rv, fin) = s.read_with_amount(
-            &mut self.buf[self.offset..],
-            (self.len - self.offset) as u64,
-        )?;
-
-        self.offset += rv as usize;
-        Ok((rv, fin))
-    }
-
-    fn check_remaining(&mut self, needs: usize) -> Result<usize, HError> {
-        if self.len < self.offset + needs || self.buf.len() < self.offset + needs {
-            return Err(get_hframe_malformated_error(self.hframe_type));
-        }
-        Ok(needs)
-    }
-
-    pub fn remaining(&self) -> u64 {
-        (self.len - self.offset) as u64
-    }
-
-    fn decode_byte(&mut self) -> Result<u8, HError> {
-        let _ = self.check_remaining(1)?;
-        let res = self.buf[self.offset];
-        self.offset += 1;
-
-        Ok(res)
-    }
-
-    pub fn reset(&mut self) {
-        self.offset = 0;
-        self.len = 0;
-        self.state = ReadBufState::Uninit;
-    }
-
-    // This checks only up to 8 bits!
-    fn check_remaining_read_bits(&mut self, needs: u8) -> u8 {
-        assert!(self.len <= self.buf.len());
-        if self.offset >= self.len {
-            0
-        } else if self.offset + 1 == self.len && (8 - self.bits_read) < needs {
-            8 - self.bits_read
-        } else {
-            needs
-        }
-    }
-
-    // Here we can read only up to 8 bits!
-    // this returns read bit and amount of bits read.
-    pub fn read_bits(&mut self, needs: u8) -> (u8, u8) {
-        if needs > 8 {
-            panic!("Here, we can read only up to 8 bits");
-        }
-        // check how much we have.
-        let bits = self.check_remaining_read_bits(needs);
-        if bits == 0 {
-            return (0, 0);
-        }
-
-        if bits == 8 && self.bits_read == 0 {
-            // it is allined with a buffered byte.
-            let c = self.buf[self.offset];
-            self.offset += 1;
-            (c, bits)
-        } else if bits <= (8 - self.bits_read) {
-            // we need to read only the current byte(buf[offset])
-            let c = (self.buf[self.offset] >> (8 - self.bits_read - bits)) & ((1 << bits) - 1);
-            self.bits_read += bits;
-            if self.bits_read == 8 {
-                self.offset += 1;
-                self.bits_read = 0;
-            }
-            (c, bits)
-        } else {
-            let mut c = self.buf[self.offset] & ((1 << (8 - self.bits_read)) - 1);
-            c = c << (bits - (8 - self.bits_read));
-            self.offset += 1;
-            self.bits_read = bits - (8 - self.bits_read);
-            c = c | (self.buf[self.offset] >> (8 - self.bits_read));
-            (c, bits)
-        }
-    }
-}
-
 #[derive(Copy, Clone, PartialEq)]
 enum HFrameReaderState {
     GetType,
@@ -514,18 +303,18 @@ impl HFrameReader {
     }
 
     // returns true if quic stream was closed.
-    pub fn receive(&mut self, s: &mut Recvable) -> Result<bool, CError> {
+    pub fn receive(&mut self, s: &mut Recvable) -> Res<bool> {
+        let mut w = RecvableWrapper::wrap(s);
         let r = loop {
             match self.state {
                 HFrameReaderState::GetType => {
-                    let (rv, fin) = self.reader.get_varint(s)?;
+                    let (rv, fin) = self.reader.get_varint(&mut w)?;
                     if rv == 0 {
                         break Ok(fin);
                     }
 
                     if self.reader.done() {
                         self.hframe_type = decode_varint(&mut self.reader)?;
-                        self.reader.set_hframe_type(self.hframe_type);
                         self.reader.reset();
                         self.state = HFrameReaderState::GetLength;
                     }
@@ -536,7 +325,7 @@ impl HFrameReader {
                 }
 
                 HFrameReaderState::GetLength => {
-                    let (rv, fin) = self.reader.get_varint(s)?;
+                    let (rv, fin) = self.reader.get_varint(&mut w)?;
                     if rv == 0 {
                         break Ok(fin);
                     }
@@ -570,7 +359,7 @@ impl HFrameReader {
                     }
                 }
                 HFrameReaderState::GetPushPromiseData => {
-                    let (rv, fin) = self.reader.get_varint(s)?;
+                    let (rv, fin) = self.reader.get_varint(&mut w)?;
                     if rv == 0 {
                         break Ok(fin);
                     }
@@ -584,7 +373,7 @@ impl HFrameReader {
                     }
                 }
                 HFrameReaderState::GetData => {
-                    let (rv, fin) = self.reader.get(s)?;
+                    let (rv, fin) = self.reader.get(&mut w)?;
                     if rv == 0 {
                         break Ok(fin);
                     }
@@ -608,9 +397,9 @@ impl HFrameReader {
         self.state == HFrameReaderState::Done
     }
 
-    pub fn get_frame(&mut self) -> Result<HFrame, HError> {
+    pub fn get_frame(&mut self) -> Res<HFrame> {
         if self.state != HFrameReaderState::Done {
-            Err(HError::ErrHttpNotEnoughData)
+            Err(Error::NotEnoughData)
         } else {
             let f = match self.hframe_type {
                 H3_FRAME_TYPE_DATA => HFrame::Data {
@@ -678,21 +467,6 @@ impl HFrameReader {
             self.reset();
             Ok(f)
         }
-    }
-}
-
-fn get_hframe_malformated_error(t: u64) -> HError {
-    match t {
-        H3_FRAME_TYPE_DATA => HError::ErrHttpMalformatedFrameData,
-        H3_FRAME_TYPE_HEADERS => HError::ErrHttpMalformatedFrameHeaders,
-        H3_FRAME_TYPE_PRIORITY => HError::ErrHttpMalformatedFramePriority,
-        H3_FRAME_TYPE_CANCEL_PUSH => HError::ErrHttpMalformatedFrameCancelPush,
-        H3_FRAME_TYPE_SETTINGS => HError::ErrHttpMalformatedFrameSettings,
-        H3_FRAME_TYPE_PUSH_PROMISE => HError::ErrHttpMalformatedFramePushPromise,
-        H3_FRAME_TYPE_GOAWAY => HError::ErrHttpMalformatedFrameGoaway,
-        H3_FRAME_TYPE_MAX_PUSH_ID => HError::ErrHttpMalformatedFrameMaxPushId,
-        H3_FRAME_TYPE_DUPLICATE_PUSH => HError::ErrHttpMalformatedFrameDuplicatePush,
-        _ => panic!("Can't happen"),
     }
 }
 
@@ -839,7 +613,7 @@ mod tests {
         enc_dec(&f, "0e0105", 0);
     }
 
-    use crate::stream_test::{get_stream_type, Stream};
+    use crate::transport::test_stream::{get_stream_type, Stream};
     use neqo_transport::connection::Role;
     use neqo_transport::frame::StreamType;
 

@@ -5,6 +5,8 @@ authors = ["draganadamjanovic"]
 edition = "2018"
 
 [dependencies]
-neqo-transport = { version = "0.1.0", path = "./../neqo-transport" }
+neqo-common = { version = "0.1", path = "./../neqo-common" }
 neqo-crypto = { version = "0.1", path = "./../neqo-crypto" }
+neqo-transport = { version = "0.1", path = "./../neqo-transport" }
+neqo-qpack = { version = "0.1", path = "./../neqo-qpack" }
 num-traits = "0.2"

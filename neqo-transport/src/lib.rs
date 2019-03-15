@@ -3,98 +3,121 @@
 #[macro_use]
 extern crate neqo_common;
 
+use neqo_crypto;
+
 pub mod connection;
-pub mod data;
 pub mod frame;
 mod nss;
 pub mod nss_stub;
 pub mod packet;
 pub mod stream;
-pub mod varint;
 
-#[derive(PartialEq, Debug, Copy, Clone)]
+type TransportError = u16;
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum Error {
-    ErrNoError = 0x0,
-    ErrInternalError = 0x1,
-    ErrServerBusy = 0x2,
-    ErrFlowControlError = 0x3,
-    ErrStreamLimitError = 0x4,
-    ErrStreamStateError = 0x5,
-    ErrFinalSizeError = 0x6,
-    ErrFrameEncodingError = 0x7,
-    ErrTransportParameterError = 0x8,
-    ErrProtocolViolation = 0xa,
-    ErrInvalidMigration = 0xc,
-    ErrCryptoError = 0x100,
-    ErrNoMoreData,
-    ErrTooMuchData,
-    ErrUnknownFrameType,
-    ErrInternal,
-    ErrInvalidPacket,
-    ErrDecryptError,
-    ErrInvalidStreamId,
-    ErrDecodingFrame,
-    ErrUnexpectedMessage,
-    ErrHandshakeFailed,
-    ErrKeysNotFound,
+    NoError,
+    InternalError,
+    ServerBusy,
+    FlowControlError,
+    StreamLimitError,
+    StreamStateError,
+    FinalSizeError,
+    FrameEncodingError,
+    TransportParameterError,
+    ProtocolViolation,
+    InvalidMigration,
+    CryptoError(neqo_crypto::Error),
+    IoError(neqo_common::Error),
+    NoMoreData,
+    TooMuchData,
+    UnknownFrameType,
+    InvalidPacket,
+    DecryptError,
+    InvalidStreamId,
+    DecodingFrame,
+    UnexpectedMessage,
+    HandshakeFailed,
+    KeysNotFound,
 }
 
-#[derive(PartialEq, Debug, Copy, Clone)]
-pub enum HError {
-    ErrHttpNoError = 0x00,
-    ErrHttpWrongSettngsDirection = 0x01,
-    ErrHttpPushRefused = 0x02,
-    ErrHttpInternalError = 0x03,
-    ErrHttpPushAlreadyInCache = 0x04,
-    ErrHttpRequestCancelled = 0x05,
-    ErrHttpIncompleteRequest = 0x06,
-    ErrHttpConnectError = 0x07,
-    ErrHttpExcessiveLoad = 0x08,
-    ErrHttpVersionFallback = 0x09,
-    ErrHttpWrongStream = 0x0a,
-    ErrHttpLimitExceeded = 0x0b,
-    ErrHttpDuplicatePush = 0x0c,
-    ErrHttpUnknownStreamType = 0x0d,
-    ErrHttpWrongStreamCount = 0x0e,
-    ErrHttpClosedCriticalStream = 0x0f,
-    ErrHttpWrongStreamDirection = 0x10,
-    ErrHttpEarlyResponse = 0x11,
-    ErrHttpMissingSettings = 0x12,
-    ErrHttpUnexpectedFrame = 0x13,
-    ErrHttpRequestRejected = 0x14,
-    ErrHttpGeneralProtocolError = 0xff,
-
-    ErrHttpMalformatedFrameData = 0x100,
-    ErrHttpMalformatedFrameHeaders = 0x101,
-    ErrHttpMalformatedFramePriority = 0x102,
-    ErrHttpMalformatedFrameCancelPush = 0x103,
-    ErrHttpMalformatedFrameSettings = 0x104,
-    ErrHttpMalformatedFramePushPromise = 0x105,
-    ErrHttpMalformatedFrameGoaway = 0x107,
-    ErrHttpMalformatedFrameMaxPushId = 0x10d,
-    ErrHttpMalformatedFrameDuplicatePush = 0x10e,
-
-    ErrHttpNoMoreData,
-    ErrHttpDecodingFrame,
-    ErrHttpNotEnoughData,
-    ErrHttpUnexpected,
-}
-
-#[derive(PartialEq, Debug, Copy, Clone)]
-pub enum CError {
-    Error(Error),
-    HError(HError),
-}
-
-impl From<Error> for CError {
-    fn from(err: Error) -> Self {
-        CError::Error(err)
+impl Error {
+    pub fn code(&self) -> TransportError {
+        match self {
+            Error::NoError => 0,
+            Error::InternalError => 1,
+            Error::ServerBusy => 2,
+            Error::FlowControlError => 3,
+            Error::StreamLimitError => 4,
+            Error::StreamStateError => 5,
+            Error::FinalSizeError => 6,
+            Error::FrameEncodingError => 7,
+            Error::TransportParameterError => 8,
+            Error::ProtocolViolation => 10,
+            Error::InvalidMigration => 12,
+            Error::CryptoError(e) => match e.alert() {
+                Some(a) => 0x100 + (a as u16),
+                _ => 1,
+            },
+            Error::IoError(..)
+            | Error::NoMoreData
+            | Error::TooMuchData
+            | Error::UnknownFrameType
+            | Error::InvalidPacket
+            | Error::DecryptError
+            | Error::InvalidStreamId
+            | Error::DecodingFrame
+            | Error::UnexpectedMessage
+            | Error::HandshakeFailed
+            | Error::KeysNotFound => 1,
+        }
     }
 }
 
-impl From<HError> for CError {
-    fn from(err: HError) -> Self {
-        CError::HError(err)
+impl From<neqo_crypto::Error> for Error {
+    fn from(err: neqo_crypto::Error) -> Self {
+        qinfo!("Crypto operation failed {:?}", err);
+        Error::CryptoError(err)
+    }
+}
+
+impl From<neqo_common::Error> for Error {
+    fn from(err: neqo_common::Error) -> Self {
+        qinfo!("IO error {:?}", err);
+        Error::IoError(err)
+    }
+}
+
+impl ::std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+        match self {
+            Error::CryptoError(e) => Some(e),
+            Error::IoError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl ::std::fmt::Display for Error {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Transport error: {:?}", self)
+    }
+}
+
+pub type AppError = u16;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConnectionError {
+    Transport(Error),
+    Application(AppError),
+}
+
+impl ConnectionError {
+    pub fn app_code(&self) -> Option<AppError> {
+        match self {
+            ConnectionError::Application(e) => Some(*e),
+            _ => None,
+        }
     }
 }
 
@@ -108,6 +131,3 @@ pub fn hex(label: &str, buf: &[u8]) -> String {
     }
     ret
 }
-
-#[cfg(test)]
-mod tests {}

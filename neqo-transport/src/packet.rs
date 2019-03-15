@@ -3,8 +3,8 @@
 
 use derive_more::*;
 
-use super::data::*;
 use super::*;
+use neqo_common::data::*;
 
 use crate::nss_stub::Epoch;
 
@@ -210,7 +210,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     // Get the type byte
     p.tbyte = d.decode_byte()?;
     if p.tbyte & 0x40 == 0 {
-        return Err(Error::ErrInvalidPacket);
+        return Err(Error::InvalidPacket);
     }
 
     if (p.tbyte & 0x80) == 0 {
@@ -285,7 +285,7 @@ pub fn decrypt_packet(
     let payload = &pkt[hdr.hdr_len..];
 
     if payload.len() < (4 + SAMPLE_SIZE) {
-        return Err(Error::ErrNoMoreData);
+        return Err(Error::NoMoreData);
     }
     let mask = crypto.compute_mask(&payload[4..(SAMPLE_SIZE + 4)])?;
 
@@ -442,7 +442,7 @@ mod tests {
             let at = TestFixture::auth_tag(hdr, &pt[0..pt_len]);
             for i in 0..16 {
                 if at[i] != pt[pt_len + i] {
-                    return Err(Error::ErrDecryptError);
+                    return Err(Error::DecryptError);
                 }
             }
             Ok(pt[0..pt_len].to_vec())
@@ -603,4 +603,4 @@ if matches!(hdr.tipe, PacketType::Short) {
 d.encode_byte(t);
 
 
-Err(Error::ErrInternal)*/
+Err(Error::Internal)*/

@@ -93,7 +93,7 @@ impl Data {
 
     fn check_remaining(&self, needed: usize) -> Res<usize> {
         if (self.buf.len() - self.offset) < needed {
-            return Err(Error::ErrNoMoreData);
+            return Err(Error::NoMoreData);
         }
         Ok(needed)
     }
@@ -209,20 +209,20 @@ mod tests {
 
         assert_eq!(d.decode_byte().unwrap(), 0x01);
         assert_eq!(d.decode_byte().unwrap(), 0x23);
-        assert_eq!(d.decode_byte().unwrap_err(), Error::ErrNoMoreData);
+        assert_eq!(d.decode_byte().unwrap_err(), Error::NoMoreData);
     }
 
     #[test]
     fn test_decode_data() {
         let mut d = Data::from_hex("012345");
         assert_eq!(d.decode_data(2).unwrap(), vec![0x01, 0x23]);
-        assert_eq!(d.decode_data(2).unwrap_err(), Error::ErrNoMoreData);
+        assert_eq!(d.decode_data(2).unwrap_err(), Error::NoMoreData);
     }
 
     #[test]
     fn test_decode_remainder() {
         let mut d = Data::from_hex("012345");
         assert_eq!(d.decode_remainder().unwrap(), vec![0x01, 0x23, 0x45]);
-        assert_eq!(d.decode_data(2).unwrap_err(), Error::ErrNoMoreData);
+        assert_eq!(d.decode_data(2).unwrap_err(), Error::NoMoreData);
     }
 }

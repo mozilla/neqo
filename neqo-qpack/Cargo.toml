@@ -5,5 +5,5 @@ authors = ["Dragana Damjanovic <dragana.damjano@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-neqo-transport = { version = "0.1.0", path = "./../neqo-transport" }
-neqo-http3 = { version = "0.1.0", path = "./../neqo-http3" }
+neqo-common = { version = "0.1", path = "./../neqo-common" }
+neqo-transport = { version = "0.1", path = "./../neqo-transport" }

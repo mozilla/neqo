@@ -1,36 +1,38 @@
 // TODO(ekr@rtfm.com): Remove this once I've implemented everything.
 #![allow(unused_variables, dead_code)]
-use super::data::*;
 use super::*;
+use neqo_common::data::*;
 
-const FRAME_TYPE_PADDING: u8 = 0x0;
-const FRAME_TYPE_PING: u8 = 0x1;
-const FRAME_TYPE_ACK: u8 = 0x2;
-const FRAME_TYPE_ACK_ECN: u8 = 0x3;
-const FRAME_TYPE_RST_STREAM: u8 = 0x4;
-const FRAME_TYPE_STOP_SENDING: u8 = 0x5;
-const FRAME_TYPE_CRYPTO: u8 = 0x6;
-const FRAME_TYPE_NEW_TOKEN: u8 = 0x7;
-const FRAME_TYPE_STREAM: u8 = 0x8;
-const FRAME_TYPE_STREAM_MAX: u8 = 0xf;
-const FRAME_TYPE_MAX_DATA: u8 = 0x10;
-const FRAME_TYPE_MAX_STREAM_DATA: u8 = 0x11;
-const FRAME_TYPE_MAX_STREAMS_BIDI: u8 = 0x12;
-const FRAME_TYPE_MAX_STREAMS_UNIDI: u8 = 0x13;
-const FRAME_TYPE_DATA_BLOCKED: u8 = 0x14;
-const FRAME_TYPE_STREAM_DATA_BLOCKED: u8 = 0x15;
-const FRAME_TYPE_STREAMS_BLOCKED_BIDI: u8 = 0x16;
-const FRAME_TYPE_STREAMS_BLOCKED_UNIDI: u8 = 0x17;
-const FRAME_TYPE_NEW_CONNECTION_ID: u8 = 0x18;
-const FRAME_TYPE_RETIRE_CONNECTION_ID: u8 = 0x19;
-const FRAME_TYPE_PATH_CHALLENGE: u8 = 0x1a;
-const FRAME_TYPE_PATH_RESPONSE: u8 = 0x1b;
-const FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: u8 = 0x1c;
-const FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: u8 = 0x1d;
+pub type FrameType = u64;
 
-const STREAM_FRAME_BIT_FIN: u8 = 0x01;
-const STREAM_FRAME_BIT_LEN: u8 = 0x02;
-const STREAM_FRAME_BIT_OFF: u8 = 0x04;
+const FRAME_TYPE_PADDING: FrameType = 0x0;
+const FRAME_TYPE_PING: FrameType = 0x1;
+const FRAME_TYPE_ACK: FrameType = 0x2;
+const FRAME_TYPE_ACK_ECN: FrameType = 0x3;
+const FRAME_TYPE_RST_STREAM: FrameType = 0x4;
+const FRAME_TYPE_STOP_SENDING: FrameType = 0x5;
+const FRAME_TYPE_CRYPTO: FrameType = 0x6;
+const FRAME_TYPE_NEW_TOKEN: FrameType = 0x7;
+const FRAME_TYPE_STREAM: FrameType = 0x8;
+const FRAME_TYPE_STREAM_MAX: FrameType = 0xf;
+const FRAME_TYPE_MAX_DATA: FrameType = 0x10;
+const FRAME_TYPE_MAX_STREAM_DATA: FrameType = 0x11;
+const FRAME_TYPE_MAX_STREAMS_BIDI: FrameType = 0x12;
+const FRAME_TYPE_MAX_STREAMS_UNIDI: FrameType = 0x13;
+const FRAME_TYPE_DATA_BLOCKED: FrameType = 0x14;
+const FRAME_TYPE_STREAM_DATA_BLOCKED: FrameType = 0x15;
+const FRAME_TYPE_STREAMS_BLOCKED_BIDI: FrameType = 0x16;
+const FRAME_TYPE_STREAMS_BLOCKED_UNIDI: FrameType = 0x17;
+const FRAME_TYPE_NEW_CONNECTION_ID: FrameType = 0x18;
+const FRAME_TYPE_RETIRE_CONNECTION_ID: FrameType = 0x19;
+const FRAME_TYPE_PATH_CHALLENGE: FrameType = 0x1a;
+const FRAME_TYPE_PATH_RESPONSE: FrameType = 0x1b;
+const FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: FrameType = 0x1c;
+const FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: FrameType = 0x1d;
+
+const STREAM_FRAME_BIT_FIN: u64 = 0x01;
+const STREAM_FRAME_BIT_LEN: u64 = 0x02;
+const STREAM_FRAME_BIT_OFF: u64 = 0x04;
 
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum StreamType {
@@ -39,13 +41,13 @@ pub enum StreamType {
 }
 
 impl StreamType {
-    fn frame_type_bit(&self) -> u8 {
+    fn frame_type_bit(&self) -> u64 {
         match self {
             StreamType::BiDi => 0,
             StreamType::UniDi => 1,
         }
     }
-    fn from_type_bit(bit: u8) -> StreamType {
+    fn from_type_bit(bit: u64) -> StreamType {
         if (bit & 0x01) == 0 {
             return StreamType::BiDi;
         }
@@ -60,17 +62,26 @@ pub enum CloseType {
 }
 
 impl CloseType {
-    fn frame_type_bit(&self) -> u8 {
+    fn frame_type_bit(&self) -> u64 {
         match self {
             CloseType::Transport => 0,
             CloseType::Application => 1,
         }
     }
-    fn from_type_bit(bit: u8) -> CloseType {
+    fn from_type_bit(bit: u64) -> CloseType {
         if (bit & 0x01) == 0 {
             return CloseType::Transport;
         }
         return CloseType::Application;
+    }
+}
+
+impl From<&ConnectionError> for CloseType {
+    fn from(err: &ConnectionError) -> Self {
+        match err {
+            ConnectionError::Transport(_) => CloseType::Transport,
+            _ => CloseType::Application,
+        }
     }
 }
 
@@ -157,7 +168,7 @@ pub enum Frame {
 }
 
 impl Frame {
-    fn get_type(&self) -> u8 {
+    pub fn get_type(&self) -> FrameType {
         match self {
             Frame::Padding => FRAME_TYPE_PADDING,
             Frame::Ping => FRAME_TYPE_PING,
@@ -198,7 +209,7 @@ impl Frame {
     }
 
     pub fn marshal(&self, d: &mut Data) -> Res<()> {
-        d.encode_byte(self.get_type());
+        d.encode_varint(self.get_type());
 
         match self {
             Frame::Padding => (),
@@ -318,7 +329,7 @@ impl Frame {
 
 pub fn decode_frame(d: &mut Data) -> Res<Frame> {
     // TODO(ekr@rtfm.com): check for minimal encoding
-    let t = d.decode_byte()?;
+    let t = d.decode_varint()?;
     qdebug!("Frame type byte={:0x}", t);
     match t {
         FRAME_TYPE_PADDING => Ok(Frame::Padding),
@@ -460,7 +471,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
                 reason_phrase: d.decode_data_and_len()?,
             })
         }
-        _ => Err(Error::ErrUnknownFrameType),
+        _ => Err(Error::UnknownFrameType),
     }
 }
 
@@ -505,7 +516,7 @@ mod tests {
 
         // Try to parse ACK_ECN without ECN values
         let mut d1 = Data::from_hex("035234523502523601020304");
-        assert_eq!(decode_frame(&mut d1).unwrap_err(), Error::ErrNoMoreData);
+        assert_eq!(decode_frame(&mut d1).unwrap_err(), Error::IoError(::neqo_common::Error::NoMoreData));
 
         // Try to parse ACK_ECN without ECN values
         d1 = Data::from_hex("035234523502523601020304010203");

@@ -1,5 +1,9 @@
 #![deny(warnings)]
 
+pub mod data;
+pub mod readbuf;
+pub mod varint;
+
 // Cribbed from the |matches| crate, for simplicity.
 #[macro_export]
 macro_rules! matches {
@@ -49,4 +53,24 @@ macro_rules! qdebug {
 macro_rules! qtrace {
     ($ctx:ident, $($arg:tt)*) => ( log_with_ctx!(Level::Trace, $ctx, $($arg)*););
     ($($arg:tt)*) => ( log!(Level::Trace, $($arg)*);)
+}
+
+type Res<T> = Result<T, Error>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Error {
+    NoMoreData,
+    ReadError, // TODO (mt): Copy the reader error through.
+}
+
+impl ::std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+        None
+    }
+}
+
+impl ::std::fmt::Display for Error {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Reader error: {:?}", self)
+    }
 }

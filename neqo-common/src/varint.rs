@@ -1,4 +1,6 @@
-use super::data::*;
+// TODO(mt): move this to _common.
+
+use crate::data::*;
 
 // Encode a QUIC-style variable length integer
 

@@ -3,7 +3,7 @@
 use neqo_transport::connection::{Role, TxMode};
 use neqo_transport::frame::StreamType;
 use neqo_transport::stream::{Recvable, Sendable};
-use neqo_transport::{HError, Res};
+use neqo_transport::{AppError, Res};
 use std::collections::VecDeque;
 
 #[derive(Debug)]
@@ -37,7 +37,7 @@ impl Sendable for Stream {
         Ok(buf.len())
     }
 
-    fn reset(&mut self) -> Res<()> {
+    fn reset(&mut self, err: AppError) -> Res<()> {
         Ok(())
     }
 
@@ -98,7 +98,7 @@ impl Recvable for Stream {
         None
     }
 
-    fn stop_sending(&mut self, err: HError) {
+    fn stop_sending(&mut self, err: AppError) {
         self.stop_sending_error = Some(err);
     }
 
@@ -120,8 +120,8 @@ pub struct Stream {
     send_buf_tmp: VecDeque<u8>,
     pub send_buf: Vec<u8>,
     pub recv_buf: Vec<u8>,
-    pub stop_sending_error: Option<HError>,
-    pub error: Option<HError>,
+    pub stop_sending_error: Option<AppError>,
+    pub error: Option<AppError>,
 }
 
 impl Stream {
@@ -143,7 +143,7 @@ impl Stream {
         self.receive_side_closed = true;
     }
 
-    pub fn reset(&mut self, err: HError) {
+    pub fn reset(&mut self, err: AppError) {
         self.error = Some(err);
     }
 

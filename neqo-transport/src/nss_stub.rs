@@ -1,7 +1,7 @@
 // TODO(ekr@rtfm.com): Remove this once I've implemented everything.
 // Stub version of SSLRecord
 #![allow(unused_variables, dead_code)]
-use super::data::*;
+use neqo_common::data::*;
 //use super::packet::*;
 use super::*;
 use lazy_static::*;
@@ -97,7 +97,7 @@ impl SecretAgent {
         for r in input.recs {
             if HANDSHAKE_MESSAGES[self.next].client == self.client {
                 qwarn!("Receiving a handshake message when not expected");
-                return Err(Error::ErrUnexpectedMessage);
+                return Err(Error::UnexpectedMessage);
             }
             let m = self.process_message(&r)?;
             if m != HANDSHAKE_MESSAGES[self.next] {
@@ -106,7 +106,7 @@ impl SecretAgent {
                     &m,
                     &HANDSHAKE_MESSAGES[self.next]
                 );
-                return Err(Error::ErrUnexpectedMessage);
+                return Err(Error::UnexpectedMessage);
             }
             self.next += 1;
         }
@@ -148,7 +148,7 @@ impl SecretAgent {
         let mut d = Data::from_slice(&r.data);
         let v = d.decode_data_and_len()?;
         if d.remaining() > 0 {
-            return Err(Error::ErrTooMuchData);
+            return Err(Error::TooMuchData);
         }
         Ok(HandshakeMessage {
             name: String::from_utf8(v).unwrap(),
