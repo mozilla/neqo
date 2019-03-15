@@ -1,3 +1,4 @@
+capture alerts that are sent
 certificate examination - blocked on Bug 1531236
 resumption with external session ticket - just typing
 early data - API in place for inspection, but depends on resumption
