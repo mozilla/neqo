@@ -6,6 +6,7 @@ use crate::p11::{
 };
 use crate::result;
 
+use std::fmt::{self, Debug};
 use std::os::raw::{c_char, c_uint};
 use std::ptr::{null, null_mut, NonNull};
 
@@ -23,6 +24,12 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
 ));
 
 pub struct HpKey(SymKey);
+
+impl Debug for HpKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("HP Key")
+    }
+}
 
 /// QUIC-specific API for extracting a header-protection key.
 pub fn extract_hp<S: Into<String>>(
