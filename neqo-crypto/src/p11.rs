@@ -3,13 +3,11 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use crate::constants::*;
 use crate::err::{Error, Res};
 use crate::result;
 
 use std::ops::{Deref, DerefMut};
-use std::os::raw::{c_uchar, c_uint};
-use std::ptr::{null_mut, NonNull};
+use std::ptr::NonNull;
 
 include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
 
@@ -51,55 +49,7 @@ scoped_ptr!(PrivateKey, SECKEYPrivateKey, SECKEY_DestroyPrivateKey);
 scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey);
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
-#[derive(Clone, Copy, Debug)]
-pub enum SymKeyTarget {
-    Hkdf(Cipher),
-    HpMask(Cipher),
-}
-
 impl SymKey {
-    pub fn import(target: SymKeyTarget, buf: &[u8]) -> Res<SymKey> {
-        let mut item = SECItem {
-            type_: SECItemType::siBuffer,
-            data: buf.as_ptr() as *mut c_uchar,
-            len: buf.len() as c_uint,
-        };
-        let slot_ptr = unsafe { PK11_GetInternalSlot() };
-        let slot = match NonNull::new(slot_ptr) {
-            None => return Err(Error::InternalError),
-            Some(p) => Slot::new(p),
-        };
-        let mech = match target {
-            SymKeyTarget::Hkdf(cipher) => match cipher {
-                TLS_AES_128_GCM_SHA256 | TLS_CHACHA20_POLY1305_SHA256 => CKM_NSS_HKDF_SHA256,
-                TLS_AES_256_GCM_SHA384 => CKM_NSS_HKDF_SHA384,
-                _ => CKM_INVALID_MECHANISM,
-            },
-            SymKeyTarget::HpMask(cipher) => match cipher {
-                TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => CKM_AES_ECB,
-                TLS_CHACHA20_POLY1305_SHA256 => CKM_NSS_CHACHA20_CTR,
-                _ => CKM_INVALID_MECHANISM,
-            },
-        };
-        if mech == CKM_INVALID_MECHANISM {
-            return Err(Error::InternalError);
-        }
-        let key_ptr = unsafe {
-            PK11_ImportSymKey(
-                *slot,
-                mech as CK_MECHANISM_TYPE,
-                PK11Origin::PK11_OriginUnwrap,
-                CKA_DERIVE as CK_ATTRIBUTE_TYPE,
-                &mut item,
-                null_mut(),
-            )
-        };
-        match NonNull::new(key_ptr) {
-            None => Err(Error::InternalError),
-            Some(p) => Ok(SymKey::new(p)),
-        }
-    }
-
     /// You really don't want to use this.
     pub fn as_bytes<'a>(&'a self) -> Res<&'a [u8]> {
         let rv = unsafe { PK11_ExtractKeyValue(self.ptr) };

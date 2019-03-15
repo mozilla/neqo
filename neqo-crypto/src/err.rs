@@ -29,6 +29,7 @@ pub enum Error {
     },
     OverrunError,
     UnsupportedCipher,
+    UnsupportedVersion,
 }
 
 impl std::error::Error for Error {

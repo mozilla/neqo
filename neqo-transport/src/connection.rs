@@ -94,11 +94,11 @@ impl CryptoDxState {
             TLS_VERSION_1_3,
             cipher,
             Some(
-                SymKey::import(SymKeyTarget::Hkdf(cipher), initial_salt.as_vec())
+                hkdf::import_key(TLS_VERSION_1_3, cipher, initial_salt.as_vec())
                     .as_ref()
                     .unwrap(),
             ),
-            SymKey::import(SymKeyTarget::Hkdf(cipher), dcid)
+            hkdf::import_key(TLS_VERSION_1_3, cipher, dcid)
                 .as_ref()
                 .unwrap(),
         )

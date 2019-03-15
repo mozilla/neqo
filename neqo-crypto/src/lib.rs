@@ -25,7 +25,7 @@ pub use self::agent::{
 pub use self::constants::*;
 pub use self::err::{Error, Res};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-pub use self::p11::{SymKey, SymKeyTarget};
+pub use self::p11::SymKey;
 pub use self::secrets::SecretDirection;
 
 use std::ffi::CString;

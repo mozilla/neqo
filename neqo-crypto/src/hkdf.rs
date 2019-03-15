@@ -1,10 +1,13 @@
-// TODO(mt) consider naming this just KDF.
 use crate::constants::*;
 use crate::err::{Error, Res};
-use crate::p11::{PK11SymKey, SymKey};
+use crate::p11::{
+    PK11Origin, PK11SymKey, PK11_GetInternalSlot, PK11_ImportSymKey, SECItem, SECItemType, Slot,
+    SymKey, CKA_DERIVE, CKM_INVALID_MECHANISM, CKM_NSS_HKDF_SHA256, CKM_NSS_HKDF_SHA384,
+    CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE,
+};
 use crate::result;
 
-use std::os::raw::{c_char, c_uint};
+use std::os::raw::{c_char, c_uchar, c_uint};
 use std::ptr::{null_mut, NonNull};
 
 experimental_api!(SSL_HkdfExtract(
@@ -25,6 +28,46 @@ experimental_api!(SSL_HkdfExpandLabel(
     secret: *mut *mut PK11SymKey,
 ));
 
+/// Import a symmetric key for use with HKDF.
+pub fn import_key(version: Version, cipher: Cipher, buf: &[u8]) -> Res<SymKey> {
+    if version != TLS_VERSION_1_3 {
+        return Err(Error::UnsupportedVersion);
+    }
+    let mech = match cipher {
+        TLS_AES_128_GCM_SHA256 | TLS_CHACHA20_POLY1305_SHA256 => CKM_NSS_HKDF_SHA256,
+        TLS_AES_256_GCM_SHA384 => CKM_NSS_HKDF_SHA384,
+        _ => CKM_INVALID_MECHANISM,
+    };
+    if mech == CKM_INVALID_MECHANISM {
+        return Err(Error::UnsupportedCipher);
+    }
+    let mut item = SECItem {
+        type_: SECItemType::siBuffer,
+        data: buf.as_ptr() as *mut c_uchar,
+        len: buf.len() as c_uint,
+    };
+    let slot_ptr = unsafe { PK11_GetInternalSlot() };
+    let slot = match NonNull::new(slot_ptr) {
+        None => return Err(Error::InternalError),
+        Some(p) => Slot::new(p),
+    };
+    let key_ptr = unsafe {
+        PK11_ImportSymKey(
+            *slot,
+            mech as CK_MECHANISM_TYPE,
+            PK11Origin::PK11_OriginUnwrap,
+            CKA_DERIVE as CK_ATTRIBUTE_TYPE,
+            &mut item,
+            null_mut(),
+        )
+    };
+    match NonNull::new(key_ptr) {
+        None => Err(Error::InternalError),
+        Some(p) => Ok(SymKey::new(p)),
+    }
+}
+
+/// Extract a PRK from the given salt and IKM using the algorithm defined in RFC 5869.
 pub fn extract(
     version: Version,
     cipher: Cipher,
@@ -44,6 +87,7 @@ pub fn extract(
     }
 }
 
+/// Expand a PRK using the HKDF-Expand-Label function defined in RFC 8446.
 pub fn expand_label<S: Into<String>>(
     version: Version,
     cipher: Cipher,

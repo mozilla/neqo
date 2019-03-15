@@ -4,10 +4,9 @@ use neqo_crypto::constants::*;
 use neqo_crypto::hkdf;
 use neqo_crypto::hp;
 use neqo_crypto::init_db;
-use neqo_crypto::{SymKey, SymKeyTarget};
 
 fn make_hp(cipher: Cipher) -> hp::HpKey {
-    let ikm = SymKey::import(SymKeyTarget::Hkdf(cipher), &[0; 16]).expect("import IKM");
+    let ikm = hkdf::import_key(TLS_VERSION_1_3, cipher, &[0; 16]).expect("import IKM");
     let prk = hkdf::extract(TLS_VERSION_1_3, cipher, None, &ikm).expect("extract works");
     hp::extract_hp(TLS_VERSION_1_3, cipher, &prk, "hp").expect("extract label works")
 }
