@@ -77,7 +77,6 @@ impl SymKey {
             },
             SymKeyTarget::HpMask(cipher) => match cipher {
                 TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => CKM_AES_ECB,
-                #[cfg(feature = "chacha")]
                 TLS_CHACHA20_POLY1305_SHA256 => CKM_NSS_CHACHA20_CTR,
                 _ => CKM_INVALID_MECHANISM,
             },

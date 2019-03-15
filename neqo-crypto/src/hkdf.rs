@@ -25,9 +25,18 @@ experimental_api!(SSL_HkdfExpandLabel(
     secret: *mut *mut PK11SymKey,
 ));
 
-pub fn extract(version: Version, cipher: Cipher, salt: &SymKey, ikm: &SymKey) -> Res<SymKey> {
+pub fn extract(
+    version: Version,
+    cipher: Cipher,
+    salt: Option<&SymKey>,
+    ikm: &SymKey,
+) -> Res<SymKey> {
     let mut prk: *mut PK11SymKey = null_mut();
-    let rv = unsafe { SSL_HkdfExtract(version, cipher, **salt, **ikm, &mut prk) };
+    let salt_ptr: *mut PK11SymKey = match salt {
+        Some(s) => **s,
+        None => null_mut(),
+    };
+    let rv = unsafe { SSL_HkdfExtract(version, cipher, salt_ptr, **ikm, &mut prk) };
     result::result(rv)?;
     match NonNull::new(prk) {
         None => Err(Error::InternalError),

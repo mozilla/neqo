@@ -12,7 +12,7 @@ pub mod constants;
 mod err;
 mod ext;
 pub mod hkdf;
-pub mod hpmask;
+pub mod hp;
 mod prio;
 mod result;
 mod secrets;

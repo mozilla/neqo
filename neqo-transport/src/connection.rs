@@ -93,9 +93,11 @@ impl CryptoDxState {
         let initial_secret = hkdf::extract(
             TLS_VERSION_1_3,
             cipher,
-            SymKey::import(SymKeyTarget::Hkdf(cipher), initial_salt.as_vec())
-                .as_ref()
-                .unwrap(),
+            Some(
+                SymKey::import(SymKeyTarget::Hkdf(cipher), initial_salt.as_vec())
+                    .as_ref()
+                    .unwrap(),
+            ),
             SymKey::import(SymKeyTarget::Hkdf(cipher), dcid)
                 .as_ref()
                 .unwrap(),
