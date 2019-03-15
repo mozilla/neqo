@@ -20,7 +20,6 @@ use neqo_crypto::aead::Aead;
 use neqo_crypto::constants::*;
 use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
-use neqo_crypto::p11::*;
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
