@@ -248,7 +248,7 @@ impl Connection {
             let msg = String::from("");
             self.set_state(State::Closing(
                 ConnectionError::Transport(v.clone()),
-                frame_type,
+                frame_tytpe,
                 msg,
             ));
         }
@@ -336,6 +336,8 @@ impl Connection {
             // Decryption failure, or not having keys is not fatal.
             // If the state isn't available, or we can't decrypt the packet, drop
             // the rest of the datagram on the floor, but don't generate an error.
+            // TODO(ekr@rtfm.com): This is incorrect, you need to try to process
+            // the other packets.
             let res = match self.ensure_crypto_state(hdr.epoch) {
                 Ok(cs) => decrypt_packet(&cs.rx, &PnCtx {}, &mut hdr, slc),
                 Err(e) => Err(e),
