@@ -21,6 +21,7 @@ const TRANSPORT_PARAMETER_MAX_ACK_DELAY: u16 = 11;
 const TRANSPORT_PARAMETER_DISABLE_MIGRATION: u16 = 12;
 const TRANSPORT_PARAMETER_PREFERRED_ADDRESS: u16 = 13;
 
+#[derive(PartialEq, Debug)]
 enum TransportParameter {
     Bytes(Vec<u8>),
     Integer(u64),
@@ -108,6 +109,54 @@ impl TransportParameter {
     }
 }
 
+#[derive(Default, PartialEq, Debug)]
 pub struct TransportParameters {
-    params: HashMap<u16, TransportParameter>,
+    params: HashMap<u16, TransportParameter>            
+}
+
+impl TransportParameters {
+    pub fn encode(&self, d: &mut Data) -> Res<()> {
+        for (tipe, tp) in &self.params {
+            tp.encode(d, *tipe)?;
+        }
+        Ok(())
+    }
+
+    pub fn decode(d: &mut Data) -> Res<TransportParameters> {
+        let mut tps = TransportParameters::default();
+
+        while d.remaining() > 0 {
+            match TransportParameter::decode(d) {
+                Ok((tipe, tp)) =>  {tps.params.insert(tipe, tp);}
+                Err(Error::TransportParameterError) => {},
+                Err(e) => return Err(e)
+            }
+        }
+        Ok(tps)
+    }
+}
+
+
+// TODO(ekr@rtfm.com): Need to write more TP unit tests.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_tps() {
+        let mut tps = TransportParameters::default();
+        tps.params.insert(TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN,
+                          TransportParameter::Bytes(vec![1,2,3,4,5,6,7,8,1,2,3,4,5,6,7,8]));
+        tps.params.insert(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI,
+                          TransportParameter::Integer(10));
+
+        let mut d = Data::default();
+        tps.encode(&mut d).expect("Couldn't encode");
+
+        let tps2 = TransportParameters::decode(&mut d).expect("Couldn't decode");
+        assert_eq!(tps, tps2);
+
+        println!("TPS = {:?}", tps);
+    }
+    
 }
