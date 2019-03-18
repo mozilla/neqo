@@ -319,7 +319,7 @@ impl Connection {
                     self.dcid = scid.clone();
                 }
                 State::Handshaking => {
-                    // No-op.
+                    // No-op.rs
                 }
                 State::Connected => {
                     // No-op.

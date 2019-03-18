@@ -11,6 +11,7 @@ mod nss;
 pub mod nss_stub;
 pub mod packet;
 pub mod stream;
+mod tparams;
 
 type TransportError = u16;
 
@@ -39,6 +40,7 @@ pub enum Error {
     UnexpectedMessage,
     HandshakeFailed,
     KeysNotFound,
+    UnknownTransportParameter,
 }
 
 impl Error {
@@ -69,7 +71,8 @@ impl Error {
             | Error::DecodingFrame
             | Error::UnexpectedMessage
             | Error::HandshakeFailed
-            | Error::KeysNotFound => 1,
+            | Error::KeysNotFound
+            | Error::UnknownTransportParameter => 1,
         }
     }
 }
@@ -89,7 +92,7 @@ impl From<neqo_common::Error> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
         match self {
             Error::CryptoError(e) => Some(e),
             Error::IoError(e) => Some(e),
