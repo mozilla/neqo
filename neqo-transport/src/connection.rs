@@ -814,42 +814,26 @@ impl Connection {
         String::from("Connection {id=xxx}")
     }
 
-    pub fn get_recv_streams<'a>(
-        &'a mut self,
-    ) -> Box<Iterator<Item = (u64, &mut dyn Recvable)> + 'a> {
-        Box::new(
-            self.recv_streams
-                .iter_mut()
-                .map(|(x, y)| (*x, y as &mut Recvable)),
-        )
+    pub fn get_recv_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Recvable)> {
+        self.recv_streams
+            .iter_mut()
+            .map(|(x, y)| (*x, y as &mut Recvable))
     }
 
-    pub fn get_recvable_streams<'a>(
-        &'a mut self,
-    ) -> Box<Iterator<Item = (u64, &mut dyn Recvable)> + 'a> {
-        Box::new(
-            self.get_recv_streams()
-                .filter(|(_, stream)| stream.recv_data_ready()),
-        )
+    pub fn get_recvable_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Recvable)> {
+        self.get_recv_streams()
+            .filter(|(_, stream)| stream.recv_data_ready())
     }
 
-    pub fn get_send_streams<'a>(
-        &'a mut self,
-    ) -> Box<Iterator<Item = (u64, &mut dyn Sendable)> + 'a> {
-        Box::new(
-            self.send_streams
-                .iter_mut()
-                .map(|(x, y)| (*x, y as &mut Sendable)),
-        )
+    pub fn get_send_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Sendable)> {
+        self.send_streams
+            .iter_mut()
+            .map(|(x, y)| (*x, y as &mut Sendable))
     }
 
-    pub fn get_sendable_streams<'a>(
-        &'a mut self,
-    ) -> Box<Iterator<Item = (u64, &mut dyn Sendable)> + 'a> {
-        Box::new(
-            self.get_send_streams()
-                .filter(|(_, stream)| stream.send_data_ready()),
-        )
+    pub fn get_sendable_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Sendable)> {
+        self.get_send_streams()
+            .filter(|(_, stream)| stream.send_data_ready())
     }
 }
 
