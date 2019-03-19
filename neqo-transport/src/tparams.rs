@@ -1,8 +1,11 @@
-#![allow(unused_variables,dead_code)]
+#![allow(unused_variables, dead_code)]
 use crate::{Error, Res};
 use neqo_common::data::*;
 use neqo_common::varint::*;
+use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
+use neqo_crypto::HandshakeMessage;
 use std::collections::HashMap;
+
 struct PreferredAddress {
     // TODO(ekr@rtfm.com): Implement.
 }
@@ -130,11 +133,27 @@ impl TransportParameters {
                 Ok((tipe, tp)) => {
                     tps.params.insert(tipe, tp);
                 }
-                Err(Error::TransportParameterError) => {}
+                Err(Error::UnknownTransportParameter) => {}
                 Err(e) => return Err(e),
             }
         }
         Ok(tps)
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct TransportParametersHandler {
+    pub local: TransportParameters,
+    pub remote: TransportParameters,
+}
+
+impl ExtensionHandler for TransportParametersHandler {
+    fn write(&mut self, msg: HandshakeMessage, d: &mut [u8]) -> ExtensionWriterResult {
+        return ExtensionWriterResult::Skip;
+    }
+
+    fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
+        return ExtensionHandlerResult::Alert(47);
     }
 }
 

@@ -10,7 +10,7 @@ pub mod agent;
 mod agentio;
 pub mod constants;
 mod err;
-mod ext;
+pub mod ext;
 pub mod hkdf;
 pub mod hp;
 mod prio;
