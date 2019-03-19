@@ -73,7 +73,7 @@ impl TransportParameter {
             | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI
             | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI
                 | TRANSPORT_PARAMETER_MAX_ACK_DELAY => TransportParameter::Integer(d.decode_varint()?),
-            
+
             TRANSPORT_PARAMETER_MAX_PACKET_SIZE => {
                 let tmp = d.decode_varint()?;
                 if tmp < 1200 {
@@ -111,7 +111,7 @@ impl TransportParameter {
 
 #[derive(Default, PartialEq, Debug)]
 pub struct TransportParameters {
-    params: HashMap<u16, TransportParameter>            
+    params: HashMap<u16, TransportParameter>,
 }
 
 impl TransportParameters {
@@ -127,15 +127,16 @@ impl TransportParameters {
 
         while d.remaining() > 0 {
             match TransportParameter::decode(d) {
-                Ok((tipe, tp)) =>  {tps.params.insert(tipe, tp);}
-                Err(Error::UnknownTransportParameter) => {},
-                Err(e) => return Err(e)
+                Ok((tipe, tp)) => {
+                    tps.params.insert(tipe, tp);
+                }
+                Err(Error::TransportParameterError) => {}
+                Err(e) => return Err(e),
             }
         }
         Ok(tps)
     }
 }
-
 
 // TODO(ekr@rtfm.com): Need to write more TP unit tests.
 #[cfg(test)]
@@ -145,10 +146,14 @@ mod tests {
     #[test]
     fn test_basic_tps() {
         let mut tps = TransportParameters::default();
-        tps.params.insert(TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN,
-                          TransportParameter::Bytes(vec![1,2,3,4,5,6,7,8,1,2,3,4,5,6,7,8]));
-        tps.params.insert(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI,
-                          TransportParameter::Integer(10));
+        tps.params.insert(
+            TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN,
+            TransportParameter::Bytes(vec![1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8]),
+        );
+        tps.params.insert(
+            TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI,
+            TransportParameter::Integer(10),
+        );
 
         let mut d = Data::default();
         tps.encode(&mut d).expect("Couldn't encode");
@@ -158,5 +163,5 @@ mod tests {
 
         println!("TPS = {:?}", tps);
     }
-    
+
 }

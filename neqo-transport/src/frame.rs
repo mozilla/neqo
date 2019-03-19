@@ -516,7 +516,10 @@ mod tests {
 
         // Try to parse ACK_ECN without ECN values
         let mut d1 = Data::from_hex("035234523502523601020304");
-        assert_eq!(decode_frame(&mut d1).unwrap_err(), Error::IoError(::neqo_common::Error::NoMoreData));
+        assert_eq!(
+            decode_frame(&mut d1).unwrap_err(),
+            Error::IoError(::neqo_common::Error::NoMoreData)
+        );
 
         // Try to parse ACK_ECN without ECN values
         d1 = Data::from_hex("035234523502523601020304010203");
