@@ -12,7 +12,7 @@ use crate::hframe::{
     ElementDependencyType, HFrame, HFrameReader, HSettingType, PrioritizedElementType,
 };
 use crate::recvable::RecvableWrapper;
-use crate::transport::{Agent, Connection};
+use crate::transport::Connection;
 use crate::{Error, Res};
 
 const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
@@ -396,10 +396,10 @@ struct HttpConn {
 }
 
 impl HttpConn {
-    pub fn new(r: Role, agent: Agent) -> HttpConn {
+    pub fn new(c: Connection) -> HttpConn {
         HttpConn {
-            role: r,
-            conn: Connection::new(r, agent),
+            role: c.role(),
+            conn: c,
             max_header_list_size: MAX_HEADER_LIST_SIZE_DEFAULT,
             num_placeholders: NUM_PLACEHOLDERS_DEFAULT,
             control_stream_local: None,
@@ -643,7 +643,7 @@ mod tests {
 
     #[test]
     fn test_connect() {
-        let mut hconn = HttpConn::new(Role::Client, Agent {});
+        let mut hconn = HttpConn::new(Connection::new_client());
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -657,7 +657,7 @@ mod tests {
 
     #[test]
     fn fetch() {
-        let mut hconn = HttpConn::new(Role::Client, Agent {});
+        let mut hconn = HttpConn::new(Connection::new_client());
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -750,7 +750,7 @@ mod tests {
     // Test reading of a slow streamed frame. bytes are received one by one
     #[test]
     fn test_frame_reading() {
-        let mut hconn = HttpConn::new(Role::Client, Agent {});
+        let mut hconn = HttpConn::new(Connection::new_client());
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -905,7 +905,7 @@ mod tests {
 
     #[test]
     fn test_close_cotrol_stream() {
-        let mut hconn = HttpConn::new(Role::Client, Agent {});
+        let mut hconn = HttpConn::new(Connection::new_client());
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -936,7 +936,7 @@ mod tests {
 
     #[test]
     fn test_missing_settings() {
-        let mut hconn = HttpConn::new(Role::Client, Agent {});
+        let mut hconn = HttpConn::new(Connection::new_client());
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -966,7 +966,7 @@ mod tests {
 
     #[test]
     fn test_receive_settings_twice() {
-        let mut hconn = HttpConn::new(Role::Client, Agent {});
+        let mut hconn = HttpConn::new(Connection::new_client());
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -1005,7 +1005,7 @@ mod tests {
     }
 
     fn test_wrong_frame_on_control_stream(v: &Vec<u8>) {
-        let mut hconn = HttpConn::new(Role::Client, Agent {});
+        let mut hconn = HttpConn::new(Connection::new_client());
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -1074,7 +1074,7 @@ mod tests {
     // also test getting stream id that does not fit into a single byte.
     #[test]
     fn test_received_unknown_stream() {
-        let mut hconn = HttpConn::new(Role::Client, Agent {});
+        let mut hconn = HttpConn::new(Connection::new_client());
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -1111,7 +1111,7 @@ mod tests {
     // receive a push stream
     #[test]
     fn test_received_push_stream() {
-        let mut hconn = HttpConn::new(Role::Client, Agent {});
+        let mut hconn = HttpConn::new(Connection::new_client());
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -1146,7 +1146,7 @@ mod tests {
 
     // Test wrong frame on req/rec stream
     fn test_wrong_frame_on_request_stream(v: &Vec<u8>, err: Error) {
-        let mut hconn = HttpConn::new(Role::Client, Agent {});
+        let mut hconn = HttpConn::new(Connection::new_client());
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);

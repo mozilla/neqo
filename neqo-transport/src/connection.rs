@@ -4,10 +4,10 @@ use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
+use std::mem;
 use std::net::SocketAddr;
-use std::ops;
 use std::rc::Rc;
-
+use std::ops::Deref;
 use std::time::Instant;
 
 use neqo_common::data::Data;
@@ -56,6 +56,31 @@ pub struct Datagram {
     d: Vec<u8>,
 }
 
+impl Datagram {
+    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, d: V) -> Datagram {
+        Datagram {
+            src,
+            dst,
+            d: d.into(),
+        }
+    }
+
+    pub fn source(&self) -> &SocketAddr {
+        &self.src
+    }
+
+    pub fn destination(&self) -> &SocketAddr {
+        &self.dst
+    }
+}
+
+impl Deref for Datagram {
+    type Target = [u8];
+    fn deref(&self) -> &Self::Target {
+        self.d.deref()
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TxMode {
     Normal,
@@ -71,7 +96,7 @@ impl Debug for FrameGenerator {
     }
 }
 
-impl ops::Deref for FrameGenerator {
+impl Deref for FrameGenerator {
     type Target = FrameGeneratorFn;
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -132,12 +157,32 @@ struct CryptoStream {
     rx: RxStreamOrderer,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct Path {
+    local: SocketAddr,
+    remote: SocketAddr,
+}
+
+impl Path {
+    fn received_on(&self, d: &Datagram) -> bool {
+        self.local == d.dst && self.remote == d.src
+    }
+}
+
+impl From<&Datagram> for Path {
+    fn from(d: &Datagram) -> Self {
+        Path {
+            local: d.dst,
+            remote: d.src,
+        }
+    }
+}
+
 #[allow(unused_variables)]
 pub struct Connection {
     version: crate::packet::Version,
-    local_addr: Option<SocketAddr>,
-    remote_addr: Option<SocketAddr>,
-    role: Role,
+    paths: Option<Path>,
+    rol: Role,
     state: State,
     tls: Agent,
     tps: Rc<RefCell<dyn ExtensionHandler>>,
@@ -166,32 +211,32 @@ pub struct Connection {
 impl Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_fmt(format_args!(
-            "Connection: {:?} <-> {:?}",
-            self.local_addr, self.remote_addr
+            "{:?} Connection: {:?} {:?}", self.rol, self.state, self.paths
         ))
     }
 }
 
 impl Connection {
-    pub fn new_client(server_name: &str) -> Connection {
-        let mut c = Connection::new(
+    pub fn new_client<S: Into<String>>(
+        server_name: S,
+        local_addr: SocketAddr,
+        remote_addr: SocketAddr,
+    ) -> Connection {
+        Connection::new(
             Role::Client,
-            Agent::Client(Client::new(server_name).unwrap()),
-        );
-        // TODO(ekr@rtfm.com): Need addresses.
-        c.local_addr = Some("127.0.0.1:0".parse().unwrap());
-        c.remote_addr = Some("127.0.0.1:0".parse().unwrap());
-        c
+            Client::new(server_name).unwrap().into(),
+            Some(Path {
+                local: local_addr,
+                remote: remote_addr,
+            }),
+        )
     }
 
-    pub fn new_server(certs: &[String]) -> Connection {
-        let mut c = Connection::new(Role::Server, Agent::Server(Server::new(certs).unwrap()));
-        // TODO(ekr@rtfm.com): Need addresses.
-        c.local_addr = Some("127.0.0.1:0".parse().unwrap());
-        c
+    pub fn new_server<A: ToString, I: IntoIterator<Item = A>>(certs: I) -> Connection {
+        Connection::new(Role::Server, Server::new(certs).unwrap().into(), None)
     }
 
-    pub fn new(r: Role, mut agent: Agent) -> Connection {
+    fn new(r: Role, mut agent: Agent, paths: Option<Path>) -> Connection {
         agent
             .enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])
             .unwrap();
@@ -206,9 +251,8 @@ impl Connection {
 
         let mut c = Connection {
             version: QUIC_VERSION,
-            local_addr: None,
-            remote_addr: None,
-            role: r,
+            paths,
+            rol: r,
             state: match r {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
@@ -245,12 +289,17 @@ impl Connection {
         };
 
         c.scid = c.generate_cid();
-        if c.role == Role::Client {
+        if c.rol == Role::Client {
             c.dcid = c.generate_cid();
             c.create_initial_crypto_state(&c.dcid.clone()); // Stupid borrow checker.
         }
 
         c
+    }
+
+    /// Get the current role.
+    pub fn role(&self) -> Role {
+        self.rol
     }
 
     /// Get the state of the connection.
@@ -277,7 +326,7 @@ impl Connection {
 
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
-    pub fn process(&mut self, d: Vec<Datagram>) -> Res<Vec<Datagram>> {
+    pub fn process<V: IntoIterator<Item = Datagram>>(&mut self, d: V) -> Res<Vec<Datagram>> {
         for dgram in d {
             let res = self.input(dgram);
             self.capture_error(0, res)?;
@@ -299,12 +348,17 @@ impl Connection {
             }
         }
 
-        let out_dgrams = self.output()?;
-
+        // Can't iterate over self.paths while it is owned by self.
+        let paths = mem::replace(&mut self.paths, None);
+        let mut out_dgrams = Vec::new();
+        for p in &paths {
+            out_dgrams.append(&mut self.output(&p)?);
+        }
+        self.paths = paths;
         Ok(out_dgrams) // TODO(ekr@rtfm.com): When to call back next.
     }
 
-    pub fn input(&mut self, d: Datagram) -> Res<()> {
+    fn input(&mut self, d: Datagram) -> Res<()> {
         let mut slc = &d.d[..];
 
         // Handle each packet in the datagram
@@ -326,12 +380,11 @@ impl Connection {
                 State::WaitInitial => {
                     // Out DCID is the other side's SCID.
                     let scid = &hdr.scid.as_ref().unwrap().0;
-                    if self.role == Role::Server {
+                    if self.rol == Role::Server {
                         if hdr.dcid.len() < 8 {
                             qwarn!(self, "Peer DCID is too short");
                             return Ok(());
                         }
-                        self.remote_addr = Some(d.src);
                         self.create_initial_crypto_state(&hdr.dcid);
                     }
 
@@ -385,6 +438,18 @@ impl Connection {
             }
 
             self.input_packet(hdr.epoch, Data::from_slice(&body))?;
+
+            match &self.paths {
+                None => {
+                    self.paths = Some(Path::from(&d));
+                }
+                Some(p) => {
+                    if !p.received_on(&d) {
+                        // Right now, we don't support any form of migration.
+                        return Err(Error::InvalidMigration);
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -404,7 +469,7 @@ impl Connection {
 
     // Iterate through all the generators, inserting as many frames as will
     // fit.
-    fn output(&mut self) -> Res<Vec<Datagram>> {
+    fn output(&mut self, path: &Path) -> Res<Vec<Datagram>> {
         let mut out_packets = Vec::new();
 
         // TODO(ekr@rtfm.com): Be smarter about what epochs we actually have.
@@ -473,11 +538,7 @@ impl Connection {
                     .map(|dgram| dgram.d.len() + packet.len() > self.pmtu)
                     .unwrap_or(true);
                 if new_dgram {
-                    vec.push(Datagram {
-                        src: self.local_addr.unwrap(),
-                        dst: self.remote_addr.unwrap(),
-                        d: packet,
-                    });
+                    vec.push(Datagram::new(path.local, path.remote, packet));
                 } else {
                     vec.last_mut().unwrap().d.extend(packet);
                 }
@@ -688,14 +749,14 @@ impl Connection {
             self,
             "Creating initial cipher state DCID={:?} role={:?}",
             dcid,
-            self.role
+            self.rol
         );
         //assert!(matches!(None, self.crypto_states[0]));
 
         let cds = CryptoDxState::new_initial("client in", dcid);
         let sds = CryptoDxState::new_initial("server in", dcid);
 
-        self.crypto_states[0] = Some(match self.role {
+        self.crypto_states[0] = Some(match self.rol {
             Role::Client => CryptoState { tx: cds, rx: sds },
             Role::Server => CryptoState { tx: sds, rx: cds },
         });
@@ -771,7 +832,7 @@ impl Connection {
     // Returns new stream id
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         // TODO(agrover@mozilla.com): Check against max_stream_id
-        let role_val = match self.role {
+        let role_val = match self.rol {
             Role::Server => 1,
             Role::Client => 0,
         };
@@ -1008,11 +1069,15 @@ mod tests {
     use super::*;
     use crate::frame::StreamType;
 
+    fn loopback() -> SocketAddr {
+        "127.0.0.1:443".parse().unwrap()
+    }
+
     #[test]
     fn test_conn_stream_create() {
         init_db("./db");
 
-        let mut client = Connection::new_client("example.com");
+        let mut client = Connection::new_client("example.com", loopback(), loopback());
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
@@ -1030,7 +1095,7 @@ mod tests {
         init_db("./db");
         // 0 -> CH
         qdebug!("---- client");
-        let mut client = Connection::new_client("example.com");
+        let mut client = Connection::new_client("example.com", loopback(), loopback());
         let res = client.process(Vec::new()).unwrap();
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
@@ -1076,7 +1141,7 @@ mod tests {
     fn test_conn_stream() {
         init_db("./db");
 
-        let mut client = Connection::new_client("example.com");
+        let mut client = Connection::new_client("example.com", loopback(), loopback());
         let mut server = Connection::new_server(&[String::from("key")]);
 
         qdebug!("---- client");

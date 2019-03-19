@@ -13,6 +13,8 @@ pub mod packet;
 pub mod stream;
 mod tparams;
 
+pub use self::connection::{Connection, Datagram};
+
 type TransportError = u16;
 
 #[derive(Clone, Debug, PartialEq)]

@@ -29,7 +29,7 @@ pub use self::p11::SymKey;
 pub use self::secrets::SecretDirection;
 
 use std::ffi::CString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr::null;
 use std::sync::Once;
 
@@ -93,14 +93,15 @@ pub fn init() {
     }
 }
 
-pub fn init_db(dir: &str) {
+// TODO(mt): convert this to Into<PathBuf>.
+pub fn init_db<P: Into<PathBuf>>(dir: P) {
     unsafe {
         INIT_ONCE.call_once(|| {
             if already_initialized() {
                 return;
             }
 
-            let path = Path::new(dir);
+            let path = dir.into();
             assert!(path.is_dir());
             let pathstr = path.to_str().expect("path converts to string").to_string();
             let dircstr = CString::new(pathstr).expect("new CString");

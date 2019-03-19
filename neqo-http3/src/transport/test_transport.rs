@@ -8,8 +8,7 @@ use neqo_transport::{AppError, ConnectionError, Res};
 use std::collections::HashMap;
 
 pub struct Connection {
-    role: Role,
-    agent: Agent,
+    rol: Role,
     st: State,
     deadline: u64,
     next_stream_id: u64,
@@ -19,15 +18,27 @@ pub struct Connection {
 pub struct Agent {}
 
 impl Connection {
-    pub fn new(r: Role, agent: Agent) -> Connection {
+    fn new(r: Role) -> Connection {
         Connection {
-            role: r,
-            agent: agent,
+            rol: r,
             st: State::Init,
             deadline: 0,
             next_stream_id: 0,
             streams: HashMap::new(),
         }
+    }
+
+    /// Get the current role.
+    pub fn role(&self) -> Role {
+        self.rol
+    }
+
+    pub fn new_client() -> Connection {
+        Connection::new(Role::Client)
+    }
+
+    pub fn new_server() -> Connection {
+        Connection::new(Role::Server)
     }
 
     pub fn process(&mut self, _d: Vec<Datagram>) -> Res<Vec<Datagram>> {
@@ -38,7 +49,7 @@ impl Connection {
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         let stream_id = self.next_stream_id;
         self.streams
-            .insert(stream_id, Stream::new(get_stream_type(self.role, st)));
+            .insert(stream_id, Stream::new(get_stream_type(self.rol, st)));
         self.next_stream_id += 1;
         Ok(stream_id)
     }

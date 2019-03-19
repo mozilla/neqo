@@ -490,9 +490,9 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(server_name: &str) -> Res<Self> {
+    pub fn new<S: Into<String>>(server_name: S) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
-        let url = CString::new(server_name.to_string());
+        let url = CString::new(server_name.into());
         if url.is_err() {
             return Err(Error::InternalError);
         }
@@ -588,5 +588,17 @@ impl DerefMut for Agent {
             Agent::Client(c) => c.deref_mut(),
             Agent::Server(s) => s.deref_mut(),
         }
+    }
+}
+
+impl From<Client> for Agent {
+    fn from(c: Client) -> Self {
+        Agent::Client(c)
+    }
+}
+
+impl From<Server> for Agent {
+    fn from(s: Server) -> Self {
+        Agent::Server(s)
     }
 }
