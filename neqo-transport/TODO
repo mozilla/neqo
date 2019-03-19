@@ -1,3 +1,4 @@
+Convenient accessors for TP.
 generate ACK  // EKR
 consume ACK   // EKR
 client/server cmdline
