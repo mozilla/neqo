@@ -172,8 +172,9 @@ impl ExtensionHandler for TransportParametersHandler {
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
         log!(
             LogLevel::Debug,
-            "Handling transport parameters, msg={:?}",
-            msg
+            "Handling transport parameters, msg={:?} len={}",
+            msg,
+            d.len()
         );
         if !matches!(msg, TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS) {
             return ExtensionHandlerResult::Alert(110); // unsupported_extension
