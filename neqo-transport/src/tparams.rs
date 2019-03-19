@@ -75,7 +75,7 @@ impl TransportParameter {
             | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI
             | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI
             | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI
-                | TRANSPORT_PARAMETER_MAX_ACK_DELAY => TransportParameter::Integer(d.decode_varint()?),
+            | TRANSPORT_PARAMETER_MAX_ACK_DELAY => TransportParameter::Integer(d.decode_varint()?),
 
             TRANSPORT_PARAMETER_MAX_PACKET_SIZE => {
                 let tmp = d.decode_varint()?;
@@ -138,6 +138,46 @@ impl TransportParameters {
             }
         }
         Ok(tps)
+    }
+
+    // Get an integer type or a default.
+    fn get_integer(&self, tipe: u16) -> u64 {
+        let default = match tipe {
+            TRANSPORT_PARAMETER_IDLE_TIMEOUT
+            | TRANSPORT_PARAMETER_INITIAL_MAX_DATA
+            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
+            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
+            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI
+            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI
+            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI => 0,
+            TRANSPORT_PARAMETER_MAX_PACKET_SIZE => 65527,
+            TRANSPORT_PARAMETER_ACK_DELAY_EXPONENT => 3,
+            TRANSPORT_PARAMETER_MAX_ACK_DELAY => 25,
+            _ => panic!("Transport parameter not known or not an Integer"),
+        };
+        match self.params.get(&tipe) {
+            None => default,
+            Some(TransportParameter::Integer(x)) => *x,
+            _ => panic!("Internal error"),
+        }
+    }
+
+    fn get_bytes(&self, tipe: u16) -> Option<Vec<u8>> {
+        match tipe {
+            TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID
+            | TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN => {}
+            _ => panic!("Transport parameter not known or not type bytes"),
+        }
+
+        match self.params.get(&tipe) {
+            None => None,
+            Some(TransportParameter::Bytes(x)) => Some(x.to_vec()),
+            _ => panic!("Internal error"),
+        }
+    }
+
+    fn was_sent(&self, tipe: u16) -> bool {
+        self.params.contains_key(&tipe)
     }
 }
 
@@ -217,6 +257,28 @@ mod tests {
         assert_eq!(tps, tps2);
 
         println!("TPS = {:?}", tps);
+        assert_eq!(tps2.get_integer(TRANSPORT_PARAMETER_IDLE_TIMEOUT), 0); // Default
+        assert_eq!(tps2.get_integer(TRANSPORT_PARAMETER_MAX_ACK_DELAY), 25); // Default
+        assert_eq!(
+            tps2.get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI),
+            10
+        ); // Sent
+        assert_eq!(
+            tps2.get_bytes(TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN),
+            Some(vec![1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8])
+        );
+        assert_eq!(
+            tps2.get_bytes(TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID),
+            None
+        );
+        assert_eq!(
+            tps2.was_sent(TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID),
+            false
+        );
+        assert_eq!(
+            tps2.was_sent(TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN),
+            true
+        );
     }
 
 }
