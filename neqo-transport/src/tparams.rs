@@ -128,7 +128,7 @@ impl TransportParameters {
         while d.remaining() > 0 {
             match TransportParameter::decode(d) {
                 Ok((tipe, tp)) =>  {tps.params.insert(tipe, tp);}
-                Err(Error::TransportParameterError) => {},
+                Err(Error::UnknownTransportParameter) => {},
                 Err(e) => return Err(e)
             }
         }
