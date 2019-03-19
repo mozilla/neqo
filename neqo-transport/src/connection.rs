@@ -1,10 +1,13 @@
-#![allow(unused_variables)]
+#![allow(unused_variables, dead_code)]
 
+use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
 use std::ops;
+use std::rc::Rc;
+
 use std::time::Instant;
 
 use neqo_common::data::Data;
@@ -19,7 +22,9 @@ use crate::frame::{decode_frame, Frame, FrameType, StreamType};
 use crate::nss::*;
 use crate::packet::*;
 use crate::stream::{RecvStream, Recvable, RxStreamOrderer, SendStream, Sendable, TxBuffer};
+use crate::tparams::TransportParametersHandler;
 use crate::{hex, AppError, ConnectionError, Error, Res};
+use neqo_crypto::ext::ExtensionHandler;
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -128,7 +133,6 @@ struct CryptoStream {
 }
 
 #[allow(unused_variables)]
-#[derive(Debug)]
 pub struct Connection {
     version: crate::packet::Version,
     local_addr: Option<SocketAddr>,
@@ -136,14 +140,15 @@ pub struct Connection {
     role: Role,
     state: State,
     tls: Agent,
+    tps: Rc<RefCell<dyn ExtensionHandler>>,
     scid: Vec<u8>,
     dcid: Vec<u8>,
-    // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
     send_epoch: Epoch,
     recv_epoch: Epoch,
     crypto_streams: [CryptoStream; 4],
     crypto_states: [Option<CryptoState>; 4],
     tx_pns: [u64; 4],
+    // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
     generators: Vec<FrameGenerator>,
     deadline: Instant,
     max_data: u64,
@@ -156,6 +161,15 @@ pub struct Connection {
     recv_streams: BTreeMap<u64, RecvStream>, // stream id, stream
     outgoing_pkts: Vec<Packet>,              // (offset, data)
     pmtu: usize,
+}
+
+impl Debug for Connection {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "Connection: {:?} <-> {:?}",
+            self.local_addr, self.remote_addr
+        ))
+    }
 }
 
 impl Connection {
@@ -184,6 +198,11 @@ impl Connection {
         agent
             .set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)
             .unwrap();
+        let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
+        let tprc = Rc::clone(&tphandler);
+        agent
+            .extension_handler(0xffa5, tprc)
+            .expect("Could not set extension handler");
 
         let mut c = Connection {
             version: QUIC_VERSION,
@@ -195,6 +214,7 @@ impl Connection {
                 Role::Server => State::WaitInitial,
             },
             tls: agent,
+            tps: tphandler,
             scid: Vec::new(),
             dcid: Vec::new(),
             send_epoch: 0,

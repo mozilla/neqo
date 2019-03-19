@@ -3,7 +3,7 @@ use crate::{Error, Res};
 use neqo_common::data::*;
 use neqo_common::varint::*;
 use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-use neqo_crypto::HandshakeMessage;
+use neqo_crypto::{HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS};
 use std::collections::HashMap;
 
 struct PreferredAddress {
@@ -25,14 +25,14 @@ const TRANSPORT_PARAMETER_DISABLE_MIGRATION: u16 = 12;
 const TRANSPORT_PARAMETER_PREFERRED_ADDRESS: u16 = 13;
 
 #[derive(PartialEq, Debug)]
-enum TransportParameter {
+pub enum TransportParameter {
     Bytes(Vec<u8>),
     Integer(u64),
     Empty,
 }
 
 impl TransportParameter {
-    pub fn encode(&self, d: &mut Data, tipe: u16) -> Res<()> {
+    fn encode(&self, d: &mut Data, tipe: u16) -> Res<()> {
         d.encode_uint(tipe, 2);
         match self {
             TransportParameter::Bytes(a) => {
@@ -51,7 +51,7 @@ impl TransportParameter {
         Ok(())
     }
 
-    pub fn decode(d: &mut Data) -> Res<(u16, TransportParameter)> {
+    fn decode(d: &mut Data) -> Res<(u16, TransportParameter)> {
         let tipe = d.decode_uint(2)? as u16;
         let length = d.decode_uint(2)? as usize;
         let remaining = d.remaining();
@@ -144,16 +144,51 @@ impl TransportParameters {
 #[derive(Default, Debug)]
 pub struct TransportParametersHandler {
     pub local: TransportParameters,
-    pub remote: TransportParameters,
+    pub remote: Option<TransportParameters>,
 }
 
 impl ExtensionHandler for TransportParametersHandler {
     fn write(&mut self, msg: HandshakeMessage, d: &mut [u8]) -> ExtensionWriterResult {
-        return ExtensionWriterResult::Skip;
+        if !matches!(msg, TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS) {
+            return ExtensionWriterResult::Skip;
+        }
+
+        log!(
+            LogLevel::Debug,
+            "Writing transport parameters, msg={:?}",
+            msg
+        );
+
+        // TODO(ekr@rtfm.com): Modify to avoid a copy.
+        let mut buf = Data::default();
+        self.local
+            .encode(&mut buf)
+            .expect("Failed to encode transport parameters");
+        assert!(buf.remaining() <= d.len());
+        d[..buf.remaining()].copy_from_slice(&buf.as_mut_vec());
+        ExtensionWriterResult::Write(buf.remaining())
     }
 
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
-        return ExtensionHandlerResult::Alert(47);
+        log!(
+            LogLevel::Debug,
+            "Handling transport parameters, msg={:?}",
+            msg
+        );
+        if !matches!(msg, TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS) {
+            return ExtensionHandlerResult::Alert(110); // unsupported_extension
+        }
+
+        // TODO(ekr@rtfm.com): Unnecessary copy.
+        let mut buf = Data::from_slice(d);
+
+        match TransportParameters::decode(&mut buf) {
+            Err(_) => ExtensionHandlerResult::Alert(47), // illegal_parameter
+            Ok(tp) => {
+                self.remote = Some(tp);
+                ExtensionHandlerResult::Ok
+            }
+        }
     }
 }
 
