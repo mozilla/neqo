@@ -2,7 +2,6 @@ use neqo_crypto::init_db;
 use neqo_transport::{Connection, Datagram};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
-use std::str::FromStr;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -38,12 +37,11 @@ impl Args {
 }
 
 impl ToSocketAddrs for Args {
-    type Iter = ::std::option::IntoIter<SocketAddr>;
+    type Iter = ::std::vec::IntoIter<SocketAddr>;
     fn to_socket_addrs(&self) -> ::std::io::Result<Self::Iter> {
-        (
-            IpAddr::from_str(self.host.as_str()).expect("Invalid address"),
-            self.port,
-        )
+        // This is idiotic.  There is no path from hostname: String to IpAddr.
+        // And no means of controlling name resolution either.
+        std::fmt::format(format_args!("{}:{}", self.host, self.port))
             .to_socket_addrs()
     }
 }
@@ -57,6 +55,9 @@ fn main() {
 
     let local_addr = socket.local_addr().expect("Socket local address not bound");
     let remote_addr = args.addr();
+
+    println!("Client connecting: {:?} -> {:?}", local_addr, remote_addr);
+
     let mut client = Connection::new_client(args.host.as_str(), local_addr, remote_addr);
 
     let buf = &mut [0u8; 2048];

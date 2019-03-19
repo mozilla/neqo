@@ -1,8 +1,8 @@
 use neqo_crypto::init_db;
 use neqo_transport::{Connection, Datagram};
+use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
-use std::str::FromStr;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -43,12 +43,16 @@ impl Args {
 }
 
 impl ToSocketAddrs for Args {
-    type Iter = ::std::option::IntoIter<SocketAddr>;
+    type Iter = ::std::vec::IntoIter<SocketAddr>;
     fn to_socket_addrs(&self) -> ::std::io::Result<Self::Iter> {
-        (
-            IpAddr::from_str(self.host.as_ref().unwrap().as_str()).expect("Invalid address"),
-            self.port,
-        )
+        let dflt = String::from(match (self.ipv4, self.ipv6) {
+            (false, true) => "::",
+            _ => "0.0.0.0",
+        });
+        let h = self.host.as_ref().unwrap_or(&dflt);
+        // This is idiotic.  There is no path from hostname: String to IpAddr.
+        // And no means of controlling name resolution either.
+        fmt::format(format_args!("{}:{}", h, self.port))
             .to_socket_addrs()
     }
 }
@@ -56,6 +60,8 @@ impl ToSocketAddrs for Args {
 // TODO(mt): implement a server that can handle multiple connections.
 fn main() {
     let args = Args::from_args();
+    assert!(args.key.len() > 0, "Need at least one key");
+
     init_db(args.db.clone());
 
     // TODO(mt): listen on both v4 and v6.
@@ -63,6 +69,8 @@ fn main() {
 
     let local_addr = socket.local_addr().expect("Socket local address not bound");
     let mut server = Connection::new_server(args.key);
+
+    println!("Server waiting for connection on: {:?}", local_addr);
 
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
@@ -81,7 +89,7 @@ fn main() {
             .expect("Error processing input");
 
         for d in out_dgrams {
-            let sent = socket.send(&d[..]).expect("Error sending datagram");
+            let sent = socket.send_to(&d[..], d.destination()).expect("Error sending datagram");
             if sent != d.len() {
                 eprintln!("Unable to send all {} bytes of datagram", d.len());
             }
