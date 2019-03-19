@@ -1,6 +1,5 @@
-Transport parameters
-generate ACK
-consume ACK
+generate ACK  // EKR
+consume ACK   // EKR
 client/server cmdline
 harmonize our rust usage:
  - use foo::* or use foo::{bar, baz} and ordering/grouping
