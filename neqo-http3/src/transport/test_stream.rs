@@ -2,8 +2,8 @@
 
 use neqo_transport::connection::{Role, TxMode};
 use neqo_transport::frame::StreamType;
-use neqo_transport::stream::{Recvable, Sendable};
 use neqo_transport::{AppError, Res};
+use neqo_transport::{Recvable, Sendable};
 use std::collections::VecDeque;
 
 #[derive(Debug)]
@@ -41,8 +41,6 @@ impl Sendable for Stream {
         Ok(())
     }
 
-    fn reset_acked(&mut self) {}
-
     fn send_data_ready(&self) -> bool {
         self.send_buf.len() > 0
     }
@@ -50,25 +48,10 @@ impl Sendable for Stream {
     fn close(&mut self) {
         self.send_side_closed = true;
     }
-
-    fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
-        let len = self.send_buf.len() as u64;
-        if len > 0 {
-            Some((len, &self.send_buf))
-        } else {
-            None
-        }
-    }
-
-    fn mark_as_sent(&mut self, offset: u64, len: usize) {}
-
-    fn final_size(&self) -> Option<u64> {
-        None
-    }
 }
 
 impl Recvable for Stream {
-    fn recv_data_ready(&self) -> bool {
+    fn data_ready(&self) -> bool {
         self.recv_buf.len() > 0
     }
 
@@ -91,19 +74,8 @@ impl Recvable for Stream {
         self.read_with_amount(buf, buf.len() as u64)
     }
 
-    fn inbound_stream_frame(&mut self, _fin: bool, _offset: u64, _data: Vec<u8>) -> Res<()> {
-        Ok(())
-    }
-    fn needs_flowc_update(&mut self) -> Option<u64> {
-        None
-    }
-
     fn stop_sending(&mut self, err: AppError) {
         self.stop_sending_error = Some(err);
-    }
-
-    fn final_size(&self) -> Option<u64> {
-        None
     }
 
     fn close(&mut self) {
@@ -149,5 +121,18 @@ impl Stream {
 
     pub fn recv_data_ready_amount(&self) -> usize {
         self.recv_buf.len()
+    }
+
+    fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
+        let len = self.send_buf.len() as u64;
+        if len > 0 {
+            Some((len, &self.send_buf))
+        } else {
+            None
+        }
+    }
+
+    fn final_size(&self) -> Option<u64> {
+        None
     }
 }

@@ -1,5 +1,5 @@
 use crate::{Error, Res};
-use neqo_transport::stream::Recvable;
+use neqo_transport::Recvable;
 
 pub struct HeaderReadBuf {
     buf: Vec<u8>,

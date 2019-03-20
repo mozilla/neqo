@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
@@ -21,9 +21,10 @@ use rand::prelude::*;
 use crate::frame::{decode_frame, Frame, FrameType, StreamType};
 use crate::nss::*;
 use crate::packet::*;
-use crate::stream::{RecvStream, Recvable, RxStreamOrderer, SendStream, Sendable, TxBuffer};
+use crate::recv_stream::{RecvStream, RxStreamOrderer};
+use crate::send_stream::{SendStream, TxBuffer};
 use crate::tparams::TransportParametersHandler;
-use crate::{hex, AppError, ConnectionError, Error, Res};
+use crate::{hex, AppError, ConnectionError, Error, Recvable, Res, Sendable};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -84,6 +85,34 @@ impl Deref for Datagram {
 pub enum TxMode {
     Normal,
     Pto,
+}
+
+#[derive(Debug, Default)]
+pub struct FlowMgr {
+    fc_frames: VecDeque<Frame>,
+}
+
+impl FlowMgr {
+    pub fn new() -> FlowMgr {
+        FlowMgr::default()
+    }
+
+    /// indicate to peer we need more credits
+    pub fn stream_data_blocked(&mut self, stream_id: u64, data_limit: u64) {
+        self.fc_frames.push_back(Frame::StreamDataBlocked {
+            stream_id: stream_id,
+            stream_data_limit: data_limit,
+        })
+    }
+
+    /// Used by generator to get a flow control frame.
+    pub fn next(&mut self) -> Option<Frame> {
+        self.fc_frames.pop_front()
+    }
+
+    pub fn peek(&self) -> Option<&Frame> {
+        self.fc_frames.front()
+    }
 }
 
 type FrameGeneratorFn = fn(&mut Connection, Epoch, TxMode, usize) -> Option<Frame>;
@@ -205,6 +234,7 @@ pub struct Connection {
     recv_streams: BTreeMap<u64, RecvStream>, // stream id, stream
     outgoing_pkts: Vec<Packet>,              // (offset, data)
     pmtu: usize,
+    flow_mgr: Rc<RefCell<FlowMgr>>,
 }
 
 impl Debug for Connection {
@@ -299,6 +329,7 @@ impl Connection {
             ],
             generators: vec![
                 FrameGenerator(generate_crypto_frames),
+                FrameGenerator(generate_flowc_frames),
                 FrameGenerator(generate_stream_frames),
             ],
             crypto_states: [None, None, None, None],
@@ -314,6 +345,7 @@ impl Connection {
             recv_streams: BTreeMap::new(),
             outgoing_pkts: Vec::new(),
             pmtu: 1280,
+            flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
         };
 
         c.scid = c.generate_cid();
@@ -924,13 +956,15 @@ impl Connection {
             StreamType::BiDi => {
                 let new_id = (self.next_bi_stream_id << 2) + role_val;
                 self.next_bi_stream_id += 1;
-                self.send_streams.insert(new_id, SendStream::new());
+                self.send_streams
+                    .insert(new_id, SendStream::new(new_id, self.flow_mgr.clone()));
                 new_id
             }
             StreamType::UniDi => {
                 let new_id = (self.next_uni_stream_id << 2) + 2 + role_val;
                 self.next_uni_stream_id += 1;
-                self.send_streams.insert(new_id, SendStream::new());
+                self.send_streams
+                    .insert(new_id, SendStream::new(new_id, self.flow_mgr.clone()));
                 self.recv_streams.insert(new_id, RecvStream::new());
                 new_id
             }
@@ -987,7 +1021,7 @@ impl Connection {
 
     pub fn get_recvable_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Recvable)> {
         self.get_recv_streams()
-            .filter(|(_, stream)| stream.recv_data_ready())
+            .filter(|(_, stream)| stream.data_ready())
     }
 
     pub fn get_send_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Sendable)> {
@@ -1109,9 +1143,9 @@ fn generate_stream_frames(
         return None;
     }
 
-    for (stream_id, stream) in &mut conn.get_sendable_streams() {
+    for (stream_id, stream) in &mut conn.send_streams {
         if stream.send_data_ready() {
-            let fin = Sendable::final_size(stream);
+            let fin = stream.final_size();
             if let Some((offset, data)) = stream.next_bytes(mode) {
                 qtrace!(
                     "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
@@ -1122,7 +1156,7 @@ fn generate_stream_frames(
                     mode,
                     remaining
                 );
-                let frame_hdr_len = stream_frame_hdr_len(stream_id, offset, remaining);
+                let frame_hdr_len = stream_frame_hdr_len(*stream_id, offset, remaining);
                 let data_len = min(data.len(), remaining - frame_hdr_len);
                 let fin = match fin {
                     None => false,
@@ -1136,7 +1170,7 @@ fn generate_stream_frames(
                 };
                 let frame = Some(Frame::Stream {
                     fin,
-                    stream_id,
+                    stream_id: *stream_id,
                     offset,
                     data: data[..data_len].to_vec(),
                 });
@@ -1146,6 +1180,29 @@ fn generate_stream_frames(
         }
     }
     None
+}
+
+fn generate_flowc_frames(
+    conn: &mut Connection,
+    epoch: u16,
+    mode: TxMode,
+    remaining: usize,
+) -> Option<Frame> {
+    if let Some(frame) = conn.flow_mgr.borrow().peek() {
+        // A suboptimal way to figure out if the frame fits within remaining
+        // space.
+        let mut d = Data::default();
+        frame.marshal(&mut d);
+        if d.remaining() > remaining {
+            qtrace!("flowc frame doesn't fit in remaining");
+            None
+        } else {
+            conn.flow_mgr.borrow_mut().next()
+        }
+    } else {
+        qtrace!("no flowc frames");
+        None
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 use neqo_common::readbuf::Reader;
-use neqo_transport::stream::Recvable;
+use neqo_transport::Recvable;
 
 // A simple wrapper that wraps a Recvable so that it can be used with ReadBuf.
 #[derive(Debug)]

@@ -9,8 +9,8 @@ use neqo_common::varint::decode_varint;
 use neqo_qpack::header_read_buf::HeaderReadBuf;
 use neqo_transport::connection::Role;
 use neqo_transport::frame::StreamType;
-use neqo_transport::stream::{Recvable, Sendable};
 use neqo_transport::{Datagram, State};
+use neqo_transport::{Recvable, Sendable};
 
 use crate::hframe::{
     ElementDependencyType, HFrame, HFrameReader, HSettingType, PrioritizedElementType,
@@ -737,7 +737,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&2) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
             }
             None => {
                 assert!(false);
@@ -779,7 +779,7 @@ mod tests {
         // start sending SETTINGS frame
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x4]);
             }
             None => {
@@ -790,7 +790,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x4]);
             }
             None => {
@@ -801,7 +801,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x6]);
             }
             None => {
@@ -812,7 +812,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x0]);
             }
             None => {
@@ -823,7 +823,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x8]);
             }
             None => {
@@ -834,7 +834,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x0]);
             }
             None => {
@@ -845,7 +845,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
             }
             None => {
                 assert!(false);
@@ -855,7 +855,7 @@ mod tests {
         // Now test PushPromise
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x5]);
             }
             None => {
@@ -868,7 +868,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x5]);
             }
             None => {
@@ -879,7 +879,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x4]);
             }
             None => {
@@ -892,7 +892,7 @@ mod tests {
         assert_closed(&hconn, Error::WrongStream);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
             }
             None => {
                 assert!(false);

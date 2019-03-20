@@ -7,7 +7,7 @@ use crate::header_read_buf::{
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
-use neqo_transport::stream::{Recvable, Sendable};
+use neqo_transport::{Recvable, Sendable};
 use std::{mem, str};
 
 fn to_string(v: &[u8]) -> Res<String> {
@@ -605,7 +605,6 @@ fn read_prefixed_encoded_int_with_recvable_wrap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_transport::connection::TxMode;
     use neqo_transport::{AppError, Res};
 
     #[derive(Debug)]
@@ -614,10 +613,6 @@ mod tests {
     }
 
     impl Recvable for ReceiverForTests {
-        fn recv_data_ready(&self) -> bool {
-            self.recv_buf.len() > 0
-        }
-
         /// caller has been told data is available on a stream, and they want to
         /// retrieve it.
         fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)> {
@@ -633,18 +628,11 @@ mod tests {
             self.read_with_amount(buf, buf.len() as u64)
         }
 
-        fn inbound_stream_frame(&mut self, _fin: bool, _offset: u64, _data: Vec<u8>) -> Res<()> {
-            Ok(())
-        }
-        fn needs_flowc_update(&mut self) -> Option<u64> {
-            None
+        fn data_ready(&self) -> bool {
+            self.recv_buf.len() > 0
         }
 
         fn stop_sending(&mut self, _err: AppError) {}
-
-        fn final_size(&self) -> Option<u64> {
-            None
-        }
 
         fn close(&mut self) {}
     }
@@ -653,6 +641,7 @@ mod tests {
     struct SenderForTests {
         pub send_buf: Vec<u8>,
     }
+
     impl Sendable for SenderForTests {
         /// Enqueue some bytes to send
         fn send(&mut self, buf: &[u8]) -> Res<usize> {
@@ -671,23 +660,6 @@ mod tests {
         fn close(&mut self) {
             false;
         }
-
-        fn next_bytes(&mut self, _mode: TxMode) -> Option<(u64, &[u8])> {
-            let len = self.send_buf.len() as u64;
-            if len > 0 {
-                Some((len, &self.send_buf))
-            } else {
-                None
-            }
-        }
-
-        fn mark_as_sent(&mut self, offset: u64, len: usize) {}
-
-        fn final_size(&self) -> Option<u64> {
-            None
-        }
-
-        fn reset_acked(&mut self) {}
     }
 
     fn test_sent_instructions(decoder: &mut QPackDecoder, res: &[u8]) {
@@ -742,7 +714,7 @@ mod tests {
         test_sent_instructions(&mut decoder, &vec![0x01]);
     }
 
-     // test insert_with_name_literal which fails because there is not enough space in the table
+    // test insert_with_name_literal which fails because there is not enough space in the table
     #[test]
     fn test_recv_insert_with_name_litarel_1() {
         let mut decoder = QPackDecoder::new(0);
@@ -763,7 +735,7 @@ mod tests {
         test_sent_instructions(&mut decoder, &vec![]);
     }
 
-   // test insert with name literal - succeeds
+    // test insert with name literal - succeeds
     #[test]
     fn test_recv_insert_with_name_litarel_2() {
         let mut decoder = QPackDecoder::new(200);

@@ -6,8 +6,8 @@ use std::time::Instant;
 use super::test_stream::{get_stream_type, Stream};
 use neqo_transport::connection::{Datagram, Role, State};
 use neqo_transport::frame::StreamType;
-use neqo_transport::stream::{Recvable, Sendable};
 use neqo_transport::{AppError, ConnectionError, Res};
+use neqo_transport::{Recvable, Sendable};
 
 pub struct Connection {
     rol: Role,

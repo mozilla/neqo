@@ -4,7 +4,7 @@ use crate::header_read_buf::read_prefixed_encoded_int_with_recvable;
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
-use neqo_transport::stream::{Recvable, Sendable};
+use neqo_transport::{Recvable, Sendable};
 
 enum DecoderInstructions {
     InsertCountIncrement,
@@ -77,16 +77,16 @@ impl QPackEncoder {
                         b[0],
                         true,
                     ) {
-                     Ok(done) => {
-                        if done {
-                            self.call_instruction();
-                        } else {
-                            // wait for more data.
-                            break Ok(());
+                        Ok(done) => {
+                            if done {
+                                self.call_instruction();
+                            } else {
+                                // wait for more data.
+                                break Ok(());
+                            }
                         }
-                     },
-                     Err(Error::ClosedCriticalStream) => break Err(Error::ClosedCriticalStream),
-                     Err(_) => break Err(Error::EncoderStreamError),
+                        Err(Error::ClosedCriticalStream) => break Err(Error::ClosedCriticalStream),
+                        Err(_) => break Err(Error::EncoderStreamError),
                     }
                 }
                 Some(_) => {
@@ -98,16 +98,16 @@ impl QPackEncoder {
                         0x0,
                         false,
                     ) {
-                     Ok(done) => {
-                        if done {
-                            self.call_instruction();
-                        } else {
-                            // wait for more data.
-                            break Ok(());
+                        Ok(done) => {
+                            if done {
+                                self.call_instruction();
+                            } else {
+                                // wait for more data.
+                                break Ok(());
+                            }
                         }
-                    },
-                    Err(Error::ClosedCriticalStream) =>  break Err(Error::ClosedCriticalStream),
-                    Err(_) => break Err(Error::EncoderStreamError),
+                        Err(Error::ClosedCriticalStream) => break Err(Error::ClosedCriticalStream),
+                        Err(_) => break Err(Error::EncoderStreamError),
                     }
                 }
             }
@@ -394,13 +394,13 @@ impl QPackEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_transport::connection::TxMode;
     use neqo_transport::{AppError, Res};
 
     #[derive(Debug)]
     struct SenderForTests {
         pub send_buf: Vec<u8>,
     }
+
     impl Sendable for SenderForTests {
         /// Enqueue some bytes to send
         fn send(&mut self, buf: &[u8]) -> Res<usize> {
@@ -419,23 +419,6 @@ mod tests {
         fn close(&mut self) {
             false;
         }
-
-        fn next_bytes(&mut self, _mode: TxMode) -> Option<(u64, &[u8])> {
-            let len = self.send_buf.len() as u64;
-            if len > 0 {
-                Some((len, &self.send_buf))
-            } else {
-                None
-            }
-        }
-
-        fn mark_as_sent(&mut self, offset: u64, len: usize) {}
-
-        fn final_size(&self) -> Option<u64> {
-            None
-        }
-
-        fn reset_acked(&mut self) {}
     }
 
     #[derive(Debug)]
@@ -444,7 +427,7 @@ mod tests {
     }
 
     impl Recvable for ReceiverForTests {
-        fn recv_data_ready(&self) -> bool {
+        fn data_ready(&self) -> bool {
             self.recv_buf.len() > 0
         }
 
@@ -463,18 +446,7 @@ mod tests {
             self.read_with_amount(buf, buf.len() as u64)
         }
 
-        fn inbound_stream_frame(&mut self, _fin: bool, _offset: u64, _data: Vec<u8>) -> Res<()> {
-            Ok(())
-        }
-        fn needs_flowc_update(&mut self) -> Option<u64> {
-            None
-        }
-
         fn stop_sending(&mut self, _err: AppError) {}
-
-        fn final_size(&self) -> Option<u64> {
-            None
-        }
 
         fn close(&mut self) {}
     }
