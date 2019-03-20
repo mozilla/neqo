@@ -448,7 +448,7 @@ impl Connection {
                 Ok(cs) => decrypt_packet(&cs.rx, &PnCtx {}, &mut hdr, slc),
                 Err(e) => Err(e),
             };
-            slc = &slc[hdr.hdr_len + hdr.encrypted_body_len()..];
+            slc = &slc[hdr.hdr_len + hdr.plain_body_len()..];
             let body = match res {
                 Ok(b) => b,
                 _ => {

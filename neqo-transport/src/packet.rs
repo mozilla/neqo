@@ -94,10 +94,6 @@ impl PacketHdr {
     pub fn plain_body_len(&self) -> usize {
         self.body_len
     }
-
-    pub fn encrypted_body_len(&self) -> usize {
-        self.body_len + AUTH_TAG_LEN
-    }
 }
 
 pub trait PacketDecoder {
@@ -218,7 +214,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
         p.tipe = PacketType::Short;
         p.dcid = ConnectionId(d.decode_data(dec.get_cid_len())?);
         p.hdr_len = d.offset();
-        p.body_len = d.remaining() - AUTH_TAG_LEN;
+        p.body_len = d.remaining();
         p.epoch = 3; // TODO(ekr@rtfm.com): Decode key phase bits.
         return Ok(p);
     }
@@ -319,7 +315,7 @@ pub fn decrypt_packet(
     Ok(crypto.aead_decrypt(
         hdr.pn,
         &hdrbytes,
-        &pkt[hdr.hdr_len..hdr.hdr_len + hdr.encrypted_body_len()],
+        &pkt[hdr.hdr_len..hdr.hdr_len + hdr.plain_body_len()],
     )?)
 }
 
@@ -358,7 +354,7 @@ fn encode_packet_long(
     if let PacketType::Initial(token) = &hdr.tipe {
         d.encode_vec_and_len(&token);
     }
-    d.encode_varint((pnl + body.len()) as u64);
+    d.encode_varint((pnl + body.len() + AUTH_TAG_LEN) as u64);
     d.encode_uint(hdr.pn, pnl);
 
     encrypt_packet(crypto, hdr, d, body)
