@@ -1,5 +1,5 @@
 use neqo_crypto::init_db;
-use neqo_transport::{Connection, Datagram};
+use neqo_transport::{Connection, Datagram, State};
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
@@ -94,8 +94,11 @@ fn main() {
         }
 
         let out_dgrams = server
-            .process(in_dgrams.drain(..))
-            .expect("Error processing input");
+            .process(in_dgrams.drain(..));
+        if let State::Closed(e) = server.state() {
+            eprintln!("Closed: {:?}", e);
+            break;
+        }
 
         for d in out_dgrams {
             let sent = socket

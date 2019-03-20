@@ -4,7 +4,8 @@ use neqo_common::data::Data;
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::decode_varint;
 use neqo_qpack::header_read_buf::HeaderReadBuf;
-use neqo_transport::connection::{Datagram, Role, State};
+use neqo_transport::{Datagram, State};
+use neqo_transport::connection::Role;
 use neqo_transport::frame::StreamType;
 use neqo_transport::stream::{Recvable, Sendable};
 use std::collections::HashMap;
@@ -381,6 +382,7 @@ impl NewStreamTypeReader {
 }
 
 struct HttpConn {
+    // TODO(mt): This is redundant with the role on the transport.
     role: Role,
     conn: Connection,
     max_header_list_size: u64,
@@ -410,14 +412,13 @@ impl HttpConn {
 
     // This function takes the provided result and captures errors.
     // Any error results in the connection being closed.
-    fn check_result<T>(&mut self, res: Res<T>) -> Res<T> {
+    fn check_result<T>(&mut self, res: Res<T>)  {
         match &res {
             Err(e) => {
                 self.conn.close(e.code(), format!("{}", e));
             }
             _ => {}
-        }
-        res
+        };
     }
 
     fn process_state_change(&mut self, state: &State) -> Res<()> {
@@ -427,19 +428,19 @@ impl HttpConn {
         Ok(())
     }
 
-    pub fn process(&mut self, d: Vec<Datagram>) -> Res<Vec<Datagram>> {
+    pub fn process(&mut self, d: Vec<Datagram>) -> Vec<Datagram> {
         let state_before = self.state().clone();
-        let res = self.conn.process(d)?;
+        let out = self.conn.process(d);
         let state_after = self.state().clone();
         if state_after != state_before {
             let res = self.process_state_change(&state_after);
-            self.check_result(res)?;
+            self.check_result(res);
         }
-        if *self.state() == State::Connected {
+        if let State::Connected = self.state() {
             let res = self.check_streams();
-            self.check_result(res)?;
+            self.check_result(res);
         }
-        Ok(res)
+        out
     }
 
     fn on_connected(&mut self) -> Res<()> {
@@ -631,12 +632,15 @@ impl HttpConn {
 mod tests {
     use super::*;
 
-    fn check_return_value(r: Res<Vec<Datagram>>) {
-        if let Ok(v) = r {
-            assert_eq!(v, Vec::new());
-        } else {
-            assert!(false);
-        }
+    fn check_return_value(r: Vec<Datagram>) {
+        assert_eq!(r, Vec::new());
+    }
+
+    fn assert_closed(hconn: &HttpConn, expected: Error) {
+        match hconn.state() {
+            State::Closing(err, ..) | State::Closed(err) => assert_eq!(err.app_code(), Some(expected.code())),
+            _ => panic!("Wrong state {:?}", hconn.state()),
+        };
     }
 
     #[test]
@@ -880,10 +884,8 @@ mod tests {
         }
 
         // PUSH_PROMISE on a control stream will cause an error
-        r = hconn.process(Vec::new());
-        if let Err(e) = r {
-            assert_eq!(e, Error::WrongStream);
-        }
+        let _ = hconn.process(Vec::new());
+        assert_closed(&hconn, Error::WrongStream);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
                 assert!(!s.recv_data_ready());
@@ -892,13 +894,6 @@ mod tests {
                 assert!(false);
             }
         }
-    }
-
-    fn assert_closed(hconn: &HttpConn, expected: Error) {
-        match hconn.state() {
-            State::Closed(err) => assert_eq!(err.app_code(), Some(expected.code())),
-            _ => panic!("Wrong state {:?}", hconn.state()),
-        };
     }
 
     #[test]
@@ -925,10 +920,7 @@ mod tests {
         r = hconn.process(Vec::new());
         check_return_value(r);
         hconn.conn.close_receive_side(1);
-        r = hconn.process(Vec::new());
-        if let Err(e) = r {
-            assert_eq!(e, Error::ClosedCriticalStream);
-        }
+        let _ = hconn.process(Vec::new());
         assert_closed(&hconn, Error::ClosedCriticalStream);
     }
 
@@ -955,10 +947,7 @@ mod tests {
         }
         r = hconn.process(Vec::new());
         check_return_value(r);
-        r = hconn.process(Vec::new());
-        if let Err(e) = r {
-            assert_eq!(e, Error::MissingSettings);
-        }
+        let _ = hconn.process(Vec::new());
         assert_closed(&hconn, Error::MissingSettings);
     }
 
@@ -995,10 +984,7 @@ mod tests {
         }
         r = hconn.process(Vec::new());
         check_return_value(r);
-        r = hconn.process(Vec::new());
-        if let Err(e) = r {
-            assert_eq!(e, Error::UnexpectedFrame);
-        }
+        let _ = hconn.process(Vec::new());
         assert_closed(&hconn, Error::UnexpectedFrame);
     }
 
@@ -1034,14 +1020,8 @@ mod tests {
         }
         r = hconn.process(Vec::new());
         check_return_value(r);
-        r = hconn.process(Vec::new());
-        if let Err(e) = r {
-            assert_eq!(e, Error::WrongStream);
-        }
-        match hconn.state() {
-            State::Closed(err) => assert_eq!(err.app_code(), Some(Error::WrongStream.code())),
-            _ => panic!("Wrong state {:?}", hconn.state()),
-        };
+        let _ = hconn.process(Vec::new());
+        assert_closed(&hconn, Error::WrongStream);
     }
 
     // send DATA frame on a cortrol stream

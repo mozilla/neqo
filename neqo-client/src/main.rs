@@ -1,5 +1,5 @@
 use neqo_crypto::init_db;
-use neqo_transport::{Connection, Datagram};
+use neqo_transport::{Connection, Datagram, State};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -69,8 +69,11 @@ fn main() {
     let mut in_dgrams = Vec::new();
     loop {
         let out_dgrams = client
-            .process(in_dgrams.drain(..))
-            .expect("Error processing input");
+            .process(in_dgrams.drain(..));
+        if let State::Closed(e) = client.state() {
+            eprintln!("Closed: {:?}", e);
+            break;
+        }
 
         for d in out_dgrams {
             let sent = socket.send(&d[..]).expect("Error sending datagram");

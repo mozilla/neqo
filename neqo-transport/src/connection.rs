@@ -361,34 +361,37 @@ impl Connection {
         res
     }
 
+    /// For use with process().  Errors there can be ignored, but this needs to
+    /// ensure that the state is updated.
+    fn absorb_error(&mut self, res: Res<()>) {
+        let _ = self.capture_error(0, res);
+    }
+
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
-    pub fn process<V: IntoIterator<Item = Datagram>>(&mut self, d: V) -> Res<Vec<Datagram>> {
+    pub fn process<V: IntoIterator<Item = Datagram>>(&mut self, d: V) -> Vec<Datagram> {
         for dgram in d {
             let res = self.input(dgram);
-            self.capture_error(0, res)?;
+            self.absorb_error(res);
         }
 
         if Instant::now() >= self.deadline {
             // Timer expired.
             match self.state {
                 State::Init => {
-                    self.client_start()?;
+                    let res = self.client_start();
+                    self.absorb_error(res);
                 }
                 _ => {
                     // Nothing to do.
                 }
             }
         }
-
-        // Can't iterate over self.paths while it is owned by self.
-        let paths = mem::replace(&mut self.paths, None);
-        let mut out_dgrams = Vec::new();
-        for p in &paths {
-            out_dgrams.append(&mut self.output(&p)?);
+        if let State::Closed(..) = self.state {
+            Vec::new()
+        } else {
+            self.output()
         }
-        self.paths = paths;
-        Ok(out_dgrams) // TODO(ekr@rtfm.com): When to call back next.
     }
 
     fn input(&mut self, d: Datagram) -> Res<()> {
@@ -500,9 +503,35 @@ impl Connection {
         Ok(())
     }
 
+    fn output (&mut self) -> Vec<Datagram> {
+        // Can't iterate over self.paths while it is owned by self.
+        let paths = mem::replace(&mut self.paths, None);
+        let mut out_dgrams = Vec::new();
+        let mut errors = Vec::new();
+        for p in &paths {
+            let res = match self.output_path(&p) {
+                Ok(ref mut dgrams) => out_dgrams.append(dgrams),
+                Err(e) => errors.push(e),
+            };
+        }
+        self.paths = paths;
+
+        let closing = match self.state {
+            State::Closing(..) => true,
+            _ => false,
+        };
+        if !closing && errors.len() > 0 {
+            self.absorb_error(Err(errors.pop().unwrap()));
+            // We just closed, so run this again to produce CONNECTION_CLOSE.
+            self.output()
+        } else {
+            out_dgrams // TODO(ekr@rtfm.com): When to call back next.
+        }
+    }
+
     // Iterate through all the generators, inserting as many frames as will
     // fit.
-    fn output(&mut self, path: &Path) -> Res<Vec<Datagram>> {
+    fn output_path(&mut self, path: &Path) -> Res<Vec<Datagram>> {
         let mut out_packets = Vec::new();
 
         // TODO(ekr@rtfm.com): Be smarter about what epochs we actually have.
@@ -568,7 +597,7 @@ impl Connection {
             .fold(Vec::new(), |mut vec: Vec<Datagram>, packet| {
                 let new_dgram: bool = vec
                     .last()
-                    .map(|dgram| dgram.d.len() + packet.len() > self.pmtu)
+                    .map(|dgram| dgram.len() + packet.len() > self.pmtu)
                     .unwrap_or(true);
                 if new_dgram {
                     vec.push(Datagram::new(path.local, path.remote, packet));
@@ -580,7 +609,7 @@ impl Connection {
 
         out_dgrams
             .iter()
-            .for_each(|dgram| qdebug!(self, "Datagram length: {}", dgram.d.len()));
+            .for_each(|dgram| qdebug!(self, "Datagram length: {}", dgram.len()));
 
         return Ok(out_dgrams);
     }
@@ -1150,38 +1179,38 @@ mod tests {
         // 0 -> CH
         qdebug!("---- client");
         let mut client = Connection::new_client("example.com", &["alpn"], loopback(), loopback());
-        let res = client.process(Vec::new()).unwrap();
+        let res = client.process(Vec::new());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         // CH -> SH
         qdebug!("---- server");
         let mut server = Connection::new_server(&["key"], &["alpn"]);
-        let res = server.process(res).unwrap();
+        let res = server.process(res);
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         // SH -> 0
         qdebug!("---- client");
-        let res = client.process(res).unwrap();
+        let res = client.process(res);
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         // 0 -> EE, CERT, CV, FIN
         qdebug!("---- server");
-        let res = server.process(res).unwrap();
+        let res = server.process(res);
         assert!(res.is_empty());
         qdebug!("Output={:0x?}", res);
 
         // EE, CERT, CV, FIN -> FIN
         qdebug!("---- client");
-        let res = client.process(res).unwrap();
+        let res = client.process(res);
         assert!(res.is_empty());
         qdebug!("Output={:0x?}", res);
 
         // FIN -> 0
         qdebug!("---- server");
-        let res = server.process(res).unwrap();
+        let res = server.process(res);
         assert!(res.is_empty());
 
         assert_eq!(*client.state(), State::Connected);
@@ -1199,13 +1228,13 @@ mod tests {
         let mut server = Connection::new_server(&["key"], &["alpn"]);
 
         qdebug!("---- client");
-        let res = client.process(Vec::new()).unwrap();
+        let res = client.process(Vec::new());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // -->> Initial[0]: CRYPTO[CH]
 
         qdebug!("---- server");
-        let res = server.process(res).unwrap();
+        let res = server.process(res);
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // TODO(agrover@mozilla.com): ACKs
@@ -1213,7 +1242,7 @@ mod tests {
         // <<-- Handshake[0]: CRYPTO[EE, CERT, CV, FIN]
 
         qdebug!("---- client");
-        let res = client.process(res).unwrap();
+        let res = client.process(res);
         assert_eq!(res.len(), 1);
         assert_eq!(*client.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1221,7 +1250,7 @@ mod tests {
         // -->> Handshake[0]: CRYPTO[FIN], ACK[0]
 
         qdebug!("---- server");
-        let res = server.process(res).unwrap();
+        let res = server.process(res);
         assert!(res.is_empty());
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1243,11 +1272,11 @@ mod tests {
         client
             .stream_send(client_stream_id2, &vec![7; 50])
             .unwrap_err();
-        let res = client.process(res).unwrap();
+        let res = client.process(res);
         assert_eq!(res.len(), 4);
 
         qdebug!("---- server");
-        let res = server.process(res).unwrap();
+        let res = server.process(res);
         assert!(res.is_empty());
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1275,17 +1304,12 @@ mod tests {
         let mut b = server;
         let mut records = Vec::new();
         let is_done = |c: &mut Connection| match c.state() {
+            // TODO(mt): Finish on Closed and not Closing.
             State::Connected | State::Closing(..) | State::Closed(..) => true,
             _ => false,
         };
-        while !is_done(a) || !is_done(b) {
-            records = match a.process(records) {
-                Ok(r) => r,
-                _ => {
-                    // If this returns an error, we will pick the error up when we check the state.
-                    return;
-                }
-            };
+        while !is_done(a) {
+            records = a.process(records);
             b = mem::replace(&mut a, b);
         }
     }
@@ -1298,6 +1322,7 @@ mod tests {
 
     fn assert_error(c: &Connection, err: ConnectionError) {
         match c.state() {
+            // TODO(mt): Finish on Closed and not Closing.
             State::Closing(e, ..) | State::Closed(e, ..) => {
                 assert_eq!(*e, err);
             }

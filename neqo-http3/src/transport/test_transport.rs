@@ -41,9 +41,9 @@ impl Connection {
         Connection::new(Role::Server)
     }
 
-    pub fn process(&mut self, _d: Vec<Datagram>) -> Res<Vec<Datagram>> {
+    pub fn process(&mut self, _d: Vec<Datagram>) -> Vec<Datagram> {
         self.st = State::Connected;
-        Ok(Vec::new())
+        Vec::new()
     }
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {

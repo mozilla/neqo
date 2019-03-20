@@ -13,7 +13,7 @@ pub mod packet;
 pub mod stream;
 mod tparams;
 
-pub use self::connection::{Connection, Datagram};
+pub use self::connection::{Connection, Datagram, State};
 
 type TransportError = u16;
 
