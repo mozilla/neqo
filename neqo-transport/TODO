@@ -6,5 +6,6 @@ harmonize our rust usage:
  - remove extern crate
  - sort #[derive()] args
 cleanup public API
-generate docs for public API
+write docs for public API
+write docs for everything else
 CI

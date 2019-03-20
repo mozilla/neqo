@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
-use std::rc::Rc;
 use std::ops::Deref;
+use std::rc::Rc;
 use std::time::Instant;
 
 use neqo_common::data::Data;
@@ -24,7 +24,6 @@ use crate::packet::*;
 use crate::stream::{RecvStream, Recvable, RxStreamOrderer, SendStream, Sendable, TxBuffer};
 use crate::tparams::TransportParametersHandler;
 use crate::{hex, AppError, ConnectionError, Error, Res};
-use neqo_crypto::ext::ExtensionHandler;
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -185,7 +184,7 @@ pub struct Connection {
     rol: Role,
     state: State,
     tls: Agent,
-    tps: Rc<RefCell<dyn ExtensionHandler>>,
+    tps: Rc<RefCell<TransportParametersHandler>>,
     scid: Vec<u8>,
     dcid: Vec<u8>,
     send_epoch: Epoch,
@@ -211,20 +210,25 @@ pub struct Connection {
 impl Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_fmt(format_args!(
-            "{:?} Connection: {:?} {:?}", self.rol, self.state, self.paths
+            "{:?} Connection: {:?} {:?}",
+            self.rol, self.state, self.paths
         ))
     }
 }
 
 impl Connection {
-    pub fn new_client<S: Into<String>>(
+    pub fn new_client<S: ToString, PA: ToString, PI: IntoIterator<Item = PA>>(
         server_name: S,
+        protocols: PI,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
     ) -> Connection {
         Connection::new(
             Role::Client,
-            Client::new(server_name).unwrap().into(),
+            Client::new(server_name)
+                .expect("Could not create client")
+                .into(),
+            protocols,
             Some(Path {
                 local: local_addr,
                 remote: remote_addr,
@@ -232,22 +236,48 @@ impl Connection {
         )
     }
 
-    pub fn new_server<A: ToString, I: IntoIterator<Item = A>>(certs: I) -> Connection {
-        Connection::new(Role::Server, Server::new(certs).unwrap().into(), None)
+    pub fn new_server<
+        CS: ToString,
+        CI: IntoIterator<Item = CS>,
+        PA: ToString,
+        PI: IntoIterator<Item = PA>,
+    >(
+        certs: CI,
+        protocols: PI,
+    ) -> Connection {
+        Connection::new(
+            Role::Server,
+            Server::new(certs).expect("Could not create server").into(),
+            protocols,
+            None,
+        )
     }
 
-    fn new(r: Role, mut agent: Agent, paths: Option<Path>) -> Connection {
-        agent
-            .enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])
-            .unwrap();
+    fn configure_agent<A: ToString, I: IntoIterator<Item = A>>(
+        agent: &mut Agent,
+        protocols: I,
+        tphandler: Rc<RefCell<TransportParametersHandler>>,
+    ) {
         agent
             .set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)
-            .unwrap();
-        let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
-        let tprc = Rc::clone(&tphandler);
+            .expect("Could not enable TLS 1.3");
         agent
-            .extension_handler(0xffa5, tprc)
+            .enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])
+            .expect("Could not set ciphers");
+        agent
+            .extension_handler(0xffa5, tphandler)
             .expect("Could not set extension handler");
+        agent.set_alpn(protocols).expect("Could not set ALPN");
+    }
+
+    fn new<A: ToString, I: IntoIterator<Item = A>>(
+        r: Role,
+        mut agent: Agent,
+        protocols: I,
+        paths: Option<Path>,
+    ) -> Connection {
+        let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
+        Connection::configure_agent(&mut agent, protocols, Rc::clone(&tphandler));
 
         let mut c = Connection {
             version: QUIC_VERSION,
@@ -297,6 +327,13 @@ impl Connection {
         c
     }
 
+    /// Set ALPN preferences. Strings that appear earlier in the list are given
+    /// higher preference.
+    pub fn set_alpn<A: ToString, I: IntoIterator<Item = A>>(&mut self, protocols: I) -> Res<()> {
+        self.tls.set_alpn(protocols)?;
+        Ok(())
+    }
+
     /// Get the current role.
     pub fn role(&self) -> Role {
         self.rol
@@ -338,13 +375,9 @@ impl Connection {
                 State::Init => {
                     self.client_start()?;
                 }
-                State::Handshaking => {
+                _ => {
                     // Nothing to do.
                 }
-                State::Connected => {
-                    // Nothing to do.
-                }
-                _ => unimplemented!(),
             }
         }
 
@@ -359,7 +392,7 @@ impl Connection {
     }
 
     fn input(&mut self, d: Datagram) -> Res<()> {
-        let mut slc = &d.d[..];
+        let mut slc = &d[..];
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
@@ -617,13 +650,17 @@ impl Connection {
             m = self.tls.handshake_raw(0, None);
         }
         match m {
-            Err(_) => {
+            Err(e) => {
                 qwarn!(self, "Handshake failed");
-                return Err(Error::HandshakeFailed);
+                return Err(match self.tls.alert() {
+                    Some(a) => Error::CryptoAlert(*a),
+                    _ => Error::CryptoError(e),
+                });
             }
             Ok((_, msgs)) => {
                 for m in msgs {
-                    qdebug!("Inserting message {:?}", m);
+                    qdebug!(self, "Inserting message {:?}", m);
+                    assert_eq!(m.ct, 22);
                     self.crypto_streams[m.epoch as usize].tx.send(&m.data);
                 }
             }
@@ -735,10 +772,27 @@ impl Connection {
         if state != self.state {
             qinfo!(self, "State change from {:?} -> {:?}", self.state, state);
             self.state = state;
-            if let State::Closing(..) = &self.state {
-                self.generators.clear();
-                self.generators
-                    .push(FrameGenerator(Connection::generate_close));
+            match &self.state {
+                State::Connected => {
+                    if let None = match self.tls.info() {
+                        Some(i) => i.alpn(),
+                        _ => None,
+                    } {
+                        // 120 = no_application_protocol
+                        let err = Error::CryptoAlert(120);
+                        self.set_state(State::Closing(
+                            ConnectionError::Transport(err),
+                            0,
+                            String::from("no ALPN"),
+                        ));
+                    }
+                }
+                State::Closing(..) => {
+                    self.generators.clear();
+                    self.generators
+                        .push(FrameGenerator(Connection::generate_close));
+                }
+                _ => {}
             }
         }
     }
@@ -892,7 +946,7 @@ impl Connection {
     }
 
     pub fn label(&self) -> String {
-        String::from("Connection {id=xxx}")
+        format!("{:?} {:p}", self.rol, self as *const Connection)
     }
 
     pub fn get_recv_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Recvable)> {
@@ -1077,13 +1131,13 @@ mod tests {
     fn test_conn_stream_create() {
         init_db("./db");
 
-        let mut client = Connection::new_client("example.com", loopback(), loopback());
+        let mut client = Connection::new_client("example.com", &["alpn"], loopback(), loopback());
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 4);
 
-        let mut server = Connection::new_server(&[String::from("key")]);
+        let mut server = Connection::new_server(&["key"], &["alpn"]);
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 3);
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 7);
         assert_eq!(server.stream_create(StreamType::BiDi).unwrap(), 1);
@@ -1095,14 +1149,14 @@ mod tests {
         init_db("./db");
         // 0 -> CH
         qdebug!("---- client");
-        let mut client = Connection::new_client("example.com", loopback(), loopback());
+        let mut client = Connection::new_client("example.com", &["alpn"], loopback(), loopback());
         let res = client.process(Vec::new()).unwrap();
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         // CH -> SH
         qdebug!("---- server");
-        let mut server = Connection::new_server(&[String::from("key")]);
+        let mut server = Connection::new_server(&["key"], &["alpn"]);
         let res = server.process(res).unwrap();
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
@@ -1141,8 +1195,8 @@ mod tests {
     fn test_conn_stream() {
         init_db("./db");
 
-        let mut client = Connection::new_client("example.com", loopback(), loopback());
-        let mut server = Connection::new_server(&[String::from("key")]);
+        let mut client = Connection::new_client("example.com", &["alpn"], loopback(), loopback());
+        let mut server = Connection::new_server(&["key"], &["alpn"]);
 
         qdebug!("---- client");
         let res = client.process(Vec::new()).unwrap();
@@ -1213,5 +1267,54 @@ mod tests {
         let (received, fin) = stream.read(&mut buf).unwrap();
         assert_eq!(received, 60);
         assert_eq!(fin, true);
+    }
+
+    /// Drive the handshake between the client and server.
+    fn handshake(client: &mut Connection, server: &mut Connection) {
+        let mut a = client;
+        let mut b = server;
+        let mut records = Vec::new();
+        let is_done = |c: &mut Connection| match c.state() {
+            State::Connected | State::Closing(..) | State::Closed(..) => true,
+            _ => false,
+        };
+        while !is_done(a) || !is_done(b) {
+            records = match a.process(records) {
+                Ok(r) => r,
+                _ => {
+                    // If this returns an error, we will pick the error up when we check the state.
+                    return;
+                }
+            };
+            b = mem::replace(&mut a, b);
+        }
+    }
+
+    fn connect(client: &mut Connection, server: &mut Connection) {
+        handshake(client, server);
+        assert_eq!(*client.state(), State::Connected);
+        assert_eq!(*server.state(), State::Connected);
+    }
+
+    fn assert_error(c: &Connection, err: ConnectionError) {
+        match c.state() {
+            State::Closing(e, ..) | State::Closed(e, ..) => {
+                assert_eq!(*e, err);
+            }
+            _ => panic!("bad state {:?}", c.state()),
+        }
+    }
+
+    #[test]
+    fn test_no_alpn() {
+        init_db("./db");
+        let mut client = Connection::new_client("example.com", &["alpn"], loopback(), loopback());
+        let mut server = Connection::new_server(&["key"], &["different-alpn"]);
+
+        handshake(&mut client, &mut server);
+        // TODO (mt): errors are immediate, which means that we never send CONNECTION_CLOSE
+        // and the client never sees the server's rejection of its handshake.
+        //assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(120)));
+        assert_error(&server, ConnectionError::Transport(Error::CryptoAlert(120)));
     }
 }

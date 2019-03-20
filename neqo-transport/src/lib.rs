@@ -31,6 +31,7 @@ pub enum Error {
     ProtocolViolation,
     InvalidMigration,
     CryptoError(neqo_crypto::Error),
+    CryptoAlert(u8),
     IoError(neqo_common::Error),
     NoMoreData,
     TooMuchData,
@@ -59,11 +60,9 @@ impl Error {
             Error::TransportParameterError => 8,
             Error::ProtocolViolation => 10,
             Error::InvalidMigration => 12,
-            Error::CryptoError(e) => match e.alert() {
-                Some(a) => 0x100 + (a as u16),
-                _ => 1,
-            },
-            Error::IoError(..)
+            Error::CryptoAlert(a) => 0x100 + (*a as u16),
+            Error::CryptoError(_)
+            | Error::IoError(..)
             | Error::NoMoreData
             | Error::TooMuchData
             | Error::UnknownFrameType

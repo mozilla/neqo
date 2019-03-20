@@ -149,7 +149,7 @@ impl SecretAgentInfo {
     }
 }
 
-// SecretAgent holds the common parts of client and server.
+/// SecretAgent holds the common parts of client and server.
 #[derive(Debug)]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
@@ -157,7 +157,11 @@ pub struct SecretAgent {
     raw: Option<bool>,
     io: Box<AgentIo>,
     st: HandshakeState,
+
+    /// Records whether authentication of certificates is required.
     auth_required: Box<bool>,
+    /// Records any fatal alert that is sent by the stack.
+    alert: Box<Option<Alert>>,
 
     extension_handlers: Vec<ExtensionTracker>,
     inf: Option<SecretAgentInfo>,
@@ -172,6 +176,7 @@ impl SecretAgent {
             io: Box::new(AgentIo::new()),
             st: HandshakeState::New,
             auth_required: Box::new(false),
+            alert: Box::new(None),
 
             extension_handlers: Default::default(),
             inf: Default::default(),
@@ -223,17 +228,55 @@ impl SecretAgent {
         ssl::_SECStatus_SECWouldBlock
     }
 
+    unsafe extern "C" fn alert_sent_cb(
+        _fd: *const ssl::PRFileDesc,
+        arg: *mut c_void,
+        alert: *const ssl::SSLAlert,
+    ) {
+        let alert = alert.as_ref().unwrap();
+        if alert.level == 2 {
+            // Fatal alerts demand attention.
+            let p = arg as *mut Option<Alert>;
+            let st = p.as_mut().unwrap();
+            match st {
+                None => {
+                    *st = Some(alert.description);
+                }
+                _ => {
+                    // TODO(mt): Log duplicate alerts.
+                }
+            }
+        }
+    }
+
     // Ready this for connecting.
     fn ready(&mut self, is_server: bool) -> Res<()> {
-        result::result(unsafe {
+        let rv = unsafe {
             ssl::SSL_AuthCertificateHook(
                 self.fd,
                 Some(SecretAgent::auth_complete_hook),
                 &mut *self.auth_required as *mut bool as *mut c_void,
             )
-        })?;
+        };
+        result::result(rv)?;
+        let rv = unsafe {
+            ssl::SSL_AlertSentCallback(
+                self.fd,
+                Some(SecretAgent::alert_sent_cb),
+                &mut *self.alert as *mut Option<Alert> as *mut c_void,
+            )
+        };
+        result::result(rv)?;
         self.configure()?;
         result::result(unsafe { ssl::SSL_ResetHandshake(self.fd, is_server as ssl::PRBool) })
+    }
+
+    /// Default configuration.
+    fn configure(&mut self) -> Res<()> {
+        self.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
+        self.set_option(ssl::Opt::Locking, false)?;
+        self.set_option(ssl::Opt::Tickets, false)?;
+        Ok(())
     }
 
     pub fn set_version_range(&mut self, min: Version, max: Version) -> Res<()> {
@@ -335,14 +378,6 @@ impl SecretAgent {
         Ok(())
     }
 
-    // Common configuration.
-    pub fn configure(&mut self) -> Res<()> {
-        self.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
-        self.set_option(ssl::Opt::Locking, false)?;
-        self.set_option(ssl::Opt::Tickets, false)?;
-        Ok(())
-    }
-
     fn set_raw(&mut self, r: bool) -> Res<()> {
         if self.raw.is_none() {
             self.secrets.register(self.fd)?;
@@ -355,14 +390,22 @@ impl SecretAgent {
         }
     }
 
-    // TODO(mt) consider whether this info should instead be attached
-    // to the Completed state.
     pub fn info(&self) -> Option<&SecretAgentInfo> {
+        // TODO(mt) consider whether this info should instead be attached
+        // to the Completed state.
         self.inf.as_ref()
     }
 
+    /// Get any preliminary information about the status of the connection.
+    ///
+    /// This includes whether 0-RTT was accepted and any information related to that.
     pub fn preinfo(&self) -> Res<SecretAgentPreInfo> {
         SecretAgentPreInfo::new(self.fd)
+    }
+
+    /// Return any fatal alert that the TLS stack might have sent.
+    pub fn alert(&self) -> &Option<Alert> {
+        &*self.alert
     }
 
     /// Call this function to mark the peer as authenticated.
@@ -490,9 +533,9 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new<S: Into<String>>(server_name: S) -> Res<Self> {
+    pub fn new<S: ToString>(server_name: S) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
-        let url = CString::new(server_name.into());
+        let url = CString::new(server_name.to_string());
         if url.is_err() {
             return Err(Error::InternalError);
         }

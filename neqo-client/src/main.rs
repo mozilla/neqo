@@ -12,6 +12,12 @@ struct Args {
     #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
     db: PathBuf,
 
+    #[structopt(short = "a", long, default_value = "http/0.9")]
+    /// ALPN labels to negotiate.
+    ///
+    /// This client still only does HTTP/0.9 no matter what the ALPN says.
+    alpn: Vec<String>,
+
     #[structopt(short = "4", long)]
     /// Restrict to IPv4.
     ipv4: bool,
@@ -41,8 +47,7 @@ impl ToSocketAddrs for Args {
     fn to_socket_addrs(&self) -> ::std::io::Result<Self::Iter> {
         // This is idiotic.  There is no path from hostname: String to IpAddr.
         // And no means of controlling name resolution either.
-        std::fmt::format(format_args!("{}:{}", self.host, self.port))
-            .to_socket_addrs()
+        std::fmt::format(format_args!("{}:{}", self.host, self.port)).to_socket_addrs()
     }
 }
 
@@ -58,7 +63,7 @@ fn main() {
 
     println!("Client connecting: {:?} -> {:?}", local_addr, remote_addr);
 
-    let mut client = Connection::new_client(args.host.as_str(), local_addr, remote_addr);
+    let mut client = Connection::new_client(args.host.as_str(), args.alpn, local_addr, remote_addr);
 
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
