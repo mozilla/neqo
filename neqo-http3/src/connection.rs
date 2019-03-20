@@ -1,14 +1,16 @@
 #![allow(unused_variables, dead_code)]
 
+use std::collections::HashMap;
+use std::time::Instant;
+
 use neqo_common::data::Data;
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::decode_varint;
 use neqo_qpack::header_read_buf::HeaderReadBuf;
-use neqo_transport::{Datagram, State};
 use neqo_transport::connection::Role;
 use neqo_transport::frame::StreamType;
 use neqo_transport::stream::{Recvable, Sendable};
-use std::collections::HashMap;
+use neqo_transport::{Datagram, State};
 
 use crate::hframe::{
     ElementDependencyType, HFrame, HFrameReader, HSettingType, PrioritizedElementType,
@@ -412,7 +414,7 @@ impl HttpConn {
 
     // This function takes the provided result and captures errors.
     // Any error results in the connection being closed.
-    fn check_result<T>(&mut self, res: Res<T>)  {
+    fn check_result<T>(&mut self, res: Res<T>) {
         match &res {
             Err(e) => {
                 self.conn.close(e.code(), format!("{}", e));
@@ -430,7 +432,7 @@ impl HttpConn {
 
     pub fn process(&mut self, d: Vec<Datagram>) -> Vec<Datagram> {
         let state_before = self.state().clone();
-        let out = self.conn.process(d);
+        let out = self.conn.process(d, Instant::now());
         let state_after = self.state().clone();
         if state_after != state_before {
             let res = self.process_state_change(&state_after);
@@ -638,7 +640,9 @@ mod tests {
 
     fn assert_closed(hconn: &HttpConn, expected: Error) {
         match hconn.state() {
-            State::Closing(err, ..) | State::Closed(err) => assert_eq!(err.app_code(), Some(expected.code())),
+            State::Closing(err, ..) | State::Closed(err) => {
+                assert_eq!(err.app_code(), Some(expected.code()))
+            }
             _ => panic!("Wrong state {:?}", hconn.state()),
         };
     }

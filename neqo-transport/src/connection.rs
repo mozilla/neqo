@@ -222,18 +222,16 @@ impl Connection {
         protocols: PI,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-    ) -> Connection {
-        Connection::new(
+    ) -> Res<Connection> {
+        Ok(Connection::new(
             Role::Client,
-            Client::new(server_name)
-                .expect("Could not create client")
-                .into(),
+            Client::new(server_name)?.into(),
             protocols,
             Some(Path {
                 local: local_addr,
                 remote: remote_addr,
             }),
-        )
+        ))
     }
 
     pub fn new_server<
@@ -244,13 +242,13 @@ impl Connection {
     >(
         certs: CI,
         protocols: PI,
-    ) -> Connection {
-        Connection::new(
+    ) -> Res<Connection> {
+        Ok(Connection::new(
             Role::Server,
-            Server::new(certs).expect("Could not create server").into(),
+            Server::new(certs)?.into(),
             protocols,
             None,
-        )
+        ))
     }
 
     fn configure_agent<A: ToString, I: IntoIterator<Item = A>>(
@@ -369,8 +367,11 @@ impl Connection {
 
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
-    pub fn process<V: IntoIterator<Item = Datagram>>(&mut self, d: V) -> Vec<Datagram> {
-        for dgram in d {
+    pub fn process<I>(&mut self, in_dgrams: I, cur_time: Instant) -> Vec<Datagram>
+    where
+        I: IntoIterator<Item = Datagram>,
+    {
+        for dgram in in_dgrams {
             let res = self.input(dgram);
             self.absorb_error(res);
         }
@@ -503,7 +504,7 @@ impl Connection {
         Ok(())
     }
 
-    fn output (&mut self) -> Vec<Datagram> {
+    fn output(&mut self) -> Vec<Datagram> {
         // Can't iterate over self.paths while it is owned by self.
         let paths = mem::replace(&mut self.paths, None);
         let mut out_dgrams = Vec::new();
@@ -547,7 +548,7 @@ impl Connection {
                 let left = self.pmtu - d.remaining();
                 while let Some(frame) = self.generators[i](self, epoch, TxMode::Normal, left) {
                     qtrace!("pmtu {} remaining {}", self.pmtu, d.remaining());
-                    frame.marshal(&mut d)?;
+                    frame.marshal(&mut d);
                     assert!(d.remaining() <= self.pmtu);
                     if d.remaining() == self.pmtu {
                         // Filled this packet, get another one.
@@ -1160,13 +1161,14 @@ mod tests {
     fn test_conn_stream_create() {
         init_db("./db");
 
-        let mut client = Connection::new_client("example.com", &["alpn"], loopback(), loopback());
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 4);
 
-        let mut server = Connection::new_server(&["key"], &["alpn"]);
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 3);
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 7);
         assert_eq!(server.stream_create(StreamType::BiDi).unwrap(), 1);
@@ -1178,39 +1180,40 @@ mod tests {
         init_db("./db");
         // 0 -> CH
         qdebug!("---- client");
-        let mut client = Connection::new_client("example.com", &["alpn"], loopback(), loopback());
-        let res = client.process(Vec::new());
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let res = client.process(Vec::new(), Instant::now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         // CH -> SH
         qdebug!("---- server");
-        let mut server = Connection::new_server(&["key"], &["alpn"]);
-        let res = server.process(res);
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let res = server.process(res, Instant::now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         // SH -> 0
         qdebug!("---- client");
-        let res = client.process(res);
+        let res = client.process(res, Instant::now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         // 0 -> EE, CERT, CV, FIN
         qdebug!("---- server");
-        let res = server.process(res);
+        let res = server.process(res, Instant::now());
         assert!(res.is_empty());
         qdebug!("Output={:0x?}", res);
 
         // EE, CERT, CV, FIN -> FIN
         qdebug!("---- client");
-        let res = client.process(res);
+        let res = client.process(res, Instant::now());
         assert!(res.is_empty());
         qdebug!("Output={:0x?}", res);
 
         // FIN -> 0
         qdebug!("---- server");
-        let res = server.process(res);
+        let res = server.process(res, Instant::now());
         assert!(res.is_empty());
 
         assert_eq!(*client.state(), State::Connected);
@@ -1224,17 +1227,18 @@ mod tests {
     fn test_conn_stream() {
         init_db("./db");
 
-        let mut client = Connection::new_client("example.com", &["alpn"], loopback(), loopback());
-        let mut server = Connection::new_server(&["key"], &["alpn"]);
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
 
         qdebug!("---- client");
-        let res = client.process(Vec::new());
+        let res = client.process(Vec::new(), Instant::now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // -->> Initial[0]: CRYPTO[CH]
 
         qdebug!("---- server");
-        let res = server.process(res);
+        let res = server.process(res, Instant::now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // TODO(agrover@mozilla.com): ACKs
@@ -1242,7 +1246,7 @@ mod tests {
         // <<-- Handshake[0]: CRYPTO[EE, CERT, CV, FIN]
 
         qdebug!("---- client");
-        let res = client.process(res);
+        let res = client.process(res, Instant::now());
         assert_eq!(res.len(), 1);
         assert_eq!(*client.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1250,7 +1254,7 @@ mod tests {
         // -->> Handshake[0]: CRYPTO[FIN], ACK[0]
 
         qdebug!("---- server");
-        let res = server.process(res);
+        let res = server.process(res, Instant::now());
         assert!(res.is_empty());
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1272,11 +1276,11 @@ mod tests {
         client
             .stream_send(client_stream_id2, &vec![7; 50])
             .unwrap_err();
-        let res = client.process(res);
+        let res = client.process(res, Instant::now());
         assert_eq!(res.len(), 4);
 
         qdebug!("---- server");
-        let res = server.process(res);
+        let res = server.process(res, Instant::now());
         assert!(res.is_empty());
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1309,7 +1313,7 @@ mod tests {
             _ => false,
         };
         while !is_done(a) {
-            records = a.process(records);
+            records = a.process(records, Instant::now());
             b = mem::replace(&mut a, b);
         }
     }
@@ -1333,8 +1337,9 @@ mod tests {
     #[test]
     fn test_no_alpn() {
         init_db("./db");
-        let mut client = Connection::new_client("example.com", &["alpn"], loopback(), loopback());
-        let mut server = Connection::new_server(&["key"], &["different-alpn"]);
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut server = Connection::new_server(&["key"], &["different-alpn"]).unwrap();
 
         handshake(&mut client, &mut server);
         // TODO (mt): errors are immediate, which means that we never send CONNECTION_CLOSE

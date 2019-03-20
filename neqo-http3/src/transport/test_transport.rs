@@ -1,11 +1,13 @@
 #![allow(unused_variables, dead_code)]
 
+use std::collections::HashMap;
+use std::time::Instant;
+
 use super::test_stream::{get_stream_type, Stream};
 use neqo_transport::connection::{Datagram, Role, State};
 use neqo_transport::frame::StreamType;
 use neqo_transport::stream::{Recvable, Sendable};
 use neqo_transport::{AppError, ConnectionError, Res};
-use std::collections::HashMap;
 
 pub struct Connection {
     rol: Role,
@@ -41,7 +43,7 @@ impl Connection {
         Connection::new(Role::Server)
     }
 
-    pub fn process(&mut self, _d: Vec<Datagram>) -> Vec<Datagram> {
+    pub fn process(&mut self, _d: Vec<Datagram>, cur_time: Instant) -> Vec<Datagram> {
         self.st = State::Connected;
         Vec::new()
     }
