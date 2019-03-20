@@ -91,7 +91,7 @@ impl PacketHdr {
         }
     }
 
-    pub fn plain_body_len(&self) -> usize {
+    pub fn body_len(&self) -> usize {
         self.body_len
     }
 }
@@ -315,7 +315,7 @@ pub fn decrypt_packet(
     Ok(crypto.aead_decrypt(
         hdr.pn,
         &hdrbytes,
-        &pkt[hdr.hdr_len..hdr.hdr_len + hdr.plain_body_len()],
+        &pkt[hdr.hdr_len..hdr.hdr_len + hdr.body_len()],
     )?)
 }
 
