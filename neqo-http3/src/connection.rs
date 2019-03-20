@@ -3,6 +3,7 @@
 use neqo_common::data::Data;
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::decode_varint;
+use neqo_qpack::header_read_buf::HeaderReadBuf;
 use neqo_transport::connection::{Datagram, Role, State};
 use neqo_transport::frame::StreamType;
 use neqo_transport::stream::{Recvable, Sendable};
@@ -75,19 +76,19 @@ impl Request {
 struct Response {
     status: u32,
     status_line: Vec<u8>,
-    pub headers: ReadBuf,
+    pub headers: HeaderReadBuf,
     pub data_len: u64,
-    pub trailers: ReadBuf,
+    pub trailers: HeaderReadBuf,
 }
 
 impl Response {
-    pub fn new() -> Response {
+    pub fn new(len: usize) -> Response {
         Response {
             status: 0,
             status_line: Vec::new(),
-            headers: ReadBuf::new(),
+            headers: HeaderReadBuf::new(len),
             data_len: 0,
-            trailers: ReadBuf::new(),
+            trailers: HeaderReadBuf::new(0),
         }
     }
 }
@@ -198,8 +199,7 @@ impl ClientRequest {
             }
             ClientRequestState::ReadingHeaders => {
                 if let Some(r) = &mut self.response {
-                    let mut w = RecvableWrapper::wrap(s);
-                    let (_, fin) = r.headers.get(&mut w)?;
+                    let (_, fin) = r.headers.write(s)?;
                     if fin {
                         self.state = ClientRequestState::Closed;
                     } else if r.headers.done() {
@@ -260,15 +260,13 @@ impl ClientRequest {
         if let Some(_) = &self.response {
             panic!("We sould not have a responce here!");
         }
-        self.response = Some(Response::new());
+        self.response = Some(Response::new(len as usize));
 
         if let Some(r) = &mut self.response {
             if len == 0 {
                 self.state = ClientRequestState::WaitingForData;
             } else {
-                r.headers.get_len(len);
-                let mut w = RecvableWrapper::wrap(s);
-                let (_, fin) = r.headers.get(&mut w)?;
+                let (_, fin) = r.headers.write(s)?;
                 if fin {
                     self.state = ClientRequestState::Closed;
                 } else if r.headers.done() {

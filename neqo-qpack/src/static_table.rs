@@ -2,12 +2,26 @@
 
 #[derive(Debug)]
 pub struct StaticTableEntry {
-    pub index: u64,
-    pub name: &'static [u8],
-    pub value: &'static [u8],
+    index: u64,
+    name: &'static [u8],
+    value: &'static [u8],
 }
 
-pub const STATIC_TABLE: &'static [StaticTableEntry] = &[
+impl StaticTableEntry {
+    pub fn name(&self) -> &[u8] {
+        self.name
+    }
+
+    pub fn value(&self) -> &[u8] {
+        self.value
+    }
+
+    pub fn index(&self) -> u64 {
+        self.index
+    }
+}
+
+pub const HEADER_STATIC_TABLE: &'static [StaticTableEntry] = &[
     StaticTableEntry {
         index: 0,
         name: b":authority",

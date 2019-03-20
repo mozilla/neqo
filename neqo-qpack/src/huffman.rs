@@ -1,10 +1,10 @@
 // TOTO(dragana) remove this
 #![allow(unused_variables, dead_code)]
 
+use crate::header_read_buf::HeaderReadBuf;
 use crate::huffman_decode_helper::{HuffmanDecodeTable, HUFFMAN_DECODE_ROOT};
 use crate::huffman_table::HUFFMAN_TABLE;
 use crate::{Error, Res};
-use neqo_common::readbuf::ReadBuf;
 
 pub fn encode_header_block(input: &[u8], output: &mut Vec<u8>) {
     let mut left: u8 = 8;
@@ -45,7 +45,7 @@ pub fn encode_header_block(input: &[u8], output: &mut Vec<u8>) {
     }
 }
 
-pub fn decode_header_block(input: &mut ReadBuf, output: &mut Vec<u8>) -> Res<()> {
+pub fn decode_header_block(input: &mut HeaderReadBuf, output: &mut Vec<u8>) -> Res<()> {
     let mut byte: u8 = 0;
     let mut bits_left: u8 = 0;
     while input.remaining() > 0 {
@@ -69,7 +69,7 @@ pub fn decode_header_block(input: &mut ReadBuf, output: &mut Vec<u8>) -> Res<()>
     Ok(())
 }
 
-fn extract_byte(input: &mut ReadBuf, byte: &mut u8, bits_left: &mut u8) -> Res<()> {
+fn extract_byte(input: &mut HeaderReadBuf, byte: &mut u8, bits_left: &mut u8) -> Res<()> {
     if *bits_left != 0 {
         let (c, left) = input.read_bits(8 - *bits_left);
         *byte = *byte | (c << ((8 - *bits_left) - left));
@@ -85,7 +85,7 @@ fn extract_byte(input: &mut ReadBuf, byte: &mut u8, bits_left: &mut u8) -> Res<(
 
 fn decode_huffman_character(
     table: &HuffmanDecodeTable,
-    input: &mut ReadBuf,
+    input: &mut HeaderReadBuf,
     byte: &mut u8,
     bits_left: &mut u8,
 ) -> Res<Option<u8>> {
@@ -208,7 +208,7 @@ mod tests {
             let mut out: Vec<u8> = Vec::new();
             assert_eq!(
                 Ok(()),
-                decode_header_block(&mut ReadBuf::from(e.res), &mut out)
+                decode_header_block(&mut HeaderReadBuf::from(e.res), &mut out)
             );
 
             assert_eq!(out[..], *e.val);
