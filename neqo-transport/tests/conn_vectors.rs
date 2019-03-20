@@ -56,7 +56,7 @@ fn process_client_initial() {
     let mut d = Data::from_hex(INITIAL_PACKET);
     let dgram = Datagram::new(loopback(), loopback(), d.as_mut_vec());
     assert_eq!(*server.state(), connection::State::WaitInitial);
-    let out = server.process(vec![dgram]).unwrap();
+    let out = server.process(vec![dgram]);
     assert_eq!(*server.state(), connection::State::Handshaking);
     assert_eq!(out.len(), 1);
 }
