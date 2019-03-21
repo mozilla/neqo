@@ -351,12 +351,9 @@ impl SecretAgent {
 
         // Prepare to encode.
         let mut encoded = Vec::with_capacity(encoded_len);
-        let mut cursor = 0usize;
         let mut add = |v: String| {
             encoded.push(v.len() as u8);
-            cursor += 1;
             encoded.extend_from_slice(v.as_bytes());
-            cursor += v.len();
         };
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
