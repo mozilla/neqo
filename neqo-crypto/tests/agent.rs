@@ -76,6 +76,7 @@ fn raw() {
     assert_eq!(client_preinfo.early_data(), false);
     assert_eq!(client_preinfo.early_data_cipher(), None);
     assert_eq!(client_preinfo.max_early_data(), 0);
+    assert_eq!(client_preinfo.alpn(), None);
 
     let server_records = forward_records(&mut server, client_records).expect("read CH, send SH");
     assert!(server_records.len() > 0);
@@ -87,6 +88,7 @@ fn raw() {
     assert_eq!(server_preinfo.early_data(), false);
     assert_eq!(server_preinfo.early_data_cipher(), None);
     assert_eq!(server_preinfo.max_early_data(), 0);
+    assert_eq!(server_preinfo.alpn(), None);
 
     let client_records = forward_records(&mut client, server_records).expect("send CF");
     assert_eq!(client_records.len(), 0);

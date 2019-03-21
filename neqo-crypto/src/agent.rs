@@ -28,8 +28,39 @@ pub enum HandshakeState {
     Failed(Error),
 }
 
+fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
+    let mut alpn_state = ssl::SSLNextProtoState::SSL_NEXT_PROTO_NO_SUPPORT;
+    let mut chosen = vec![0u8; 255];
+    let mut chosen_len: c_uint = 0;
+    let rv = unsafe {
+        ssl::SSL_GetNextProto(
+            fd,
+            &mut alpn_state,
+            chosen.as_mut_ptr(),
+            &mut chosen_len,
+            chosen.len() as c_uint,
+        )
+    };
+    result::result(rv)?;
+
+    let alpn = match (pre, alpn_state) {
+        (true, ssl::SSLNextProtoState::SSL_NEXT_PROTO_EARLY_VALUE)
+        | (false, ssl::SSLNextProtoState::SSL_NEXT_PROTO_NEGOTIATED)
+        | (false, ssl::SSLNextProtoState::SSL_NEXT_PROTO_SELECTED) => {
+            chosen.truncate(chosen_len as usize);
+            Some(match String::from_utf8(chosen) {
+                Ok(a) => a,
+                _ => return Err(Error::InternalError),
+            })
+        }
+        _ => None,
+    };
+    Ok(alpn)
+}
+
 pub struct SecretAgentPreInfo {
     info: ssl::SSLPreliminaryChannelInfo,
+    alpn: Option<String>,
 }
 
 macro_rules! preinfo_arg {
@@ -57,7 +88,11 @@ impl SecretAgentPreInfo {
             )
         };
         result::result(rv)?;
-        Ok(SecretAgentPreInfo { info })
+
+        Ok(SecretAgentPreInfo {
+            info,
+            alpn: get_alpn(fd, true)?,
+        })
     }
 
     preinfo_arg!(version, ssl_preinfo_version, protocolVersion: Version);
@@ -69,6 +104,10 @@ impl SecretAgentPreInfo {
 
     pub fn max_early_data(&self) -> usize {
         self.info.maxEarlyDataSize as usize
+    }
+
+    pub fn alpn(&self) -> Option<&String> {
+        self.alpn.as_ref()
     }
 
     preinfo_arg!(
@@ -89,31 +128,6 @@ pub struct SecretAgentInfo {
 
 impl SecretAgentInfo {
     fn new(fd: *mut ssl::PRFileDesc) -> Res<SecretAgentInfo> {
-        let mut alpn_state = ssl::SSLNextProtoState::SSL_NEXT_PROTO_NO_SUPPORT;
-        let mut chosen = vec![0u8; 255];
-        let mut chosen_len: c_uint = 0;
-        let rv = unsafe {
-            ssl::SSL_GetNextProto(
-                fd,
-                &mut alpn_state,
-                chosen.as_mut_ptr(),
-                &mut chosen_len,
-                chosen.len() as c_uint,
-            )
-        };
-        result::result(rv)?;
-        let alpn = match alpn_state {
-            ssl::SSLNextProtoState::SSL_NEXT_PROTO_NEGOTIATED
-            | ssl::SSLNextProtoState::SSL_NEXT_PROTO_SELECTED => {
-                chosen.truncate(chosen_len as usize);
-                Some(match String::from_utf8(chosen) {
-                    Ok(a) => a,
-                    _ => return Err(Error::InternalError),
-                })
-            }
-            _ => None,
-        };
-
         let mut info: ssl::SSLChannelInfo = unsafe { mem::uninitialized() };
         let rv = unsafe {
             ssl::SSL_GetChannelInfo(
@@ -128,7 +142,7 @@ impl SecretAgentInfo {
             cipher: info.cipherSuite as Cipher,
             group: info.keaGroup as Group,
             early_data: info.earlyDataAccepted != 0,
-            alpn,
+            alpn: get_alpn(fd, false)?,
         })
     }
 
@@ -383,6 +397,8 @@ impl SecretAgent {
         Ok(())
     }
 
+    // This function tracks whether handshake() or handshake_raw() was used
+    // and prevents the other from being used.
     fn set_raw(&mut self, r: bool) -> Res<()> {
         if self.raw.is_none() {
             self.secrets.register(self.fd)?;
@@ -395,6 +411,9 @@ impl SecretAgent {
         }
     }
 
+    /// Get information about the connection.  This includes the version, ciphersuite, and ALPN.
+    ///
+    /// Calling this function returns None until the connection is complete.
     pub fn info(&self) -> Option<&SecretAgentInfo> {
         // TODO(mt) consider whether this info should instead be attached
         // to the Completed state.
@@ -404,6 +423,7 @@ impl SecretAgent {
     /// Get any preliminary information about the status of the connection.
     ///
     /// This includes whether 0-RTT was accepted and any information related to that.
+    /// Calling this function collects all the relevant information.
     pub fn preinfo(&self) -> Res<SecretAgentPreInfo> {
         SecretAgentPreInfo::new(self.fd)
     }

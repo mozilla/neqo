@@ -118,6 +118,7 @@ variables = [
 types = ["SECItem", "CK_ATTRIBUTE_TYPE", "CK_MECHANISM_TYPE"]
 functions = [
     "CERT_DestroyCertificate",
+    "CERT_GetCertificateDer",
     "PK11_Encrypt",
     "PK11_ExtractKeyValue",
     "PK11_FindCertFromNickname",
