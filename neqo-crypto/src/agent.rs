@@ -368,6 +368,11 @@ impl SecretAgent {
         result::result(rv)
     }
 
+    /// Install an extension handler.
+    ///
+    /// This can be called multiple times with different values for `ext`.  The handler is provided as
+    /// Rc<RefCell<>> so that the caller is able to hold a reference to the handler and later access any
+    /// state that it accumulates.
     pub fn extension_handler(
         &mut self,
         ext: Extension,
