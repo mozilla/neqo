@@ -290,13 +290,15 @@ impl RecvStreamState {
 
 #[derive(Debug, PartialEq)]
 pub struct RecvStream {
+    max_stream_data: u64,
     final_size: Option<u64>,
     state: RecvStreamState,
 }
 
 impl RecvStream {
-    pub fn new() -> RecvStream {
+    pub fn new(max_stream_data: u64) -> RecvStream {
         RecvStream {
+            max_stream_data,
             final_size: None,
             state: RecvStreamState::new(),
         }
@@ -433,7 +435,7 @@ mod tests {
 
     #[test]
     fn test_stream_rx() {
-        let mut s = RecvStream::new();
+        let mut s = RecvStream::new(1024);
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, vec![1; 10]).unwrap();
@@ -480,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_stream_rx_dedupe() {
-        let mut s = RecvStream::new();
+        let mut s = RecvStream::new(1024);
 
         let mut buf = vec![0u8; 100];
 
@@ -568,7 +570,7 @@ mod tests {
     fn test_stream_flowc_update() {
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = RecvStream::new();
+        let mut s = RecvStream::new(1024);
 
         let mut buf = vec![0u8; RX_STREAM_DATA_WINDOW as usize * 4]; // Make it overlarge
 
@@ -585,7 +587,7 @@ mod tests {
     fn test_stream_rx_window() {
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = RecvStream::new();
+        let mut s = RecvStream::new(1024);
 
         assert_eq!(s.needs_flowc_update(), None);
         s.inbound_stream_frame(false, 0, frame1).unwrap();

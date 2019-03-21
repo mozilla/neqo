@@ -48,6 +48,7 @@ pub enum Error {
     HandshakeFailed,
     KeysNotFound,
     UnknownTransportParameter,
+    ConnectionState,
 }
 
 impl Error {
@@ -77,7 +78,8 @@ impl Error {
             | Error::UnexpectedMessage
             | Error::HandshakeFailed
             | Error::KeysNotFound
-            | Error::UnknownTransportParameter => 1,
+            | Error::UnknownTransportParameter
+            | Error::ConnectionState => 1,
         }
     }
 }

@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::cmp::min;
+use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::mem;
@@ -188,14 +188,16 @@ impl SendStreamState {
 
 #[derive(Debug)]
 pub struct SendStream {
+    max_stream_data: u64,
     state: SendStreamState,
     stream_id: u64,
     flow_mgr: Rc<RefCell<FlowMgr>>,
 }
 
 impl SendStream {
-    pub fn new(stream_id: u64, flow_mgr: Rc<RefCell<FlowMgr>>) -> SendStream {
+    pub fn new(stream_id: u64, max_stream_data: u64, flow_mgr: Rc<RefCell<FlowMgr>>) -> SendStream {
         SendStream {
+            max_stream_data,
             state: SendStreamState::Ready,
             stream_id,
             flow_mgr,
@@ -222,6 +224,10 @@ impl SendStream {
         self.state.final_size()
     }
 
+    pub fn max_stream_data(&mut self, value: u64) {
+        self.max_stream_data = max(self.max_stream_data, value)
+    }
+
     #[allow(dead_code)]
     fn reset_acked(&mut self) {
         match self.state {
@@ -239,6 +245,8 @@ impl SendStream {
 
 impl Sendable for SendStream {
     fn send(&mut self, buf: &[u8]) -> Res<usize> {
+        //let flowc_space = self.max_stream_data;
+
         let (sent, data_limit) = match self.state {
             SendStreamState::Ready => {
                 let mut tx_buf = TxBuffer::new();
@@ -312,7 +320,7 @@ mod tests {
     #[test]
     fn test_stream_tx() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let mut s = SendStream::new(4, flow_mgr.clone());
+        let mut s = SendStream::new(4, 1024, flow_mgr.clone());
 
         let res = s.send(&vec![4; 100]).unwrap();
         assert_eq!(res, 100);

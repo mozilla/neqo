@@ -23,8 +23,8 @@ use crate::packet::*;
 use crate::recv_stream::{RecvStream, RxStreamOrderer};
 use crate::send_stream::{SendStream, TxBuffer};
 use crate::tparams::TransportParametersHandler;
+use crate::tparams::*;
 use crate::tracking::RecvdPackets;
-
 use crate::{hex, AppError, ConnectionError, Error, Recvable, Res, Sendable};
 
 #[derive(Debug, Default)]
@@ -810,7 +810,11 @@ impl Connection {
             Frame::MaxStreamData {
                 stream_id,
                 maximum_stream_data,
-            } => {} // TODO(agrover@mozilla.com): lookup stream and modify its max_stream_data
+            } => {
+                if let Some(stream) = self.send_streams.get_mut(&stream_id) {
+                    stream.max_stream_data(maximum_stream_data);
+                }
+            }
             Frame::MaxStreams {
                 stream_type,
                 maximum_streams,
@@ -955,16 +959,23 @@ impl Connection {
     ) -> Res<()> {
         // TODO(agrover@mozilla.com): more checking here
 
-        let stream_type = match stream_id & 0x1 == 0 {
-            true => StreamType::BiDi,
-            false => StreamType::UniDi,
+        let max_data_if_new_stream = match stream_id & 0x2 == 0 {
+            true => self
+                .tps
+                .borrow()
+                .local
+                .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE),
+            false => self
+                .tps
+                .borrow()
+                .local
+                .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI),
         };
 
-        // TODO(agrover@mozilla.com): May create a stream so check against streams_max
         let stream = self
             .recv_streams
             .entry(stream_id)
-            .or_insert(RecvStream::new());
+            .or_insert(RecvStream::new(max_data_if_new_stream));
 
         stream.inbound_stream_frame(fin, offset, data)?;
 
@@ -974,24 +985,60 @@ impl Connection {
     // Returns new stream id
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         // TODO(agrover@mozilla.com): Check against max_stream_id
+
+        // Can't make streams before remote tparams are received as part of
+        // handshake
+        if self.state != State::Connected {
+            return Err(Error::ConnectionState);
+        }
+
         let role_val = match self.rol {
             Role::Server => 1,
             Role::Client => 0,
         };
+
         Ok(match st {
-            StreamType::BiDi => {
-                let new_id = (self.next_bi_stream_id << 2) + role_val;
-                self.next_bi_stream_id += 1;
-                self.send_streams
-                    .insert(new_id, SendStream::new(new_id, self.flow_mgr.clone()));
-                new_id
-            }
             StreamType::UniDi => {
                 let new_id = (self.next_uni_stream_id << 2) + 2 + role_val;
                 self.next_uni_stream_id += 1;
-                self.send_streams
-                    .insert(new_id, SendStream::new(new_id, self.flow_mgr.clone()));
-                self.recv_streams.insert(new_id, RecvStream::new());
+                let initial_max_stream_data = self
+                    .tps
+                    .borrow()
+                    .remote
+                    .as_ref()
+                    .expect("remote tparams are valid when State::Connected")
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI);
+
+                self.send_streams.insert(
+                    new_id,
+                    SendStream::new(new_id, initial_max_stream_data, self.flow_mgr.clone()),
+                );
+                new_id
+            }
+            StreamType::BiDi => {
+                let new_id = (self.next_bi_stream_id << 2) + role_val;
+                self.next_bi_stream_id += 1;
+                let send_initial_max_stream_data = self
+                    .tps
+                    .borrow()
+                    .remote
+                    .as_ref()
+                    .expect("remote tparams are valid when State::Connected")
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+
+                self.send_streams.insert(
+                    new_id,
+                    SendStream::new(new_id, send_initial_max_stream_data, self.flow_mgr.clone()),
+                );
+
+                let recv_initial_max_stream_data = self
+                    .tps
+                    .borrow()
+                    .local
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
+
+                self.recv_streams
+                    .insert(new_id, RecvStream::new(recv_initial_max_stream_data));
                 new_id
             }
         })
@@ -1250,12 +1297,19 @@ mod tests {
 
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let res = client.process(vec![], now());
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let res = server.process(res, now());
+
+        let res = client.process(res, now());
+        // client now in State::Connected
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 4);
 
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let res = server.process(res, now());
+        // server now in State::Connected
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 3);
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 7);
         assert_eq!(server.stream_create(StreamType::BiDi).unwrap(), 1);
