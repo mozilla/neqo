@@ -1,9 +1,7 @@
 #![allow(unused_variables, dead_code)]
 
-use std::collections::HashMap;
-use std::time::Instant;
-
 use neqo_common::data::Data;
+use neqo_common::now;
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::decode_varint;
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
@@ -12,6 +10,7 @@ use neqo_transport::connection::Role;
 use neqo_transport::frame::StreamType;
 use neqo_transport::{Datagram, State};
 use neqo_transport::{Recvable, Sendable};
+use std::collections::HashMap;
 
 use crate::hframe::{
     ElementDependencyType, HFrame, HFrameReader, HSettingType, PrioritizedElementType,
@@ -521,7 +520,7 @@ impl HttpConn {
 
     pub fn process(&mut self, d: Vec<Datagram>) -> Vec<Datagram> {
         let state_before = self.state().clone();
-        let out = self.conn.process(d, Instant::now());
+        let out = self.conn.process(d, now());
         let state_after = self.state().clone();
         if state_after != state_before {
             let res = self.process_state_change(&state_after);

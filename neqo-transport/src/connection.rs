@@ -8,7 +8,6 @@ use std::mem;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::rc::Rc;
-use std::time::Instant;
 
 use neqo_common::data::Data;
 use neqo_common::varint::*;
@@ -24,6 +23,8 @@ use crate::packet::*;
 use crate::recv_stream::{RecvStream, RxStreamOrderer};
 use crate::send_stream::{SendStream, TxBuffer};
 use crate::tparams::TransportParametersHandler;
+use crate::tracking::RecvdPackets;
+
 use crate::{hex, AppError, ConnectionError, Error, Recvable, Res, Sendable};
 
 #[derive(Debug, Default)]
@@ -177,8 +178,17 @@ impl CryptoDxState {
 struct CryptoState {
     rx: CryptoDxState,
     tx: CryptoDxState,
+    recvd: Option<RecvdPackets>,
 }
 
+impl CryptoState {
+    fn ensure_recvd_state(&mut self, pn: u64) -> &mut RecvdPackets {
+        if self.recvd.is_none() {
+            self.recvd = Some(RecvdPackets::new(pn));
+        }
+        self.recvd.as_mut().unwrap()
+    }
+}
 #[derive(Debug, Default)]
 struct CryptoStream {
     tx: TxBuffer,
@@ -223,7 +233,7 @@ pub struct Connection {
     tx_pns: [u64; 4],
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
     generators: Vec<FrameGenerator>,
-    deadline: Instant,
+    deadline: u64,
     max_data: u64,
     max_streams: u64,
     highest_stream: Option<u64>,
@@ -334,7 +344,7 @@ impl Connection {
             ],
             crypto_states: [None, None, None, None],
             tx_pns: [0; 4],
-            deadline: Instant::now(),
+            deadline: 0,
             max_data: 0,
             max_streams: 0,
             highest_stream: None,
@@ -399,16 +409,16 @@ impl Connection {
 
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
-    pub fn process<I>(&mut self, in_dgrams: I, cur_time: Instant) -> Vec<Datagram>
+    pub fn process<I>(&mut self, in_dgrams: I, cur_time: u64) -> Vec<Datagram>
     where
         I: IntoIterator<Item = Datagram>,
     {
         for dgram in in_dgrams {
-            let res = self.input(dgram);
+            let res = self.input(dgram, cur_time);
             self.absorb_error(res);
         }
 
-        if Instant::now() >= self.deadline {
+        if cur_time >= self.deadline {
             // Timer expired.
             match self.state {
                 State::Init => {
@@ -427,7 +437,7 @@ impl Connection {
         }
     }
 
-    fn input(&mut self, d: Datagram) -> Res<()> {
+    fn input(&mut self, d: Datagram, cur_time: u64) -> Res<()> {
         let mut slc = &d[..];
 
         // Handle each packet in the datagram
@@ -507,6 +517,13 @@ impl Connection {
             }
 
             self.input_packet(hdr.epoch, Data::from_slice(&body))?;
+
+            // Mark the packet as received.
+            self.ensure_crypto_state(hdr.epoch)
+                .as_mut()
+                .unwrap()
+                .ensure_recvd_state(hdr.pn)
+                .set_received(cur_time, hdr.pn, true);
 
             match &self.paths {
                 None => {
@@ -873,13 +890,21 @@ impl Connection {
         let sds = CryptoDxState::new_initial("server in", dcid);
 
         self.crypto_states[0] = Some(match self.rol {
-            Role::Client => CryptoState { tx: cds, rx: sds },
-            Role::Server => CryptoState { tx: sds, rx: cds },
+            Role::Client => CryptoState {
+                tx: cds,
+                rx: sds,
+                recvd: None,
+            },
+            Role::Server => CryptoState {
+                tx: sds,
+                rx: cds,
+                recvd: None,
+            },
         });
     }
 
     // Get a crypto state, making it if possible, otherwise return an error.
-    fn ensure_crypto_state(&mut self, epoch: Epoch) -> Res<&CryptoState> {
+    fn ensure_crypto_state(&mut self, epoch: Epoch) -> Res<&mut CryptoState> {
         let cs = &self.crypto_states[epoch as usize];
 
         // Note: I had originally written an early return, but the
@@ -908,10 +933,11 @@ impl Connection {
             self.crypto_states[epoch as usize] = Some(CryptoState {
                 rx: CryptoDxState::new(format!("read_epoch={}", epoch), rs, cipher),
                 tx: CryptoDxState::new(format!("write_epoch={}", epoch), ws, cipher),
+                recvd: None,
             });
         }
 
-        Ok(self.crypto_states[epoch as usize].as_ref().unwrap())
+        Ok(self.crypto_states[epoch as usize].as_mut().unwrap())
     }
 
     fn pn_space(epoch: Epoch) -> Epoch {
@@ -1214,6 +1240,10 @@ mod tests {
         "127.0.0.1:443".parse().unwrap()
     }
 
+    fn now() -> u64 {
+        0
+    }
+
     #[test]
     fn test_conn_stream_create() {
         init_db("./db");
@@ -1239,38 +1269,38 @@ mod tests {
         qdebug!("---- client");
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let res = client.process(Vec::new(), Instant::now());
+        let res = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         // CH -> SH
         qdebug!("---- server");
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
-        let res = server.process(res, Instant::now());
+        let res = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         // SH -> 0
         qdebug!("---- client");
-        let res = client.process(res, Instant::now());
+        let res = client.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         // 0 -> EE, CERT, CV, FIN
         qdebug!("---- server");
-        let res = server.process(res, Instant::now());
+        let res = server.process(res, now());
         assert!(res.is_empty());
         qdebug!("Output={:0x?}", res);
 
         // EE, CERT, CV, FIN -> FIN
         qdebug!("---- client");
-        let res = client.process(res, Instant::now());
+        let res = client.process(res, now());
         assert!(res.is_empty());
         qdebug!("Output={:0x?}", res);
 
         // FIN -> 0
         qdebug!("---- server");
-        let res = server.process(res, Instant::now());
+        let res = server.process(res, now());
         assert!(res.is_empty());
 
         assert_eq!(*client.state(), State::Connected);
@@ -1289,13 +1319,13 @@ mod tests {
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
 
         qdebug!("---- client");
-        let res = client.process(Vec::new(), Instant::now());
+        let res = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // -->> Initial[0]: CRYPTO[CH]
 
         qdebug!("---- server");
-        let res = server.process(res, Instant::now());
+        let res = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // TODO(agrover@mozilla.com): ACKs
@@ -1303,7 +1333,7 @@ mod tests {
         // <<-- Handshake[0]: CRYPTO[EE, CERT, CV, FIN]
 
         qdebug!("---- client");
-        let res = client.process(res, Instant::now());
+        let res = client.process(res, now());
         assert_eq!(res.len(), 1);
         assert_eq!(*client.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1311,7 +1341,7 @@ mod tests {
         // -->> Handshake[0]: CRYPTO[FIN], ACK[0]
 
         qdebug!("---- server");
-        let res = server.process(res, Instant::now());
+        let res = server.process(res, now());
         assert!(res.is_empty());
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1333,11 +1363,11 @@ mod tests {
         client
             .stream_send(client_stream_id2, &vec![7; 50])
             .unwrap_err();
-        let res = client.process(res, Instant::now());
+        let res = client.process(res, now());
         assert_eq!(res.len(), 4);
 
         qdebug!("---- server");
-        let res = server.process(res, Instant::now());
+        let res = server.process(res, now());
         assert!(res.is_empty());
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1370,7 +1400,7 @@ mod tests {
             _ => false,
         };
         while !is_done(a) {
-            records = a.process(records, Instant::now());
+            records = a.process(records, now());
             b = mem::replace(&mut a, b);
         }
     }

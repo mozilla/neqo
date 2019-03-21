@@ -1,9 +1,9 @@
+use neqo_common::now;
 use neqo_crypto::init_db;
 use neqo_transport::{Connection, Datagram, State};
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
-use std::time::Instant;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -94,7 +94,7 @@ fn main() {
             in_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
         }
 
-        let out_dgrams = server.process(in_dgrams.drain(..), Instant::now());
+        let out_dgrams = server.process(in_dgrams.drain(..), now());
         if let State::Closed(e) = server.state() {
             eprintln!("Closed: {:?}", e);
             break;

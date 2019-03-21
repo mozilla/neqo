@@ -3,6 +3,7 @@
 pub mod data;
 pub mod readbuf;
 pub mod varint;
+use std::time::SystemTime;
 
 // Cribbed from the |matches| crate, for simplicity.
 #[macro_export]
@@ -64,7 +65,7 @@ pub enum Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
         None
     }
 }
@@ -73,4 +74,11 @@ impl ::std::fmt::Display for Error {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "Reader error: {:?}", self)
     }
+}
+
+pub fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
 }

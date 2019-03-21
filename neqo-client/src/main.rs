@@ -1,8 +1,8 @@
+use neqo_common::now;
 use neqo_crypto::init_db;
 use neqo_transport::{Connection, Datagram, State};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
-use std::time::Instant;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -70,7 +70,7 @@ fn main() {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     loop {
-        let out_dgrams = client.process(in_dgrams.drain(..), Instant::now());
+        let out_dgrams = client.process(in_dgrams.drain(..), now());
         if let State::Closed(e) = client.state() {
             eprintln!("Closed: {:?}", e);
             break;
