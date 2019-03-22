@@ -105,6 +105,14 @@ fn raw() {
     let server_records = forward_records(&mut server, client_records).expect("finish");
     assert_eq!(server_records.len(), 0);
     assert_eq!(*server.state(), HandshakeState::Complete);
+
+    // The client should have one certificate for the server.
+    let mut certs = client.peer_certificate().unwrap();
+    let cert_vec: Vec<&[u8]> = certs.collect();
+    assert_eq!(1, cert_vec.len());
+
+    // The server shouldn't have a client certificate.
+    assert!(server.peer_certificate().is_none());
 }
 
 #[test]

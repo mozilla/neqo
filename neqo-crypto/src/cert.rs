@@ -1,6 +1,5 @@
 use std::ptr::{null_mut, NonNull};
 
-use crate::err::{Error, Res};
 use crate::p11::{
     CERTCertList, CERTCertListNode, CERT_GetCertificateDer, CertList, PRCList, SECItem, SECItemType,
 };
@@ -13,14 +12,14 @@ pub struct CertificateChain {
 }
 
 impl CertificateChain {
-    pub(crate) fn new(fd: *mut PRFileDesc) -> Res<Self> {
+    pub(crate) fn new(fd: *mut PRFileDesc) -> Option<Self> {
         let chain = unsafe { SSL_PeerCertificateChain(fd) };
         let certs = match NonNull::new(chain as *mut CERTCertList) {
             Some(certs_ptr) => CertList::new(certs_ptr),
-            None => return Err(Error::InternalError),
+            None => return None,
         };
         let cursor = CertificateChain::head(&certs);
-        Ok(CertificateChain { certs, cursor })
+        Some(CertificateChain { certs, cursor })
     }
 
     fn head(certs: &CertList) -> *const CERTCertListNode {

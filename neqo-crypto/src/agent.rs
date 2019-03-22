@@ -427,7 +427,7 @@ impl SecretAgent {
     }
 
     /// Get the peer's certificate chain.
-    pub fn peer_certificate(&self) -> Res<CertificateChain> {
+    pub fn peer_certificate(&self) -> Option<CertificateChain> {
         CertificateChain::new(self.fd)
     }
 
