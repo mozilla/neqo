@@ -6,7 +6,11 @@ pub struct QPData {
 }
 
 impl QPData {
-    fn write_byte(&mut self, b: u8) {
+    pub fn len(&self) -> usize {
+        self.buf.len()
+    }
+
+    pub fn write_byte(&mut self, b: u8) {
         self.buf.push(b);
     }
 

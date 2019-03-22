@@ -3,11 +3,12 @@
 use neqo_common::data::Data;
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::decode_varint;
-use neqo_qpack::header_read_buf::HeaderReadBuf;
-use neqo_transport::{Datagram, State};
+use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
+use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::connection::Role;
 use neqo_transport::frame::StreamType;
 use neqo_transport::stream::{Recvable, Sendable};
+use neqo_transport::{Datagram, State};
 use std::collections::HashMap;
 
 use crate::hframe::{
@@ -16,6 +17,7 @@ use crate::hframe::{
 use crate::recvable::RecvableWrapper;
 use crate::transport::Connection;
 use crate::{Error, Res};
+use std::mem;
 
 const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
@@ -23,73 +25,76 @@ const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 const MAX_HEADER_LIST_SIZE_DEFAULT: u64 = u64::max_value();
 const NUM_PLACEHOLDERS_DEFAULT: u64 = 0;
 
-// TODO(dragana) this will need to make a list out of a header stream provided by necko.
-struct HeaderList {
-    headers: Vec<(String, String)>,
-}
-
+#[derive(Debug)]
 struct Request {
     method: String,
-    target: String,
-    headers: HeaderList,
+    scheme: String,
+    host: String,
+    path: String,
+    headers: Vec<(String, String)>,
     buf: Option<Data>,
 }
 
 impl Request {
-    pub fn new(method: String, target: String, headers: HeaderList) -> Request {
-        Request {
-            method: method,
-            target: target,
-            headers: headers,
+    pub fn new(
+        method: &String,
+        scheme: &String,
+        host: &String,
+        path: &String,
+        headers: &Vec<(String, String)>,
+    ) -> Request {
+        let mut r = Request {
+            method: method.clone(),
+            scheme: scheme.clone(),
+            host: host.clone(),
+            path: path.clone(),
+            headers: Vec::new(),
             buf: None,
-        }
+        };
+        r.headers.push((String::from(":method"), method.clone()));
+        r.headers.push((String::from(":scheme"), r.scheme.clone()));
+        r.headers.push((String::from(":authority"), r.host.clone()));
+        r.headers.push((String::from(":path"), r.path.clone()));
+        r.headers.extend_from_slice(&headers);
+        r
     }
 
     // TODO(dragana) this will be encoded by QPACK
-    pub fn encode_request(&mut self) {
-        let mut len = self.method.as_bytes().len()
-            + 1
-            + self.target.as_bytes().len()
-            + " HTTP/1.1".as_bytes().len()
-            + 2;
-        for i in self.headers.headers.iter() {
-            len += i.0.as_bytes().len() + 2 + i.1.as_bytes().len() + 2;
-        }
-        let f = HFrame::Headers { len: len as u64 };
+    pub fn encode_request(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
+        log!(
+            Level::Debug,
+            "Encoding headers for {}{}",
+            self.host,
+            self.path
+        );
+        let mut encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
+        let f = HFrame::Headers {
+            len: encoded_headers.len() as u64,
+        };
         let mut d = Data::default();
         f.encode(&mut d).unwrap();
-        d.encode_vec(self.method.as_bytes());
-        d.encode_vec(" ".as_bytes());
-        d.encode_vec(self.target.as_bytes());
-        d.encode_vec(" HTTP/1.1".as_bytes());
-        d.encode_vec("\r\n".as_bytes());
-        for (n, v) in self.headers.headers.iter() {
-            d.encode_vec(n.as_bytes());
-            d.encode_vec(": ".as_bytes());
-            d.encode_vec(v.as_bytes());
-            d.encode_vec("\r\n".as_bytes());
-        }
-        d.encode_vec("\r\n".as_bytes());
+        d.encode_vec(encoded_headers.as_mut_vec());
         self.buf = Some(d);
     }
 }
 
+#[derive(Debug)]
 struct Response {
     status: u32,
     status_line: Vec<u8>,
-    pub headers: HeaderReadBuf,
+    pub headers: Option<Vec<(String, String)>>,
     pub data_len: u64,
-    pub trailers: HeaderReadBuf,
+    pub trailers: Option<Vec<(String, String)>>,
 }
 
 impl Response {
-    pub fn new(len: usize) -> Response {
+    pub fn new() -> Response {
         Response {
             status: 0,
             status_line: Vec::new(),
-            headers: HeaderReadBuf::new(len),
+            headers: None,
             data_len: 0,
-            trailers: HeaderReadBuf::new(0),
+            trailers: None,
         }
     }
 }
@@ -108,11 +113,12 @@ impl Response {
  *    Closed : waiting for app to pick up data, after that we can delete the ClientRequest.
  */
 
-#[derive(PartialEq, Debug, Copy, Clone)]
+#[derive(PartialEq, Debug)]
 enum ClientRequestState {
     SendingRequest,
     WaitingForResponseHeaders,
-    ReadingHeaders,
+    ReadingHeaders { buf: Vec<u8>, offset: usize },
+    BlockedDecodingHeaders { buf: Vec<u8> },
     WaitingForData,
     ReadingData,
     ReadingTrailers,
@@ -120,39 +126,62 @@ enum ClientRequestState {
 }
 
 //  This is used for normal request/responses.
+#[derive(Debug)]
 struct ClientRequest {
     role: Role,
     state: ClientRequestState,
+    stream_id: u64,
     request: Request,
-    response: Option<Response>,
+    response: Response,
     frame_reader: HFrameReader,
     priority_received: bool,
 }
 
 impl ClientRequest {
-    pub fn new(role: Role, method: String, target: String, headers: HeaderList) -> ClientRequest {
+    pub fn new(
+        role: Role,
+        id: u64,
+        method: &String,
+        scheme: &String,
+        host: &String,
+        path: &String,
+        headers: &Vec<(String, String)>,
+    ) -> ClientRequest {
+        log!(Level::Debug, "Create a request stream_id={}", id);
         ClientRequest {
             role: role,
             state: ClientRequestState::SendingRequest,
-            request: Request::new(method, target, headers),
-            response: None,
+            stream_id: id,
+            request: Request::new(method, scheme, host, path, headers),
+            response: Response::new(),
             frame_reader: HFrameReader::new(),
             priority_received: false,
         }
     }
 
-    // TODO: Currently we cannot send data with a request
-    pub fn send(&mut self, s: &mut Sendable) -> Res<()> {
+    // TODO: Currently we cannot send data along with a request
+    pub fn send(&mut self, s: &mut Sendable, encoder: &mut QPackEncoder) -> Res<()> {
         if self.state == ClientRequestState::SendingRequest {
             if let None = self.request.buf {
-                self.request.encode_request();
+                self.request.encode_request(encoder, self.stream_id);
             }
             if let Some(d) = &mut self.request.buf {
                 let sent = s.send(d.as_mut_vec())?;
+                log!(
+                    Level::Debug,
+                    "Request stream_id={}: {} bytes sent.",
+                    self.stream_id,
+                    sent
+                );
                 if sent == d.remaining() {
                     self.request.buf = None;
                     s.close();
                     self.state = ClientRequestState::WaitingForResponseHeaders;
+                    log!(
+                        Level::Debug,
+                        "Request stream_id={}: done sending request.",
+                        self.stream_id
+                    );
                 } else {
                     d.read(sent);
                 }
@@ -161,23 +190,37 @@ impl ClientRequest {
         Ok(())
     }
 
-    fn get_frame(&mut self, s: &mut Recvable) -> Res<()> {
+    fn recv_frame(&mut self, s: &mut Recvable) -> Res<()> {
         if self.frame_reader.receive(s)? {
             self.state = ClientRequestState::Closed;
         }
         Ok(())
     }
 
-    pub fn receive(&mut self, s: &mut Recvable) -> Res<()> {
-        return match self.state {
-            ClientRequestState::SendingRequest => {
-                /*TODO if we get response whlie streaming data. We may also get a stop_sending...*/
-                Ok(())
-            }
-            ClientRequestState::WaitingForResponseHeaders => {
-                self.get_frame(s)?;
-                if self.frame_reader.done() {
-                    return match self.frame_reader.get_frame()? {
+    pub fn receive(&mut self, s: &mut Recvable, decoder: &mut QPackDecoder) -> Res<()> {
+        log!(
+            Level::Debug,
+            "Request stream_id={} state={:?}: receiving data.",
+            self.stream_id,
+            self.state
+        );
+        loop {
+            match self.state {
+                ClientRequestState::SendingRequest => {
+                    /*TODO if we get response whlie streaming data. We may also get a stop_sending...*/
+                    break Ok(());
+                }
+                ClientRequestState::WaitingForResponseHeaders => {
+                    self.recv_frame(s)?;
+                    if !self.frame_reader.done() {
+                        break Ok(());
+                    }
+                    log!(
+                        Level::Debug,
+                        "Request stream_id={}: received a frame.",
+                        self.stream_id
+                    );
+                    match self.frame_reader.get_frame()? {
                         HFrame::Priority {
                             priorized_elem_type,
                             elem_dependensy_type,
@@ -190,48 +233,73 @@ impl ClientRequest {
                             priority_elem_id,
                             elem_dependency_id,
                             weight,
-                        ),
-                        HFrame::Headers { len } => self.handle_headers_frame(len, s),
-                        HFrame::PushPromise { .. } => Err(Error::UnexpectedFrame),
-                        _ => Err(Error::WrongStream),
+                        )?,
+                        HFrame::Headers { len } => self.handle_headers_frame(len, s)?,
+                        HFrame::PushPromise { .. } => break Err(Error::UnexpectedFrame),
+                        _ => {
+                            break { Err(Error::WrongStream) };
+                        }
                     };
                 }
-                Ok(())
-            }
-            ClientRequestState::ReadingHeaders => {
-                if let Some(r) = &mut self.response {
-                    let (_, fin) = r.headers.write(s)?;
+                ClientRequestState::ReadingHeaders {
+                    ref mut buf,
+                    ref mut offset,
+                } => {
+                    let (amount, fin) = s.read(&mut buf[*offset..])?;
+                    log!(
+                        Level::Debug,
+                        "Request stream_id={} state=ReadingHeaders: read {} bytes fin={}.",
+                        self.stream_id,
+                        amount,
+                        fin
+                    );
                     if fin {
                         self.state = ClientRequestState::Closed;
-                    } else if r.headers.done() {
+                        break Ok(());
+                    }
+                    *offset += amount as usize;
+                    if *offset < buf.len() {
+                        break Ok(());
+                    }
+                    // we have read the headers.
+                    self.response.headers = decoder.decode_header_block(buf, self.stream_id)?;
+                    if let None = self.response.headers {
+                        log!(
+                            Level::Debug,
+                            "Request stream_id={} decoding header is blocked.",
+                            self.stream_id
+                        );
+                        let mut tmp: Vec<u8> = Vec::new();
+                        mem::swap(&mut tmp, buf);
+                        self.state = ClientRequestState::BlockedDecodingHeaders { buf: tmp };
+                    } else {
                         self.state = ClientRequestState::WaitingForData;
                     }
-                    Ok(())
-                } else {
-                    panic!("We must have responce here!");
                 }
-            }
-            ClientRequestState::WaitingForData => {
-                self.get_frame(s)?;
-                if self.frame_reader.done() {
-                    return match self.frame_reader.get_frame()? {
-                        HFrame::Data { len } => self.handle_data_frame(len),
-                        HFrame::PushPromise { .. } => Err(Error::UnexpectedFrame),
+                ClientRequestState::BlockedDecodingHeaders { ref mut buf } => break Ok(()),
+                ClientRequestState::WaitingForData => {
+                    self.recv_frame(s)?;
+                    if !self.frame_reader.done() {
+                        break Ok(());
+                    }
+                    match self.frame_reader.get_frame()? {
+                        HFrame::Data { len } => self.handle_data_frame(len)?,
+                        HFrame::PushPromise { .. } => break Err(Error::UnexpectedFrame),
                         HFrame::Headers { .. } => {
                             // TODO implement trailers!
-                            Err(Error::UnexpectedFrame)
+                            break Err(Error::UnexpectedFrame);
                         }
-                        _ => Err(Error::WrongStream),
+                        _ => break Err(Error::WrongStream),
                     };
+                    break Ok(());
                 }
-                Ok(())
-            }
-            ClientRequestState::ReadingData => Ok(()),
-            ClientRequestState::ReadingTrailers => Ok(()),
-            ClientRequestState::Closed => {
-                panic!("Stream readable after being closed!");
-            }
-        };
+                ClientRequestState::ReadingData => break Ok(()),
+                ClientRequestState::ReadingTrailers => break Ok(()),
+                ClientRequestState::Closed => {
+                    panic!("Stream readable after being closed!");
+                }
+            };
+        }
     }
 
     fn handle_priority_frame(
@@ -257,47 +325,47 @@ impl ClientRequest {
         if self.state == ClientRequestState::Closed {
             return Ok(());
         }
-
-        if let Some(_) = &self.response {
-            panic!("We sould not have a responce here!");
-        }
-        self.response = Some(Response::new(len as usize));
-
-        if let Some(r) = &mut self.response {
-            if len == 0 {
-                self.state = ClientRequestState::WaitingForData;
-            } else {
-                let (_, fin) = r.headers.write(s)?;
-                if fin {
-                    self.state = ClientRequestState::Closed;
-                } else if r.headers.done() {
-                    self.state = ClientRequestState::WaitingForData;
-                }
-            }
+        if len == 0 {
+            self.state = ClientRequestState::WaitingForData;
+        } else {
+            self.state = ClientRequestState::ReadingHeaders {
+                buf: vec![0; len as usize],
+                offset: 0,
+            };
         }
         Ok(())
     }
 
     fn handle_data_frame(&mut self, len: u64) -> Res<()> {
-        if let Some(r) = &mut self.response {
-            r.data_len = len;
-            if self.state != ClientRequestState::Closed {
-                if r.data_len > 0 {
-                    self.state = ClientRequestState::ReadingData;
-                } else {
-                    self.state = ClientRequestState::WaitingForData;
-                }
+        self.response.data_len = len;
+        if self.state != ClientRequestState::Closed {
+            if self.response.data_len > 0 {
+                self.state = ClientRequestState::ReadingData;
+            } else {
+                self.state = ClientRequestState::WaitingForData;
             }
-            Ok(())
-        } else {
-            panic!("We must have a responce here!");
         }
+        Ok(())
+    }
+
+    fn unblock(&mut self, decoder: &mut QPackDecoder) -> Res<()> {
+        if let ClientRequestState::BlockedDecodingHeaders { ref mut buf } = self.state {
+            self.response.headers = decoder.decode_header_block(buf, self.stream_id)?;
+            self.state = ClientRequestState::WaitingForData;
+            if let None = self.response.headers {
+                panic!("We must not be blocked again!");
+            }
+        } else {
+            panic!("Stream must be in the block state!");
+        }
+        Ok(())
     }
 }
 
 // The local control stream, responsible for encoding frames and sending them
+#[derive(Default)]
 struct ControlStreamLocal {
-    stream_id: u64,
+    stream_id: Option<u64>,
     buf: Data,
 }
 
@@ -316,23 +384,38 @@ impl ControlStreamLocal {
         }
         Ok(())
     }
+
+    pub fn is_control_stream(&self, stream_id: u64) -> bool {
+        match self.stream_id {
+            Some(id) => id == stream_id,
+            None => false,
+        }
+    }
 }
 
 // The remote control stream is responsible only for reading frames. The frames are handled by HttpConn
 struct ControlStreamRemote {
-    stream_id: u64,
+    stream_id: Option<u64>,
     frame_reader: HFrameReader,
     fin: bool,
 }
 
 impl ControlStreamRemote {
-    pub fn new(id: u64) -> ControlStreamRemote {
+    pub fn new() -> ControlStreamRemote {
         ControlStreamRemote {
-            stream_id: id,
+            stream_id: None,
             frame_reader: HFrameReader::new(),
             fin: false,
         }
     }
+
+    pub fn is_control_stream(&self, stream_id: u64) -> bool {
+        match self.stream_id {
+            Some(id) => id == stream_id,
+            None => false,
+        }
+    }
+
     pub fn receive(&mut self, s: &mut Recvable) -> Res<()> {
         self.fin = self.frame_reader.receive(s)?;
         Ok(())
@@ -387,32 +470,38 @@ struct HttpConn {
     conn: Connection,
     max_header_list_size: u64,
     num_placeholders: u64,
-    control_stream_local: Option<ControlStreamLocal>,
-    control_stream_remote: Option<ControlStreamRemote>,
+    control_stream_local: ControlStreamLocal,
+    control_stream_remote: ControlStreamRemote,
     new_streams: HashMap<u64, NewStreamTypeReader>,
-    //  qpack: QPack,Stream
+    qpack_encoder: QPackEncoder,
+    qpack_decoder: QPackDecoder,
     client_requests: HashMap<u64, ClientRequest>,
     settings_received: bool,
 }
 
 impl HttpConn {
-    pub fn new(c: Connection) -> HttpConn {
+    pub fn new(c: Connection, max_table_size: u32, nax_blocked_streams: u16) -> HttpConn {
+        if max_table_size > (1 << 30) - 1 {
+            panic!("Wrong max_table_size");
+        }
         HttpConn {
             role: c.role(),
             conn: c,
             max_header_list_size: MAX_HEADER_LIST_SIZE_DEFAULT,
             num_placeholders: NUM_PLACEHOLDERS_DEFAULT,
-            control_stream_local: None,
-            control_stream_remote: None,
+            control_stream_local: ControlStreamLocal::default(),
+            control_stream_remote: ControlStreamRemote::new(),
+            qpack_encoder: QPackEncoder::new(true),
+            qpack_decoder: QPackDecoder::new(max_table_size, nax_blocked_streams),
             new_streams: HashMap::new(),
             client_requests: HashMap::new(),
             settings_received: false,
         }
     }
 
-    // This function takes the provided result and captures errors.
-    // Any error results in the connection being closed.
-    fn check_result<T>(&mut self, res: Res<T>)  {
+    // This function takes the provided result and check for an error.
+    // An error results in closing the connection.
+    fn check_result<T>(&mut self, res: Res<T>) {
         match &res {
             Err(e) => {
                 self.conn.close(e.code(), format!("{}", e));
@@ -444,42 +533,56 @@ impl HttpConn {
     }
 
     fn on_connected(&mut self) -> Res<()> {
-        self.control_stream_local = self.create_control_stream()?;
+        self.create_control_stream()?;
+        self.create_qpack_streams()?;
         self.create_settings();
         Ok(())
     }
 
-    fn create_control_stream(&mut self) -> Res<Option<ControlStreamLocal>> {
-        let id = self.conn.stream_create(StreamType::UniDi)?;
-        let mut cs = ControlStreamLocal {
-            stream_id: id,
-            buf: Data::default(),
-        };
-        cs.buf.encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
-        Ok(Some(cs))
+    fn create_control_stream(&mut self) -> Res<()> {
+        self.control_stream_local.stream_id = Some(self.conn.stream_create(StreamType::UniDi)?);
+        self.control_stream_local
+            .buf
+            .encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
+        Ok(())
+    }
+
+    fn create_qpack_streams(&mut self) -> Res<()> {
+        self.qpack_encoder
+            .add_send_stream(self.conn.stream_create(StreamType::UniDi)?);
+        self.qpack_decoder
+            .add_send_stream(self.conn.stream_create(StreamType::UniDi)?);
+        Ok(())
     }
 
     fn create_settings(&mut self) {
-        if let Some(cs) = &mut self.control_stream_local {
-            cs.send_frame(HFrame::Settings {
-                settings: vec![
-                    (HSettingType::MaxHeaderListSize, 0),
-                    (HSettingType::NumPlaceholders, 0),
-                ],
-            });
-        }
+        self.control_stream_local.send_frame(HFrame::Settings {
+            settings: vec![
+                (
+                    HSettingType::MaxTableSize,
+                    self.qpack_decoder.get_max_table_size().into(),
+                ),
+                (
+                    HSettingType::BlockedStreams,
+                    self.qpack_decoder.get_blocked_streams().into(),
+                ),
+            ],
+        });
     }
 
     // If this return an error the connection must be closed.
     fn check_streams(&mut self) -> Res<()> {
+        let mut unblocked_streams: Vec<u64> = Vec::new();
         let lw = self.conn.get_sendable_streams();
         for (id, ws) in lw {
             if let Some(cs) = &mut self.client_requests.get_mut(&id) {
-                cs.send(ws)?;
-            } else if let Some(s) = &mut self.control_stream_local {
-                if id == s.stream_id {
-                    s.send(ws)?;
-                }
+                cs.send(ws, &mut self.qpack_encoder)?;
+            } else if self.control_stream_local.is_control_stream(id) {
+                self.control_stream_local.send(ws)?;
+            } else if self.qpack_encoder.is_send_stream(id) {
+                self.qpack_encoder.send(ws)?;
+            } else if self.qpack_decoder.is_send_stream(id) {
+                self.qpack_encoder.send(ws)?;
             }
         }
 
@@ -487,32 +590,35 @@ impl HttpConn {
         let mut stream_errors: Vec<(u64, Error)> = Vec::new();
         for (id, rs) in self.conn.get_recvable_streams() {
             if let Some(cs) = &mut self.client_requests.get_mut(&id) {
-                if let Err(e) = cs.receive(rs) {
+                if let Err(e) = cs.receive(rs, &mut self.qpack_decoder) {
                     if e.is_stream_error() {
                         stream_errors.push((id, e));
                     } else {
                         return Err(e);
                     }
                 }
-            } else if let Some(s) = &mut self.control_stream_remote {
-                if id == s.stream_id {
-                    if let Err(_) = s.receive(rs) {
-                        //TODO handle error
-                    }
+            } else if self.control_stream_remote.is_control_stream(id) {
+                if let Err(_) = self.control_stream_remote.receive(rs) {
+                    //TODO handle error
                 }
+            } else if self.qpack_encoder.is_recv_stream(id) {
+                self.qpack_encoder.receive(rs)?;
+            } else if self.qpack_decoder.is_recv_stream(id) {
+                unblocked_streams = self.qpack_decoder.receive(rs)?;
+
             // new stream we need to decode stream id.
             } else {
                 let ns = &mut self
                     .new_streams
                     .entry(id)
-                    .or_insert(NewStreamTypeReader::new()); //{
+                    .or_insert(NewStreamTypeReader::new());
                 if let Some(t) = ns.get_type(rs) {
                     match t {
                         HTTP3_UNI_STREAM_TYPE_CONTROL => {
-                            if let Some(_) = &mut self.control_stream_remote {
+                            if let Some(_) = self.control_stream_remote.stream_id {
                                 return Err(Error::WrongStreamCount);
                             }
-                            self.control_stream_remote = Some(ControlStreamRemote::new(id));
+                            self.control_stream_remote.stream_id = Some(id);
                         }
                         HTTP3_UNI_STREAM_TYPE_PUSH => {
                             if self.role == Role::Server {
@@ -521,6 +627,18 @@ impl HttpConn {
                                 // TODO implement PUSH
                                 rs.stop_sending(Error::PushRefused.code());
                             }
+                        }
+                        QPACK_UNI_STREAM_TYPE_ENCODER => {
+                            if self.qpack_decoder.has_recv_stream() {
+                                return Err(Error::WrongStreamCount);
+                            }
+                            self.qpack_decoder.add_recv_stream(id);
+                        }
+                        QPACK_UNI_STREAM_TYPE_DECODER => {
+                            if self.qpack_encoder.has_recv_stream() {
+                                return Err(Error::WrongStreamCount);
+                            }
+                            self.qpack_encoder.add_recv_stream(id);
                         }
                         // TODO reserved stream types
                         _ => {
@@ -542,6 +660,15 @@ impl HttpConn {
         }
 
         self.new_streams.retain(|_, v| !v.fin);
+
+        for id in unblocked_streams {
+            if let Some(client_request) = &mut self.client_requests.get_mut(&id) {
+                if let Err(e) = client_request.unblock(&mut self.qpack_decoder) {
+                    self.client_requests.remove(&id);
+                    self.conn.stream_reset(id, e.code())?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -549,39 +676,46 @@ impl HttpConn {
         self.conn.close(0, "");
     }
 
-    pub fn fetch(&mut self, method: String, target: String, headers: HeaderList) -> Res<()> {
+    pub fn fetch(
+        &mut self,
+        method: &String,
+        scheme: &String,
+        host: &String,
+        path: &String,
+        headers: &Vec<(String, String)>,
+    ) -> Res<()> {
         let id = self.conn.stream_create(StreamType::BiDi)?;
-        self.client_requests
-            .insert(id, ClientRequest::new(self.role, method, target, headers));
+        self.client_requests.insert(
+            id,
+            ClientRequest::new(self.role, id, method, scheme, host, path, headers),
+        );
         Ok(())
     }
 
     fn handle_control_frame(&mut self) -> Res<()> {
-        if let Some(cs) = &mut self.control_stream_remote {
-            if cs.fin {
-                return Err(Error::ClosedCriticalStream);
-            }
-            if cs.frame_reader.done() {
-                let f = cs.frame_reader.get_frame()?;
-                if let HFrame::Settings { .. } = f {
-                    if self.settings_received {
-                        return Err(Error::UnexpectedFrame);
-                    }
-                    self.settings_received = true;
-                } else {
-                    if !self.settings_received {
-                        return Err(Error::MissingSettings);
-                    }
+        if self.control_stream_remote.fin {
+            return Err(Error::ClosedCriticalStream);
+        }
+        if self.control_stream_remote.frame_reader.done() {
+            let f = self.control_stream_remote.frame_reader.get_frame()?;
+            if let HFrame::Settings { .. } = f {
+                if self.settings_received {
+                    return Err(Error::UnexpectedFrame);
                 }
-                return match f {
-                    HFrame::Settings { settings } => self.handle_settings(&settings),
-                    HFrame::Priority { .. } => Ok(()),
-                    HFrame::CancelPush { .. } => Ok(()),
-                    HFrame::Goaway { stream_id } => self.handle_goaway(stream_id),
-                    HFrame::MaxPushId { .. } => Ok(()),
-                    _ => Err(Error::WrongStream),
-                };
+                self.settings_received = true;
+            } else {
+                if !self.settings_received {
+                    return Err(Error::MissingSettings);
+                }
             }
+            return match f {
+                HFrame::Settings { settings } => self.handle_settings(&settings),
+                HFrame::Priority { .. } => Ok(()),
+                HFrame::CancelPush { .. } => Ok(()),
+                HFrame::Goaway { stream_id } => self.handle_goaway(stream_id),
+                HFrame::MaxPushId { .. } => Ok(()),
+                _ => Err(Error::WrongStream),
+            };
         }
         Ok(())
     }
@@ -599,6 +733,9 @@ impl HttpConn {
                         self.num_placeholders = *v;
                     }
                 }
+                HSettingType::MaxTableSize => self.qpack_encoder.set_max_capacity(*v)?,
+                HSettingType::BlockedStreams => self.qpack_encoder.set_blocked_streams(*v)?,
+
                 _ => {}
             }
         }
@@ -638,14 +775,16 @@ mod tests {
 
     fn assert_closed(hconn: &HttpConn, expected: Error) {
         match hconn.state() {
-            State::Closing(err, ..) | State::Closed(err) => assert_eq!(err.app_code(), Some(expected.code())),
+            State::Closing(err, ..) | State::Closed(err) => {
+                assert_eq!(err.app_code(), Some(expected.code()))
+            }
             _ => panic!("Wrong state {:?}", hconn.state()),
         };
     }
 
     #[test]
     fn test_connect() {
-        let mut hconn = HttpConn::new(Connection::new_client());
+        let mut hconn = HttpConn::new(Connection::new_client(), 100, 100);
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -653,13 +792,16 @@ mod tests {
         r = hconn.process(Vec::new());
         check_return_value(r);
         if let Some(s) = hconn.conn.streams.get(&0) {
-            assert_eq!(s.send_buf, vec![0x0, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
+            assert_eq!(
+                s.send_buf,
+                vec![0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]
+            );
         }
     }
 
     #[test]
     fn fetch() {
-        let mut hconn = HttpConn::new(Connection::new_client());
+        let mut hconn = HttpConn::new(Connection::new_client(), 100, 100);
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -668,29 +810,34 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get(&0) {
             Some(s) => {
-                assert_eq!(s.send_buf, vec![0x0, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
+                assert_eq!(
+                    s.send_buf,
+                    vec![0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]
+                );
             }
             None => {
                 assert!(false);
             }
         }
-        let headers = HeaderList {
-            headers: Vec::new(),
-        };
         assert_eq!(
-            hconn.fetch("GET".to_string(), "something.com".to_string(), headers),
+            hconn.fetch(
+                &"GET".to_string(),
+                &"https".to_string(),
+                &"something.com".to_string(),
+                &"/".to_string(),
+                &Vec::<(String, String)>::new()
+            ),
             Ok(())
         );
         r = hconn.process(Vec::new());
         check_return_value(r);
 
-        if let Some(s) = hconn.conn.streams.get(&1) {
+        if let Some(s) = hconn.conn.streams.get(&3) {
             assert_eq!(
                 s.send_buf,
                 vec![
-                    0x1, 0x1c, 0x47, 0x45, 0x54, 0x20, 0x73, 0x6f, 0x6d, 0x65, 0x74, 0x68, 0x69,
-                    0x6e, 0x67, 0x2e, 0x63, 0x6f, 0x6d, 0x20, 0x48, 0x54, 0x54, 0x50, 0x2f, 0x31,
-                    0x2e, 0x31, 0xd, 0xa, 0xd, 0xa
+                    0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67, 0x35,
+                    0x53, 0x2e, 0x43, 0xd3, 0xc1,
                 ]
             );
             assert!(s.send_side_closed);
@@ -709,14 +856,12 @@ mod tests {
         }
 
         // send response.
-        match hconn.conn.streams.get_mut(&1) {
+        match hconn.conn.streams.get_mut(&3) {
             Some(s) => {
                 s.recv_buf.extend(vec![
-                    0x1, 0x1f, 0x48, 0x54, 0x54, 0x50, 0x2f, 0x31, 0x2e, 0x31, 0x20, 0x32, 0x30,
-                    0x30, 0x20, 0x4f, 0x4b, 0xd, 0xa, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74,
-                    0x3a, 0x20, 0x33, 0xd, 0xa, 0xd, 0xa, // data frame
+                    0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // data frame
                     0x0, 0x3, 0x61, 0x62, 0x63,
-                ]); //HTTP/1.1 200 OK  Content-Length: 3  abc
+                ]); // 200  Content-Length: 3  abc
                 s.receive_side_closed = true;
             }
             None => {
@@ -739,7 +884,7 @@ mod tests {
                 assert!(false);
             }
         }
-        match hconn.conn.streams.get_mut(&1) {
+        match hconn.conn.streams.get_mut(&3) {
             Some(s) => {
                 assert_eq!(s.recv_data_ready_amount(), 3);
             }
@@ -749,10 +894,10 @@ mod tests {
         }
     }
 
-    // Test reading of a slow streamed frame. bytes are received one by one
+    // Test reading of a slowly streamed frame. bytes are received one by one
     #[test]
     fn test_frame_reading() {
-        let mut hconn = HttpConn::new(Connection::new_client());
+        let mut hconn = HttpConn::new(Connection::new_client(), 100, 100);
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -898,7 +1043,7 @@ mod tests {
 
     #[test]
     fn test_close_cotrol_stream() {
-        let mut hconn = HttpConn::new(Connection::new_client());
+        let mut hconn = HttpConn::new(Connection::new_client(), 100, 100);
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -926,7 +1071,7 @@ mod tests {
 
     #[test]
     fn test_missing_settings() {
-        let mut hconn = HttpConn::new(Connection::new_client());
+        let mut hconn = HttpConn::new(Connection::new_client(), 100, 100);
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -953,7 +1098,7 @@ mod tests {
 
     #[test]
     fn test_receive_settings_twice() {
-        let mut hconn = HttpConn::new(Connection::new_client());
+        let mut hconn = HttpConn::new(Connection::new_client(), 100, 100);
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -989,7 +1134,7 @@ mod tests {
     }
 
     fn test_wrong_frame_on_control_stream(v: &Vec<u8>) {
-        let mut hconn = HttpConn::new(Connection::new_client());
+        let mut hconn = HttpConn::new(Connection::new_client(), 100, 100);
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -1052,7 +1197,7 @@ mod tests {
     // also test getting stream id that does not fit into a single byte.
     #[test]
     fn test_received_unknown_stream() {
-        let mut hconn = HttpConn::new(Connection::new_client());
+        let mut hconn = HttpConn::new(Connection::new_client(), 200, 200);
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -1089,7 +1234,7 @@ mod tests {
     // receive a push stream
     #[test]
     fn test_received_push_stream() {
-        let mut hconn = HttpConn::new(Connection::new_client());
+        let mut hconn = HttpConn::new(Connection::new_client(), 200, 200);
         assert_eq!(*hconn.state(), State::Init);
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
@@ -1124,32 +1269,43 @@ mod tests {
 
     // Test wrong frame on req/rec stream
     fn test_wrong_frame_on_request_stream(v: &Vec<u8>, err: Error) {
-        let mut hconn = HttpConn::new(Connection::new_client());
+        let mut hconn = HttpConn::new(Connection::new_client(), 200, 200);
         assert_eq!(*hconn.state(), State::Init);
+
         let mut r = hconn.process(Vec::new());
         check_return_value(r);
         assert_eq!(*hconn.state(), State::Connected);
+
         r = hconn.process(Vec::new());
         check_return_value(r);
+
         match hconn.conn.streams.get(&0) {
             Some(s) => {
-                assert_eq!(s.send_buf, vec![0x0, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
+                assert_eq!(
+                    s.send_buf,
+                    vec![0x0, 0x4, 0x6, 0x1, 0x40, 0xc8, 0x7, 0x40, 0xc8]
+                );
             }
             None => {
                 assert!(false);
             }
         }
-        let headers = HeaderList {
-            headers: Vec::new(),
-        };
+
         assert_eq!(
-            hconn.fetch("GET".to_string(), "something.com".to_string(), headers),
+            hconn.fetch(
+                &"GET".to_string(),
+                &"https".to_string(),
+                &"something.com".to_string(),
+                &"/".to_string(),
+                &Vec::<(String, String)>::new()
+            ),
             Ok(())
         );
+
         r = hconn.process(Vec::new());
         check_return_value(r);
 
-        match hconn.conn.streams.get_mut(&1) {
+        match hconn.conn.streams.get_mut(&3) {
             Some(s) => {
                 s.recv_buf.extend(v);
             }
@@ -1157,9 +1313,11 @@ mod tests {
                 assert!(false);
             }
         }
+
         r = hconn.process(Vec::new());
         check_return_value(r);
-        match hconn.conn.streams.get_mut(&1) {
+
+        match hconn.conn.streams.get_mut(&3) {
             Some(s) => {
                 assert_eq!(s.error, Some(err.code()));
             }

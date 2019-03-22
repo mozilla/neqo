@@ -6,6 +6,7 @@ use std::collections::{HashMap, VecDeque};
 
 const QPACK_MAX_TABLE_CAPACITY: u64 = 0;
 
+#[derive(Debug)]
 pub struct DynamicTableEntry {
     base: u64,
     name: Vec<u8>,
@@ -47,6 +48,7 @@ impl DynamicTableEntry {
     }
 }
 
+#[derive(Debug)]
 pub struct HeaderTable {
     qpack_side: QPackSide,
     dynamic: VecDeque<DynamicTableEntry>,
@@ -57,11 +59,11 @@ pub struct HeaderTable {
     used: u64,
     // The total number of inserts thus far.
     base: u64,
-    first_not_acked: u64,
+    acked_inserts_cnt: u64,
 }
 
 impl HeaderTable {
-    pub fn new(capacity: u64, encoder: bool) -> HeaderTable {
+    pub fn new(encoder: bool) -> HeaderTable {
         HeaderTable {
             qpack_side: if encoder {
                 QPackSide::Encoder
@@ -69,10 +71,10 @@ impl HeaderTable {
                 QPackSide::Decoder
             },
             dynamic: VecDeque::new(),
-            capacity: capacity,
+            capacity: 0,
             used: 0,
             base: 0,
-            first_not_acked: if encoder { 0 } else { std::u64::MAX },
+            acked_inserts_cnt: if encoder { 0 } else { std::u64::MAX },
         }
     }
 
@@ -171,7 +173,7 @@ impl HeaderTable {
     pub fn evict_to(&mut self, reduce: u64) -> bool {
         while (self.dynamic.len() > 0) && self.used > reduce {
             if let Some(e) = self.dynamic.front() {
-                if !e.can_reduce(self.first_not_acked) {
+                if !e.can_reduce(self.acked_inserts_cnt) {
                     return false;
                 }
                 self.used -= e.size();
@@ -205,7 +207,6 @@ impl HeaderTable {
         &mut self,
         name_static_table: bool,
         name_index: u64,
-        value_is_huffman: bool,
         value: Vec<u8>,
     ) -> Res<()> {
         let mut name;
@@ -233,7 +234,11 @@ impl HeaderTable {
     }
 
     pub fn increment_acked(&mut self, increment: u64) {
-        self.first_not_acked += increment;
+        self.acked_inserts_cnt += increment;
+    }
+
+    pub fn get_acked_inserts_cnt(&self) -> u64 {
+        self.acked_inserts_cnt
     }
 
     pub fn header_ack(&mut self, stream_id: u64) {

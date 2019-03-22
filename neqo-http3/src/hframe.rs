@@ -28,6 +28,9 @@ type SettingsType = u64;
 const SETTINGS_MAX_HEADER_LIST_SIZE: SettingsType = 0x6;
 const SETTINGS_NUM_PLACEHOLDERS: SettingsType = 0x8;
 
+const SETTINGS_QPACK_MAX_TABLE_CAPACITY: SettingsType = 0x1;
+const SETTINGS_QPACK_BLOCKED_STREAMS: SettingsType = 0x7;
+
 #[derive(Copy, Clone, PartialEq)]
 pub enum HStreamType {
     Control,
@@ -75,6 +78,8 @@ fn elem_dep_from_byte(b: u8) -> ElementDependencyType {
 pub enum HSettingType {
     MaxHeaderListSize,
     NumPlaceholders,
+    MaxTableSize,
+    BlockedStreams,
     UnknownType,
 }
 
@@ -178,6 +183,14 @@ impl HFrame {
                             d.encode_varint(SETTINGS_NUM_PLACEHOLDERS as u64);
                             d.encode_varint(iter.1);
                         }
+                        HSettingType::MaxTableSize => {
+                            d.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY as u64);
+                            d.encode_varint(iter.1);
+                        }
+                        HSettingType::BlockedStreams => {
+                            d.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS as u64);
+                            d.encode_varint(iter.1);
+                        }
                         HSettingType::UnknownType => {}
                     }
                 }
@@ -271,7 +284,7 @@ impl HFrame {
     }
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 enum HFrameReaderState {
     GetType,
     GetLength,
@@ -280,6 +293,7 @@ enum HFrameReaderState {
     Done,
 }
 
+#[derive(Debug)]
 pub struct HFrameReader {
     state: HFrameReaderState,
     reader: ReadBuf,
@@ -305,10 +319,11 @@ impl HFrameReader {
     // returns true if quic stream was closed.
     pub fn receive(&mut self, s: &mut Recvable) -> Res<bool> {
         let mut w = RecvableWrapper::wrap(s);
-        let r = loop {
+        loop {
             match self.state {
                 HFrameReaderState::GetType => {
                     let (rv, fin) = self.reader.get_varint(&mut w)?;
+
                     if rv == 0 {
                         break Ok(fin);
                     }
@@ -389,8 +404,7 @@ impl HFrameReader {
                     break Ok(false);
                 }
             }
-        };
-        r
+        }
     }
 
     pub fn done(&self) -> bool {

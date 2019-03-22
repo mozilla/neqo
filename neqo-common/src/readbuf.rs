@@ -14,6 +14,7 @@ pub trait Reader {
     fn read(&mut self, buf: &mut [u8]) -> Res<(usize, bool)>;
 }
 
+#[derive(Debug)]
 pub struct ReadBuf {
     state: ReadBufState,
     buf: Vec<u8>,

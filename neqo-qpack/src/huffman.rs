@@ -1,12 +1,127 @@
 // TOTO(dragana) remove this
 #![allow(unused_variables, dead_code)]
 
-use crate::header_read_buf::HeaderReadBuf;
 use crate::huffman_decode_helper::{HuffmanDecodeTable, HUFFMAN_DECODE_ROOT};
 use crate::huffman_table::HUFFMAN_TABLE;
 use crate::{Error, Res};
 
-pub fn encode_header_block(input: &[u8], output: &mut Vec<u8>) {
+#[derive(Default)]
+pub struct Huffman {
+    // we read whole bytes from an input and stored them in incoming_bytes.
+    // Some bits will be transfer to decoding_byte and incoming_bits_left is number of bits still
+    // left in incoming_bytes.
+    input_byte: u8,
+    input_bits_left: u8,
+    // byte used for decoding
+    decoding_byte: u8,
+    // bits left in decoding_byte that are not decoded yet.
+    decoding_bits_left: u8,
+}
+
+impl Huffman {
+    pub fn decode(&mut self, input: &[u8]) -> Res<Vec<u8>> {
+        let mut output: Vec<u8> = Vec::new();
+        let mut read: usize = 0; // bytes read from the input.
+        let len = input.len();
+
+        while self.has_more_data(len, read) {
+            if let Some(c) =
+                self.decode_huffman_character(HUFFMAN_DECODE_ROOT, input, len, &mut read)?
+            {
+                output.push(c);
+            }
+        }
+
+        if self.decoding_bits_left > 7 {
+            return Err(Error::DecompressionFailed);
+        }
+        if self.decoding_bits_left > 0 {
+            let mask: u8 = ((1 << self.decoding_bits_left) - 1) << (8 - self.decoding_bits_left);
+            let bits: u8 = self.decoding_byte & mask;
+            if bits != mask {
+                return Err(Error::DecompressionFailed);
+            }
+        }
+        Ok(output)
+    }
+
+    fn has_more_data(&self, len: usize, read: usize) -> bool {
+        len > read || self.input_bits_left > 0
+    }
+
+    fn extract_byte(&mut self, input: &[u8], len: usize, read: &mut usize) {
+        // if self.decoding_bits_left > 0 the 'left' bits will be in proper place and the rest will be 0.
+        // for self.decoding_bits_left == 0 we need to do it here.
+        if self.decoding_bits_left == 0 {
+            self.decoding_byte = 0x00;
+        }
+
+        let from_current = std::cmp::min(8 - self.decoding_bits_left, self.input_bits_left);
+        if from_current > 0 {
+            let mask = (1 << from_current) - 1;
+            let bits = (self.input_byte >> (self.input_bits_left - from_current)) & mask;
+            self.decoding_byte =
+                self.decoding_byte | (bits << (8 - self.decoding_bits_left - from_current));
+            self.decoding_bits_left += from_current;
+            self.input_bits_left -= from_current;
+        }
+        if self.decoding_bits_left < 8 && *read < len {
+            // get bits from the next byte.
+            self.input_byte = input[*read];
+            *read += 1;
+            self.decoding_byte =
+                self.decoding_byte | ((self.input_byte) >> self.decoding_bits_left);
+            self.input_bits_left = self.decoding_bits_left;
+            self.decoding_bits_left = 8;
+        }
+    }
+
+    fn decode_huffman_character(
+        &mut self,
+        table: &HuffmanDecodeTable,
+        input: &[u8],
+        len: usize,
+        read: &mut usize,
+    ) -> Res<Option<u8>> {
+        self.extract_byte(input, len, read);
+
+        if table.index_has_a_next_table(self.decoding_byte) {
+            if !self.has_more_data(len, *read) {
+                // This is the last bit and it is padding.
+                return Ok(None);
+            }
+
+            self.decoding_bits_left = 0;
+            return self.decode_huffman_character(
+                table.next_table(self.decoding_byte),
+                input,
+                len,
+                read,
+            );
+        }
+
+        let entry = table.entry(self.decoding_byte);
+        if entry.val == 256 {
+            return Err(Error::DecompressionFailed);
+        }
+
+        if entry.prefix_len > self.decoding_bits_left as u16 {
+            assert!(!self.has_more_data(len, *read));
+            // This is the last bit and it is padding.
+            return Ok(None);
+        }
+        let c = entry.val as u8;
+
+        self.decoding_bits_left -= entry.prefix_len as u8;
+        if self.decoding_bits_left > 0 {
+            self.decoding_byte <<= entry.prefix_len;
+        }
+        Ok(Some(c))
+    }
+}
+
+pub fn encode_huffman(input: &[u8]) -> Vec<u8> {
+    let mut output: Vec<u8> = Vec::new();
     let mut left: u8 = 8;
     let mut saved: u8 = 0;
     for c in input {
@@ -43,82 +158,8 @@ pub fn encode_header_block(input: &[u8], output: &mut Vec<u8>) {
         saved = saved | v;
         output.push(saved);
     }
-}
 
-pub fn decode_header_block(input: &mut HeaderReadBuf, output: &mut Vec<u8>) -> Res<()> {
-    let mut byte: u8 = 0;
-    let mut bits_left: u8 = 0;
-    while input.remaining() > 0 {
-        if let Some(c) =
-            decode_huffman_character(HUFFMAN_DECODE_ROOT, input, &mut byte, &mut bits_left)?
-        {
-            output.push(c);
-        }
-    }
-
-    if bits_left > 7 {
-        return Err(Error::DecompressionFailed);
-    }
-    if bits_left > 0 {
-        let mask: u8 = ((1 << bits_left) - 1) << (8 - bits_left);
-        let bits: u8 = byte & mask;
-        if bits != mask {
-            return Err(Error::DecompressionFailed);
-        }
-    }
-    Ok(())
-}
-
-fn extract_byte(input: &mut HeaderReadBuf, byte: &mut u8, bits_left: &mut u8) -> Res<()> {
-    if *bits_left != 0 {
-        let (c, left) = input.read_bits(8 - *bits_left);
-        *byte = *byte | (c << ((8 - *bits_left) - left));
-        *bits_left += left;
-        Ok(())
-    } else {
-        let (c, left) = input.read_bits(8);
-        *byte = c << (8 - left);
-        *bits_left = left;
-        Ok(())
-    }
-}
-
-fn decode_huffman_character(
-    table: &HuffmanDecodeTable,
-    input: &mut HeaderReadBuf,
-    byte: &mut u8,
-    bits_left: &mut u8,
-) -> Res<Option<u8>> {
-    extract_byte(input, byte, bits_left)?;
-
-    if table.index_has_a_next_table(*byte) {
-        if input.remaining() == 0 {
-            // This is the last bit and it is padding.
-            return Ok(None);
-        }
-
-        *bits_left = 0;
-        return decode_huffman_character(table.next_table(*byte), input, byte, &mut *bits_left);
-    }
-
-    let entry = table.entry(*byte);
-    if entry.val == 256 {
-        return Err(Error::DecompressionFailed);
-    }
-
-    if entry.prefix_len > *bits_left as u16 {
-        assert!(input.remaining() == 0);
-        // This is the last bit and it is padding.
-        return Ok(None);
-    }
-    let c = entry.val as u8;
-
-    *bits_left -= entry.prefix_len as u8;
-    if *bits_left != 0 {
-        // move bits to the beginning of the byte.
-        *byte <<= entry.prefix_len;
-    }
-    Ok(Some(c))
+    output
 }
 
 #[cfg(test)]
@@ -195,9 +236,7 @@ mod tests {
     #[test]
     fn test_encoder() {
         for e in TEST_CASES {
-            let mut out: Vec<u8> = Vec::new();
-            encode_header_block(e.val, &mut out);
-
+            let out = encode_huffman(e.val);
             assert_eq!(out[..], *e.res);
         }
     }
@@ -205,13 +244,12 @@ mod tests {
     #[test]
     fn test_decoder() {
         for e in TEST_CASES {
-            let mut out: Vec<u8> = Vec::new();
-            assert_eq!(
-                Ok(()),
-                decode_header_block(&mut HeaderReadBuf::from(e.res), &mut out)
-            );
-
-            assert_eq!(out[..], *e.val);
+            match Huffman::default().decode(e.res) {
+                Err(_) => assert!(false),
+                Ok(out) => {
+                    assert_eq!(out[..], *e.val);
+                }
+            }
         }
     }
 }

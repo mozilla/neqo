@@ -1,14 +1,16 @@
 #![allow(unused_variables, dead_code)]
 
-use crate::header_read_buf::{
-    read_prefixed_encoded_int_header_read_buf, read_prefixed_encoded_int_with_recvable,
-    HeaderReadBuf,
+use crate::qpack_helper::{
+    read_prefixed_encoded_int_slice, read_prefixed_encoded_int_with_recvable, BufWrapper,
 };
+use crate::huffman::Huffman;
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
 use neqo_transport::stream::{Recvable, Sendable};
 use std::{mem, str};
+
+pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
 
 fn to_string(v: &[u8]) -> Res<String> {
     match str::from_utf8(v) {
@@ -17,12 +19,14 @@ fn to_string(v: &[u8]) -> Res<String> {
     }
 }
 
+#[derive(Debug)]
 enum QPackWithRefState {
     GetName { cnt: u8 },
     GetValueLength { len: u64, cnt: u8 },
     GetValue { offset: usize },
 }
 
+#[derive(Debug)]
 enum QPackWithoutRefState {
     GetNameLength { len: u64, cnt: u8 },
     GetName { offset: usize },
@@ -30,6 +34,7 @@ enum QPackWithoutRefState {
     GetValue { offset: usize },
 }
 
+#[derive(Debug)]
 enum QPackDecoderState {
     ReadInstruction,
     InsertWithNameRef {
@@ -56,36 +61,67 @@ enum QPackDecoderState {
     },
 }
 
-struct QPackDecoder {
+#[derive(Debug)]
+pub struct QPackDecoder {
     state: QPackDecoderState,
     table: HeaderTable,
     increment: u64,
     total_num_of_inserts: u64,
     max_entries: u64,
     send_buf: QPData,
+    local_stream_id: Option<u64>,
+    remote_stream_id: Option<u64>,
+    max_table_size: u32,
+    max_blocked_streams: u16,
+    blocked_streams: Vec<(u64, u64)>, //stream_id and requested inserts count.
 }
 
 impl QPackDecoder {
-    pub fn new(capacity: u64) -> QPackDecoder {
+    pub fn new(max_table_size: u32, max_blocked_streams: u16) -> QPackDecoder {
+        log!(Level::Debug, "Decoder: creating a new qpack decoder.");
         QPackDecoder {
             state: QPackDecoderState::ReadInstruction,
-            table: HeaderTable::new(capacity, false),
+            table: HeaderTable::new(false),
             increment: 0,
             total_num_of_inserts: 0,
-            max_entries: 0,
+            max_entries: (max_table_size as f64 / 32.0).floor() as u64,
             send_buf: QPData::default(),
+            local_stream_id: None,
+            remote_stream_id: None,
+            max_table_size: max_table_size,
+            max_blocked_streams: max_blocked_streams,
+            blocked_streams: Vec::new(),
         }
-    }
-
-    pub fn set_max_capacity(&mut self, cap: u64) {
-        self.max_entries = (cap as f64 / 32.0).floor() as u64;
     }
 
     pub fn capacity(&self) -> u64 {
         self.table.capacity()
     }
 
-    pub fn read_instructions(&mut self, s: &mut Recvable) -> Res<()> {
+    pub fn get_max_table_size(&self) -> u32 {
+        self.max_table_size
+    }
+
+    pub fn get_blocked_streams(&self) -> u16 {
+        self.max_blocked_streams
+    }
+
+    // returns a list of unblocked streams
+    pub fn receive(&mut self, s: &mut Recvable) -> Res<Vec<u64>> {
+        self.read_instructions(s)?;
+        let base = self.table.base();
+        let r = self
+            .blocked_streams
+            .iter()
+            .filter(|(_, req)| req <= &base)
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        self.blocked_streams.retain(|(_, req)| req <= &base);
+        Ok(r)
+    }
+
+    fn read_instructions(&mut self, s: &mut Recvable) -> Res<()> {
+        log!(Level::Debug, "Decoder: reading instructions");
         loop {
             match self.state {
                 QPackDecoderState::ReadInstruction => {
@@ -161,6 +197,11 @@ impl QPackDecoder {
                             s, &mut v, &mut cnt, 3, b[0], true,
                         )?;
                         if done {
+                            log!(
+                                Level::Debug,
+                                "Decoder: receiced instruction - duplicate index={}",
+                                v
+                            );
                             self.table.duplicate(v)?;
                             self.total_num_of_inserts += 1;
                             self.increment += 1;
@@ -178,7 +219,7 @@ impl QPackDecoder {
                             s, &mut v, &mut cnt, 3, b[0], true,
                         )?;
                         if done {
-                            self.table.set_capacity(v);
+                            self.set_capacity(v)?;
                             self.state = QPackDecoderState::ReadInstruction;
                         } else {
                             self.state = QPackDecoderState::Capacity {
@@ -236,10 +277,10 @@ impl QPackDecoder {
                                 // We are done reading instruction, insert the new entry.
                                 let mut value_to_insert: Vec<u8> = Vec::new();
                                 mem::swap(&mut value_to_insert, value);
+                                log!(Level::Debug, "Decoder: received instruction - insert with name ref index={} static={} value={:x?}", name_index, name_static_table, value_to_insert);
                                 self.table.insert_with_name_ref(
                                     *name_static_table,
                                     *name_index,
-                                    *value_is_huffman,
                                     value_to_insert,
                                 )?;
                                 self.total_num_of_inserts += 1;
@@ -321,10 +362,18 @@ impl QPackDecoder {
                             if value.len() == *offset {
                                 // We are done reading instruction, insert the new entry.
                                 let mut name_to_insert: Vec<u8> = Vec::new();
-                                mem::swap(&mut name_to_insert, name);
+                                if *name_is_huffman {
+                                    name_to_insert = Huffman::default().decode(name)?;
+                                } else {
+                                    mem::swap(&mut name_to_insert, name);
+                                }
                                 let mut value_to_insert: Vec<u8> = Vec::new();
-                                mem::swap(&mut value_to_insert, value);
-                                // TODO decode huffman
+                                if *value_is_huffman {
+                                    value_to_insert = Huffman::default().decode(value)?;
+                                } else {
+                                    mem::swap(&mut value_to_insert, value);
+                                }
+                                log!(Level::Debug, "Decoder: received instruction - insert with name literal name={:x?} value={:x?}", name_to_insert, value_to_insert);
                                 self.table.insert(name_to_insert, value_to_insert)?;
                                 self.total_num_of_inserts += 1;
                                 self.increment += 1;
@@ -343,6 +392,11 @@ impl QPackDecoder {
                     let done =
                         read_prefixed_encoded_int_with_recvable_wrap(s, index, cnt, 0, 0x0, false)?;
                     if done {
+                        log!(
+                            Level::Debug,
+                            "Decoder: received instruction - duplicate index={}",
+                            index
+                        );
                         self.table.duplicate(*index)?;
                         self.total_num_of_inserts += 1;
                         self.increment += 1;
@@ -360,7 +414,8 @@ impl QPackDecoder {
                         s, capacity, cnt, 0, 0x0, false,
                     )?;
                     if done {
-                        self.table.set_capacity(*capacity);
+                        let v = *capacity;
+                        self.set_capacity(v)?;
                         self.state = QPackDecoderState::ReadInstruction;
                     } else {
                         // waiting for more data
@@ -369,6 +424,19 @@ impl QPackDecoder {
                 }
             }
         }
+    }
+
+    fn set_capacity(&mut self, cap: u64) -> Res<()> {
+        log!(
+            Level::Debug,
+            "Decoder: received instruction capacity cap={}",
+            cap
+        );
+        if cap > self.max_table_size as u64 {
+            return Err(Error::EncoderStreamError);
+        }
+        self.table.set_capacity(cap);
+        Ok(())
     }
 
     fn header_ack(&mut self, stream_id: u64) {
@@ -381,8 +449,8 @@ impl QPackDecoder {
             .encode_prefixed_encoded_int(0x40, 1, stream_id);
     }
 
-    pub fn write(&mut self, s: &mut Sendable) -> Res<()> {
-        // Encode increment istruction if neede.
+    pub fn send(&mut self, s: &mut Sendable) -> Res<()> {
+        // Encode increment istruction if needed.
         if self.increment > 0 {
             self.send_buf
                 .encode_prefixed_encoded_int(0x00, 2, self.increment);
@@ -397,77 +465,96 @@ impl QPackDecoder {
         }
     }
 
+    // this function returns None if the stream is blocked waiting for table insertions.
     pub fn decode_header_block(
         &mut self,
-        buf: &mut HeaderReadBuf,
+        buf: &[u8],
         stream_id: u64,
-    ) -> Res<Vec<(String, String)>> {
-        let (largest_ref, base) = self.read_base(buf)?;
-        if self.table.base() < largest_ref {
-            //TODO
+    ) -> Res<Option<Vec<(String, String)>>> {
+        log!(Level::Debug, "Decoder: decode header block.");
+        let mut reader = BufWrapper {
+            buf: buf,
+            offset: 0,
+        };
+
+        let (req_inserts, base) = self.read_base(&mut reader)?;
+        log!(
+            Level::Debug,
+            "Decoder: requested inserts count is {} and base is {}",
+            req_inserts,
+            base
+        );
+        if self.table.base() < req_inserts {
+            log!(
+                Level::Debug,
+                "Decoder: stream is blocked stream_id={} requested inserts count={}",
+                stream_id,
+                req_inserts
+            );
+            self.blocked_streams.push((stream_id, req_inserts));
+            if self.blocked_streams.len() > self.max_blocked_streams as usize {
+                return Err(Error::DecompressionFailed);
+            }
+            return Ok(None);
         }
         let mut h: Vec<(String, String)> = Vec::new();
 
-        let mut b: u8;
         loop {
-            if buf.remaining() == 0 {
+            if reader.done() {
                 // Send header_ack
-                self.header_ack(stream_id);
-                break Ok(h);
+                if req_inserts != 0 {
+                    self.header_ack(stream_id);
+                }
+                log!(Level::Debug, "Decoder: done decoding header block.");
+                break Ok(Some(h));
             }
 
-            b = buf.read_bits2(1)?;
-            if b == 1 {
-                h.push(self.read_indexed(buf, base)?);
+            let b = reader.peek()?;
+            if b & 0x80 != 0 {
+                h.push(self.read_indexed(&mut reader, base)?);
+            } else if b & 0x40 != 0 {
+                h.push(self.read_literal_with_name_ref(&mut reader, base)?);
+            } else if b & 0x20 != 0 {
+                h.push(self.read_literal_with_name_literal(&mut reader)?);
                 continue;
-            }
-
-            b = buf.read_bits2(1)?;
-            if b == 1 {
-                h.push(self.read_literal_with_name_ref(buf, base)?);
-                continue;
-            }
-
-            b = buf.read_bits2(1)?;
-            if b == 1 {
-                h.push(self.read_literal_with_name_literal(buf)?);
-                continue;
-            }
-
-            b = buf.read_bits2(1)?;
-            if b == 1 {
-                h.push(self.read_post_base_index(buf, base)?);
-                continue;
+            } else if b & 0x10 != 0 {
+                h.push(self.read_post_base_index(&mut reader, base)?);
             } else {
-                h.push(self.read_literal_with_post_base_name_ref(buf, base)?);
+                h.push(self.read_literal_with_post_base_name_ref(&mut reader, base)?);
             }
         }
     }
 
-    fn read_base(&self, buf: &mut HeaderReadBuf) -> Res<(u64, u64)> {
-        let req_insert_cnt =
-            self.calc_req_insert_cnt(read_prefixed_encoded_int_header_read_buf(buf, 0)?)?;
+    fn read_base(&self, buf: &mut BufWrapper) -> Res<(u64, u64)> {
+        let req_insert_cnt = self.calc_req_insert_cnt(read_prefixed_encoded_int_slice(buf, 0)?)?;
 
-        let b = buf.read_bits2(1)?;
-        let base_delta = read_prefixed_encoded_int_header_read_buf(buf, 1)?;
-
+        let s = buf.peek()? & 0x80 != 0;
+        let base_delta = read_prefixed_encoded_int_slice(buf, 1)?;
         let base: u64;
-        if b == 0 {
+        if !s {
             base = req_insert_cnt + base_delta;
         } else {
+            if req_insert_cnt <= base_delta {
+                return Err(Error::DecompressionFailed);
+            }
             base = req_insert_cnt - base_delta - 1;
         }
         Ok((req_insert_cnt, base))
     }
 
-    fn read_indexed(&self, buf: &mut HeaderReadBuf, base: u64) -> Res<(String, String)> {
-        let static_table = buf.read_bits2(1)?;
-        let index = read_prefixed_encoded_int_header_read_buf(buf, 2)?;
-        if static_table == 1 {
-            if let Ok(entry) = self.table.get_static(index) {
-                Ok((to_string(entry.name())?, to_string(entry.value())?))
-            } else {
-                Err(Error::DecompressionFailed)
+    fn read_indexed(&self, buf: &mut BufWrapper, base: u64) -> Res<(String, String)> {
+        let static_table = buf.peek()? & 0x40 != 0;
+        let index = read_prefixed_encoded_int_slice(buf, 2)?;
+        log!(
+            Level::Debug,
+            "Decoder: decoder indexed {} static={}.",
+            index,
+            static_table
+        );
+        if static_table {
+            match self.table.get_static(index) {
+                Ok(entry) => Ok((to_string(entry.name())?, to_string(entry.value())?)),
+                Err(_) => Err(Error::DecompressionFailed),
             }
         } else {
             if let Ok(entry) = self.table.get_dynamic(index, base, false) {
@@ -478,9 +565,9 @@ impl QPackDecoder {
         }
     }
 
-    fn read_post_base_index(&self, buf: &mut HeaderReadBuf, base: u64) -> Res<(String, String)> {
-        let index = read_prefixed_encoded_int_header_read_buf(buf, 4)?;
-        // TODO(dragana) huffman
+    fn read_post_base_index(&self, buf: &mut BufWrapper, base: u64) -> Res<(String, String)> {
+        let index = read_prefixed_encoded_int_slice(buf, 4)?;
+        log!(Level::Debug, "Decoder: decode post-based {}.", index);
         if let Ok(entry) = self.table.get_dynamic(index, base, true) {
             Ok((to_string(entry.name())?, to_string(entry.value())?))
         } else {
@@ -488,16 +575,14 @@ impl QPackDecoder {
         }
     }
 
-    fn read_literal_with_name_ref(
-        &self,
-        buf: &mut HeaderReadBuf,
-        base: u64,
-    ) -> Res<(String, String)> {
-        let _n = buf.read_bits2(1)?;
-        let static_table = buf.read_bits2(1)?;
-        let index = read_prefixed_encoded_int_header_read_buf(buf, 4)?;
+    fn read_literal_with_name_ref(&self, buf: &mut BufWrapper, base: u64) -> Res<(String, String)> {
+        log!(Level::Debug, "Decoder: insert with name reference.");
+        // ignore n bit.
+        let static_table = buf.peek()? & 0x10 != 0;
+        let index = read_prefixed_encoded_int_slice(buf, 4)?;
+
         let mut name: Vec<u8>;
-        if static_table == 1 {
+        if static_table {
             if let Ok(entry) = self.table.get_static(index) {
                 name = entry.name().to_vec();
             } else {
@@ -510,20 +595,37 @@ impl QPackDecoder {
                 return Err(Error::DecompressionFailed);
             }
         }
-        let _value_is_huffman = buf.read_bits2(1)?;
-        let value_len = read_prefixed_encoded_int_header_read_buf(buf, 1)?;
+
+        let value_is_huffman = buf.peek()? & 0x80 != 0;
+        let value_len = read_prefixed_encoded_int_slice(buf, 1)? as usize;
+
         let mut value: Vec<u8> = Vec::new();
-        buf.read_bytes(&mut value, value_len)?;
+        if value_is_huffman {
+            value = Huffman::default().decode(buf.slice(value_len)?)?;
+        } else {
+            value.extend_from_slice(buf.slice(value_len)?);
+        }
+        log!(
+            Level::Debug,
+            "Decoder: name index={} static={} value={:x?}.",
+            index,
+            static_table,
+            value
+        );
         Ok((to_string(&name)?, to_string(&value)?))
     }
 
     fn read_literal_with_post_base_name_ref(
         &self,
-        buf: &mut HeaderReadBuf,
+        buf: &mut BufWrapper,
         base: u64,
     ) -> Res<(String, String)> {
-        let _n = buf.read_bits2(1)?;
-        let index = read_prefixed_encoded_int_header_read_buf(buf, 5)?;
+        log!(
+            Level::Debug,
+            "Decoder: decoder literal with post-based index."
+        );
+        // ignore n bit.
+        let index = read_prefixed_encoded_int_slice(buf, 5)?;
         let mut name: Vec<u8>;
         if let Ok(entry) = self.table.get_dynamic(index, base, true) {
             name = entry.name().to_vec();
@@ -531,26 +633,55 @@ impl QPackDecoder {
             return Err(Error::DecompressionFailed);
         }
 
-        let _value_is_huffman = buf.read_bits2(1)?;
-        let value_len = read_prefixed_encoded_int_header_read_buf(buf, 1)?;
+        let value_is_huffman = buf.peek()? & 0x80 != 0;
+        let value_len = read_prefixed_encoded_int_slice(buf, 1)? as usize;
+
         let mut value: Vec<u8> = Vec::new();
-        buf.read_bytes(&mut value, value_len)?;
+        if value_is_huffman {
+            value = Huffman::default().decode(buf.slice(value_len)?)?;
+        } else {
+            value.extend_from_slice(buf.slice(value_len)?);
+        }
+
+        log!(
+            Level::Debug,
+            "Decoder: name={:x?} value={:x?}.",
+            name,
+            value
+        );
         Ok((to_string(&name)?, to_string(&value)?))
     }
 
-    fn read_literal_with_name_literal(&self, buf: &mut HeaderReadBuf) -> Res<(String, String)> {
-        let _n = buf.read_bits2(1)?;
+    fn read_literal_with_name_literal(&self, buf: &mut BufWrapper) -> Res<(String, String)> {
+        log!(Level::Debug, "Decoder: decode literal with name literal.");
+        // ignore n bit.
 
-        let _name_is_huffman = buf.read_bits2(1)?;
-        let name_len = read_prefixed_encoded_int_header_read_buf(buf, 5)?;
+        let name_is_huffman = buf.peek()? & 0x08 != 0;
+        let name_len = read_prefixed_encoded_int_slice(buf, 5)? as usize;
+
         let mut name: Vec<u8> = Vec::new();
-        buf.read_bytes(&mut name, name_len)?;
+        if name_is_huffman {
+            name = Huffman::default().decode(buf.slice(name_len)?)?;
+        } else {
+            name.extend_from_slice(buf.slice(name_len)?);
+        }
 
-        let _value_is_huffman = buf.read_bits2(1)?;
-        let value_len = read_prefixed_encoded_int_header_read_buf(buf, 1)?;
+        let value_is_huffman = buf.peek()? & 0x80 != 0;
+        let value_len = read_prefixed_encoded_int_slice(buf, 1)? as usize;
+
         let mut value: Vec<u8> = Vec::new();
-        buf.read_bytes(&mut value, value_len)?;
+        if value_is_huffman {
+            value = Huffman::default().decode(buf.slice(value_len)?)?;
+        } else {
+            value.extend_from_slice(buf.slice(value_len)?);
+        }
 
+        log!(
+            Level::Debug,
+            "Decoder: name={:x?} value={:x?}.",
+            name,
+            value
+        );
         Ok((to_string(&name)?, to_string(&value)?))
     }
 
@@ -575,6 +706,43 @@ impl QPackDecoder {
                 }
             }
             Ok(req_insert_cnt)
+        }
+    }
+
+    pub fn is_send_stream(&self, stream_id: u64) -> bool {
+        match self.local_stream_id {
+            Some(id) => id == stream_id,
+            None => false,
+        }
+    }
+
+    pub fn is_recv_stream(&self, stream_id: u64) -> bool {
+        match self.remote_stream_id {
+            Some(id) => id == stream_id,
+            None => false,
+        }
+    }
+
+    pub fn add_send_stream(&mut self, stream_id: u64) {
+        if let Some(_) = self.local_stream_id {
+            panic!("Adding multiple local streams");
+        }
+        self.local_stream_id = Some(stream_id);
+        self.send_buf
+            .write_byte(QPACK_UNI_STREAM_TYPE_DECODER as u8);
+    }
+
+    pub fn add_recv_stream(&mut self, stream_id: u64) {
+        if let Some(_) = self.remote_stream_id {
+            panic!("Adding multiple remote streams");
+        }
+        self.remote_stream_id = Some(stream_id);
+    }
+
+    pub fn has_recv_stream(&self) -> bool {
+        match self.remote_stream_id {
+            Some(_) => true,
+            None => false,
         }
     }
 }
@@ -694,7 +862,7 @@ mod tests {
         let mut sender = SenderForTests {
             send_buf: Vec::new(),
         };
-        if let Err(_) = decoder.write(&mut sender) {
+        if let Err(_) = decoder.send(&mut sender) {
             assert!(false);
         } else {
             assert!(true);
@@ -705,7 +873,7 @@ mod tests {
     // test insert_with_name_ref which fails because there is not enough space in the table
     #[test]
     fn test_recv_insert_with_name_ref_1() {
-        let mut decoder = QPackDecoder::new(0);
+        let mut decoder = QPackDecoder::new(100, 100);
         let mut receiver = ReceiverForTests {
             recv_buf: Vec::new(),
         };
@@ -725,7 +893,10 @@ mod tests {
     // test insert_name_ref that succeeds
     #[test]
     fn test_recv_insert_with_name_ref_2() {
-        let mut decoder = QPackDecoder::new(200);
+        let mut decoder = QPackDecoder::new(100, 100);
+        if let Err(_) = decoder.set_capacity(100) {
+            assert!(false);
+        }
         let mut receiver = ReceiverForTests {
             recv_buf: Vec::new(),
         };
@@ -742,10 +913,10 @@ mod tests {
         test_sent_instructions(&mut decoder, &vec![0x01]);
     }
 
-     // test insert_with_name_literal which fails because there is not enough space in the table
+    // test insert_with_name_literal which fails because there is not enough space in the table
     #[test]
     fn test_recv_insert_with_name_litarel_1() {
-        let mut decoder = QPackDecoder::new(0);
+        let mut decoder = QPackDecoder::new(100, 100);
         let mut receiver = ReceiverForTests {
             recv_buf: Vec::new(),
         };
@@ -763,10 +934,13 @@ mod tests {
         test_sent_instructions(&mut decoder, &vec![]);
     }
 
-   // test insert with name literal - succeeds
+    // test insert with name literal - succeeds
     #[test]
     fn test_recv_insert_with_name_litarel_2() {
-        let mut decoder = QPackDecoder::new(200);
+        let mut decoder = QPackDecoder::new(200, 100);
+        if let Err(_) = decoder.set_capacity(200) {
+            assert!(false);
+        }
         let mut receiver = ReceiverForTests {
             recv_buf: Vec::new(),
         };
@@ -786,7 +960,7 @@ mod tests {
 
     #[test]
     fn test_recv_change_capacity() {
-        let mut decoder = QPackDecoder::new(0);
+        let mut decoder = QPackDecoder::new(300, 100);
         let mut receiver = ReceiverForTests {
             recv_buf: Vec::new(),
         };
@@ -800,10 +974,28 @@ mod tests {
         assert_eq!(decoder.capacity(), 200);
     }
 
+    #[test]
+    fn test_recv_change_capacity_too_big() {
+        let mut decoder = QPackDecoder::new(100, 100);
+        let mut receiver = ReceiverForTests {
+            recv_buf: Vec::new(),
+        };
+        receiver.recv_buf.extend(vec![0x3f, 0xa9, 0x01]);
+
+        if let Err(e) = decoder.read_instructions(&mut receiver) {
+            assert_eq!(Error::EncoderStreamError, e);
+        } else {
+            assert!(false);
+        }
+    }
+
     // this test tests heade decoding, the header acks command and the insert count increment command.
     #[test]
     fn test_duplicate() {
-        let mut decoder = QPackDecoder::new(60);
+        let mut decoder = QPackDecoder::new(200, 100);
+        if let Err(_) = decoder.set_capacity(60) {
+            assert!(false);
+        }
         let mut receiver = ReceiverForTests {
             recv_buf: Vec::new(),
         };
@@ -893,8 +1085,10 @@ mod tests {
             },
         ];
 
-        let mut decoder = QPackDecoder::new(200);
-        decoder.set_max_capacity(200);
+        let mut decoder = QPackDecoder::new(200, 100);
+        if let Err(_) = decoder.set_capacity(200) {
+            assert!(false);
+        }
         let mut receiver = ReceiverForTests {
             recv_buf: Vec::new(),
         };
@@ -908,9 +1102,12 @@ mod tests {
                 assert!(true);
             }
 
-            let headers = decoder.decode_header_block(&mut HeaderReadBuf::from(t.header_block), i);
-            if let Ok(h) = headers {
-                assert_eq!(h, t.headers);
+            if let Ok(headers) = decoder.decode_header_block(t.header_block, i) {
+                if let Some(h) = headers {
+                    assert_eq!(h, t.headers);
+                } else {
+                    assert!(false);
+                }
             } else {
                 assert!(false);
             }
@@ -918,6 +1115,6 @@ mod tests {
         }
 
         // test header acks and insert count increment command.
-        test_sent_instructions(&mut decoder, &vec![0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x1]);
+        test_sent_instructions(&mut decoder, &vec![0x82, 0x83, 0x84, 0x1]);
     }
 }

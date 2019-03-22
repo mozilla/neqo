@@ -1,8 +1,11 @@
 #![deny(warnings)]
 
-mod decoder;
-mod encoder;
-pub mod header_read_buf;
+#[macro_use]
+extern crate neqo_common;
+
+pub mod decoder;
+pub mod encoder;
+pub mod qpack_helper;
 pub mod huffman;
 mod huffman_decode_helper;
 pub mod huffman_table;
@@ -12,6 +15,7 @@ mod table;
 
 type Res<T> = Result<T, Error>;
 
+#[derive(Debug)]
 enum QPackSide {
     Encoder,
     Decoder,
