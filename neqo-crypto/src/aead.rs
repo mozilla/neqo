@@ -79,10 +79,10 @@ impl Aead {
         };
         result::result(rv)?;
         match NonNull::new(ctx) {
-            None => Err(Error::InternalError),
             Some(ctx_ptr) => Ok(Aead {
                 ctx: AeadContext::new(ctx_ptr),
             }),
+            None => Err(Error::InternalError),
         }
     }
 

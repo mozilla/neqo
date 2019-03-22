@@ -48,8 +48,8 @@ pub fn import_key(version: Version, cipher: Cipher, buf: &[u8]) -> Res<SymKey> {
     };
     let slot_ptr = unsafe { PK11_GetInternalSlot() };
     let slot = match NonNull::new(slot_ptr) {
-        None => return Err(Error::InternalError),
         Some(p) => Slot::new(p),
+        None => return Err(Error::InternalError),
     };
     let key_ptr = unsafe {
         PK11_ImportSymKey(
@@ -62,8 +62,8 @@ pub fn import_key(version: Version, cipher: Cipher, buf: &[u8]) -> Res<SymKey> {
         )
     };
     match NonNull::new(key_ptr) {
-        None => Err(Error::InternalError),
         Some(p) => Ok(SymKey::new(p)),
+        None => Err(Error::InternalError),
     }
 }
 
@@ -82,8 +82,8 @@ pub fn extract(
     let rv = unsafe { SSL_HkdfExtract(version, cipher, salt_ptr, **ikm, &mut prk) };
     result::result(rv)?;
     match NonNull::new(prk) {
-        None => Err(Error::InternalError),
         Some(p) => Ok(SymKey::new(p)),
+        None => Err(Error::InternalError),
     }
 }
 
@@ -115,7 +115,7 @@ pub fn expand_label<S: Into<String>>(
     };
     result::result(rv)?;
     match NonNull::new(secret) {
-        None => Err(Error::HkdfError),
         Some(p) => Ok(SymKey::new(p)),
+        None => Err(Error::HkdfError),
     }
 }

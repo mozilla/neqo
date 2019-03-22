@@ -1,5 +1,6 @@
 use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{Record, RecordList};
+pub use crate::cert::CertificateChain;
 use crate::constants::*;
 use crate::err::{Error, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
@@ -423,6 +424,11 @@ impl SecretAgent {
     /// Calling this function collects all the relevant information.
     pub fn preinfo(&self) -> Res<SecretAgentPreInfo> {
         SecretAgentPreInfo::new(self.fd)
+    }
+
+    /// Get the peer's certificate chain.
+    pub fn peer_certificate(&self) -> Res<CertificateChain> {
+        CertificateChain::new(self.fd)
     }
 
     /// Return any fatal alert that the TLS stack might have sent.

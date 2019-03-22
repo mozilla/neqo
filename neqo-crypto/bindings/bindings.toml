@@ -3,6 +3,7 @@
 
 [nss_ssl]
 types = [
+    "PRCList",
     "PRUint16",
     "PRUint64",
     "PRUint8",
@@ -115,9 +116,16 @@ variables = [
 ]
 
 [nss_p11]
-types = ["SECItem", "CK_ATTRIBUTE_TYPE", "CK_MECHANISM_TYPE"]
+types = [
+    "CERTCertList",
+    "CERTCertListNode",
+    "SECItem",
+    "CK_ATTRIBUTE_TYPE",
+    "CK_MECHANISM_TYPE",
+]
 functions = [
     "CERT_DestroyCertificate",
+    "CERT_DestroyCertList",
     "CERT_GetCertificateDer",
     "PK11_Encrypt",
     "PK11_ExtractKeyValue",

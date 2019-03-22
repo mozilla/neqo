@@ -8,6 +8,7 @@ pub mod p11;
 pub mod aead;
 pub mod agent;
 mod agentio;
+mod cert;
 pub mod constants;
 mod err;
 pub mod ext;

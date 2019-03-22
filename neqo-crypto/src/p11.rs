@@ -45,6 +45,7 @@ macro_rules! scoped_ptr {
 }
 
 scoped_ptr!(Certificate, CERTCertificate, CERT_DestroyCertificate);
+scoped_ptr!(CertList, CERTCertList, CERT_DestroyCertList);
 scoped_ptr!(PrivateKey, SECKEYPrivateKey, SECKEY_DestroyPrivateKey);
 scoped_ptr!(SymKey, PK11SymKey, PK11_FreeSymKey);
 scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
