@@ -105,7 +105,7 @@ impl ReadBuf {
         Ok(r)
     }
 
-    fn read<T: Reader>(&mut self, reader: &mut T) -> Res<(u64, bool)> {
+    fn read(&mut self, reader: &mut Reader) -> Res<(u64, bool)> {
         assert!(
             self.state == ReadBufState::CollectingVarint
                 || self.state == ReadBufState::CollectingLen

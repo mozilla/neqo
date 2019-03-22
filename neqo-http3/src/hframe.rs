@@ -4,7 +4,7 @@
 use neqo_common::data::*;
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::*;
-use neqo_transport::stream::Recvable;
+use neqo_transport::Recvable;
 
 use crate::recvable::RecvableWrapper;
 use crate::{Error, Res};
@@ -645,22 +645,22 @@ mod tests {
         // Read settings frame 040406040804
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x6]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x8]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         if !fr.done() {
             assert!(false);
         }
@@ -690,26 +690,26 @@ mod tests {
         assert_eq!(Ok(false), fr.receive(&mut s));
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x6]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x6]);
         assert_eq!(Ok(false), fr.receive(&mut s));
         s.recv_buf.extend(vec![0x40]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x4]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x8]);
         assert_eq!(Ok(false), fr.receive(&mut s));
         s.recv_buf.extend(vec![0x41]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x0]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         if !fr.done() {
             assert!(false);
         }
@@ -736,13 +736,13 @@ mod tests {
         // Read pushpromise frame 05054101010203
         s.recv_buf.extend(vec![0x5]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x5]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x41]);
         assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.recv_data_ready());
+        assert!(!s.data_ready());
         s.recv_buf.extend(vec![0x1, 0x1, 0x2, 0x3]);
         assert_eq!(Ok(false), fr.receive(&mut s));
 

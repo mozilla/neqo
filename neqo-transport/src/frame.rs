@@ -208,7 +208,7 @@ impl Frame {
         }
     }
 
-    pub fn marshal(&self, d: &mut Data) -> Res<()> {
+    pub fn marshal(&self, d: &mut Data) {
         d.encode_varint(self.get_type());
 
         match self {
@@ -322,8 +322,6 @@ impl Frame {
                 d.encode_vec_and_len(reason_phrase);
             }
         }
-
-        Ok(())
     }
 }
 
@@ -482,7 +480,7 @@ mod tests {
     fn enc_dec(f: &Frame, s: &str) {
         let mut d = Data::default();
 
-        f.marshal(&mut d).unwrap();
+        f.marshal(&mut d);
         assert_eq!(d, Data::from_hex(s));
 
         let f2 = decode_frame(&mut d).unwrap();

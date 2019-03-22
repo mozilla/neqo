@@ -4,6 +4,7 @@ use neqo_common::data::*;
 use neqo_crypto::*;
 use neqo_transport::*;
 use std::net::SocketAddr;
+use std::time::Instant;
 
 const INITIAL_PACKET: &str = "c1ff000012508394c8f03e51570800449f0dbc195a0000f3a694c75775b4e546\
                               172ce9e047cd0b5bee5181648c727adc87f7eae54473ec6cba6bdad4f5982317\
@@ -51,12 +52,12 @@ fn loopback() -> SocketAddr {
 #[test]
 fn process_client_initial() {
     init_db("./db");
-    let mut server = Connection::new_server(&["key"], &["alpn"]);
+    let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
 
     let mut d = Data::from_hex(INITIAL_PACKET);
     let dgram = Datagram::new(loopback(), loopback(), d.as_mut_vec());
     assert_eq!(*server.state(), connection::State::WaitInitial);
-    let out = server.process(vec![dgram]);
+    let out = server.process(vec![dgram], Instant::now());
     assert_eq!(*server.state(), connection::State::Handshaking);
     assert_eq!(out.len(), 1);
 }

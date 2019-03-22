@@ -1,5 +1,8 @@
 #![allow(unused_variables, dead_code)]
 
+use std::collections::HashMap;
+use std::time::Instant;
+
 use neqo_common::data::Data;
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::decode_varint;
@@ -7,9 +10,8 @@ use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::connection::Role;
 use neqo_transport::frame::StreamType;
-use neqo_transport::stream::{Recvable, Sendable};
 use neqo_transport::{Datagram, State};
-use std::collections::HashMap;
+use neqo_transport::{Recvable, Sendable};
 
 use crate::hframe::{
     ElementDependencyType, HFrame, HFrameReader, HSettingType, PrioritizedElementType,
@@ -519,7 +521,7 @@ impl HttpConn {
 
     pub fn process(&mut self, d: Vec<Datagram>) -> Vec<Datagram> {
         let state_before = self.state().clone();
-        let out = self.conn.process(d);
+        let out = self.conn.process(d, Instant::now());
         let state_after = self.state().clone();
         if state_after != state_before {
             let res = self.process_state_change(&state_after);
@@ -878,7 +880,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&2) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
             }
             None => {
                 assert!(false);
@@ -920,7 +922,7 @@ mod tests {
         // start sending SETTINGS frame
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x4]);
             }
             None => {
@@ -931,7 +933,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x4]);
             }
             None => {
@@ -942,7 +944,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x6]);
             }
             None => {
@@ -953,7 +955,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x0]);
             }
             None => {
@@ -964,7 +966,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x8]);
             }
             None => {
@@ -975,7 +977,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x0]);
             }
             None => {
@@ -986,7 +988,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
             }
             None => {
                 assert!(false);
@@ -996,7 +998,7 @@ mod tests {
         // Now test PushPromise
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x5]);
             }
             None => {
@@ -1009,7 +1011,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x5]);
             }
             None => {
@@ -1020,7 +1022,7 @@ mod tests {
         check_return_value(r);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
                 s.recv_buf.extend(vec![0x4]);
             }
             None => {
@@ -1033,7 +1035,7 @@ mod tests {
         assert_closed(&hconn, Error::WrongStream);
         match hconn.conn.streams.get_mut(&1) {
             Some(s) => {
-                assert!(!s.recv_data_ready());
+                assert!(!s.data_ready());
             }
             None => {
                 assert!(false);

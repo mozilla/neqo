@@ -1,16 +1,10 @@
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::mem;
-
-use slice_deque::SliceDeque;
-
-use crate::connection::TxMode;
 
 use crate::{AppError, Error, Res};
 
 const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
-const TX_STREAM_DATA_WINDOW: usize = 0xFFFF; // 64 KiB
 
 pub trait Recvable: Debug {
     /// Read buffered data from stream. bool says whether is final data on
@@ -26,139 +20,8 @@ pub trait Recvable: Debug {
     /// Close the stream.
     fn close(&mut self);
 
-    // Following methods are used by packet generator, not application
-
     /// Bytes can be read from the stream.
-    fn recv_data_ready(&self) -> bool;
-
-    /// Handle a received stream data frame.
-    fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()>;
-
-    /// What should be communicated to the sender as the new max stream
-    /// offset.
-    fn needs_flowc_update(&mut self) -> Option<u64>;
-
-    /// The final size of the stream.
-    fn final_size(&self) -> Option<u64>;
-}
-
-pub trait Sendable: Debug {
-    /// Enqueue data to send on the stream. Returns bytes enqueued.
-    fn send(&mut self, buf: &[u8]) -> Res<usize>;
-
-    /// Data is ready for sending
-    fn send_data_ready(&self) -> bool;
-
-    /// Close the stream
-    fn close(&mut self) {}
-
-    /// Abandon transmission of stream data
-    fn reset(&mut self, err: AppError) -> Res<()>;
-
-    // Following methods are used by packet generator, not application
-
-    fn next_bytes(&mut self, _mode: TxMode) -> Option<(u64, &[u8])>;
-
-    fn mark_as_sent(&mut self, offset: u64, len: usize);
-
-    fn final_size(&self) -> Option<u64>;
-
-    fn reset_acked(&mut self);
-}
-
-#[derive(Debug, Default)]
-pub struct TxBuffer {
-    acked_offset: u64,                  // contig acked bytes, no longer in buffer
-    next_send_offset: u64,              // differentiates bytes buffered from bytes sent
-    send_buf: SliceDeque<u8>,           // buffer of not-acked bytes
-    acked_ranges: BTreeMap<u64, usize>, // non-contig ranges in buffer that have been acked
-}
-
-impl TxBuffer {
-    pub fn new() -> TxBuffer {
-        TxBuffer {
-            send_buf: SliceDeque::with_capacity(TX_STREAM_DATA_WINDOW),
-            ..TxBuffer::default()
-        }
-    }
-
-    pub fn send(&mut self, buf: &[u8]) -> usize {
-        let can_send = min(TX_STREAM_DATA_WINDOW - self.buffered(), buf.len());
-        if can_send > 0 {
-            self.send_buf.extend(&buf[..can_send]);
-            assert!(self.send_buf.len() <= TX_STREAM_DATA_WINDOW);
-        }
-        can_send
-    }
-
-    pub fn next_bytes(&mut self, _mode: TxMode) -> Option<(u64, &[u8])> {
-        // TODO(agrover@mozilla.com): this returns
-        let buffered_bytes_sent_not_acked = self.next_send_offset - self.acked_offset;
-        let buffered_bytes_not_sent = self.send_buf.len() as u64 - buffered_bytes_sent_not_acked;
-
-        if buffered_bytes_not_sent == 0 {
-            None
-        } else {
-            // Present all bytes for sending, but frame generator may or may
-            // not take all of them (how much indicated by calling
-            // mark_as_sent())
-            Some((
-                self.acked_offset + buffered_bytes_sent_not_acked,
-                &self.send_buf[buffered_bytes_sent_not_acked as usize..],
-            ))
-        }
-    }
-
-    pub fn mark_as_sent(&mut self, new_sent_offset: u64, len: usize) {
-        assert!(new_sent_offset == self.next_send_offset);
-        self.next_send_offset = new_sent_offset + len as u64;
-    }
-
-    // pub fn mark_as_ackedTODO(&mut self, offset: u64, len: usize) {
-    //     let end_off = offset + len as u64;
-    //     let (prev_sent_start, prev_len) = self
-    //         .sent_ranges
-    //         .range_mut(..offset + 1)
-    //         .next_back()
-    //         .expect("must exist");
-    //     let prev_sent_end: u64 = prev_sent_start + *prev_len as u64;
-    //     match prev_sent_end.cmp(&offset) {
-    //         Ordering::Less => *prev_len = max(prev_sent_end as usize, end_off as usize),
-    //         Ordering::Equal => {
-    //             *prev_len = max(prev_sent_end as usize, end_off as usize);
-    //         }
-    //         Ordering::Greater => {
-    //             panic!("should never happen, why are we sending out of order?");
-    //         }
-    //     }
-    // }
-
-    fn sent_not_acked_bytes(&self) -> usize {
-        self.next_send_offset as usize - self.acked_offset as usize
-    }
-
-    #[allow(dead_code, unused_variables)]
-    fn sent_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
-        unimplemented!();
-    }
-
-    #[allow(dead_code, unused_variables)]
-    fn lost_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
-        unimplemented!();
-    }
-
-    #[allow(dead_code, unused_variables)]
-    fn acked_bytes(&mut self, now: u64, offset: usize, l: usize) -> Res<()> {
-        unimplemented!();
-    }
-
-    fn data_ready(&self) -> bool {
-        self.send_buf.len() != self.sent_not_acked_bytes()
-    }
-
-    fn buffered(&self) -> usize {
-        self.send_buf.len()
-    }
+    fn data_ready(&self) -> bool;
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -407,164 +270,6 @@ impl RxStreamOrderer {
     }
 }
 
-#[derive(Debug)]
-enum SendStreamState {
-    Ready,
-    Send(TxBuffer),
-    DataSent(TxBuffer, u64),
-    DataRecvd(u64),
-    ResetSent,
-    ResetRecvd,
-}
-
-impl SendStreamState {
-    fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
-        match self {
-            SendStreamState::Send(buf) => Some(buf),
-            SendStreamState::DataSent(buf, _) => Some(buf),
-            SendStreamState::Ready
-            | SendStreamState::DataRecvd(_)
-            | SendStreamState::ResetSent
-            | SendStreamState::ResetRecvd => None,
-        }
-    }
-
-    fn tx_buf(&self) -> Option<&TxBuffer> {
-        match self {
-            SendStreamState::Send(buf) => Some(buf),
-            SendStreamState::DataSent(buf, _) => Some(buf),
-            SendStreamState::Ready
-            | SendStreamState::DataRecvd(_)
-            | SendStreamState::ResetSent
-            | SendStreamState::ResetRecvd => None,
-        }
-    }
-
-    fn final_size(&self) -> Option<u64> {
-        match self {
-            SendStreamState::DataSent(_, size) => Some(*size),
-            SendStreamState::DataRecvd(size) => Some(*size),
-            SendStreamState::Ready
-            | SendStreamState::Send(_)
-            | SendStreamState::ResetSent
-            | SendStreamState::ResetRecvd => None,
-        }
-    }
-
-    fn name(&self) -> &str {
-        match self {
-            SendStreamState::Ready => "Ready",
-            SendStreamState::Send(_) => "Send",
-            SendStreamState::DataSent(_, _) => "DataSent",
-            SendStreamState::DataRecvd(_) => "DataRecvd",
-            SendStreamState::ResetSent => "ResetSent",
-            SendStreamState::ResetRecvd => "ResetRecvd",
-        }
-    }
-
-    fn transition(&mut self, new_state: SendStreamState) {
-        qtrace!("SendStream state {} -> {}", self.name(), new_state.name());
-        *self = new_state;
-    }
-}
-
-#[derive(Debug)]
-pub struct SendStream {
-    state: SendStreamState,
-}
-
-impl SendStream {
-    pub fn new() -> SendStream {
-        SendStream {
-            state: SendStreamState::Ready,
-        }
-    }
-}
-
-impl Sendable for SendStream {
-    fn send(&mut self, buf: &[u8]) -> Res<usize> {
-        Ok(match self.state {
-            SendStreamState::Ready => {
-                let mut tx_buf = TxBuffer::new();
-                let sent = tx_buf.send(buf);
-                self.state.transition(SendStreamState::Send(tx_buf));
-                sent
-            }
-            SendStreamState::Send(ref mut tx_buf) => tx_buf.send(buf),
-            SendStreamState::DataSent(_, _) => return Err(Error::FinalSizeError),
-            SendStreamState::DataRecvd(_) => return Err(Error::FinalSizeError),
-            SendStreamState::ResetSent => return Err(Error::FinalSizeError),
-            SendStreamState::ResetRecvd => return Err(Error::FinalSizeError),
-        })
-    }
-
-    fn send_data_ready(&self) -> bool {
-        self.state
-            .tx_buf()
-            .map(|buf| buf.data_ready())
-            .unwrap_or(false)
-    }
-
-    fn close(&mut self) {
-        match self.state {
-            SendStreamState::Ready => {
-                self.state.transition(SendStreamState::DataRecvd(0));
-            }
-            SendStreamState::Send(ref mut tx_buf) => {
-                let final_size = tx_buf.acked_offset + tx_buf.buffered() as u64;
-                let owned_buf = mem::replace(tx_buf, TxBuffer::new());
-                self.state
-                    .transition(SendStreamState::DataSent(owned_buf, final_size));
-            }
-            SendStreamState::DataSent(_, _) => qtrace!("already in DataSent state"),
-            SendStreamState::DataRecvd(_) => qtrace!("already in DataRecvd state"),
-            SendStreamState::ResetSent => qtrace!("already in ResetSent state"),
-            SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
-        }
-    }
-
-    fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
-        self.state.tx_buf_mut().and_then(|buf| buf.next_bytes(mode))
-    }
-
-    fn mark_as_sent(&mut self, offset: u64, len: usize) {
-        self.state
-            .tx_buf_mut()
-            .map(|buf| buf.mark_as_sent(offset, len));
-    }
-
-    fn final_size(&self) -> Option<u64> {
-        self.state.final_size()
-    }
-
-    fn reset(&mut self, _err: AppError) -> Res<()> {
-        match self.state {
-            SendStreamState::Ready | SendStreamState::Send(_) | SendStreamState::DataSent(_, _) => {
-                // TODO(agrover@mozilla.com): send RESET_STREAM
-                self.state.transition(SendStreamState::ResetSent);
-            }
-            SendStreamState::DataRecvd(_) => qtrace!("already in DataRecvd state"),
-            SendStreamState::ResetSent => qtrace!("already in ResetSent state"),
-            SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
-        };
-
-        Ok(())
-    }
-
-    fn reset_acked(&mut self) {
-        match self.state {
-            SendStreamState::Ready
-            | SendStreamState::Send(_)
-            | SendStreamState::DataSent(_, _)
-            | SendStreamState::DataRecvd(_) => {
-                qtrace!("Reset acked while in {} state?", self.state.name())
-            }
-            SendStreamState::ResetSent => self.state.transition(SendStreamState::ResetRecvd),
-            SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
-        };
-    }
-}
-
 #[derive(Debug, PartialEq)]
 enum RecvStreamState {
     Open {
@@ -607,10 +312,70 @@ impl RecvStream {
             RecvStreamState::Closed => None,
         }
     }
+
+    pub fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
+        let new_end = offset + data.len() as u64;
+
+        // Send final size errors even if stream is closed
+        if let Some(final_size) = self.final_size {
+            if new_end > final_size || (fin && new_end != final_size) {
+                return Err(Error::FinalSizeError);
+            }
+        }
+
+        match &mut self.state {
+            RecvStreamState::Closed => {
+                Err(Error::TooMuchData) // send STOP_SENDING
+            }
+            RecvStreamState::Open {
+                rx_window,
+                rx_orderer,
+            } => {
+                if fin && self.final_size == None {
+                    let final_size = offset + data.len() as u64;
+                    if final_size < rx_orderer.highest_seen_offset() {
+                        return Err(Error::FinalSizeError);
+                    }
+                    self.final_size = Some(offset + data.len() as u64);
+                }
+
+                if new_end > *rx_window {
+                    qtrace!("Stream RX window {} exceeded: {}", rx_window, new_end);
+                    return Err(Error::FlowControlError);
+                }
+
+                rx_orderer.inbound_frame(offset, data)
+            }
+        }
+    }
+
+    /// If we should tell the sender they have more credit, return an offset
+    pub fn needs_flowc_update(&mut self) -> Option<u64> {
+        match &mut self.state {
+            RecvStreamState::Closed => None,
+            RecvStreamState::Open {
+                rx_window,
+                rx_orderer,
+            } => {
+                let lowater = RX_STREAM_DATA_WINDOW / 2;
+                let new_window = rx_orderer.retired() + RX_STREAM_DATA_WINDOW;
+                if self.final_size.is_none() && new_window > lowater + *rx_window {
+                    *rx_window = new_window;
+                    Some(new_window)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    pub fn final_size(&self) -> Option<u64> {
+        self.final_size
+    }
 }
 
 impl Recvable for RecvStream {
-    fn recv_data_ready(&self) -> bool {
+    fn data_ready(&self) -> bool {
         match &self.state {
             RecvStreamState::Open {
                 rx_window: _,
@@ -652,68 +417,8 @@ impl Recvable for RecvStream {
         }
     }
 
-    fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
-        let new_end = offset + data.len() as u64;
-
-        // Send final size errors even if stream is closed
-        if let Some(final_size) = self.final_size {
-            if new_end > final_size || (fin && new_end != final_size) {
-                return Err(Error::FinalSizeError);
-            }
-        }
-
-        match &mut self.state {
-            RecvStreamState::Closed => {
-                Err(Error::TooMuchData) // send STOP_SENDING
-            }
-            RecvStreamState::Open {
-                rx_window,
-                rx_orderer,
-            } => {
-                if fin && self.final_size == None {
-                    let final_size = offset + data.len() as u64;
-                    if final_size < rx_orderer.highest_seen_offset() {
-                        return Err(Error::FinalSizeError);
-                    }
-                    self.final_size = Some(offset + data.len() as u64);
-                }
-
-                if new_end > *rx_window {
-                    qtrace!("Stream RX window {} exceeded: {}", rx_window, new_end);
-                    return Err(Error::FlowControlError);
-                }
-
-                rx_orderer.inbound_frame(offset, data)
-            }
-        }
-    }
-
-    /// If we should tell the sender they have more credit, return an offset
-    fn needs_flowc_update(&mut self) -> Option<u64> {
-        match &mut self.state {
-            RecvStreamState::Closed => None,
-            RecvStreamState::Open {
-                rx_window,
-                rx_orderer,
-            } => {
-                let lowater = RX_STREAM_DATA_WINDOW / 2;
-                let new_window = rx_orderer.retired() + RX_STREAM_DATA_WINDOW;
-                if self.final_size.is_none() && new_window > lowater + *rx_window {
-                    *rx_window = new_window;
-                    Some(new_window)
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
     fn close(&mut self) {
         self.state = RecvStreamState::Closed
-    }
-
-    fn final_size(&self) -> Option<u64> {
-        self.final_size
     }
 
     #[allow(dead_code, unused_variables)]
@@ -732,7 +437,7 @@ mod tests {
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, vec![1; 10]).unwrap();
-        assert_eq!(s.recv_data_ready(), true);
+        assert_eq!(s.data_ready(), true);
         let mut buf = vec![0u8; 100];
         assert_eq!(s.read(&mut buf).unwrap(), (10, false));
         assert_eq!(s.orderer().unwrap().retired(), 10);
@@ -740,27 +445,27 @@ mod tests {
 
         // test receiving a noncontig frame
         s.inbound_stream_frame(false, 12, vec![2; 12]).unwrap();
-        assert_eq!(s.recv_data_ready(), false);
+        assert_eq!(s.data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
         assert_eq!(s.orderer().unwrap().retired(), 10);
         assert_eq!(s.orderer().unwrap().buffered(), 12);
 
         // another frame that overlaps the first
         s.inbound_stream_frame(false, 14, vec![3; 8]).unwrap();
-        assert_eq!(s.recv_data_ready(), false);
+        assert_eq!(s.data_ready(), false);
         assert_eq!(s.orderer().unwrap().retired(), 10);
         assert_eq!(s.orderer().unwrap().buffered(), 12);
 
         // fill in the gap, but with a FIN
         s.inbound_stream_frame(true, 10, vec![4; 6]).unwrap_err();
-        assert_eq!(s.recv_data_ready(), false);
+        assert_eq!(s.data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
         assert_eq!(s.orderer().unwrap().retired(), 10);
         assert_eq!(s.orderer().unwrap().buffered(), 12);
 
         // fill in the gap
         s.inbound_stream_frame(false, 10, vec![5; 10]).unwrap();
-        assert_eq!(s.recv_data_ready(), true);
+        assert_eq!(s.data_ready(), true);
         assert_eq!(s.orderer().unwrap().retired(), 10);
         assert_eq!(s.orderer().unwrap().buffered(), 14);
 
@@ -768,7 +473,7 @@ mod tests {
         s.inbound_stream_frame(true, 24, vec![6; 18]).unwrap();
         assert_eq!(s.orderer().unwrap().retired(), 10);
         assert_eq!(s.orderer().unwrap().buffered(), 32);
-        assert_eq!(s.recv_data_ready(), true);
+        assert_eq!(s.data_ready(), true);
         assert_eq!(s.read(&mut buf).unwrap(), (32, true));
         assert_eq!(s.read(&mut buf).unwrap(), (0, true));
     }
@@ -871,7 +576,7 @@ mod tests {
         s.inbound_stream_frame(false, 0, frame1).unwrap();
         assert_eq!(s.needs_flowc_update(), None);
         assert_eq!(s.read(&mut buf).unwrap(), (RX_STREAM_DATA_WINDOW, false));
-        assert_eq!(s.recv_data_ready(), false);
+        assert_eq!(s.data_ready(), false);
         assert_eq!(s.needs_flowc_update(), Some(RX_STREAM_DATA_WINDOW * 2));
         assert_eq!(s.needs_flowc_update(), None);
     }

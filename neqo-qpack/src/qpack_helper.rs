@@ -1,5 +1,5 @@
 use crate::{Error, Res};
-use neqo_transport::stream::Recvable;
+use neqo_transport::Recvable;
 
 pub trait ReadByte {
     fn read_byte(&mut self) -> Res<u8>;

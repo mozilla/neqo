@@ -3,6 +3,7 @@ use neqo_transport::{Connection, Datagram, State};
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
+use std::time::Instant;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -77,7 +78,7 @@ fn main() {
     let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
 
     let local_addr = socket.local_addr().expect("Socket local address not bound");
-    let mut server = Connection::new_server(args.key, args.alpn);
+    let mut server = Connection::new_server(args.key, args.alpn).expect("must succeed");
 
     println!("Server waiting for connection on: {:?}", local_addr);
 
@@ -93,8 +94,7 @@ fn main() {
             in_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
         }
 
-        let out_dgrams = server
-            .process(in_dgrams.drain(..));
+        let out_dgrams = server.process(in_dgrams.drain(..), Instant::now());
         if let State::Closed(e) = server.state() {
             eprintln!("Closed: {:?}", e);
             break;
