@@ -1,7 +1,10 @@
+use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use std::rc::Rc;
 
+use crate::connection::FlowMgr;
 use crate::{AppError, Error, Res};
 
 pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
@@ -274,7 +277,7 @@ impl RxStreamOrderer {
 enum RecvStreamState {
     Open {
         max_bytes: u64,
-        rx_window: u64,
+        max_stream_data: u64,
         rx_orderer: RxStreamOrderer,
     },
     Closed,
@@ -284,23 +287,27 @@ impl RecvStreamState {
     fn new(max_bytes: u64) -> RecvStreamState {
         RecvStreamState::Open {
             max_bytes,
-            rx_window: max_bytes,
+            max_stream_data: max_bytes,
             rx_orderer: RxStreamOrderer::new(),
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct RecvStream {
+    stream_id: u64,
     final_size: Option<u64>,
     state: RecvStreamState,
+    flow_mgr: Rc<RefCell<FlowMgr>>,
 }
 
 impl RecvStream {
-    pub fn new(max_stream_data: u64) -> RecvStream {
+    pub fn new(stream_id: u64, max_stream_data: u64, flow_mgr: Rc<RefCell<FlowMgr>>) -> RecvStream {
         RecvStream {
+            stream_id,
             final_size: None,
             state: RecvStreamState::new(max_stream_data),
+            flow_mgr,
         }
     }
 
@@ -309,7 +316,7 @@ impl RecvStream {
         match &self.state {
             RecvStreamState::Open {
                 max_bytes: _,
-                rx_window: _,
+                max_stream_data: _,
                 rx_orderer,
             } => Some(&rx_orderer),
             RecvStreamState::Closed => None,
@@ -332,7 +339,7 @@ impl RecvStream {
             }
             RecvStreamState::Open {
                 max_bytes: _,
-                rx_window,
+                max_stream_data,
                 rx_orderer,
             } => {
                 if fin && self.final_size == None {
@@ -343,32 +350,42 @@ impl RecvStream {
                     self.final_size = Some(offset + data.len() as u64);
                 }
 
-                if new_end > *rx_window {
-                    qtrace!("Stream RX window {} exceeded: {}", rx_window, new_end);
+                if new_end > *max_stream_data {
+                    qtrace!("Stream RX window {} exceeded: {}", max_stream_data, new_end);
                     return Err(Error::FlowControlError);
                 }
 
-                rx_orderer.inbound_frame(offset, data)
+                rx_orderer.inbound_frame(offset, data)?;
+                self.maybe_send_flowc_update();
+                Ok(())
             }
         }
     }
 
     /// If we should tell the sender they have more credit, return an offset
-    pub fn needs_flowc_update(&mut self) -> Option<u64> {
-        match &mut self.state {
-            RecvStreamState::Closed => None,
-            RecvStreamState::Open {
-                max_bytes,
-                rx_window,
-                rx_orderer,
-            } => {
-                let lowater = *max_bytes / 2;
-                let new_window = rx_orderer.retired() + *max_bytes;
-                if self.final_size.is_none() && new_window > lowater + *rx_window {
-                    *rx_window = new_window;
-                    Some(new_window)
-                } else {
-                    None
+    pub fn maybe_send_flowc_update(&mut self) {
+        if let RecvStreamState::Open {
+            max_bytes,
+            max_stream_data,
+            rx_orderer,
+        } = &mut self.state
+        {
+            {
+                if self.final_size.is_some() {
+                    return;
+                }
+
+                // Algo: send an update if app has consumed more than half
+                // the data in the current window
+                // TODO(agrover@mozilla.com): This algo is not great but
+                // should prevent Silly Window Syndrome. Spec refers to using
+                // highest seen offset somehow? RTT maybe?
+                let maybe_new_max = rx_orderer.retired() + *max_bytes;
+                if maybe_new_max > (*max_bytes / 2) + *max_stream_data {
+                    *max_stream_data = maybe_new_max;
+                    self.flow_mgr
+                        .borrow_mut()
+                        .max_stream_data(self.stream_id, maybe_new_max)
                 }
             }
         }
@@ -384,7 +401,7 @@ impl Recvable for RecvStream {
         match &self.state {
             RecvStreamState::Open {
                 max_bytes: _,
-                rx_window: _,
+                max_stream_data: _,
                 rx_orderer,
             } => rx_orderer.data_ready(),
             RecvStreamState::Closed => false,
@@ -404,7 +421,7 @@ impl Recvable for RecvStream {
             RecvStreamState::Closed => return Err(Error::NoMoreData),
             RecvStreamState::Open {
                 max_bytes: _,
-                rx_window: _,
+                max_stream_data: _,
                 rx_orderer,
             } => {
                 let read_bytes = rx_orderer.read_with_amount(buf, amount)?;
@@ -440,7 +457,9 @@ mod tests {
 
     #[test]
     fn test_stream_rx() {
-        let mut s = RecvStream::new(1024);
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+
+        let mut s = RecvStream::new(567, 1024, flow_mgr.clone());
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, vec![1; 10]).unwrap();
@@ -487,7 +506,9 @@ mod tests {
 
     #[test]
     fn test_stream_rx_dedupe() {
-        let mut s = RecvStream::new(1024);
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+
+        let mut s = RecvStream::new(3, 1024, flow_mgr.clone());
 
         let mut buf = vec![0u8; 100];
 
@@ -573,28 +594,44 @@ mod tests {
 
     #[test]
     fn test_stream_flowc_update() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = RecvStream::new(RX_STREAM_DATA_WINDOW);
+        let mut s = RecvStream::new(4, RX_STREAM_DATA_WINDOW, flow_mgr.clone());
 
         let mut buf = vec![0u8; RX_STREAM_DATA_WINDOW as usize * 4]; // Make it overlarge
 
-        assert_eq!(s.needs_flowc_update(), None);
+        s.maybe_send_flowc_update();
+        assert_eq!(s.flow_mgr.borrow().peek(), None);
         s.inbound_stream_frame(false, 0, frame1).unwrap();
-        assert_eq!(s.needs_flowc_update(), None);
+        s.maybe_send_flowc_update();
+        assert_eq!(s.flow_mgr.borrow().peek(), None);
         assert_eq!(s.read(&mut buf).unwrap(), (RX_STREAM_DATA_WINDOW, false));
         assert_eq!(s.data_ready(), false);
-        assert_eq!(s.needs_flowc_update(), Some(RX_STREAM_DATA_WINDOW * 2));
-        assert_eq!(s.needs_flowc_update(), None);
+        s.maybe_send_flowc_update();
+
+        // flow msg generated!
+        assert!(s.flow_mgr.borrow().peek().is_some());
+
+        // consume it
+        s.flow_mgr.borrow_mut().next().unwrap();
+
+        // it should be gone
+        s.maybe_send_flowc_update();
+        assert_eq!(s.flow_mgr.borrow().peek(), None);
     }
 
     #[test]
-    fn test_stream_rx_window() {
+    fn test_stream_max_stream_data() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = RecvStream::new(RX_STREAM_DATA_WINDOW);
+        let mut s = RecvStream::new(67, RX_STREAM_DATA_WINDOW, flow_mgr.clone());
 
-        assert_eq!(s.needs_flowc_update(), None);
+        s.maybe_send_flowc_update();
+        assert_eq!(s.flow_mgr.borrow().peek(), None);
         s.inbound_stream_frame(false, 0, frame1).unwrap();
         s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, vec![1; 1])
             .unwrap_err();

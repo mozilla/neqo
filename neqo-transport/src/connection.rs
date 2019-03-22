@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
@@ -90,7 +90,8 @@ pub enum TxMode {
 
 #[derive(Debug, Default)]
 pub struct FlowMgr {
-    fc_frames: VecDeque<Frame>,
+    stream_data_blockeds: BTreeMap<u64, Frame>, // stream_id, stream_data_limit
+    max_stream_datas: BTreeMap<u64, Frame>,     // stream_id, max_stream_data
 }
 
 impl FlowMgr {
@@ -98,21 +99,49 @@ impl FlowMgr {
         FlowMgr::default()
     }
 
-    /// indicate to peer we need more credits
-    pub fn stream_data_blocked(&mut self, stream_id: u64, data_limit: u64) {
-        self.fc_frames.push_back(Frame::StreamDataBlocked {
-            stream_id: stream_id,
-            stream_data_limit: data_limit,
-        })
+    /// Indicate to peer we need more credits
+    pub fn stream_data_blocked(&mut self, stream_id: u64, stream_data_limit: u64) {
+        let frame = Frame::StreamDataBlocked {
+            stream_id,
+            stream_data_limit,
+        };
+        self.stream_data_blockeds.insert(stream_id, frame);
+    }
+
+    /// Update peer with more credits
+    pub fn max_stream_data(&mut self, stream_id: u64, maximum_stream_data: u64) {
+        let frame = Frame::MaxStreamData {
+            stream_id,
+            maximum_stream_data,
+        };
+        self.max_stream_datas.insert(stream_id, frame);
     }
 
     /// Used by generator to get a flow control frame.
     pub fn next(&mut self) -> Option<Frame> {
-        self.fc_frames.pop_front()
+        let first_key = self.stream_data_blockeds.keys().next();
+        if let Some(&first_key) = first_key {
+            return self.stream_data_blockeds.remove(&first_key);
+        }
+
+        let first_key = self.max_stream_datas.keys().next();
+        if let Some(&first_key) = first_key {
+            return self.max_stream_datas.remove(&first_key);
+        }
+
+        None
     }
 
     pub fn peek(&self) -> Option<&Frame> {
-        self.fc_frames.front()
+        if let Some(key) = self.stream_data_blockeds.keys().next() {
+            self.stream_data_blockeds.get(key)
+        } else {
+            if let Some(key) = self.max_stream_datas.keys().next() {
+                self.max_stream_datas.get(key)
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -836,7 +865,17 @@ impl Connection {
             Frame::StreamDataBlocked {
                 stream_id,
                 stream_data_limit,
-            } => {} // TODO(agrover@mozilla.com): generate MaxStreamData
+            } => {
+                // TODO(agrover@mozilla.com): terminate connection with
+                // SEND_STREAM_ERROR if send-only stream (-transport 19.13)
+
+                // TODO(agrover@mozilla.com): how should we be using
+                // currently-unused stream_data_limit?
+
+                if let Some(stream) = self.recv_streams.get_mut(&stream_id) {
+                    stream.maybe_send_flowc_update();
+                }
+            }
             Frame::StreamsBlocked {
                 stream_type,
                 stream_limit,
@@ -988,9 +1027,14 @@ impl Connection {
         let stream = self
             .recv_streams
             .entry(stream_id)
-            .or_insert(RecvStream::new(max_data_if_new_stream));
+            .or_insert(RecvStream::new(
+                stream_id,
+                max_data_if_new_stream,
+                self.flow_mgr.clone(),
+            ));
 
         stream.inbound_stream_frame(fin, offset, data)?;
+        stream.maybe_send_flowc_update();
 
         Ok(())
     }
@@ -1050,8 +1094,10 @@ impl Connection {
                     .local
                     .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
 
-                self.recv_streams
-                    .insert(new_id, RecvStream::new(recv_initial_max_stream_data));
+                self.recv_streams.insert(
+                    new_id,
+                    RecvStream::new(new_id, recv_initial_max_stream_data, self.flow_mgr.clone()),
+                );
                 new_id
             }
         })
