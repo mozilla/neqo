@@ -8,6 +8,8 @@ use crate::ssl;
 pub type Alert = u8;
 pub type Epoch = u16;
 
+/// Rather than defining a type alias and a bunch of constants, which leads to a ton of repetition,
+/// use this macro.
 macro_rules! remap_enum {
     { $t:ident: $s:ty { $( $n:ident = $v:path ),+ $(,)? } } => {
         pub type $t = $s;
@@ -71,31 +73,29 @@ remap_enum! {
     }
 }
 
-pub type Extension = u16;
-// TODO(mt) - work out why SSLExtensionType isn't being mapped by bindgen.
-// remap_enum!{
-//     Extension: u16 => ssl::SSLExtensionType {
-//         TLS_EXT_SERVER_NAME = ssl_server_name_xtn,
-//         TLS_EXT_CERT_STATUS = ssl_cert_status_xtn,
-//         TLS_EXT_GROUPS = ssl_supported_groups_xtn,
-//         TLS_EXT_EC_POINT_FORMATS = ssl_ec_point_formats_xtn,
-//         TLS_EXT_SIG_SCHEMES = ssl_signature_algorithms_xtn,
-//         TLS_EXT_USE_SRTP = ssl_use_srtp_xtn,
-//         TLS_EXT_ALPN = ssl_app_layer_protocol_xtn,
-//         TLS_EXT_SCT = ssl_signed_cert_timestamp_xtn,
-//         TLS_EXT_PADDING = ssl_padding_xtn,
-//         TLS_EXT_EMS = ssl_extended_master_secret_xtn,
-//         TLS_EXT_RECORD_SIZE = ssl_record_size_limit_xtn,
-//         TLS_EXT_SESSION_TICKET = ssl_session_ticket_xtn,
-//         TLS_EXT_PSK = ssl_tls13_pre_shared_key_xtn,
-//         TLS_EXT_EARLY_DATA = ssl_tls13_early_data_xtn,
-//         TLS_EXT_VERSIONS = ssl_tls13_supported_versions_xtn,
-//         TLS_EXT_COOKIE = ssl_tls13_cookie_xtn,
-//         TLS_EXT_PSK_MODES = ssl_tls13_psk_key_exchange_modes_xtn,
-//         TLS_EXT_CA = ssl_tls13_certificate_authorities_xtn,
-//         TLS_EXT_POST_HS_AUTH = ssl_tls13_post_handshake_auth_xtn,
-//         TLS_EXT_CERT_SIG_SCHEMES = ssl_signature_algorithms_cert_xtn,
-//         TLS_EXT_KEY_SHARE = ssl_tls13_key_share_xtn,
-//         TLS_EXT_RENEGOTIATION_INFO = ssl_renegotiation_info_xtn,
-//     }
-// }
+remap_enum!{
+    Extension: u16 => ssl::SSLExtensionType {
+        TLS_EXT_SERVER_NAME = ssl_server_name_xtn,
+        TLS_EXT_CERT_STATUS = ssl_cert_status_xtn,
+        TLS_EXT_GROUPS = ssl_supported_groups_xtn,
+        TLS_EXT_EC_POINT_FORMATS = ssl_ec_point_formats_xtn,
+        TLS_EXT_SIG_SCHEMES = ssl_signature_algorithms_xtn,
+        TLS_EXT_USE_SRTP = ssl_use_srtp_xtn,
+        TLS_EXT_ALPN = ssl_app_layer_protocol_xtn,
+        TLS_EXT_SCT = ssl_signed_cert_timestamp_xtn,
+        TLS_EXT_PADDING = ssl_padding_xtn,
+        TLS_EXT_EMS = ssl_extended_master_secret_xtn,
+        TLS_EXT_RECORD_SIZE = ssl_record_size_limit_xtn,
+        TLS_EXT_SESSION_TICKET = ssl_session_ticket_xtn,
+        TLS_EXT_PSK = ssl_tls13_pre_shared_key_xtn,
+        TLS_EXT_EARLY_DATA = ssl_tls13_early_data_xtn,
+        TLS_EXT_VERSIONS = ssl_tls13_supported_versions_xtn,
+        TLS_EXT_COOKIE = ssl_tls13_cookie_xtn,
+        TLS_EXT_PSK_MODES = ssl_tls13_psk_key_exchange_modes_xtn,
+        TLS_EXT_CA = ssl_tls13_certificate_authorities_xtn,
+        TLS_EXT_POST_HS_AUTH = ssl_tls13_post_handshake_auth_xtn,
+        TLS_EXT_CERT_SIG_SCHEMES = ssl_signature_algorithms_cert_xtn,
+        TLS_EXT_KEY_SHARE = ssl_tls13_key_share_xtn,
+        TLS_EXT_RENEGOTIATION_INFO = ssl_renegotiation_info_xtn,
+    }
+}

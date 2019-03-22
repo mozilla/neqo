@@ -10,6 +10,7 @@ types = [
     "SECStatus",
     "SSLAeadContext",
     "SSLExtensionHandler",
+    "SSLExtensionType",
     "SSLExtensionWriter",
     "SSLProtocolVariant",
     "SSLResumptionTokenCallback",
