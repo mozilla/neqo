@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use crate::{AppError, Error, Res};
 
-const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
+pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
 
 pub trait Recvable: Debug {
     /// Read buffered data from stream. bool says whether is final data on
@@ -273,6 +273,7 @@ impl RxStreamOrderer {
 #[derive(Debug, PartialEq)]
 enum RecvStreamState {
     Open {
+        max_bytes: u64,
         rx_window: u64,
         rx_orderer: RxStreamOrderer,
     },
@@ -280,9 +281,10 @@ enum RecvStreamState {
 }
 
 impl RecvStreamState {
-    fn new() -> RecvStreamState {
+    fn new(max_bytes: u64) -> RecvStreamState {
         RecvStreamState::Open {
-            rx_window: RX_STREAM_DATA_WINDOW,
+            max_bytes,
+            rx_window: max_bytes,
             rx_orderer: RxStreamOrderer::new(),
         }
     }
@@ -290,7 +292,6 @@ impl RecvStreamState {
 
 #[derive(Debug, PartialEq)]
 pub struct RecvStream {
-    max_stream_data: u64,
     final_size: Option<u64>,
     state: RecvStreamState,
 }
@@ -298,9 +299,8 @@ pub struct RecvStream {
 impl RecvStream {
     pub fn new(max_stream_data: u64) -> RecvStream {
         RecvStream {
-            max_stream_data,
             final_size: None,
-            state: RecvStreamState::new(),
+            state: RecvStreamState::new(max_stream_data),
         }
     }
 
@@ -308,6 +308,7 @@ impl RecvStream {
     pub fn orderer(&self) -> Option<&RxStreamOrderer> {
         match &self.state {
             RecvStreamState::Open {
+                max_bytes: _,
                 rx_window: _,
                 rx_orderer,
             } => Some(&rx_orderer),
@@ -330,6 +331,7 @@ impl RecvStream {
                 Err(Error::TooMuchData) // send STOP_SENDING
             }
             RecvStreamState::Open {
+                max_bytes: _,
                 rx_window,
                 rx_orderer,
             } => {
@@ -356,11 +358,12 @@ impl RecvStream {
         match &mut self.state {
             RecvStreamState::Closed => None,
             RecvStreamState::Open {
+                max_bytes,
                 rx_window,
                 rx_orderer,
             } => {
-                let lowater = RX_STREAM_DATA_WINDOW / 2;
-                let new_window = rx_orderer.retired() + RX_STREAM_DATA_WINDOW;
+                let lowater = *max_bytes / 2;
+                let new_window = rx_orderer.retired() + *max_bytes;
                 if self.final_size.is_none() && new_window > lowater + *rx_window {
                     *rx_window = new_window;
                     Some(new_window)
@@ -380,6 +383,7 @@ impl Recvable for RecvStream {
     fn data_ready(&self) -> bool {
         match &self.state {
             RecvStreamState::Open {
+                max_bytes: _,
                 rx_window: _,
                 rx_orderer,
             } => rx_orderer.data_ready(),
@@ -399,6 +403,7 @@ impl Recvable for RecvStream {
         match &mut self.state {
             RecvStreamState::Closed => return Err(Error::NoMoreData),
             RecvStreamState::Open {
+                max_bytes: _,
                 rx_window: _,
                 rx_orderer,
             } => {
@@ -570,7 +575,7 @@ mod tests {
     fn test_stream_flowc_update() {
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = RecvStream::new(1024);
+        let mut s = RecvStream::new(RX_STREAM_DATA_WINDOW);
 
         let mut buf = vec![0u8; RX_STREAM_DATA_WINDOW as usize * 4]; // Make it overlarge
 
@@ -587,7 +592,7 @@ mod tests {
     fn test_stream_rx_window() {
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = RecvStream::new(1024);
+        let mut s = RecvStream::new(RX_STREAM_DATA_WINDOW);
 
         assert_eq!(s.needs_flowc_update(), None);
         s.inbound_stream_frame(false, 0, frame1).unwrap();

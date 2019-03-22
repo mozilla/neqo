@@ -20,10 +20,10 @@ use rand::prelude::*;
 use crate::frame::{decode_frame, Frame, FrameType, StreamType};
 use crate::nss::*;
 use crate::packet::*;
-use crate::recv_stream::{RecvStream, RxStreamOrderer};
+use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, TxBuffer};
+use crate::tparams::consts::*;
 use crate::tparams::TransportParametersHandler;
-use crate::tparams::*;
 use crate::tracking::RecvdPackets;
 use crate::{hex, AppError, ConnectionError, Error, Recvable, Res, Sendable};
 
@@ -315,6 +315,19 @@ impl Connection {
         paths: Option<Path>,
     ) -> Connection {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
+        tphandler.borrow_mut().local.set_integer(
+            TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            RX_STREAM_DATA_WINDOW,
+        );
+        tphandler.borrow_mut().local.set_integer(
+            TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+            RX_STREAM_DATA_WINDOW,
+        );
+        tphandler.borrow_mut().local.set_integer(
+            TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI,
+            RX_STREAM_DATA_WINDOW,
+        );
+
         Connection::configure_agent(&mut agent, protocols, Rc::clone(&tphandler));
 
         let mut c = Connection {

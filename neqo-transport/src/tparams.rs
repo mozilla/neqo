@@ -9,20 +9,25 @@ use std::collections::HashMap;
 struct PreferredAddress {
     // TODO(ekr@rtfm.com): Implement.
 }
-pub const TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID: u16 = 0;
-pub const TRANSPORT_PARAMETER_IDLE_TIMEOUT: u16 = 1;
-pub const TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN: u16 = 2;
-pub const TRANSPORT_PARAMETER_MAX_PACKET_SIZE: u16 = 3;
-pub const TRANSPORT_PARAMETER_INITIAL_MAX_DATA: u16 = 4;
-pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL: u16 = 5;
-pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE: u16 = 6;
-pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI: u16 = 7;
-pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI: u16 = 8;
-pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI: u16 = 9;
-pub const TRANSPORT_PARAMETER_ACK_DELAY_EXPONENT: u16 = 10;
-pub const TRANSPORT_PARAMETER_MAX_ACK_DELAY: u16 = 11;
-pub const TRANSPORT_PARAMETER_DISABLE_MIGRATION: u16 = 12;
-pub const TRANSPORT_PARAMETER_PREFERRED_ADDRESS: u16 = 13;
+
+pub mod consts {
+    pub const TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID: u16 = 0;
+    pub const TRANSPORT_PARAMETER_IDLE_TIMEOUT: u16 = 1;
+    pub const TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN: u16 = 2;
+    pub const TRANSPORT_PARAMETER_MAX_PACKET_SIZE: u16 = 3;
+    pub const TRANSPORT_PARAMETER_INITIAL_MAX_DATA: u16 = 4;
+    pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL: u16 = 5;
+    pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE: u16 = 6;
+    pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI: u16 = 7;
+    pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI: u16 = 8;
+    pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI: u16 = 9;
+    pub const TRANSPORT_PARAMETER_ACK_DELAY_EXPONENT: u16 = 10;
+    pub const TRANSPORT_PARAMETER_MAX_ACK_DELAY: u16 = 11;
+    pub const TRANSPORT_PARAMETER_DISABLE_MIGRATION: u16 = 12;
+    pub const TRANSPORT_PARAMETER_PREFERRED_ADDRESS: u16 = 13;
+}
+
+use consts::*;
 
 #[derive(PartialEq, Debug)]
 pub enum TransportParameter {
@@ -162,6 +167,25 @@ impl TransportParameters {
         }
     }
 
+    // Get an integer type or a default.
+    pub fn set_integer(&mut self, tipe: u16, value: u64) {
+        let default = match tipe {
+            TRANSPORT_PARAMETER_IDLE_TIMEOUT
+            | TRANSPORT_PARAMETER_INITIAL_MAX_DATA
+            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
+            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
+            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI
+            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI
+            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI
+            | TRANSPORT_PARAMETER_MAX_PACKET_SIZE
+            | TRANSPORT_PARAMETER_ACK_DELAY_EXPONENT
+            | TRANSPORT_PARAMETER_MAX_ACK_DELAY => {
+                self.params.insert(tipe, TransportParameter::Integer(value))
+            }
+            _ => panic!("Transport parameter not known"),
+        };
+    }
+
     pub fn get_bytes(&self, tipe: u16) -> Option<Vec<u8>> {
         match tipe {
             TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID
@@ -173,6 +197,16 @@ impl TransportParameters {
             None => None,
             Some(TransportParameter::Bytes(x)) => Some(x.to_vec()),
             _ => panic!("Internal error"),
+        }
+    }
+
+    pub fn set_bytes(&mut self, tipe: u16, value: Vec<u8>) {
+        match tipe {
+            TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID
+            | TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN => {
+                self.params.insert(tipe, TransportParameter::Bytes(value));
+            }
+            _ => panic!("Transport parameter not known or not type bytes"),
         }
     }
 
