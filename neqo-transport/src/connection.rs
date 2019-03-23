@@ -490,6 +490,10 @@ impl Connection {
         }
     }
 
+    fn valid_cid(&self, cid: &[u8]) -> bool {
+        &self.scid[..] == cid
+    }
+
     fn input(&mut self, d: Datagram, cur_time: u64) -> Res<()> {
         let mut slc = &d[..];
 
@@ -525,11 +529,11 @@ impl Connection {
                     // Imprint on the remote parameters.
                     self.dcid = scid.clone();
                 }
-                State::Handshaking => {
-                    // No-op.rs
-                }
-                State::Connected => {
-                    // No-op.
+                State::Handshaking | State::Connected => {
+                    if !self.valid_cid(&hdr.dcid[..]) {
+                        qinfo!(self, "Bad CID {:?}", hdr.dcid);
+                        return Ok(());
+                    }
                 }
                 State::Closing(..) | State::Closed(..) => {
                     // Don't bother processing the packet.
