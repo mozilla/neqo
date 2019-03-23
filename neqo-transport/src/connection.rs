@@ -151,19 +151,19 @@ impl FlowMgr {
     }
 }
 
-type FrameGeneratorFn = fn(&mut Connection, Epoch, TxMode, usize) -> Option<Frame>;
-struct FrameGenerator(FrameGeneratorFn);
+trait FrameGenerator {
+    fn generate(
+        &mut self,
+        conn: &mut Connection,
+        epoch: Epoch,
+        tx_mode: TxMode,
+        remaining: usize,
+    ) -> Option<Frame>;
+}
 
 impl Debug for FrameGenerator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("<FrameGenerator Function>")
-    }
-}
-
-impl Deref for FrameGenerator {
-    type Target = FrameGeneratorFn;
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -272,7 +272,7 @@ pub struct Connection {
     crypto_states: [Option<CryptoState>; 4],
     tx_pns: [u64; 4],
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
-    generators: Vec<FrameGenerator>,
+    generators: Vec<Box<FrameGenerator>>,
     deadline: u64,
     max_data: u64,
     max_streams: u64,
@@ -391,9 +391,9 @@ impl Connection {
                 CryptoStream::default(),
             ],
             generators: vec![
-                FrameGenerator(generate_crypto_frames),
-                FrameGenerator(generate_flowc_frames),
-                FrameGenerator(generate_stream_frames),
+                Box::new(CryptoGenerator {}),
+                Box::new(FlowControlGenerator {}),
+                Box::new(StreamGenerator {}),
             ],
             crypto_states: [None, None, None, None],
             tx_pns: [0; 4],
@@ -678,7 +678,10 @@ impl Connection {
                 // TODO(ekr@rtfm.com): Fix TxMode
 
                 let left = self.pmtu - d.written();
-                while let Some(frame) = self.generators[i](self, epoch, TxMode::Normal, left) {
+                // Copy generators out so that we can iterate over it and pass
+                // self to the functions.
+                let mut generators = mem::replace(&mut self.generators, Vec::new());
+                while let Some(frame) = generators[i].generate(self, epoch, TxMode::Normal, left) {
                     //qtrace!("pmtu {} written {}", self.pmtu, d.written());
                     frame.marshal(&mut d);
                     assert!(d.written() <= self.pmtu);
@@ -688,6 +691,7 @@ impl Connection {
                         d = Data::default();
                     }
                 }
+                self.generators = generators;
             }
             if d.written() > 0 {
                 ds.push(d)
@@ -775,15 +779,6 @@ impl Connection {
         } else {
             None
         }
-    }
-
-    fn generate_close(
-        c: &mut Connection,
-        e: Epoch,
-        mode: TxMode,
-        remaining: usize,
-    ) -> Option<Frame> {
-        c.send_close()
     }
 
     #[allow(dead_code, unused_variables)]
@@ -973,8 +968,7 @@ impl Connection {
                 }
                 State::Closing(..) => {
                     self.generators.clear();
-                    self.generators
-                        .push(FrameGenerator(Connection::generate_close));
+                    self.generators.push(Box::new(CloseGenerator {}));
                 }
                 _ => {}
             }
@@ -1283,24 +1277,43 @@ impl PacketNumberCtx for PnCtx {
     }
 }
 
-fn generate_crypto_frames(
-    conn: &mut Connection,
-    epoch: u16,
-    mode: TxMode,
-    remaining: usize,
-) -> Option<Frame> {
-    let tx_stream = &mut conn.crypto_streams[epoch as usize].tx;
-    if let Some((offset, data)) = tx_stream.next_bytes(mode) {
-        let data_len = data.len();
-        let frame = Frame::Crypto {
-            offset,
-            data: data.to_vec(),
-        };
-        tx_stream.mark_as_sent(offset, data_len);
+struct CryptoGenerator {}
 
-        Some(frame)
-    } else {
-        None
+impl FrameGenerator for CryptoGenerator {
+    fn generate(
+        &mut self,
+        conn: &mut Connection,
+        epoch: u16,
+        mode: TxMode,
+        remaining: usize,
+    ) -> Option<Frame> {
+        let tx_stream = &mut conn.crypto_streams[epoch as usize].tx;
+        if let Some((offset, data)) = tx_stream.next_bytes(mode) {
+            let data_len = data.len();
+            let frame = Frame::Crypto {
+                offset,
+                data: data.to_vec(),
+            };
+            tx_stream.mark_as_sent(offset, data_len);
+
+            Some(frame)
+        } else {
+            None
+        }
+    }
+}
+
+struct CloseGenerator {}
+
+impl FrameGenerator for CloseGenerator {
+    fn generate(
+        &mut self,
+        c: &mut Connection,
+        e: Epoch,
+        mode: TxMode,
+        remaining: usize,
+    ) -> Option<Frame> {
+        c.send_close()
     }
 }
 
@@ -1316,70 +1329,80 @@ fn stream_frame_hdr_len(stream_id: u64, offset: u64, remaining: usize) -> usize 
     hdr_len as usize + get_varint_len(remaining as u64) as usize
 }
 
-fn generate_stream_frames(
-    conn: &mut Connection,
-    epoch: u16,
-    mode: TxMode,
-    remaining: usize,
-) -> Option<Frame> {
-    // only send in 1rtt epoch?
-    if epoch != 3 {
-        return None;
-    }
+struct StreamGenerator {}
 
-    for (stream_id, stream) in &mut conn.send_streams {
-        if stream.send_data_ready() {
-            let fin = stream.final_size();
-            if let Some((offset, data)) = stream.next_bytes(mode) {
-                qtrace!(
-                    "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
-                    stream_id,
-                    offset,
-                    offset + data.len() as u64,
-                    epoch,
-                    mode,
-                    remaining
-                );
-                let frame_hdr_len = stream_frame_hdr_len(*stream_id, offset, remaining);
-                let data_len = min(data.len(), remaining - frame_hdr_len);
-                let fin = match fin {
-                    None => false,
-                    Some(fin) => fin == offset + data_len as u64,
-                };
-                let frame = Some(Frame::Stream {
-                    fin,
-                    stream_id: *stream_id,
-                    offset,
-                    data: data[..data_len].to_vec(),
-                });
-                stream.mark_as_sent(offset, data_len);
-                return frame;
+impl FrameGenerator for StreamGenerator {
+    fn generate(
+        &mut self,
+        conn: &mut Connection,
+        epoch: u16,
+        mode: TxMode,
+        remaining: usize,
+    ) -> Option<Frame> {
+        // only send in 1rtt epoch?
+        if epoch != 3 {
+            return None;
+        }
+
+        for (stream_id, stream) in &mut conn.send_streams {
+            if stream.send_data_ready() {
+                let fin = stream.final_size();
+                if let Some((offset, data)) = stream.next_bytes(mode) {
+                    qtrace!(
+                        "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
+                        stream_id,
+                        offset,
+                        offset + data.len() as u64,
+                        epoch,
+                        mode,
+                        remaining
+                    );
+                    let frame_hdr_len = stream_frame_hdr_len(*stream_id, offset, remaining);
+                    let data_len = min(data.len(), remaining - frame_hdr_len);
+                    let fin = match fin {
+                        None => false,
+                        Some(fin) => fin == offset + data_len as u64,
+                    };
+                    let frame = Some(Frame::Stream {
+                        fin,
+                        stream_id: *stream_id,
+                        offset,
+                        data: data[..data_len].to_vec(),
+                    });
+                    stream.mark_as_sent(offset, data_len);
+                    return frame;
+                }
             }
         }
+        None
     }
-    None
 }
 
-fn generate_flowc_frames(
-    conn: &mut Connection,
-    epoch: u16,
-    mode: TxMode,
-    remaining: usize,
-) -> Option<Frame> {
-    if let Some(frame) = conn.flow_mgr.borrow().peek() {
-        // A suboptimal way to figure out if the frame fits within remaining
-        // space.
-        let mut d = Data::default();
-        frame.marshal(&mut d);
-        if d.written() > remaining {
-            qtrace!("flowc frame doesn't fit in remaining");
-            None
+struct FlowControlGenerator {}
+
+impl FrameGenerator for FlowControlGenerator {
+    fn generate(
+        &mut self,
+        conn: &mut Connection,
+        epoch: u16,
+        mode: TxMode,
+        remaining: usize,
+    ) -> Option<Frame> {
+        if let Some(frame) = conn.flow_mgr.borrow().peek() {
+            // A suboptimal way to figure out if the frame fits within remaining
+            // space.
+            let mut d = Data::default();
+            frame.marshal(&mut d);
+            if d.written() > remaining {
+                qtrace!("flowc frame doesn't fit in remaining");
+                None
+            } else {
+                conn.flow_mgr.borrow_mut().next()
+            }
         } else {
-            conn.flow_mgr.borrow_mut().next()
+            qtrace!("no flowc frames");
+            None
         }
-    } else {
-        qtrace!("no flowc frames");
-        None
     }
 }
 
