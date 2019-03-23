@@ -1341,13 +1341,7 @@ fn generate_stream_frames(
                 let data_len = min(data.len(), remaining - frame_hdr_len);
                 let fin = match fin {
                     None => false,
-                    Some(fin) => {
-                        if fin == offset + data_len as u64 {
-                            true
-                        } else {
-                            false
-                        }
-                    }
+                    Some(fin) => fin == offset + data_len as u64,
                 };
                 let frame = Some(Frame::Stream {
                     fin,
