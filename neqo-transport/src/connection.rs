@@ -661,7 +661,6 @@ impl Connection {
                 continue;
             }
 
-            // TODO(ekr@rtfm.com): Suppress bare acks when we're not piggybacking.
             if let Some(recvd) = self
                 .ensure_crypto_state(epoch)
                 .as_mut()
