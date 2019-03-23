@@ -11,7 +11,7 @@ use crate::connection::{FlowMgr, TxMode};
 
 use crate::{AppError, Error, Res};
 
-const TX_STREAM_DATA_WINDOW: usize = 0xFFFF; // 64 KiB
+const TX_STREAM_BUFFER: usize = 0xFFFF; // 64 KiB
 
 pub trait Sendable: Debug {
     /// Enqueue data to send on the stream. Returns bytes enqueued.
@@ -38,16 +38,16 @@ pub struct TxBuffer {
 impl TxBuffer {
     pub fn new() -> TxBuffer {
         TxBuffer {
-            send_buf: SliceDeque::with_capacity(TX_STREAM_DATA_WINDOW),
+            send_buf: SliceDeque::with_capacity(TX_STREAM_BUFFER),
             ..TxBuffer::default()
         }
     }
 
     pub fn send(&mut self, buf: &[u8]) -> usize {
-        let can_send = min(TX_STREAM_DATA_WINDOW - self.buffered(), buf.len());
+        let can_send = min(TX_STREAM_BUFFER - self.buffered(), buf.len());
         if can_send > 0 {
             self.send_buf.extend(&buf[..can_send]);
-            assert!(self.send_buf.len() <= TX_STREAM_DATA_WINDOW);
+            assert!(self.send_buf.len() <= TX_STREAM_BUFFER);
         }
         can_send
     }
@@ -205,7 +205,34 @@ impl SendStream {
     }
 
     pub fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
-        self.state.tx_buf_mut().and_then(|buf| buf.next_bytes(mode))
+        if let Some(tx_buf) = self.state.tx_buf_mut() {
+            let flowc_bytes_avail = self.max_stream_data - tx_buf.data_limit();
+            qtrace!(
+                "next_bytes max_stream_data {}, data_limit {}, flowc_bytes_avail {}",
+                self.max_stream_data,
+                tx_buf.data_limit(),
+                flowc_bytes_avail
+            );
+            if let Some((offset, data)) = tx_buf.next_bytes(mode) {
+                // Restrict slice of data offered for sending by remaining
+                // flow control credits
+                let data = &data[..min(flowc_bytes_avail as usize, data.len())];
+                qtrace!("next_bytes after flowc: {} {}", offset, data.len());
+
+                if data.len() == 0 {
+                    // We had some bytes to send but were blocked by flow
+                    // control.
+                    self.flow_mgr
+                        .borrow_mut()
+                        .stream_data_blocked(self.stream_id, self.max_stream_data);
+                    return None;
+                } else {
+                    return Some((offset, data));
+                }
+            }
+        }
+
+        None
     }
 
     pub fn mark_as_sent(&mut self, offset: u64, len: usize) {
@@ -245,30 +272,19 @@ impl SendStream {
 
 impl Sendable for SendStream {
     fn send(&mut self, buf: &[u8]) -> Res<usize> {
-        //let flowc_space = self.max_stream_data;
-
-        let (sent, data_limit) = match self.state {
+        let sent = match self.state {
             SendStreamState::Ready => {
                 let mut tx_buf = TxBuffer::new();
                 let sent = tx_buf.send(buf);
-                let data_limit = tx_buf.data_limit();
                 self.state.transition(SendStreamState::Send(tx_buf));
-                (sent, data_limit)
+                sent
             }
-            SendStreamState::Send(ref mut tx_buf) => (tx_buf.send(buf), tx_buf.data_limit()),
+            SendStreamState::Send(ref mut tx_buf) => tx_buf.send(buf),
             SendStreamState::DataSent(_, _) => return Err(Error::FinalSizeError),
             SendStreamState::DataRecvd(_) => return Err(Error::FinalSizeError),
             SendStreamState::ResetSent => return Err(Error::FinalSizeError),
             SendStreamState::ResetRecvd => return Err(Error::FinalSizeError),
         };
-
-        // TODO(agrover@mozilla.com): tx buffer being full is not the same as
-        // being out of stream flow credits.
-        if sent != buf.len() {
-            self.flow_mgr
-                .borrow_mut()
-                .stream_data_blocked(self.stream_id, data_limit)
-        }
 
         Ok(sent)
     }
@@ -327,11 +343,12 @@ mod tests {
         s.mark_as_sent(0, 50);
         assert_eq!(s.state.tx_buf().unwrap().data_limit(), 100);
 
-        // Should cause send() to indicate data blocked
-        let res = s.send(&vec![4; TX_STREAM_DATA_WINDOW]).unwrap();
-        assert_eq!(res, TX_STREAM_DATA_WINDOW - 100);
-        assert!(flow_mgr.borrow_mut().next().is_some());
+        // Should fill up send buffer
+        let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
+        assert_eq!(res, TX_STREAM_BUFFER - 100);
 
+        // TODO(agrover@mozilla.com): test flow control somehow
+        // TODO(agrover@mozilla.com): test ooo acks somehow
         s.mark_as_acked(0, 40);
     }
 

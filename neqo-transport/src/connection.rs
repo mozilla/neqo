@@ -96,8 +96,8 @@ pub enum TxMode {
 
 #[derive(Debug, Default)]
 pub struct FlowMgr {
-    stream_data_blockeds: BTreeMap<u64, Frame>, // stream_id, stream_data_limit
-    max_stream_datas: BTreeMap<u64, Frame>,     // stream_id, max_stream_data
+    stream_data_blockeds: BTreeMap<u64, Frame>, // key: stream_id
+    max_stream_datas: BTreeMap<u64, Frame>,     // key: stream_id
 }
 
 impl FlowMgr {
@@ -1621,8 +1621,6 @@ mod tests {
 
     #[test]
     // tests stream send/recv after connection is established.
-    // TODO(agrover@mozilla.com): Add a test that sends data before connection
-    // is fully established.
     fn test_conn_stream() {
         init_db("./db");
 
