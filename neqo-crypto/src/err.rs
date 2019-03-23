@@ -10,7 +10,6 @@ pub mod NSPRErrorCodes {
 
 pub type Res<T> = Result<T, Error>;
 
-// TODO this Error class is awful.  It could probably be a lot better.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     AeadInitFailure,
