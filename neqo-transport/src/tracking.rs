@@ -90,7 +90,9 @@ impl RecvdPackets {
             let mut needs_ack = false;
 
             match self.packets.get(&pn) {
-                None => {}
+                None => {
+                    qtrace!(self, "Packet {} does not need acking", pn);
+                }
                 Some(packet) => {
                     if !packet.acked2 {
                         qtrace!(self, "Packet {} needs acking", pn);
@@ -106,14 +108,16 @@ impl RecvdPackets {
             match (inrange, needs_ack) {
                 (true, false) => {
                     // We are at the end of a range.
+                    qtrace!(self, "End of a range");
                     ranges.push(AckRange {
-                        largest: pn,
+                        largest: last,
                         length: last - pn,
                     });
                     inrange = false;
                 }
                 (false, true) => {
                     // We are now at the beginning of a range.
+                    qtrace!(self, "Beginning of a range");
                     last = pn;
                     inrange = true;
                 }
@@ -131,7 +135,7 @@ impl RecvdPackets {
         if inrange {
             ranges.push(AckRange {
                 largest: last,
-                length: last - pn,
+                length: (last - pn) + 1,
             });
         }
         self.min_not_acked2 = new_min_not_acked2;
@@ -165,7 +169,7 @@ mod tests {
 
         println!("ACK ranges: {:?}", ranges);
         for range in ranges {
-            for offset in 0..range.length + 1 {
+            for offset in 0..range.length {
                 packets2.insert(range.largest - offset);
             }
         }
@@ -174,7 +178,13 @@ mod tests {
     }
 
     #[test]
-    fn test_single_packet_range() {
+    fn test_single_packet_zero() {
         test_ack_range(vec![0]);
     }
+
+    #[test]
+    fn test_single_packet_one() {
+        test_ack_range(vec![1]);
+    }
+
 }
