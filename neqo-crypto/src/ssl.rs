@@ -87,6 +87,11 @@ experimental_api!(SSL_GetCurrentEpoch(
     read_epoch: *mut PRUint16,
     write_epoch: *mut PRUint16,
 ));
+experimental_api!(SSL_SetResumptionToken(
+    fd: *mut PRFileDesc,
+    token: *const u8,
+    len: c_uint,
+));
 
 #[cfg(test)]
 mod tests {

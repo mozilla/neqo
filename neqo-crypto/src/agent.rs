@@ -174,6 +174,8 @@ pub struct SecretAgent {
     auth_required: Box<bool>,
     /// Records any fatal alert that is sent by the stack.
     alert: Box<Option<Alert>>,
+    /// Records the last resumption token.
+    resumption: Box<Option<Vec<u8>>>,
 
     extension_handlers: Vec<ExtensionTracker>,
     inf: Option<SecretAgentInfo>,
@@ -187,8 +189,10 @@ impl SecretAgent {
             raw: None,
             io: Box::new(AgentIo::new()),
             st: HandshakeState::New,
+
             auth_required: Box::new(false),
             alert: Box::new(None),
+            resumption: Box::new(None),
 
             extension_handlers: Default::default(),
             inf: Default::default(),
@@ -261,6 +265,20 @@ impl SecretAgent {
         }
     }
 
+    unsafe extern "C" fn resumption_token_cb(
+        _fd: *mut ssl::PRFileDesc,
+        token: *const u8,
+        len: c_uint,
+        arg: *mut c_void,
+    ) -> ssl::SECStatus {
+        let resumption_ptr = arg as *mut Option<Vec<u8>>;
+        let resumption = resumption_ptr.as_mut().unwrap();
+        let mut v = Vec::with_capacity(len as usize);
+        v.extend_from_slice(std::slice::from_raw_parts(token, len as usize));
+        *resumption = Some(v);
+        ssl::SECSuccess
+    }
+
     // Ready this for connecting.
     fn ready(&mut self, is_server: bool) -> Res<()> {
         let rv = unsafe {
@@ -271,6 +289,7 @@ impl SecretAgent {
             )
         };
         result::result(rv)?;
+
         let rv = unsafe {
             ssl::SSL_AlertSentCallback(
                 self.fd,
@@ -279,6 +298,16 @@ impl SecretAgent {
             )
         };
         result::result(rv)?;
+
+        let rv = unsafe {
+            ssl::SSL_SetResumptionTokenCallback(
+                self.fd,
+                Some(SecretAgent::resumption_token_cb),
+                &mut *self.resumption as *mut Option<Vec<u8>> as *mut c_void,
+            )
+        };
+        result::result(rv)?;
+
         self.configure()?;
         result::result(unsafe { ssl::SSL_ResetHandshake(self.fd, is_server as ssl::PRBool) })
     }
@@ -426,6 +455,18 @@ impl SecretAgent {
     /// Get the peer's certificate chain.
     pub fn peer_certificate(&self) -> Option<CertificateChain> {
         CertificateChain::new(self.fd)
+    }
+
+    /// Return the resumption token.
+    pub fn resumption_token(&self) -> Option<&Vec<u8>> {
+        (*self.resumption).as_ref()
+    }
+
+    /// Enable resumption, using a token previously provided.
+    pub fn set_resumption_token(&mut self, token: &[u8]) -> Res<()> {
+        let rv =
+            unsafe { ssl::SSL_SetResumptionToken(self.fd, token.as_ptr(), token.len() as c_uint) };
+        result::result(rv)
     }
 
     /// Return any fatal alert that the TLS stack might have sent.

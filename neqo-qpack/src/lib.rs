@@ -5,10 +5,10 @@ extern crate neqo_common;
 
 pub mod decoder;
 pub mod encoder;
-pub mod qpack_helper;
 pub mod huffman;
 mod huffman_decode_helper;
 pub mod huffman_table;
+pub mod qpack_helper;
 mod qpack_send_buf;
 mod static_table;
 mod table;

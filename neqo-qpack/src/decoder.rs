@@ -1,9 +1,9 @@
 #![allow(unused_variables, dead_code)]
 
+use crate::huffman::Huffman;
 use crate::qpack_helper::{
     read_prefixed_encoded_int_slice, read_prefixed_encoded_int_with_recvable, BufWrapper,
 };
-use crate::huffman::Huffman;
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};

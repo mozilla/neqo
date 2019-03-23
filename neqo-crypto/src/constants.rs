@@ -73,7 +73,7 @@ remap_enum! {
     }
 }
 
-remap_enum!{
+remap_enum! {
     Extension: u16 => ssl::SSLExtensionType {
         TLS_EXT_SERVER_NAME = ssl_server_name_xtn,
         TLS_EXT_CERT_STATUS = ssl_cert_status_xtn,
