@@ -678,7 +678,7 @@ impl Connection {
 
                 let left = self.pmtu - d.written();
                 while let Some(frame) = self.generators[i](self, epoch, TxMode::Normal, left) {
-                    qtrace!("pmtu {} written {}", self.pmtu, d.written());
+                    //qtrace!("pmtu {} written {}", self.pmtu, d.written());
                     frame.marshal(&mut d);
                     assert!(d.written() <= self.pmtu);
                     if d.written() == self.pmtu {

@@ -384,6 +384,7 @@ fn encrypt_packet(
     for i in 0..pn_length(hdr.pn) {
         ret[pn_start + i] ^= mask[i + 1];
     }
+    log!(Level::Trace, "{}", hex("masked hdr", &ret[0..hdr_len]));
     Ok(ret.to_vec())
 }
 

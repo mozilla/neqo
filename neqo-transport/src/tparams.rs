@@ -1,5 +1,6 @@
 #![allow(unused_variables, dead_code)]
 use crate::connection::{Role, QUIC_VERSION};
+use crate::hex;
 use crate::{Error, Res};
 use neqo_common::data::*;
 use neqo_common::varint::*;
@@ -60,6 +61,7 @@ impl TransportParameter {
     fn decode(d: &mut Data) -> Res<(u16, TransportParameter)> {
         let tipe = d.decode_uint(2)? as u16;
         let length = d.decode_uint(2)? as usize;
+        log!(LogLevel::Trace, "TP {:x} length {:x}", tipe, length);
         let remaining = d.remaining();
         // TODO(ekr@rtfm.com): Sure would be nice to have a version
         // of Data that returned another data that was a slice on
@@ -135,9 +137,13 @@ impl TransportParameters {
                 d.encode_uint(QUIC_VERSION, 4);
             }
         }
+        let mut d2 = Data::default();
         for (tipe, tp) in &self.params {
-            tp.encode(d, *tipe)?;
+            tp.encode(&mut d2, *tipe)?;
         }
+        d.encode_uint(d2.written() as u64, 2);
+        d.encode_data(&d2);
+
         Ok(())
     }
 
@@ -157,8 +163,22 @@ impl TransportParameters {
             }
         }
 
-        while d.remaining() > 0 {
-            match TransportParameter::decode(d) {
+        log!(LogLevel::Trace, "Parsed fixed TP header");
+
+        let l = d.decode_uint(2)?;
+        log!(
+            LogLevel::Trace,
+            "Remaining bytes: needed {} remaining {}",
+            l,
+            d.remaining()
+        );
+        let tmp = d.decode_data(l as usize)?;
+        if d.remaining() > 0 {
+            return Err(Error::UnknownTransportParameter);
+        }
+        let mut d2 = Data::from_slice(&tmp);
+        while d2.remaining() > 0 {
+            match TransportParameter::decode(&mut d2) {
                 Ok((tipe, tp)) => {
                     tps.params.insert(tipe, tp);
                 }
@@ -272,9 +292,9 @@ impl ExtensionHandler for TransportParametersHandler {
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
         log!(
             LogLevel::Debug,
-            "Handling transport parameters, msg={:?} len={}",
+            "Handling transport parameters, msg={:?} {}",
             msg,
-            d.len()
+            hex("Value", d),
         );
 
         let role = match msg {
@@ -349,4 +369,9 @@ mod tests {
         let tps2 = TransportParameters::decode(Role::Client, &mut d).expect("Couldn't decode");
     }
 
+    #[test]
+    fn test_apple_tps() {
+        let mut d = Data::from_hex("ff00001204ff0000120049000100011e00020010449aeef472626f18a5bba2d51ae473be0003000244b0000400048015f9000005000480015f900006000480015f90000700048004000000080001080009000108");
+        let tps2 = TransportParameters::decode(Role::Client, &mut d).unwrap();
+    }
 }
