@@ -30,7 +30,7 @@ use crate::{hex, AppError, ConnectionError, Error, Recvable, Res, Sendable};
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
 
-const QUIC_VERSION: u32 = 0xff000012;
+pub const QUIC_VERSION: u32 = 0xff000012;
 const NUM_EPOCHS: Epoch = 4;
 const MAX_AUTH_TAG: usize = 32;
 
@@ -964,9 +964,9 @@ impl Connection {
     fn create_initial_crypto_state(&mut self, dcid: &[u8]) {
         qinfo!(
             self,
-            "Creating initial cipher state DCID={:?} role={:?}",
-            dcid,
-            self.rol
+            "Creating initial cipher state role={:?} {}",
+            self.rol,
+            hex("DCID", dcid)
         );
         //assert!(matches!(None, self.crypto_states[0]));
 
