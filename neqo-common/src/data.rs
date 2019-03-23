@@ -106,6 +106,10 @@ impl Data {
         self.buf.len() - self.offset
     }
 
+    pub fn written(&self) -> usize {
+        self.buf.len()
+    }
+
     pub fn peek_data(&mut self, l: usize) -> Res<Vec<u8>> {
         let _ = self.check_remaining(l)?;
 

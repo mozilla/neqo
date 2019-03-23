@@ -658,25 +658,25 @@ impl Connection {
                 Frame::encode_ack_frame(acks, &mut d);
                 // TODO(ekr@rtfm.com): Deal with the case where ACKs don't fit
                 // in an entire packet.
-                assert!(d.remaining() <= self.pmtu);
+                assert!(d.written() <= self.pmtu);
             }
 
             for i in 0..self.generators.len() {
                 // TODO(ekr@rtfm.com): Fix TxMode
 
-                let left = self.pmtu - d.remaining();
+                let left = self.pmtu - d.written();
                 while let Some(frame) = self.generators[i](self, epoch, TxMode::Normal, left) {
-                    qtrace!("pmtu {} remaining {}", self.pmtu, d.remaining());
+                    qtrace!("pmtu {} written {}", self.pmtu, d.written());
                     frame.marshal(&mut d);
-                    assert!(d.remaining() <= self.pmtu);
-                    if d.remaining() == self.pmtu {
+                    assert!(d.written() <= self.pmtu);
+                    if d.written() == self.pmtu {
                         // Filled this packet, get another one.
                         ds.push(d);
                         d = Data::default();
                     }
                 }
             }
-            if d.remaining() > 0 {
+            if d.written() > 0 {
                 ds.push(d)
             }
 
@@ -1356,7 +1356,7 @@ fn generate_flowc_frames(
         // space.
         let mut d = Data::default();
         frame.marshal(&mut d);
-        if d.remaining() > remaining {
+        if d.written() > remaining {
             qtrace!("flowc frame doesn't fit in remaining");
             None
         } else {
