@@ -154,7 +154,7 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    fn test_ack_range(pns: Vec<u64>) {
+    fn test_ack_range(pns: Vec<u64>, nranges: usize) {
         let mut rp = RecvdPackets::new("[label]", pns[0]);
         let mut packets = HashSet::new();
         let mut packets2 = HashSet::new();
@@ -168,6 +168,7 @@ mod tests {
         let ranges = rp.get_eligible_ack_ranges(true);
 
         println!("ACK ranges: {:?}", ranges);
+        assert_eq!(ranges.len(), nranges);
         for range in ranges {
             for offset in 0..range.length {
                 packets2.insert(range.largest - offset);
@@ -179,17 +180,42 @@ mod tests {
 
     #[test]
     fn test_single_packet_zero() {
-        test_ack_range(vec![0]);
+        test_ack_range(vec![0], 1);
     }
 
     #[test]
     fn test_single_packet_one() {
-        test_ack_range(vec![1]);
+        test_ack_range(vec![1], 1);
     }
 
     #[test]
     fn test_two_ranges() {
-        test_ack_range(vec![0, 1, 2, 5, 6, 7]);
+        test_ack_range(vec![0, 1, 2, 5, 6, 7], 2);
+    }
+
+    #[test]
+    fn test_one_range_fill_in() {
+        test_ack_range(vec![0, 1, 2, 5, 6, 7, 3, 4], 1);
+    }
+
+    #[test]
+    fn test_two_acks() {
+        let mut rp = RecvdPackets::new("[label]", 0);
+        rp.set_received(0, 0, true);
+        let ranges = rp.get_eligible_ack_ranges(false);
+        assert_eq!(ranges.len(), 1);
+        let ranges = rp.get_eligible_ack_ranges(false);
+        assert_eq!(ranges.len(), 0);
+    }
+
+    #[test]
+    fn test_ack_only() {
+        let mut rp = RecvdPackets::new("[label]", 0);
+        rp.set_received(0, 0, false);
+        let ranges = rp.get_eligible_ack_ranges(false);
+        assert_eq!(ranges.len(), 0);
+        let ranges = rp.get_eligible_ack_ranges(true);
+        assert_eq!(ranges.len(), 1);
     }
 
 }
