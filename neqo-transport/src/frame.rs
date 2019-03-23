@@ -325,7 +325,7 @@ impl Frame {
         }
     }
 
-    pub fn encode_ack_frame(ranges: Vec<PacketRange>, d: &mut Data) {
+    pub fn encode_ack_frame(ranges: &Vec<PacketRange>, d: &mut Data) {
         if ranges.len() == 0 {
             return;
         }
@@ -335,7 +335,9 @@ impl Frame {
 
         for r in &ranges[1..] {
             ack_ranges.push(AckRange {
-                gap: last - r.largest,
+                // the difference must be at least 2 (because 0-length gaps,
+                // (difference 1) are illegal.
+                gap: last - r.largest - 2,
                 range: r.length - 1,
             });
             last = r.smallest();
@@ -779,4 +781,38 @@ mod tests {
         assert_ne!(f3, f6);
     }
 
+    #[test]
+    fn test_encode_ack_frame() {
+        let packets = vec![
+            PacketRange {
+                largest: 7,
+                length: 3,
+            },
+            PacketRange {
+                largest: 3,
+                length: 4,
+            },
+        ];
+        let mut d = Data::default();
+        Frame::encode_ack_frame(&packets, &mut d);
+        println!("Encoded  {}", hex("ACK", d.as_vec()));
+
+        let f = decode_frame(&mut d).unwrap();
+        match f {
+            Frame::Ack {
+                largest_acknowledged,
+                ack_delay,
+                first_ack_range,
+                ack_ranges,
+            } => {
+                assert_eq!(largest_acknowledged, 7);
+                assert_eq!(ack_delay, 0);
+                assert_eq!(first_ack_range, 2);
+                assert_eq!(ack_ranges.len(), 1);
+                assert_eq!(ack_ranges[0].gap, 0);
+                assert_eq!(ack_ranges[0].range, 3);
+            }
+            _ => {}
+        }
+    }
 }

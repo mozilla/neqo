@@ -669,7 +669,7 @@ impl Connection {
                 .recvd_state()
             {
                 let acks = recvd.get_eligible_ack_ranges();
-                Frame::encode_ack_frame(acks, &mut d);
+                Frame::encode_ack_frame(&acks, &mut d);
                 // TODO(ekr@rtfm.com): Deal with the case where ACKs don't fit
                 // in an entire packet.
                 assert!(d.written() <= self.pmtu);
