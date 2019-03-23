@@ -493,6 +493,8 @@ impl Connection {
     fn input(&mut self, d: Datagram, cur_time: u64) -> Res<()> {
         let mut slc = &d[..];
 
+        qdebug!(self, "input {}", hex("", &**d));
+
         // Handle each packet in the datagram
         while !slc.is_empty() {
             let mut hdr = match decode_packet_hdr(self, slc) {
