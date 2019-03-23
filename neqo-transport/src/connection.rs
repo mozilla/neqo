@@ -645,8 +645,6 @@ impl Connection {
 
         let mut num_initials = 0usize;
 
-        // TODO(ekr@rtfm.com): Be smarter about what epochs we actually have.
-
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for epoch in 0..NUM_EPOCHS {

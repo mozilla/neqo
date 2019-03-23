@@ -71,8 +71,14 @@ fn main() {
     let mut in_dgrams = Vec::new();
     loop {
         let out_dgrams = client.process(in_dgrams.drain(..), now());
+        eprintln!("State: {:?}", client.state());
         if let State::Closed(e) = client.state() {
             eprintln!("Closed: {:?}", e);
+            break;
+        }
+        // TODO(mt): remove this.
+        if let State::Closing(e, ..) = client.state() {
+            eprintln!("Closing: {:?}", e);
             break;
         }
 
