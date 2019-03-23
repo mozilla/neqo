@@ -224,7 +224,7 @@ impl Frame {
                 d.encode_varint(*ack_delay);
                 d.encode_varint(ack_ranges.len() as u64);
                 d.encode_varint(*first_ack_range);
-                for ref r in ack_ranges {
+                for r in ack_ranges {
                     d.encode_varint(r.gap);
                     d.encode_varint(r.range);
                 }
