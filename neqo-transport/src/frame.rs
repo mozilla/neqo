@@ -1,6 +1,7 @@
 // TODO(ekr@rtfm.com): Remove this once I've implemented everything.
 #![allow(unused_variables, dead_code)]
 use super::*;
+use crate::tracking::PacketRange;
 use neqo_common::data::*;
 
 pub type FrameType = u64;
@@ -321,6 +322,39 @@ impl Frame {
                 d.encode_varint(*frame_type);
                 d.encode_vec_and_len(reason_phrase);
             }
+        }
+    }
+
+    pub fn encode_ack_frame(ranges: Vec<PacketRange>, d: &mut Data) {
+        if ranges.len() == 0 {
+            return;
+        }
+
+        let mut ack_ranges = Vec::new();
+        let mut last = ranges[0].smallest();
+
+        for r in &ranges[1..] {
+            ack_ranges.push(AckRange {
+                gap: last - r.largest,
+                range: r.length - 1,
+            });
+            last = r.smallest();
+        }
+
+        let f = Frame::Ack {
+            largest_acknowledged: ranges[0].largest,
+            ack_delay: 0,
+            first_ack_range: ranges[0].length - 1,
+            ack_ranges: ack_ranges,
+        };
+
+        f.marshal(d)
+    }
+
+    pub fn ack_eliciting(&self) -> bool {
+        match self {
+            Frame::Ack { .. } | Frame::Padding => false,
+            _ => true,
         }
     }
 }

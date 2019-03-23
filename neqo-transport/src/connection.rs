@@ -205,6 +205,7 @@ impl CryptoDxState {
 
 #[derive(Debug)]
 struct CryptoState {
+    epoch: Epoch,
     rx: CryptoDxState,
     tx: CryptoDxState,
     recvd: Option<RecvdPackets>,
@@ -213,7 +214,7 @@ struct CryptoState {
 impl CryptoState {
     fn ensure_recvd_state(&mut self, pn: u64) -> &mut RecvdPackets {
         if self.recvd.is_none() {
-            self.recvd = Some(RecvdPackets::new("label [TODO]", pn));
+            self.recvd = Some(RecvdPackets::new("label [TODO]", self.epoch, pn));
         }
         self.recvd.as_mut().unwrap()
     }
@@ -562,14 +563,14 @@ impl Connection {
                 self.set_state(State::Handshaking);
             }
 
-            self.input_packet(hdr.epoch, Data::from_slice(&body))?;
+            let ack_eliciting = self.input_packet(hdr.epoch, Data::from_slice(&body))?;
 
             // Mark the packet as received.
             self.ensure_crypto_state(hdr.epoch)
                 .as_mut()
                 .unwrap()
                 .ensure_recvd_state(hdr.pn)
-                .set_received(cur_time, hdr.pn, true);
+                .set_received(cur_time, hdr.pn, ack_eliciting);
 
             match &self.paths {
                 None => {
@@ -587,16 +588,20 @@ impl Connection {
         Ok(())
     }
 
-    fn input_packet(&mut self, epoch: Epoch, mut d: Data) -> Res<()> {
+    // Return whether the packet had ack-eliciting frames.
+    fn input_packet(&mut self, epoch: Epoch, mut d: Data) -> Res<(bool)> {
+        let mut ack_eliciting = false;
+
         // Handle each frame in the packet
         while d.remaining() > 0 {
             let f = decode_frame(&mut d)?;
+            ack_eliciting |= f.ack_eliciting();
             let t = f.get_type();
             let res = self.input_frame(epoch, f);
             self.capture_error(t, res)?;
         }
 
-        Ok(())
+        Ok(ack_eliciting)
     }
 
     fn output(&mut self) -> Vec<Datagram> {
@@ -649,7 +654,11 @@ impl Connection {
                 .unwrap()
                 .recvd_state()
             {
-                recvd.get_eligible_ack_ranges(true);
+                let acks = recvd.get_eligible_ack_ranges();
+                Frame::encode_ack_frame(acks, &mut d);
+                // TODO(ekr@rtfm.com): Deal with the case where ACKs don't fit
+                // in an entire packet.
+                assert!(d.remaining() <= self.pmtu);
             }
 
             for i in 0..self.generators.len() {
@@ -966,11 +975,13 @@ impl Connection {
 
         self.crypto_states[0] = Some(match self.rol {
             Role::Client => CryptoState {
+                epoch: 0,
                 tx: cds,
                 rx: sds,
                 recvd: None,
             },
             Role::Server => CryptoState {
+                epoch: 0,
                 tx: sds,
                 rx: cds,
                 recvd: None,
@@ -1006,6 +1017,7 @@ impl Connection {
                 None => TLS_AES_128_GCM_SHA256 as u16,
             };
             self.crypto_states[epoch as usize] = Some(CryptoState {
+                epoch: epoch,
                 rx: CryptoDxState::new(format!("read_epoch={}", epoch), rs, cipher),
                 tx: CryptoDxState::new(format!("write_epoch={}", epoch), ws, cipher),
                 recvd: None,
@@ -1397,43 +1409,33 @@ mod tests {
     #[test]
     fn test_conn_handshake() {
         init_db("./db");
-        // 0 -> CH
-        qdebug!("---- client");
+        qdebug!("---- client: generate CH");
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
         let res = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
-        // CH -> SH
-        qdebug!("---- server");
+        qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
         let res = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
-        // SH -> 0
-        qdebug!("---- client");
+        qdebug!("---- client: SH..FIN -> FIN");
         let res = client.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
-        // 0 -> EE, CERT, CV, FIN
-        qdebug!("---- server");
+        qdebug!("---- server: FIN -> ACKS");
         let res = server.process(res, now());
-        assert!(res.is_empty());
+        assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
-        // EE, CERT, CV, FIN -> FIN
-        qdebug!("---- client");
+        qdebug!("---- client: ACKS -> 0");
         let res = client.process(res, now());
         assert!(res.is_empty());
         qdebug!("Output={:0x?}", res);
-
-        // FIN -> 0
-        qdebug!("---- server");
-        let res = server.process(res, now());
-        assert!(res.is_empty());
 
         assert_eq!(*client.state(), State::Connected);
         assert_eq!(*server.state(), State::Connected);
