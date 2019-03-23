@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -75,9 +75,15 @@ impl Datagram {
 }
 
 impl Deref for Datagram {
-    type Target = [u8];
+    type Target = Vec<u8>;
     fn deref(&self) -> &Self::Target {
-        self.d.deref()
+        &self.d
+    }
+}
+
+impl DerefMut for Datagram {
+    fn deref_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.d
     }
 }
 
@@ -567,6 +573,8 @@ impl Connection {
     fn output_path(&mut self, path: &Path) -> Res<Vec<Datagram>> {
         let mut out_packets = Vec::new();
 
+        let mut num_initials = 0usize;
+
         // TODO(ekr@rtfm.com): Be smarter about what epochs we actually have.
 
         // Frames for different epochs must go in different packets, but then these
@@ -600,7 +608,10 @@ impl Connection {
                     0,
                     match epoch {
                         // TODO(ekr@rtfm.com): Retry token
-                        0 => PacketType::Initial(Vec::new()),
+                        0 => {
+                            num_initials += 1;
+                            PacketType::Initial(Vec::new())
+                        }
                         1 => PacketType::ZeroRTT,
                         2 => PacketType::Handshake,
                         3 => PacketType::Short,
@@ -624,7 +635,7 @@ impl Connection {
         }
 
         // Put packets in UDP datagrams
-        let out_dgrams = out_packets
+        let mut out_dgrams = out_packets
             .into_iter()
             .inspect(|p| qdebug!(self, "{}", hex("Packet", p)))
             .fold(Vec::new(), |mut vec: Vec<Datagram>, packet| {
@@ -639,6 +650,11 @@ impl Connection {
                 }
                 vec
             });
+
+        // Kludgy padding
+        for dgram in &mut out_dgrams[..num_initials] {
+            dgram.resize(1200, 0);
+        }
 
         out_dgrams
             .iter()
