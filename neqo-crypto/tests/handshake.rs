@@ -8,6 +8,7 @@ pub const NOW: u64 = 20;
 pub fn forward_records(agent: &mut SecretAgent, records_in: RecordList) -> Res<RecordList> {
     let mut expected_state = match agent.state() {
         HandshakeState::New => HandshakeState::New,
+        HandshakeState::Complete => HandshakeState::Complete,
         _ => HandshakeState::InProgress,
     };
     let mut records_out: RecordList = Default::default();
@@ -17,6 +18,8 @@ pub fn forward_records(agent: &mut SecretAgent, records_in: RecordList) -> Res<R
 
         let (_state, rec_out) = agent.handshake_raw(NOW, Some(record))?;
         records_out = rec_out;
+
+        // The state is not checked for the last record so that the caller can do that.
         expected_state = HandshakeState::InProgress;
     }
     Ok(records_out)

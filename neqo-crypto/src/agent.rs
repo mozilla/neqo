@@ -117,9 +117,10 @@ impl SecretAgentPreInfo {
 
 #[derive(Debug, Default)]
 pub struct SecretAgentInfo {
-    ver: Version,
+    version: Version,
     cipher: Cipher,
     group: Group,
+    resumed: bool,
     early_data: bool,
     alpn: Option<String>,
 }
@@ -136,22 +137,26 @@ impl SecretAgentInfo {
         };
         result::result(rv)?;
         Ok(SecretAgentInfo {
-            ver: info.protocolVersion as Version,
+            version: info.protocolVersion as Version,
             cipher: info.cipherSuite as Cipher,
             group: info.keaGroup as Group,
+            resumed: info.resumed != 0,
             early_data: info.earlyDataAccepted != 0,
             alpn: get_alpn(fd, false)?,
         })
     }
 
     pub fn version(&self) -> Version {
-        self.ver
+        self.version
     }
     pub fn cipher_suite(&self) -> Cipher {
         self.cipher
     }
     pub fn key_exchange(&self) -> Group {
         self.group
+    }
+    pub fn resumed(&self) -> bool {
+        self.resumed
     }
     pub fn early_data_accepted(&self) -> bool {
         self.early_data
@@ -531,6 +536,22 @@ impl SecretAgent {
         Ok((self.st.clone(), output))
     }
 
+    /// Setup to receive records for raw handshake functions.
+    fn setup_raw(&mut self) -> Res<Box<RecordList>> {
+        self.set_raw(true)?;
+
+        // Setup for accepting records.
+        let mut records: Box<RecordList> = Default::default();
+        let records_ptr = &mut *records as *mut RecordList as *mut c_void;
+        let rv =
+            unsafe { ssl::SSL_RecordLayerWriteCallback(self.fd, Some(ingest_record), records_ptr) };
+        if rv != ssl::SECSuccess {
+            return Err(self.set_failed());
+        }
+
+        Ok(records)
+    }
+
     // Drive the TLS handshake, but get the raw content of records, not
     // protected records as bytes. This function is incompatible with
     // handshake(); use either this or handshake() exclusively.
@@ -542,16 +563,7 @@ impl SecretAgent {
         _now: u64,
         input: Option<Record>,
     ) -> Res<(HandshakeState, RecordList)> {
-        self.set_raw(true)?;
-
-        // Setup for accepting records.
-        let mut records: Box<RecordList> = Default::default();
-        let records_ptr = &mut *records as *mut RecordList as *mut c_void;
-        let rv =
-            unsafe { ssl::SSL_RecordLayerWriteCallback(self.fd, Some(ingest_record), records_ptr) };
-        if rv != ssl::SECSuccess {
-            return Err(self.set_failed());
-        }
+        let records = self.setup_raw()?;
 
         // Fire off any authentication we might need to complete.
         if self.st == HandshakeState::Authenticated {
@@ -576,6 +588,16 @@ impl SecretAgent {
         self.update_state(rv)?;
 
         Ok((self.st.clone(), *records))
+    }
+
+    pub fn send_session_ticket(&mut self, extra: &[u8]) -> Res<RecordList> {
+        let records = self.setup_raw()?;
+
+        let rv =
+            unsafe { ssl::SSL_SendSessionTicket(self.fd, extra.as_ptr(), extra.len() as c_uint) };
+        result::result(rv)?;
+
+        Ok(*records)
     }
 
     // State returns the status of the handshake.
