@@ -187,4 +187,9 @@ mod tests {
         test_ack_range(vec![1]);
     }
 
+    #[test]
+    fn test_two_ranges() {
+        test_ack_range(vec![0, 1, 2, 5, 6, 7]);
+    }
+
 }
