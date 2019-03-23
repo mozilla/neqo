@@ -1476,9 +1476,10 @@ mod tests {
 
         qdebug!("---- server");
         let res = server.process(res, now());
-        assert!(res.is_empty());
+        assert_eq!(res.len(), 1);
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
+        // ACKs
         // -->> nothing
 
         qdebug!("---- client");
@@ -1502,7 +1503,7 @@ mod tests {
 
         qdebug!("---- server");
         let res = server.process(res, now());
-        assert!(res.is_empty());
+        assert_eq!(res.len(), 1);
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
 
