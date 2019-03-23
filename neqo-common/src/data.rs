@@ -67,7 +67,7 @@ impl Data {
     pub fn encode_uint<T: Into<u64>>(&mut self, v: T, l: usize) {
         let u: u64 = v.into();
         for i in 0..l {
-            self.encode_byte((u >> ((l - 1) - i) * 8) as u8);
+            self.encode_byte((u >> ((l - 1 - i) * 8)) as u8);
         }
     }
 

@@ -83,7 +83,7 @@ impl ReadBuf {
             self.offset = 0;
         }
 
-        return Ok((rv, fin));
+        Ok((rv, fin))
     }
 
     pub fn get_len(&mut self, len: u64) {

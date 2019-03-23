@@ -217,6 +217,10 @@ impl CryptoState {
         }
         self.recvd.as_mut().unwrap()
     }
+
+    fn recvd_state(&mut self) -> Option<&mut RecvdPackets> {
+        self.recvd.as_mut()
+    }
 }
 #[derive(Debug, Default)]
 struct CryptoStream {
@@ -626,13 +630,28 @@ impl Connection {
     fn output_path(&mut self, path: &Path) -> Res<Vec<Datagram>> {
         let mut out_packets = Vec::new();
 
-        // TODO(ekr@rtfm.com): Be smarter about what epochs we actually have.
-
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for epoch in 0..NUM_EPOCHS {
             let mut d = Data::default();
             let mut ds = Vec::new();
+
+            // Try to make our own crypo state and if we can't, skip this
+            // epoch.
+            if self.ensure_crypto_state(epoch).is_err() {
+                continue;
+            }
+
+            // TODO(ekr@rtfm.com): Suppress bare acks when we're not piggybacking.
+            if let Some(recvd) = self
+                .ensure_crypto_state(epoch)
+                .as_mut()
+                .unwrap()
+                .recvd_state()
+            {
+                recvd.get_eligible_ack_ranges(true);
+            }
+
             for i in 0..self.generators.len() {
                 // TODO(ekr@rtfm.com): Fix TxMode
 
