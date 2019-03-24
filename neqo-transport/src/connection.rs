@@ -2,7 +2,7 @@
 
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
@@ -161,11 +161,20 @@ trait FrameGenerator {
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)>;
 }
 
-trait FrameGeneratorToken {}
-
 impl Debug for FrameGenerator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("<FrameGenerator Function>")
+    }
+}
+
+trait FrameGeneratorToken {
+    fn acked(&mut self, conn: &mut Connection);
+    fn lost(&mut self, conn: &mut Connection);
+}
+
+impl Debug for FrameGeneratorToken {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("<FrameGenerator Token>")
     }
 }
 
@@ -217,6 +226,7 @@ struct CryptoState {
     rx: CryptoDxState,
     tx: CryptoDxState,
     recvd: Option<RecvdPackets>,
+    sent: HashMap<u64, Vec<Box<FrameGeneratorToken>>>, // pn to a list of tokens.
 }
 
 impl CryptoState {
@@ -656,7 +666,7 @@ impl Connection {
         for epoch in 0..NUM_EPOCHS {
             let mut d = Data::default();
             let mut ds = Vec::new();
-
+            let mut tokens = Vec::new();
             // Try to make our own crypo state and if we can't, skip this
             // epoch.
             if self.ensure_crypto_state(epoch).is_err() {
@@ -683,7 +693,7 @@ impl Connection {
                 // Copy generators out so that we can iterate over it and pass
                 // self to the functions.
                 let mut generators = mem::replace(&mut self.generators, Vec::new());
-                while let Some((frame, ..)) =
+                while let Some((frame, token)) =
                     generators[i].generate(self, epoch, TxMode::Normal, left)
                 {
                     //qtrace!("pmtu {} written {}", self.pmtu, d.written());
@@ -691,14 +701,18 @@ impl Connection {
                     assert!(d.written() <= self.pmtu);
                     if d.written() == self.pmtu {
                         // Filled this packet, get another one.
-                        ds.push(d);
+                        ds.push((d, tokens));
                         d = Data::default();
+                        tokens = Vec::new();
+                    }
+                    if let Some(t) = token {
+                        tokens.push(t);
                     }
                 }
                 self.generators = generators;
             }
             if d.written() > 0 {
-                ds.push(d)
+                ds.push((d, tokens))
             }
 
             for mut d in ds {
@@ -727,7 +741,8 @@ impl Connection {
                 self.tx_pns[Connection::pn_space(epoch) as usize] += 1;
                 // Failure to have the state here is an internal error.
                 let cs = self.ensure_crypto_state(hdr.epoch).unwrap();
-                let packet = encode_packet(&cs.tx, &mut hdr, d.as_mut_vec())?;
+                cs.sent.insert(hdr.pn, d.1);
+                let packet = encode_packet(&cs.tx, &mut hdr, d.0.as_mut_vec())?;
                 out_packets.push(packet);
 
                 // TODO(ekr@rtfm.com): Pad the Client Initial.
@@ -1001,12 +1016,14 @@ impl Connection {
                 tx: cds,
                 rx: sds,
                 recvd: None,
+                sent: HashMap::new(),
             },
             Role::Server => CryptoState {
                 epoch: 0,
                 tx: sds,
                 rx: cds,
                 recvd: None,
+                sent: HashMap::new(),
             },
         });
     }
@@ -1043,6 +1060,7 @@ impl Connection {
                 rx: CryptoDxState::new(format!("read_epoch={}", epoch), rs, cipher),
                 tx: CryptoDxState::new(format!("write_epoch={}", epoch), ws, cipher),
                 recvd: None,
+                sent: HashMap::new(),
             });
         }
 
@@ -1303,11 +1321,40 @@ impl FrameGenerator for CryptoGenerator {
             };
             tx_stream.mark_as_sent(offset, data_len);
 
-            Some((frame, None))
+            Some((
+                frame,
+                Some(Box::new(CryptoGeneratorToken {
+                    epoch: epoch,
+                    offset: offset,
+                    length: data_len as u64,
+                })),
+            ))
         } else {
             None
         }
     }
+}
+
+struct CryptoGeneratorToken {
+    epoch: u16,
+    offset: u64,
+    length: u64,
+}
+
+impl FrameGeneratorToken for CryptoGeneratorToken {
+    fn acked(&mut self, conn: &mut Connection) {
+        qinfo!(
+            conn,
+            "Lost crypto frame epoch={} offset={} length={}",
+            self.epoch,
+            self.offset,
+            self.length
+        );
+        conn.crypto_streams[self.epoch as usize]
+            .tx
+            .mark_as_acked(self.offset, self.length as usize);
+    }
+    fn lost(&mut self, conn: &mut Connection) {}
 }
 
 struct CloseGenerator {}
@@ -1377,12 +1424,44 @@ impl FrameGenerator for StreamGenerator {
                         data: data[..data_len].to_vec(),
                     };
                     stream.mark_as_sent(offset, data_len);
-                    return Some((frame, None));
+                    return Some((
+                        frame,
+                        Some(Box::new(StreamGeneratorToken {
+                            id: *stream_id,
+                            offset: offset,
+                            length: data_len as u64,
+                        })),
+                    ));
                 }
             }
         }
         None
     }
+}
+
+struct StreamGeneratorToken {
+    id: u64,
+    offset: u64,
+    length: u64,
+}
+
+impl FrameGeneratorToken for StreamGeneratorToken {
+    fn acked(&mut self, conn: &mut Connection) {
+        qinfo!(
+            conn,
+            "Lost frame stream={} offset={} length={}",
+            self.id,
+            self.offset,
+            self.length
+        );
+        match conn.send_streams.get_mut(&self.id) {
+            None => {}
+            Some(str) => {
+                str.mark_as_acked(self.offset, self.length as usize);
+            }
+        }
+    }
+    fn lost(&mut self, conn: &mut Connection) {}
 }
 
 struct FlowControlGenerator {}
