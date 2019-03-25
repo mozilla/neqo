@@ -3,7 +3,7 @@ version: 2
 jobs:
   build:
     docker:
-      - image: rustlang/rust:nightly
+      - image: martinthomson/neqo:latest
 
     steps:
       - checkout
