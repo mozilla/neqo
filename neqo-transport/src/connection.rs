@@ -17,7 +17,7 @@ use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
 use rand::prelude::*;
 
-use crate::frame::{decode_frame, Frame, FrameType, StreamType};
+use crate::frame::{decode_frame, AckRange, Frame, FrameType, StreamType};
 use crate::nss::*;
 use crate::packet::*;
 use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
@@ -871,7 +871,15 @@ impl Connection {
                 ack_delay,
                 first_ack_range,
                 ack_ranges,
-            } => {} // TODO(agrover@mozilla.com): remove acked ranges from list of in-flight packets
+            } => {
+                self.handle_ack(
+                    epoch,
+                    largest_acknowledged,
+                    ack_delay,
+                    first_ack_range,
+                    &ack_ranges,
+                )?;
+            }
             Frame::ResetStream {
                 stream_id,
                 application_error_code,
@@ -966,6 +974,40 @@ impl Connection {
             } => {} // TODO(agrover@mozilla.com): close the connection
         };
 
+        Ok(())
+    }
+
+    fn handle_ack(
+        &mut self,
+        epoch: Epoch,
+        largest_acknowledged: u64,
+        ack_delay: u64,
+        first_ack_range: u64,
+        ack_ranges: &Vec<AckRange>,
+    ) -> Res<()> {
+        qinfo!(
+            self,
+            "Rx ACK epoch={}, largest_acked={}, first_ack_range={}, ranges={:?}",
+            epoch,
+            largest_acknowledged,
+            first_ack_range,
+            ack_ranges
+        );
+
+        for pn in largest_acknowledged..(largest_acknowledged - first_ack_range) + 1 {
+            let mut cs = mem::replace(&mut self.crypto_states[epoch as usize], None);
+            match cs.as_mut().unwrap().sent.get_mut(&pn) {
+                None => {
+                    return Err(Error::AckedUnsentPacket);
+                }
+                Some(tokens) => {
+                    for token in tokens {
+                        token.acked(self);
+                    }
+                }
+            }
+            self.crypto_states[epoch as usize] = cs;
+        }
         Ok(())
     }
 
@@ -1345,14 +1387,16 @@ impl FrameGeneratorToken for CryptoGeneratorToken {
     fn acked(&mut self, conn: &mut Connection) {
         qinfo!(
             conn,
-            "Lost crypto frame epoch={} offset={} length={}",
+            "Acked crypto frame epoch={} offset={} length={}",
             self.epoch,
             self.offset,
             self.length
         );
-        conn.crypto_streams[self.epoch as usize]
-            .tx
-            .mark_as_acked(self.offset, self.length as usize);
+        /*
+                conn.crypto_streams[self.epoch as usize]
+                    .tx
+                    .mark_as_acked(self.offset, self.length as usize);
+        */
     }
     fn lost(&mut self, conn: &mut Connection) {}
 }

@@ -79,8 +79,6 @@ impl TxBuffer {
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
-        //let acked_end = offset + len as u64;
-
         // TODO(agrover@mozilla.com): handle nontrivial ACK scenarios
         if self.acked_offset == offset {
             self.acked_offset += len as u64;

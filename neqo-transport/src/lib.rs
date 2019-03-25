@@ -49,6 +49,7 @@ pub enum Error {
     KeysNotFound,
     UnknownTransportParameter,
     ConnectionState,
+    AckedUnsentPacket,
 }
 
 impl Error {
@@ -66,6 +67,7 @@ impl Error {
             Error::ProtocolViolation => 10,
             Error::InvalidMigration => 12,
             Error::CryptoAlert(a) => 0x100 + (*a as u16),
+            // TODO(ekr@rtfm.com): Map these errors.
             Error::CryptoError(_)
             | Error::IoError(..)
             | Error::NoMoreData
@@ -79,7 +81,8 @@ impl Error {
             | Error::HandshakeFailed
             | Error::KeysNotFound
             | Error::UnknownTransportParameter
-            | Error::ConnectionState => 1,
+            | Error::ConnectionState
+            | Error::AckedUnsentPacket => 1,
         }
     }
 }
@@ -99,7 +102,7 @@ impl From<neqo_common::Error> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
         match self {
             Error::CryptoError(e) => Some(e),
             Error::IoError(e) => Some(e),
