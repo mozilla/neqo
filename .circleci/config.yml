@@ -23,7 +23,7 @@ jobs:
 
       - run:
           name: Build
-          command: cargo build
+          command: NSS_JOBS=3 cargo build
 
       - run:
           name: Test

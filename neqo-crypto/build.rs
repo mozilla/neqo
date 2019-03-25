@@ -35,7 +35,7 @@ struct Bindings {
 fn is_debug() -> bool {
     match env::var("DEBUG") {
         Ok(d) => d.parse::<bool>().unwrap(),
-        Err(_) => false,
+        _ => false,
     }
 }
 
@@ -150,9 +150,16 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[&Path]) {
 fn main() {
     println!("cargo:rerun-if-env-changed=NSS_DIR");
     let nss = nss_dir();
-    let mut build_nss = vec!["-c", "./build.sh"];
+    let mut build_nss = vec![String::from("-c"), String::from("./build.sh")];
     if is_debug() {
-        build_nss.push("--test");
+        build_nss.push(String::from("--test"));
+    }
+    match env::var("NSS_JOBS") {
+        Ok(d) => {
+            build_nss.push(String::from("-j"));
+            build_nss.push(d);
+        },
+        _ => (),
     }
     Command::new("bash")
         .args(build_nss)
