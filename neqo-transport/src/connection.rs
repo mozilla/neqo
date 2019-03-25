@@ -767,8 +767,10 @@ impl Connection {
             });
 
         // Kludgy padding
-        for dgram in &mut out_dgrams[..num_initials] {
-            dgram.resize(1200, 0);
+        if self.rol == Role::Client {
+            for dgram in &mut out_dgrams[..num_initials] {
+                dgram.resize(1200, 0);
+            }
         }
 
         out_dgrams
@@ -1392,11 +1394,9 @@ impl FrameGeneratorToken for CryptoGeneratorToken {
             self.offset,
             self.length
         );
-        /*
-                conn.crypto_streams[self.epoch as usize]
-                    .tx
-                    .mark_as_acked(self.offset, self.length as usize);
-        */
+        conn.crypto_streams[self.epoch as usize]
+            .tx
+            .mark_as_acked(self.offset, self.length as usize);
     }
     fn lost(&mut self, conn: &mut Connection) {}
 }
