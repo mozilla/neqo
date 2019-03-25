@@ -686,15 +686,14 @@ impl Connection {
                 assert!(d.written() <= self.pmtu);
             }
 
-            for i in 0..self.generators.len() {
+            // Copy generators out so that we can iterate over it and pass
+            // self to the functions.
+            let mut generators = mem::replace(&mut self.generators, Vec::new());
+            for generator in &mut generators {
                 // TODO(ekr@rtfm.com): Fix TxMode
-
                 let left = self.pmtu - d.written();
-                // Copy generators out so that we can iterate over it and pass
-                // self to the functions.
-                let mut generators = mem::replace(&mut self.generators, Vec::new());
                 while let Some((frame, token)) =
-                    generators[i].generate(self, epoch, TxMode::Normal, left)
+                    generator.generate(self, epoch, TxMode::Normal, left)
                 {
                     //qtrace!("pmtu {} written {}", self.pmtu, d.written());
                     frame.marshal(&mut d);
@@ -709,8 +708,9 @@ impl Connection {
                         tokens.push(t);
                     }
                 }
-                self.generators = generators;
             }
+            self.generators = generators;
+
             if d.written() > 0 {
                 ds.push((d, tokens))
             }
