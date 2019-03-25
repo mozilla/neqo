@@ -158,7 +158,7 @@ fn main() {
         Ok(d) => {
             build_nss.push(String::from("-j"));
             build_nss.push(d);
-        },
+        }
         _ => (),
     }
     Command::new("bash")
