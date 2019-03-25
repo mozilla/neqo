@@ -1,5 +1,9 @@
 generate ACK  // EKR
 consume ACK   // EKR
+Track ooo ACK ranges in SendStream // grover
+Track dropped ranges in SendStream and queue for resend // grover
+Add stream events to transport API (readable, writable, new, closed) // grover
+Use stream events in h3 // grover or dragana?
 client/server cmdline
 harmonize our rust usage:
  - use foo::* or use foo::{bar, baz} and ordering/grouping
