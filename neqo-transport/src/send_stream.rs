@@ -82,7 +82,9 @@ impl TxBuffer {
         // TODO(agrover@mozilla.com): handle nontrivial ACK scenarios
         if self.acked_offset == offset {
             self.acked_offset += len as u64;
-            self.send_buf.truncate_front(len);
+            let origlen = self.send_buf.len();
+            assert!(origlen >= len);
+            self.send_buf.truncate_front(origlen - len);
         }
     }
 
@@ -332,4 +334,21 @@ mod tests {
 
         s.mark_as_acked(0, 40);
     }
+
+    #[test]
+    fn test_tx_buffer_acks() {
+        let mut tx = TxBuffer::new();
+        assert_eq!(tx.send(&vec![4; 100]), 100);
+        let res = tx.next_bytes(TxMode::Normal).unwrap();
+        assert_eq!(res.0, 0);
+        assert_eq!(res.1.len(), 100);
+        tx.mark_as_sent(0, 100);
+        let res = tx.next_bytes(TxMode::Normal);
+        assert_eq!(res, None);
+
+        tx.mark_as_acked(0, 100);
+        let res = tx.next_bytes(TxMode::Normal);
+        assert_eq!(res, None);
+    }
+
 }

@@ -1365,6 +1365,13 @@ impl FrameGenerator for CryptoGenerator {
             };
             tx_stream.mark_as_sent(offset, data_len);
 
+            qdebug!(
+                conn,
+                "Emitting crypto frame epoch={}, offset={}, len={}",
+                epoch,
+                offset,
+                data_len
+            );
             Some((
                 frame,
                 Some(Box::new(CryptoGeneratorToken {
