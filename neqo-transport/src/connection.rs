@@ -802,7 +802,7 @@ impl Connection {
 
                 // Failure to have the state here is an internal error.
                 let cs = self.ensure_crypto_state(hdr.epoch).unwrap();
-                let packet = encode_packet(&cs.tx, &mut hdr, d.0.as_mut_vec())?;
+                let packet = encode_packet(&cs.tx, &mut hdr, d.0.as_mut_vec());
                 out_packets.push(packet);
 
                 // TODO(ekr@rtfm.com): Pad the Client Initial.
@@ -1365,7 +1365,7 @@ impl Connection {
                 self,
                 "check_loss_detection_timeout - retransmit_unacked_crypto"
             );
-            // TOOD
+        // TOOD
         } else if send_one_or_two_packets {
             qdebug!(
                 self,

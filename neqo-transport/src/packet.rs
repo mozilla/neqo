@@ -324,7 +324,7 @@ fn encode_packet_short(
     d: &mut Data,
     hdr: &mut PacketHdr,
     body: &[u8],
-) -> Res<Vec<u8>> {
+) -> Vec<u8> {
     // Leading byte.
     let pnl = pn_length(hdr.pn);
     d.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | encode_pnl(pnl));
@@ -340,7 +340,7 @@ fn encode_packet_long(
     d: &mut Data,
     hdr: &mut PacketHdr,
     body: &[u8],
-) -> Res<Vec<u8>> {
+) -> Vec<u8> {
     let pnl = pn_length(hdr.pn);
     d.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | hdr.tipe.code() << 4 | encode_pnl(pnl));
     d.encode_uint(hdr.version.unwrap(), 4);
@@ -360,12 +360,7 @@ fn encode_packet_long(
     encrypt_packet(crypto, hdr, d, body)
 }
 
-fn encrypt_packet(
-    crypto: &CryptoCtx,
-    hdr: &mut PacketHdr,
-    d: &mut Data,
-    body: &[u8],
-) -> Res<Vec<u8>> {
+fn encrypt_packet(crypto: &CryptoCtx, hdr: &mut PacketHdr, d: &mut Data, body: &[u8]) -> Vec<u8> {
     let hdr_len = d.remaining();
     // Encrypt the packet. This has too many copies.
     let ct = crypto.aead_encrypt(hdr.pn, d.as_mut_vec(), body).unwrap();
@@ -385,7 +380,7 @@ fn encrypt_packet(
         ret[pn_start + i] ^= mask[i + 1];
     }
     log!(Level::Trace, "{}", hex("masked hdr", &ret[0..hdr_len]));
-    Ok(ret.to_vec())
+    ret.to_vec()
 }
 
 // TODO(ekr@rtfm.com): Minimal packet number lengths.
@@ -393,7 +388,7 @@ fn pn_length(pn: PacketNumber) -> usize {
     return 3;
 }
 
-pub fn encode_packet(crypto: &CryptoCtx, hdr: &mut PacketHdr, body: &[u8]) -> Res<Vec<u8>> {
+pub fn encode_packet(crypto: &CryptoCtx, hdr: &mut PacketHdr, body: &[u8]) -> Vec<u8> {
     let mut d = Data::default();
 
     match hdr.tipe {
@@ -496,7 +491,7 @@ mod tests {
     }
 
     fn test_encrypt_decrypt(f: &TestFixture, hdr: &mut PacketHdr, body: &[u8]) -> PacketHdr {
-        let packet = encode_packet(f, hdr, &TEST_BODY).unwrap();
+        let packet = encode_packet(f, hdr, &TEST_BODY);
         let res = test_decrypt_packet(&f, packet).unwrap();
         assert_headers_equal(&hdr, &res.0);
         assert_eq!(body.to_vec(), res.1);
@@ -514,7 +509,7 @@ mod tests {
     fn test_short_packet_damaged() {
         let f = TestFixture {};
         let mut hdr = default_hdr();
-        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY).unwrap();
+        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY);
         let plen = packet.len();
         packet[plen - 1] ^= 0x7;
         assert!(test_decrypt_packet(&f, packet).is_err());
@@ -535,7 +530,7 @@ mod tests {
         let mut hdr = default_hdr();
         hdr.tipe = PacketType::Handshake;
         hdr.scid = Some(ConnectionId(vec![9, 8, 7, 6, 5, 4, 3, 2]));
-        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY).unwrap();
+        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY);
         let plen = packet.len();
         packet[plen - 1] ^= 0x7;
         assert!(test_decrypt_packet(&f, packet).is_err());
@@ -557,7 +552,7 @@ mod tests {
         let mut hdr = default_hdr();
         hdr.tipe = PacketType::Initial(vec![0x0, 0x0, 0x0, 0x0]);
         hdr.scid = Some(ConnectionId(vec![9, 8, 7, 6, 5, 4, 3, 2]));
-        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY).unwrap();
+        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY);
         let plen = packet.len();
         packet[plen - 1] ^= 0x7;
         assert!(test_decrypt_packet(&f, packet).is_err());
