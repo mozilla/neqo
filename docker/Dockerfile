@@ -19,9 +19,11 @@ RUN set -eux; \
     ./rustup-init -y --no-modify-path --default-toolchain "$RUST_VERSION"; \
     rm -f rustup-init; \
     chmod -R a+w $RUSTUP_HOME $CARGO_HOME; \
+    rustup component add rustfmt; \
     rustup --version; \
     cargo --version; \
-    rustc --version
+    rustc --version; \
+    rustfmt --version
 
 ENV USER neqo
 ENV LOGNAME $USER
