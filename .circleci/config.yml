@@ -12,18 +12,19 @@ jobs:
           name: Show Versions
           command: |
             rustup show
-            rustup run nightly rustc --version --verbose
-            rustup run nightly rustfmt --version --verbose
-            rustup run nightly cargo --version --verbose
+            rustup --version
+            rustc --version
+            cargo --version
+            rustfmt --version
 
       - run:
           name: Check Formatting
-          command: rustup run nightly cargo fmt -- --check
+          command: cargo fmt -- --check
 
       - run:
           name: Build
-          command: rustup run nightly cargo build
+          command: cargo build
 
       - run:
           name: Test
-          command: rustup run stable cargo test
+          command: cargo test
