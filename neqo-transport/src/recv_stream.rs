@@ -485,9 +485,16 @@ impl Recvable for RecvStream {
         self.state.transition(RecvStreamState::DataRead)
     }
 
-    #[allow(dead_code, unused_variables)]
     fn stop_sending(&mut self, err: AppError) {
-        unimplemented!();
+        match &self.state {
+            RecvStreamState::ResetRecvd | RecvStreamState::ResetRead => {
+                qerror!("stop_sending called when in state {}", self.state.name())
+            }
+            _ => {
+                qtrace!("stop_sending called when in state {}", self.state.name());
+                self.flow_mgr.borrow_mut().stop_sending(self.stream_id, err)
+            }
+        }
     }
 }
 
