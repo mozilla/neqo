@@ -136,7 +136,7 @@ enum SendStreamState {
 }
 
 impl SendStreamState {
-    fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
+    fn tx_buf(&self) -> Option<&TxBuffer> {
         match self {
             SendStreamState::Send(buf) => Some(buf),
             SendStreamState::DataSent(buf, _) => Some(buf),
@@ -147,7 +147,7 @@ impl SendStreamState {
         }
     }
 
-    fn tx_buf(&self) -> Option<&TxBuffer> {
+    fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
         match self {
             SendStreamState::Send(buf) => Some(buf),
             SendStreamState::DataSent(buf, _) => Some(buf),
