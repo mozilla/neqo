@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use std::mem;
 use std::rc::Rc;
 
 use crate::connection::FlowMgr;
@@ -275,28 +276,72 @@ impl RxStreamOrderer {
 
 #[derive(Debug, PartialEq)]
 enum RecvStreamState {
-    Open {
-        max_bytes: u64,
+    Recv {
+        recv_buf: RxStreamOrderer,
+        max_bytes: u64, // Maximum size of recv_buf
         max_stream_data: u64,
-        rx_orderer: RxStreamOrderer,
     },
-    Closed,
+    SizeKnown {
+        recv_buf: RxStreamOrderer,
+        final_size: u64,
+    },
+    DataRecvd {
+        recv_buf: RxStreamOrderer,
+    },
+    DataRead,
+    #[allow(dead_code)]
+    ResetRecvd,
+    #[allow(dead_code)]
+    ResetRead,
 }
 
 impl RecvStreamState {
     fn new(max_bytes: u64) -> RecvStreamState {
-        RecvStreamState::Open {
+        RecvStreamState::Recv {
+            recv_buf: RxStreamOrderer::new(),
             max_bytes,
             max_stream_data: max_bytes,
-            rx_orderer: RxStreamOrderer::new(),
         }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            RecvStreamState::Recv { .. } => "Recv",
+            RecvStreamState::SizeKnown { .. } => "SizeKnown",
+            RecvStreamState::DataRecvd { .. } => "DataRecvd",
+            RecvStreamState::DataRead { .. } => "DataRead",
+            RecvStreamState::ResetRecvd => "ResetRecvd",
+            RecvStreamState::ResetRead => "ResetRead",
+        }
+    }
+
+    fn recv_buf(&self) -> Option<&RxStreamOrderer> {
+        match self {
+            RecvStreamState::Recv { recv_buf, .. } => Some(recv_buf),
+            RecvStreamState::SizeKnown { recv_buf, .. } => Some(recv_buf),
+            RecvStreamState::DataRecvd { recv_buf, .. } => Some(recv_buf),
+            RecvStreamState::DataRead { .. }
+            | RecvStreamState::ResetRecvd
+            | RecvStreamState::ResetRead => None,
+        }
+    }
+
+    fn final_size(&self) -> Option<u64> {
+        match self {
+            RecvStreamState::SizeKnown { final_size, .. } => Some(*final_size),
+            _ => None,
+        }
+    }
+
+    fn transition(&mut self, new_state: RecvStreamState) {
+        qtrace!("RecvStream state {} -> {}", self.name(), new_state.name());
+        *self = new_state;
     }
 }
 
 #[derive(Debug)]
 pub struct RecvStream {
     stream_id: u64,
-    final_size: Option<u64>,
     state: RecvStreamState,
     flow_mgr: Rc<RefCell<FlowMgr>>,
 }
@@ -305,7 +350,6 @@ impl RecvStream {
     pub fn new(stream_id: u64, max_stream_data: u64, flow_mgr: Rc<RefCell<FlowMgr>>) -> RecvStream {
         RecvStream {
             stream_id,
-            final_size: None,
             state: RecvStreamState::new(max_stream_data),
             flow_mgr,
         }
@@ -313,74 +357,88 @@ impl RecvStream {
 
     #[cfg(test)]
     pub fn orderer(&self) -> Option<&RxStreamOrderer> {
-        match &self.state {
-            RecvStreamState::Open {
-                max_bytes: _,
-                max_stream_data: _,
-                rx_orderer,
-            } => Some(&rx_orderer),
-            RecvStreamState::Closed => None,
-        }
+        self.state.recv_buf()
     }
 
     pub fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
         let new_end = offset + data.len() as u64;
 
         // Send final size errors even if stream is closed
-        if let Some(final_size) = self.final_size {
+        if let Some(final_size) = self.state.final_size() {
             if new_end > final_size || (fin && new_end != final_size) {
                 return Err(Error::FinalSizeError);
             }
         }
 
         match &mut self.state {
-            RecvStreamState::Closed => {
-                Err(Error::TooMuchData) // send STOP_SENDING
-            }
-            RecvStreamState::Open {
-                max_bytes: _,
+            RecvStreamState::Recv {
+                recv_buf,
                 max_stream_data,
-                rx_orderer,
+                ..
             } => {
-                if fin && self.final_size == None {
-                    let final_size = offset + data.len() as u64;
-                    if final_size < rx_orderer.highest_seen_offset() {
-                        return Err(Error::FinalSizeError);
-                    }
-                    self.final_size = Some(offset + data.len() as u64);
-                }
-
                 if new_end > *max_stream_data {
                     qtrace!("Stream RX window {} exceeded: {}", max_stream_data, new_end);
                     return Err(Error::FlowControlError);
                 }
 
-                rx_orderer.inbound_frame(offset, data)?;
-                self.maybe_send_flowc_update();
-                Ok(())
+                if !fin {
+                    recv_buf.inbound_frame(offset, data)?;
+                    self.maybe_send_flowc_update();
+                } else {
+                    let final_size = offset + data.len() as u64;
+                    if final_size < recv_buf.highest_seen_offset() {
+                        return Err(Error::FinalSizeError);
+                    }
+                    recv_buf.inbound_frame(offset, data)?;
+
+                    let buf = mem::replace(recv_buf, RxStreamOrderer::new());
+                    if final_size == buf.retired() + buf.bytes_ready() as u64 {
+                        self.state
+                            .transition(RecvStreamState::DataRecvd { recv_buf: buf });
+                    } else {
+                        self.state.transition(RecvStreamState::SizeKnown {
+                            recv_buf: buf,
+                            final_size,
+                        });
+                    }
+                }
+            }
+            RecvStreamState::SizeKnown {
+                recv_buf,
+                final_size,
+            } => {
+                recv_buf.inbound_frame(offset, data)?;
+                if *final_size == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
+                    let buf = mem::replace(recv_buf, RxStreamOrderer::new());
+                    self.state
+                        .transition(RecvStreamState::DataRecvd { recv_buf: buf });
+                }
+            }
+            RecvStreamState::DataRecvd { .. }
+            | RecvStreamState::DataRead
+            | RecvStreamState::ResetRecvd
+            | RecvStreamState::ResetRead => {
+                qtrace!("data received when we are in state {}", self.state.name())
             }
         }
+        Ok(())
     }
 
     /// If we should tell the sender they have more credit, return an offset
     pub fn maybe_send_flowc_update(&mut self) {
-        if let RecvStreamState::Open {
+        if let RecvStreamState::Recv {
             max_bytes,
             max_stream_data,
-            rx_orderer,
+            recv_buf,
         } = &mut self.state
         {
             {
-                if self.final_size.is_some() {
-                    return;
-                }
-
                 // Algo: send an update if app has consumed more than half
                 // the data in the current window
                 // TODO(agrover@mozilla.com): This algo is not great but
                 // should prevent Silly Window Syndrome. Spec refers to using
                 // highest seen offset somehow? RTT maybe?
-                let maybe_new_max = rx_orderer.retired() + *max_bytes;
+                let maybe_new_max = recv_buf.retired() + *max_bytes;
                 if maybe_new_max > (*max_bytes / 2) + *max_stream_data {
                     *max_stream_data = maybe_new_max;
                     self.flow_mgr
@@ -390,22 +448,14 @@ impl RecvStream {
             }
         }
     }
-
-    pub fn final_size(&self) -> Option<u64> {
-        self.final_size
-    }
 }
 
 impl Recvable for RecvStream {
     fn data_ready(&self) -> bool {
-        match &self.state {
-            RecvStreamState::Open {
-                max_bytes: _,
-                max_stream_data: _,
-                rx_orderer,
-            } => rx_orderer.data_ready(),
-            RecvStreamState::Closed => false,
-        }
+        self.state
+            .recv_buf()
+            .map(|recv_buf| recv_buf.data_ready())
+            .unwrap_or(false)
     }
 
     /// caller has been told data is available on a stream, and they want to
@@ -418,31 +468,21 @@ impl Recvable for RecvStream {
         assert!(buf.len() >= amount as usize);
 
         match &mut self.state {
-            RecvStreamState::Closed => return Err(Error::NoMoreData),
-            RecvStreamState::Open {
-                max_bytes: _,
-                max_stream_data: _,
-                rx_orderer,
-            } => {
-                let read_bytes = rx_orderer.read_with_amount(buf, amount)?;
-
-                let fin = if let Some(final_size) = self.final_size {
-                    if final_size == rx_orderer.retired() {
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-
-                Ok((read_bytes, fin))
+            RecvStreamState::Recv { recv_buf, .. }
+            | RecvStreamState::SizeKnown { recv_buf, .. } => {
+                Ok((recv_buf.read_with_amount(buf, amount)?, false))
             }
+            RecvStreamState::DataRecvd { recv_buf, .. } => {
+                Ok((recv_buf.read_with_amount(buf, amount)?, true))
+            }
+            RecvStreamState::DataRead { .. }
+            | RecvStreamState::ResetRecvd
+            | RecvStreamState::ResetRead => Err(Error::NoMoreData),
         }
     }
 
     fn close(&mut self) {
-        self.state = RecvStreamState::Closed
+        self.state.transition(RecvStreamState::DataRead)
     }
 
     #[allow(dead_code, unused_variables)]
