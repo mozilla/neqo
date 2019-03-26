@@ -27,12 +27,247 @@ pub trait Sendable: Debug {
     fn reset(&mut self, err: AppError);
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum RangeState {
+    Sent,
+    Acked,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct RangeTracker {
+    // offset, (len, RangeState). Use u64 for len because ranges can exceed 32bits.
+    used: BTreeMap<u64, (u64, RangeState)>,
+}
+
+impl RangeTracker {
+    pub fn highest_offset(&self) -> u64 {
+        self.used
+            .range(..)
+            .next_back()
+            .map(|(k, (v, _))| *k + *v)
+            .unwrap_or(0)
+    }
+
+    pub fn acked_from_zero(&self) -> u64 {
+        self.used
+            .get(&0)
+            .filter(|(_, state)| *state == RangeState::Acked)
+            .map(|(v, _)| *v)
+            .unwrap_or(0)
+    }
+
+    /// Find the first unmarked range. If all are contiguous, this will return
+    /// (highest_offset(), None).
+    pub fn first_unmarked_range(&self) -> (u64, Option<u64>) {
+        let mut prev_end = 0;
+
+        for (cur_off, (cur_len, _)) in &self.used {
+            if prev_end == *cur_off {
+                prev_end = cur_off + cur_len;
+            } else {
+                return (prev_end, Some(cur_off - prev_end));
+            }
+        }
+        (prev_end, None)
+    }
+
+    /// Turn one range into a list of subranges that align with existing
+    /// ranges.
+    /// Check impermissible overlaps in subregions: Sent cannot overwrite Acked.
+    //
+    // e.g. given N is new and ABC are existing:
+    //             NNNNNNNNNNNNNNNN
+    //               AAAAA   BBBCCCCC  ...then we want 5 chunks:
+    //             1122222333444555
+    //
+    // but also if we have this:
+    //             NNNNNNNNNNNNNNNN
+    //           AAAAAAAAAA      BBBB  ...then break existing A and B ranges up:
+    //
+    //             1111111122222233
+    //           aaAAAAAAAA      BBbb
+    //
+    // Doing all this work up front should make handling each chunk much
+    // easier.
+    fn chunk_range_on_edges(
+        &mut self,
+        new_off: u64,
+        new_len: u64,
+        new_state: RangeState,
+    ) -> Vec<(u64, u64, RangeState)> {
+        let mut tmp_off = new_off;
+        let mut tmp_len = new_len;
+        let mut v = Vec::new();
+
+        // cut previous overlapping range if needed
+        let prev = self.used.range_mut(..tmp_off).next_back();
+        if let Some((prev_off, (prev_len, prev_state))) = prev {
+            let prev_state = *prev_state;
+            let overlap = (*prev_off + *prev_len).saturating_sub(new_off);
+            *prev_len -= overlap;
+            if overlap > 0 {
+                self.used.insert(new_off, (overlap, prev_state));
+            }
+        }
+
+        let mut last_existing_remaining = None;
+        for (off, (len, state)) in self.used.range(tmp_off..tmp_off + tmp_len) {
+            // Create chunk for "overhang" before an existing range
+            if tmp_off < *off {
+                let sub_len = off - tmp_off;
+                v.push((tmp_off, sub_len, new_state));
+                tmp_off += sub_len;
+                tmp_len -= sub_len;
+            }
+
+            // Create chunk to match existing range
+            let sub_len = min(*len, tmp_len);
+            let remaining_len = len - sub_len;
+            if new_state == RangeState::Sent && *state == RangeState::Acked {
+                qerror!(
+                    "Attempted to downgrade overlapping range Acked range {}-{} with Sent {}-{}",
+                    off,
+                    len,
+                    new_off,
+                    new_len
+                );
+            } else {
+                v.push((tmp_off, sub_len, new_state));
+            }
+            tmp_off += sub_len;
+            tmp_len -= sub_len;
+
+            if remaining_len > 0 {
+                last_existing_remaining = Some((*off, sub_len, remaining_len, *state));
+            }
+        }
+
+        // Maybe break last existing range in two so that a final chunk will
+        // have the same length as an existing range entry
+        if let Some((off, sub_len, remaining_len, state)) = last_existing_remaining {
+            *self.used.get_mut(&off).expect("must be there") = (sub_len, state);
+            self.used.insert(off + sub_len, (remaining_len, state));
+        }
+
+        // Create final chunk if anything remains of the new range
+        if tmp_len > 0 {
+            v.push((tmp_off, tmp_len, new_state))
+        }
+
+        v
+    }
+
+    /// Merge contiguous Acked ranges into the first entry (0). This range may
+    /// be dropped from the send buffer.
+    fn coalesce_acked_from_zero(&mut self) {
+        let acked_range_from_zero = self
+            .used
+            .get_mut(&0)
+            .filter(|(_, state)| *state == RangeState::Acked)
+            .map(|(len, _)| *len);
+
+        if let Some(len_from_zero) = acked_range_from_zero {
+            let mut to_remove = Vec::new();
+
+            let mut new_len_from_zero = len_from_zero;
+
+            // See if there's another Acked range entry contiguous to this one
+            while let Some((next_len, _)) = self
+                .used
+                .get(&new_len_from_zero)
+                .filter(|(_, state)| *state == RangeState::Acked)
+            {
+                to_remove.push(new_len_from_zero);
+                new_len_from_zero += *next_len;
+            }
+
+            if len_from_zero != new_len_from_zero {
+                self.used.get_mut(&0).expect("must be there").0 = new_len_from_zero;
+            }
+
+            for val in to_remove {
+                self.used.remove(&val);
+            }
+        }
+    }
+
+    pub fn mark_range(&mut self, off: u64, len: usize, state: RangeState) {
+        let subranges = self.chunk_range_on_edges(off, len as u64, state);
+
+        for (sub_off, sub_len, sub_state) in subranges {
+            self.used.insert(sub_off, (sub_len, sub_state));
+        }
+
+        self.coalesce_acked_from_zero()
+    }
+
+    pub fn unmark_range(&mut self, off: u64, len: usize) {
+        let len = len as u64;
+        let end_off = off + len;
+
+        let mut to_remove = Vec::new();
+        let mut to_add = None;
+
+        // Walk backwards through possibly affected existing ranges
+        for (cur_off, (cur_len, cur_state)) in self.used.range_mut(..off + len).rev() {
+            // Maybe fixup range preceding the removed range
+            if *cur_off < off {
+                // Check for overlap
+                if *cur_off + *cur_len > off {
+                    if *cur_state == RangeState::Acked {
+                        qerror!(
+                            "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
+                            cur_off,
+                            cur_len,
+                            off,
+                            len
+                        );
+                    } else {
+                        *cur_len = off - cur_off;
+                    }
+                }
+                break;
+            }
+
+            if *cur_state == RangeState::Acked {
+                qerror!(
+                    "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
+                    cur_off,
+                    cur_len,
+                    off,
+                    len
+                );
+                continue;
+            }
+
+            // Add a new range for old subrange extending beyond
+            // to-be-unmarked range
+            let cur_end_off = cur_off + *cur_len;
+            if cur_end_off > end_off {
+                let new_cur_off = off + len;
+                let new_cur_len = cur_end_off - end_off;
+                assert_eq!(to_add, None);
+                to_add = Some((new_cur_off, new_cur_len, *cur_state));
+            }
+
+            to_remove.push(*cur_off);
+        }
+
+        for remove_off in to_remove {
+            self.used.remove(&remove_off);
+        }
+
+        if let Some((new_cur_off, new_cur_len, cur_state)) = to_add {
+            self.used.insert(new_cur_off, (new_cur_len, cur_state));
+        }
+    }
+}
+
 #[derive(Debug, Default, PartialEq)]
 pub struct TxBuffer {
-    acked_offset: u64,                  // contig acked bytes, no longer in buffer
-    next_send_offset: u64,              // differentiates bytes buffered from bytes sent
-    send_buf: SliceDeque<u8>,           // buffer of not-acked bytes
-    acked_ranges: BTreeMap<u64, usize>, // non-contig ranges in buffer that have been acked
+    retired: u64,             // contig acked bytes, no longer in buffer
+    send_buf: SliceDeque<u8>, // buffer of not-acked bytes
+    ranges: RangeTracker,     // ranges in buffer that have been sent or acked
 }
 
 impl TxBuffer {
@@ -44,79 +279,60 @@ impl TxBuffer {
     }
 
     pub fn send(&mut self, buf: &[u8]) -> usize {
-        let can_send = min(TX_STREAM_BUFFER - self.buffered(), buf.len());
-        if can_send > 0 {
-            self.send_buf.extend(&buf[..can_send]);
+        let can_buffer = min(TX_STREAM_BUFFER - self.buffered(), buf.len());
+        if can_buffer > 0 {
+            self.send_buf.extend(&buf[..can_buffer]);
             assert!(self.send_buf.len() <= TX_STREAM_BUFFER);
         }
-        can_send
+        can_buffer
     }
 
     pub fn next_bytes(&mut self, _mode: TxMode) -> Option<(u64, &[u8])> {
-        let buffered_bytes_sent_not_acked = self.next_send_offset - self.acked_offset;
-        let buffered_bytes_not_sent = self.send_buf.len() as u64 - buffered_bytes_sent_not_acked;
+        let (start, maybe_len) = self.ranges.first_unmarked_range();
 
-        if buffered_bytes_not_sent == 0 {
-            None
-        } else {
-            // Present all bytes for sending, but frame generator may or may
-            // not take all of them (how much indicated by calling
-            // mark_as_sent())
-            Some((
-                self.acked_offset + buffered_bytes_sent_not_acked,
-                &self.send_buf[buffered_bytes_sent_not_acked as usize..],
-            ))
+        if start == self.retired + self.buffered() as u64 {
+            return None;
+        }
+
+        let buff_off = (start - self.retired) as usize;
+        match maybe_len {
+            Some(len) => Some((start, &self.send_buf[buff_off..buff_off + len as usize])),
+            None => Some((start, &self.send_buf[buff_off..])),
         }
     }
 
-    pub fn next_retrans_bytes(&mut self, _mode: TxMode) -> Option<(u64, &[u8])> {
-        unimplemented!();
-    }
-
-    pub fn mark_as_sent(&mut self, new_sent_offset: u64, len: usize) {
-        assert!(new_sent_offset == self.next_send_offset);
-        self.next_send_offset = new_sent_offset + len as u64;
+    pub fn mark_as_sent(&mut self, offset: u64, len: usize) {
+        self.ranges.mark_range(offset, len, RangeState::Sent)
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
-        // TODO(agrover@mozilla.com): handle nontrivial ACK scenarios
-        if self.acked_offset == offset {
-            self.acked_offset += len as u64;
-            let origlen = self.send_buf.len();
-            assert!(origlen >= len);
-            self.send_buf.truncate_front(origlen - len);
+        assert!(self.ranges.highest_offset() >= offset + len as u64);
+
+        self.ranges.mark_range(offset, len, RangeState::Acked);
+
+        // We can drop contig acked range from the buffer
+        let new_retirable = self.ranges.acked_from_zero() - self.retired;
+        if new_retirable > 0 {
+            let keep_len = self.buffered() - new_retirable as usize;
+            self.send_buf.truncate_front(keep_len);
+            self.retired += new_retirable;
         }
     }
 
-    // pub fn mark_as_ackedTODO(&mut self, offset: u64, len: usize) {
-    //     let end_off = offset + len as u64;
-    //     let (prev_sent_start, prev_len) = self
-    //         .sent_ranges
-    //         .range_mut(..offset + 1)
-    //         .next_back()
-    //         .expect("must exist");
-    //     let prev_sent_end: u64 = prev_sent_start + *prev_len as u64;
-    //     match prev_sent_end.cmp(&offset) {
-    //         Ordering::Less => *prev_len = max(prev_sent_end as usize, end_off as usize),
-    //         Ordering::Equal => {
-    //             *prev_len = max(prev_sent_end as usize, end_off as usize);
-    //         }
-    //         Ordering::Greater => {
-    //             panic!("should never happen, why are we sending out of order?");
-    //         }
-    //     }
-    // }
+    pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
+        assert!(self.ranges.highest_offset() > offset + len as u64);
+        assert!(offset >= self.retired);
 
-    fn data_limit(&self) -> u64 {
-        self.buffered() as u64 + self.acked_offset
+        // Make eligible for sending again
+        self.ranges.unmark_range(offset, len)
     }
 
-    fn sent_not_acked_bytes(&self) -> usize {
-        self.next_send_offset as usize - self.acked_offset as usize
+    fn data_limit(&self) -> u64 {
+        self.buffered() as u64 + self.retired
     }
 
     fn data_ready(&self) -> bool {
-        self.send_buf.len() != self.sent_not_acked_bytes()
+        self.ranges.first_unmarked_range().0 != self.retired + self.buffered() as u64
     }
 
     fn buffered(&self) -> usize {
@@ -124,7 +340,7 @@ impl TxBuffer {
     }
 
     fn highest_sent(&self) -> u64 {
-        self.next_send_offset
+        self.ranges.highest_offset()
     }
 }
 
@@ -200,9 +416,9 @@ pub struct SendStream {
 impl SendStream {
     pub fn new(stream_id: u64, max_stream_data: u64, flow_mgr: Rc<RefCell<FlowMgr>>) -> SendStream {
         SendStream {
+            stream_id,
             max_stream_data,
             state: SendStreamState::Ready,
-            stream_id,
             flow_mgr,
         }
     }
@@ -305,7 +521,7 @@ impl Sendable for SendStream {
                     .transition(SendStreamState::DataRecvd { final_size: 0 });
             }
             SendStreamState::Send { ref mut send_buf } => {
-                let final_size = send_buf.acked_offset + send_buf.buffered() as u64;
+                let final_size = send_buf.retired + send_buf.buffered() as u64;
                 let owned_buf = mem::replace(send_buf, TxBuffer::new());
                 self.state.transition(SendStreamState::DataSent {
                     send_buf: owned_buf,
@@ -356,6 +572,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_mark_range() {
+        let mut rt = RangeTracker::default();
+
+        // ranges can go from nothing->Sent if queued for retrans and then
+        // acks arrive
+        rt.mark_range(5, 5, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 10);
+        assert_eq!(rt.acked_from_zero(), 0);
+        rt.mark_range(10, 4, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 14);
+        assert_eq!(rt.acked_from_zero(), 0);
+
+        rt.mark_range(0, 5, RangeState::Sent);
+        assert_eq!(rt.highest_offset(), 14);
+        assert_eq!(rt.acked_from_zero(), 0);
+        rt.mark_range(0, 5, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 14);
+        assert_eq!(rt.acked_from_zero(), 14);
+
+        rt.mark_range(12, 20, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 32);
+        assert_eq!(rt.acked_from_zero(), 32);
+
+        // ack the lot
+        rt.mark_range(0, 400, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 400);
+        assert_eq!(rt.acked_from_zero(), 400);
+
+        // acked trumps sent
+        rt.mark_range(0, 200, RangeState::Sent);
+        assert_eq!(rt.highest_offset(), 400);
+        assert_eq!(rt.acked_from_zero(), 400);
+    }
+
+    #[test]
+    fn test_unmark_range() {
+        let mut rt = RangeTracker::default();
+
+        rt.mark_range(5, 5, RangeState::Acked);
+        rt.mark_range(10, 5, RangeState::Sent);
+
+        // Should unmark sent but not acked range
+        rt.unmark_range(7, 6);
+
+        let res = rt.first_unmarked_range();
+        assert_eq!(res, (0, Some(5)));
+        rt.mark_range(0, 5, RangeState::Sent);
+
+        let res = rt.first_unmarked_range();
+        assert_eq!(res, (10, Some(3)));
+        rt.mark_range(10, 3, RangeState::Sent);
+
+        let res = rt.first_unmarked_range();
+        assert_eq!(res, (15, None));
+    }
+
+    #[test]
     fn test_stream_tx() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         let mut s = SendStream::new(4, 1024, flow_mgr.clone());
@@ -389,5 +662,4 @@ mod tests {
         let res = tx.next_bytes(TxMode::Normal);
         assert_eq!(res, None);
     }
-
 }
