@@ -1549,13 +1549,13 @@ impl FrameGeneratorToken for StreamGeneratorToken {
 }
 
 // Need to know when reset frame was acked
-struct FlowControlResetGeneratorToken {
+struct FlowControlGeneratorToken {
     stream_id: u64,
     application_error_code: AppError,
     final_size: u64,
 }
 
-impl FrameGeneratorToken for FlowControlResetGeneratorToken {
+impl FrameGeneratorToken for FlowControlGeneratorToken {
     fn acked(&mut self, conn: &mut Connection) {
         qinfo!(
             conn,
@@ -1593,13 +1593,25 @@ impl FrameGenerator for FlowControlGenerator {
                 qtrace!("flowc frame doesn't fit in remaining");
                 None
             } else {
-                match conn.flow_mgr.borrow_mut().next() {
-                    Some(s) => Some((s, None)),
-                    None => None,
+                let frame = conn.flow_mgr.borrow_mut().next().expect("just peeked this");
+                match frame {
+                    // only set FlowControlGeneratorTokens for reset_stream
+                    Frame::ResetStream {
+                        stream_id,
+                        application_error_code,
+                        final_size,
+                    } => Some((
+                        frame,
+                        Some(Box::new(FlowControlGeneratorToken {
+                            stream_id,
+                            application_error_code,
+                            final_size,
+                        })),
+                    )),
+                    s => Some((s, None)),
                 }
             }
         } else {
-            qtrace!("no flowc frames");
             None
         }
     }

@@ -131,18 +131,10 @@ impl TxBuffer {
 #[derive(Debug, PartialEq)]
 enum SendStreamState {
     Ready,
-    Send {
-        send_buf: TxBuffer,
-    },
-    DataSent {
-        send_buf: TxBuffer,
-        final_size: u64,
-    },
-    DataRecvd {
-        final_size: u64,
-    },
+    Send { send_buf: TxBuffer },
+    DataSent { send_buf: TxBuffer, final_size: u64 },
+    DataRecvd { final_size: u64 },
     ResetSent,
-    #[allow(dead_code)]
     ResetRecvd,
 }
 
