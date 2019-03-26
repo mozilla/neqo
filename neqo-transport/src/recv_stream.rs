@@ -289,7 +289,6 @@ enum RecvStreamState {
         recv_buf: RxStreamOrderer,
     },
     DataRead,
-    #[allow(dead_code)]
     ResetRecvd,
     #[allow(dead_code)]
     ResetRead,
@@ -422,6 +421,11 @@ impl RecvStream {
             }
         }
         Ok(())
+    }
+
+    pub fn reset(&mut self, _application_error_code: AppError) {
+        // TODO(agrover@mozilla.com): queue an event to application
+        self.state.transition(RecvStreamState::ResetRecvd)
     }
 
     /// If we should tell the sender they have more credit, return an offset

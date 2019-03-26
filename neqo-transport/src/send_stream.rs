@@ -21,10 +21,10 @@ pub trait Sendable: Debug {
     fn send_data_ready(&self) -> bool;
 
     /// Close the stream. Enqueued data will be sent.
-    fn close(&mut self) {}
+    fn close(&mut self);
 
     /// Abandon transmission of in-flight and future stream data.
-    fn reset(&mut self, err: AppError) -> Res<()>;
+    fn reset(&mut self, err: AppError);
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -122,14 +122,25 @@ impl TxBuffer {
     fn buffered(&self) -> usize {
         self.send_buf.len()
     }
+
+    fn highest_sent(&self) -> u64 {
+        self.next_send_offset
+    }
 }
 
 #[derive(Debug, PartialEq)]
 enum SendStreamState {
     Ready,
-    Send(TxBuffer),
-    DataSent(TxBuffer, u64),
-    DataRecvd(u64),
+    Send {
+        send_buf: TxBuffer,
+    },
+    DataSent {
+        send_buf: TxBuffer,
+        final_size: u64,
+    },
+    DataRecvd {
+        final_size: u64,
+    },
     ResetSent,
     #[allow(dead_code)]
     ResetRecvd,
@@ -138,10 +149,10 @@ enum SendStreamState {
 impl SendStreamState {
     fn tx_buf(&self) -> Option<&TxBuffer> {
         match self {
-            SendStreamState::Send(buf) => Some(buf),
-            SendStreamState::DataSent(buf, _) => Some(buf),
+            SendStreamState::Send { send_buf } => Some(send_buf),
+            SendStreamState::DataSent { send_buf, .. } => Some(send_buf),
             SendStreamState::Ready
-            | SendStreamState::DataRecvd(_)
+            | SendStreamState::DataRecvd { .. }
             | SendStreamState::ResetSent
             | SendStreamState::ResetRecvd => None,
         }
@@ -149,10 +160,10 @@ impl SendStreamState {
 
     fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
         match self {
-            SendStreamState::Send(buf) => Some(buf),
-            SendStreamState::DataSent(buf, _) => Some(buf),
+            SendStreamState::Send { send_buf } => Some(send_buf),
+            SendStreamState::DataSent { send_buf, .. } => Some(send_buf),
             SendStreamState::Ready
-            | SendStreamState::DataRecvd(_)
+            | SendStreamState::DataRecvd { .. }
             | SendStreamState::ResetSent
             | SendStreamState::ResetRecvd => None,
         }
@@ -160,10 +171,10 @@ impl SendStreamState {
 
     fn final_size(&self) -> Option<u64> {
         match self {
-            SendStreamState::DataSent(_, size) => Some(*size),
-            SendStreamState::DataRecvd(size) => Some(*size),
+            SendStreamState::DataSent { final_size, .. } => Some(*final_size),
+            SendStreamState::DataRecvd { final_size } => Some(*final_size),
             SendStreamState::Ready
-            | SendStreamState::Send(_)
+            | SendStreamState::Send { .. }
             | SendStreamState::ResetSent
             | SendStreamState::ResetRecvd => None,
         }
@@ -172,9 +183,9 @@ impl SendStreamState {
     fn name(&self) -> &str {
         match self {
             SendStreamState::Ready => "Ready",
-            SendStreamState::Send(_) => "Send",
-            SendStreamState::DataSent(_, _) => "DataSent",
-            SendStreamState::DataRecvd(_) => "DataRecvd",
+            SendStreamState::Send { .. } => "Send",
+            SendStreamState::DataSent { .. } => "DataSent",
+            SendStreamState::DataRecvd { .. } => "DataRecvd",
             SendStreamState::ResetSent => "ResetSent",
             SendStreamState::ResetRecvd => "ResetRecvd",
         }
@@ -255,13 +266,12 @@ impl SendStream {
         self.max_stream_data = max(self.max_stream_data, value)
     }
 
-    #[allow(dead_code)]
-    fn reset_acked(&mut self) {
+    pub fn reset_acked(&mut self) {
         match self.state {
             SendStreamState::Ready
-            | SendStreamState::Send(_)
-            | SendStreamState::DataSent(_, _)
-            | SendStreamState::DataRecvd(_) => {
+            | SendStreamState::Send { .. }
+            | SendStreamState::DataSent { .. }
+            | SendStreamState::DataRecvd { .. } => {
                 qtrace!("Reset acked while in {} state?", self.state.name())
             }
             SendStreamState::ResetSent => self.state.transition(SendStreamState::ResetRecvd),
@@ -274,14 +284,14 @@ impl Sendable for SendStream {
     fn send(&mut self, buf: &[u8]) -> Res<usize> {
         let sent = match self.state {
             SendStreamState::Ready => {
-                let mut tx_buf = TxBuffer::new();
-                let sent = tx_buf.send(buf);
-                self.state.transition(SendStreamState::Send(tx_buf));
+                let mut send_buf = TxBuffer::new();
+                let sent = send_buf.send(buf);
+                self.state.transition(SendStreamState::Send { send_buf });
                 sent
             }
-            SendStreamState::Send(ref mut tx_buf) => tx_buf.send(buf),
-            SendStreamState::DataSent(_, _) => return Err(Error::FinalSizeError),
-            SendStreamState::DataRecvd(_) => return Err(Error::FinalSizeError),
+            SendStreamState::Send { ref mut send_buf } => send_buf.send(buf),
+            SendStreamState::DataSent { .. } => return Err(Error::FinalSizeError),
+            SendStreamState::DataRecvd { .. } => return Err(Error::FinalSizeError),
             SendStreamState::ResetSent => return Err(Error::FinalSizeError),
             SendStreamState::ResetRecvd => return Err(Error::FinalSizeError),
         };
@@ -299,33 +309,53 @@ impl Sendable for SendStream {
     fn close(&mut self) {
         match self.state {
             SendStreamState::Ready => {
-                self.state.transition(SendStreamState::DataRecvd(0));
-            }
-            SendStreamState::Send(ref mut tx_buf) => {
-                let final_size = tx_buf.acked_offset + tx_buf.buffered() as u64;
-                let owned_buf = mem::replace(tx_buf, TxBuffer::new());
                 self.state
-                    .transition(SendStreamState::DataSent(owned_buf, final_size));
+                    .transition(SendStreamState::DataRecvd { final_size: 0 });
             }
-            SendStreamState::DataSent(_, _) => qtrace!("already in DataSent state"),
-            SendStreamState::DataRecvd(_) => qtrace!("already in DataRecvd state"),
+            SendStreamState::Send { ref mut send_buf } => {
+                let final_size = send_buf.acked_offset + send_buf.buffered() as u64;
+                let owned_buf = mem::replace(send_buf, TxBuffer::new());
+                self.state.transition(SendStreamState::DataSent {
+                    send_buf: owned_buf,
+                    final_size,
+                });
+            }
+            SendStreamState::DataSent { .. } => qtrace!("already in DataSent state"),
+            SendStreamState::DataRecvd { .. } => qtrace!("already in DataRecvd state"),
             SendStreamState::ResetSent => qtrace!("already in ResetSent state"),
             SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
         }
     }
 
-    fn reset(&mut self, _err: AppError) -> Res<()> {
-        match self.state {
-            SendStreamState::Ready | SendStreamState::Send(_) | SendStreamState::DataSent(_, _) => {
-                // TODO(agrover@mozilla.com): send RESET_STREAM
+    fn reset(&mut self, err: AppError) {
+        match &self.state {
+            SendStreamState::Ready => {
+                self.flow_mgr
+                    .borrow_mut()
+                    .stream_reset(self.stream_id, err, 0);
+
                 self.state.transition(SendStreamState::ResetSent);
             }
-            SendStreamState::DataRecvd(_) => qtrace!("already in DataRecvd state"),
+            SendStreamState::Send { send_buf } => {
+                self.flow_mgr.borrow_mut().stream_reset(
+                    self.stream_id,
+                    err,
+                    send_buf.highest_sent(),
+                );
+
+                self.state.transition(SendStreamState::ResetSent);
+            }
+            SendStreamState::DataSent { final_size, .. } => {
+                self.flow_mgr
+                    .borrow_mut()
+                    .stream_reset(self.stream_id, err, *final_size);
+
+                self.state.transition(SendStreamState::ResetSent);
+            }
+            SendStreamState::DataRecvd { .. } => qtrace!("already in DataRecvd state"),
             SendStreamState::ResetSent => qtrace!("already in ResetSent state"),
             SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
         };
-
-        Ok(())
     }
 }
 

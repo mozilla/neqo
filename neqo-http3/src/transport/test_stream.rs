@@ -37,9 +37,7 @@ impl Sendable for Stream {
         Ok(buf.len())
     }
 
-    fn reset(&mut self, err: AppError) -> Res<()> {
-        Ok(())
-    }
+    fn reset(&mut self, err: AppError) {}
 
     fn send_data_ready(&self) -> bool {
         self.send_buf.len() > 0

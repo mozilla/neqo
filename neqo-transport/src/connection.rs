@@ -114,6 +114,21 @@ impl FlowMgr {
         self.from_send_streams.insert(stream_id, frame);
     }
 
+    /// Indicate to receiving peer the stream is reset
+    pub fn stream_reset(
+        &mut self,
+        stream_id: u64,
+        application_error_code: AppError,
+        final_size: u64,
+    ) {
+        let frame = Frame::ResetStream {
+            stream_id,
+            application_error_code,
+            final_size,
+        };
+        self.from_send_streams.insert(stream_id, frame);
+    }
+
     /// Indicate to sending peer we are no longer interested in the stream
     pub fn stop_sending(&mut self, stream_id: u64, application_error_code: AppError) {
         let frame = Frame::StopSending {
@@ -898,7 +913,14 @@ impl Connection {
                 stream_id,
                 application_error_code,
                 final_size,
-            } => {} // TODO(agrover@mozilla.com): reset a stream
+            } => {
+                let stream = self
+                    .recv_streams
+                    .get_mut(&stream_id)
+                    .ok_or_else(|| return Error::InvalidStreamId)?;
+
+                stream.reset(application_error_code);
+            }
             Frame::StopSending {
                 stream_id,
                 application_error_code,
@@ -908,7 +930,7 @@ impl Connection {
                     .get_mut(&stream_id)
                     .ok_or_else(|| return Error::InvalidStreamId)?;
 
-                stream.reset(application_error_code)?
+                stream.reset(application_error_code);
             }
             Frame::Crypto { offset, data } => {
                 qdebug!(
@@ -1258,7 +1280,7 @@ impl Connection {
             .get_mut(&stream_id)
             .ok_or_else(|| return Error::InvalidStreamId)?;
 
-        stream.reset(err)
+        Ok(stream.reset(err))
     }
 
     fn generate_cid(&mut self) -> Vec<u8> {
@@ -1520,6 +1542,32 @@ impl FrameGeneratorToken for StreamGeneratorToken {
             None => {}
             Some(str) => {
                 str.mark_as_acked(self.offset, self.length as usize);
+            }
+        }
+    }
+    fn lost(&mut self, conn: &mut Connection) {}
+}
+
+// Need to know when reset frame was acked
+struct FlowControlResetGeneratorToken {
+    stream_id: u64,
+    application_error_code: AppError,
+    final_size: u64,
+}
+
+impl FrameGeneratorToken for FlowControlResetGeneratorToken {
+    fn acked(&mut self, conn: &mut Connection) {
+        qinfo!(
+            conn,
+            "Reset received stream={} err={} final_size={}",
+            self.stream_id,
+            self.application_error_code,
+            self.final_size
+        );
+        match conn.send_streams.get_mut(&self.stream_id) {
+            None => {}
+            Some(str) => {
+                str.reset_acked();
             }
         }
     }
