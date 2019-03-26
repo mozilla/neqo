@@ -1149,7 +1149,6 @@ impl Connection {
             ));
 
         stream.inbound_stream_frame(fin, offset, data)?;
-        stream.maybe_send_flowc_update();
 
         Ok(())
     }
