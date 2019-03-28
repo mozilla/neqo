@@ -109,8 +109,8 @@ pub enum TxMode {
 
 #[derive(Debug, Default)]
 pub struct FlowMgr {
-    stream_data_blockeds: BTreeMap<u64, Frame>, // key: stream_id
-    max_stream_datas: BTreeMap<u64, Frame>,     // key: stream_id
+    from_send_streams: BTreeMap<u64, Frame>, // key: stream_id
+    from_recv_streams: BTreeMap<u64, Frame>, // key: stream_id
 }
 
 impl FlowMgr {
@@ -118,45 +118,72 @@ impl FlowMgr {
         FlowMgr::default()
     }
 
-    /// Indicate to peer we need more credits
+    /// Indicate to receiving peer we need more credits
     pub fn stream_data_blocked(&mut self, stream_id: u64, stream_data_limit: u64) {
         let frame = Frame::StreamDataBlocked {
             stream_id,
             stream_data_limit,
         };
-        self.stream_data_blockeds.insert(stream_id, frame);
+        self.from_send_streams.insert(stream_id, frame);
     }
 
-    /// Update peer with more credits
+    /// Indicate to receiving peer the stream is reset
+    pub fn stream_reset(
+        &mut self,
+        stream_id: u64,
+        application_error_code: AppError,
+        final_size: u64,
+    ) {
+        let frame = Frame::ResetStream {
+            stream_id,
+            application_error_code,
+            final_size,
+        };
+        self.from_send_streams.insert(stream_id, frame);
+    }
+
+    /// Indicate to sending peer we are no longer interested in the stream
+    pub fn stop_sending(&mut self, stream_id: u64, application_error_code: AppError) {
+        let frame = Frame::StopSending {
+            stream_id,
+            application_error_code,
+        };
+        self.from_recv_streams.insert(stream_id, frame);
+    }
+
+    /// Update sending peer with more credits
     pub fn max_stream_data(&mut self, stream_id: u64, maximum_stream_data: u64) {
         let frame = Frame::MaxStreamData {
             stream_id,
             maximum_stream_data,
         };
-        self.max_stream_datas.insert(stream_id, frame);
+        self.from_recv_streams.insert(stream_id, frame);
     }
 
     /// Used by generator to get a flow control frame.
+    // TODO(agrover@mozilla.com): Think more about precedence of possible
+    // frames for a given stream, and how things could go wrong with different
+    // orderings
     pub fn next(&mut self) -> Option<Frame> {
-        let first_key = self.stream_data_blockeds.keys().next();
+        let first_key = self.from_recv_streams.keys().next();
         if let Some(&first_key) = first_key {
-            return self.stream_data_blockeds.remove(&first_key);
+            return self.from_recv_streams.remove(&first_key);
         }
 
-        let first_key = self.max_stream_datas.keys().next();
+        let first_key = self.from_send_streams.keys().next();
         if let Some(&first_key) = first_key {
-            return self.max_stream_datas.remove(&first_key);
+            return self.from_send_streams.remove(&first_key);
         }
 
         None
     }
 
     pub fn peek(&self) -> Option<&Frame> {
-        if let Some(key) = self.stream_data_blockeds.keys().next() {
-            self.stream_data_blockeds.get(key)
+        if let Some(key) = self.from_recv_streams.keys().next() {
+            self.from_recv_streams.get(key)
         } else {
-            if let Some(key) = self.max_stream_datas.keys().next() {
-                self.max_stream_datas.get(key)
+            if let Some(key) = self.from_send_streams.keys().next() {
+                self.from_send_streams.get(key)
             } else {
                 None
             }
@@ -920,7 +947,14 @@ impl Connection {
                 stream_id,
                 application_error_code,
                 final_size,
-            } => {} // TODO(agrover@mozilla.com): reset a stream
+            } => {
+                let stream = self
+                    .recv_streams
+                    .get_mut(&stream_id)
+                    .ok_or_else(|| return Error::InvalidStreamId)?;
+
+                stream.reset(application_error_code);
+            }
             Frame::StopSending {
                 stream_id,
                 application_error_code,
@@ -930,7 +964,7 @@ impl Connection {
                     .get_mut(&stream_id)
                     .ok_or_else(|| return Error::InvalidStreamId)?;
 
-                stream.reset(application_error_code)?
+                stream.reset(application_error_code);
             }
             Frame::Crypto { offset, data } => {
                 qdebug!(
@@ -1185,7 +1219,6 @@ impl Connection {
             ));
 
         stream.inbound_stream_frame(fin, offset, data)?;
-        stream.maybe_send_flowc_update();
 
         Ok(())
     }
@@ -1283,7 +1316,7 @@ impl Connection {
             .get_mut(&stream_id)
             .ok_or_else(|| return Error::InvalidStreamId)?;
 
-        stream.reset(err)
+        Ok(stream.reset(err))
     }
 
     fn generate_cid(&mut self) -> Vec<u8> {
@@ -1575,6 +1608,32 @@ impl FrameGeneratorToken for StreamGeneratorToken {
     fn lost(&mut self, conn: &mut Connection) {}
 }
 
+// Need to know when reset frame was acked
+struct FlowControlGeneratorToken {
+    stream_id: u64,
+    application_error_code: AppError,
+    final_size: u64,
+}
+
+impl FrameGeneratorToken for FlowControlGeneratorToken {
+    fn acked(&mut self, conn: &mut Connection) {
+        qinfo!(
+            conn,
+            "Reset received stream={} err={} final_size={}",
+            self.stream_id,
+            self.application_error_code,
+            self.final_size
+        );
+        match conn.send_streams.get_mut(&self.stream_id) {
+            None => {}
+            Some(str) => {
+                str.reset_acked();
+            }
+        }
+    }
+    fn lost(&mut self, conn: &mut Connection) {}
+}
+
 struct FlowControlGenerator {}
 
 impl FrameGenerator for FlowControlGenerator {
@@ -1594,13 +1653,25 @@ impl FrameGenerator for FlowControlGenerator {
                 qtrace!("flowc frame doesn't fit in remaining");
                 None
             } else {
-                match conn.flow_mgr.borrow_mut().next() {
-                    Some(s) => Some((s, None)),
-                    None => None,
+                let frame = conn.flow_mgr.borrow_mut().next().expect("just peeked this");
+                match frame {
+                    // only set FlowControlGeneratorTokens for reset_stream
+                    Frame::ResetStream {
+                        stream_id,
+                        application_error_code,
+                        final_size,
+                    } => Some((
+                        frame,
+                        Some(Box::new(FlowControlGeneratorToken {
+                            stream_id,
+                            application_error_code,
+                            final_size,
+                        })),
+                    )),
+                    s => Some((s, None)),
                 }
             }
         } else {
-            qtrace!("no flowc frames");
             None
         }
     }

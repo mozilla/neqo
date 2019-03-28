@@ -821,9 +821,7 @@ mod tests {
             self.send_buf.len() > 0
         }
 
-        fn reset(&mut self, err: AppError) -> Res<()> {
-            Ok(())
-        }
+        fn reset(&mut self, err: AppError) {}
 
         fn close(&mut self) {
             false;
