@@ -34,6 +34,12 @@ pub const QUIC_VERSION: u32 = 0xff000012;
 const NUM_EPOCHS: Epoch = 4;
 const MAX_AUTH_TAG: usize = 32;
 
+const TIME_THRESHOLD: f64 = 9.0 / 8.0;
+const PACKET_THRESHOLD: u64 = 3;
+// TODO granularity
+const GRANULARITY: u64 = 1000; // 1ms in microseconds
+const INITIAL_RTT: u64 = 100_000; // 100ms in microseconds
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Role {
     Client,
@@ -48,6 +54,13 @@ pub enum State {
     Connected,
     Closing(ConnectionError, FrameType, String),
     Closed(ConnectionError),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum PNSpace {
+    Initial,
+    Handshake,
+    ApplicationData,
 }
 
 #[derive(Debug, PartialEq)]
@@ -167,7 +180,7 @@ impl Debug for FrameGenerator {
     }
 }
 
-trait FrameGeneratorToken {
+pub trait FrameGeneratorToken {
     fn acked(&mut self, conn: &mut Connection);
     fn lost(&mut self, conn: &mut Connection);
 }
@@ -226,7 +239,6 @@ struct CryptoState {
     rx: CryptoDxState,
     tx: CryptoDxState,
     recvd: Option<RecvdPackets>,
-    sent: HashMap<u64, Vec<Box<FrameGeneratorToken>>>, // pn to a list of tokens.
 }
 
 impl CryptoState {
@@ -297,6 +309,7 @@ pub struct Connection {
     outgoing_pkts: Vec<Packet>,              // (offset, data)
     pmtu: usize,
     flow_mgr: Rc<RefCell<FlowMgr>>,
+    loss_recovery: LossRecovery,
 }
 
 impl Debug for Connection {
@@ -421,6 +434,7 @@ impl Connection {
             outgoing_pkts: Vec::new(),
             pmtu: 1280,
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
+            loss_recovery: LossRecovery::new(),
         };
 
         c.scid = c.generate_cid();
@@ -474,7 +488,7 @@ impl Connection {
 
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
-    pub fn process<I>(&mut self, in_dgrams: I, cur_time: u64) -> Vec<Datagram>
+    pub fn process<I>(&mut self, in_dgrams: I, cur_time: u64) -> (Vec<Datagram>, u64)
     where
         I: IntoIterator<Item = Datagram>,
     {
@@ -496,9 +510,10 @@ impl Connection {
             }
         }
         if let State::Closed(..) = self.state {
-            Vec::new()
+            (Vec::new(), 0)
         } else {
-            self.output()
+            self.check_loss_detection_timeout(cur_time);
+            (self.output(cur_time), self.loss_recovery.get_timer())
         }
     }
 
@@ -587,7 +602,7 @@ impl Connection {
                 self.set_state(State::Handshaking);
             }
 
-            let ack_eliciting = self.input_packet(hdr.epoch, Data::from_slice(&body))?;
+            let ack_eliciting = self.input_packet(hdr.epoch, Data::from_slice(&body), cur_time)?;
 
             // Mark the packet as received.
             self.ensure_crypto_state(hdr.epoch)
@@ -613,7 +628,7 @@ impl Connection {
     }
 
     // Return whether the packet had ack-eliciting frames.
-    fn input_packet(&mut self, epoch: Epoch, mut d: Data) -> Res<(bool)> {
+    fn input_packet(&mut self, epoch: Epoch, mut d: Data, cur_time: u64) -> Res<(bool)> {
         let mut ack_eliciting = false;
 
         // Handle each frame in the packet
@@ -621,20 +636,20 @@ impl Connection {
             let f = decode_frame(&mut d)?;
             ack_eliciting |= f.ack_eliciting();
             let t = f.get_type();
-            let res = self.input_frame(epoch, f);
+            let res = self.input_frame(epoch, f, cur_time);
             self.capture_error(t, res)?;
         }
 
         Ok(ack_eliciting)
     }
 
-    fn output(&mut self) -> Vec<Datagram> {
+    fn output(&mut self, cur_time: u64) -> Vec<Datagram> {
         // Can't iterate over self.paths while it is owned by self.
         let paths = mem::replace(&mut self.paths, None);
         let mut out_dgrams = Vec::new();
         let mut errors = Vec::new();
         for p in &paths {
-            let res = match self.output_path(&p) {
+            let res = match self.output_path(&p, cur_time) {
                 Ok(ref mut dgrams) => out_dgrams.append(dgrams),
                 Err(e) => errors.push(e),
             };
@@ -648,7 +663,7 @@ impl Connection {
         if !closing && errors.len() > 0 {
             self.absorb_error(Err(errors.pop().unwrap()));
             // We just closed, so run this again to produce CONNECTION_CLOSE.
-            self.output()
+            self.output(cur_time)
         } else {
             out_dgrams // TODO(ekr@rtfm.com): When to call back next.
         }
@@ -656,7 +671,7 @@ impl Connection {
 
     // Iterate through all the generators, inserting as many frames as will
     // fit.
-    fn output_path(&mut self, path: &Path) -> Res<Vec<Datagram>> {
+    fn output_path(&mut self, path: &Path, cur_time: u64) -> Res<Vec<Datagram>> {
         let mut out_packets = Vec::new();
 
         let mut num_initials = 0usize;
@@ -686,6 +701,8 @@ impl Connection {
                 assert!(d.written() <= self.pmtu);
             }
 
+            let mut ack_eliciting = false;
+            let mut is_crypto_packet = false;
             // Copy generators out so that we can iterate over it and pass
             // self to the functions.
             let mut generators = mem::replace(&mut self.generators, Vec::new());
@@ -696,13 +713,20 @@ impl Connection {
                     generator.generate(self, epoch, TxMode::Normal, left)
                 {
                     //qtrace!("pmtu {} written {}", self.pmtu, d.written());
+                    ack_eliciting = ack_eliciting || frame.ack_eliciting();
+                    is_crypto_packet = match frame {
+                        Frame::Crypto { .. } => true,
+                        _ => is_crypto_packet,
+                    };
                     frame.marshal(&mut d);
                     assert!(d.written() <= self.pmtu);
                     if d.written() == self.pmtu {
                         // Filled this packet, get another one.
-                        ds.push((d, tokens));
+                        ds.push((d, (ack_eliciting, is_crypto_packet, tokens)));
                         d = Data::default();
                         tokens = Vec::new();
+                        ack_eliciting = false;
+                        is_crypto_packet = false;
                     }
                     if let Some(t) = token {
                         tokens.push(t);
@@ -712,7 +736,7 @@ impl Connection {
             self.generators = generators;
 
             if d.written() > 0 {
-                ds.push((d, tokens))
+                ds.push((d, (ack_eliciting, is_crypto_packet, tokens)))
             }
 
             for mut d in ds {
@@ -739,9 +763,18 @@ impl Connection {
                     0,
                 );
                 self.tx_pns[Connection::pn_space(epoch) as usize] += 1;
+
+                self.loss_recovery.on_packet_sent(
+                    Connection::pn_space(epoch),
+                    hdr.pn,
+                    (d.1).0,
+                    (d.1).1,
+                    (d.1).2,
+                    cur_time,
+                );
+
                 // Failure to have the state here is an internal error.
                 let cs = self.ensure_crypto_state(hdr.epoch).unwrap();
-                cs.sent.insert(hdr.pn, d.1);
                 let packet = encode_packet(&cs.tx, &mut hdr, d.0.as_mut_vec())?;
                 out_packets.push(packet);
 
@@ -861,7 +894,7 @@ impl Connection {
         Ok(())
     }
 
-    pub fn input_frame(&mut self, epoch: Epoch, frame: Frame) -> Res<()> {
+    pub fn input_frame(&mut self, epoch: Epoch, frame: Frame, cur_time: u64) -> Res<()> {
         #[allow(unused_variables)]
         match frame {
             Frame::Padding => {
@@ -880,6 +913,7 @@ impl Connection {
                     ack_delay,
                     first_ack_range,
                     &ack_ranges,
+                    cur_time,
                 )?;
             }
             Frame::ResetStream {
@@ -986,6 +1020,7 @@ impl Connection {
         ack_delay: u64,
         first_ack_range: u64,
         ack_ranges: &Vec<AckRange>,
+        cur_time: u64,
     ) -> Res<()> {
         qinfo!(
             self,
@@ -996,20 +1031,22 @@ impl Connection {
             ack_ranges
         );
 
-        for pn in largest_acknowledged..(largest_acknowledged - first_ack_range) + 1 {
-            let mut cs = mem::replace(&mut self.crypto_states[epoch as usize], None);
-            match cs.as_mut().unwrap().sent.get_mut(&pn) {
-                None => {
-                    return Err(Error::AckedUnsentPacket);
-                }
-                Some(tokens) => {
-                    for token in tokens {
-                        token.acked(self);
-                    }
-                }
-            }
-            self.crypto_states[epoch as usize] = cs;
+        let acked_ranges =
+            Frame::decode_ack_frame(largest_acknowledged, first_ack_range, ack_ranges)?;
+        let (mut acked_packets, mut lost_packets) = self.loss_recovery.on_ack_received(
+            Connection::pn_space(epoch),
+            largest_acknowledged,
+            acked_ranges,
+            ack_delay,
+            cur_time,
+        );
+        for acked in acked_packets.iter_mut() {
+            acked.mark_acked(self);
         }
+        for lost in lost_packets.iter_mut() {
+            lost.mark_lost(self);
+        }
+
         Ok(())
     }
 
@@ -1060,14 +1097,12 @@ impl Connection {
                 tx: cds,
                 rx: sds,
                 recvd: None,
-                sent: HashMap::new(),
             },
             Role::Server => CryptoState {
                 epoch: 0,
                 tx: sds,
                 rx: cds,
                 recvd: None,
-                sent: HashMap::new(),
             },
         });
     }
@@ -1104,18 +1139,19 @@ impl Connection {
                 rx: CryptoDxState::new(format!("read_epoch={}", epoch), rs, cipher),
                 tx: CryptoDxState::new(format!("write_epoch={}", epoch), ws, cipher),
                 recvd: None,
-                sent: HashMap::new(),
             });
         }
 
         Ok(self.crypto_states[epoch as usize].as_mut().unwrap())
     }
 
-    fn pn_space(epoch: Epoch) -> Epoch {
-        if epoch >= 3 {
-            return 1;
+    fn pn_space(epoch: Epoch) -> PNSpace {
+        match epoch {
+            0 => PNSpace::Initial,
+            1 => PNSpace::ApplicationData,
+            2 => PNSpace::Handshake,
+            _ => PNSpace::ApplicationData,
         }
-        return epoch;
     }
     pub fn process_inbound_stream_frame(
         &mut self,
@@ -1280,6 +1316,30 @@ impl Connection {
     pub fn get_sendable_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Sendable)> {
         self.get_send_streams()
             .filter(|(_, stream)| stream.send_data_ready())
+    }
+
+    fn check_loss_detection_timeout(&mut self, cur_time: u64) {
+        qdebug!(self, "check_loss_detection_timeout");
+        let (mut lost_packets, retransmit_unacked_crypto, send_one_or_two_packets) =
+            self.loss_recovery.on_loss_detection_timeout(cur_time);
+        if lost_packets.len() > 0 {
+            qdebug!(self, "check_loss_detection_timeout loss detected.");
+            for lost in lost_packets.iter_mut() {
+                lost.mark_lost(self);
+            }
+        } else if retransmit_unacked_crypto {
+            qdebug!(
+                self,
+                "check_loss_detection_timeout - retransmit_unacked_crypto"
+            );
+            // TOOD
+        } else if send_one_or_two_packets {
+            qdebug!(
+                self,
+                "check_loss_detection_timeout -send_one_or_two_packets"
+            );
+            // TODO
+        }
     }
 }
 
@@ -1546,6 +1606,399 @@ impl FrameGenerator for FlowControlGenerator {
     }
 }
 
+#[derive(Debug)]
+pub struct SentPacket {
+    ack_eliciting: bool,
+    //in_flight: bool, // TODO needed only for cc
+    is_crypto_packet: bool,
+    //size: u64, // TODO needed only for cc
+    time_sent: u64,
+    tokens: Vec<Box<FrameGeneratorToken>>, // a list of tokens.
+}
+
+impl SentPacket {
+    pub fn mark_acked(&mut self, conn: &mut Connection) {
+        for token in self.tokens.iter_mut() {
+            token.acked(conn);
+        }
+    }
+
+    pub fn mark_lost(&mut self, conn: &mut Connection) {
+        for token in self.tokens.iter_mut() {
+            token.lost(conn);
+        }
+    }
+}
+
+pub struct LossRecovery {
+    loss_detection_timer: u64,
+    crypto_count: u32,
+    pto_count: u32,
+    time_of_last_sent_ack_eliciting_packet: u64,
+    time_of_last_sent_crypto_packet: u64,
+    largest_acked_packet: [u64; 3],
+    pub latest_rtt: u64,
+    pub smoothed_rtt: u64,
+    pub rttvar: u64,
+    pub min_rtt: u64,
+    max_ack_delay: u64,
+    pub loss_time: [u64; 3],
+    sent_packets: [HashMap<u64, SentPacket>; 3],
+}
+
+impl LossRecovery {
+    pub fn new() -> LossRecovery {
+        LossRecovery {
+            loss_detection_timer: 0,
+            crypto_count: 0,
+            pto_count: 0,
+            time_of_last_sent_ack_eliciting_packet: 0,
+            time_of_last_sent_crypto_packet: 0,
+            largest_acked_packet: [0, 0, 0],
+            latest_rtt: 0,
+            smoothed_rtt: 0,
+            rttvar: 0,
+            min_rtt: u64::max_value(),
+            max_ack_delay: 25_000, // 25ms in microseconds
+            loss_time: [0, 0, 0],
+            sent_packets: [HashMap::new(), HashMap::new(), HashMap::new()],
+        }
+    }
+
+    pub fn on_packet_sent(
+        &mut self,
+        pn_space: PNSpace,
+        packet_number: u64,
+        ack_eliciting: bool,
+        is_crypto_packet: bool,
+        tokens: Vec<Box<FrameGeneratorToken>>,
+        cur_time_nanos: u64,
+    ) {
+        let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
+        log!(Level::Debug, "LossRecovery: packet {} sent.", packet_number);
+        self.sent_packets[pn_space as usize].insert(
+            packet_number,
+            SentPacket {
+                time_sent: cur_time,
+                ack_eliciting: ack_eliciting,
+                is_crypto_packet: is_crypto_packet,
+                tokens: tokens,
+            },
+        );
+        if is_crypto_packet {
+            self.time_of_last_sent_crypto_packet = cur_time;
+        }
+        if ack_eliciting {
+            self.time_of_last_sent_ack_eliciting_packet = cur_time;
+            // TODO implement cc
+            //     cc.on_packet_sent(sent_bytes)
+        }
+
+        self.set_loss_detection_timer();
+    }
+
+    pub fn on_ack_received(
+        &mut self,
+        pn_space: PNSpace,
+        largest_acked: u64,
+        acked_ranges: Vec<(u64, u64)>,
+        ack_delay: u64,
+        cur_time_nanos: u64,
+    ) -> (Vec<SentPacket>, Vec<SentPacket>) {
+        let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
+        log!(
+            Level::Debug,
+            "LossRecovery: ack received - largest_acked={}.",
+            largest_acked
+        );
+        if self.largest_acked_packet[pn_space as usize] < largest_acked {
+            self.largest_acked_packet[pn_space as usize] = largest_acked;
+        }
+
+        // If the largest acknowledged is newly acked and
+        // ack-eliciting, update the RTT.
+        if let Some(sent) = self.sent_packets[pn_space as usize].get(&largest_acked) {
+            if sent.ack_eliciting {
+                self.latest_rtt = cur_time - sent.time_sent;
+                self.update_rtt(ack_delay);
+            }
+        }
+
+        // TODO Process ECN information if present.
+
+        let mut acked_packets = Vec::new();
+        for r in acked_ranges {
+            for pn in r.1..r.0 + 1 {
+                if let Some(sent_packet) = self.sent_packets[pn_space as usize].remove(&pn) {
+                    log!(Level::Debug, "LossRecovery: acked={}", pn);
+                    acked_packets.push(sent_packet);
+                }
+            }
+        }
+
+        if acked_packets.len() == 0 {
+            return (acked_packets, Vec::new());
+        }
+
+        let lost_packets = self.detect_lost_packets(pn_space, cur_time);
+
+        self.crypto_count = 0;
+        self.pto_count = 0;
+
+        self.set_loss_detection_timer();
+
+        (acked_packets, lost_packets)
+    }
+
+    fn update_rtt(&mut self, mut ack_delay: u64) {
+        // min_rtt ignores ack delay.
+        self.min_rtt = std::cmp::min(self.min_rtt, self.latest_rtt);
+        // Limit ack_delay by max_ack_delay
+        ack_delay = std::cmp::min(ack_delay, self.max_ack_delay);
+        // Adjust for ack delay if it's plausible.
+        if self.latest_rtt - self.min_rtt > ack_delay {
+            self.latest_rtt -= ack_delay;
+        }
+        // Based on {{?RFC6298}}.
+        if self.smoothed_rtt == 0 {
+            self.smoothed_rtt = self.latest_rtt;
+            self.rttvar = self.latest_rtt / 2;
+        } else {
+            let rttvar_sample;
+            if self.smoothed_rtt > self.latest_rtt {
+                rttvar_sample = self.smoothed_rtt - self.latest_rtt;
+            } else {
+                rttvar_sample = self.latest_rtt - self.smoothed_rtt;
+            }
+            self.rttvar =
+                (3.0 / 4.0 * (self.rttvar as f64) + 1.0 / 4.0 * (rttvar_sample as f64)) as u64;
+            self.smoothed_rtt = (7.0 / 8.0 * (self.smoothed_rtt as f64)
+                + 1.0 / 8.0 * (self.latest_rtt as f64)) as u64;
+        }
+    }
+
+    fn detect_lost_packets(&mut self, pn_space: PNSpace, cur_time: u64) -> Vec<SentPacket> {
+        self.loss_time[pn_space as usize] = 0;
+
+        let loss_delay =
+            (TIME_THRESHOLD * (std::cmp::max(self.latest_rtt, self.smoothed_rtt) as f64)) as u64;
+
+        // Packets sent before this time are deemed lost. ( cur_time < loss_delay, can happen in test)
+        let lost_send_time = if cur_time < loss_delay {
+            0
+        } else {
+            cur_time - loss_delay
+        };
+
+        // Packets with packet numbers before this are deemed lost.
+        let lost_pn = if self.largest_acked_packet[pn_space as usize] > PACKET_THRESHOLD {
+            self.largest_acked_packet[pn_space as usize] - PACKET_THRESHOLD
+        } else {
+            0
+        };
+
+        log!(
+            Level::Debug,
+            "LossRecovery: detect lost packets - time={}, pn={}",
+            lost_send_time,
+            lost_pn
+        );
+
+        let mut lost: Vec<u64> = Vec::new();
+        for iter in self.sent_packets[pn_space as usize].iter_mut() {
+            // Mark packet as lost, or set time when it should be marked.
+            // Mark packet as lost, or set time when it should be marked.
+            if *iter.0 <= self.largest_acked_packet[pn_space as usize] {
+                if iter.1.time_sent <= lost_send_time || *iter.0 <= lost_pn {
+                    log!(Level::Debug, "LossRecovery: lost={}.", iter.0);
+                    lost.push(*iter.0);
+                } else {
+                    if self.loss_time[pn_space as usize] == 0 {
+                        self.loss_time[pn_space as usize] = iter.1.time_sent + loss_delay;
+                    } else {
+                        self.loss_time[pn_space as usize] = std::cmp::min(
+                            self.loss_time[pn_space as usize],
+                            iter.1.time_sent + loss_delay,
+                        );
+                    }
+                }
+            }
+        }
+
+        let mut lost_packets = Vec::new();
+        for pn in lost {
+            if let Some(sent_packet) = self.sent_packets[pn_space as usize].remove(&pn) {
+                lost_packets.push(sent_packet);
+            }
+        }
+
+        // TODO
+        // Inform the congestion controller of lost packets.
+
+        lost_packets
+    }
+
+    fn set_loss_detection_timer(&mut self) {
+        log!(Level::Debug, "LossRecovery: set_loss_detection_timer.");
+        let mut has_crypto_out = false;
+        let mut has_ack_eliciting_out = false;
+
+        for pn_space in &[
+            PNSpace::Initial,
+            PNSpace::Handshake,
+            PNSpace::ApplicationData,
+        ] {
+            if let Some(_) = self.sent_packets[*pn_space as usize]
+                .iter()
+                .filter(|(x, y)| y.is_crypto_packet)
+                .next()
+            {
+                has_crypto_out = true;
+            }
+            if let Some(_) = self.sent_packets[*pn_space as usize]
+                .iter()
+                .filter(|(x, y)| y.ack_eliciting)
+                .next()
+            {
+                has_ack_eliciting_out = true;
+            }
+        }
+
+        log!(
+            Level::Debug,
+            "LossRecovery: has_ack_eliciting_out={} has_crypto_out={}",
+            has_ack_eliciting_out,
+            has_crypto_out
+        );
+        if !has_ack_eliciting_out && !has_crypto_out {
+            self.loss_detection_timer = 0;
+            return;
+        }
+
+        let (loss_time, _) = self.get_earliest_loss_time();
+
+        if loss_time != 0 {
+            self.loss_detection_timer = loss_time;
+        } else if has_crypto_out {
+            self.set_timer_for_crypto_retransmission();
+        } else {
+            // Calculate PTO duration
+            let mut timeout = self.smoothed_rtt
+                + std::cmp::max(4 * self.rttvar, GRANULARITY)
+                + self.max_ack_delay;
+            timeout = timeout * 2u64.pow(self.pto_count);
+            self.loss_detection_timer = self.time_of_last_sent_ack_eliciting_packet + timeout;
+        }
+        log!(
+            Level::Debug,
+            "LossRecovery: loss_detection_timer={}",
+            self.loss_detection_timer
+        );
+    }
+
+    fn set_timer_for_crypto_retransmission(&mut self) {
+        let mut timeout;
+        if self.smoothed_rtt == 0 {
+            timeout = 2 * INITIAL_RTT;
+        } else {
+            timeout = 2 * self.smoothed_rtt;
+        }
+
+        timeout = std::cmp::max(timeout, GRANULARITY);
+        timeout = timeout * 2u64.pow(self.crypto_count);
+        self.loss_detection_timer = self.time_of_last_sent_crypto_packet + timeout;
+    }
+
+    fn get_earliest_loss_time(&self) -> (u64, PNSpace) {
+        let mut loss_time = self.loss_time[PNSpace::Initial as usize];
+        let mut pn_space = PNSpace::Initial;
+        for space in &[PNSpace::Handshake, PNSpace::ApplicationData] {
+            if loss_time == 0 {
+                loss_time = self.loss_time[*space as usize];
+                pn_space = *space;
+            } else if self.loss_time[*space as usize] != 0
+                && self.loss_time[*space as usize] < loss_time
+            {
+                loss_time = self.loss_time[*space as usize];
+                pn_space = *space;
+            }
+        }
+        (loss_time, pn_space)
+    }
+
+    pub fn get_timer(&self) -> u64 {
+        self.loss_detection_timer * 1000
+    }
+
+    //  there are3 outcome for this function, they correspond to (Vec<SentPacket>, bool, bool):
+    //  1) lost packets are detected and a list of the packet is return,
+    //  2) crypto timer expired, crypto data should be retransmitted,
+    //  3) pto, one or two packets should be transmitted.
+    pub fn on_loss_detection_timeout(
+        &mut self,
+        cur_time_nanos: u64,
+    ) -> (Vec<SentPacket>, bool, bool) {
+        let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
+        let mut lost_packets = Vec::new();
+        //let mut retransmit_unacked_crypto = false;
+        //let mut send_one_or_two_packets = false;
+        if cur_time < self.loss_detection_timer {
+            return (
+                lost_packets, false, false
+                //retransmit_unacked_crypto,
+                //send_one_or_two_packets,
+            );
+        }
+
+        let (loss_time, pn_space) = self.get_earliest_loss_time();
+        if loss_time != 0 {
+            // Time threshold loss Detection
+            lost_packets = self.detect_lost_packets(pn_space, cur_time);
+        } else {
+            let mut has_crypto_out = false;
+            let mut iter = self.sent_packets[PNSpace::Initial as usize]
+                .iter()
+                .filter(|(x, y)| y.ack_eliciting);
+            if let Some(_) = iter.next() {
+                has_crypto_out = true;
+            }
+
+            if !has_crypto_out {
+                let mut iter = self.sent_packets[PNSpace::Handshake as usize]
+                    .iter()
+                    .filter(|(x, y)| y.ack_eliciting);
+                if let Some(_) = iter.next() {
+                    has_crypto_out = true;
+                }
+            }
+
+            // Retransmit crypto data if no packets were lost
+            // and there are still crypto packets in flight.
+            if has_crypto_out {
+                // Crypto retransmission timeout.
+                //retransmit_unacked_crypto = true;
+                //for now just call detect_lost_packets;
+                lost_packets = self.detect_lost_packets(pn_space, cur_time);
+                self.crypto_count += 1;
+            } else {
+                // PTO
+                //send_one_or_two_packets = true;
+                //for now just call detect_lost_packets;
+                lost_packets = self.detect_lost_packets(pn_space, cur_time);
+                self.pto_count += 1;
+            }
+        }
+        self.set_loss_detection_timer();
+        (
+            lost_packets,
+            false,
+            false,
+            //retransmit_unacked_crypto,
+            //send_one_or_two_packets,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1565,18 +2018,18 @@ mod tests {
 
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let res = client.process(vec![], now());
+        let (res, _) = client.process(vec![], now());
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
-        let res = server.process(res, now());
+        let (res, _) = server.process(res, now());
 
-        let res = client.process(res, now());
+        let (res, _) = client.process(res, now());
         // client now in State::Connected
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 4);
 
-        let res = server.process(res, now());
+        let (res, _) = server.process(res, now());
         // server now in State::Connected
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 3);
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 7);
@@ -1590,28 +2043,28 @@ mod tests {
         qdebug!("---- client: generate CH");
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let res = client.process(Vec::new(), now());
+        let (res, _) = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
-        let res = server.process(res, now());
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: SH..FIN -> FIN");
-        let res = client.process(res, now());
+        let (res, _) = client.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: FIN -> ACKS");
-        let res = server.process(res, now());
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: ACKS -> 0");
-        let res = client.process(res, now());
+        let (res, _) = client.process(res, now());
         assert!(res.is_empty());
         qdebug!("Output={:0x?}", res);
 
@@ -1629,13 +2082,13 @@ mod tests {
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
 
         qdebug!("---- client");
-        let res = client.process(Vec::new(), now());
+        let (res, _) = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // -->> Initial[0]: CRYPTO[CH]
 
         qdebug!("---- server");
-        let res = server.process(res, now());
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // TODO(agrover@mozilla.com): ACKs
@@ -1643,7 +2096,7 @@ mod tests {
         // <<-- Handshake[0]: CRYPTO[EE, CERT, CV, FIN]
 
         qdebug!("---- client");
-        let res = client.process(res, now());
+        let (res, _) = client.process(res, now());
         assert_eq!(res.len(), 1);
         assert_eq!(*client.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1651,7 +2104,7 @@ mod tests {
         // -->> Handshake[0]: CRYPTO[FIN], ACK[0]
 
         qdebug!("---- server");
-        let res = server.process(res, now());
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1674,11 +2127,11 @@ mod tests {
         client
             .stream_send(client_stream_id2, &vec![7; 50])
             .unwrap_err();
-        let res = client.process(res, now());
+        let (res, _) = client.process(res, now());
         assert_eq!(res.len(), 4);
 
         qdebug!("---- server");
-        let res = server.process(res, now());
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -1711,7 +2164,8 @@ mod tests {
             _ => false,
         };
         while !is_done(a) {
-            records = a.process(records, now());
+            let (r, _) = a.process(records, now());
+            records = r;
             b = mem::replace(&mut a, b);
         }
     }
@@ -1744,5 +2198,227 @@ mod tests {
         // and the client never sees the server's rejection of its handshake.
         //assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(120)));
         assert_error(&server, ConnectionError::Transport(Error::CryptoAlert(120)));
+    }
+
+    // LOSSRECOVERY tests
+
+    fn assert_values(
+        lr: &LossRecovery,
+        latest_rtt: u64,
+        smoothed_rtt: u64,
+        rttvar: u64,
+        min_rtt: u64,
+        loss_time: [u64; 3],
+    ) {
+        println!(
+            "{} {} {} {} {} {} {}",
+            lr.latest_rtt,
+            lr.smoothed_rtt,
+            lr.rttvar,
+            lr.min_rtt,
+            lr.loss_time[0],
+            lr.loss_time[1],
+            lr.loss_time[2]
+        );
+        assert_eq!(lr.latest_rtt, latest_rtt);
+        assert_eq!(lr.smoothed_rtt, smoothed_rtt);
+        assert_eq!(lr.rttvar, rttvar);
+        assert_eq!(lr.min_rtt, min_rtt);
+        assert_eq!(lr.loss_time, loss_time);
+    }
+
+    #[test]
+    fn test_loss_recovery1() {
+        let mut lr_module = LossRecovery::new();
+
+        lr_module.on_packet_sent(PNSpace::ApplicationData, 0, true, false, Vec::new(), 0);
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            1,
+            true,
+            false,
+            Vec::new(),
+            10_000_000,
+        );
+
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            2,
+            true,
+            false,
+            Vec::new(),
+            20_000_000,
+        );
+
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            3,
+            true,
+            false,
+            Vec::new(),
+            30_000_000,
+        );
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            4,
+            true,
+            false,
+            Vec::new(),
+            40_000_000,
+        );
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            5,
+            true,
+            false,
+            Vec::new(),
+            50_000_000,
+        );
+
+        // Calculating rtt for the first ack
+        lr_module.on_ack_received(PNSpace::ApplicationData, 0, Vec::new(), 2000, 50_000_000);
+        assert_values(&lr_module, 50_000, 50_000, 25_000, 50_000, [0, 0, 0]);
+
+        // Calculating rtt for further acks
+        lr_module.on_ack_received(PNSpace::ApplicationData, 1, vec![(1, 0)], 2000, 60_000_000);
+        assert_values(&lr_module, 50_000, 50_000, 18_750, 50_000, [0, 0, 0]);
+
+        // Calculating rtt for further acks
+        lr_module.on_ack_received(PNSpace::ApplicationData, 2, vec![(2, 0)], 2000, 70_000_000);
+        assert_values(&lr_module, 50_000, 50_000, 14_062, 50_000, [0, 0, 0]);
+
+        // Calculating rtt for further acks; test min_rtt
+        lr_module.on_ack_received(PNSpace::ApplicationData, 3, vec![(3, 0)], 2000, 75_000_000);
+        assert_values(&lr_module, 45_000, 49_375, 11_796, 45_000, [0, 0, 0]);
+
+        // Calculating rtt for further acks; test ack_delay
+        lr_module.on_ack_received(PNSpace::ApplicationData, 4, vec![(4, 0)], 2000, 95_000_000);
+        assert_values(&lr_module, 53_000, 49828, 9_753, 45_000, [0, 0, 0]);
+
+        // Calculating rtt for further acks; test max_ack_delay
+        lr_module.on_ack_received(
+            PNSpace::ApplicationData,
+            5,
+            vec![(5, 0)],
+            28000,
+            150_000_000,
+        );
+        assert_values(&lr_module, 75000, 52974, 13607, 45000, [0, 0, 0]);
+
+        // Calculating rtt for further acks; test acking already acked packet
+        lr_module.on_ack_received(
+            PNSpace::ApplicationData,
+            5,
+            vec![(5, 0)],
+            28000,
+            160_000_000,
+        );
+        assert_values(&lr_module, 75000, 52974, 13607, 45000, [0, 0, 0]);
+    }
+
+    // Test crypto timeout.
+    #[test]
+    fn test_loss_recovery2() {
+        let mut lr_module = LossRecovery::new();
+        lr_module.on_packet_sent(PNSpace::ApplicationData, 0, true, true, Vec::new(), 0);
+        assert_eq!(lr_module.get_timer(), 200_000_000);
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            1,
+            true,
+            false,
+            Vec::new(),
+            10_000_000,
+        );
+        assert_eq!(lr_module.get_timer(), 200_000_000);
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            2,
+            true,
+            false,
+            Vec::new(),
+            20_000_000,
+        );
+        assert_eq!(lr_module.get_timer(), 200_000_000);
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            3,
+            true,
+            false,
+            Vec::new(),
+            30_000_000,
+        );
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            4,
+            true,
+            false,
+            Vec::new(),
+            40_000_000,
+        );
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            5,
+            true,
+            false,
+            Vec::new(),
+            50_000_000,
+        );
+
+        lr_module.on_packet_sent(
+            PNSpace::ApplicationData,
+            6,
+            true,
+            false,
+            Vec::new(),
+            60_000_000,
+        );
+
+        // This is a PTO for crypto packet.
+        assert_eq!(lr_module.get_timer(), 200_000_000);
+
+        // Receive an ack for packet 0.
+        lr_module.on_ack_received(PNSpace::ApplicationData, 0, vec![(0, 0)], 2000, 100_000_000);
+        assert_values(&lr_module, 100_000, 100_000, 50_000, 100_000, [0, 0, 0]);
+        assert_eq!(lr_module.get_timer(), 385_000_000);
+
+        // Receive an ack with a gap. ackes 0 and 2.
+        lr_module.on_ack_received(
+            PNSpace::ApplicationData,
+            2,
+            vec![(0, 0), (2, 2)],
+            2000,
+            105_000_000,
+        );
+        assert_values(&lr_module, 85_000, 98_125, 41_250, 85_000, [0, 0, 120_390]);
+        assert_eq!(lr_module.get_timer(), 120_390_000);
+
+        // Timer expires, packet 1 is lost. packet 1 is lost
+        lr_module.on_loss_detection_timeout(120_390_000);
+        assert_values(&lr_module, 85_000, 98_125, 41_250, 85_000, [0, 0, 0]);
+        assert_eq!(lr_module.get_timer(), 348_125_000);
+
+        // dupacks loss detection. ackes 0, 2 and 6, markes packet 3 as lost.
+        lr_module.on_ack_received(
+            PNSpace::ApplicationData,
+            6,
+            vec![(0, 0), (2, 2), (6, 6)],
+            2000,
+            130_000_000,
+        );
+        assert_values(&lr_module, 70_000, 94_609, 37_968, 70_000, [0, 0, 146_435]);
+        assert_eq!(lr_module.get_timer(), 146_435_000);
+
+        // Timer expires, packet 4 is lost.
+        lr_module.on_loss_detection_timeout(146_500_000);
+        assert_values(&lr_module, 70_000, 94_609, 37_968, 70_000, [0, 0, 156_435]);
+        assert_eq!(lr_module.get_timer(), 156_435_000);
+
+        // Timer expires, packet 5 is lost.
+        lr_module.on_loss_detection_timeout(156_500_000);
+        assert_values(&lr_module, 70_000, 94_609, 37_968, 70_000, [0, 0, 0]);
+
+        // there is no more outstanding data - timer is set to 0.
+        assert_eq!(lr_module.get_timer(), 0);
     }
 }

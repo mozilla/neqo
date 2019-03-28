@@ -94,7 +94,8 @@ fn main() {
             in_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
         }
 
-        let out_dgrams = server.process(in_dgrams.drain(..), now());
+        // TODO use timer to set socket.set_read_timeout.
+        let (out_dgrams, _timer) = server.process(in_dgrams.drain(..), now());
         if let State::Closed(e) = server.state() {
             eprintln!("Closed: {:?}", e);
             break;

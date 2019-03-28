@@ -3,7 +3,7 @@
 #[macro_use]
 extern crate neqo_common;
 
-mod connection;
+pub mod connection;
 pub mod hframe;
 mod recvable;
 mod transport;

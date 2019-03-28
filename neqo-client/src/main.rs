@@ -70,7 +70,8 @@ fn main() {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     loop {
-        let out_dgrams = client.process(in_dgrams.drain(..), now());
+        // TODO use timer to set socket.set_read_timeout.
+        let (out_dgrams, _timer) = client.process(in_dgrams.drain(..), now());
         eprintln!("State: {:?}", client.state());
         if let State::Closed(e) = client.state() {
             eprintln!("Closed: {:?}", e);

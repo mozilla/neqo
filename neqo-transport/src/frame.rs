@@ -359,6 +359,48 @@ impl Frame {
             _ => true,
         }
     }
+
+    pub fn decode_ack_frame(
+        largest_acked: u64,
+        first_ack_range: u64,
+        ack_ranges: &Vec<AckRange>,
+    ) -> Res<Vec<(u64, u64)>> {
+        // acked_ranges holds acked ranges. Each acked range is a tuple (x, y), packet numbers
+        // between x and y and including x and y are acked.
+        let mut acked_ranges: Vec<(u64, u64)> = Vec::new();
+
+        if largest_acked < first_ack_range {
+            return Err(Error::FrameEncodingError);
+        }
+        acked_ranges.push((largest_acked, largest_acked - first_ack_range));
+        if ack_ranges.len() > 0 && largest_acked < first_ack_range + 1 {
+            return Err(Error::FrameEncodingError);
+        }
+        let mut cur = if ack_ranges.len() > 0 {
+            largest_acked - first_ack_range - 1
+        } else {
+            0
+        };
+        for r in ack_ranges {
+            if cur < r.gap + 1 {
+                return Err(Error::FrameEncodingError);
+            }
+            cur = cur - r.gap - 1;
+
+            if cur < r.range {
+                return Err(Error::FrameEncodingError);
+            }
+            acked_ranges.push((cur, cur - r.range));
+
+            if cur > r.range + 1 {
+                cur = cur - r.range - 1;
+            } else {
+                cur = cur - r.range;
+            }
+        }
+
+        Ok(acked_ranges)
+    }
 }
 
 pub fn decode_frame(d: &mut Data) -> Res<Frame> {
@@ -814,5 +856,13 @@ mod tests {
             }
             _ => {}
         }
+    }
+
+    #[test]
+    fn test_decode_ack_frame() {
+       match Frame::decode_ack_frame(7, 2, &vec![AckRange {gap: 0, range: 3} ]) {
+         Err(_) => assert!(false),
+         Ok(r) => assert_eq!(r, vec![(7,5), (3, 0)]),
+       };
     }
 }
