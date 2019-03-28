@@ -101,6 +101,17 @@ fn main() {
             break;
         }
 
+        let iter = server.get_recvable_streams();
+        let mut data = vec![0; 4000];
+        for (stream_id, stream) in iter {
+            stream.read(&mut data).expect("Read should succeed");
+            println!(
+                "READ[{}]: {}",
+                stream_id,
+                String::from_utf8(data.clone()).unwrap()
+            );
+        }
+
         for d in out_dgrams {
             let sent = socket
                 .send_to(&d[..], d.destination())

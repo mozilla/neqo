@@ -53,30 +53,25 @@ impl ToSocketAddrs for Args {
     }
 }
 
+trait Handler {
+    fn handle(&mut self, client: &mut Connection) -> bool;
+}
+
 fn process_loop(
     local_addr: &SocketAddr,
     remote_addr: &SocketAddr,
     socket: &UdpSocket,
     client: &mut Connection,
+    handler: &mut Box<Handler>,
 ) -> neqo_transport::connection::State {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     loop {
         let (out_dgrams, _timer) = client.process(in_dgrams.drain(..), now());
         let state = client.state();
-        eprintln!("State: {:?}", state);
-        match state {
-            State::Closed(e) => {
-                eprintln!("Closed: {:?}", e);
-                return state.clone();
-            }
-            State::Connected => {
-                eprintln!("Connected");
-                return state.clone();
-            }
-            _ => {}
+        if !handler.handle(client) {
+            return state.clone();
         }
-
         for d in out_dgrams {
             let sent = socket.send(&d[..]).expect("Error sending datagram");
             if sent != d.len() {
@@ -114,11 +109,13 @@ fn main() {
     let mut client = Connection::new_client(args.host.as_str(), args.alpn, local_addr, remote_addr)
         .expect("must succeed");
 
-    process_loop(&local_addr, &remote_addr, &socket, &mut client);
+    process_loop(&local_addr, &remote_addr, &socket, &mut client, true);
 
     let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
     let req: String = "GET /".to_string();
     client
         .stream_send(client_stream_id, req.as_bytes())
         .unwrap();
+
+    process_loop(&local_addr, &remote_addr, &socket, &mut client, false);
 }

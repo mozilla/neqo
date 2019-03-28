@@ -1299,6 +1299,16 @@ impl Connection {
         stream.send(data)
     }
 
+    pub fn stream_recv(&mut self, stream_id: u64, data: &mut [u8]) -> Res<(usize, bool)> {
+        let stream = self
+            .recv_streams
+            .get_mut(&stream_id)
+            .ok_or_else(|| return Error::InvalidStreamId)?;
+
+        let rb = stream.read(data)?;
+        Ok((rb.0 as usize, rb.1))
+    }
+
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
         let stream = self
             .send_streams
