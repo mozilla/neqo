@@ -1,5 +1,6 @@
 use neqo_common::now;
 use neqo_crypto::init_db;
+use neqo_transport::frame::StreamType;
 use neqo_transport::{Connection, Datagram, State};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
@@ -52,35 +53,28 @@ impl ToSocketAddrs for Args {
     }
 }
 
-fn main() {
-    let args = Args::from_args();
-    init_db(args.db.clone());
-
-    let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
-    socket.connect(&args).expect("Unable to connect UDP socket");
-
-    let local_addr = socket.local_addr().expect("Socket local address not bound");
-    let remote_addr = args.addr();
-
-    println!("Client connecting: {:?} -> {:?}", local_addr, remote_addr);
-
-    let mut client = Connection::new_client(args.host.as_str(), args.alpn, local_addr, remote_addr)
-        .expect("must succeed");
-
+fn process_loop(
+    local_addr: &SocketAddr,
+    remote_addr: &SocketAddr,
+    socket: &UdpSocket,
+    client: &mut Connection,
+) -> neqo_transport::connection::State {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     loop {
-        // TODO use timer to set socket.set_read_timeout.
         let (out_dgrams, _timer) = client.process(in_dgrams.drain(..), now());
-        eprintln!("State: {:?}", client.state());
-        if let State::Closed(e) = client.state() {
-            eprintln!("Closed: {:?}", e);
-            break;
-        }
-        // TODO(mt): remove this.
-        if let State::Closing(e, ..) = client.state() {
-            eprintln!("Closing: {:?}", e);
-            break;
+        let state = client.state();
+        eprintln!("State: {:?}", state);
+        match state {
+            State::Closed(e) => {
+                eprintln!("Closed: {:?}", e);
+                return state.clone();
+            }
+            State::Connected => {
+                eprintln!("Connected");
+                return state.clone();
+            }
+            _ => {}
         }
 
         for d in out_dgrams {
@@ -96,7 +90,35 @@ fn main() {
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
+            in_dgrams.push(Datagram::new(
+                remote_addr.clone(),
+                local_addr.clone(),
+                &buf[..sz],
+            ));
         }
     }
+}
+
+fn main() {
+    let args = Args::from_args();
+    init_db(args.db.clone());
+
+    let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
+    socket.connect(&args).expect("Unable to connect UDP socket");
+
+    let local_addr = socket.local_addr().expect("Socket local address not bound");
+    let remote_addr = args.addr();
+
+    println!("Client connecting: {:?} -> {:?}", local_addr, remote_addr);
+
+    let mut client = Connection::new_client(args.host.as_str(), args.alpn, local_addr, remote_addr)
+        .expect("must succeed");
+
+    process_loop(&local_addr, &remote_addr, &socket, &mut client);
+
+    let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    let req: String = "GET /".to_string();
+    client
+        .stream_send(client_stream_id, req.as_bytes())
+        .unwrap();
 }
