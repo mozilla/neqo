@@ -100,6 +100,17 @@ fn http_serve(server: &mut Connection, stream: u64) {
     server.stream_send(stream, &resp).expect("Successful write");
 }
 
+fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
+    for d in out_dgrams {
+        let sent = socket
+            .send_to(&d[..], d.destination())
+            .expect("Error sending datagram");
+        if sent != d.len() {
+            eprintln!("Unable to send all {} bytes of datagram", d.len());
+        }
+    }
+}
+
 // TODO(mt): implement a server that can handle multiple connections.
 fn main() {
     let args = Args::from_args();
@@ -133,6 +144,7 @@ fn main() {
             eprintln!("Closed: {:?}", e);
             break;
         }
+        emit_packets(&socket, &out_dgrams);
 
         let iter = server.get_recvable_streams();
         let mut streams = Vec::new();
@@ -143,13 +155,7 @@ fn main() {
             http_serve(&mut server, str);
         }
 
-        for d in out_dgrams {
-            let sent = socket
-                .send_to(&d[..], d.destination())
-                .expect("Error sending datagram");
-            if sent != d.len() {
-                eprintln!("Unable to send all {} bytes of datagram", d.len());
-            }
-        }
+        let (out_dgrams, _timer) = server.process(in_dgrams.drain(..), now());
+        emit_packets(&socket, &out_dgrams);
     }
 }

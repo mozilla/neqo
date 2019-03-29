@@ -58,6 +58,15 @@ trait Handler {
     fn handle(&mut self, client: &mut Connection) -> bool;
 }
 
+fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
+    for d in out_dgrams {
+        let sent = socket.send(&d[..]).expect("Error sending datagram");
+        if sent != d.len() {
+            eprintln!("Unable to send all {} bytes of datagram", d.len());
+        }
+    }
+}
+
 fn process_loop(
     local_addr: &SocketAddr,
     remote_addr: &SocketAddr,
@@ -69,6 +78,8 @@ fn process_loop(
     let mut in_dgrams = Vec::new();
     loop {
         let (out_dgrams, _timer) = client.process(in_dgrams.drain(..), now());
+        emit_packets(&socket, &out_dgrams);
+
         let state = client.state().clone();
         if let State::Closed(..) = state {
             return state;
@@ -76,12 +87,9 @@ fn process_loop(
         if !handler.handle(client) {
             return state;
         }
-        for d in out_dgrams {
-            let sent = socket.send(&d[..]).expect("Error sending datagram");
-            if sent != d.len() {
-                eprintln!("Unable to send all {} bytes of datagram", d.len());
-            }
-        }
+
+        let (out_dgrams, _timer) = client.process(in_dgrams.drain(..), now());
+        emit_packets(&socket, &out_dgrams);
 
         let sz = socket.recv(&mut buf[..]).expect("UDP error");
         if sz == buf.len() {

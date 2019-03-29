@@ -860,9 +860,9 @@ mod tests {
 
     #[test]
     fn test_decode_ack_frame() {
-       match Frame::decode_ack_frame(7, 2, &vec![AckRange {gap: 0, range: 3} ]) {
-         Err(_) => assert!(false),
-         Ok(r) => assert_eq!(r, vec![(7,5), (3, 0)]),
-       };
+        match Frame::decode_ack_frame(7, 2, &vec![AckRange { gap: 0, range: 3 }]) {
+            Err(_) => assert!(false),
+            Ok(r) => assert_eq!(r, vec![(7, 5), (3, 0)]),
+        };
     }
 }

@@ -1,5 +1,4 @@
 #![allow(unused_variables, dead_code)]
-
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -1195,30 +1194,61 @@ impl Connection {
         data: Vec<u8>,
     ) -> Res<()> {
         // TODO(agrover@mozilla.com): more checking here
+        if !self.recv_streams.contains_key(&stream_id) {
+            // Stream doesn't exist.
+            match (stream_id & 0x1, self.rol) {
+                (0, Role::Client) | (1, Role::Server) => {
+                    qwarn!(self, "Peer attempted to create local stream: {}", stream_id);
+                    return Err(Error::ProtocolViolation);
+                }
+                _ => {}
+            }
 
-        let max_data_if_new_stream = match stream_id & 0x2 == 0 {
-            true => self
-                .tps
-                .borrow()
-                .local
-                .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE),
-            false => self
-                .tps
-                .borrow()
-                .local
-                .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI),
-        };
+            // TODO(ekr@rtfm.com): Check for whether this is too many streams.
 
-        let stream = self
-            .recv_streams
-            .entry(stream_id)
-            .or_insert(RecvStream::new(
+            // Get the TPS for size.
+            let max_data_if_new_stream = match stream_id & 0x2 == 0 {
+                true => self
+                    .tps
+                    .borrow()
+                    .local
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE),
+                false => self
+                    .tps
+                    .borrow()
+                    .local
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI),
+            };
+
+            self.recv_streams.insert(
                 stream_id,
-                max_data_if_new_stream,
-                self.flow_mgr.clone(),
-            ));
+                RecvStream::new(stream_id, max_data_if_new_stream, self.flow_mgr.clone()),
+            );
 
-        stream.inbound_stream_frame(fin, offset, data)?;
+            // If this is bidirectional, insert a send stream.
+            let send_initial_max_stream_data = self
+                .tps
+                .borrow()
+                .remote
+                .as_ref()
+                .expect("remote tparams are valid when State::Connected")
+                .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+            self.send_streams.insert(
+                stream_id,
+                SendStream::new(
+                    stream_id,
+                    send_initial_max_stream_data,
+                    self.flow_mgr.clone(),
+                ),
+            );
+        }
+
+        // Finally, let's process some data.
+        self.recv_streams
+            .get_mut(&stream_id)
+            .as_mut()
+            .unwrap()
+            .inbound_stream_frame(fin, offset, data)?;
 
         Ok(())
     }
