@@ -464,8 +464,6 @@ impl NewStreamTypeReader {
 }
 
 pub struct HttpConn {
-    // TODO(mt): This is redundant with the role on the transport.
-    role: Role,
     conn: Connection,
     max_header_list_size: u64,
     num_placeholders: u64,
@@ -484,7 +482,6 @@ impl HttpConn {
             panic!("Wrong max_table_size");
         }
         HttpConn {
-            role: c.role(),
             conn: c,
             max_header_list_size: MAX_HEADER_LIST_SIZE_DEFAULT,
             num_placeholders: NUM_PLACEHOLDERS_DEFAULT,
@@ -507,6 +504,10 @@ impl HttpConn {
             }
             _ => {}
         };
+    }
+
+    fn role(&self) -> Role {
+        self.conn.role()
     }
 
     fn process_state_change(&mut self, state: &State) -> Res<()> {
@@ -589,6 +590,7 @@ impl HttpConn {
         }
 
         // TODO see if we can do this better (with better solution I am getting cannot borrow `*self` as mutable more than once at a time)
+        let role = self.role();
         let mut stream_errors: Vec<(u64, Error)> = Vec::new();
         for (id, rs) in self.conn.get_recvable_streams() {
             if let Some(cs) = &mut self.client_requests.get_mut(&id) {
@@ -623,7 +625,7 @@ impl HttpConn {
                             self.control_stream_remote.stream_id = Some(id);
                         }
                         HTTP3_UNI_STREAM_TYPE_PUSH => {
-                            if self.role == Role::Server {
+                            if role == Role::Server {
                                 rs.stop_sending(Error::WrongStreamDirection.code());
                             } else {
                                 // TODO implement PUSH
@@ -689,7 +691,7 @@ impl HttpConn {
         let id = self.conn.stream_create(StreamType::BiDi)?;
         self.client_requests.insert(
             id,
-            ClientRequest::new(self.role, id, method, scheme, host, path, headers),
+            ClientRequest::new(self.role(), id, method, scheme, host, path, headers),
         );
         Ok(())
     }
@@ -729,7 +731,7 @@ impl HttpConn {
                     self.max_header_list_size = *v;
                 }
                 HSettingType::NumPlaceholders => {
-                    if self.role == Role::Server {
+                    if self.role() == Role::Server {
                         return Err(Error::WrongStreamDirection);
                     } else {
                         self.num_placeholders = *v;
@@ -745,7 +747,7 @@ impl HttpConn {
     }
 
     fn handle_goaway(&mut self, _id: u64) -> Res<()> {
-        if self.role == Role::Server {
+        if self.role() == Role::Server {
             return Err(Error::UnexpectedFrame);
         } else {
             // TODO
@@ -754,7 +756,7 @@ impl HttpConn {
     }
 
     fn handle_max_push_id(&mut self, _id: u64) -> Res<()> {
-        if self.role == Role::Client {
+        if self.role() == Role::Client {
             return Err(Error::UnexpectedFrame);
         } else {
             // TODO
