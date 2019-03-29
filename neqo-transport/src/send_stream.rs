@@ -17,7 +17,7 @@ pub trait Sendable: Debug {
     /// Enqueue data to send on the stream. Returns bytes enqueued.
     fn send(&mut self, buf: &[u8]) -> Res<usize>;
 
-    /// If enqueueing some data with send will return nonzero.
+    /// If attempting to enqueue some data with send() will return nonzero.
     fn send_data_ready(&self) -> bool;
 
     /// Close the stream. Enqueued data will be sent.
