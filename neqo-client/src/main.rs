@@ -2,6 +2,7 @@ use neqo_common::now;
 use neqo_crypto::init_db;
 use neqo_transport::frame::StreamType;
 use neqo_transport::{Connection, Datagram, State};
+use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
 use structopt::StructOpt;
@@ -62,15 +63,18 @@ fn process_loop(
     remote_addr: &SocketAddr,
     socket: &UdpSocket,
     client: &mut Connection,
-    handler: &mut Box<Handler>,
+    handler: &mut Handler,
 ) -> neqo_transport::connection::State {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     loop {
         let (out_dgrams, _timer) = client.process(in_dgrams.drain(..), now());
-        let state = client.state();
+        let state = client.state().clone();
+        if let State::Closed(..) = state {
+            return state;
+        }
         if !handler.handle(client) {
-            return state.clone();
+            return state;
         }
         for d in out_dgrams {
             let sent = socket.send(&d[..]).expect("Error sending datagram");
@@ -94,6 +98,42 @@ fn process_loop(
     }
 }
 
+struct PreConnectHandler {}
+impl Handler for PreConnectHandler {
+    fn handle(&mut self, client: &mut Connection) -> bool {
+        if let State::Connected = client.state() {
+            return false;
+        }
+        return true;
+    }
+}
+
+#[derive(Default)]
+struct PostConnectHandler {
+    streams: HashSet<u64>,
+}
+
+// This is a bit fancier than actually needed.
+impl Handler for PostConnectHandler {
+    fn handle(&mut self, client: &mut Connection) -> bool {
+        let iter = client.get_recvable_streams();
+        let mut data = vec![0; 4000];
+        for (stream_id, stream) in iter {
+            if !self.streams.contains(&stream_id) {
+                println!("Data on invalid stream: {}", stream_id);
+                return false;
+            }
+            stream.read(&mut data).expect("Read should succeed");
+            println!(
+                "READ[{}]: {}",
+                stream_id,
+                String::from_utf8(data.clone()).unwrap()
+            );
+        }
+        return true;
+    }
+}
+
 fn main() {
     let args = Args::from_args();
     init_db(args.db.clone());
@@ -108,14 +148,19 @@ fn main() {
 
     let mut client = Connection::new_client(args.host.as_str(), args.alpn, local_addr, remote_addr)
         .expect("must succeed");
+    // Temporary here to help out the type inference engine
+    let mut h = PreConnectHandler {};
+    process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h);
 
-    process_loop(&local_addr, &remote_addr, &socket, &mut client, true);
-
-    let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-    let req: String = "GET /".to_string();
+    let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    let req: String = "GET /10\n
+"
+    .to_string();
     client
         .stream_send(client_stream_id, req.as_bytes())
         .unwrap();
 
-    process_loop(&local_addr, &remote_addr, &socket, &mut client, false);
+    let mut h2 = PostConnectHandler::default();
+    h2.streams.insert(client_stream_id);
+    process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h2);
 }

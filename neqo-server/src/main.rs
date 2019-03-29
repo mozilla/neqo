@@ -1,6 +1,7 @@
 use neqo_common::now;
 use neqo_crypto::init_db;
 use neqo_transport::{Connection, Datagram, State};
+use regex::Regex;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
@@ -67,6 +68,38 @@ impl ToSocketAddrs for Args {
     }
 }
 
+// World's dumbest HTTP 0.9 server. Assumes that the whole request is
+// in a single write.
+// TODO(ekr@rtfm.com): One imagines we could fix this.
+fn http_serve(server: &mut Connection, stream: u64) {
+    println!("Stream ID {}", stream);
+    let mut data = vec![0; 4000];
+    server
+        .stream_recv(stream, &mut data)
+        .expect("Read should succeed");
+    let msg = String::from_utf8(data.clone()).unwrap();
+    let re = Regex::new(r"GET +/(\d*)(\r)?\n").unwrap();
+    let m = re.captures(&msg);
+    if m.is_none() {
+        println!("Invalid HTTP request: {}", msg);
+        return;
+    }
+
+    let mut resp: Vec<u8> = vec![];
+    if m.as_ref().unwrap().get(1).is_some() {
+        let path = m.as_ref().unwrap().get(1).unwrap().as_str().clone();
+        println!("Path = {}", path);
+        let count = u32::from_str_radix(path, 10).unwrap();
+        for _i in 0..count {
+            resp.push(0x58);
+        }
+    } else {
+        resp = "Hello World".as_bytes().to_vec();
+    }
+    // TODO(ekr@rtfm.com): This won't work with flow control blocks.
+    server.stream_send(stream, &resp).expect("Successful write");
+}
+
 // TODO(mt): implement a server that can handle multiple connections.
 fn main() {
     let args = Args::from_args();
@@ -102,14 +135,12 @@ fn main() {
         }
 
         let iter = server.get_recvable_streams();
-        let mut data = vec![0; 4000];
-        for (stream_id, stream) in iter {
-            stream.read(&mut data).expect("Read should succeed");
-            println!(
-                "READ[{}]: {}",
-                stream_id,
-                String::from_utf8(data.clone()).unwrap()
-            );
+        let mut streams = Vec::new();
+        for (stream_id, _stream) in iter {
+            streams.push(stream_id);
+        }
+        for str in streams {
+            http_serve(&mut server, str);
         }
 
         for d in out_dgrams {
