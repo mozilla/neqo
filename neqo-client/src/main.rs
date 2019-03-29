@@ -126,17 +126,27 @@ impl Handler for PostConnectHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
         let iter = client.get_recvable_streams();
         let mut data = vec![0; 4000];
-        for (stream_id, stream) in iter {
+        let mut streams = Vec::new();
+        for (stream_id, _stream) in iter {
             if !self.streams.contains(&stream_id) {
-                println!("Data on invalid stream: {}", stream_id);
+                println!("Data on unexpected stream: {}", stream_id);
                 return false;
             }
-            stream.read(&mut data).expect("Read should succeed");
+            streams.push(stream_id);
+        }
+
+        for stream_id in streams {
+            let (_sz, fin) = client
+                .stream_recv(stream_id, &mut data)
+                .expect("Read should succeed");
             println!(
                 "READ[{}]: {}",
                 stream_id,
                 String::from_utf8(data.clone()).unwrap()
             );
+            if fin {
+                println!("<FIN[{}]>", stream_id);
+            }
         }
         return true;
     }

@@ -98,6 +98,7 @@ fn http_serve(server: &mut Connection, stream: u64) {
     }
     // TODO(ekr@rtfm.com): This won't work with flow control blocks.
     server.stream_send(stream, &resp).expect("Successful write");
+    server.stream_close_send(stream).expect("Stream closed");
 }
 
 fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
