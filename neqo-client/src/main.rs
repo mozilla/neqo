@@ -10,8 +10,6 @@ use structopt::StructOpt;
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-client", about = "A basic QUIC client.")]
 struct Args {
-    host: String,
-    port: u16,
     #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
     db: PathBuf,
 
@@ -27,6 +25,9 @@ struct Args {
     #[structopt(short = "6", long)]
     /// Restrict to IPv6.
     ipv6: bool,
+
+    host: String,
+    port: u16,
 }
 
 impl Args {
@@ -88,7 +89,7 @@ fn process_loop(
             return state;
         }
 
-        let (out_dgrams, _timer) = client.process(in_dgrams.drain(..), now());
+        let (out_dgrams, _timer) = client.process(&[], now());
         emit_packets(&socket, &out_dgrams);
 
         let sz = socket.recv(&mut buf[..]).expect("UDP error");
