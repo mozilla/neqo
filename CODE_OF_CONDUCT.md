@@ -12,7 +12,7 @@ page.
 
 ## Project Specific Etiquette
 
-Please consider the advice in the [Bugzilla ettiquette
+Please consider the advice in the [Bugzilla etiquette
 guide](https://bugzilla.mozilla.org/page.cgi?id=etiquette.html) when
 contributing to this project.
 
