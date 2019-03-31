@@ -89,7 +89,7 @@ fn process_loop(
             return state;
         }
 
-        let (out_dgrams, _timer) = client.process(&[], now());
+        let (out_dgrams, _timer) = client.process(vec![], now());
         emit_packets(&socket, &out_dgrams);
 
         let sz = socket.recv(&mut buf[..]).expect("UDP error");
