@@ -1227,21 +1227,23 @@ impl Connection {
             );
 
             // If this is bidirectional, insert a send stream.
-            let send_initial_max_stream_data = self
-                .tps
-                .borrow()
-                .remote
-                .as_ref()
-                .expect("remote tparams are valid when State::Connected")
-                .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
-            self.send_streams.insert(
-                stream_id,
-                SendStream::new(
+            if stream_id & 0x01 == 0 {
+                let send_initial_max_stream_data = self
+                    .tps
+                    .borrow()
+                    .remote
+                    .as_ref()
+                    .expect("remote tparams are valid when State::Connected")
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+                self.send_streams.insert(
                     stream_id,
-                    send_initial_max_stream_data,
-                    self.flow_mgr.clone(),
-                ),
-            );
+                    SendStream::new(
+                        stream_id,
+                        send_initial_max_stream_data,
+                        self.flow_mgr.clone(),
+                    ),
+                );
+            }
         }
 
         // Finally, let's process some data.
