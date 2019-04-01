@@ -10,3 +10,5 @@ neqo-crypto = { version = "0.1", path = "./../neqo-crypto" }
 neqo-transport = { version = "0.1", path = "./../neqo-transport" }
 neqo-qpack = { version = "0.1", path = "./../neqo-qpack" }
 num-traits = "0.2"
+log = "0.4.0"
+env_logger = "0.6.1"

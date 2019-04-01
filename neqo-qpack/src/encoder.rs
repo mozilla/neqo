@@ -5,6 +5,7 @@ use crate::qpack_helper::read_prefixed_encoded_int_with_recvable;
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
+use log::Level;
 use neqo_transport::{Recvable, Sendable};
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;

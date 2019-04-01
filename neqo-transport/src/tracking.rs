@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use log::Level;
 use neqo_crypto::constants::Epoch;
 use std::cmp::{max, min};
 use std::collections::HashMap;

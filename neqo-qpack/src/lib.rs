@@ -1,7 +1,13 @@
 #![deny(warnings)]
+// For some reason the macro_use around log is causing a failure
+// even though it is used in the crate. TODO(ekr@rtfm.com)
+#![allow(unused_imports)]
 
 #[macro_use]
 extern crate neqo_common;
+
+#[macro_use]
+extern crate log;
 
 pub mod decoder;
 pub mod encoder;
@@ -44,7 +50,7 @@ impl Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
         match self {
             Error::TransportError(e) => Some(e),
             _ => None,

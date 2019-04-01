@@ -3,6 +3,8 @@
 pub mod data;
 pub mod readbuf;
 pub mod varint;
+extern crate env_logger;
+extern crate log;
 use std::time::SystemTime;
 
 // Cribbed from the |matches| crate, for simplicity.
@@ -26,10 +28,9 @@ enum Level {
     Debug,
     Trace,
 }
+
 #[macro_export]
-macro_rules! log { ($lvl:expr, $($arg:tt)+) => (eprintln!($($arg)+)) }
-#[macro_export]
-macro_rules! log_with_ctx { ($lvl:expr, $ctx: expr, $($arg:tt)*) => ( log!($lvl, "[{}] {}", $ctx.label(), format!($($arg)*));) }
+macro_rules! log_with_ctx { ($lvl:expr, $ctx: expr, $($arg:tt)*) => ( { let _x = env_logger::try_init(); log!($lvl, "[{}] {}", $ctx.label(), format!($($arg)*)); } ) }
 #[macro_export]
 macro_rules! qerror {
     ($ctx:ident, $($arg:tt)*) => ( log_with_ctx!(Level::Error, $ctx, $($arg)*););
@@ -65,7 +66,7 @@ pub enum Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
         None
     }
 }

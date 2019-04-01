@@ -1,3 +1,4 @@
+use log::Level;
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;

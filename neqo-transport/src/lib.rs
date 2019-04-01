@@ -3,6 +3,9 @@
 #[macro_use]
 extern crate neqo_common;
 
+#[macro_use]
+extern crate log;
+
 use neqo_crypto;
 
 pub mod connection;
@@ -14,6 +17,7 @@ pub mod recv_stream;
 pub mod send_stream;
 mod tparams;
 mod tracking;
+use log::Level;
 
 pub use self::connection::{Connection, Datagram, State};
 pub use recv_stream::Recvable;
@@ -102,7 +106,7 @@ impl From<neqo_common::Error> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
         match self {
             Error::CryptoError(e) => Some(e),
             Error::IoError(e) => Some(e),

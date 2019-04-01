@@ -2,6 +2,7 @@
 use crate::connection::{Role, QUIC_VERSION};
 use crate::hex;
 use crate::{Error, Res};
+use log::Level;
 use neqo_common::data::*;
 use neqo_common::varint::*;
 use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
@@ -61,7 +62,7 @@ impl TransportParameter {
     fn decode(d: &mut Data) -> Res<(u16, TransportParameter)> {
         let tipe = d.decode_uint(2)? as u16;
         let length = d.decode_uint(2)? as usize;
-        log!(LogLevel::Trace, "TP {:x} length {:x}", tipe, length);
+        log!(Level::Trace, "TP {:x} length {:x}", tipe, length);
         let remaining = d.remaining();
         // TODO(ekr@rtfm.com): Sure would be nice to have a version
         // of Data that returned another data that was a slice on
@@ -163,11 +164,11 @@ impl TransportParameters {
             }
         }
 
-        log!(LogLevel::Trace, "Parsed fixed TP header");
+        log!(Level::Trace, "Parsed fixed TP header");
 
         let l = d.decode_uint(2)?;
         log!(
-            LogLevel::Trace,
+            Level::Trace,
             "Remaining bytes: needed {} remaining {}",
             l,
             d.remaining()
@@ -273,11 +274,7 @@ impl ExtensionHandler for TransportParametersHandler {
             _ => return ExtensionWriterResult::Skip,
         };
 
-        log!(
-            LogLevel::Debug,
-            "Writing transport parameters, msg={:?}",
-            msg
-        );
+        log!(Level::Debug, "Writing transport parameters, msg={:?}", msg);
 
         // TODO(ekr@rtfm.com): Modify to avoid a copy.
         let mut buf = Data::default();
@@ -291,7 +288,7 @@ impl ExtensionHandler for TransportParametersHandler {
 
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
         log!(
-            LogLevel::Debug,
+            Level::Debug,
             "Handling transport parameters, msg={:?} {}",
             msg,
             hex("Value", d),

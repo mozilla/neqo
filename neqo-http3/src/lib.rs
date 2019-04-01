@@ -3,6 +3,9 @@
 #[macro_use]
 extern crate neqo_common;
 
+#[macro_use]
+extern crate log;
+
 pub mod connection;
 pub mod hframe;
 mod recvable;
@@ -117,7 +120,7 @@ impl From<neqo_common::Error> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
         match self {
             Error::TransportError(e) => Some(e),
             Error::QpackError(e) => Some(e),
