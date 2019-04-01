@@ -136,7 +136,6 @@ enum ClientRequestState {
 //  This is used for normal request/responses.
 #[derive(Debug)]
 struct ClientRequest {
-    role: Role,
     state: ClientRequestState,
     stream_id: u64,
     request: Request,
@@ -147,7 +146,6 @@ struct ClientRequest {
 
 impl ClientRequest {
     pub fn new(
-        role: Role,
         stream_id: u64,
         method: &str,
         scheme: &str,
@@ -157,7 +155,6 @@ impl ClientRequest {
     ) -> ClientRequest {
         qdebug!("Create a request stream_id={}", stream_id);
         ClientRequest {
-            role,
             state: ClientRequestState::SendingRequest,
             stream_id,
             request: Request::new(method, scheme, host, path, headers),
@@ -303,15 +300,7 @@ impl ClientRequest {
         _elem_dependency_id: u64,
         _weight: u8,
     ) -> Res<()> {
-        if self.role == Role::Client {
-            Err(Error::UnexpectedFrame)
-        } else if self.priority_received {
-            Err(Error::UnexpectedFrame)
-        } else {
-            self.priority_received = true;
-            //TODO
-            Ok(())
-        }
+        Err(Error::UnexpectedFrame)
     }
 
     fn handle_headers_frame(&mut self, len: u64, s: &mut Recvable) -> Res<()> {
@@ -691,7 +680,7 @@ impl HttpConn {
         let id = self.conn.stream_create(StreamType::BiDi)?;
         self.client_requests.insert(
             id,
-            ClientRequest::new(self.role(), id, method, scheme, host, path, headers),
+            ClientRequest::new(id, method, scheme, host, path, headers),
         );
         Ok(())
     }
