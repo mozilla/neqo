@@ -55,9 +55,8 @@ impl Recvable for Stream {
 
     /// caller has been told data is available on a stream, and they want to
     /// retrieve it.
-    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)> {
-        assert!(buf.len() >= amount as usize);
-        let ret_bytes = std::cmp::min(self.recv_buf.len(), amount as usize);
+    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
+        let ret_bytes = std::cmp::min(buf.len(), self.recv_buf.len());
         let remaining = self.recv_buf.split_off(ret_bytes);
         buf[..ret_bytes].copy_from_slice(&*self.recv_buf);
         self.recv_buf = remaining;
@@ -66,10 +65,6 @@ impl Recvable for Stream {
             fin = true;
         }
         Ok((ret_bytes as u64, fin))
-    }
-
-    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
-        self.read_with_amount(buf, buf.len() as u64)
     }
 
     fn stop_sending(&mut self, err: AppError) {

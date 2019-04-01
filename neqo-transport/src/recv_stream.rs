@@ -15,9 +15,6 @@ pub trait Recvable: Debug {
     /// stream.
     fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)>;
 
-    /// Read with defined amount.
-    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)>;
-
     /// Application is no longer interested in this stream.
     fn stop_sending(&mut self, err: AppError);
 
@@ -215,21 +212,8 @@ impl RxStreamOrderer {
     /// retrieve it.
     /// Returns bytes copied.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
-        self.read_with_amount(buf, buf.len() as u64)
-    }
-
-    pub fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Res<u64> {
-        let orig_len = buf.len();
-        buf.resize(orig_len + self.bytes_ready(), 0);
-        self.read(&mut buf[orig_len..])
-    }
-
-    /// Caller has been told data is available on a stream, and they want to
-    /// retrieve it.
-    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<u64> {
-        assert!(buf.len() >= amount as usize);
-        qtrace!("Reading {} bytes, {} available", amount, self.buffered());
-        let mut buf_remaining = amount as usize;
+        qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
+        let mut buf_remaining = buf.len() as usize;
         let mut copied = 0;
 
         for (&range_start, range_data) in &mut self.data_ranges {
@@ -262,6 +246,12 @@ impl RxStreamOrderer {
         }
 
         Ok(copied as u64)
+    }
+
+    pub fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Res<u64> {
+        let orig_len = buf.len();
+        buf.resize(orig_len + self.bytes_ready(), 0);
+        self.read(&mut buf[orig_len..])
     }
 
     pub fn highest_seen_offset(&self) -> u64 {
@@ -465,21 +455,12 @@ impl Recvable for RecvStream {
     /// caller has been told data is available on a stream, and they want to
     /// retrieve it.
     fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
-        self.read_with_amount(buf, buf.len() as u64)
-    }
-
-    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)> {
-        assert!(buf.len() >= amount as usize);
-
         match &mut self.state {
             RecvStreamState::Recv { recv_buf, .. }
-            | RecvStreamState::SizeKnown { recv_buf, .. } => {
-                Ok((recv_buf.read_with_amount(buf, amount)?, false))
+            | RecvStreamState::SizeKnown { recv_buf, .. } => Ok((recv_buf.read(buf)?, false)),
+            RecvStreamState::DataRecvd { recv_buf, .. } => {
+                Ok((recv_buf.read(buf)?, recv_buf.buffered() == 0))
             }
-            RecvStreamState::DataRecvd { recv_buf, .. } => Ok((
-                recv_buf.read_with_amount(buf, amount)?,
-                recv_buf.buffered() == 0,
-            )),
             RecvStreamState::DataRead { .. }
             | RecvStreamState::ResetRecvd
             | RecvStreamState::ResetRead => Err(Error::NoMoreData),
