@@ -1,13 +1,11 @@
 use env_logger::{Builder, Target};
 
 pub fn init() {
-    let _x = Builder::new()
-        .target(Target::Stdout)
-        .try_init();
+    let _x = Builder::new().target(Target::Stdout).try_init();
 }
 
 #[macro_export]
-macro_rules! qlog { 
+macro_rules! qlog {
     ($lvl:expr, $ctx:expr, $($arg:tt)*) => ( {
         ::neqo_common::log::init();
         ::log::log!($lvl, "[{}] {}", $ctx, format!($($arg)*));

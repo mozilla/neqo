@@ -5,9 +5,9 @@ use crate::hframe::{
 };
 use crate::recvable::RecvableWrapper;
 use neqo_common::data::Data;
-use neqo_common::{qdebug, qlog};
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::decode_varint;
+use neqo_common::{qdebug, qlog};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::connection::Role;
@@ -68,12 +68,7 @@ impl Request {
 
     // TODO(dragana) this will be encoded by QPACK
     pub fn encode_request(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
-        qdebug!(
-            self,
-            "Encoding headers for {}:{}",
-            self.host,
-            self.path
-        );
+        qdebug!(self, "Encoding headers for {}:{}", self.host, self.path);
         let mut encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
         let f = HFrame::Headers {
             len: encoded_headers.len() as u64,
@@ -249,7 +244,12 @@ impl ClientRequest {
                     ref mut offset,
                 } => {
                     let (amount, fin) = s.read(&mut buf[*offset..])?;
-                    qdebug!(label, "state=ReadingHeaders: read {} bytes fin={}.", amount, fin);
+                    qdebug!(
+                        label,
+                        "state=ReadingHeaders: read {} bytes fin={}.",
+                        amount,
+                        fin
+                    );
                     if fin {
                         self.state = ClientRequestState::Closed;
                         break Ok(());
