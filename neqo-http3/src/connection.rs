@@ -44,24 +44,24 @@ struct Request {
 
 impl Request {
     pub fn new(
-        method: &String,
-        scheme: &String,
-        host: &String,
-        path: &String,
+        method: &str,
+        scheme: &str,
+        host: &str,
+        path: &str,
         headers: &Vec<(String, String)>,
     ) -> Request {
         let mut r = Request {
-            method: method.clone(),
-            scheme: scheme.clone(),
-            host: host.clone(),
-            path: path.clone(),
+            method: method.to_owned(),
+            scheme: scheme.to_owned(),
+            host: host.to_owned(),
+            path: path.to_owned(),
             headers: Vec::new(),
             buf: None,
         };
-        r.headers.push((String::from(":method"), method.clone()));
-        r.headers.push((String::from(":scheme"), r.scheme.clone()));
-        r.headers.push((String::from(":authority"), r.host.clone()));
-        r.headers.push((String::from(":path"), r.path.clone()));
+        r.headers.push((":method".into(), method.to_owned()));
+        r.headers.push((":scheme".into(), r.scheme.clone()));
+        r.headers.push((":authority".into(), r.host.clone()));
+        r.headers.push((":path".into(), r.path.clone()));
         r.headers.extend_from_slice(&headers);
         r
     }
@@ -149,10 +149,10 @@ impl ClientRequest {
     pub fn new(
         role: Role,
         stream_id: u64,
-        method: &String,
-        scheme: &String,
-        host: &String,
-        path: &String,
+        method: &str,
+        scheme: &str,
+        host: &str,
+        path: &str,
         headers: &Vec<(String, String)>,
     ) -> ClientRequest {
         qdebug!("Create a request stream_id={}", stream_id);
@@ -682,10 +682,10 @@ impl HttpConn {
 
     pub fn fetch(
         &mut self,
-        method: &String,
-        scheme: &String,
-        host: &String,
-        path: &String,
+        method: &str,
+        scheme: &str,
+        host: &str,
+        path: &str,
         headers: &Vec<(String, String)>,
     ) -> Res<()> {
         let id = self.conn.stream_create(StreamType::BiDi)?;
