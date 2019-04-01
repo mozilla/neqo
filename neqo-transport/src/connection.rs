@@ -227,7 +227,7 @@ struct CryptoDxState {
 
 impl CryptoDxState {
     fn new<S: Into<String>>(label: S, secret: &SymKey, cipher: Cipher) -> CryptoDxState {
-        log!(Level::Error, "Making CryptoDxState, cipher={}", cipher);
+        log!(Level::Info, "Making CryptoDxState, cipher={}", cipher);
         CryptoDxState {
             label: label.into(),
             aead: Aead::new(TLS_VERSION_1_3, cipher, secret, "quic ").unwrap(),

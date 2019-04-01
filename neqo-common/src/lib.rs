@@ -30,7 +30,7 @@ enum Level {
 }
 
 #[macro_export]
-macro_rules! log_with_ctx { ($lvl:expr, $ctx: expr, $($arg:tt)*) => ( { let _x = env_logger::try_init(); log!($lvl, "[{}] {}", $ctx.label(), format!($($arg)*)); } ) }
+macro_rules! log_with_ctx { ($lvl:expr, $ctx: expr, $($arg:tt)*) => ( { ::neqo_common::log_init(); log!($lvl, "[{}] {}", $ctx.label(), format!($($arg)*)); } ) }
 #[macro_export]
 macro_rules! qerror {
     ($ctx:ident, $($arg:tt)*) => ( log_with_ctx!(Level::Error, $ctx, $($arg)*););
@@ -82,4 +82,10 @@ pub fn now() -> u64 {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_nanos() as u64
+}
+
+pub fn log_init() {
+    let _x = env_logger::Builder::new()
+        .target(env_logger::Target::Stdout)
+        .try_init();
 }
