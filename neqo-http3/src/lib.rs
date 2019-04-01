@@ -1,11 +1,5 @@
 #![deny(warnings)]
 
-#[macro_use]
-extern crate neqo_common;
-
-#[macro_use]
-extern crate log;
-
 pub mod connection;
 pub mod hframe;
 mod recvable;

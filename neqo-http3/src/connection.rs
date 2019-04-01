@@ -4,8 +4,8 @@ use crate::hframe::{
     ElementDependencyType, HFrame, HFrameReader, HSettingType, PrioritizedElementType,
 };
 use crate::recvable::RecvableWrapper;
-use log::Level;
 use neqo_common::data::Data;
+use neqo_common::{qdebug, qlog};
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::decode_varint;
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
@@ -68,9 +68,9 @@ impl Request {
 
     // TODO(dragana) this will be encoded by QPACK
     pub fn encode_request(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
-        log!(
-            Level::Debug,
-            "Encoding headers for {}{}",
+        qdebug!(
+            self,
+            "Encoding headers for {}:{}",
             self.host,
             self.path
         );
@@ -82,6 +82,12 @@ impl Request {
         f.encode(&mut d).unwrap();
         d.encode_vec(encoded_headers.as_mut_vec());
         self.buf = Some(d);
+    }
+}
+
+impl ::std::fmt::Display for Request {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Request {} {}", self.method, self.path)
     }
 }
 
@@ -147,18 +153,18 @@ struct ClientRequest {
 impl ClientRequest {
     pub fn new(
         role: Role,
-        id: u64,
+        stream_id: u64,
         method: &String,
         scheme: &String,
         host: &String,
         path: &String,
         headers: &Vec<(String, String)>,
     ) -> ClientRequest {
-        log!(Level::Debug, "Create a request stream_id={}", id);
+        qdebug!("Create a request stream_id={}", stream_id);
         ClientRequest {
-            role: role,
+            role,
             state: ClientRequestState::SendingRequest,
-            stream_id: id,
+            stream_id,
             request: Request::new(method, scheme, host, path, headers),
             response: Response::new(),
             frame_reader: HFrameReader::new(),
@@ -168,27 +174,22 @@ impl ClientRequest {
 
     // TODO: Currently we cannot send data along with a request
     pub fn send(&mut self, s: &mut Sendable, encoder: &mut QPackEncoder) -> Res<()> {
+        let label = match ::log::log_enabled!(::log::Level::Debug) {
+            true => format!("{}", self),
+            _ => String::new(),
+        };
         if self.state == ClientRequestState::SendingRequest {
             if let None = self.request.buf {
                 self.request.encode_request(encoder, self.stream_id);
             }
             if let Some(d) = &mut self.request.buf {
                 let sent = s.send(d.as_mut_vec())?;
-                log!(
-                    Level::Debug,
-                    "Request stream_id={}: {} bytes sent.",
-                    self.stream_id,
-                    sent
-                );
+                qdebug!(label, "{} bytes sent", sent);
                 if sent == d.remaining() {
                     self.request.buf = None;
                     s.close();
                     self.state = ClientRequestState::WaitingForResponseHeaders;
-                    log!(
-                        Level::Debug,
-                        "Request stream_id={}: done sending request.",
-                        self.stream_id
-                    );
+                    qdebug!(label, "done sending request");
                 } else {
                     d.read(sent);
                 }
@@ -205,12 +206,11 @@ impl ClientRequest {
     }
 
     pub fn receive(&mut self, s: &mut Recvable, decoder: &mut QPackDecoder) -> Res<()> {
-        log!(
-            Level::Debug,
-            "Request stream_id={} state={:?}: receiving data.",
-            self.stream_id,
-            self.state
-        );
+        let label = match ::log::log_enabled!(::log::Level::Debug) {
+            true => format!("{}", self),
+            _ => String::new(),
+        };
+        qdebug!(label, "state={:?}: receiving data.", self.state);
         loop {
             match self.state {
                 ClientRequestState::SendingRequest => {
@@ -222,11 +222,7 @@ impl ClientRequest {
                     if !self.frame_reader.done() {
                         break Ok(());
                     }
-                    log!(
-                        Level::Debug,
-                        "Request stream_id={}: received a frame.",
-                        self.stream_id
-                    );
+                    qdebug!("received a frame");
                     match self.frame_reader.get_frame()? {
                         HFrame::Priority {
                             priorized_elem_type,
@@ -253,13 +249,7 @@ impl ClientRequest {
                     ref mut offset,
                 } => {
                     let (amount, fin) = s.read(&mut buf[*offset..])?;
-                    log!(
-                        Level::Debug,
-                        "Request stream_id={} state=ReadingHeaders: read {} bytes fin={}.",
-                        self.stream_id,
-                        amount,
-                        fin
-                    );
+                    qdebug!(label, "state=ReadingHeaders: read {} bytes fin={}.", amount, fin);
                     if fin {
                         self.state = ClientRequestState::Closed;
                         break Ok(());
@@ -271,11 +261,7 @@ impl ClientRequest {
                     // we have read the headers.
                     self.response.headers = decoder.decode_header_block(buf, self.stream_id)?;
                     if let None = self.response.headers {
-                        log!(
-                            Level::Debug,
-                            "Request stream_id={} decoding header is blocked.",
-                            self.stream_id
-                        );
+                        qdebug!(label, "decoding header is blocked.");
                         let mut tmp: Vec<u8> = Vec::new();
                         mem::swap(&mut tmp, buf);
                         self.state = ClientRequestState::BlockedDecodingHeaders { buf: tmp };
@@ -366,6 +352,12 @@ impl ClientRequest {
             panic!("Stream must be in the block state!");
         }
         Ok(())
+    }
+}
+
+impl ::std::fmt::Display for ClientRequest {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "ClientRequest {}", self.stream_id)
     }
 }
 

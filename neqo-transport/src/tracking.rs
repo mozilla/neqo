@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use log::Level;
 use neqo_crypto::constants::Epoch;
 use std::cmp::{max, min};
 use std::collections::HashMap;
@@ -44,10 +43,6 @@ impl RecvdPackets {
             min_not_acked2: pn,
             unacked: false,
         }
-    }
-
-    pub fn label(&self) -> String {
-        return self.label.clone();
     }
 
     pub fn set_received(&mut self, now: u64, pn: u64, non_acks: bool) {
@@ -149,6 +144,12 @@ impl RecvdPackets {
 
         self.unacked = false;
         return ranges;
+    }
+}
+
+impl ::std::fmt::Display for RecvdPackets {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "{}", self.label)
     }
 }
 

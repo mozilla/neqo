@@ -1,4 +1,3 @@
-use log::Level;
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
@@ -125,7 +124,7 @@ impl RangeTracker {
             let sub_len = min(*len, tmp_len);
             let remaining_len = len - sub_len;
             if new_state == RangeState::Sent && *state == RangeState::Acked {
-                qerror!(
+                qwarn!(
                     "Attempted to downgrade overlapping range Acked range {}-{} with Sent {}-{}",
                     off,
                     len,

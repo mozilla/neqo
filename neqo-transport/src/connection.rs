@@ -1366,10 +1366,6 @@ impl Connection {
         v.to_vec()
     }
 
-    pub fn label(&self) -> String {
-        format!("{:?} {:p}", self.rol, self as *const Connection)
-    }
-
     pub fn get_recv_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Recvable)> {
         self.recv_streams
             .iter_mut()
@@ -1414,6 +1410,12 @@ impl Connection {
             );
             // TODO
         }
+    }
+}
+
+impl ::std::fmt::Display for Connection {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "{:?} {:p}", self.rol, self as *const Connection)
     }
 }
 
