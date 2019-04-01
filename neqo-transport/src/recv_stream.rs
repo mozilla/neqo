@@ -476,9 +476,10 @@ impl Recvable for RecvStream {
             | RecvStreamState::SizeKnown { recv_buf, .. } => {
                 Ok((recv_buf.read_with_amount(buf, amount)?, false))
             }
-            RecvStreamState::DataRecvd { recv_buf, .. } => {
-                Ok((recv_buf.read_with_amount(buf, amount)?, true))
-            }
+            RecvStreamState::DataRecvd { recv_buf, .. } => Ok((
+                recv_buf.read_with_amount(buf, amount)?,
+                recv_buf.buffered() == 0,
+            )),
             RecvStreamState::DataRead { .. }
             | RecvStreamState::ResetRecvd
             | RecvStreamState::ResetRead => Err(Error::NoMoreData),
