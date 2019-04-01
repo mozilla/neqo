@@ -1,6 +1,3 @@
-Handle RESET_STREAM and STOP_SENDING // grover
-Track ooo ACK ranges in SendStream // grover
-Track lost ranges in SendStream and queue for resend // grover
 Add stream events to transport API (readable, writable, new, closed) // grover
 Use stream events in h3 // grover or dragana?
 harmonize our rust usage:
