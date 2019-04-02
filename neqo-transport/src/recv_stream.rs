@@ -298,7 +298,7 @@ impl RecvStreamState {
             RecvStreamState::Recv { .. } => "Recv",
             RecvStreamState::SizeKnown { .. } => "SizeKnown",
             RecvStreamState::DataRecvd { .. } => "DataRecvd",
-            RecvStreamState::DataRead { .. } => "DataRead",
+            RecvStreamState::DataRead => "DataRead",
             RecvStreamState::ResetRecvd => "ResetRecvd",
             RecvStreamState::ResetRead => "ResetRead",
         }
@@ -308,8 +308,8 @@ impl RecvStreamState {
         match self {
             RecvStreamState::Recv { recv_buf, .. } => Some(recv_buf),
             RecvStreamState::SizeKnown { recv_buf, .. } => Some(recv_buf),
-            RecvStreamState::DataRecvd { recv_buf, .. } => Some(recv_buf),
-            RecvStreamState::DataRead { .. }
+            RecvStreamState::DataRecvd { recv_buf } => Some(recv_buf),
+            RecvStreamState::DataRead
             | RecvStreamState::ResetRecvd
             | RecvStreamState::ResetRead => None,
         }
@@ -466,7 +466,7 @@ impl Recvable for RecvStream {
                 }
                 Ok((bytes_read, fin_read))
             }
-            RecvStreamState::DataRead { .. }
+            RecvStreamState::DataRead
             | RecvStreamState::ResetRecvd
             | RecvStreamState::ResetRead => Err(Error::NoMoreData),
         }
@@ -478,13 +478,11 @@ impl Recvable for RecvStream {
 
     fn stop_sending(&mut self, err: AppError) {
         match &self.state {
-            RecvStreamState::ResetRecvd | RecvStreamState::ResetRead => {
-                qerror!("stop_sending called when in state {}", self.state.name())
-            }
-            _ => {
+            RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
                 qtrace!("stop_sending called when in state {}", self.state.name());
                 self.flow_mgr.borrow_mut().stop_sending(self.stream_id, err)
             }
+            _ => qtrace!("stop_sending called when in state {}", self.state.name()),
         }
     }
 }
