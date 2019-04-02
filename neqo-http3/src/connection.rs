@@ -214,7 +214,7 @@ impl ClientRequest {
                     if !self.frame_reader.done() {
                         break Ok(());
                     }
-                    qdebug!("received a frame");
+                    qdebug!(label, "received a frame");
                     match self.frame_reader.get_frame()? {
                         HFrame::Priority {
                             priorized_elem_type,
@@ -466,7 +466,7 @@ pub struct HttpConn {
 }
 
 impl HttpConn {
-    pub fn new(c: Connection, max_table_size: u32, nax_blocked_streams: u16) -> HttpConn {
+    pub fn new(c: Connection, max_table_size: u32, max_blocked_streams: u16) -> HttpConn {
         if max_table_size > (1 << 30) - 1 {
             panic!("Wrong max_table_size");
         }
@@ -477,7 +477,7 @@ impl HttpConn {
             control_stream_local: ControlStreamLocal::default(),
             control_stream_remote: ControlStreamRemote::new(),
             qpack_encoder: QPackEncoder::new(true),
-            qpack_decoder: QPackDecoder::new(max_table_size, nax_blocked_streams),
+            qpack_decoder: QPackDecoder::new(max_table_size, max_blocked_streams),
             new_streams: HashMap::new(),
             client_requests: HashMap::new(),
             settings_received: false,
