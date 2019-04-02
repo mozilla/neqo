@@ -458,8 +458,13 @@ impl Recvable for RecvStream {
         match &mut self.state {
             RecvStreamState::Recv { recv_buf, .. }
             | RecvStreamState::SizeKnown { recv_buf, .. } => Ok((recv_buf.read(buf)?, false)),
-            RecvStreamState::DataRecvd { recv_buf, .. } => {
-                Ok((recv_buf.read(buf)?, recv_buf.buffered() == 0))
+            RecvStreamState::DataRecvd { recv_buf } => {
+                let bytes_read = recv_buf.read(buf)?;
+                let fin_read = recv_buf.buffered() == 0;
+                if fin_read {
+                    self.state.transition(RecvStreamState::DataRead)
+                }
+                Ok((bytes_read, fin_read))
             }
             RecvStreamState::DataRead { .. }
             | RecvStreamState::ResetRecvd
@@ -534,7 +539,9 @@ mod tests {
         assert_eq!(s.orderer().unwrap().buffered(), 32);
         assert_eq!(s.data_ready(), true);
         assert_eq!(s.read(&mut buf).unwrap(), (32, true));
-        assert_eq!(s.read(&mut buf).unwrap(), (0, true));
+
+        // Stream now no longer readable (is in DataRead state)
+        s.read(&mut buf).unwrap_err();
     }
 
     #[test]
