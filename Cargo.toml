@@ -9,4 +9,5 @@ members = [
   "neqo-qpack",
   "neqo-server",
   "neqo-transport",
+  "neqo-interop",
 ]
