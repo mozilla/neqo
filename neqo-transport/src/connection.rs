@@ -2,7 +2,7 @@
 use log::Level;
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
@@ -105,6 +105,67 @@ impl DerefMut for Datagram {
 pub enum TxMode {
     Normal,
     Pto,
+}
+
+#[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
+pub enum ConnectionEvent {
+    /// A new recv stream has been opened by the peer and is available for
+    /// reading.
+    NewRecvStream { stream_id: u64 },
+    /// Space available in the buffer for an application write to succeed.
+    SendStreamWritable { stream_id: u64 },
+    /// New bytes available for reading.
+    RecvStreamReadable { stream_id: u64 },
+    /// Peer reset the stream.
+    RecvStreamReset { stream_id: u64, app_error: AppError },
+    /// Peer has acked everything sent on the stream.
+    SendStreamComplete { stream_id: u64 },
+    /// Peer increased MAX_STREAMS
+    SendStreamCreatable { stream_type: StreamType },
+    // TODO(agrover@mozilla.com): Are there more?
+}
+
+#[derive(Debug, Default)]
+pub struct ConnectionEvents {
+    events: BTreeSet<ConnectionEvent>,
+}
+
+impl ConnectionEvents {
+    pub fn new_recv_stream(&mut self, stream_id: u64) {
+        self.events
+            .insert(ConnectionEvent::NewRecvStream { stream_id });
+    }
+
+    pub fn send_stream_writable(&mut self, stream_id: u64) {
+        self.events
+            .insert(ConnectionEvent::SendStreamWritable { stream_id });
+    }
+
+    pub fn recv_stream_readable(&mut self, stream_id: u64) {
+        self.events
+            .insert(ConnectionEvent::RecvStreamReadable { stream_id });
+    }
+
+    pub fn recv_stream_reset(&mut self, stream_id: u64, app_error: AppError) {
+        self.events.insert(ConnectionEvent::RecvStreamReset {
+            stream_id,
+            app_error,
+        });
+    }
+
+    pub fn send_stream_complete(&mut self, stream_id: u64) {
+        self.events
+            .insert(ConnectionEvent::SendStreamComplete { stream_id });
+    }
+
+    pub fn send_stream_creatable(&mut self, stream_type: StreamType) {
+        self.events
+            .insert(ConnectionEvent::SendStreamCreatable { stream_type });
+    }
+
+    fn events(&mut self) -> BTreeSet<ConnectionEvent> {
+        mem::replace(&mut self.events, BTreeSet::new())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -337,6 +398,7 @@ pub struct Connection {
     pmtu: usize,
     flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
+    events: Rc<RefCell<ConnectionEvents>>,
 }
 
 impl Debug for Connection {
@@ -462,6 +524,7 @@ impl Connection {
             pmtu: 1280,
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             loss_recovery: LossRecovery::new(),
+            events: Rc::new(RefCell::new(ConnectionEvents::default())),
         };
 
         c.scid = c.generate_cid();
@@ -1223,7 +1286,12 @@ impl Connection {
 
             self.recv_streams.insert(
                 stream_id,
-                RecvStream::new(stream_id, max_data_if_new_stream, self.flow_mgr.clone()),
+                RecvStream::new(
+                    stream_id,
+                    max_data_if_new_stream,
+                    self.flow_mgr.clone(),
+                    self.events.clone(),
+                ),
             );
 
             // If this is bidirectional, insert a send stream.
@@ -1241,6 +1309,7 @@ impl Connection {
                         stream_id,
                         send_initial_max_stream_data,
                         self.flow_mgr.clone(),
+                        self.events.clone(),
                     ),
                 );
             }
@@ -1285,7 +1354,12 @@ impl Connection {
 
                 self.send_streams.insert(
                     new_id,
-                    SendStream::new(new_id, initial_max_stream_data, self.flow_mgr.clone()),
+                    SendStream::new(
+                        new_id,
+                        initial_max_stream_data,
+                        self.flow_mgr.clone(),
+                        self.events.clone(),
+                    ),
                 );
                 new_id
             }
@@ -1302,7 +1376,12 @@ impl Connection {
 
                 self.send_streams.insert(
                     new_id,
-                    SendStream::new(new_id, send_initial_max_stream_data, self.flow_mgr.clone()),
+                    SendStream::new(
+                        new_id,
+                        send_initial_max_stream_data,
+                        self.flow_mgr.clone(),
+                        self.events.clone(),
+                    ),
                 );
 
                 let recv_initial_max_stream_data = self
@@ -1313,7 +1392,12 @@ impl Connection {
 
                 self.recv_streams.insert(
                     new_id,
-                    RecvStream::new(new_id, recv_initial_max_stream_data, self.flow_mgr.clone()),
+                    RecvStream::new(
+                        new_id,
+                        recv_initial_max_stream_data,
+                        self.flow_mgr.clone(),
+                        self.events.clone(),
+                    ),
                 );
                 new_id
             }
@@ -1388,6 +1472,23 @@ impl Connection {
     pub fn get_sendable_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Sendable)> {
         self.get_send_streams()
             .filter(|(_, stream)| stream.send_data_ready())
+    }
+
+    pub fn get_recv_stream_mut(&mut self, stream_id: u64) -> Option<&mut Recvable> {
+        self.recv_streams
+            .get_mut(&stream_id)
+            .map(|rs| rs as &mut Recvable)
+    }
+
+    pub fn get_send_stream_mut(&mut self, stream_id: u64) -> Option<&mut Sendable> {
+        self.send_streams
+            .get_mut(&stream_id)
+            .map(|rs| rs as &mut Sendable)
+    }
+
+    pub fn events(&mut self) -> Vec<ConnectionEvent> {
+        // Turn it into a vec for simplicity's sake
+        self.events.borrow_mut().events().into_iter().collect()
     }
 
     fn check_loss_detection_timeout(&mut self, cur_time: u64) {

@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
 
-use crate::connection::FlowMgr;
+use crate::connection::{ConnectionEvents, FlowMgr};
 use crate::{AppError, Error, Res};
 
 pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
@@ -333,14 +333,22 @@ pub struct RecvStream {
     stream_id: u64,
     state: RecvStreamState,
     flow_mgr: Rc<RefCell<FlowMgr>>,
+    conn_events: Rc<RefCell<ConnectionEvents>>,
 }
 
 impl RecvStream {
-    pub fn new(stream_id: u64, max_stream_data: u64, flow_mgr: Rc<RefCell<FlowMgr>>) -> RecvStream {
+    pub fn new(
+        stream_id: u64,
+        max_stream_data: u64,
+        flow_mgr: Rc<RefCell<FlowMgr>>,
+        conn_events: Rc<RefCell<ConnectionEvents>>,
+    ) -> RecvStream {
+        conn_events.borrow_mut().new_recv_stream(stream_id);
         RecvStream {
             stream_id,
             state: RecvStreamState::new(max_stream_data),
             flow_mgr,
+            conn_events,
         }
     }
 
@@ -410,11 +418,20 @@ impl RecvStream {
                 qtrace!("data received when we are in state {}", self.state.name())
             }
         }
+
+        if self.data_ready() {
+            self.conn_events
+                .borrow_mut()
+                .recv_stream_readable(self.stream_id)
+        }
+
         Ok(())
     }
 
-    pub fn reset(&mut self, _application_error_code: AppError) {
-        // TODO(agrover@mozilla.com): queue an event to application
+    pub fn reset(&mut self, application_error_code: AppError) {
+        self.conn_events
+            .borrow_mut()
+            .recv_stream_reset(self.stream_id, application_error_code);
         self.state.transition(RecvStreamState::ResetRecvd)
     }
 
@@ -494,8 +511,9 @@ mod tests {
     #[test]
     fn test_stream_rx() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
 
-        let mut s = RecvStream::new(567, 1024, flow_mgr.clone());
+        let mut s = RecvStream::new(567, 1024, flow_mgr.clone(), conn_events.clone());
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, vec![1; 10]).unwrap();
@@ -545,8 +563,9 @@ mod tests {
     #[test]
     fn test_stream_rx_dedupe() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
 
-        let mut s = RecvStream::new(3, 1024, flow_mgr.clone());
+        let mut s = RecvStream::new(3, 1024, flow_mgr.clone(), conn_events.clone());
 
         let mut buf = vec![0u8; 100];
 
@@ -633,10 +652,16 @@ mod tests {
     #[test]
     fn test_stream_flowc_update() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
 
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = RecvStream::new(4, RX_STREAM_DATA_WINDOW, flow_mgr.clone());
+        let mut s = RecvStream::new(
+            4,
+            RX_STREAM_DATA_WINDOW,
+            flow_mgr.clone(),
+            conn_events.clone(),
+        );
 
         let mut buf = vec![0u8; RX_STREAM_DATA_WINDOW as usize * 4]; // Make it overlarge
 
@@ -663,10 +688,16 @@ mod tests {
     #[test]
     fn test_stream_max_stream_data() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
 
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = RecvStream::new(67, RX_STREAM_DATA_WINDOW, flow_mgr.clone());
+        let mut s = RecvStream::new(
+            67,
+            RX_STREAM_DATA_WINDOW,
+            flow_mgr.clone(),
+            conn_events.clone(),
+        );
 
         s.maybe_send_flowc_update();
         assert_eq!(s.flow_mgr.borrow().peek(), None);

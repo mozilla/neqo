@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use slice_deque::SliceDeque;
 
-use crate::connection::{FlowMgr, TxMode};
+use crate::connection::{ConnectionEvents, FlowMgr, TxMode};
 
 use crate::{AppError, Error, Res};
 
@@ -411,15 +411,22 @@ pub struct SendStream {
     state: SendStreamState,
     stream_id: u64,
     flow_mgr: Rc<RefCell<FlowMgr>>,
+    conn_events: Rc<RefCell<ConnectionEvents>>,
 }
 
 impl SendStream {
-    pub fn new(stream_id: u64, max_stream_data: u64, flow_mgr: Rc<RefCell<FlowMgr>>) -> SendStream {
+    pub fn new(
+        stream_id: u64,
+        max_stream_data: u64,
+        flow_mgr: Rc<RefCell<FlowMgr>>,
+        conn_events: Rc<RefCell<ConnectionEvents>>,
+    ) -> SendStream {
         SendStream {
             stream_id,
             max_stream_data,
             state: SendStreamState::Ready,
             flow_mgr,
+            conn_events,
         }
     }
 
@@ -461,9 +468,31 @@ impl SendStream {
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
-        self.state
-            .tx_buf_mut()
-            .map(|buf| buf.mark_as_acked(offset, len));
+        match self.state {
+            SendStreamState::Send { ref mut send_buf } => {
+                send_buf.mark_as_acked(offset, len);
+                if send_buf.buffered() < TX_STREAM_BUFFER {
+                    self.conn_events
+                        .borrow_mut()
+                        .send_stream_writable(self.stream_id)
+                }
+            }
+            SendStreamState::DataSent {
+                ref mut send_buf,
+                final_size,
+            } => {
+                send_buf.mark_as_acked(offset, len);
+                if send_buf.buffered() == 0 {
+                    self.conn_events
+                        .borrow_mut()
+                        .send_stream_complete(self.stream_id);
+                    self.state.transition(SendStreamState::DataRecvd {
+                        final_size: final_size,
+                    });
+                }
+            }
+            _ => qtrace!("mark_as_acked called from state {}", self.state.name()),
+        }
     }
 
     pub fn final_size(&self) -> Option<u64> {
@@ -631,7 +660,9 @@ mod tests {
     #[test]
     fn test_stream_tx() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let mut s = SendStream::new(4, 1024, flow_mgr.clone());
+        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+
+        let mut s = SendStream::new(4, 1024, flow_mgr.clone(), conn_events.clone());
 
         let res = s.send(&vec![4; 100]).unwrap();
         assert_eq!(res, 100);

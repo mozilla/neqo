@@ -1,4 +1,4 @@
-Add stream events to transport API (readable, writable, new, closed) // grover
+Max streams tracking/checking // grover
 Use stream events in h3 // grover or dragana?
 harmonize our rust usage:
  - use foo::* or use foo::{bar, baz} and ordering/grouping
