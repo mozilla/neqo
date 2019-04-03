@@ -55,7 +55,7 @@ fn decode_uint<E>(d: &mut DataBuf<E>, l: usize) -> Result<u64, E> {
         res <<= 8;
         let z = d.decode_byte()? & mask;
         mask = 0xff;
-        res += z as u64;
+        res += u64::from(z);
     }
 
     Ok(res)

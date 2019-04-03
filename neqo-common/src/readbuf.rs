@@ -45,6 +45,12 @@ impl DataBuf<Error> for ReadBuf {
     }
 }
 
+impl Default for ReadBuf {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReadBuf {
     pub fn new() -> ReadBuf {
         ReadBuf {
@@ -61,6 +67,10 @@ impl ReadBuf {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     // We need to propagate fin as well.

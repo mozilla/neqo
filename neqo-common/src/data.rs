@@ -130,7 +130,7 @@ impl Data {
         for _ in 0..l {
             res <<= 8;
             let z = self.decode_byte()?;
-            res += z as u64;
+            res += u64::from(z);
         }
 
         Ok(res)
