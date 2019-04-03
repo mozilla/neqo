@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
 
-use crate::connection::{ConnectionEvents, FlowMgr};
+use crate::connection::{ConnectionEvents, FlowMgr, StreamId};
 use crate::{AppError, Error, Res};
 
 pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
@@ -330,7 +330,7 @@ impl RecvStreamState {
 
 #[derive(Debug)]
 pub struct RecvStream {
-    stream_id: u64,
+    stream_id: StreamId,
     state: RecvStreamState,
     flow_mgr: Rc<RefCell<FlowMgr>>,
     conn_events: Rc<RefCell<ConnectionEvents>>,
@@ -338,7 +338,7 @@ pub struct RecvStream {
 
 impl RecvStream {
     pub fn new(
-        stream_id: u64,
+        stream_id: StreamId,
         max_stream_data: u64,
         flow_mgr: Rc<RefCell<FlowMgr>>,
         conn_events: Rc<RefCell<ConnectionEvents>>,
@@ -513,7 +513,7 @@ mod tests {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
 
-        let mut s = RecvStream::new(567, 1024, flow_mgr.clone(), conn_events.clone());
+        let mut s = RecvStream::new(567.into(), 1024, flow_mgr.clone(), conn_events.clone());
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, vec![1; 10]).unwrap();
@@ -565,7 +565,7 @@ mod tests {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
 
-        let mut s = RecvStream::new(3, 1024, flow_mgr.clone(), conn_events.clone());
+        let mut s = RecvStream::new(3.into(), 1024, flow_mgr.clone(), conn_events.clone());
 
         let mut buf = vec![0u8; 100];
 
@@ -657,7 +657,7 @@ mod tests {
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
         let mut s = RecvStream::new(
-            4,
+            4.into(),
             RX_STREAM_DATA_WINDOW,
             flow_mgr.clone(),
             conn_events.clone(),
@@ -693,7 +693,7 @@ mod tests {
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
         let mut s = RecvStream::new(
-            67,
+            67.into(),
             RX_STREAM_DATA_WINDOW,
             flow_mgr.clone(),
             conn_events.clone(),

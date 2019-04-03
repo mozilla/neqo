@@ -56,6 +56,37 @@ pub enum State {
     Closed(ConnectionError),
 }
 
+#[derive(Debug, PartialEq, Clone, Copy, Eq, PartialOrd, Ord, Hash)]
+pub struct StreamId(u64);
+
+impl StreamId {
+    fn is_bidi(&self) -> bool {
+        self.0 & 0x02 == 0
+    }
+
+    fn is_uni(&self) -> bool {
+        !self.is_bidi()
+    }
+
+    fn is_client_initiated(&self) -> bool {
+        self.0 & 0x01 == 0
+    }
+
+    fn is_server_initiated(&self) -> bool {
+        !self.is_client_initiated()
+    }
+
+    fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for StreamId {
+    fn from(val: u64) -> Self {
+        StreamId(val)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum PNSpace {
     Initial,
@@ -131,31 +162,35 @@ pub struct ConnectionEvents {
 }
 
 impl ConnectionEvents {
-    pub fn new_recv_stream(&mut self, stream_id: u64) {
-        self.events
-            .insert(ConnectionEvent::NewRecvStream { stream_id });
+    pub fn new_recv_stream(&mut self, stream_id: StreamId) {
+        self.events.insert(ConnectionEvent::NewRecvStream {
+            stream_id: stream_id.as_u64(),
+        });
     }
 
-    pub fn send_stream_writable(&mut self, stream_id: u64) {
-        self.events
-            .insert(ConnectionEvent::SendStreamWritable { stream_id });
+    pub fn send_stream_writable(&mut self, stream_id: StreamId) {
+        self.events.insert(ConnectionEvent::SendStreamWritable {
+            stream_id: stream_id.as_u64(),
+        });
     }
 
-    pub fn recv_stream_readable(&mut self, stream_id: u64) {
-        self.events
-            .insert(ConnectionEvent::RecvStreamReadable { stream_id });
+    pub fn recv_stream_readable(&mut self, stream_id: StreamId) {
+        self.events.insert(ConnectionEvent::RecvStreamReadable {
+            stream_id: stream_id.as_u64(),
+        });
     }
 
-    pub fn recv_stream_reset(&mut self, stream_id: u64, app_error: AppError) {
+    pub fn recv_stream_reset(&mut self, stream_id: StreamId, app_error: AppError) {
         self.events.insert(ConnectionEvent::RecvStreamReset {
-            stream_id,
+            stream_id: stream_id.as_u64(),
             app_error,
         });
     }
 
-    pub fn send_stream_complete(&mut self, stream_id: u64) {
-        self.events
-            .insert(ConnectionEvent::SendStreamComplete { stream_id });
+    pub fn send_stream_complete(&mut self, stream_id: StreamId) {
+        self.events.insert(ConnectionEvent::SendStreamComplete {
+            stream_id: stream_id.as_u64(),
+        });
     }
 
     pub fn send_stream_creatable(&mut self, stream_type: StreamType) {
@@ -170,8 +205,8 @@ impl ConnectionEvents {
 
 #[derive(Debug, Default)]
 pub struct FlowMgr {
-    from_send_streams: BTreeMap<u64, Frame>, // key: stream_id
-    from_recv_streams: BTreeMap<u64, Frame>, // key: stream_id
+    from_send_streams: BTreeMap<StreamId, Frame>,
+    from_recv_streams: BTreeMap<StreamId, Frame>,
 }
 
 impl FlowMgr {
@@ -180,9 +215,9 @@ impl FlowMgr {
     }
 
     /// Indicate to receiving peer we need more credits
-    pub fn stream_data_blocked(&mut self, stream_id: u64, stream_data_limit: u64) {
+    pub fn stream_data_blocked(&mut self, stream_id: StreamId, stream_data_limit: u64) {
         let frame = Frame::StreamDataBlocked {
-            stream_id,
+            stream_id: stream_id.as_u64(),
             stream_data_limit,
         };
         self.from_send_streams.insert(stream_id, frame);
@@ -191,12 +226,12 @@ impl FlowMgr {
     /// Indicate to receiving peer the stream is reset
     pub fn stream_reset(
         &mut self,
-        stream_id: u64,
+        stream_id: StreamId,
         application_error_code: AppError,
         final_size: u64,
     ) {
         let frame = Frame::ResetStream {
-            stream_id,
+            stream_id: stream_id.as_u64(),
             application_error_code,
             final_size,
         };
@@ -204,18 +239,18 @@ impl FlowMgr {
     }
 
     /// Indicate to sending peer we are no longer interested in the stream
-    pub fn stop_sending(&mut self, stream_id: u64, application_error_code: AppError) {
+    pub fn stop_sending(&mut self, stream_id: StreamId, application_error_code: AppError) {
         let frame = Frame::StopSending {
-            stream_id,
+            stream_id: stream_id.as_u64(),
             application_error_code,
         };
         self.from_recv_streams.insert(stream_id, frame);
     }
 
     /// Update sending peer with more credits
-    pub fn max_stream_data(&mut self, stream_id: u64, maximum_stream_data: u64) {
+    pub fn max_stream_data(&mut self, stream_id: StreamId, maximum_stream_data: u64) {
         let frame = Frame::MaxStreamData {
-            stream_id,
+            stream_id: stream_id.as_u64(),
             maximum_stream_data,
         };
         self.from_recv_streams.insert(stream_id, frame);
@@ -392,9 +427,9 @@ pub struct Connection {
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
     next_uni_stream_id: u64,
     next_bi_stream_id: u64,
-    send_streams: BTreeMap<u64, SendStream>, // stream id, stream
-    recv_streams: BTreeMap<u64, RecvStream>, // stream id, stream
-    outgoing_pkts: Vec<Packet>,              // (offset, data)
+    send_streams: BTreeMap<StreamId, SendStream>,
+    recv_streams: BTreeMap<StreamId, RecvStream>,
+    outgoing_pkts: Vec<Packet>,
     pmtu: usize,
     flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
@@ -1013,7 +1048,7 @@ impl Connection {
             } => {
                 let stream = self
                     .recv_streams
-                    .get_mut(&stream_id)
+                    .get_mut(&stream_id.into())
                     .ok_or_else(|| return Error::InvalidStreamId)?;
 
                 stream.reset(application_error_code);
@@ -1024,7 +1059,7 @@ impl Connection {
             } => {
                 let stream = self
                     .send_streams
-                    .get_mut(&stream_id)
+                    .get_mut(&stream_id.into())
                     .ok_or_else(|| return Error::InvalidStreamId)?;
 
                 stream.reset(application_error_code);
@@ -1053,14 +1088,14 @@ impl Connection {
                 offset,
                 data,
             } => {
-                self.process_inbound_stream_frame(fin, stream_id, offset, data)?;
+                self.process_inbound_stream_frame(fin, stream_id.into(), offset, data)?;
             }
             Frame::MaxData { maximum_data } => self.max_data = max(self.max_data, maximum_data),
             Frame::MaxStreamData {
                 stream_id,
                 maximum_stream_data,
             } => {
-                if let Some(stream) = self.send_streams.get_mut(&stream_id) {
+                if let Some(stream) = self.send_streams.get_mut(&stream_id.into()) {
                     stream.max_stream_data(maximum_stream_data);
                 }
             }
@@ -1079,7 +1114,7 @@ impl Connection {
                 // TODO(agrover@mozilla.com): how should we be using
                 // currently-unused stream_data_limit?
 
-                if let Some(stream) = self.recv_streams.get_mut(&stream_id) {
+                if let Some(stream) = self.recv_streams.get_mut(&stream_id.into()) {
                     stream.maybe_send_flowc_update();
                 }
             }
@@ -1253,16 +1288,20 @@ impl Connection {
     pub fn process_inbound_stream_frame(
         &mut self,
         fin: bool,
-        stream_id: u64,
+        stream_id: StreamId,
         offset: u64,
         data: Vec<u8>,
     ) -> Res<()> {
         // TODO(agrover@mozilla.com): more checking here
         if !self.recv_streams.contains_key(&stream_id) {
             // Stream doesn't exist.
-            match (stream_id & 0x1, self.rol) {
-                (0, Role::Client) | (1, Role::Server) => {
-                    qwarn!(self, "Peer attempted to create local stream: {}", stream_id);
+            match (stream_id.is_client_initiated(), self.rol) {
+                (true, Role::Client) | (false, Role::Server) => {
+                    qwarn!(
+                        self,
+                        "Peer attempted to create local stream: {}",
+                        stream_id.as_u64()
+                    );
                     return Err(Error::ProtocolViolation);
                 }
                 _ => {}
@@ -1294,8 +1333,7 @@ impl Connection {
                 ),
             );
 
-            // If this is bidirectional, insert a send stream.
-            if stream_id & 0x01 == 0 {
+            if stream_id.is_bidi() {
                 let send_initial_max_stream_data = self
                     .tps
                     .borrow()
@@ -1304,7 +1342,7 @@ impl Connection {
                     .expect("remote tparams are valid when State::Connected")
                     .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
                 self.send_streams.insert(
-                    stream_id,
+                    stream_id.into(),
                     SendStream::new(
                         stream_id,
                         send_initial_max_stream_data,
@@ -1342,7 +1380,7 @@ impl Connection {
 
         Ok(match st {
             StreamType::UniDi => {
-                let new_id = (self.next_uni_stream_id << 2) + 2 + role_val;
+                let new_id = ((self.next_uni_stream_id << 2) + 2 + role_val).into();
                 self.next_uni_stream_id += 1;
                 let initial_max_stream_data = self
                     .tps
@@ -1361,10 +1399,10 @@ impl Connection {
                         self.events.clone(),
                     ),
                 );
-                new_id
+                new_id.as_u64()
             }
             StreamType::BiDi => {
-                let new_id = (self.next_bi_stream_id << 2) + role_val;
+                let new_id = ((self.next_bi_stream_id << 2) + role_val).into();
                 self.next_bi_stream_id += 1;
                 let send_initial_max_stream_data = self
                     .tps
@@ -1399,7 +1437,7 @@ impl Connection {
                         self.events.clone(),
                     ),
                 );
-                new_id
+                new_id.as_u64()
             }
         })
     }
@@ -1410,7 +1448,7 @@ impl Connection {
     pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
         let stream = self
             .send_streams
-            .get_mut(&stream_id)
+            .get_mut(&stream_id.into())
             .ok_or_else(|| return Error::InvalidStreamId)?;
 
         stream.send(data)
@@ -1419,7 +1457,7 @@ impl Connection {
     pub fn stream_recv(&mut self, stream_id: u64, data: &mut [u8]) -> Res<(usize, bool)> {
         let stream = self
             .recv_streams
-            .get_mut(&stream_id)
+            .get_mut(&stream_id.into())
             .ok_or_else(|| return Error::InvalidStreamId)?;
 
         let rb = stream.read(data)?;
@@ -1429,7 +1467,7 @@ impl Connection {
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
         let stream = self
             .send_streams
-            .get_mut(&stream_id)
+            .get_mut(&stream_id.into())
             .ok_or_else(|| return Error::InvalidStreamId)?;
 
         Sendable::close(stream);
@@ -1440,7 +1478,7 @@ impl Connection {
         // TODO(agrover@mozilla.com): reset can create a stream
         let stream = self
             .send_streams
-            .get_mut(&stream_id)
+            .get_mut(&stream_id.into())
             .ok_or_else(|| return Error::InvalidStreamId)?;
 
         Ok(stream.reset(err))
@@ -1455,7 +1493,7 @@ impl Connection {
     pub fn get_recv_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Recvable)> {
         self.recv_streams
             .iter_mut()
-            .map(|(x, y)| (*x, y as &mut Recvable))
+            .map(|(x, y)| (x.as_u64(), y as &mut Recvable))
     }
 
     pub fn get_recvable_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Recvable)> {
@@ -1466,7 +1504,7 @@ impl Connection {
     pub fn get_send_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Sendable)> {
         self.send_streams
             .iter_mut()
-            .map(|(x, y)| (*x, y as &mut Sendable))
+            .map(|(x, y)| (x.as_u64(), y as &mut Sendable))
     }
 
     pub fn get_sendable_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Sendable)> {
@@ -1476,13 +1514,13 @@ impl Connection {
 
     pub fn get_recv_stream_mut(&mut self, stream_id: u64) -> Option<&mut Recvable> {
         self.recv_streams
-            .get_mut(&stream_id)
+            .get_mut(&stream_id.into())
             .map(|rs| rs as &mut Recvable)
     }
 
     pub fn get_send_stream_mut(&mut self, stream_id: u64) -> Option<&mut Sendable> {
         self.send_streams
-            .get_mut(&stream_id)
+            .get_mut(&stream_id.into())
             .map(|rs| rs as &mut Sendable)
     }
 
@@ -1662,9 +1700,9 @@ impl FrameGenerator for CloseGenerator {
 }
 
 /// Calculate the frame header size so we know how much data we can fit
-fn stream_frame_hdr_len(stream_id: u64, offset: u64, remaining: usize) -> usize {
+fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> usize {
     let mut hdr_len = 1; // for frame type
-    hdr_len += get_varint_len(stream_id);
+    hdr_len += get_varint_len(stream_id.as_u64());
     if offset > 0 {
         hdr_len += get_varint_len(offset);
     }
@@ -1694,7 +1732,7 @@ impl FrameGenerator for StreamGenerator {
                 if let Some((offset, data)) = stream.next_bytes(mode) {
                     qtrace!(
                         "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
-                        stream_id,
+                        stream_id.as_u64(),
                         offset,
                         offset + data.len() as u64,
                         epoch,
@@ -1709,7 +1747,7 @@ impl FrameGenerator for StreamGenerator {
                     };
                     let frame = Frame::Stream {
                         fin,
-                        stream_id: *stream_id,
+                        stream_id: stream_id.as_u64(),
                         offset,
                         data: data[..data_len].to_vec(),
                     };
@@ -1730,7 +1768,7 @@ impl FrameGenerator for StreamGenerator {
 }
 
 struct StreamGeneratorToken {
-    id: u64,
+    id: StreamId,
     offset: u64,
     length: u64,
 }
@@ -1740,7 +1778,7 @@ impl FrameGeneratorToken for StreamGeneratorToken {
         qinfo!(
             conn,
             "Lost frame stream={} offset={} length={}",
-            self.id,
+            self.id.as_u64(),
             self.offset,
             self.length
         );
@@ -1756,7 +1794,7 @@ impl FrameGeneratorToken for StreamGeneratorToken {
 
 // Need to know when reset frame was acked
 struct FlowControlGeneratorToken {
-    stream_id: u64,
+    stream_id: StreamId,
     application_error_code: AppError,
     final_size: u64,
 }
@@ -1766,7 +1804,7 @@ impl FrameGeneratorToken for FlowControlGeneratorToken {
         qinfo!(
             conn,
             "Reset received stream={} err={} final_size={}",
-            self.stream_id,
+            self.stream_id.as_u64(),
             self.application_error_code,
             self.final_size
         );
@@ -1809,7 +1847,7 @@ impl FrameGenerator for FlowControlGenerator {
                     } => Some((
                         frame,
                         Some(Box::new(FlowControlGeneratorToken {
-                            stream_id,
+                            stream_id: stream_id.into(),
                             application_error_code,
                             final_size,
                         })),

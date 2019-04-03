@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use slice_deque::SliceDeque;
 
-use crate::connection::{ConnectionEvents, FlowMgr, TxMode};
+use crate::connection::{ConnectionEvents, FlowMgr, StreamId, TxMode};
 
 use crate::{AppError, Error, Res};
 
@@ -409,14 +409,14 @@ impl SendStreamState {
 pub struct SendStream {
     max_stream_data: u64,
     state: SendStreamState,
-    stream_id: u64,
+    stream_id: StreamId,
     flow_mgr: Rc<RefCell<FlowMgr>>,
     conn_events: Rc<RefCell<ConnectionEvents>>,
 }
 
 impl SendStream {
     pub fn new(
-        stream_id: u64,
+        stream_id: StreamId,
         max_stream_data: u64,
         flow_mgr: Rc<RefCell<FlowMgr>>,
         conn_events: Rc<RefCell<ConnectionEvents>>,
@@ -662,7 +662,7 @@ mod tests {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
 
-        let mut s = SendStream::new(4, 1024, flow_mgr.clone(), conn_events.clone());
+        let mut s = SendStream::new(4.into(), 1024, flow_mgr.clone(), conn_events.clone());
 
         let res = s.send(&vec![4; 100]).unwrap();
         assert_eq!(res, 100);
