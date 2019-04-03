@@ -59,7 +59,7 @@ pub enum State {
     Closed(ConnectionError),
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash)]
 pub struct StreamId(u64);
 
 impl StreamId {
@@ -452,7 +452,6 @@ pub struct Connection {
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
     send_streams: BTreeMap<StreamId, SendStream>,
     recv_streams: BTreeMap<StreamId, RecvStream>,
-    outgoing_pkts: Vec<Packet>,
     pmtu: usize,
     flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
@@ -589,7 +588,6 @@ impl Connection {
             connection_ids: HashSet::new(),
             send_streams: BTreeMap::new(),
             recv_streams: BTreeMap::new(),
-            outgoing_pkts: Vec::new(),
             pmtu: 1280,
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             loss_recovery: LossRecovery::new(),
@@ -997,7 +995,6 @@ impl Connection {
         }
     }
 
-    #[allow(dead_code, unused_variables)]
     pub fn close<S: Into<String>>(&mut self, error: AppError, msg: S) {
         // TODO(mt): Set closing timer.
         self.set_state(State::Closing(
@@ -1073,9 +1070,11 @@ impl Connection {
         #[allow(unused_variables)]
         match frame {
             Frame::Padding => {
-                qdebug!(self, "padding!");
+                // Ignore
             }
-            Frame::Ping => {} // TODO(agrover@mozilla.com): generate ack
+            Frame::Ping => {
+                // Ack elicited with no further handling needed
+            }
             Frame::Ack {
                 largest_acknowledged,
                 ack_delay,
