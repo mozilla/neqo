@@ -8,6 +8,7 @@
 use log::Level;
 use std::cell::RefCell;
 use std::cmp::{max, min};
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{self, Debug};
 use std::mem;
@@ -149,9 +150,11 @@ pub enum TxMode {
 
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ConnectionEvent {
-    /// A new recv stream has been opened by the peer and is available for
-    /// reading.
-    NewRecvStream { stream_id: u64 },
+    /// A new uni (read) or bidi stream has been opened by the peer.
+    NewStream {
+        stream_id: u64,
+        stream_type: StreamType,
+    },
     /// Space available in the buffer for an application write to succeed.
     SendStreamWritable { stream_id: u64 },
     /// New bytes available for reading.
@@ -171,9 +174,10 @@ pub struct ConnectionEvents {
 }
 
 impl ConnectionEvents {
-    pub fn new_recv_stream(&mut self, stream_id: StreamId) {
-        self.events.insert(ConnectionEvent::NewRecvStream {
+    pub fn new_stream(&mut self, stream_id: StreamId, stream_type: StreamType) {
+        self.events.insert(ConnectionEvent::NewStream {
             stream_id: stream_id.as_u64(),
+            stream_type,
         });
     }
 
@@ -270,6 +274,14 @@ impl FlowMgr {
         let frame = Frame::StreamsBlocked {
             stream_type,
             stream_limit,
+        };
+        self.from_conn.push_back(frame);
+    }
+
+    pub fn max_streams(&mut self, stream_limit: u64, stream_type: StreamType) {
+        let frame = Frame::MaxStreams {
+            stream_type,
+            maximum_streams: stream_limit,
         };
         self.from_conn.push_back(frame);
     }
@@ -1144,7 +1156,8 @@ impl Connection {
                 offset,
                 data,
             } => {
-                self.process_inbound_stream_frame(fin, stream_id.into(), offset, data)?;
+                self.obtain_stream(stream_id.into())?
+                    .inbound_stream_frame(fin, offset, data)?;
             }
             Frame::MaxData { maximum_data } => self.max_data = max(self.max_data, maximum_data),
             Frame::MaxStreamData {
@@ -1363,32 +1376,24 @@ impl Connection {
             _ => PNSpace::ApplicationData,
         }
     }
-    pub fn process_inbound_stream_frame(
-        &mut self,
-        fin: bool,
-        stream_id: StreamId,
-        offset: u64,
-        data: Vec<u8>,
-    ) -> Res<()> {
-        // TODO(agrover@mozilla.com): more checking here
-        if !self.recv_streams.contains_key(&stream_id) {
-            // Stream doesn't exist.
-            match (stream_id.is_client_initiated(), self.rol) {
-                (true, Role::Client) | (false, Role::Server) => {
-                    qwarn!(
-                        self,
-                        "Peer attempted to create local stream: {}",
-                        stream_id.as_u64()
-                    );
-                    return Err(Error::ProtocolViolation);
+
+    /// Get or make a stream.
+    fn obtain_stream(&mut self, stream_id: StreamId) -> Res<&mut RecvStream> {
+        match self.recv_streams.entry(stream_id) {
+            Entry::Occupied(occ) => Ok(occ.into_mut()),
+            Entry::Vacant(vac) => {
+                match (stream_id.is_client_initiated(), self.rol) {
+                    (true, Role::Client) | (false, Role::Server) => {
+                        qwarn!(
+                            "Peer attempted to create local stream: {}",
+                            stream_id.as_u64()
+                        );
+                        return Err(Error::ProtocolViolation);
+                    }
+                    _ => {}
                 }
-                _ => {}
-            }
 
-            // TODO(ekr@rtfm.com): Check for whether this is too many streams.
-
-            let recv_initial_max_stream_data = match stream_id.is_bidi() {
-                true => {
+                let recv_initial_max_stream_data = if stream_id.is_bidi() {
                     if stream_id.as_u64() >> 2 > self.local_max_streams_bidi {
                         return Err(Error::StreamLimitError);
                     }
@@ -1396,8 +1401,7 @@ impl Connection {
                         .borrow()
                         .local
                         .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
-                }
-                false => {
+                } else {
                     if stream_id.as_u64() >> 2 > self.local_max_streams_uni {
                         return Err(Error::StreamLimitError);
                     }
@@ -1405,53 +1409,48 @@ impl Connection {
                         .borrow()
                         .local
                         .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI)
-                }
-            };
+                };
 
-            self.recv_streams.insert(
-                stream_id,
-                RecvStream::new(
+                let new = vac.insert(RecvStream::new(
                     stream_id,
                     recv_initial_max_stream_data,
                     self.flow_mgr.clone(),
                     self.events.clone(),
-                ),
-            );
+                ));
 
-            if stream_id.is_bidi() {
-                let send_initial_max_stream_data = self
-                    .tps
-                    .borrow()
-                    .remote
-                    .as_ref()
-                    .expect("remote tparams are valid when State::Connected")
-                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
-                self.send_streams.insert(
-                    stream_id.into(),
-                    SendStream::new(
-                        stream_id,
-                        send_initial_max_stream_data,
-                        self.flow_mgr.clone(),
-                        self.events.clone(),
-                    ),
-                );
+                if stream_id.is_bidi() {
+                    let send_initial_max_stream_data = self
+                        .tps
+                        .borrow()
+                        .remote
+                        .as_ref()
+                        .expect("remote tparams are valid when State::Connected")
+                        .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+                    self.send_streams.insert(
+                        stream_id.into(),
+                        SendStream::new(
+                            stream_id,
+                            send_initial_max_stream_data,
+                            self.flow_mgr.clone(),
+                            self.events.clone(),
+                        ),
+                    );
+                    self.events
+                        .borrow_mut()
+                        .new_stream(stream_id, StreamType::BiDi);
+                } else {
+                    self.events
+                        .borrow_mut()
+                        .new_stream(stream_id, StreamType::UniDi);
+                }
+
+                Ok(new)
             }
         }
-
-        // Finally, let's process some data.
-        self.recv_streams
-            .get_mut(&stream_id)
-            .as_mut()
-            .unwrap()
-            .inbound_stream_frame(fin, offset, data)?;
-
-        Ok(())
     }
 
     // Returns new stream id
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
-        // TODO(agrover@mozilla.com): Check against max_stream_id
-
         // Can't make streams before remote tparams are received as part of
         // handshake
         if self.state != State::Connected {

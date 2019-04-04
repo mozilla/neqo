@@ -349,7 +349,6 @@ impl RecvStream {
         flow_mgr: Rc<RefCell<FlowMgr>>,
         conn_events: Rc<RefCell<ConnectionEvents>>,
     ) -> RecvStream {
-        conn_events.borrow_mut().new_recv_stream(stream_id);
         RecvStream {
             stream_id,
             state: RecvStreamState::new(max_stream_data),
