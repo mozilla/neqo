@@ -27,7 +27,7 @@ impl StaticTableEntry {
     }
 }
 
-pub const HEADER_STATIC_TABLE: &'static [StaticTableEntry] = &[
+pub const HEADER_STATIC_TABLE: &[StaticTableEntry] = &[
     StaticTableEntry {
         index: 0,
         name: b":authority",

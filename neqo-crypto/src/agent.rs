@@ -354,12 +354,13 @@ impl SecretAgent {
         let cipher_count = unsafe { ssl::SSL_GetNumImplementedCiphers() } as usize;
         for i in 0..cipher_count {
             let p = all_ciphers.wrapping_add(i);
-            let rv = unsafe { ssl::SSL_CipherPrefSet(self.fd, *p as i32, false as ssl::PRBool) };
+            let rv =
+                unsafe { ssl::SSL_CipherPrefSet(self.fd, i32::from(*p), false as ssl::PRBool) };
             result::result(rv)?;
         }
 
         for c in ciphers {
-            let rv = unsafe { ssl::SSL_CipherPrefSet(self.fd, *c as i32, true as ssl::PRBool) };
+            let rv = unsafe { ssl::SSL_CipherPrefSet(self.fd, i32::from(*c), true as ssl::PRBool) };
             result::result(rv)?;
         }
         Ok(())
@@ -367,10 +368,7 @@ impl SecretAgent {
 
     pub fn set_groups(&mut self, groups: &[Group]) -> Res<()> {
         // SSLNamedGroup is a different size to Group, so copy one by one.
-        let group_vec: Vec<_> = groups
-            .iter()
-            .map(|&g| g as ssl::SSLNamedGroup::Type)
-            .collect();
+        let group_vec: Vec<_> = groups.iter().map(|&g| u32::from(g)).collect();
 
         let ptr = group_vec.as_slice().as_ptr();
         let rv = unsafe { ssl::SSL_NamedGroupConfig(self.fd, ptr, group_vec.len() as c_uint) };
@@ -598,7 +596,7 @@ impl SecretAgent {
         // Feed in any records.
         if let Some(rec) = input {
             let res = emit_record(self.fd, rec);
-            if let Err(_) = res {
+            if res.is_err() {
                 return Err(self.set_failed());
             }
         }

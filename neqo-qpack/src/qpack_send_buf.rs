@@ -33,12 +33,12 @@ impl QPData {
             (1 << (8 - prefix_len)) - 1
         };
 
-        if val < first_byte_max as u64 {
+        if val < u64::from(first_byte_max) {
             self.write_byte((prefix & !first_byte_max) | (val as u8));
             return;
         }
         self.write_byte(prefix | first_byte_max);
-        val -= first_byte_max as u64;
+        val -= u64::from(first_byte_max);
 
         let mut done = false;
         while !done {
@@ -70,12 +70,12 @@ impl QPData {
             (1 << (8 - prefix_len)) - 1
         };
 
-        if val < first_byte_max as u64 {
+        if val < u64::from(first_byte_max) {
             self.buf[offset] = (prefix & !first_byte_max) | (val as u8);
             return 1;
         }
         self.write_byte(prefix | first_byte_max);
-        val -= first_byte_max as u64;
+        val -= u64::from(first_byte_max);
 
         let mut written = 1;
         let mut done = false;

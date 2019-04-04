@@ -61,7 +61,7 @@ impl RecvdPackets {
         self.packets.insert(
             pn,
             PacketMeta {
-                pn: pn,
+                pn,
                 //                non_acks: non_acks,
                 t: now,
                 acked2: false,
@@ -150,7 +150,7 @@ impl RecvdPackets {
         self.min_not_acked2 = new_min_not_acked2;
 
         self.unacked = false;
-        return ranges;
+        ranges
     }
 }
 

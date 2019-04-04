@@ -66,8 +66,7 @@ impl Huffman {
         if from_current > 0 {
             let mask = (1 << from_current) - 1;
             let bits = (self.input_byte >> (self.input_bits_left - from_current)) & mask;
-            self.decoding_byte =
-                self.decoding_byte | (bits << (8 - self.decoding_bits_left - from_current));
+            self.decoding_byte |= bits << (8 - self.decoding_bits_left - from_current);
             self.decoding_bits_left += from_current;
             self.input_bits_left -= from_current;
         }
@@ -75,8 +74,7 @@ impl Huffman {
             // get bits from the next byte.
             self.input_byte = input[*read];
             *read += 1;
-            self.decoding_byte =
-                self.decoding_byte | ((self.input_byte) >> self.decoding_bits_left);
+            self.decoding_byte |= self.input_byte >> self.decoding_bits_left;
             self.input_bits_left = self.decoding_bits_left;
             self.decoding_bits_left = 8;
         }
@@ -111,7 +109,7 @@ impl Huffman {
             return Err(Error::DecompressionFailed);
         }
 
-        if entry.prefix_len > self.decoding_bits_left as u16 {
+        if entry.prefix_len > u16::from(self.decoding_bits_left) {
             assert!(!self.has_more_data(len, *read));
             // This is the last bit and it is padding.
             return Ok(None);
@@ -133,14 +131,14 @@ pub fn encode_huffman(input: &[u8]) -> Vec<u8> {
     for c in input {
         let mut e = HUFFMAN_TABLE[*c as usize];
 
-        // Fill the privious byte
+        // Fill the previous byte
         if e.len < left {
-            saved = saved | ((e.val as u8) << left - e.len);
+            saved |= (e.val as u8) << (left - e.len);
             left -= e.len;
             e.len = 0;
         } else {
             let v: u8 = (e.val >> (e.len - left)) as u8;
-            saved = saved | v;
+            saved |= v;
             output.push(saved);
             e.len -= left;
             left = 8;
@@ -161,7 +159,7 @@ pub fn encode_huffman(input: &[u8]) -> Vec<u8> {
 
     if left < 8 {
         let v: u8 = (1 << left) - 1;
-        saved = saved | v;
+        saved |= v;
         output.push(saved);
     }
 

@@ -15,7 +15,12 @@ use crate::result;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
-include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
+#[allow(clippy::unreadable_literal)]
+mod nss_p11 {
+    include!(concat!(env!("OUT_DIR"), "/nss_p11.rs"));
+}
+
+pub use nss_p11::*;
 
 macro_rules! scoped_ptr {
     ($scoped:ident, $target:ty, $dtor:path) => {

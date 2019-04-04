@@ -464,7 +464,7 @@ impl SendStream {
                 let data = &data[..min(credit_avail as usize, data.len())];
                 qtrace!("next_bytes after flowc: {} {}", offset, data.len());
 
-                if data.len() == 0 {
+                if data.is_empty() {
                     // We had some bytes to send but were blocked by flow
                     // control.
                     assert!(stream_credit_avail == 0 || conn_credit_avail == 0);
@@ -500,9 +500,10 @@ impl SendStream {
     }
 
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
-        self.state
-            .tx_buf_mut()
-            .map(|buf| buf.mark_as_sent(offset, len));
+        if let Some(buf) = self.state.tx_buf_mut() {
+            buf.mark_as_sent(offset, len)
+        };
+
         if fin {
             if let SendStreamState::DataSent {
                 ref mut fin_sent, ..
@@ -533,15 +534,12 @@ impl SendStream {
                 ..
             } => {
                 send_buf.mark_as_acked(offset, len);
-                if fin {
-                    if send_buf.buffered() == 0 {
-                        self.conn_events
-                            .borrow_mut()
-                            .send_stream_complete(self.stream_id);
-                        self.state.transition(SendStreamState::DataRecvd {
-                            final_size: final_size,
-                        });
-                    }
+                if fin && send_buf.buffered() == 0 {
+                    self.conn_events
+                        .borrow_mut()
+                        .send_stream_complete(self.stream_id);
+                    self.state
+                        .transition(SendStreamState::DataRecvd { final_size });
                 }
             }
             _ => qtrace!("mark_as_acked called from state {}", self.state.name()),
@@ -549,9 +547,10 @@ impl SendStream {
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
-        self.state
-            .tx_buf_mut()
-            .map(|buf| buf.mark_as_lost(offset, len));
+        if let Some(buf) = self.state.tx_buf_mut() {
+            buf.mark_as_lost(offset, len)
+        };
+
         if fin {
             if let SendStreamState::DataSent {
                 ref mut fin_sent, ..

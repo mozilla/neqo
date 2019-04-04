@@ -47,7 +47,7 @@ pub enum StreamType {
 }
 
 impl StreamType {
-    fn frame_type_bit(&self) -> u64 {
+    fn frame_type_bit(self) -> u64 {
         match self {
             StreamType::BiDi => 0,
             StreamType::UniDi => 1,
@@ -57,7 +57,7 @@ impl StreamType {
         if (bit & 0x01) == 0 {
             return StreamType::BiDi;
         }
-        return StreamType::UniDi;
+        StreamType::UniDi
     }
 }
 
@@ -68,7 +68,7 @@ pub enum CloseType {
 }
 
 impl CloseType {
-    fn frame_type_bit(&self) -> u64 {
+    fn frame_type_bit(self) -> u64 {
         match self {
             CloseType::Transport => 0,
             CloseType::Application => 1,
@@ -78,7 +78,7 @@ impl CloseType {
         if (bit & 0x01) == 0 {
             return CloseType::Transport;
         }
-        return CloseType::Application;
+        CloseType::Application
     }
 }
 
@@ -186,12 +186,12 @@ impl Frame {
             Frame::Stream { fin, offset, .. } => {
                 let mut t = FRAME_TYPE_STREAM;
                 if *fin {
-                    t = t | STREAM_FRAME_BIT_FIN;
+                    t |= STREAM_FRAME_BIT_FIN;
                 }
                 if *offset > 0 {
-                    t = t | STREAM_FRAME_BIT_OFF;
+                    t |= STREAM_FRAME_BIT_OFF;
                 }
-                t = t | STREAM_FRAME_BIT_LEN;
+                t |= STREAM_FRAME_BIT_LEN;
                 t
             }
             Frame::MaxData { .. } => FRAME_TYPE_MAX_DATA,
@@ -330,8 +330,8 @@ impl Frame {
         }
     }
 
-    pub fn encode_ack_frame(ranges: &Vec<PacketRange>, d: &mut Encoder) {
-        if ranges.len() == 0 {
+    pub fn encode_ack_frame(ranges: &[PacketRange], d: &mut Encoder) {
+        if ranges.is_empty() {
             return;
         }
 
@@ -352,7 +352,7 @@ impl Frame {
             largest_acknowledged: ranges[0].largest,
             ack_delay: 0,
             first_ack_range: ranges[0].length - 1,
-            ack_ranges: ack_ranges,
+            ack_ranges,
         };
 
         f.marshal(d)
@@ -399,9 +399,9 @@ impl Frame {
             acked_ranges.push((cur, cur - r.range));
 
             if cur > r.range + 1 {
-                cur = cur - r.range - 1;
+                cur -= r.range - 1;
             } else {
-                cur = cur - r.range;
+                cur -= r.range;
             }
         }
 
@@ -511,10 +511,11 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
         }
         FRAME_TYPE_STREAM...FRAME_TYPE_STREAM_MAX => {
             let s = dv!(dec);
-            let mut o: u64 = 0;
-            if (t & STREAM_FRAME_BIT_OFF) != 0 {
-                o = dv!(dec);
-            }
+            let o = if t & STREAM_FRAME_BIT_OFF != 0 {
+                dv!(dec)
+            } else {
+                0
+            };
             qdebug!("STREAM {}", t);
             let data = if (t & STREAM_FRAME_BIT_LEN) != 0 {
                 qdebug!("STREAM frame has a length");

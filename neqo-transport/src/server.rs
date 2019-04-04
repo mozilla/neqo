@@ -47,14 +47,14 @@ impl Server {
             if self.token_is_ok(&token) {
                 return Ok(RetryResult::Ok);
             }
-            if token.len() > 0 {
+            if !token.is_empty() {
                 return Err(Error::ProtocolViolation);
             }
         } else {
             return Ok(RetryResult::Ok);
         }
 
-        let mut hdr = PacketHdr::new(
+        let hdr = PacketHdr::new(
             0, // tbyte (unused on encode)
             PacketType::Retry {
                 odcid: hdr.dcid,
@@ -66,12 +66,8 @@ impl Server {
             0, // Packet number
             0, // Epoch
         );
-        let retry = encode_retry(&mut hdr);
-        let dgram = Datagram::new(
-            received.destination().clone(),
-            received.source().clone(),
-            retry,
-        );
+        let retry = encode_retry(&hdr);
+        let dgram = Datagram::new(*received.destination(), *received.source(), retry);
         Ok(RetryResult::SendRetry(dgram))
     }
 }

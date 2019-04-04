@@ -46,7 +46,7 @@ impl RxStreamOrderer {
             return Ok(());
         }
 
-        if new_data.len() == 0 {
+        if new_data.is_empty() {
             // No data to insert
             return Ok(());
         }
@@ -131,27 +131,25 @@ impl RxStreamOrderer {
                 let overlap = new_end.saturating_sub(next_start);
                 if overlap == 0 {
                     break;
+                } else if next_end > new_end {
+                    qtrace!(
+                        "New frame {}-{} overlaps with next frame by {}, truncating",
+                        new_start,
+                        new_end,
+                        overlap
+                    );
+                    let truncate_to = new_data.len() - overlap as usize;
+                    new_data.truncate(truncate_to);
+                    break;
                 } else {
-                    if next_end > new_end {
-                        qtrace!(
-                            "New frame {}-{} overlaps with next frame by {}, truncating",
-                            new_start,
-                            new_end,
-                            overlap
-                        );
-                        let truncate_to = new_data.len() - overlap as usize;
-                        new_data.truncate(truncate_to);
-                        break;
-                    } else {
-                        qtrace!(
-                            "New frame {}-{} spans entire next frame {}-{}, replacing",
-                            new_start,
-                            new_end,
-                            next_start,
-                            next_end
-                        );
-                        to_remove.push(next_start);
-                    }
+                    qtrace!(
+                        "New frame {}-{} spans entire next frame {}-{}, replacing",
+                        new_start,
+                        new_end,
+                        next_start,
+                        next_end
+                    );
+                    to_remove.push(next_start);
                 }
             }
 
@@ -477,7 +475,7 @@ impl RecvStream {
     fn data_ready(&self) -> bool {
         self.state
             .recv_buf()
-            .map(|recv_buf| recv_buf.data_ready())
+            .map(RxStreamOrderer::data_ready)
             .unwrap_or(false)
     }
 

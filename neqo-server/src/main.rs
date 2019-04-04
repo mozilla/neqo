@@ -91,24 +91,25 @@ fn http_serve(server: &mut Connection, stream: u64) {
         println!("Invalid HTTP request: {}", msg);
         return;
     }
+    let m = m.unwrap();
 
     let mut resp: Vec<u8> = vec![];
-    if m.as_ref().unwrap().get(1).is_some() {
-        let path = m.as_ref().unwrap().get(1).unwrap().as_str().clone();
+    if let Some(path) = m.get(1) {
+        let path = path.as_str();
         println!("Path = {}", path);
         let count = u32::from_str_radix(path, 10).unwrap();
         for _i in 0..count {
             resp.push(0x58);
         }
     } else {
-        resp = "Hello World".as_bytes().to_vec();
+        resp = b"Hello World".to_vec();
     }
     // TODO(ekr@rtfm.com): This won't work with flow control blocks.
     server.stream_send(stream, &resp).expect("Successful write");
     server.stream_close_send(stream).expect("Stream closed");
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
+fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
     for d in out_dgrams {
         let sent = socket
             .send_to(&d[..], d.destination())
@@ -121,7 +122,7 @@ fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
 
 fn main() {
     let args = Args::from_args();
-    assert!(args.key.len() > 0, "Need at least one key");
+    assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
 
@@ -164,9 +165,8 @@ fn main() {
         }
         let mut streams = Vec::new();
         for event in server.events() {
-            match event {
-                ConnectionEvent::RecvStreamReadable { stream_id } => streams.push(stream_id),
-                _ => {}
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = event {
+                streams.push(stream_id)
             }
         }
 

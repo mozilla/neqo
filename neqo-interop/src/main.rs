@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::all)]
+
 use neqo_common::now;
 use neqo_crypto::init;
 //use neqo_transport::frame::StreamType;

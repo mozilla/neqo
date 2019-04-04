@@ -327,7 +327,7 @@ unsafe extern "C" fn agent_getsockopt(_fd: PrFd, opt: *mut prio::PRSocketOptionD
     PR_FAILURE
 }
 
-pub const METHODS: &'static prio::PRIOMethods = &prio::PRIOMethods {
+pub const METHODS: &prio::PRIOMethods = &prio::PRIOMethods {
     file_type: prio::PRDescType::PR_DESC_LAYERED,
     close: Some(agent_close),
     read: Some(agent_read),

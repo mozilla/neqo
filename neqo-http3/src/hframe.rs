@@ -217,69 +217,15 @@ impl HFrame {
 
     pub fn is_allowed(&self, s: HStreamType) -> bool {
         match self {
-            HFrame::Data { .. } => {
-                if s == HStreamType::Control {
-                    false
-                } else {
-                    true
-                }
-            }
-            HFrame::Headers { .. } => {
-                if s == HStreamType::Control {
-                    false
-                } else {
-                    true
-                }
-            }
-            HFrame::Priority { .. } => {
-                if s == HStreamType::Push {
-                    false
-                } else {
-                    true
-                }
-            }
-            HFrame::CancelPush { .. } => {
-                if s == HStreamType::Control {
-                    true
-                } else {
-                    false
-                }
-            }
-            HFrame::Settings { .. } => {
-                if s == HStreamType::Control {
-                    true
-                } else {
-                    false
-                }
-            }
-            HFrame::PushPromise { .. } => {
-                if s == HStreamType::Request {
-                    true
-                } else {
-                    false
-                }
-            }
-            HFrame::Goaway { .. } => {
-                if s == HStreamType::Control {
-                    true
-                } else {
-                    false
-                }
-            }
-            HFrame::MaxPushId { .. } => {
-                if s == HStreamType::Control {
-                    true
-                } else {
-                    false
-                }
-            }
-            HFrame::DuplicatePush { .. } => {
-                if s == HStreamType::Request {
-                    true
-                } else {
-                    false
-                }
-            }
+            HFrame::Data { .. } => !(s == HStreamType::Control),
+            HFrame::Headers { .. } => !(s == HStreamType::Control),
+            HFrame::Priority { .. } => !(s == HStreamType::Control),
+            HFrame::CancelPush { .. } => (s == HStreamType::Control),
+            HFrame::Settings { .. } => (s == HStreamType::Control),
+            HFrame::PushPromise { .. } => (s == HStreamType::Request),
+            HFrame::Goaway { .. } => (s == HStreamType::Control),
+            HFrame::MaxPushId { .. } => (s == HStreamType::Control),
+            HFrame::DuplicatePush { .. } => (s == HStreamType::Request),
         }
     }
 }
@@ -305,6 +251,12 @@ pub struct HFrameReader {
     payload: Vec<u8>,
 }
 
+impl Default for HFrameReader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HFrameReader {
     pub fn new() -> HFrameReader {
         HFrameReader {
@@ -326,8 +278,7 @@ impl HFrameReader {
     pub fn receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         loop {
             let to_read = std::cmp::min(self.decoder.min_remaining(), 4096);
-            let mut buf = Vec::with_capacity(to_read);
-            buf.resize(to_read, 0);
+            let mut buf = vec![0; to_read];
             let mut input = match conn.stream_recv(stream_id, &mut buf[..]) {
                 Ok((_, true)) => {
                     break match self.state {
@@ -512,7 +463,7 @@ impl HFrameReader {
                         settings.push((st, v));
                     }
                 }
-                HFrame::Settings { settings: settings }
+                HFrame::Settings { settings }
             }
             H3_FRAME_TYPE_PUSH_PROMISE => {
                 let push_id = match dec.decode_uint(8) {
@@ -563,6 +514,7 @@ mod tests {
         0
     }
 
+    #[allow(clippy::many_single_char_names)]
     fn enc_dec(f: &HFrame, st: &str, remaining: usize) {
         let mut d = Encoder::default();
 

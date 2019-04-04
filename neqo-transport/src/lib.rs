@@ -69,7 +69,7 @@ impl Error {
             Error::TransportParameterError => 8,
             Error::ProtocolViolation => 10,
             Error::InvalidMigration => 12,
-            Error::CryptoAlert(a) => 0x100 + (*a as u16),
+            Error::CryptoAlert(a) => 0x100 + u16::from(*a),
             // TODO(ekr@rtfm.com): Map these errors.
             Error::CryptoError(_)
             | Error::NoMoreData

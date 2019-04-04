@@ -156,7 +156,7 @@ impl IncrementalDecoder {
             IncrementalDecoder::BeforeVarint => {
                 let (v, remaining) = match dv.decode_byte() {
                     Some(b) => (
-                        (b & 0x3f) as u64,
+                        u64::from(b & 0x3f),
                         match b >> 6 {
                             0 => 0,
                             1 => 1,

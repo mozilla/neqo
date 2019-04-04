@@ -11,14 +11,21 @@ mod exp;
 #[macro_use]
 pub mod p11;
 
+#[allow(clippy::all)]
 pub mod aead;
+#[allow(clippy::all)]
 pub mod agent;
+#[allow(clippy::all)]
 mod agentio;
+#[allow(clippy::all)]
 mod cert;
 pub mod constants;
 mod err;
+#[allow(clippy::all)]
 pub mod ext;
+#[allow(clippy::all)]
 pub mod hkdf;
+#[allow(clippy::all)]
 pub mod hp;
 mod prio;
 mod result;
@@ -42,6 +49,7 @@ use std::sync::Once;
 
 mod nss {
     #![allow(non_upper_case_globals)]
+    #![allow(clippy::const_static_lifetime)]
 
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }

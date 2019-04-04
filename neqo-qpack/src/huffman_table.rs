@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(clippy::unreadable_literal)]
+
 #[derive(Debug, Copy, Clone)]
 pub struct HuffmanTableEntry {
     pub len: u8,
@@ -11,7 +13,7 @@ pub struct HuffmanTableEntry {
 }
 
 // Table contains the raw HPACK Huffman table
-pub const HUFFMAN_TABLE: &'static [HuffmanTableEntry] = &[
+pub const HUFFMAN_TABLE: &[HuffmanTableEntry] = &[
     HuffmanTableEntry {
         len: 13,
         val: 0x1ff8,

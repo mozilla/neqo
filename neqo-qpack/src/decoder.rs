@@ -24,6 +24,7 @@ fn to_string(v: &[u8]) -> Res<String> {
     }
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 enum QPackWithRefState {
     GetName { cnt: u8 },
@@ -31,6 +32,7 @@ enum QPackWithRefState {
     GetValue { offset: usize },
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 enum QPackWithoutRefState {
     GetNameLength { len: u64, cnt: u8 },
@@ -89,12 +91,12 @@ impl QPackDecoder {
             table: HeaderTable::new(false),
             increment: 0,
             total_num_of_inserts: 0,
-            max_entries: (max_table_size as f64 / 32.0).floor() as u64,
+            max_entries: (f64::from(max_table_size) / 32.0).floor() as u64,
             send_buf: QPData::default(),
             local_stream_id: None,
             remote_stream_id: None,
-            max_table_size: max_table_size,
-            max_blocked_streams: max_blocked_streams,
+            max_table_size,
+            max_blocked_streams,
             blocked_streams: Vec::new(),
         }
     }
@@ -118,13 +120,15 @@ impl QPackDecoder {
         let r = self
             .blocked_streams
             .iter()
-            .filter(|(_, req)| req <= &base)
+            .filter(|(_, req)| *req <= base)
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
-        self.blocked_streams.retain(|(_, req)| req > &base);
+        self.blocked_streams.retain(|(_, req)| *req > base);
         Ok(r)
     }
 
+    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::useless_let_if_seq)]
     fn read_instructions(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
         let label = self.to_string();
         qdebug!([self] "reading instructions");
@@ -161,7 +165,7 @@ impl QPackDecoder {
                             state: if name_done {
                                 QPackWithRefState::GetValueLength { len: 0, cnt: 0 }
                             } else {
-                                QPackWithRefState::GetName { cnt: cnt }
+                                QPackWithRefState::GetName { cnt }
                             },
                         };
                         if !name_done {
@@ -188,7 +192,7 @@ impl QPackDecoder {
                             state: if name_done {
                                 QPackWithoutRefState::GetName { offset: 0 }
                             } else {
-                                QPackWithoutRefState::GetNameLength { len: v, cnt: cnt }
+                                QPackWithoutRefState::GetNameLength { len: v, cnt }
                             },
                         };
                         if !name_done {
@@ -209,7 +213,7 @@ impl QPackDecoder {
                             self.increment += 1;
                             self.state = QPackDecoderState::ReadInstruction;
                         } else {
-                            self.state = QPackDecoderState::Duplicate { index: v, cnt: cnt };
+                            self.state = QPackDecoderState::Duplicate { index: v, cnt };
                             // wait for more data
                             break Ok(());
                         }
@@ -224,10 +228,7 @@ impl QPackDecoder {
                             self.set_capacity(v)?;
                             self.state = QPackDecoderState::ReadInstruction;
                         } else {
-                            self.state = QPackDecoderState::Capacity {
-                                capacity: v,
-                                cnt: cnt,
-                            };
+                            self.state = QPackDecoderState::Capacity { capacity: v, cnt };
                             // wait for more data
                             break Ok(());
                         }
@@ -280,7 +281,7 @@ impl QPackDecoder {
                                 cnt,
                                 prefix_len,
                                 b[0],
-                                if prefix_len > 0 { true } else { false },
+                                prefix_len > 0,
                             )?;
                             if !done {
                                 // waiting for more data
@@ -393,7 +394,7 @@ impl QPackDecoder {
                                 cnt,
                                 prefix_len,
                                 b[0],
-                                if prefix_len > 0 { true } else { false },
+                                prefix_len > 0,
                             )?;
                             if !done {
                                 // waiting for more data
@@ -479,7 +480,7 @@ impl QPackDecoder {
 
     pub fn set_capacity(&mut self, cap: u64) -> Res<()> {
         qdebug!([self] "received instruction capacity cap={}", cap);
-        if cap > self.max_table_size as u64 {
+        if cap > u64::from(self.max_table_size) {
             return Err(Error::EncoderStreamError);
         }
         self.table.set_capacity(cap);
@@ -505,19 +506,17 @@ impl QPackDecoder {
         }
         if self.send_buf.len() == 0 {
             Ok(())
-        } else {
-            if let Some(stream_id) = self.local_stream_id {
-                match conn.stream_send(stream_id, &self.send_buf[..]) {
-                    Err(_) => Err(Error::DecoderStreamError),
-                    Ok(r) => {
-                        qdebug!([self] "{} bytes sent.", r);
-                        self.send_buf.read(r as usize);
-                        Ok(())
-                    }
+        } else if let Some(stream_id) = self.local_stream_id {
+            match conn.stream_send(stream_id, &self.send_buf[..]) {
+                Err(_) => Err(Error::DecoderStreamError),
+                Ok(r) => {
+                    qdebug!([self] "{} bytes sent.", r);
+                    self.send_buf.read(r as usize);
+                    Ok(())
                 }
-            } else {
-                Ok(())
             }
+        } else {
+            Ok(())
         }
     }
 
@@ -528,10 +527,7 @@ impl QPackDecoder {
         stream_id: u64,
     ) -> Res<Option<Vec<(String, String)>>> {
         qdebug!([self] "decode header block.");
-        let mut reader = BufWrapper {
-            buf: buf,
-            offset: 0,
-        };
+        let mut reader = BufWrapper { buf, offset: 0 };
 
         let (req_inserts, base) = self.read_base(&mut reader)?;
         qdebug!(
@@ -586,15 +582,14 @@ impl QPackDecoder {
 
         let s = buf.peek()? & 0x80 != 0;
         let base_delta = read_prefixed_encoded_int_slice(buf, 1)?;
-        let base: u64;
-        if !s {
-            base = req_insert_cnt + base_delta;
+        let base = if !s {
+            req_insert_cnt + base_delta
         } else {
             if req_insert_cnt <= base_delta {
                 return Err(Error::DecompressionFailed);
             }
-            base = req_insert_cnt - base_delta - 1;
-        }
+            req_insert_cnt - base_delta - 1
+        };
         Ok((req_insert_cnt, base))
     }
 
@@ -607,12 +602,10 @@ impl QPackDecoder {
                 Ok(entry) => Ok((to_string(entry.name())?, to_string(entry.value())?)),
                 Err(_) => Err(Error::DecompressionFailed),
             }
+        } else if let Ok(entry) = self.table.get_dynamic(index, base, false) {
+            Ok((to_string(entry.name())?, to_string(entry.value())?))
         } else {
-            if let Ok(entry) = self.table.get_dynamic(index, base, false) {
-                Ok((to_string(entry.name())?, to_string(entry.value())?))
-            } else {
-                Err(Error::DecompressionFailed)
-            }
+            Err(Error::DecompressionFailed)
         }
     }
 
@@ -639,23 +632,20 @@ impl QPackDecoder {
             } else {
                 return Err(Error::DecompressionFailed);
             }
+        } else if let Ok(entry) = self.table.get_dynamic(index, base, false) {
+            name = entry.name().to_vec();
         } else {
-            if let Ok(entry) = self.table.get_dynamic(index, base, false) {
-                name = entry.name().to_vec();
-            } else {
-                return Err(Error::DecompressionFailed);
-            }
+            return Err(Error::DecompressionFailed);
         }
 
         let value_is_huffman = buf.peek()? & 0x80 != 0;
         let value_len = read_prefixed_encoded_int_slice(buf, 1)? as usize;
 
-        let mut value: Vec<u8> = Vec::new();
-        if value_is_huffman {
-            value = Huffman::default().decode(buf.slice(value_len)?)?;
+        let value = if value_is_huffman {
+            Huffman::default().decode(buf.slice(value_len)?)?
         } else {
-            value.extend_from_slice(buf.slice(value_len)?);
-        }
+            buf.slice(value_len)?.to_vec()
+        };
         qdebug!(
             [self]
             "name index={} static={} value={:x?}.",
@@ -684,12 +674,11 @@ impl QPackDecoder {
         let value_is_huffman = buf.peek()? & 0x80 != 0;
         let value_len = read_prefixed_encoded_int_slice(buf, 1)? as usize;
 
-        let mut value: Vec<u8> = Vec::new();
-        if value_is_huffman {
-            value = Huffman::default().decode(buf.slice(value_len)?)?;
+        let value = if value_is_huffman {
+            Huffman::default().decode(buf.slice(value_len)?)?
         } else {
-            value.extend_from_slice(buf.slice(value_len)?);
-        }
+            buf.slice(value_len)?.to_vec()
+        };
 
         qdebug!([self] "name={:x?} value={:x?}.", name, value);
         Ok((to_string(&name)?, to_string(&value)?))
@@ -702,22 +691,20 @@ impl QPackDecoder {
         let name_is_huffman = buf.peek()? & 0x08 != 0;
         let name_len = read_prefixed_encoded_int_slice(buf, 5)? as usize;
 
-        let mut name: Vec<u8> = Vec::new();
-        if name_is_huffman {
-            name = Huffman::default().decode(buf.slice(name_len)?)?;
+        let name = if name_is_huffman {
+            Huffman::default().decode(buf.slice(name_len)?)?
         } else {
-            name.extend_from_slice(buf.slice(name_len)?);
-        }
+            buf.slice(name_len)?.to_vec()
+        };
 
         let value_is_huffman = buf.peek()? & 0x80 != 0;
         let value_len = read_prefixed_encoded_int_slice(buf, 1)? as usize;
 
-        let mut value: Vec<u8> = Vec::new();
-        if value_is_huffman {
-            value = Huffman::default().decode(buf.slice(value_len)?)?;
+        let value = if value_is_huffman {
+            Huffman::default().decode(buf.slice(value_len)?)?
         } else {
-            value.extend_from_slice(buf.slice(value_len)?);
-        }
+            buf.slice(value_len)?.to_vec()
+        };
 
         qdebug!([self] "name={:x?} value={:x?}.", name, value);
         Ok((to_string(&name)?, to_string(&value)?))
@@ -755,7 +742,7 @@ impl QPackDecoder {
     }
 
     pub fn add_send_stream(&mut self, stream_id: u64) {
-        if let Some(_) = self.local_stream_id {
+        if self.local_stream_id.is_some() {
             panic!("Adding multiple local streams");
         }
         self.local_stream_id = Some(stream_id);
@@ -764,7 +751,7 @@ impl QPackDecoder {
     }
 
     pub fn add_recv_stream(&mut self, stream_id: u64) {
-        if let Some(_) = self.remote_stream_id {
+        if self.remote_stream_id.is_some() {
             panic!("Adding multiple remote streams");
         }
         self.remote_stream_id = Some(stream_id);

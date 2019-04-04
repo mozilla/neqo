@@ -61,7 +61,7 @@ impl QPackEncoder {
             remote_stream_id: None,
             max_blocked_streams: 0,
             blocked_streams: Vec::new(),
-            use_huffman: use_huffman,
+            use_huffman,
         }
     }
 
@@ -177,7 +177,7 @@ impl QPackEncoder {
                 DecoderInstructions::InsertCountIncrement => {
                     self.table.increment_acked(self.instruction_reader_value);
                     let inserts = self.table.get_acked_inserts_cnt();
-                    self.blocked_streams.retain(|req| req <= &inserts);
+                    self.blocked_streams.retain(|req| *req <= inserts);
                 }
                 DecoderInstructions::HeaderAck => {
                     self.table.header_ack(self.instruction_reader_value)
@@ -250,25 +250,23 @@ impl QPackEncoder {
     }
 
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
-        if self.send_buf.len() == 0 {
+        if self.send_buf.is_empty() {
             Ok(())
-        } else {
-            if let Some(stream_id) = self.local_stream_id {
-                match conn.stream_send(stream_id, &self.send_buf[..]) {
-                    Err(_) => Err(Error::EncoderStreamError),
-                    Ok(r) => {
-                        qdebug!([self] "{} bytes sent.", r);
-                        self.send_buf.read(r as usize);
-                        Ok(())
-                    }
+        } else if let Some(stream_id) = self.local_stream_id {
+            match conn.stream_send(stream_id, &self.send_buf[..]) {
+                Err(_) => Err(Error::EncoderStreamError),
+                Ok(r) => {
+                    qdebug!([self] "{} bytes sent.", r);
+                    self.send_buf.read(r as usize);
+                    Ok(())
                 }
-            } else {
-                Ok(())
             }
+        } else {
+            Ok(())
         }
     }
 
-    pub fn encode_header_block(&mut self, h: &Vec<(String, String)>, stream_id: u64) -> QPData {
+    pub fn encode_header_block(&mut self, h: &[(String, String)], stream_id: u64) -> QPData {
         qdebug!([self] "encoding headers.");
         let mut encoded_h = QPData::default();
         let base = self.table.base();
@@ -391,10 +389,11 @@ impl QPackEncoder {
             delta,
             fix
         );
-        let mut enc_insert_cnt = 0;
-        if req_insert_cnt != 0 {
-            enc_insert_cnt = (req_insert_cnt % (2 * self.max_entries)) + 1;
-        }
+        let enc_insert_cnt = if req_insert_cnt != 0 {
+            (req_insert_cnt % (2 * self.max_entries)) + 1
+        } else {
+            0
+        };
 
         let mut offset = 0; // this is for fixing header_block only.
         if !fix {
@@ -486,7 +485,7 @@ impl QPackEncoder {
     }
 
     pub fn add_send_stream(&mut self, stream_id: u64) {
-        if let Some(_) = self.local_stream_id {
+        if self.local_stream_id.is_some() {
             panic!("Adding multiple local streams");
         }
         self.local_stream_id = Some(stream_id);
@@ -495,7 +494,7 @@ impl QPackEncoder {
     }
 
     pub fn add_recv_stream(&mut self, stream_id: u64) {
-        if let Some(_) = self.remote_stream_id {
+        if self.remote_stream_id.is_some() {
             panic!("Adding multiple remote streams");
         }
         self.remote_stream_id = Some(stream_id);

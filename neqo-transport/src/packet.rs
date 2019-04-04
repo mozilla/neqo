@@ -62,8 +62,7 @@ pub struct ConnectionId(pub Vec<u8>);
 impl ConnectionId {
     pub fn generate(len: usize) -> ConnectionId {
         assert!(matches!(len, 4...18));
-        let mut v = Vec::with_capacity(len);
-        v.resize(len, 0);
+        let mut v = vec![0; len];
         rand::thread_rng().fill(&mut v[..]);
         ConnectionId(v)
     }
@@ -366,7 +365,7 @@ pub fn decrypt_packet(
     for i in 0..pn_len {
         hdrbytes[hdr.hdr_len + i] ^= mask[1 + i];
         pn_encoded <<= 8;
-        pn_encoded += hdrbytes[hdr.hdr_len + i] as u64;
+        pn_encoded += u64::from(hdrbytes[hdr.hdr_len + i]);
     }
     qtrace!("unmasked hdr={}", hex(&hdrbytes));
     hdr.hdr_len += pn_len;
@@ -457,7 +456,7 @@ fn encrypt_packet(crypto: &CryptoCtx, hdr: &PacketHdr, mut enc: Encoder, body: &
 
 // TODO(ekr@rtfm.com): Minimal packet number lengths.
 fn pn_length(_pn: PacketNumber) -> usize {
-    return 3;
+    3
 }
 
 pub fn encode_retry(hdr: &PacketHdr) -> Vec<u8> {

@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::aead::Aead;
+use neqo_crypto::agent::SecretAgentInfo;
 use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
 
@@ -39,7 +40,7 @@ use crate::{AppError, ConnectionError, Error, Res};
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
 
-pub const QUIC_VERSION: u32 = 0xff000014;
+pub const QUIC_VERSION: u32 = 0xff00_0014;
 const NUM_EPOCHS: Epoch = 4;
 const MAX_AUTH_TAG: usize = 32;
 const CID_LENGTH: usize = 8;
@@ -85,15 +86,15 @@ pub enum State {
 pub struct StreamId(u64);
 
 impl StreamId {
-    fn is_bidi(&self) -> bool {
+    fn is_bidi(self) -> bool {
         self.0 & 0x02 == 0
     }
 
-    fn is_uni(&self) -> bool {
+    fn is_uni(self) -> bool {
         !self.is_bidi()
     }
 
-    fn stream_type(&self) -> StreamType {
+    fn stream_type(self) -> StreamType {
         if self.is_bidi() {
             StreamType::BiDi
         } else {
@@ -101,15 +102,15 @@ impl StreamId {
         }
     }
 
-    fn is_client_initiated(&self) -> bool {
+    fn is_client_initiated(self) -> bool {
         self.0 & 0x01 == 0
     }
 
-    fn is_server_initiated(&self) -> bool {
+    fn is_server_initiated(self) -> bool {
         !self.is_client_initiated()
     }
 
-    fn role(&self) -> Role {
+    fn role(self) -> Role {
         if self.is_client_initiated() {
             Role::Client
         } else {
@@ -117,7 +118,7 @@ impl StreamId {
         }
     }
 
-    fn is_self_initiated(&self, my_role: Role) -> bool {
+    fn is_self_initiated(self, my_role: Role) -> bool {
         match my_role {
             Role::Client if self.is_client_initiated() => true,
             Role::Server if self.is_server_initiated() => true,
@@ -125,19 +126,19 @@ impl StreamId {
         }
     }
 
-    fn is_peer_initiated(&self, my_role: Role) -> bool {
+    fn is_peer_initiated(self, my_role: Role) -> bool {
         !self.is_self_initiated(my_role)
     }
 
-    fn is_send_only(&self, my_role: Role) -> bool {
+    fn is_send_only(self, my_role: Role) -> bool {
         self.is_uni() && self.is_self_initiated(my_role)
     }
 
-    fn is_recv_only(&self, my_role: Role) -> bool {
+    fn is_recv_only(self, my_role: Role) -> bool {
         self.is_uni() && self.is_peer_initiated(my_role)
     }
 
-    fn as_u64(&self) -> u64 {
+    fn as_u64(self) -> u64 {
         self.0
     }
 }
@@ -156,7 +157,7 @@ impl StreamIndex {
         StreamIndex(val)
     }
 
-    pub fn to_stream_id(&self, stream_type: StreamType, role: Role) -> StreamId {
+    pub fn to_stream_id(self, stream_type: StreamType, role: Role) -> StreamId {
         let type_val = match stream_type {
             StreamType::BiDi => 0,
             StreamType::UniDi => 2,
@@ -169,7 +170,7 @@ impl StreamIndex {
         StreamId::from((self.0 << 2) + type_val + role_val)
     }
 
-    pub fn as_u64(&self) -> u64 {
+    pub fn as_u64(self) -> u64 {
         self.0
     }
 }
@@ -464,8 +465,31 @@ impl FlowMgr {
             .insert((stream_type, mem::discriminant(&frame)), frame);
     }
 
+    pub fn peek(&self) -> Option<&Frame> {
+        if let Some(key) = self.from_conn.keys().next() {
+            self.from_conn.get(key)
+        } else if let Some(key) = self.from_streams.keys().next() {
+            self.from_streams.get(key)
+        } else if let Some(key) = self.from_stream_types.keys().next() {
+            self.from_stream_types.get(key)
+        } else {
+            None
+        }
+    }
+
+    fn need_close_frame(&self) -> bool {
+        self.need_close_frame
+    }
+
+    fn set_need_close_frame(&mut self, new: bool) {
+        self.need_close_frame = new
+    }
+}
+
+impl Iterator for FlowMgr {
+    type Item = Frame;
     /// Used by generator to get a flow control frame.
-    pub fn next(&mut self) -> Option<Frame> {
+    fn next(&mut self) -> Option<Frame> {
         let first_key = self.from_conn.keys().next();
         if let Some(&first_key) = first_key {
             return self.from_conn.remove(&first_key);
@@ -482,30 +506,6 @@ impl FlowMgr {
         }
 
         None
-    }
-
-    pub fn peek(&self) -> Option<&Frame> {
-        if let Some(key) = self.from_conn.keys().next() {
-            self.from_conn.get(key)
-        } else {
-            if let Some(key) = self.from_streams.keys().next() {
-                self.from_streams.get(key)
-            } else {
-                if let Some(key) = self.from_stream_types.keys().next() {
-                    self.from_stream_types.get(key)
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    fn need_close_frame(&self) -> bool {
-        self.need_close_frame
-    }
-
-    fn set_need_close_frame(&mut self, new: bool) {
-        self.need_close_frame = new
     }
 }
 
@@ -865,7 +865,7 @@ impl Connection {
     fn capture_error<T>(&mut self, cur_time: u64, frame_type: FrameType, res: Res<T>) -> Res<T> {
         if let Err(v) = &res {
             #[cfg(debug_assertions)]
-            let msg = String::from(format!("{:?}", v));
+            let msg = format!("{:?}", v);
             #[cfg(not(debug_assertions))]
             let msg = String::from("");
             self.set_state(State::Closing {
@@ -899,14 +899,9 @@ impl Connection {
 
         if cur_time >= self.deadline {
             // Timer expired.
-            match self.state {
-                State::Init => {
-                    let res = self.client_start();
-                    self.absorb_error(cur_time, res);
-                }
-                _ => {
-                    // Nothing to do.
-                }
+            if let State::Init = self.state {
+                let res = self.client_start();
+                self.absorb_error(cur_time, res);
             }
         }
     }
@@ -973,7 +968,7 @@ impl Connection {
                         qwarn!("received Retry, but not for us, dropping it");
                         return Ok(());
                     }
-                    if token.len() == 0 {
+                    if token.is_empty() {
                         qwarn!("received Retry, but no token, dropping it");
                         return Ok(());
                     }
@@ -1128,8 +1123,8 @@ impl Connection {
 
     fn output_vn(&mut self, scid: ConnectionId) -> Datagram {
         qinfo!("Sending VN Packet instead of normal output");
-        let supported_versions = vec![QUIC_VERSION, 0x4a4a4a4a];
-        let mut hdr = PacketHdr::new(
+        let supported_versions = vec![QUIC_VERSION, 0x4a4a_4a4a];
+        let hdr = PacketHdr::new(
             0,
             PacketType::VN(supported_versions),
             Some(0),
@@ -1139,7 +1134,7 @@ impl Connection {
             0, // unused
         );
         let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
-        let packet = encode_packet(&cs.tx, &mut hdr, &[]);
+        let packet = encode_packet(&cs.tx, &hdr, &[]);
         if let Some(path) = &self.paths {
             Datagram::new(path.local, path.remote, packet)
         } else {
@@ -1168,7 +1163,7 @@ impl Connection {
             State::Closing { .. } => true,
             _ => false,
         };
-        if !closing && errors.len() > 0 {
+        if !closing && !errors.is_empty() {
             self.absorb_error(cur_time, Err(errors.pop().unwrap()));
             // We just closed, so run this again to produce CONNECTION_CLOSE.
             self.output(cur_time)
@@ -1250,7 +1245,7 @@ impl Connection {
                 qdebug!([self] "Need to send a packet");
 
                 initial_only = epoch == 0;
-                let mut hdr = PacketHdr::new(
+                let hdr = PacketHdr::new(
                     0,
                     match epoch {
                         0 => {
@@ -1284,7 +1279,7 @@ impl Connection {
 
                 // Failure to have the state here is an internal error.
                 let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
-                let packet = encode_packet(&cs.tx, &mut hdr, &encoded);
+                let packet = encode_packet(&cs.tx, &hdr, &encoded);
                 dump_packet(self, "tx", &hdr, &encoded);
                 out_packets.push(packet);
             }
@@ -1317,7 +1312,7 @@ impl Connection {
             .iter()
             .for_each(|dgram| qdebug!([self] "Datagram length: {}", dgram.len()));
 
-        return Ok(out_dgrams);
+        Ok(out_dgrams)
     }
 
     fn client_start(&mut self) -> Res<()> {
@@ -1384,7 +1379,7 @@ impl Connection {
         if self.tls.state().connected() {
             qinfo!([self] "TLS handshake completed");
 
-            if self.tls.info().map(|i| i.alpn()).is_none() {
+            if self.tls.info().map(SecretAgentInfo::alpn).is_none() {
                 // 120 = no_application_protocol
                 let err = Error::CryptoAlert(120);
                 return Err(err);
@@ -1447,7 +1442,7 @@ impl Connection {
             Frame::ResetStream {
                 stream_id,
                 application_error_code,
-                final_size: _,
+                ..
             } => {
                 // TODO(agrover@mozilla.com): use final_size for connection MaxData calc
                 if let (_, Some(rs)) = self.obtain_stream(stream_id.into())? {
@@ -1523,10 +1518,7 @@ impl Connection {
                 // Should never happen since we set data limit to 2^62-1
                 qwarn!([self] "Received DataBlocked with data limit {}", data_limit);
             }
-            Frame::StreamDataBlocked {
-                stream_id,
-                stream_data_limit: _,
-            } => {
+            Frame::StreamDataBlocked { stream_id, .. } => {
                 // TODO(agrover@mozilla.com): how should we be using
                 // currently-unused stream_data_limit?
 
@@ -1542,10 +1534,7 @@ impl Connection {
                     rs.maybe_send_flowc_update();
                 }
             }
-            Frame::StreamsBlocked {
-                stream_type,
-                stream_limit: _,
-            } => {
+            Frame::StreamsBlocked { stream_type, .. } => {
                 let local_max = match stream_type {
                     StreamType::BiDi => &mut self.local_max_stream_idx_bidi,
                     StreamType::UniDi => &mut self.local_max_stream_idx_uni,
@@ -1567,7 +1556,7 @@ impl Connection {
                 self.connection_ids.remove(&sequence_number);
             }
             Frame::PathChallenge { data } => self.flow_mgr.borrow_mut().path_response(data),
-            Frame::PathResponse { data: _ } => {
+            Frame::PathResponse { .. } => {
                 // Should never see this, we don't support migration atm and
                 // do not send path challenges
                 qwarn!([self] "Received Path Response");
@@ -1715,7 +1704,7 @@ impl Connection {
                     None => TLS_AES_128_GCM_SHA256 as u16,
                 };
                 *cs = Some(CryptoState {
-                    epoch: epoch,
+                    epoch,
                     rx: CryptoDxState::new(format!("read_epoch={}", epoch), rs, cipher),
                     tx: CryptoDxState::new(format!("write_epoch={}", epoch), ws, cipher),
                     recvd: None,
@@ -1971,7 +1960,7 @@ impl Connection {
         let stream = self
             .send_streams
             .get_mut(&stream_id.into())
-            .ok_or_else(|| return Error::InvalidStreamId)?;
+            .ok_or_else(|| Error::InvalidStreamId)?;
 
         stream.send(data)
     }
@@ -1981,7 +1970,7 @@ impl Connection {
         let stream = self
             .send_streams
             .get_mut(&stream_id.into())
-            .ok_or_else(|| return Error::InvalidStreamId)?;
+            .ok_or_else(|| Error::InvalidStreamId)?;
 
         stream.close();
         Ok(())
@@ -1992,9 +1981,10 @@ impl Connection {
         let stream = self
             .send_streams
             .get_mut(&stream_id.into())
-            .ok_or_else(|| return Error::InvalidStreamId)?;
+            .ok_or_else(|| Error::InvalidStreamId)?;
 
-        Ok(stream.reset(err))
+        stream.reset(err);
+        Ok(())
     }
 
     /// Read buffered data from stream. bool says whether read bytes includes
@@ -2003,7 +1993,7 @@ impl Connection {
         let stream = self
             .recv_streams
             .get_mut(&stream_id.into())
-            .ok_or_else(|| return Error::InvalidStreamId)?;
+            .ok_or_else(|| Error::InvalidStreamId)?;
 
         let rb = stream.read(data)?;
         Ok((rb.0 as usize, rb.1))
@@ -2014,9 +2004,10 @@ impl Connection {
         let stream = self
             .recv_streams
             .get_mut(&stream_id.into())
-            .ok_or_else(|| return Error::InvalidStreamId)?;
+            .ok_or_else(|| Error::InvalidStreamId)?;
 
-        Ok(stream.stop_sending(err))
+        stream.stop_sending(err);
+        Ok(())
     }
 
     /// Get events that indicate state changes on the connection.
@@ -2029,7 +2020,7 @@ impl Connection {
         qdebug!([self] "check_loss_detection_timeout");
         let (mut lost_packets, retransmit_unacked_crypto, send_one_or_two_packets) =
             self.loss_recovery.on_loss_detection_timeout(cur_time);
-        if lost_packets.len() > 0 {
+        if !lost_packets.is_empty() {
             qdebug!([self] "check_loss_detection_timeout loss detected.");
             for lost in lost_packets.iter_mut() {
                 lost.mark_lost(self);
@@ -2071,8 +2062,7 @@ impl CryptoCtx for CryptoDxState {
             hex(hdr),
             hex(body)
         );
-        let mut out = Vec::with_capacity(body.len());
-        out.resize(body.len(), 0);
+        let mut out = vec![0; body.len()];
         let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
         Ok(res.to_vec())
     }
@@ -2087,8 +2077,7 @@ impl CryptoCtx for CryptoDxState {
         );
 
         let size = body.len() + MAX_AUTH_TAG;
-        let mut out = Vec::with_capacity(size);
-        out.resize(size, 0);
+        let mut out = vec![0; size];
         let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
 
         qdebug!([self.label] "aead_encrypt ct={}", hex(res),);
@@ -2133,8 +2122,8 @@ impl FrameGenerator for CryptoGenerator {
             Some((
                 frame,
                 Some(Box::new(CryptoGeneratorToken {
-                    epoch: epoch,
-                    offset: offset,
+                    epoch,
+                    offset,
                     length: data_len as u64,
                 })),
             ))
@@ -2267,7 +2256,7 @@ impl FrameGenerator for StreamGenerator {
                     frame,
                     Some(Box::new(StreamGeneratorToken {
                         id: *stream_id,
-                        offset: offset,
+                        offset,
                         length: data_len as u64,
                         fin,
                     })),
@@ -2318,24 +2307,22 @@ struct FlowControlGeneratorToken(Frame);
 
 impl FrameGeneratorToken for FlowControlGeneratorToken {
     fn acked(&mut self, conn: &mut Connection) {
-        match self.0 {
-            Frame::ResetStream {
+        if let Frame::ResetStream {
+            stream_id,
+            application_error_code,
+            final_size,
+        } = self.0
+        {
+            qinfo!(
+                [conn]
+                "Reset received stream={} err={} final_size={}",
                 stream_id,
                 application_error_code,
-                final_size,
-            } => {
-                qinfo!(
-                    [conn]
-                    "Reset received stream={} err={} final_size={}",
-                    stream_id,
-                    application_error_code,
-                    final_size
-                );
-                if let Some(ss) = conn.send_streams.get_mut(&stream_id.into()) {
-                    ss.reset_acked()
-                }
+                final_size
+            );
+            if let Some(ss) = conn.send_streams.get_mut(&stream_id.into()) {
+                ss.reset_acked()
             }
-            _ => {}
         }
     }
 
@@ -2363,10 +2350,7 @@ impl FrameGeneratorToken for FlowControlGeneratorToken {
                 }
             }
             // Resend MaxStreams if lost (with updated value)
-            Frame::MaxStreams {
-                stream_type,
-                maximum_streams: _,
-            } => {
+            Frame::MaxStreams { stream_type, .. } => {
                 let local_max = match stream_type {
                     StreamType::BiDi => &mut conn.local_max_stream_idx_bidi,
                     StreamType::UniDi => &mut conn.local_max_stream_idx_uni,
@@ -2382,10 +2366,7 @@ impl FrameGeneratorToken for FlowControlGeneratorToken {
                     conn.flow_mgr.borrow_mut().data_blocked()
                 }
             }
-            Frame::StreamDataBlocked {
-                stream_id,
-                stream_data_limit: _,
-            } => {
+            Frame::StreamDataBlocked { stream_id, .. } => {
                 if let Some(ss) = conn.send_streams.get(&stream_id.into()) {
                     if ss.credit_avail() == 0 {
                         conn.flow_mgr
@@ -2394,10 +2375,7 @@ impl FrameGeneratorToken for FlowControlGeneratorToken {
                     }
                 }
             }
-            Frame::StreamsBlocked {
-                stream_type,
-                stream_limit: _,
-            } => match stream_type {
+            Frame::StreamsBlocked { stream_type, .. } => match stream_type {
                 StreamType::UniDi => {
                     if conn.peer_next_stream_idx_uni >= conn.peer_max_stream_idx_uni {
                         conn.flow_mgr
@@ -2423,10 +2401,7 @@ impl FrameGeneratorToken for FlowControlGeneratorToken {
                 .stop_sending(stream_id.into(), application_error_code),
             // Resend MaxStreamData if not SizeKnown
             // (maybe_send_flowc_update() checks this.)
-            Frame::MaxStreamData {
-                stream_id,
-                maximum_stream_data: _,
-            } => {
+            Frame::MaxStreamData { stream_id, .. } => {
                 if let Some(rs) = conn.recv_streams.get_mut(&stream_id.into()) {
                     rs.maybe_send_flowc_update()
                 }
@@ -2517,12 +2492,11 @@ impl RttVals {
             self.smoothed_rtt = self.latest_rtt;
             self.rttvar = self.latest_rtt / 2;
         } else {
-            let rttvar_sample;
-            if self.smoothed_rtt > self.latest_rtt {
-                rttvar_sample = self.smoothed_rtt - self.latest_rtt;
+            let rttvar_sample = if self.smoothed_rtt > self.latest_rtt {
+                self.smoothed_rtt - self.latest_rtt
             } else {
-                rttvar_sample = self.latest_rtt - self.smoothed_rtt;
-            }
+                self.latest_rtt - self.smoothed_rtt
+            };
             self.rttvar =
                 (3.0 / 4.0 * (self.rttvar as f64) + 1.0 / 4.0 * (rttvar_sample as f64)) as u64;
             self.smoothed_rtt = (7.0 / 8.0 * (self.smoothed_rtt as f64)
@@ -2535,12 +2509,11 @@ impl RttVals {
     }
 
     fn timer_for_crypto_retransmission(&mut self, crypto_count: u32) -> u64 {
-        let mut timeout;
-        if self.smoothed_rtt == 0 {
-            timeout = 2 * INITIAL_RTT;
+        let mut timeout = if self.smoothed_rtt == 0 {
+            2 * INITIAL_RTT
         } else {
-            timeout = 2 * self.smoothed_rtt;
-        }
+            2 * self.smoothed_rtt
+        };
 
         timeout = max(timeout, GRANULARITY);
         timeout * 2u64.pow(crypto_count)
@@ -2572,7 +2545,7 @@ impl LossRecoverySpace {
         let mut acked_packets = Vec::new();
         for (end, start) in acked_ranges {
             // ^^ Notabug: see Frame::decode_ack_frame()
-            for pn in start..end + 1 {
+            for pn in start..=end {
                 if let Some(sent) = self.sent_packets.remove(&pn) {
                     qdebug!("acked={}", pn);
                     acked_packets.push(sent);
@@ -2629,9 +2602,9 @@ impl LossRecovery {
             packet_number,
             SentPacket {
                 time_sent: cur_time,
-                ack_eliciting: ack_eliciting,
-                is_crypto_packet: is_crypto_packet,
-                tokens: tokens,
+                ack_eliciting,
+                is_crypto_packet,
+                tokens,
             },
         );
         if is_crypto_packet {
@@ -2722,13 +2695,11 @@ impl LossRecovery {
                 if packet.time_sent <= lost_send_time || *pn <= lost_pn {
                     qdebug!("lost={}", pn);
                     lost.push(*pn);
+                } else if packet_space.loss_time == 0 {
+                    packet_space.loss_time = packet.time_sent + loss_delay;
                 } else {
-                    if packet_space.loss_time == 0 {
-                        packet_space.loss_time = packet.time_sent + loss_delay;
-                    } else {
-                        packet_space.loss_time =
-                            min(packet_space.loss_time, packet.time_sent + loss_delay);
-                    }
+                    packet_space.loss_time =
+                        min(packet_space.loss_time, packet.time_sent + loss_delay);
                 }
             }
         }
@@ -2804,6 +2775,7 @@ impl LossRecovery {
         qdebug!([self] "loss_detection_timer={}", self.loss_detection_timer);
     }
 
+    #[allow(clippy::if_same_then_else)]
     fn get_earliest_loss_time(&self) -> (u64, PNSpace) {
         let mut loss_time = self.packet_spaces[PNSpace::Initial as usize].loss_time;
         let mut pn_space = PNSpace::Initial;

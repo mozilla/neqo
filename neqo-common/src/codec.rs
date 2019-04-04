@@ -19,7 +19,7 @@ pub struct Decoder<'a> {
 
 impl<'a> Decoder<'a> {
     /// Make a new view of the provided slice.
-    pub fn new<'d>(buf: &'d [u8]) -> Decoder<'d> {
+    pub fn new(buf: &[u8]) -> Decoder {
         Decoder { buf, offset: 0 }
     }
 
@@ -175,7 +175,7 @@ impl Encoder {
 
     /// Create a view of the current contents of the buffer.
     /// Note: for a view of a slice, use `Decoder::new(&enc[s..e])
-    pub fn as_decoder<'a>(&'a self) -> Decoder<'a> {
+    pub fn as_decoder(&self) -> Decoder {
         Decoder::new(&self)
     }
 

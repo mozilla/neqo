@@ -21,31 +21,31 @@ pub struct HuffmanDecodeTable<'a> {
 
 impl<'a> HuffmanDecodeTable<'a> {
     pub fn index_has_a_next_table(&self, inx: u8) -> bool {
-        (inx as u16) >= self.index_of_first_next_table
+        u16::from(inx) >= self.index_of_first_next_table
     }
 
     pub fn entry(&self, inx: u8) -> &'a HuffmanDecodeEntry {
-        assert!((inx as u16) < self.index_of_first_next_table);
-        return &self.entry[inx as usize];
+        assert!(u16::from(inx) < self.index_of_first_next_table);
+        &self.entry[inx as usize]
     }
 
     pub fn next_table(&self, inx: u8) -> &'a HuffmanDecodeTable {
-        assert!((inx as u16) >= self.index_of_first_next_table);
-        return self.next_table[(inx as usize) - (self.index_of_first_next_table as usize)];
+        assert!(u16::from(inx) >= self.index_of_first_next_table);
+        self.next_table[(inx as usize) - (self.index_of_first_next_table as usize)]
     }
 }
 
-pub const HUFFMAN_DECODE_ROOT: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+pub const HUFFMAN_DECODE_ROOT: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_ROOT,
     next_table: HUFFMAN_DECODE_NEXT_TABLE_ROOT,
     index_of_first_next_table: 254,
     prefix_len: 8,
 };
 
-const HUFFMAN_DECODE_NEXT_TABLE_ROOT: &'static [&HuffmanDecodeTable] =
+const HUFFMAN_DECODE_NEXT_TABLE_ROOT: &[&HuffmanDecodeTable] =
     &[HUFFMAN_DECODE_254, HUFFMAN_DECODE_255];
 
-const HUFFMAN_DECODE_ENTRIES_ROOT: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_ROOT: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 48,
         prefix_len: 5,
@@ -1064,17 +1064,17 @@ const HUFFMAN_DECODE_ENTRIES_ROOT: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255,
     next_table: HUFFMAN_DECODE_NEXT_TABLE_255,
     index_of_first_next_table: 254,
     prefix_len: 7,
 };
 
-const HUFFMAN_DECODE_NEXT_TABLE_255: &'static [&HuffmanDecodeTable] =
+const HUFFMAN_DECODE_NEXT_TABLE_255: &[&HuffmanDecodeTable] =
     &[HUFFMAN_DECODE_255_254, HUFFMAN_DECODE_255_255];
 
-const HUFFMAN_DECODE_ENTRIES_255: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 63,
         prefix_len: 2,
@@ -2093,14 +2093,14 @@ const HUFFMAN_DECODE_ENTRIES_255: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255,
     next_table: HUFFMAN_DECODE_NEXT_TABLE_255_255,
     index_of_first_next_table: 246,
     prefix_len: 8,
 };
 
-const HUFFMAN_DECODE_NEXT_TABLE_255_255: &'static [&HuffmanDecodeTable] = &[
+const HUFFMAN_DECODE_NEXT_TABLE_255_255: &[&HuffmanDecodeTable] = &[
     &HUFFMAN_DECODE_255_255_246,
     &HUFFMAN_DECODE_255_255_247,
     &HUFFMAN_DECODE_255_255_248,
@@ -2113,7 +2113,7 @@ const HUFFMAN_DECODE_NEXT_TABLE_255_255: &'static [&HuffmanDecodeTable] = &[
     &HUFFMAN_DECODE_255_255_255,
 ];
 
-const HUFFMAN_DECODE_ENTRIES_255_255: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 176,
         prefix_len: 5,
@@ -3100,14 +3100,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255_255: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255_255: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_255,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 6,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_255: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255_255: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 19,
         prefix_len: 4,
@@ -4134,14 +4134,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255_255: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255_254: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255_254: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_254,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 4,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_254: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255_254: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 254,
         prefix_len: 3,
@@ -5168,14 +5168,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255_254: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255_253: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255_253: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_253,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 3,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_253: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255_253: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 245,
         prefix_len: 3,
@@ -6202,14 +6202,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255_253: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255_252: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255_252: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_252,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 3,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_252: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255_252: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 211,
         prefix_len: 3,
@@ -7236,14 +7236,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255_252: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255_251: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255_251: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_251,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 3,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_251: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255_251: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 242,
         prefix_len: 2,
@@ -8270,14 +8270,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255_251: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255_250: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255_250: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_250,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 2,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_250: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255_250: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 218,
         prefix_len: 2,
@@ -9304,14 +9304,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255_250: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255_249: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255_249: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_249,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 2,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_249: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255_249: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 202,
         prefix_len: 2,
@@ -10338,14 +10338,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255_249: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255_248: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255_248: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_248,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 2,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_248: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255_248: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 192,
         prefix_len: 2,
@@ -11372,14 +11372,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255_248: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255_247: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255_247: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_247,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 1,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_247: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255_247: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 234,
         prefix_len: 1,
@@ -12406,14 +12406,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255_247: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_255_246: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_255_246: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_246,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 1,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_246: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_255_246: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 199,
         prefix_len: 1,
@@ -13440,14 +13440,14 @@ const HUFFMAN_DECODE_ENTRIES_255_255_246: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_255_254: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_255_254: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_254,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 5,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_254: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_255_254: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 92,
         prefix_len: 3,
@@ -14474,14 +14474,14 @@ const HUFFMAN_DECODE_ENTRIES_255_254: &'static [HuffmanDecodeEntry] = &[
     },
 ];
 
-const HUFFMAN_DECODE_254: &'static HuffmanDecodeTable = &HuffmanDecodeTable {
+const HUFFMAN_DECODE_254: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_254,
     next_table: &[],
     index_of_first_next_table: 256,
     prefix_len: 2,
 };
 
-const HUFFMAN_DECODE_ENTRIES_254: &'static [HuffmanDecodeEntry] = &[
+const HUFFMAN_DECODE_ENTRIES_254: &[HuffmanDecodeEntry] = &[
     HuffmanDecodeEntry {
         val: 33,
         prefix_len: 2,

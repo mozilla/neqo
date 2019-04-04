@@ -38,7 +38,7 @@ impl RequestStreamServer {
     pub fn new(stream_id: u64) -> RequestStreamServer {
         RequestStreamServer {
             state: RequestStreamServerState::WaitingForRequestHeaders,
-            stream_id: stream_id,
+            stream_id,
             frame_reader: HFrameReader::new(),
             request_headers: None,
             response_headers: Vec::new(),
@@ -55,7 +55,7 @@ impl RequestStreamServer {
             Vec::new()
         }
     }
-    pub fn set_response(&mut self, headers: &Vec<(String, String)>, data: String) {
+    pub fn set_response(&mut self, headers: &[(String, String)], data: String) {
         self.response_headers.extend_from_slice(headers);
         self.data = data.into_bytes(); // TODO(mt) this looks like a stub
         self.state = RequestStreamServerState::SendingResponse;
@@ -70,7 +70,7 @@ impl RequestStreamServer {
         let mut d = Encoder::default();
         f.encode(&mut d);
         d.encode(&encoded_headers[..]);
-        if self.data.len() > 0 {
+        if !self.data.is_empty() {
             let d_frame = HFrame::Data {
                 len: self.data.len() as u64,
             };
@@ -81,12 +81,13 @@ impl RequestStreamServer {
     }
 
     pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
-        let label = match ::log::log_enabled!(::log::Level::Debug) {
-            true => format!("{}", self),
-            _ => String::new(),
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
         };
         if self.state == RequestStreamServerState::SendingResponse {
-            if let None = self.response_buf {
+            if self.response_buf.is_none() {
                 self.encode_response(encoder, self.stream_id);
             }
             if let Some(d) = &mut self.response_buf {
@@ -114,9 +115,10 @@ impl RequestStreamServer {
     }
 
     pub fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
-        let label = match ::log::log_enabled!(::log::Level::Debug) {
-            true => format!("{}", self),
-            _ => String::new(),
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
         };
         qdebug!([label] "state={:?}: receiving data.", self.state);
         loop {
@@ -169,7 +171,7 @@ impl RequestStreamServer {
                     }
                     // we have read the headers.
                     self.request_headers = decoder.decode_header_block(buf, self.stream_id)?;
-                    if let None = self.request_headers {
+                    if self.request_headers.is_none() {
                         qdebug!([label] "decoding header is blocked.");
                         let mut tmp: Vec<u8> = Vec::new();
                         mem::swap(&mut tmp, buf);
@@ -219,7 +221,7 @@ impl RequestStreamServer {
     pub fn unblock(&mut self, decoder: &mut QPackDecoder) -> Res<()> {
         if let RequestStreamServerState::BlockedDecodingHeaders { ref mut buf } = self.state {
             self.request_headers = decoder.decode_header_block(buf, self.stream_id)?;
-            if let None = self.request_headers {
+            if self.request_headers.is_none() {
                 panic!("We must not be blocked again!");
             }
             self.state = RequestStreamServerState::ReadingRequestDone;
