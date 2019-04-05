@@ -283,8 +283,7 @@ enum RecvStreamState {
     },
     DataRead,
     ResetRecvd,
-    #[allow(dead_code)]
-    ResetRead,
+    // Defined by spec but we don't use it: ResetRead
 }
 
 impl RecvStreamState {
@@ -303,7 +302,6 @@ impl RecvStreamState {
             RecvStreamState::DataRecvd { .. } => "DataRecvd",
             RecvStreamState::DataRead => "DataRead",
             RecvStreamState::ResetRecvd => "ResetRecvd",
-            RecvStreamState::ResetRead => "ResetRead",
         }
     }
 
@@ -312,9 +310,7 @@ impl RecvStreamState {
             RecvStreamState::Recv { recv_buf, .. } => Some(recv_buf),
             RecvStreamState::SizeKnown { recv_buf, .. } => Some(recv_buf),
             RecvStreamState::DataRecvd { recv_buf } => Some(recv_buf),
-            RecvStreamState::DataRead
-            | RecvStreamState::ResetRecvd
-            | RecvStreamState::ResetRead => None,
+            RecvStreamState::DataRead | RecvStreamState::ResetRecvd => None,
         }
     }
 
@@ -415,8 +411,7 @@ impl RecvStream {
             }
             RecvStreamState::DataRecvd { .. }
             | RecvStreamState::DataRead
-            | RecvStreamState::ResetRecvd
-            | RecvStreamState::ResetRead => {
+            | RecvStreamState::ResetRecvd => {
                 qtrace!("data received when we are in state {}", self.state.name())
             }
         }
@@ -431,10 +426,17 @@ impl RecvStream {
     }
 
     pub fn reset(&mut self, application_error_code: AppError) {
-        self.conn_events
-            .borrow_mut()
-            .recv_stream_reset(self.stream_id, application_error_code);
-        self.state.transition(RecvStreamState::ResetRecvd)
+        match self.state {
+            RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
+                self.conn_events
+                    .borrow_mut()
+                    .recv_stream_reset(self.stream_id, application_error_code);
+                self.state.transition(RecvStreamState::ResetRecvd);
+            }
+            _ => {
+                // Ignore reset if in DataRecvd, DataRead, or ResetRecvd
+            }
+        }
     }
 
     /// If we should tell the sender they have more credit, return an offset
@@ -485,19 +487,20 @@ impl Recvable for RecvStream {
                 }
                 Ok((bytes_read, fin_read))
             }
-            RecvStreamState::DataRead
-            | RecvStreamState::ResetRecvd
-            | RecvStreamState::ResetRead => Err(Error::NoMoreData),
+            RecvStreamState::DataRead | RecvStreamState::ResetRecvd => Err(Error::NoMoreData),
         }
     }
 
     fn stop_sending(&mut self, err: AppError) {
+        qtrace!("stop_sending called when in state {}", self.state.name());
         match &self.state {
             RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
-                qtrace!("stop_sending called when in state {}", self.state.name());
                 self.flow_mgr.borrow_mut().stop_sending(self.stream_id, err)
             }
-            _ => qtrace!("stop_sending called when in state {}", self.state.name()),
+            RecvStreamState::DataRecvd { .. } => self.state.transition(RecvStreamState::DataRead),
+            RecvStreamState::DataRead | RecvStreamState::ResetRecvd => {
+                // Already in terminal state
+            }
         }
     }
 }
