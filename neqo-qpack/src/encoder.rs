@@ -580,8 +580,6 @@ mod tests {
         }
 
         fn stop_sending(&mut self, _err: AppError) {}
-
-        fn close(&mut self) {}
     }
 
     fn test_sent_instructions(encoder: &mut QPackEncoder, res: &[u8]) {

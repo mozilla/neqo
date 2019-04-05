@@ -802,8 +802,6 @@ mod tests {
         }
 
         fn stop_sending(&mut self, _err: AppError) {}
-
-        fn close(&mut self) {}
     }
 
     #[derive(Debug)]

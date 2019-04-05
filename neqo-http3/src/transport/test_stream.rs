@@ -76,10 +76,6 @@ impl Recvable for Stream {
     fn stop_sending(&mut self, err: AppError) {
         self.stop_sending_error = Some(err);
     }
-
-    fn close(&mut self) {
-        self.receive_side_closed = true;
-    }
 }
 
 #[derive(Debug)]

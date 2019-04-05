@@ -24,9 +24,6 @@ pub trait Recvable: Debug {
     /// Application is no longer interested in this stream.
     fn stop_sending(&mut self, err: AppError);
 
-    /// Close the stream.
-    fn close(&mut self);
-
     /// Bytes can be read from the stream.
     fn data_ready(&self) -> bool;
 }
@@ -492,10 +489,6 @@ impl Recvable for RecvStream {
             | RecvStreamState::ResetRecvd
             | RecvStreamState::ResetRead => Err(Error::NoMoreData),
         }
-    }
-
-    fn close(&mut self) {
-        self.state.transition(RecvStreamState::DataRead)
     }
 
     fn stop_sending(&mut self, err: AppError) {
