@@ -463,6 +463,13 @@ impl RecvStream {
             }
         }
     }
+
+    pub fn is_terminal(&self) -> bool {
+        match self.state {
+            RecvStreamState::ResetRecvd | RecvStreamState::DataRead => true,
+            _ => false,
+        }
+    }
 }
 
 impl Recvable for RecvStream {

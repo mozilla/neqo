@@ -86,6 +86,18 @@ impl StreamId {
         !self.is_client_initiated()
     }
 
+    fn is_self_initiated(&self, role: Role) -> bool {
+        match role {
+            Role::Client if self.is_client_initiated() => true,
+            Role::Server if self.is_server_initiated() => true,
+            _ => false,
+        }
+    }
+
+    fn is_peer_initiated(&self, role: Role) -> bool {
+        !self.is_self_initiated(role)
+    }
+
     fn as_u64(&self) -> u64 {
         self.0
     }
@@ -460,12 +472,12 @@ pub struct Connection {
     generators: Vec<Box<FrameGenerator>>,
     deadline: u64,
     max_data: u64,
-    local_max_streams_uni: u64,
-    local_max_streams_bidi: u64,
-    peer_max_streams_uni: u64,
-    peer_max_streams_bidi: u64,
-    next_stream_id_uni: u64,
-    next_stream_id_bidi: u64,
+    local_max_stream_id_uni: u64,
+    local_max_stream_id_bidi: u64,
+    peer_max_stream_id_uni: u64,
+    peer_max_stream_id_bidi: u64,
+    peer_next_stream_id_uni: u64,
+    peer_next_stream_id_bidi: u64,
     highest_stream: Option<u64>,
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
     send_streams: BTreeMap<StreamId, SendStream>,
@@ -596,12 +608,12 @@ impl Connection {
             tx_pns: [0; 4],
             deadline: 0,
             max_data: 0,
-            local_max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
-            local_max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
-            peer_max_streams_bidi: 0,
-            peer_max_streams_uni: 0,
-            next_stream_id_uni: 0,
-            next_stream_id_bidi: 0,
+            local_max_stream_id_bidi: LOCAL_STREAM_LIMIT_BIDI,
+            local_max_stream_id_uni: LOCAL_STREAM_LIMIT_UNI,
+            peer_max_stream_id_bidi: 0,
+            peer_max_stream_id_uni: 0,
+            peer_next_stream_id_uni: 0,
+            peer_next_stream_id_bidi: 0,
             highest_stream: None,
             connection_ids: HashSet::new(),
             send_streams: BTreeMap::new(),
@@ -671,6 +683,8 @@ impl Connection {
             let res = self.input(dgram, cur_time);
             self.absorb_error(res);
         }
+
+        self.cleanup_streams();
 
         if cur_time >= self.deadline {
             // Timer expired.
@@ -1065,7 +1079,7 @@ impl Connection {
             qinfo!(self, "TLS handshake completed");
             self.set_state(State::Connected);
 
-            self.peer_max_streams_bidi = self
+            self.peer_max_stream_id_bidi = self
                 .tps
                 .borrow()
                 .remote
@@ -1073,7 +1087,7 @@ impl Connection {
                 .expect("remote tparams are valid when State::Connected")
                 .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI);
 
-            self.peer_max_streams_uni = self
+            self.peer_max_stream_id_uni = self
                 .tps
                 .borrow()
                 .remote
@@ -1171,24 +1185,17 @@ impl Connection {
             Frame::MaxStreams {
                 stream_type,
                 maximum_streams,
-            } => match stream_type {
-                StreamType::BiDi => {
-                    if maximum_streams > self.peer_max_streams_bidi {
-                        self.peer_max_streams_bidi = maximum_streams;
-                        self.events
-                            .borrow_mut()
-                            .send_stream_creatable(StreamType::BiDi);
-                    }
+            } => {
+                let peer_max = match stream_type {
+                    StreamType::BiDi => &mut self.peer_max_stream_id_bidi,
+                    StreamType::UniDi => &mut self.peer_max_stream_id_uni,
+                };
+
+                if maximum_streams > *peer_max {
+                    *peer_max = maximum_streams;
+                    self.events.borrow_mut().send_stream_creatable(stream_type);
                 }
-                StreamType::UniDi => {
-                    if maximum_streams > self.peer_max_streams_uni {
-                        self.peer_max_streams_uni = maximum_streams;
-                        self.events
-                            .borrow_mut()
-                            .send_stream_creatable(StreamType::UniDi);
-                    }
-                }
-            },
+            }
             Frame::DataBlocked { data_limit } => {} // TODO(agrover@mozilla.com): use as input to flow control algorithms
             Frame::StreamDataBlocked {
                 stream_id,
@@ -1208,10 +1215,14 @@ impl Connection {
                 stream_type,
                 stream_limit,
             } => {
-                // TODO(agrover@mozilla.com): Once we keep track of how many
-                // streams are not in a terminal state, then we can use that
-                // to send regular MaxStreams updates, and also in response to
-                // this.
+                let local_max = match stream_type {
+                    StreamType::BiDi => &mut self.local_max_stream_id_bidi,
+                    StreamType::UniDi => &mut self.local_max_stream_id_uni,
+                };
+
+                self.flow_mgr
+                    .borrow_mut()
+                    .max_streams(*local_max, stream_type)
             }
             Frame::NewConnectionId {
                 sequence_number,
@@ -1377,6 +1388,53 @@ impl Connection {
         }
     }
 
+    fn cleanup_streams(&mut self) {
+        let recv_to_remove = self
+            .recv_streams
+            .iter()
+            .filter(|(_, stream)| stream.is_terminal())
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+
+        let mut removed_bidi = 0;
+        let mut removed_uni = 0;
+        for id in &recv_to_remove {
+            self.recv_streams.remove(&id);
+            if id.is_peer_initiated(self.role()) {
+                if id.is_bidi() {
+                    removed_bidi += 1;
+                } else {
+                    removed_uni += 1;
+                }
+            }
+        }
+
+        // Send max_streams updates if we removed peer-initiated recv streams.
+        if removed_bidi > 0 {
+            self.local_max_stream_id_bidi += removed_bidi;
+            self.flow_mgr
+                .borrow_mut()
+                .max_streams(self.local_max_stream_id_bidi, StreamType::BiDi)
+        }
+        if removed_uni > 0 {
+            self.local_max_stream_id_uni += removed_uni;
+            self.flow_mgr
+                .borrow_mut()
+                .max_streams(self.local_max_stream_id_uni, StreamType::UniDi)
+        }
+
+        let send_to_remove = self
+            .send_streams
+            .iter()
+            .filter(|(_, stream)| stream.is_terminal())
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+
+        for id in send_to_remove {
+            self.send_streams.remove(&id);
+        }
+    }
+
     /// Get or make a stream.
     fn obtain_stream(&mut self, stream_id: StreamId) -> Res<&mut RecvStream> {
         match self.recv_streams.entry(stream_id) {
@@ -1394,7 +1452,7 @@ impl Connection {
                 }
 
                 let recv_initial_max_stream_data = if stream_id.is_bidi() {
-                    if stream_id.as_u64() >> 2 > self.local_max_streams_bidi {
+                    if stream_id.as_u64() >> 2 > self.local_max_stream_id_bidi {
                         return Err(Error::StreamLimitError);
                     }
                     self.tps
@@ -1402,7 +1460,7 @@ impl Connection {
                         .local
                         .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
                 } else {
-                    if stream_id.as_u64() >> 2 > self.local_max_streams_uni {
+                    if stream_id.as_u64() >> 2 > self.local_max_stream_id_uni {
                         return Err(Error::StreamLimitError);
                     }
                     self.tps
@@ -1464,14 +1522,14 @@ impl Connection {
 
         Ok(match st {
             StreamType::UniDi => {
-                if self.next_stream_id_uni >= self.peer_max_streams_uni {
+                if self.peer_next_stream_id_uni >= self.peer_max_stream_id_uni {
                     self.flow_mgr
                         .borrow_mut()
-                        .streams_blocked(self.peer_max_streams_uni, StreamType::UniDi);
+                        .streams_blocked(self.peer_max_stream_id_uni, StreamType::UniDi);
                     return Err(Error::StreamLimitError);
                 }
-                let new_id = ((self.next_stream_id_uni << 2) + 2 + role_val).into();
-                self.next_stream_id_uni += 1;
+                let new_id = ((self.peer_next_stream_id_uni << 2) + 2 + role_val).into();
+                self.peer_next_stream_id_uni += 1;
                 let initial_max_stream_data = self
                     .tps
                     .borrow()
@@ -1492,14 +1550,14 @@ impl Connection {
                 new_id.as_u64()
             }
             StreamType::BiDi => {
-                if self.next_stream_id_bidi >= self.peer_max_streams_bidi {
+                if self.peer_next_stream_id_bidi >= self.peer_max_stream_id_bidi {
                     self.flow_mgr
                         .borrow_mut()
-                        .streams_blocked(self.peer_max_streams_bidi, StreamType::BiDi);
+                        .streams_blocked(self.peer_max_stream_id_bidi, StreamType::BiDi);
                     return Err(Error::StreamLimitError);
                 }
-                let new_id = ((self.next_stream_id_bidi << 2) + role_val).into();
-                self.next_stream_id_bidi += 1;
+                let new_id = ((self.peer_next_stream_id_bidi << 2) + role_val).into();
+                self.peer_next_stream_id_bidi += 1;
                 let send_initial_max_stream_data = self
                     .tps
                     .borrow()

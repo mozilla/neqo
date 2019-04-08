@@ -521,6 +521,13 @@ impl SendStream {
             SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
         };
     }
+
+    pub fn is_terminal(&self) -> bool {
+        match self.state {
+            SendStreamState::DataRecvd { .. } | SendStreamState::ResetRecvd => true,
+            _ => false,
+        }
+    }
 }
 
 impl Sendable for SendStream {
