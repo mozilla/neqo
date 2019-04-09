@@ -683,8 +683,9 @@ impl Connection {
 
         c.scid = c.generate_cid();
         if c.rol == Role::Client {
-            c.dcid = c.generate_cid();
-            c.create_initial_crypto_state(&c.dcid.clone()); // Stupid borrow checker.
+            let dcid = c.generate_cid();
+            c.create_initial_crypto_state(&dcid);
+            c.dcid = dcid;
         }
 
         c
