@@ -7,6 +7,7 @@
 // TODO(ekr@rtfm.com): Remove this once I've implemented everything.
 #![allow(unused_variables, dead_code)]
 use super::*;
+use crate::connection::StreamIndex;
 use crate::tracking::PacketRange;
 use neqo_common::data::*;
 
@@ -139,7 +140,7 @@ pub enum Frame {
     },
     MaxStreams {
         stream_type: StreamType,
-        maximum_streams: u64,
+        maximum_streams: StreamIndex,
     },
     DataBlocked {
         data_limit: u64,
@@ -150,7 +151,7 @@ pub enum Frame {
     },
     StreamsBlocked {
         stream_type: StreamType,
-        stream_limit: u64,
+        stream_limit: StreamIndex,
     },
     NewConnectionId {
         sequence_number: u64,
@@ -284,7 +285,7 @@ impl Frame {
             Frame::MaxStreams {
                 maximum_streams, ..
             } => {
-                d.encode_varint(*maximum_streams);
+                d.encode_varint(maximum_streams.as_u64());
             }
             Frame::DataBlocked { data_limit } => {
                 d.encode_varint(*data_limit);
@@ -297,7 +298,7 @@ impl Frame {
                 d.encode_varint(*stream_data_limit);
             }
             Frame::StreamsBlocked { stream_limit, .. } => {
-                d.encode_varint(*stream_limit);
+                d.encode_varint(stream_limit.as_u64());
             }
             Frame::NewConnectionId {
                 sequence_number,
@@ -500,7 +501,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
         }),
         FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => Ok(Frame::MaxStreams {
             stream_type: StreamType::from_type_bit(t),
-            maximum_streams: d.decode_varint()?,
+            maximum_streams: StreamIndex::new(d.decode_varint()?),
         }),
 
         FRAME_TYPE_DATA_BLOCKED => Ok(Frame::DataBlocked {
@@ -513,7 +514,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
         FRAME_TYPE_STREAMS_BLOCKED_BIDI | FRAME_TYPE_STREAMS_BLOCKED_UNIDI => {
             Ok(Frame::StreamsBlocked {
                 stream_type: StreamType::from_type_bit(t),
-                stream_limit: d.decode_varint()?,
+                stream_limit: StreamIndex::new(d.decode_varint()?),
             })
         }
         FRAME_TYPE_NEW_CONNECTION_ID => {
@@ -699,14 +700,14 @@ mod tests {
     fn test_max_streams() {
         let mut f = Frame::MaxStreams {
             stream_type: StreamType::BiDi,
-            maximum_streams: 0x1234,
+            maximum_streams: StreamIndex::new(0x1234),
         };
 
         enc_dec(&f, "125234");
 
         f = Frame::MaxStreams {
             stream_type: StreamType::UniDi,
-            maximum_streams: 0x1234,
+            maximum_streams: StreamIndex::new(0x1234),
         };
 
         enc_dec(&f, "135234");
@@ -733,14 +734,14 @@ mod tests {
     fn test_streams_blocked() {
         let mut f = Frame::StreamsBlocked {
             stream_type: StreamType::BiDi,
-            stream_limit: 0x1234,
+            stream_limit: StreamIndex::new(0x1234),
         };
 
         enc_dec(&f, "165234");
 
         f = Frame::StreamsBlocked {
             stream_type: StreamType::UniDi,
-            stream_limit: 0x1234,
+            stream_limit: StreamIndex::new(0x1234),
         };
 
         enc_dec(&f, "175234");

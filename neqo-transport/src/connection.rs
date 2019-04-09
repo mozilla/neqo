@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
-use std::ops::{Deref, DerefMut};
+use std::ops::{AddAssign, Deref, DerefMut};
 use std::rc::Rc;
 
 use neqo_common::data::Data;
@@ -106,6 +106,44 @@ impl StreamId {
 impl From<u64> for StreamId {
     fn from(val: u64) -> Self {
         StreamId(val)
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash)]
+pub struct StreamIndex(u64);
+
+impl StreamIndex {
+    pub fn new(val: u64) -> StreamIndex {
+        StreamIndex(val)
+    }
+
+    pub fn to_stream_id(&self, stream_type: StreamType, role: Role) -> StreamId {
+        let type_val = match stream_type {
+            StreamType::BiDi => 0,
+            StreamType::UniDi => 2,
+        };
+        let role_val = match role {
+            Role::Server => 1,
+            Role::Client => 0,
+        };
+
+        StreamId::from((self.0 << 2) + type_val + role_val)
+    }
+
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+impl From<StreamId> for StreamIndex {
+    fn from(val: StreamId) -> Self {
+        StreamIndex(val.as_u64() >> 2)
+    }
+}
+
+impl AddAssign<u64> for StreamIndex {
+    fn add_assign(&mut self, other: u64) {
+        *self = StreamIndex::new(self.as_u64() + other)
     }
 }
 
@@ -282,7 +320,7 @@ impl FlowMgr {
         self.from_recv_streams.insert(stream_id, frame);
     }
 
-    pub fn streams_blocked(&mut self, stream_limit: u64, stream_type: StreamType) {
+    pub fn streams_blocked(&mut self, stream_limit: StreamIndex, stream_type: StreamType) {
         let frame = Frame::StreamsBlocked {
             stream_type,
             stream_limit,
@@ -290,7 +328,7 @@ impl FlowMgr {
         self.from_conn.push_back(frame);
     }
 
-    pub fn max_streams(&mut self, stream_limit: u64, stream_type: StreamType) {
+    pub fn max_streams(&mut self, stream_limit: StreamIndex, stream_type: StreamType) {
         let frame = Frame::MaxStreams {
             stream_type,
             maximum_streams: stream_limit,
@@ -472,12 +510,12 @@ pub struct Connection {
     generators: Vec<Box<FrameGenerator>>,
     deadline: u64,
     max_data: u64,
-    local_max_stream_id_uni: u64,
-    local_max_stream_id_bidi: u64,
-    peer_max_stream_id_uni: u64,
-    peer_max_stream_id_bidi: u64,
-    peer_next_stream_id_uni: u64,
-    peer_next_stream_id_bidi: u64,
+    local_max_stream_idx_uni: StreamIndex,
+    local_max_stream_idx_bidi: StreamIndex,
+    peer_max_stream_idx_uni: StreamIndex,
+    peer_max_stream_idx_bidi: StreamIndex,
+    peer_next_stream_idx_uni: StreamIndex,
+    peer_next_stream_idx_bidi: StreamIndex,
     highest_stream: Option<u64>,
     connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
     send_streams: BTreeMap<StreamId, SendStream>,
@@ -608,12 +646,12 @@ impl Connection {
             tx_pns: [0; 4],
             deadline: 0,
             max_data: 0,
-            local_max_stream_id_bidi: LOCAL_STREAM_LIMIT_BIDI,
-            local_max_stream_id_uni: LOCAL_STREAM_LIMIT_UNI,
-            peer_max_stream_id_bidi: 0,
-            peer_max_stream_id_uni: 0,
-            peer_next_stream_id_uni: 0,
-            peer_next_stream_id_bidi: 0,
+            local_max_stream_idx_bidi: StreamIndex::new(LOCAL_STREAM_LIMIT_BIDI),
+            local_max_stream_idx_uni: StreamIndex::new(LOCAL_STREAM_LIMIT_UNI),
+            peer_max_stream_idx_bidi: StreamIndex::new(0),
+            peer_max_stream_idx_uni: StreamIndex::new(0),
+            peer_next_stream_idx_uni: StreamIndex::new(0),
+            peer_next_stream_idx_bidi: StreamIndex::new(0),
             highest_stream: None,
             connection_ids: HashSet::new(),
             send_streams: BTreeMap::new(),
@@ -1079,21 +1117,23 @@ impl Connection {
             qinfo!(self, "TLS handshake completed");
             self.set_state(State::Connected);
 
-            self.peer_max_stream_id_bidi = self
-                .tps
-                .borrow()
-                .remote
-                .as_ref()
-                .expect("remote tparams are valid when State::Connected")
-                .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI);
+            self.peer_max_stream_idx_bidi = StreamIndex::new(
+                self.tps
+                    .borrow()
+                    .remote
+                    .as_ref()
+                    .expect("remote tparams are valid when State::Connected")
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI),
+            );
 
-            self.peer_max_stream_id_uni = self
-                .tps
-                .borrow()
-                .remote
-                .as_ref()
-                .expect("remote tparams are valid when State::Connected")
-                .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI);
+            self.peer_max_stream_idx_uni = StreamIndex::new(
+                self.tps
+                    .borrow()
+                    .remote
+                    .as_ref()
+                    .expect("remote tparams are valid when State::Connected")
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI),
+            );
         }
         Ok(())
     }
@@ -1187,8 +1227,8 @@ impl Connection {
                 maximum_streams,
             } => {
                 let peer_max = match stream_type {
-                    StreamType::BiDi => &mut self.peer_max_stream_id_bidi,
-                    StreamType::UniDi => &mut self.peer_max_stream_id_uni,
+                    StreamType::BiDi => &mut self.peer_max_stream_idx_bidi,
+                    StreamType::UniDi => &mut self.peer_max_stream_idx_uni,
                 };
 
                 if maximum_streams > *peer_max {
@@ -1216,8 +1256,8 @@ impl Connection {
                 stream_limit,
             } => {
                 let local_max = match stream_type {
-                    StreamType::BiDi => &mut self.local_max_stream_id_bidi,
-                    StreamType::UniDi => &mut self.local_max_stream_id_uni,
+                    StreamType::BiDi => &mut self.local_max_stream_idx_bidi,
+                    StreamType::UniDi => &mut self.local_max_stream_idx_uni,
                 };
 
                 self.flow_mgr
@@ -1411,16 +1451,16 @@ impl Connection {
 
         // Send max_streams updates if we removed peer-initiated recv streams.
         if removed_bidi > 0 {
-            self.local_max_stream_id_bidi += removed_bidi;
+            self.local_max_stream_idx_bidi += removed_bidi;
             self.flow_mgr
                 .borrow_mut()
-                .max_streams(self.local_max_stream_id_bidi, StreamType::BiDi)
+                .max_streams(self.local_max_stream_idx_bidi, StreamType::BiDi)
         }
         if removed_uni > 0 {
-            self.local_max_stream_id_uni += removed_uni;
+            self.local_max_stream_idx_uni += removed_uni;
             self.flow_mgr
                 .borrow_mut()
-                .max_streams(self.local_max_stream_id_uni, StreamType::UniDi)
+                .max_streams(self.local_max_stream_idx_uni, StreamType::UniDi)
         }
 
         let send_to_remove = self
@@ -1451,8 +1491,9 @@ impl Connection {
                     _ => {}
                 }
 
+                let stream_idx: StreamIndex = stream_id.into();
                 let recv_initial_max_stream_data = if stream_id.is_bidi() {
-                    if stream_id.as_u64() >> 2 > self.local_max_stream_id_bidi {
+                    if stream_idx > self.local_max_stream_idx_bidi {
                         return Err(Error::StreamLimitError);
                     }
                     self.tps
@@ -1460,7 +1501,7 @@ impl Connection {
                         .local
                         .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
                 } else {
-                    if stream_id.as_u64() >> 2 > self.local_max_stream_id_uni {
+                    if stream_idx > self.local_max_stream_idx_uni {
                         return Err(Error::StreamLimitError);
                     }
                     self.tps
@@ -1515,21 +1556,18 @@ impl Connection {
             return Err(Error::ConnectionState);
         }
 
-        let role_val = match self.rol {
-            Role::Server => 1,
-            Role::Client => 0,
-        };
-
         Ok(match st {
             StreamType::UniDi => {
-                if self.peer_next_stream_id_uni >= self.peer_max_stream_id_uni {
+                if self.peer_next_stream_idx_uni >= self.peer_max_stream_idx_uni {
                     self.flow_mgr
                         .borrow_mut()
-                        .streams_blocked(self.peer_max_stream_id_uni, StreamType::UniDi);
+                        .streams_blocked(self.peer_max_stream_idx_uni, StreamType::UniDi);
                     return Err(Error::StreamLimitError);
                 }
-                let new_id = ((self.peer_next_stream_id_uni << 2) + 2 + role_val).into();
-                self.peer_next_stream_id_uni += 1;
+                let new_id = self
+                    .peer_next_stream_idx_uni
+                    .to_stream_id(StreamType::UniDi, self.rol);
+                self.peer_next_stream_idx_uni += 1;
                 let initial_max_stream_data = self
                     .tps
                     .borrow()
@@ -1550,14 +1588,16 @@ impl Connection {
                 new_id.as_u64()
             }
             StreamType::BiDi => {
-                if self.peer_next_stream_id_bidi >= self.peer_max_stream_id_bidi {
+                if self.peer_next_stream_idx_bidi >= self.peer_max_stream_idx_bidi {
                     self.flow_mgr
                         .borrow_mut()
-                        .streams_blocked(self.peer_max_stream_id_bidi, StreamType::BiDi);
+                        .streams_blocked(self.peer_max_stream_idx_bidi, StreamType::BiDi);
                     return Err(Error::StreamLimitError);
                 }
-                let new_id = ((self.peer_next_stream_id_bidi << 2) + role_val).into();
-                self.peer_next_stream_id_bidi += 1;
+                let new_id = self
+                    .peer_next_stream_idx_bidi
+                    .to_stream_id(StreamType::BiDi, self.rol);
+                self.peer_next_stream_idx_bidi += 1;
                 let send_initial_max_stream_data = self
                     .tps
                     .borrow()
