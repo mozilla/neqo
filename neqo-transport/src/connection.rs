@@ -8,7 +8,6 @@
 use log::Level;
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{self, Debug};
 use std::mem;
@@ -78,6 +77,14 @@ impl StreamId {
         !self.is_bidi()
     }
 
+    fn stream_type(&self) -> StreamType {
+        if self.is_bidi() {
+            StreamType::BiDi
+        } else {
+            StreamType::UniDi
+        }
+    }
+
     fn is_client_initiated(&self) -> bool {
         self.0 & 0x01 == 0
     }
@@ -86,8 +93,16 @@ impl StreamId {
         !self.is_client_initiated()
     }
 
+    fn role(&self) -> Role {
+        if self.is_client_initiated() {
+            Role::Client
+        } else {
+            Role::Server
+        }
+    }
+
     fn is_self_initiated(&self, role: Role) -> bool {
-        match role {
+        match self.role() {
             Role::Client if self.is_client_initiated() => true,
             Role::Server if self.is_server_initiated() => true,
             _ => false,
@@ -512,6 +527,8 @@ pub struct Connection {
     max_data: u64,
     local_max_stream_idx_uni: StreamIndex,
     local_max_stream_idx_bidi: StreamIndex,
+    local_next_stream_idx_uni: StreamIndex,
+    local_next_stream_idx_bidi: StreamIndex,
     peer_max_stream_idx_uni: StreamIndex,
     peer_max_stream_idx_bidi: StreamIndex,
     peer_next_stream_idx_uni: StreamIndex,
@@ -648,6 +665,8 @@ impl Connection {
             max_data: 0,
             local_max_stream_idx_bidi: StreamIndex::new(LOCAL_STREAM_LIMIT_BIDI),
             local_max_stream_idx_uni: StreamIndex::new(LOCAL_STREAM_LIMIT_UNI),
+            local_next_stream_idx_uni: StreamIndex::new(0),
+            local_next_stream_idx_bidi: StreamIndex::new(0),
             peer_max_stream_idx_bidi: StreamIndex::new(0),
             peer_max_stream_idx_uni: StreamIndex::new(0),
             peer_next_stream_idx_uni: StreamIndex::new(0),
@@ -1210,8 +1229,9 @@ impl Connection {
                 offset,
                 data,
             } => {
-                self.obtain_stream(stream_id.into())?
-                    .inbound_stream_frame(fin, offset, data)?;
+                if let Some(rs) = self.obtain_stream(stream_id.into())? {
+                    rs.inbound_stream_frame(fin, offset, data)?;
+                }
             }
             Frame::MaxData { maximum_data } => self.max_data = max(self.max_data, maximum_data),
             Frame::MaxStreamData {
@@ -1476,48 +1496,63 @@ impl Connection {
     }
 
     /// Get or make a stream.
-    fn obtain_stream(&mut self, stream_id: StreamId) -> Res<&mut RecvStream> {
-        match self.recv_streams.entry(stream_id) {
-            Entry::Occupied(occ) => Ok(occ.into_mut()),
-            Entry::Vacant(vac) => {
-                match (stream_id.is_client_initiated(), self.rol) {
-                    (true, Role::Client) | (false, Role::Server) => {
-                        qwarn!(
-                            "Peer attempted to create local stream: {}",
-                            stream_id.as_u64()
-                        );
-                        return Err(Error::ProtocolViolation);
-                    }
-                    _ => {}
+    fn obtain_stream(&mut self, stream_id: StreamId) -> Res<Option<&mut RecvStream>> {
+        let next_stream_idx = if stream_id.is_bidi() {
+            &mut self.local_next_stream_idx_bidi
+        } else {
+            &mut self.local_next_stream_idx_uni
+        };
+        let stream_idx: StreamIndex = stream_id.into();
+
+        if stream_idx >= *next_stream_idx {
+            // Creating new stream(s)
+            match (stream_id.is_client_initiated(), self.rol) {
+                (true, Role::Client) | (false, Role::Server) => {
+                    qwarn!(
+                        "Peer attempted to create local stream: {}",
+                        stream_id.as_u64()
+                    );
+                    return Err(Error::ProtocolViolation);
                 }
+                _ => {}
+            }
 
-                let stream_idx: StreamIndex = stream_id.into();
-                let recv_initial_max_stream_data = if stream_id.is_bidi() {
-                    if stream_idx > self.local_max_stream_idx_bidi {
-                        return Err(Error::StreamLimitError);
-                    }
-                    self.tps
-                        .borrow()
-                        .local
-                        .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
+            let recv_initial_max_stream_data = if stream_id.is_bidi() {
+                if stream_idx > self.local_max_stream_idx_bidi {
+                    return Err(Error::StreamLimitError);
+                }
+                self.tps
+                    .borrow()
+                    .local
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
+            } else {
+                if stream_idx > self.local_max_stream_idx_uni {
+                    return Err(Error::StreamLimitError);
+                }
+                self.tps
+                    .borrow()
+                    .local
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI)
+            };
+
+            loop {
+                let next_stream_id =
+                    next_stream_idx.to_stream_id(stream_id.stream_type(), stream_id.role());
+                self.recv_streams.insert(
+                    next_stream_id,
+                    RecvStream::new(
+                        next_stream_id,
+                        recv_initial_max_stream_data,
+                        self.flow_mgr.clone(),
+                        self.events.clone(),
+                    ),
+                );
+
+                if next_stream_id.is_uni() {
+                    self.events
+                        .borrow_mut()
+                        .new_stream(next_stream_id, StreamType::UniDi);
                 } else {
-                    if stream_idx > self.local_max_stream_idx_uni {
-                        return Err(Error::StreamLimitError);
-                    }
-                    self.tps
-                        .borrow()
-                        .local
-                        .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI)
-                };
-
-                let new = vac.insert(RecvStream::new(
-                    stream_id,
-                    recv_initial_max_stream_data,
-                    self.flow_mgr.clone(),
-                    self.events.clone(),
-                ));
-
-                if stream_id.is_bidi() {
                     let send_initial_max_stream_data = self
                         .tps
                         .borrow()
@@ -1526,9 +1561,9 @@ impl Connection {
                         .expect("remote tparams are valid when State::Connected")
                         .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
                     self.send_streams.insert(
-                        stream_id.into(),
+                        next_stream_id,
                         SendStream::new(
-                            stream_id,
+                            next_stream_id,
                             send_initial_max_stream_data,
                             self.flow_mgr.clone(),
                             self.events.clone(),
@@ -1536,16 +1571,17 @@ impl Connection {
                     );
                     self.events
                         .borrow_mut()
-                        .new_stream(stream_id, StreamType::BiDi);
-                } else {
-                    self.events
-                        .borrow_mut()
-                        .new_stream(stream_id, StreamType::UniDi);
+                        .new_stream(next_stream_id, StreamType::BiDi);
                 }
 
-                Ok(new)
+                *next_stream_idx += 1;
+                if *next_stream_idx > stream_idx {
+                    break;
+                }
             }
         }
+
+        Ok(self.recv_streams.get_mut(&stream_id))
     }
 
     // Returns new stream id
