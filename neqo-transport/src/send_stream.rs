@@ -428,6 +428,9 @@ impl SendStream {
         flow_mgr: Rc<RefCell<FlowMgr>>,
         conn_events: Rc<RefCell<ConnectionEvents>>,
     ) -> SendStream {
+        if max_stream_data > 0 {
+            conn_events.borrow_mut().send_stream_writable(stream_id);
+        }
         SendStream {
             stream_id,
             max_stream_data,
