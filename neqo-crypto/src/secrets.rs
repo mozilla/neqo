@@ -10,6 +10,7 @@ use crate::p11::{PK11SymKey, PK11_ReferenceSymKey, SymKey};
 use crate::result;
 use crate::ssl::{PRFileDesc, SSLSecretCallback, SSLSecretDirection};
 
+use neqo_common::qdebug;
 use std::os::raw::c_void;
 use std::ptr::NonNull;
 
@@ -71,7 +72,7 @@ impl Secrets {
     }
 
     pub fn put(&mut self, dir: SecretDirection, epoch: Epoch, key: SymKey) {
-        println!("{:?} secret for {:?}", dir, epoch);
+        qdebug!("{:?} secret available for {:?}", dir, epoch);
         let keys = match dir {
             SecretDirection::Read => &mut self.r,
             SecretDirection::Write => &mut self.w,

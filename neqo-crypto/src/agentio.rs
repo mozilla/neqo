@@ -10,6 +10,7 @@ use crate::prio;
 use crate::result;
 use crate::ssl;
 
+use neqo_common::{hex, qtrace};
 use std::cmp::min;
 use std::fmt;
 use std::mem;
@@ -51,7 +52,7 @@ impl Record {
 
     // Shoves this record into the socket, returns true if blocked.
     fn write(self, fd: *mut ssl::PRFileDesc) -> Res<()> {
-        println!("write record {:?}", self);
+        qtrace!("write {:?}", self);
         let rv = unsafe {
             ssl::SSL_RecordLayerData(
                 fd,
@@ -69,10 +70,10 @@ impl fmt::Debug for Record {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "Record {:?}:{:?} [{:?}]",
+            "Record {:?}:{:?} {}",
             self.epoch,
             self.ct,
-            self.data.len()
+            hex("", &self.data[..])
         )
     }
 }
@@ -156,6 +157,7 @@ impl AgentIoInput {
         assert!(self.input.is_null());
         self.input = input.as_ptr();
         self.available = input.len();
+        qtrace!("AgentIoInput wrap {:p}", self.input);
         AgentIoInputContext { input: self }
     }
 
@@ -168,6 +170,7 @@ impl AgentIoInput {
         }
 
         let src = unsafe { std::slice::from_raw_parts(self.input, amount) };
+        qtrace!(self, "{}", hex("read", src));
         let dst = unsafe { std::slice::from_raw_parts_mut(buf, amount) };
         dst.copy_from_slice(&src);
         self.input = self.input.wrapping_offset(amount as isize);
@@ -176,8 +179,15 @@ impl AgentIoInput {
     }
 
     fn reset(&mut self) {
+        qtrace!(self, "reset");
         self.input = null();
         self.available = 0;
+    }
+}
+
+impl ::std::fmt::Display for AgentIoInput {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "AgentIoInput {:p}", self.input)
     }
 }
 
@@ -212,13 +222,21 @@ impl AgentIo {
     }
 
     // Stage output from TLS into the output buffer.
-    fn write_output(&mut self, buf: *const u8, count: usize) {
+    fn save_output(&mut self, buf: *const u8, count: usize) {
         let slice = unsafe { std::slice::from_raw_parts(buf, count) };
+        qtrace!(self, "{}", hex("save output", slice));
         self.output.extend_from_slice(slice);
     }
 
     pub fn take_output(&mut self) -> Vec<u8> {
+        qtrace!(self, "take output");
         mem::replace(&mut self.output, Vec::new())
+    }
+}
+
+impl ::std::fmt::Display for AgentIo {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "AgentIo")
     }
 }
 
@@ -263,7 +281,7 @@ unsafe extern "C" fn agent_write(fd: PrFd, buf: *const c_void, amount: prio::PRI
     if amount <= 0 {
         return PR_FAILURE;
     }
-    io.write_output(buf as *const u8, amount as usize);
+    io.save_output(buf as *const u8, amount as usize);
     amount as prio::PRInt32
 }
 
@@ -275,12 +293,11 @@ unsafe extern "C" fn agent_send(
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
     let io = AgentIo::borrow(&fd);
-    println!("send fd {:p} io {:p} amount {:?}", fd, &io, amount);
 
     if amount <= 0 || flags != 0 {
         return PR_FAILURE;
     }
-    io.write_output(buf as *const u8, amount as usize);
+    io.save_output(buf as *const u8, amount as usize);
     amount as prio::PRInt32
 }
 

@@ -17,7 +17,7 @@ use crate::result;
 use crate::secrets::Secrets;
 use crate::ssl;
 
-use neqo_common::qinfo;
+use neqo_common::{qdebug, qinfo, qwarn};
 use std::cell::RefCell;
 use std::ffi::CString;
 use std::mem;
@@ -63,7 +63,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
         }
         _ => None,
     };
-    qinfo!("got ALPN {:?}", alpn);
+    qinfo!([format!("{:p}", fd)] "got ALPN {:?}", alpn);
     Ok(alpn)
 }
 
@@ -253,7 +253,7 @@ impl SecretAgent {
     }
 
     unsafe extern "C" fn alert_sent_cb(
-        _fd: *const ssl::PRFileDesc,
+        fd: *const ssl::PRFileDesc,
         arg: *mut c_void,
         alert: *const ssl::SSLAlert,
     ) {
@@ -267,7 +267,7 @@ impl SecretAgent {
                     *st = Some(alert.description);
                 }
                 _ => {
-                    // TODO(mt): Log duplicate alerts.
+                    qwarn!([format!("{:p}", fd)] "duplicate alert {}", alert.description);
                 }
             }
         }
@@ -502,12 +502,13 @@ impl SecretAgent {
                 HandshakeState::Complete
             }
         };
-        println!("{:?} state = {:?}", self.fd, &self.st);
+        qinfo!(self, "state -> {:?}", self.st);
         Ok(())
     }
 
     fn set_failed(&mut self) -> Error {
         let e = result::result(ssl::SECFailure).unwrap_err();
+        qwarn!(self, "error: {:?}", e);
         self.st = HandshakeState::Failed(e.clone());
         return e;
     }
@@ -564,7 +565,7 @@ impl SecretAgent {
         // Fire off any authentication we might need to complete.
         if self.st == HandshakeState::Authenticated {
             let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
-            println!("SSL_AuthCertificateComplete: {:?}", rv);
+            qdebug!(self, "SSL_AuthCertificateComplete: {:?}", rv);
             self.update_state(rv)?;
             if self.st == HandshakeState::Complete {
                 return Ok((self.st.clone(), *records));
@@ -600,7 +601,13 @@ impl SecretAgent {
     }
 }
 
-// A TLS Client.
+impl ::std::fmt::Display for SecretAgent {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Agent {:p}", self.fd)
+    }
+}
+
+/// A TLS Client.
 #[derive(Debug)]
 pub struct Client {
     agent: SecretAgent,

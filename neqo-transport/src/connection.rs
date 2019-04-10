@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use neqo_common::data::Data;
 use neqo_common::varint::*;
-use neqo_common::{matches, qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{matches, hex, qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::constants::*;
 use neqo_crypto::hkdf;
@@ -31,7 +31,7 @@ use crate::send_stream::{SendStream, TxBuffer};
 use crate::tparams::consts::*;
 use crate::tparams::TransportParametersHandler;
 use crate::tracking::RecvdPackets;
-use crate::{hex, AppError, ConnectionError, Error, Recvable, Res, Sendable};
+use crate::{AppError, ConnectionError, Error, Recvable, Res, Sendable};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
