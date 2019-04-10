@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![allow(dead_code)]
+use neqo_common::{qinfo, qtrace};
 use neqo_crypto::constants::Epoch;
 use std::cmp::{max, min};
 use std::collections::HashMap;

@@ -11,6 +11,7 @@ use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
 
+use neqo_common::{qerror, qtrace, qwarn};
 use slice_deque::SliceDeque;
 
 use crate::connection::{ConnectionEvents, FlowMgr, StreamId, TxMode};

@@ -6,12 +6,7 @@
 
 #![deny(warnings)]
 
-#[macro_use]
-extern crate neqo_common;
-
-#[macro_use]
-extern crate log;
-
+use neqo_common::qinfo;
 use neqo_crypto;
 
 pub mod connection;
@@ -23,7 +18,6 @@ pub mod recv_stream;
 pub mod send_stream;
 mod tparams;
 mod tracking;
-use log::Level;
 
 pub use self::connection::{Connection, Datagram, State};
 pub use recv_stream::Recvable;

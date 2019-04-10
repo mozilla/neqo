@@ -8,9 +8,9 @@
 use crate::connection::{Role, QUIC_VERSION};
 use crate::hex;
 use crate::{Error, Res};
-use log::Level;
 use neqo_common::data::*;
 use neqo_common::varint::*;
+use neqo_common::{qdebug, qtrace};
 use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
 use neqo_crypto::{HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS};
 use std::collections::HashMap;
@@ -36,7 +36,7 @@ pub mod consts {
     pub const TRANSPORT_PARAMETER_PREFERRED_ADDRESS: u16 = 13;
 }
 
-use consts::*;
+use self::consts::*;
 
 #[derive(PartialEq, Debug)]
 pub enum TransportParameter {
@@ -68,7 +68,7 @@ impl TransportParameter {
     fn decode(d: &mut Data) -> Res<(u16, TransportParameter)> {
         let tipe = d.decode_uint(2)? as u16;
         let length = d.decode_uint(2)? as usize;
-        log!(Level::Trace, "TP {:x} length {:x}", tipe, length);
+        qtrace!("TP {:x} length {:x}", tipe, length);
         let remaining = d.remaining();
         // TODO(ekr@rtfm.com): Sure would be nice to have a version
         // of Data that returned another data that was a slice on
@@ -170,15 +170,10 @@ impl TransportParameters {
             }
         }
 
-        log!(Level::Trace, "Parsed fixed TP header");
+        qtrace!("Parsed fixed TP header");
 
         let l = d.decode_uint(2)?;
-        log!(
-            Level::Trace,
-            "Remaining bytes: needed {} remaining {}",
-            l,
-            d.remaining()
-        );
+        qtrace!("Remaining bytes: needed {} remaining {}", l, d.remaining());
         let tmp = d.decode_data(l as usize)?;
         if d.remaining() > 0 {
             return Err(Error::UnknownTransportParameter);
@@ -280,7 +275,7 @@ impl ExtensionHandler for TransportParametersHandler {
             _ => return ExtensionWriterResult::Skip,
         };
 
-        log!(Level::Debug, "Writing transport parameters, msg={:?}", msg);
+        qdebug!("Writing transport parameters, msg={:?}", msg);
 
         // TODO(ekr@rtfm.com): Modify to avoid a copy.
         let mut buf = Data::default();
@@ -293,8 +288,7 @@ impl ExtensionHandler for TransportParametersHandler {
     }
 
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
-        log!(
-            Level::Debug,
+        qdebug!(
             "Handling transport parameters, msg={:?} {}",
             msg,
             hex("Value", d),

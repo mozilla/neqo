@@ -17,6 +17,7 @@ use crate::result;
 use crate::secrets::Secrets;
 use crate::ssl;
 
+use neqo_common::qinfo;
 use std::cell::RefCell;
 use std::ffi::CString;
 use std::mem;
@@ -62,6 +63,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
         }
         _ => None,
     };
+    qinfo!("got ALPN {:?}", alpn);
     Ok(alpn)
 }
 

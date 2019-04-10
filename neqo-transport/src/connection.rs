@@ -5,7 +5,6 @@
 // except according to those terms.
 
 #![allow(unused_variables, dead_code)]
-use log::Level;
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
@@ -17,6 +16,7 @@ use std::rc::Rc;
 
 use neqo_common::data::Data;
 use neqo_common::varint::*;
+use neqo_common::{matches, qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::constants::*;
 use neqo_crypto::hkdf;
@@ -426,7 +426,7 @@ struct CryptoDxState {
 
 impl CryptoDxState {
     fn new<S: Into<String>>(label: S, secret: &SymKey, cipher: Cipher) -> CryptoDxState {
-        log!(Level::Info, "Making CryptoDxState, cipher={}", cipher);
+        qinfo!("Making CryptoDxState, cipher={}", cipher);
         CryptoDxState {
             label: label.into(),
             aead: Aead::new(TLS_VERSION_1_3, cipher, secret, "quic ").unwrap(),
@@ -1794,18 +1794,12 @@ impl ::std::fmt::Display for Connection {
 impl CryptoCtx for CryptoDxState {
     fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
         let mask = self.hpkey.mask(sample)?;
-        log!(
-            Level::Debug,
-            "HP {} {}",
-            hex("sample", sample),
-            hex("mask", &mask)
-        );
+        qdebug!("HP {} {}", hex("sample", sample), hex("mask", &mask));
         Ok(mask)
     }
 
     fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-        log!(
-            Level::Info,
+        qinfo!(
             "aead_decrypt label={} pn={} {} {}",
             &self.label,
             pn,
@@ -1819,8 +1813,7 @@ impl CryptoCtx for CryptoDxState {
     }
 
     fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-        log!(
-            Level::Info,
+        qinfo!(
             "aead_encrypt label={} pn={} {} {}",
             self.label,
             pn,
@@ -1833,7 +1826,7 @@ impl CryptoCtx for CryptoDxState {
         out.resize(size, 0);
         let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
 
-        log!(Level::Debug, "aead_encrypt {}", hex("ct", res),);
+        qdebug!("aead_encrypt {}", hex("ct", res),);
 
         Ok(res.to_vec())
     }
@@ -2161,7 +2154,7 @@ impl LossRecovery {
         cur_time_nanos: u64,
     ) {
         let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
-        log!(Level::Debug, "LossRecovery: packet {} sent.", packet_number);
+        qdebug!(self, "packet {} sent.", packet_number);
         self.sent_packets[pn_space as usize].insert(
             packet_number,
             SentPacket {
@@ -2192,11 +2185,7 @@ impl LossRecovery {
         cur_time_nanos: u64,
     ) -> (Vec<SentPacket>, Vec<SentPacket>) {
         let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
-        log!(
-            Level::Debug,
-            "LossRecovery: ack received - largest_acked={}.",
-            largest_acked
-        );
+        qdebug!(self, "ack received - largest_acked={}.", largest_acked);
         if self.largest_acked_packet[pn_space as usize] < largest_acked {
             self.largest_acked_packet[pn_space as usize] = largest_acked;
         }
@@ -2216,7 +2205,7 @@ impl LossRecovery {
         for r in acked_ranges {
             for pn in r.1..r.0 + 1 {
                 if let Some(sent_packet) = self.sent_packets[pn_space as usize].remove(&pn) {
-                    log!(Level::Debug, "LossRecovery: acked={}", pn);
+                    qdebug!(self, "acked={}", pn);
                     acked_packets.push(sent_packet);
                 }
             }
@@ -2283,9 +2272,9 @@ impl LossRecovery {
             0
         };
 
-        log!(
-            Level::Debug,
-            "LossRecovery: detect lost packets - time={}, pn={}",
+        qdebug!(
+            self,
+            "detect lost packets - time={}, pn={}",
             lost_send_time,
             lost_pn
         );
@@ -2296,7 +2285,7 @@ impl LossRecovery {
             // Mark packet as lost, or set time when it should be marked.
             if *iter.0 <= self.largest_acked_packet[pn_space as usize] {
                 if iter.1.time_sent <= lost_send_time || *iter.0 <= lost_pn {
-                    log!(Level::Debug, "LossRecovery: lost={}.", iter.0);
+                    qdebug!("lost={}", iter.0);
                     lost.push(*iter.0);
                 } else {
                     if self.loss_time[pn_space as usize] == 0 {
@@ -2325,7 +2314,7 @@ impl LossRecovery {
     }
 
     fn set_loss_detection_timer(&mut self) {
-        log!(Level::Debug, "LossRecovery: set_loss_detection_timer.");
+        qdebug!(self, "set_loss_detection_timer.");
         let mut has_crypto_out = false;
         let mut has_ack_eliciting_out = false;
 
@@ -2350,9 +2339,9 @@ impl LossRecovery {
             }
         }
 
-        log!(
-            Level::Debug,
-            "LossRecovery: has_ack_eliciting_out={} has_crypto_out={}",
+        qdebug!(
+            self,
+            "has_ack_eliciting_out={} has_crypto_out={}",
             has_ack_eliciting_out,
             has_crypto_out
         );
@@ -2375,11 +2364,7 @@ impl LossRecovery {
             timeout = timeout * 2u64.pow(self.pto_count);
             self.loss_detection_timer = self.time_of_last_sent_ack_eliciting_packet + timeout;
         }
-        log!(
-            Level::Debug,
-            "LossRecovery: loss_detection_timer={}",
-            self.loss_detection_timer
-        );
+        qdebug!(self, "loss_detection_timer={}", self.loss_detection_timer);
     }
 
     fn set_timer_for_crypto_retransmission(&mut self) {
@@ -2482,6 +2467,12 @@ impl LossRecovery {
             //retransmit_unacked_crypto,
             //send_one_or_two_packets,
         )
+    }
+}
+
+impl ::std::fmt::Display for LossRecovery {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "LossRecovery")
     }
 }
 

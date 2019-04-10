@@ -12,7 +12,6 @@ use crate::qpack_helper::{
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
-use log::Level;
 use neqo_transport::{Recvable, Sendable};
 use std::{mem, str};
 
@@ -84,7 +83,7 @@ pub struct QPackDecoder {
 
 impl QPackDecoder {
     pub fn new(max_table_size: u32, max_blocked_streams: u16) -> QPackDecoder {
-        log!(Level::Debug, "Decoder: creating a new qpack decoder.");
+        qdebug!("Decoder: creating a new qpack decoder.");
         QPackDecoder {
             state: QPackDecoderState::ReadInstruction,
             table: HeaderTable::new(false),
@@ -127,7 +126,8 @@ impl QPackDecoder {
     }
 
     fn read_instructions(&mut self, s: &mut Recvable) -> Res<()> {
-        log!(Level::Debug, "Decoder: reading instructions");
+        let label = self.to_string();
+        qdebug!(self, "reading instructions");
         loop {
             match self.state {
                 QPackDecoderState::ReadInstruction => {
@@ -203,11 +203,7 @@ impl QPackDecoder {
                             s, &mut v, &mut cnt, 3, b[0], true,
                         )?;
                         if done {
-                            log!(
-                                Level::Debug,
-                                "Decoder: receiced instruction - duplicate index={}",
-                                v
-                            );
+                            qdebug!(label, "received instruction - duplicate index={}", v);
                             self.table.duplicate(v)?;
                             self.total_num_of_inserts += 1;
                             self.increment += 1;
@@ -283,7 +279,7 @@ impl QPackDecoder {
                                 // We are done reading instruction, insert the new entry.
                                 let mut value_to_insert: Vec<u8> = Vec::new();
                                 mem::swap(&mut value_to_insert, value);
-                                log!(Level::Debug, "Decoder: received instruction - insert with name ref index={} static={} value={:x?}", name_index, name_static_table, value_to_insert);
+                                qdebug!(label, "received instruction - insert with name ref index={} static={} value={:x?}", name_index, name_static_table, value_to_insert);
                                 self.table.insert_with_name_ref(
                                     *name_static_table,
                                     *name_index,
@@ -379,7 +375,7 @@ impl QPackDecoder {
                                 } else {
                                     mem::swap(&mut value_to_insert, value);
                                 }
-                                log!(Level::Debug, "Decoder: received instruction - insert with name literal name={:x?} value={:x?}", name_to_insert, value_to_insert);
+                                qdebug!(label, "received instruction - insert with name literal name={:x?} value={:x?}", name_to_insert, value_to_insert);
                                 self.table.insert(name_to_insert, value_to_insert)?;
                                 self.total_num_of_inserts += 1;
                                 self.increment += 1;
@@ -398,11 +394,7 @@ impl QPackDecoder {
                     let done =
                         read_prefixed_encoded_int_with_recvable_wrap(s, index, cnt, 0, 0x0, false)?;
                     if done {
-                        log!(
-                            Level::Debug,
-                            "Decoder: received instruction - duplicate index={}",
-                            index
-                        );
+                        qdebug!(label, "received instruction - duplicate index={}", index);
                         self.table.duplicate(*index)?;
                         self.total_num_of_inserts += 1;
                         self.increment += 1;
@@ -433,11 +425,7 @@ impl QPackDecoder {
     }
 
     fn set_capacity(&mut self, cap: u64) -> Res<()> {
-        log!(
-            Level::Debug,
-            "Decoder: received instruction capacity cap={}",
-            cap
-        );
+        qdebug!(self, "received instruction capacity cap={}", cap);
         if cap > self.max_table_size as u64 {
             return Err(Error::EncoderStreamError);
         }
@@ -477,23 +465,23 @@ impl QPackDecoder {
         buf: &[u8],
         stream_id: u64,
     ) -> Res<Option<Vec<(String, String)>>> {
-        log!(Level::Debug, "Decoder: decode header block.");
+        qdebug!(self, "decode header block.");
         let mut reader = BufWrapper {
             buf: buf,
             offset: 0,
         };
 
         let (req_inserts, base) = self.read_base(&mut reader)?;
-        log!(
-            Level::Debug,
-            "Decoder: requested inserts count is {} and base is {}",
+        qdebug!(
+            self,
+            "requested inserts count is {} and base is {}",
             req_inserts,
             base
         );
         if self.table.base() < req_inserts {
-            log!(
-                Level::Debug,
-                "Decoder: stream is blocked stream_id={} requested inserts count={}",
+            qdebug!(
+                self,
+                "stream is blocked stream_id={} requested inserts count={}",
                 stream_id,
                 req_inserts
             );
@@ -511,7 +499,7 @@ impl QPackDecoder {
                 if req_inserts != 0 {
                     self.header_ack(stream_id);
                 }
-                log!(Level::Debug, "Decoder: done decoding header block.");
+                qdebug!(self, "done decoding header block.");
                 break Ok(Some(h));
             }
 
@@ -551,12 +539,7 @@ impl QPackDecoder {
     fn read_indexed(&self, buf: &mut BufWrapper, base: u64) -> Res<(String, String)> {
         let static_table = buf.peek()? & 0x40 != 0;
         let index = read_prefixed_encoded_int_slice(buf, 2)?;
-        log!(
-            Level::Debug,
-            "Decoder: decoder indexed {} static={}.",
-            index,
-            static_table
-        );
+        qdebug!(self, "decoder indexed {} static={}.", index, static_table);
         if static_table {
             match self.table.get_static(index) {
                 Ok(entry) => Ok((to_string(entry.name())?, to_string(entry.value())?)),
@@ -573,7 +556,7 @@ impl QPackDecoder {
 
     fn read_post_base_index(&self, buf: &mut BufWrapper, base: u64) -> Res<(String, String)> {
         let index = read_prefixed_encoded_int_slice(buf, 4)?;
-        log!(Level::Debug, "Decoder: decode post-based {}.", index);
+        qdebug!(self, "decode post-based {}.", index);
         if let Ok(entry) = self.table.get_dynamic(index, base, true) {
             Ok((to_string(entry.name())?, to_string(entry.value())?))
         } else {
@@ -582,7 +565,7 @@ impl QPackDecoder {
     }
 
     fn read_literal_with_name_ref(&self, buf: &mut BufWrapper, base: u64) -> Res<(String, String)> {
-        log!(Level::Debug, "Decoder: insert with name reference.");
+        qdebug!(self, "insert with name reference.");
         // ignore n bit.
         let static_table = buf.peek()? & 0x10 != 0;
         let index = read_prefixed_encoded_int_slice(buf, 4)?;
@@ -611,9 +594,9 @@ impl QPackDecoder {
         } else {
             value.extend_from_slice(buf.slice(value_len)?);
         }
-        log!(
-            Level::Debug,
-            "Decoder: name index={} static={} value={:x?}.",
+        qdebug!(
+            self,
+            "name index={} static={} value={:x?}.",
             index,
             static_table,
             value
@@ -626,10 +609,7 @@ impl QPackDecoder {
         buf: &mut BufWrapper,
         base: u64,
     ) -> Res<(String, String)> {
-        log!(
-            Level::Debug,
-            "Decoder: decoder literal with post-based index."
-        );
+        qdebug!(self, "decoder literal with post-based index.");
         // ignore n bit.
         let index = read_prefixed_encoded_int_slice(buf, 5)?;
         let mut name: Vec<u8>;
@@ -649,17 +629,12 @@ impl QPackDecoder {
             value.extend_from_slice(buf.slice(value_len)?);
         }
 
-        log!(
-            Level::Debug,
-            "Decoder: name={:x?} value={:x?}.",
-            name,
-            value
-        );
+        qdebug!(self, "name={:x?} value={:x?}.", name, value);
         Ok((to_string(&name)?, to_string(&value)?))
     }
 
     fn read_literal_with_name_literal(&self, buf: &mut BufWrapper) -> Res<(String, String)> {
-        log!(Level::Debug, "Decoder: decode literal with name literal.");
+        qdebug!(self, "decode literal with name literal.");
         // ignore n bit.
 
         let name_is_huffman = buf.peek()? & 0x08 != 0;
@@ -682,12 +657,7 @@ impl QPackDecoder {
             value.extend_from_slice(buf.slice(value_len)?);
         }
 
-        log!(
-            Level::Debug,
-            "Decoder: name={:x?} value={:x?}.",
-            name,
-            value
-        );
+        qdebug!(self, "name={:x?} value={:x?}.", name, value);
         Ok((to_string(&name)?, to_string(&value)?))
     }
 
@@ -750,6 +720,12 @@ impl QPackDecoder {
             Some(_) => true,
             None => false,
         }
+    }
+}
+
+impl ::std::fmt::Display for QPackDecoder {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "QPackDecoder {}", self.capacity())
     }
 }
 

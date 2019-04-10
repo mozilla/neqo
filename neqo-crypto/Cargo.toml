@@ -10,7 +10,8 @@ default = []
 chacha = ["default"]
 
 [dependencies]
-neqo-common = { version = "0.1", path = "../neqo-common" }
+neqo-common = { path = "../neqo-common" }
+log = "0.4.0"
 
 [build-dependencies]
 bindgen = "0.46"

@@ -11,6 +11,7 @@ use derive_more::*;
 
 use super::*;
 use neqo_common::data::*;
+use neqo_common::{matches, qtrace};
 
 use crate::nss_stub::Epoch;
 
@@ -295,7 +296,7 @@ pub fn decrypt_packet(
     let pn_len = decode_pnl((hdr.tbyte ^ mask[0]) & 0x3);
     let mut hdrbytes = pkt[0..(hdr.hdr_len + pn_len)].to_vec();
 
-    log!(Level::Trace, "{}", hex("masked hdr", &hdrbytes));
+    qtrace!("{}", hex("masked hdr", &hdrbytes));
     // Un-mask the leading byte.
     hdrbytes[0] ^= mask[0]
         & match hdr.tipe {
@@ -310,7 +311,7 @@ pub fn decrypt_packet(
         pn_encoded <<= 8;
         pn_encoded += hdrbytes[hdr.hdr_len + i] as u64;
     }
-    log!(Level::Trace, "{}", hex("Unmasked hdr", &hdrbytes));
+    qtrace!("{}", hex("Unmasked hdr", &hdrbytes));
     hdr.hdr_len += pn_len;
     hdr.body_len -= pn_len;
 
@@ -372,7 +373,7 @@ fn encrypt_packet(crypto: &CryptoCtx, hdr: &mut PacketHdr, d: &mut Data, body: &
     let ct = crypto.aead_encrypt(hdr.pn, d.as_mut_vec(), body).unwrap();
     d.encode_vec(&ct);
     let ret = d.as_mut_vec();
-    log!(Level::Trace, "{}", hex("unmasked hdr", &ret[0..hdr_len]));
+    qtrace!("{}", hex("unmasked hdr", &ret[0..hdr_len]));
     let pn_start = hdr_len - pn_length(hdr.pn);
     let mask = crypto
         .compute_mask(&ret[pn_start + 4..pn_start + SAMPLE_SIZE + 4])
@@ -385,7 +386,7 @@ fn encrypt_packet(crypto: &CryptoCtx, hdr: &mut PacketHdr, d: &mut Data, body: &
     for i in 0..pn_length(hdr.pn) {
         ret[pn_start + i] ^= mask[i + 1];
     }
-    log!(Level::Trace, "{}", hex("masked hdr", &ret[0..hdr_len]));
+    qtrace!("{}", hex("masked hdr", &ret[0..hdr_len]));
     ret.to_vec()
 }
 

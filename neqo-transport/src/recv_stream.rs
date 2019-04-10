@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use crate::connection::{ConnectionEvents, FlowMgr, StreamId};
 use crate::{AppError, Error, Res};
+use neqo_common::qtrace;
 
 pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
 
