@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use neqo_common::data::Data;
 use neqo_common::varint::*;
-use neqo_common::{matches, hex, qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{hex, matches, qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::constants::*;
 use neqo_crypto::hkdf;
