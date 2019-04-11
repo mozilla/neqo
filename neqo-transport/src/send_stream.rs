@@ -362,6 +362,7 @@ enum SendStreamState {
 }
 
 impl SendStreamState {
+    #[cfg(test)]
     fn tx_buf(&self) -> Option<&TxBuffer> {
         match self {
             SendStreamState::Send { send_buf } => Some(send_buf),
@@ -554,10 +555,11 @@ impl Sendable for SendStream {
     }
 
     fn send_data_ready(&self) -> bool {
-        self.state
-            .tx_buf()
-            .map(|buf| buf.data_ready())
-            .unwrap_or(false)
+        match self.state {
+            SendStreamState::Ready => true,
+            SendStreamState::Send { ref send_buf } => send_buf.data_ready(),
+            _ => false,
+        }
     }
 
     fn close(&mut self) {
