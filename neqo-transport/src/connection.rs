@@ -1959,40 +1959,38 @@ impl FrameGenerator for StreamGenerator {
         }
 
         for (stream_id, stream) in &mut conn.send_streams {
-            if stream.send_data_ready() {
-                let fin = stream.final_size();
-                if let Some((offset, data)) = stream.next_bytes(mode) {
-                    qtrace!(
-                        "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
-                        stream_id.as_u64(),
-                        offset,
-                        offset + data.len() as u64,
-                        epoch,
-                        mode,
-                        remaining
-                    );
-                    let frame_hdr_len = stream_frame_hdr_len(*stream_id, offset, remaining);
-                    let data_len = min(data.len(), remaining - frame_hdr_len);
-                    let fin = match fin {
-                        None => false,
-                        Some(fin) => fin == offset + data_len as u64,
-                    };
-                    let frame = Frame::Stream {
-                        fin,
-                        stream_id: stream_id.as_u64(),
-                        offset,
-                        data: data[..data_len].to_vec(),
-                    };
-                    stream.mark_as_sent(offset, data_len);
-                    return Some((
-                        frame,
-                        Some(Box::new(StreamGeneratorToken {
-                            id: *stream_id,
-                            offset: offset,
-                            length: data_len as u64,
-                        })),
-                    ));
-                }
+            let fin = stream.final_size();
+            if let Some((offset, data)) = stream.next_bytes(mode) {
+                qtrace!(
+                    "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
+                    stream_id.as_u64(),
+                    offset,
+                    offset + data.len() as u64,
+                    epoch,
+                    mode,
+                    remaining
+                );
+                let frame_hdr_len = stream_frame_hdr_len(*stream_id, offset, remaining);
+                let data_len = min(data.len(), remaining - frame_hdr_len);
+                let fin = match fin {
+                    None => false,
+                    Some(fin) => fin == offset + data_len as u64,
+                };
+                let frame = Frame::Stream {
+                    fin,
+                    stream_id: stream_id.as_u64(),
+                    offset,
+                    data: data[..data_len].to_vec(),
+                };
+                stream.mark_as_sent(offset, data_len);
+                return Some((
+                    frame,
+                    Some(Box::new(StreamGeneratorToken {
+                        id: *stream_id,
+                        offset: offset,
+                        length: data_len as u64,
+                    })),
+                ));
             }
         }
         None
@@ -2633,11 +2631,10 @@ mod tests {
         assert_eq!(received, 140);
         assert_eq!(fin, false);
 
-        // TODO(agrover) : fix this: iter.next() on the next line returns None.
-        // let (stream_id, stream) = iter.next().unwrap();
-        // let (received, fin) = stream.read(&mut buf).unwrap();
-        // assert_eq!(received, 60);
-        // assert_eq!(fin, true);
+        let (stream_id, stream) = iter.next().unwrap();
+        let (received, fin) = stream.read(&mut buf).unwrap();
+        assert_eq!(received, 60);
+        assert_eq!(fin, true);
     }
 
     /// Drive the handshake between the client and server.
