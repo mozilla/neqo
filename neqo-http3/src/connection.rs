@@ -54,7 +54,7 @@ impl Request {
         scheme: &str,
         host: &str,
         path: &str,
-        headers: &Vec<(String, String)>,
+        headers: &[(String, String)],
     ) -> Request {
         let mut r = Request {
             method: method.to_owned(),
@@ -68,7 +68,7 @@ impl Request {
         r.headers.push((":scheme".into(), r.scheme.clone()));
         r.headers.push((":authority".into(), r.host.clone()));
         r.headers.push((":path".into(), r.path.clone()));
-        r.headers.extend_from_slice(&headers);
+        r.headers.extend_from_slice(headers);
         r
     }
 
@@ -157,7 +157,7 @@ impl ClientRequest {
         scheme: &str,
         host: &str,
         path: &str,
-        headers: &Vec<(String, String)>,
+        headers: &[(String, String)],
     ) -> ClientRequest {
         qdebug!("Create a request stream_id={}", stream_id);
         ClientRequest {
@@ -681,7 +681,7 @@ impl HttpConn {
         scheme: &str,
         host: &str,
         path: &str,
-        headers: &Vec<(String, String)>,
+        headers: &[(String, String)],
     ) -> Res<()> {
         let id = self.conn.stream_create(StreamType::BiDi)?;
         self.client_requests.insert(
