@@ -112,7 +112,7 @@ impl ReadBuf {
 
     // We need to propagate fin as well.
     // returns number of read byte and bool (stream has been closed or not)
-    pub fn get<T: Reader>(&mut self, reader: &mut T) -> Res<(u64, bool)> {
+    pub fn get(&mut self, reader: &mut Reader) -> Res<(u64, bool)> {
         let r = self.read(reader)?;
         if self.len == self.offset {
             self.state = ReadBufState::Done;
