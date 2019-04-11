@@ -1109,7 +1109,7 @@ impl Connection {
 
         let mut m = self.tls.handshake_raw(0, rec);
 
-        if matches!(m, Ok((HandshakeState::AuthenticationPending, _))) {
+        if matches!(m, Ok(_)) && *self.tls.state() == HandshakeState::AuthenticationPending {
             // TODO(ekr@rtfm.com): IMPORTANT: This overrides
             // authentication and so is fantastically dangerous.
             // Fix before shipping.
@@ -1125,7 +1125,7 @@ impl Connection {
                     _ => Error::CryptoError(e),
                 });
             }
-            Ok((_, msgs)) => {
+            Ok(msgs) => {
                 for m in msgs {
                     qdebug!(self, "Inserting message {:?}", m);
                     assert_eq!(m.ct, 22);
@@ -1133,7 +1133,7 @@ impl Connection {
                 }
             }
         }
-        if *self.tls.state() == HandshakeState::Complete {
+        if self.tls.state().connected() {
             qinfo!(self, "TLS handshake completed");
             self.set_state(State::Connected);
 

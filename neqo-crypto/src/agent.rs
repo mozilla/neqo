@@ -32,8 +32,17 @@ pub enum HandshakeState {
     InProgress,
     AuthenticationPending,
     Authenticated,
-    Complete,
+    Complete(SecretAgentInfo),
     Failed(Error),
+}
+
+impl HandshakeState {
+    pub fn connected(&self) -> bool {
+        match self {
+            HandshakeState::Complete(_) => true,
+            _ => false,
+        }
+    }
 }
 
 fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
@@ -123,7 +132,7 @@ impl SecretAgentPreInfo {
     );
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SecretAgentInfo {
     ver: Version,
     cipher: Cipher,
@@ -176,7 +185,7 @@ pub struct SecretAgent {
     secrets: Secrets,
     raw: Option<bool>,
     io: Box<AgentIo>,
-    st: HandshakeState,
+    state: HandshakeState,
 
     /// Records whether authentication of certificates is required.
     auth_required: Box<bool>,
@@ -196,7 +205,7 @@ impl SecretAgent {
             secrets: Default::default(),
             raw: None,
             io: Box::new(AgentIo::new()),
-            st: HandshakeState::New,
+            state: HandshakeState::New,
 
             auth_required: Box::new(false),
             alert: Box::new(None),
@@ -443,13 +452,15 @@ impl SecretAgent {
         }
     }
 
-    /// Get information about the connection.  This includes the version, ciphersuite, and ALPN.
+    /// Get information about the connection.
+    /// This includes the version, ciphersuite, and ALPN.
     ///
     /// Calling this function returns None until the connection is complete.
     pub fn info(&self) -> Option<&SecretAgentInfo> {
-        // TODO(mt) consider whether this info should instead be attached
-        // to the Completed state.
-        self.inf.as_ref()
+        match self.state {
+            HandshakeState::Complete(ref info) => Some(info),
+            _ => None,
+        }
     }
 
     /// Get any preliminary information about the status of the connection.
@@ -486,30 +497,27 @@ impl SecretAgent {
     /// Only call this function if handshake/handshake_raw returns
     /// HandshakeState::AuthenticationPending, or it will panic.
     pub fn authenticated(&mut self) {
-        assert_eq!(self.st, HandshakeState::AuthenticationPending);
+        assert_eq!(self.state, HandshakeState::AuthenticationPending);
         *self.auth_required = false;
-        self.st = HandshakeState::Authenticated;
+        self.state = HandshakeState::Authenticated;
     }
 
     fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
-        self.st = match result::result_or_blocked(rv)? {
+        self.state = match result::result_or_blocked(rv)? {
             true => match *self.auth_required {
                 true => HandshakeState::AuthenticationPending,
                 false => HandshakeState::InProgress,
             },
-            false => {
-                self.inf = Some(SecretAgentInfo::new(self.fd)?);
-                HandshakeState::Complete
-            }
+            false => HandshakeState::Complete(SecretAgentInfo::new(self.fd)?)
         };
-        qinfo!(self, "state -> {:?}", self.st);
+        qinfo!(self, "state -> {:?}", self.state);
         Ok(())
     }
 
     fn set_failed(&mut self) -> Error {
         let e = result::result(ssl::SECFailure).unwrap_err();
         qwarn!(self, "error: {:?}", e);
-        self.st = HandshakeState::Failed(e.clone());
+        self.state = HandshakeState::Failed(e.clone());
         return e;
     }
 
@@ -520,13 +528,13 @@ impl SecretAgent {
     // is complete and how many bytes were written to @output, respectively.
     // If the state is HandshakeState::AuthenticationPending, then ONLY call this
     // function if you want to proceed, because this will mark the certificate as OK.
-    pub fn handshake(&mut self, _now: u64, input: &[u8]) -> Res<(HandshakeState, Vec<u8>)> {
+    pub fn handshake(&mut self, _now: u64, input: &[u8]) -> Res<Vec<u8>> {
         self.set_raw(false)?;
 
         let rv = {
             // Within this scope, _h maintains a mutable reference to self.io.
             let _h = self.io.wrap(input);
-            match self.st {
+            match self.state {
                 HandshakeState::Authenticated => unsafe {
                     ssl::SSL_AuthCertificateComplete(self.fd, 0)
                 },
@@ -537,7 +545,7 @@ impl SecretAgent {
         // even if there is an error.
         let output = self.io.take_output();
         self.update_state(rv)?;
-        Ok((self.st.clone(), output))
+        Ok(output)
     }
 
     // Drive the TLS handshake, but get the raw content of records, not
@@ -550,7 +558,7 @@ impl SecretAgent {
         &mut self,
         _now: u64,
         input: Option<Record>,
-    ) -> Res<(HandshakeState, RecordList)> {
+    ) -> Res<RecordList> {
         self.set_raw(true)?;
 
         // Setup for accepting records.
@@ -563,12 +571,12 @@ impl SecretAgent {
         }
 
         // Fire off any authentication we might need to complete.
-        if self.st == HandshakeState::Authenticated {
+        if self.state == HandshakeState::Authenticated {
             let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
             qdebug!(self, "SSL_AuthCertificateComplete: {:?}", rv);
             self.update_state(rv)?;
-            if self.st == HandshakeState::Complete {
-                return Ok((self.st.clone(), *records));
+            if let HandshakeState::Complete(_) = self.state  {
+                return Ok(*records);
             }
         }
 
@@ -584,12 +592,12 @@ impl SecretAgent {
         let rv = unsafe { ssl::SSL_ForceHandshake(self.fd) };
         self.update_state(rv)?;
 
-        Ok((self.st.clone(), *records))
+        Ok(*records)
     }
 
     // State returns the status of the handshake.
     pub fn state(&self) -> &HandshakeState {
-        &self.st
+        &self.state
     }
 
     pub fn read_secret(&self, epoch: Epoch) -> Option<&p11::SymKey> {

@@ -101,8 +101,8 @@ mod tests {
             Error::NssError { name, code, .. } => {
                 assert_eq!(name, "UNKNOWN_ERROR");
                 assert_eq!(code, 0);
-                // TODO(mt): This fails on OSX with the message: |Undefined error: 0|
-                //assert_eq!(desc, "Success");
+                // Note that we don't test |desc| here because that comes from
+                // strerror(0), which is platform-dependent.
             }
             _ => assert!(false),
         }

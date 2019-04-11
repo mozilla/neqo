@@ -15,8 +15,7 @@ pub fn forward_records(agent: &mut SecretAgent, records_in: RecordList) -> Res<R
         assert_eq!(records_out.len(), 0);
         assert_eq!(*agent.state(), expected_state);
 
-        let (_state, rec_out) = agent.handshake_raw(NOW, Some(record))?;
-        records_out = rec_out;
+        records_out = agent.handshake_raw(NOW, Some(record))?;
         expected_state = HandshakeState::InProgress;
     }
     Ok(records_out)
@@ -25,9 +24,9 @@ pub fn forward_records(agent: &mut SecretAgent, records_in: RecordList) -> Res<R
 fn handshake(client: &mut SecretAgent, server: &mut SecretAgent) {
     let mut a = client;
     let mut b = server;
-    let (_, mut records) = a.handshake_raw(NOW, None).unwrap();
+    let mut records = a.handshake_raw(NOW, None).unwrap();
     let is_done = |agent: &mut SecretAgent| match *agent.state() {
-        HandshakeState::Complete | HandshakeState::Failed(_) => true,
+        HandshakeState::Complete(_) | HandshakeState::Failed(_) => true,
         _ => false,
     };
     while !is_done(a) || !is_done(b) {
@@ -42,8 +41,7 @@ fn handshake(client: &mut SecretAgent, server: &mut SecretAgent) {
 
         if *b.state() == HandshakeState::AuthenticationPending {
             b.authenticated();
-            let (_, rec) = b.handshake_raw(NOW, None).unwrap();
-            records = rec;
+            records  = b.handshake_raw(NOW, None).unwrap();
         }
         b = mem::replace(&mut a, b);
     }
@@ -51,12 +49,12 @@ fn handshake(client: &mut SecretAgent, server: &mut SecretAgent) {
 
 pub fn connect(client: &mut SecretAgent, server: &mut SecretAgent) {
     handshake(client, server);
-    assert_eq!(*client.state(), HandshakeState::Complete);
-    assert_eq!(*server.state(), HandshakeState::Complete);
+    assert!(client.state().connected());
+    assert!(server.state().connected());
 }
 
 pub fn connect_fail(client: &mut SecretAgent, server: &mut SecretAgent) {
     handshake(client, server);
-    assert_ne!(*client.state(), HandshakeState::Complete);
-    assert_ne!(*server.state(), HandshakeState::Complete);
+    assert!(!client.state().connected());
+    assert!(!server.state().connected());
 }
