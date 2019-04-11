@@ -969,9 +969,8 @@ impl Connection {
             let mut generators = mem::replace(&mut self.generators, Vec::new());
             for generator in &mut generators {
                 // TODO(ekr@rtfm.com): Fix TxMode
-                let left = self.pmtu - d.written();
                 while let Some((frame, token)) =
-                    generator.generate(self, epoch, TxMode::Normal, left)
+                    generator.generate(self, epoch, TxMode::Normal, self.pmtu - d.written())
                 {
                     //qtrace!("pmtu {} written {}", self.pmtu, d.written());
                     ack_eliciting = ack_eliciting || frame.ack_eliciting();
