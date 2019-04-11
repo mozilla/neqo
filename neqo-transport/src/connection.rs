@@ -733,7 +733,7 @@ impl Connection {
 
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
-    pub fn process<I>(&mut self, in_dgrams: I, cur_time: u64) -> (Vec<Datagram>, u64)
+    pub fn process_input<I>(&mut self, in_dgrams: I, cur_time: u64)
     where
         I: IntoIterator<Item = Datagram>,
     {
@@ -756,12 +756,26 @@ impl Connection {
                 }
             }
         }
+    }
+
+    /// Get output packets, as a result of receiving packets, or actions taken
+    /// by the application.
+    pub fn process_output(&mut self, cur_time: u64) -> (Vec<Datagram>, u64) {
         if let State::Closed(..) = self.state {
             (Vec::new(), 0)
         } else {
             self.check_loss_detection_timeout(cur_time);
             (self.output(cur_time), self.loss_recovery.get_timer())
         }
+    }
+
+    /// Process input and generate output.
+    pub fn process<I>(&mut self, in_dgrams: I, cur_time: u64) -> (Vec<Datagram>, u64)
+    where
+        I: IntoIterator<Item = Datagram>,
+    {
+        self.process_input(in_dgrams, cur_time);
+        self.process_output(cur_time)
     }
 
     fn valid_cid(&self, cid: &[u8]) -> bool {

@@ -6,7 +6,7 @@
 
 use neqo_common::now;
 use neqo_crypto::init_db;
-use neqo_transport::{Connection, Datagram, State};
+use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
 use regex::Regex;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
@@ -146,23 +146,25 @@ fn main() {
         }
 
         // TODO use timer to set socket.set_read_timeout.
-        let (out_dgrams, _timer) = server.process(in_dgrams.drain(..), now());
+        server.process_input(in_dgrams.drain(..), now());
         if let State::Closed(e) = server.state() {
             eprintln!("Closed: {:?}", e);
             break;
         }
-        emit_packets(&socket, &out_dgrams);
 
-        let iter = server.get_recvable_streams();
         let mut streams = Vec::new();
-        for (stream_id, _stream) in iter {
-            streams.push(stream_id);
-        }
-        for str in streams {
-            http_serve(&mut server, str);
+        for event in server.events() {
+            match event {
+                ConnectionEvent::RecvStreamReadable { stream_id } => streams.push(stream_id),
+                _ => {}
+            }
         }
 
-        let (out_dgrams, _timer) = server.process(in_dgrams.drain(..), now());
+        for stream_id in streams {
+            http_serve(&mut server, stream_id);
+        }
+
+        let (out_dgrams, _timer) = server.process_output(now());
         emit_packets(&socket, &out_dgrams);
     }
 }

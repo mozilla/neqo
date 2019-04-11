@@ -84,18 +84,16 @@ fn process_loop(
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     loop {
-        let (out_dgrams, _timer) = client.process(in_dgrams.drain(..), now());
-        emit_packets(&socket, &out_dgrams);
+        client.process_input(in_dgrams.drain(..), now());
 
-        let state = client.state().clone();
-        if let State::Closed(..) = state {
-            return state;
+        if let State::Closed(..) = client.state() {
+            return client.state().clone();
         }
         if !handler.handle(client) {
-            return state;
+            return client.state().clone();
         }
 
-        let (out_dgrams, _timer) = client.process(vec![], now());
+        let (out_dgrams, _timer) = client.process_output(now());
         emit_packets(&socket, &out_dgrams);
 
         let sz = socket.recv(&mut buf[..]).expect("UDP error");
