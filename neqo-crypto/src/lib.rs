@@ -100,7 +100,6 @@ pub fn init() {
     }
 }
 
-// TODO(mt): convert this to Into<PathBuf>.
 pub fn init_db<P: Into<PathBuf>>(dir: P) {
     unsafe {
         INIT_ONCE.call_once(|| {

@@ -12,7 +12,7 @@ static INIT_ONCE: Once = Once::new();
 pub fn init() {
     INIT_ONCE.call_once(|| {
         env_logger::init();
-        qinfo!("Logging initialized");
+        ::log::log!(::log::Level::Info, "Logging initialized");
     });
 }
 
