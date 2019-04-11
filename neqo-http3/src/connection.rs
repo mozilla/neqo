@@ -517,7 +517,7 @@ impl HttpConn {
         I: IntoIterator<Item = Datagram>,
     {
         let state_before = self.state().clone();
-        let out = self.conn.process(in_dgrams, cur_time);
+        let out = self.conn.process_input(in_dgrams, cur_time);
         let state_after = self.state().clone();
         if state_after != state_before {
             let res = self.process_state_change(&state_after);
@@ -527,7 +527,7 @@ impl HttpConn {
             let res = self.check_streams();
             self.check_result(res);
         }
-        out
+        self.conn.process_output(cur_time)
     }
 
     fn on_connected(&mut self) -> Res<()> {

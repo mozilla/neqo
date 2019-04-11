@@ -47,13 +47,23 @@ impl Connection {
     pub fn new_server() -> Connection {
         Connection::new(Role::Server)
     }
-
-    pub fn process<I>(&mut self, _in_dgrams: I, cur_time: u64) -> (Vec<Datagram>, u64)
+    pub fn process_input<I>(&mut self, in_dgrams: I, cur_time: u64)
     where
         I: IntoIterator<Item = Datagram>,
     {
         self.st = State::Connected;
+    }
+
+    pub fn process_output(&mut self, cur_time: u64) -> (Vec<Datagram>, u64) {
         (Vec::new(), 0)
+    }
+
+    pub fn process<I>(&mut self, in_dgrams: I, cur_time: u64) -> (Vec<Datagram>, u64)
+    where
+        I: IntoIterator<Item = Datagram>,
+    {
+        self.process_input(in_dgrams, cur_time);
+        self.process_output(cur_time)
     }
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
