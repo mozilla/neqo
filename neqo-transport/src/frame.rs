@@ -562,6 +562,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_common::hex;
 
     fn enc_dec(f: &Frame, s: &str) {
         let mut d = Data::default();
@@ -845,7 +846,7 @@ mod tests {
         ];
         let mut d = Data::default();
         Frame::encode_ack_frame(&packets, &mut d);
-        println!("Encoded  {}", hex("ACK", d.as_vec()));
+        println!("Encoded {}", hex("ACK", d.as_vec()));
 
         let f = decode_frame(&mut d).unwrap();
         match f {
