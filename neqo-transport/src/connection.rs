@@ -935,7 +935,7 @@ impl Connection {
     fn output_path(&mut self, path: &Path, cur_time: u64) -> Res<Vec<Datagram>> {
         let mut out_packets = Vec::new();
 
-        let mut num_initials = 0usize;
+        let mut initial_only = false;
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -1002,14 +1002,12 @@ impl Connection {
             for mut d in ds {
                 qdebug!(self, "Need to send a packet");
 
+                initial_only = epoch == 0;
                 let mut hdr = PacketHdr::new(
                     0,
                     match epoch {
                         // TODO(ekr@rtfm.com): Retry token
-                        0 => {
-                            num_initials += 1;
-                            PacketType::Initial(Vec::new())
-                        }
+                        0 => PacketType::Initial(Vec::new()),
                         1 => PacketType::ZeroRTT,
                         2 => PacketType::Handshake,
                         3 => PacketType::Short,
@@ -1037,8 +1035,6 @@ impl Connection {
                 let cs = self.ensure_crypto_state(hdr.epoch).unwrap();
                 let packet = encode_packet(&cs.tx, &mut hdr, d.0.as_mut_vec());
                 out_packets.push(packet);
-
-                // TODO(ekr@rtfm.com): Pad the Client Initial.
             }
         }
 
@@ -1059,11 +1055,10 @@ impl Connection {
                 vec
             });
 
-        // Kludgy padding
-        if self.rol == Role::Client {
-            for dgram in &mut out_dgrams[..num_initials] {
-                dgram.resize(1200, 0);
-            }
+        // Pad Initial packets sent by the client to 1200 bytes.
+        if self.rol == Role::Client && initial_only && !out_dgrams.is_empty() {
+            qdebug!(self, "pad Initial to 1200");
+            out_dgrams.last_mut().unwrap().resize(1200, 0);
         }
 
         out_dgrams
@@ -2535,6 +2530,7 @@ mod tests {
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
         let (res, _) = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
+        assert_eq!(res.first().unwrap().len(), 1200);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
