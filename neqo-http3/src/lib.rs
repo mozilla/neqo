@@ -16,6 +16,8 @@ use neqo_transport;
 
 use self::hframe::HFrameType;
 
+pub use connection::HttpConn;
+
 type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
