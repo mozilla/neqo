@@ -508,7 +508,7 @@ impl SecretAgent {
                 true => HandshakeState::AuthenticationPending,
                 false => HandshakeState::InProgress,
             },
-            false => HandshakeState::Complete(SecretAgentInfo::new(self.fd)?)
+            false => HandshakeState::Complete(SecretAgentInfo::new(self.fd)?),
         };
         qinfo!(self, "state -> {:?}", self.state);
         Ok(())
@@ -554,11 +554,7 @@ impl SecretAgent {
     //
     // Ideally, this only includes records from the current epoch.
     // If you send data from multiple epochs, you might end up being sad.
-    pub fn handshake_raw(
-        &mut self,
-        _now: u64,
-        input: Option<Record>,
-    ) -> Res<RecordList> {
+    pub fn handshake_raw(&mut self, _now: u64, input: Option<Record>) -> Res<RecordList> {
         self.set_raw(true)?;
 
         // Setup for accepting records.
@@ -575,7 +571,7 @@ impl SecretAgent {
             let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
             qdebug!(self, "SSL_AuthCertificateComplete: {:?}", rv);
             self.update_state(rv)?;
-            if let HandshakeState::Complete(_) = self.state  {
+            if let HandshakeState::Complete(_) = self.state {
                 return Ok(*records);
             }
         }

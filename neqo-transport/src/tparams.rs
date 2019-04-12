@@ -7,8 +7,8 @@
 #![allow(unused_variables, dead_code)]
 use crate::connection::{Role, QUIC_VERSION};
 use crate::{Error, Res};
-use neqo_common::hex;
 use neqo_common::data::*;
+use neqo_common::hex;
 use neqo_common::varint::*;
 use neqo_common::{qdebug, qtrace};
 use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
