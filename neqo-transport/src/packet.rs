@@ -10,6 +10,7 @@
 use derive_more::*;
 
 use super::*;
+use neqo_common::hex;
 use neqo_common::data::*;
 use neqo_common::{matches, qtrace};
 
