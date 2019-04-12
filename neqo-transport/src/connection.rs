@@ -48,6 +48,7 @@ const INITIAL_RTT: u64 = 100_000; // 100ms in microseconds
 
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16; // TODO(agrover@mozilla.com): these too low?
 const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
+const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Role {
@@ -286,11 +287,34 @@ pub struct FlowMgr {
     from_conn: VecDeque<Frame>,
     from_send_streams: BTreeMap<StreamId, Frame>,
     from_recv_streams: BTreeMap<StreamId, Frame>,
+
+    used_data: u64,
+    max_data: u64,
 }
 
 impl FlowMgr {
     pub fn new() -> FlowMgr {
         FlowMgr::default()
+    }
+
+    pub fn conn_credit_remaining(&self) -> u64 {
+        self.max_data - self.used_data
+    }
+
+    pub fn conn_credit_used(&mut self, amount: u64) {
+        self.used_data += amount;
+        assert!(self.used_data <= self.max_data)
+    }
+
+    pub fn conn_increase_max_credit(&mut self, new: u64) {
+        self.max_data = max(self.max_data, new)
+    }
+
+    pub fn data_blocked(&mut self) {
+        let frame = Frame::DataBlocked {
+            data_limit: self.max_data,
+        };
+        self.from_conn.push_back(frame);
     }
 
     /// Indicate to receiving peer we need more credits
@@ -355,6 +379,8 @@ impl FlowMgr {
     // TODO(agrover@mozilla.com): Think more about precedence of possible
     // frames for a given stream, and how things could go wrong with different
     // orderings
+    // TODO(agrover@mozilla.com): avoid redundant sent frames for
+    // conn/sent/recv
     pub fn next(&mut self) -> Option<Frame> {
         if let Some(item) = self.from_conn.pop_front() {
             return Some(item);
@@ -524,7 +550,6 @@ pub struct Connection {
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
     generators: Vec<Box<FrameGenerator>>,
     deadline: u64,
-    max_data: u64,
     local_max_stream_idx_uni: StreamIndex,
     local_max_stream_idx_bidi: StreamIndex,
     local_next_stream_idx_uni: StreamIndex,
@@ -631,6 +656,10 @@ impl Connection {
             TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI,
             LOCAL_STREAM_LIMIT_UNI,
         );
+        tphandler
+            .borrow_mut()
+            .local
+            .set_integer(TRANSPORT_PARAMETER_INITIAL_MAX_DATA, LOCAL_MAX_DATA);
 
         Connection::configure_agent(&mut agent, protocols, tphandler.clone());
 
@@ -662,7 +691,6 @@ impl Connection {
             crypto_states: [None, None, None, None],
             tx_pns: [0; 4],
             deadline: 0,
-            max_data: 0,
             local_max_stream_idx_bidi: StreamIndex::new(LOCAL_STREAM_LIMIT_BIDI),
             local_max_stream_idx_uni: StreamIndex::new(LOCAL_STREAM_LIMIT_UNI),
             local_next_stream_idx_uni: StreamIndex::new(0),
@@ -1162,6 +1190,14 @@ impl Connection {
                     .expect("remote tparams are valid when State::Connected")
                     .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI),
             );
+            self.flow_mgr.borrow_mut().conn_increase_max_credit(
+                self.tps
+                    .borrow()
+                    .remote
+                    .as_ref()
+                    .expect("remote tparams are valid when State::Connected")
+                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_DATA),
+            );
         }
         Ok(())
     }
@@ -1242,7 +1278,10 @@ impl Connection {
                     rs.inbound_stream_frame(fin, offset, data)?;
                 }
             }
-            Frame::MaxData { maximum_data } => self.max_data = max(self.max_data, maximum_data),
+            Frame::MaxData { maximum_data } => self
+                .flow_mgr
+                .borrow_mut()
+                .conn_increase_max_credit(maximum_data),
             Frame::MaxStreamData {
                 stream_id,
                 maximum_stream_data,

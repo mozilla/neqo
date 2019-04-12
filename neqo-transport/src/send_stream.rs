@@ -443,25 +443,33 @@ impl SendStream {
 
     pub fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
         if let Some(tx_buf) = self.state.tx_buf_mut() {
-            let flowc_bytes_avail = self.max_stream_data - tx_buf.data_limit();
+            let stream_credit_avail = self.max_stream_data - tx_buf.data_limit();
+            let conn_credit_avail = self.flow_mgr.borrow().conn_credit_remaining();
+            let credit_avail = min(stream_credit_avail, conn_credit_avail);
             qtrace!(
-                "next_bytes max_stream_data {}, data_limit {}, flowc_bytes_avail {}",
+                "next_bytes max_stream_data {}, data_limit {}, credit_avail {}",
                 self.max_stream_data,
                 tx_buf.data_limit(),
-                flowc_bytes_avail
+                credit_avail
             );
             if let Some((offset, data)) = tx_buf.next_bytes(mode) {
                 // Restrict slice of data offered for sending by remaining
                 // flow control credits
-                let data = &data[..min(flowc_bytes_avail as usize, data.len())];
+                let data = &data[..min(credit_avail as usize, data.len())];
                 qtrace!("next_bytes after flowc: {} {}", offset, data.len());
 
                 if data.len() == 0 {
                     // We had some bytes to send but were blocked by flow
                     // control.
-                    self.flow_mgr
-                        .borrow_mut()
-                        .stream_data_blocked(self.stream_id, self.max_stream_data);
+                    assert!(stream_credit_avail == 0 || conn_credit_avail == 0);
+                    if stream_credit_avail == 0 {
+                        self.flow_mgr
+                            .borrow_mut()
+                            .stream_data_blocked(self.stream_id, self.max_stream_data);
+                    }
+                    if conn_credit_avail == 0 {
+                        self.flow_mgr.borrow_mut().data_blocked();
+                    }
                     return None;
                 } else {
                     return Some((offset, data));
@@ -476,6 +484,7 @@ impl SendStream {
         self.state
             .tx_buf_mut()
             .map(|buf| buf.mark_as_sent(offset, len));
+        self.flow_mgr.borrow_mut().conn_credit_used(len as u64);
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
@@ -679,6 +688,7 @@ mod tests {
     #[test]
     fn test_stream_tx() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        flow_mgr.borrow_mut().conn_increase_max_credit(4096);
         let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
 
         let mut s = SendStream::new(4.into(), 1024, flow_mgr.clone(), conn_events.clone());
