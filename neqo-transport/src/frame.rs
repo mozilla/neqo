@@ -477,13 +477,13 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
             }
             let l: u64;
             let mut data: Vec<u8>;
-            println!("{}", t);
+            qdebug!("{}", t);
             if (t & STREAM_FRAME_BIT_LEN) != 0 {
-                println!("Decoding length");
+                qdebug!("Decoding length");
                 l = d.decode_varint()?;
                 data = d.decode_data(l as usize)?;
             } else {
-                println!("Decoding without length");
+                qdebug!("Decoding without length");
                 data = d.decode_remainder()?;
             }
             Ok(Frame::Stream {
