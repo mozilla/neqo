@@ -11,7 +11,7 @@ use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
 
-use neqo_common::{qerror, qtrace, qwarn};
+use neqo_common::{qtrace, qwarn};
 use slice_deque::SliceDeque;
 
 use crate::connection::{ConnectionEvents, FlowMgr, StreamId, TxMode};
@@ -35,19 +35,21 @@ pub trait Sendable: Debug {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub enum RangeState {
+enum RangeState {
     Sent,
     Acked,
 }
 
+/// Track ranges in the stream as sent or acked. Acked implies sent. Not in a
+/// range implies needing-to-be-sent, either initially or as a retransmission.
 #[derive(Debug, Default, PartialEq)]
-pub struct RangeTracker {
+struct RangeTracker {
     // offset, (len, RangeState). Use u64 for len because ranges can exceed 32bits.
     used: BTreeMap<u64, (u64, RangeState)>,
 }
 
 impl RangeTracker {
-    pub fn highest_offset(&self) -> u64 {
+    fn highest_offset(&self) -> u64 {
         self.used
             .range(..)
             .next_back()
@@ -55,7 +57,7 @@ impl RangeTracker {
             .unwrap_or(0)
     }
 
-    pub fn acked_from_zero(&self) -> u64 {
+    fn acked_from_zero(&self) -> u64 {
         self.used
             .get(&0)
             .filter(|(_, state)| *state == RangeState::Acked)
@@ -65,7 +67,7 @@ impl RangeTracker {
 
     /// Find the first unmarked range. If all are contiguous, this will return
     /// (highest_offset(), None).
-    pub fn first_unmarked_range(&self) -> (u64, Option<u64>) {
+    fn first_unmarked_range(&self) -> (u64, Option<u64>) {
         let mut prev_end = 0;
 
         for (cur_off, (cur_len, _)) in &self.used {
@@ -198,7 +200,7 @@ impl RangeTracker {
         }
     }
 
-    pub fn mark_range(&mut self, off: u64, len: usize, state: RangeState) {
+    fn mark_range(&mut self, off: u64, len: usize, state: RangeState) {
         let subranges = self.chunk_range_on_edges(off, len as u64, state);
 
         for (sub_off, sub_len, sub_state) in subranges {
@@ -208,7 +210,7 @@ impl RangeTracker {
         self.coalesce_acked_from_zero()
     }
 
-    pub fn unmark_range(&mut self, off: u64, len: usize) {
+    fn unmark_range(&mut self, off: u64, len: usize) {
         let len = len as u64;
         let end_off = off + len;
 
@@ -222,7 +224,7 @@ impl RangeTracker {
                 // Check for overlap
                 if *cur_off + *cur_len > off {
                     if *cur_state == RangeState::Acked {
-                        qerror!(
+                        qwarn!(
                             "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
                             cur_off,
                             cur_len,
@@ -237,7 +239,7 @@ impl RangeTracker {
             }
 
             if *cur_state == RangeState::Acked {
-                qerror!(
+                qwarn!(
                     "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
                     cur_off,
                     cur_len,
@@ -270,6 +272,7 @@ impl RangeTracker {
     }
 }
 
+/// Buffer to contain queued bytes and track their state.
 #[derive(Debug, Default, PartialEq)]
 pub struct TxBuffer {
     retired: u64,             // contig acked bytes, no longer in buffer
@@ -285,6 +288,7 @@ impl TxBuffer {
         }
     }
 
+    /// Attempt to add some or all of the passed-in buffer to the TxBuffer.
     pub fn send(&mut self, buf: &[u8]) -> usize {
         let can_buffer = min(TX_STREAM_BUFFER - self.buffered(), buf.len());
         if can_buffer > 0 {
@@ -351,6 +355,7 @@ impl TxBuffer {
     }
 }
 
+/// QUIC sending stream states, based on -transport 3.1.
 #[derive(Debug, PartialEq)]
 enum SendStreamState {
     Ready,
@@ -413,11 +418,12 @@ impl SendStreamState {
     }
 }
 
+/// Implement a QUIC send stream.
 #[derive(Debug)]
 pub struct SendStream {
+    stream_id: StreamId,
     max_stream_data: u64,
     state: SendStreamState,
-    stream_id: StreamId,
     flow_mgr: Rc<RefCell<FlowMgr>>,
     conn_events: Rc<RefCell<ConnectionEvents>>,
 }
@@ -441,6 +447,7 @@ impl SendStream {
         }
     }
 
+    /// Return the next range to be sent, if any.
     pub fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
         if let Some(tx_buf) = self.state.tx_buf_mut() {
             let stream_credit_avail = self.max_stream_data - tx_buf.data_limit();

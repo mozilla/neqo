@@ -9,6 +9,7 @@ use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::mem;
+use std::ops::Bound::{Included, Unbounded};
 use std::rc::Rc;
 
 use crate::connection::{ConnectionEvents, FlowMgr, StreamId};
@@ -18,8 +19,8 @@ use neqo_common::qtrace;
 pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
 
 pub trait Recvable: Debug {
-    /// Read buffered data from stream. bool says whether is final data on
-    /// stream.
+    /// Read buffered data from stream. bool says whether read bytes includes
+    /// the final data on stream.
     fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)>;
 
     /// Application is no longer interested in this stream.
@@ -29,6 +30,8 @@ pub trait Recvable: Debug {
     fn data_ready(&self) -> bool;
 }
 
+/// Holds data not yet read by application. Orders and dedupes data ranges
+/// from incoming STREAM frames.
 #[derive(Debug, Default, PartialEq)]
 pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
@@ -56,10 +59,13 @@ impl RxStreamOrderer {
             return Ok(());
         }
 
-        let (insert_new, remove_prev) = if let Some((&prev_start, prev_vec)) =
-            self.data_ranges.range_mut(..new_start + 1).next_back()
+        let (insert_new, remove_prev) = if let Some((&prev_start, prev_vec)) = self
+            .data_ranges
+            .range_mut((Unbounded, Included(new_start)))
+            .next_back()
         {
             let prev_end = prev_start + prev_vec.len() as u64;
+
             match (new_start > prev_start, new_end > prev_end) {
                 (true, true) => {
                     // PPPPPP    ->  PP
@@ -127,6 +133,7 @@ impl RxStreamOrderer {
         if insert_new {
             // Now handle possible overlap with next entries
             let mut to_remove = Vec::new(); // TODO(agrover@mozilla.com): use smallvec?
+
             for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
                 let next_end = next_start + next_data.len() as u64;
                 let overlap = new_end.saturating_sub(next_start);
@@ -134,14 +141,14 @@ impl RxStreamOrderer {
                     break;
                 } else {
                     if next_end > new_end {
-                        let truncate_to = new_data.len() - overlap as usize;
-                        new_data.truncate(truncate_to);
                         qtrace!(
                             "New frame {}-{} overlaps with next frame by {}, truncating",
                             new_start,
                             new_end,
                             overlap
                         );
+                        let truncate_to = new_data.len() - overlap as usize;
+                        new_data.truncate(truncate_to);
                         break;
                     } else {
                         qtrace!(
@@ -175,7 +182,7 @@ impl RxStreamOrderer {
             .unwrap_or(false)
     }
 
-    /// how many bytes are readable?
+    /// How many bytes are readable?
     fn bytes_ready(&self) -> usize {
         let mut prev_end = self.retired;
         self.data_ranges
@@ -199,23 +206,21 @@ impl RxStreamOrderer {
     }
 
     /// Bytes read by the application.
-    pub fn retired(&self) -> u64 {
+    fn retired(&self) -> u64 {
         self.retired
     }
 
     /// Data bytes buffered. Could be more than bytes_readable if there are
     /// ranges missing.
-    pub fn buffered(&self) -> u64 {
+    fn buffered(&self) -> u64 {
         self.data_ranges
             .iter()
             .map(|(&start, data)| data.len() as u64 - (self.retired.saturating_sub(start)))
             .sum()
     }
 
-    /// Caller has been told data is available on a stream, and they want to
-    /// retrieve it.
-    /// Returns bytes copied.
-    pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
+    /// Copy received data (if any) into the buffer. Returns bytes copied.
+    fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
         qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
         let mut buf_remaining = buf.len() as usize;
         let mut copied = 0;
@@ -252,13 +257,14 @@ impl RxStreamOrderer {
         Ok(copied as u64)
     }
 
+    /// Extend the given Vector with any available data.
     pub fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Res<u64> {
         let orig_len = buf.len();
         buf.resize(orig_len + self.bytes_ready(), 0);
         self.read(&mut buf[orig_len..])
     }
 
-    pub fn highest_seen_offset(&self) -> u64 {
+    fn highest_seen_offset(&self) -> u64 {
         let maybe_ooo_last = self
             .data_ranges
             .iter()
@@ -268,6 +274,7 @@ impl RxStreamOrderer {
     }
 }
 
+/// QUIC receiving states, based on -transport 3.2.
 #[derive(Debug, PartialEq)]
 enum RecvStreamState {
     Recv {
@@ -328,6 +335,7 @@ impl RecvStreamState {
     }
 }
 
+/// Implement a QUIC receive stream.
 #[derive(Debug)]
 pub struct RecvStream {
     stream_id: StreamId,
@@ -349,11 +357,6 @@ impl RecvStream {
             flow_mgr,
             conn_events,
         }
-    }
-
-    #[cfg(test)]
-    pub fn orderer(&self) -> Option<&RxStreamOrderer> {
-        self.state.recv_buf()
     }
 
     pub fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
@@ -481,8 +484,6 @@ impl Recvable for RecvStream {
             .unwrap_or(false)
     }
 
-    /// caller has been told data is available on a stream, and they want to
-    /// retrieve it.
     fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
         match &mut self.state {
             RecvStreamState::Recv { recv_buf, .. }
@@ -529,39 +530,39 @@ mod tests {
         assert_eq!(s.data_ready(), true);
         let mut buf = vec![0u8; 100];
         assert_eq!(s.read(&mut buf).unwrap(), (10, false));
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 0);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 0);
 
         // test receiving a noncontig frame
         s.inbound_stream_frame(false, 12, vec![2; 12]).unwrap();
         assert_eq!(s.data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 12);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 12);
 
         // another frame that overlaps the first
         s.inbound_stream_frame(false, 14, vec![3; 8]).unwrap();
         assert_eq!(s.data_ready(), false);
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 12);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 12);
 
         // fill in the gap, but with a FIN
         s.inbound_stream_frame(true, 10, vec![4; 6]).unwrap_err();
         assert_eq!(s.data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 12);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 12);
 
         // fill in the gap
         s.inbound_stream_frame(false, 10, vec![5; 10]).unwrap();
         assert_eq!(s.data_ready(), true);
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 14);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 14);
 
         // a legit FIN
         s.inbound_stream_frame(true, 24, vec![6; 18]).unwrap();
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 32);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 32);
         assert_eq!(s.data_ready(), true);
         assert_eq!(s.read(&mut buf).unwrap(), (32, true));
 
@@ -584,7 +585,7 @@ mod tests {
         // See inbound_frame(). Test (true, true) case
         s.inbound_stream_frame(false, 2, vec![2; 6]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -596,7 +597,7 @@ mod tests {
         // Test (true, false) case
         s.inbound_stream_frame(false, 4, vec![3; 4]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -608,7 +609,7 @@ mod tests {
         // Test (false, true) case
         s.inbound_stream_frame(false, 2, vec![4; 8]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -620,7 +621,7 @@ mod tests {
         // Test (false, false) case
         s.inbound_stream_frame(false, 2, vec![5; 2]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -637,7 +638,7 @@ mod tests {
         // a. insert where new frame gets truncated
         s.inbound_stream_frame(false, 99, vec![7; 6]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 99);
             assert_eq!(item.1.len(), 1);
@@ -650,7 +651,7 @@ mod tests {
         // b. insert where new frame spans next frame
         s.inbound_stream_frame(false, 98, vec![8; 10]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 98);
             assert_eq!(item.1.len(), 10);
