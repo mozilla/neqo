@@ -1222,7 +1222,7 @@ impl Connection {
                     largest_acknowledged,
                     ack_delay,
                     first_ack_range,
-                    &ack_ranges,
+                    ack_ranges,
                     cur_time,
                 )?;
             }
@@ -1361,7 +1361,7 @@ impl Connection {
         largest_acknowledged: u64,
         ack_delay: u64,
         first_ack_range: u64,
-        ack_ranges: &Vec<AckRange>,
+        ack_ranges: Vec<AckRange>,
         cur_time: u64,
     ) -> Res<()> {
         qinfo!(
@@ -1382,10 +1382,10 @@ impl Connection {
             ack_delay,
             cur_time,
         );
-        for acked in acked_packets.iter_mut() {
+        for acked in &mut acked_packets {
             acked.mark_acked(self);
         }
-        for lost in lost_packets.iter_mut() {
+        for lost in &mut lost_packets {
             lost.mark_lost(self);
         }
 
@@ -2282,8 +2282,9 @@ impl LossRecovery {
         // TODO Process ECN information if present.
 
         let mut acked_packets = Vec::new();
-        for r in acked_ranges {
-            for pn in r.1..r.0 + 1 {
+        for (end, start) in acked_ranges {
+            // ^^ Notabug: see Frame::decode_ack_frame()
+            for pn in start..end + 1 {
                 if let Some(sent_packet) = packet_space.sent_packets.remove(&pn) {
                     qdebug!("acked={}", pn);
                     acked_packets.push(sent_packet);
@@ -2323,11 +2324,9 @@ impl LossRecovery {
         };
 
         // Packets with packet numbers before this are deemed lost.
-        let lost_pn = if packet_space.largest_acked_packet > PACKET_THRESHOLD {
-            packet_space.largest_acked_packet - PACKET_THRESHOLD
-        } else {
-            0
-        };
+        let lost_pn = packet_space
+            .largest_acked_packet
+            .saturating_sub(PACKET_THRESHOLD);
 
         qdebug!(
             self,

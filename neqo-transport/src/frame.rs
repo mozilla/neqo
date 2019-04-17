@@ -368,23 +368,24 @@ impl Frame {
         }
     }
 
+    /// Converts AckRanges as encoded in a ACK frame (see -transport
+    /// 19.3.1) into ranges of acked packets (end, start), inclusive of
+    /// start and end values.
     pub fn decode_ack_frame(
         largest_acked: u64,
         first_ack_range: u64,
-        ack_ranges: &Vec<AckRange>,
+        ack_ranges: Vec<AckRange>,
     ) -> Res<Vec<(u64, u64)>> {
-        // acked_ranges holds acked ranges. Each acked range is a tuple (x, y), packet numbers
-        // between x and y and including x and y are acked.
-        let mut acked_ranges: Vec<(u64, u64)> = Vec::new();
+        let mut acked_ranges = Vec::new();
 
         if largest_acked < first_ack_range {
             return Err(Error::FrameEncodingError);
         }
         acked_ranges.push((largest_acked, largest_acked - first_ack_range));
-        if ack_ranges.len() > 0 && largest_acked < first_ack_range + 1 {
+        if !ack_ranges.is_empty() && largest_acked < first_ack_range + 1 {
             return Err(Error::FrameEncodingError);
         }
-        let mut cur = if ack_ranges.len() > 0 {
+        let mut cur = if !ack_ranges.is_empty() {
             largest_acked - first_ack_range - 1
         } else {
             0
@@ -869,7 +870,7 @@ mod tests {
 
     #[test]
     fn test_decode_ack_frame() {
-        match Frame::decode_ack_frame(7, 2, &vec![AckRange { gap: 0, range: 3 }]) {
+        match Frame::decode_ack_frame(7, 2, vec![AckRange { gap: 0, range: 3 }]) {
             Err(_) => assert!(false),
             Ok(r) => assert_eq!(r, vec![(7, 5), (3, 0)]),
         };
