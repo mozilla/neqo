@@ -522,6 +522,12 @@ impl SendStream {
         }
     }
 
+    pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
+        self.state
+            .tx_buf_mut()
+            .map(|buf| buf.mark_as_lost(offset, len));
+    }
+
     pub fn final_size(&self) -> Option<u64> {
         self.state.final_size()
     }

@@ -2045,19 +2045,27 @@ impl FrameGeneratorToken for StreamGeneratorToken {
     fn acked(&mut self, conn: &mut Connection) {
         qinfo!(
             conn,
+            "Acked frame stream={} offset={} length={}",
+            self.id.as_u64(),
+            self.offset,
+            self.length
+        );
+        if let Some(ss) = conn.send_streams.get_mut(&self.id) {
+            ss.mark_as_acked(self.offset, self.length as usize);
+        }
+    }
+    fn lost(&mut self, conn: &mut Connection) {
+        qinfo!(
+            conn,
             "Lost frame stream={} offset={} length={}",
             self.id.as_u64(),
             self.offset,
             self.length
         );
-        match conn.send_streams.get_mut(&self.id) {
-            None => {}
-            Some(str) => {
-                str.mark_as_acked(self.offset, self.length as usize);
-            }
+        if let Some(ss) = conn.send_streams.get_mut(&self.id) {
+            ss.mark_as_lost(self.offset, self.length as usize);
         }
     }
-    fn lost(&mut self, conn: &mut Connection) {}
 }
 
 // Need to know when reset frame was acked
