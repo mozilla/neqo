@@ -1007,6 +1007,9 @@ impl Connection {
                         _ => is_crypto_packet,
                     };
                     frame.marshal(&mut d);
+                    if let Some(t) = token {
+                        tokens.push(t);
+                    }
                     assert!(d.written() <= self.pmtu);
                     if d.written() == self.pmtu {
                         // Filled this packet, get another one.
@@ -1015,9 +1018,6 @@ impl Connection {
                         tokens = Vec::new();
                         ack_eliciting = false;
                         is_crypto_packet = false;
-                    }
-                    if let Some(t) = token {
-                        tokens.push(t);
                     }
                 }
             }
