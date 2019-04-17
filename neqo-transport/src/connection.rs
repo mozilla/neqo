@@ -2068,30 +2068,62 @@ impl FrameGeneratorToken for StreamGeneratorToken {
     }
 }
 
-// Need to know when reset frame was acked
-struct FlowControlGeneratorToken {
-    stream_id: StreamId,
-    application_error_code: AppError,
-    final_size: u64,
-}
+struct FlowControlGeneratorToken(Frame);
 
 impl FrameGeneratorToken for FlowControlGeneratorToken {
     fn acked(&mut self, conn: &mut Connection) {
-        qinfo!(
-            conn,
-            "Reset received stream={} err={} final_size={}",
-            self.stream_id.as_u64(),
-            self.application_error_code,
-            self.final_size
-        );
-        match conn.send_streams.get_mut(&self.stream_id) {
-            None => {}
-            Some(str) => {
-                str.reset_acked();
+        match self.0 {
+            Frame::ResetStream {
+                stream_id,
+                application_error_code,
+                final_size,
+            } => {
+                qinfo!(
+                    conn,
+                    "Reset received stream={} err={} final_size={}",
+                    stream_id,
+                    application_error_code,
+                    final_size
+                );
+                if let Some(ss) = conn.send_streams.get_mut(&stream_id.into()) {
+                    ss.reset_acked()
+                }
             }
+            _ => {}
         }
     }
-    fn lost(&mut self, conn: &mut Connection) {}
+
+    fn lost(&mut self, conn: &mut Connection) {
+        match self.0 {
+            // Always resend ResetStream if lost
+            Frame::ResetStream {
+                stream_id,
+                application_error_code,
+                final_size,
+            } => {
+                qinfo!(
+                    conn,
+                    "Reset lost stream={} err={} final_size={}",
+                    stream_id,
+                    application_error_code,
+                    final_size
+                );
+                if let Some(ss) = conn.send_streams.get_mut(&stream_id.into()) {
+                    conn.flow_mgr.borrow_mut().stream_reset(
+                        stream_id.into(),
+                        application_error_code,
+                        final_size,
+                    );
+                }
+            }
+            // TODO(agrover@mozilla.com): Only resend these if still in the
+            // given blocked state
+            Frame::DataBlocked { .. } => {}
+            Frame::StreamDataBlocked { .. } => {}
+            Frame::StreamsBlocked { .. } => {}
+            _ => {}
+        }
+    }
 }
 
 struct FlowControlGenerator {}
@@ -2122,11 +2154,11 @@ impl FrameGenerator for FlowControlGenerator {
                         final_size,
                     } => Some((
                         frame,
-                        Some(Box::new(FlowControlGeneratorToken {
+                        Some(Box::new(FlowControlGeneratorToken(Frame::ResetStream {
                             stream_id: stream_id.into(),
                             application_error_code,
                             final_size,
-                        })),
+                        }))),
                     )),
                     s => Some((s, None)),
                 }
