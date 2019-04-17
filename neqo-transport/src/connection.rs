@@ -2154,127 +2154,20 @@ impl SentPacket {
     }
 }
 
-pub struct LossRecovery {
-    loss_detection_timer: u64,
-    crypto_count: u32,
-    pto_count: u32,
-    time_of_last_sent_ack_eliciting_packet: u64,
-    time_of_last_sent_crypto_packet: u64,
-    largest_acked_packet: [u64; 3],
+#[derive(Debug, Default)]
+struct RttVals {
     pub latest_rtt: u64,
     pub smoothed_rtt: u64,
     pub rttvar: u64,
     pub min_rtt: u64,
-    max_ack_delay: u64,
-    pub loss_time: [u64; 3],
-    sent_packets: [HashMap<u64, SentPacket>; 3],
 }
 
-impl LossRecovery {
-    pub fn new() -> LossRecovery {
-        LossRecovery {
-            loss_detection_timer: 0,
-            crypto_count: 0,
-            pto_count: 0,
-            time_of_last_sent_ack_eliciting_packet: 0,
-            time_of_last_sent_crypto_packet: 0,
-            largest_acked_packet: [0, 0, 0],
-            latest_rtt: 0,
-            smoothed_rtt: 0,
-            rttvar: 0,
-            min_rtt: u64::max_value(),
-            max_ack_delay: 25_000, // 25ms in microseconds
-            loss_time: [0, 0, 0],
-            sent_packets: [HashMap::new(), HashMap::new(), HashMap::new()],
-        }
-    }
-
-    pub fn on_packet_sent(
-        &mut self,
-        pn_space: PNSpace,
-        packet_number: u64,
-        ack_eliciting: bool,
-        is_crypto_packet: bool,
-        tokens: Vec<Box<FrameGeneratorToken>>,
-        cur_time_nanos: u64,
-    ) {
-        let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
-        qdebug!(self, "packet {} sent.", packet_number);
-        self.sent_packets[pn_space as usize].insert(
-            packet_number,
-            SentPacket {
-                time_sent: cur_time,
-                ack_eliciting: ack_eliciting,
-                is_crypto_packet: is_crypto_packet,
-                tokens: tokens,
-            },
-        );
-        if is_crypto_packet {
-            self.time_of_last_sent_crypto_packet = cur_time;
-        }
-        if ack_eliciting {
-            self.time_of_last_sent_ack_eliciting_packet = cur_time;
-            // TODO implement cc
-            //     cc.on_packet_sent(sent_bytes)
-        }
-
-        self.set_loss_detection_timer();
-    }
-
-    pub fn on_ack_received(
-        &mut self,
-        pn_space: PNSpace,
-        largest_acked: u64,
-        acked_ranges: Vec<(u64, u64)>,
-        ack_delay: u64,
-        cur_time_nanos: u64,
-    ) -> (Vec<SentPacket>, Vec<SentPacket>) {
-        let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
-        qdebug!(self, "ack received - largest_acked={}.", largest_acked);
-        if self.largest_acked_packet[pn_space as usize] < largest_acked {
-            self.largest_acked_packet[pn_space as usize] = largest_acked;
-        }
-
-        // If the largest acknowledged is newly acked and
-        // ack-eliciting, update the RTT.
-        if let Some(sent) = self.sent_packets[pn_space as usize].get(&largest_acked) {
-            if sent.ack_eliciting {
-                self.latest_rtt = cur_time - sent.time_sent;
-                self.update_rtt(ack_delay);
-            }
-        }
-
-        // TODO Process ECN information if present.
-
-        let mut acked_packets = Vec::new();
-        for r in acked_ranges {
-            for pn in r.1..r.0 + 1 {
-                if let Some(sent_packet) = self.sent_packets[pn_space as usize].remove(&pn) {
-                    qdebug!(self, "acked={}", pn);
-                    acked_packets.push(sent_packet);
-                }
-            }
-        }
-
-        if acked_packets.len() == 0 {
-            return (acked_packets, Vec::new());
-        }
-
-        let lost_packets = self.detect_lost_packets(pn_space, cur_time);
-
-        self.crypto_count = 0;
-        self.pto_count = 0;
-
-        self.set_loss_detection_timer();
-
-        (acked_packets, lost_packets)
-    }
-
-    fn update_rtt(&mut self, mut ack_delay: u64) {
+impl RttVals {
+    fn update_rtt(&mut self, mut ack_delay: u64, max_ack_delay: u64) {
         // min_rtt ignores ack delay.
-        self.min_rtt = std::cmp::min(self.min_rtt, self.latest_rtt);
+        self.min_rtt = min(self.min_rtt, self.latest_rtt);
         // Limit ack_delay by max_ack_delay
-        ack_delay = std::cmp::min(ack_delay, self.max_ack_delay);
+        ack_delay = min(ack_delay, max_ack_delay);
         // Adjust for ack delay if it's plausible.
         if self.latest_rtt - self.min_rtt > ack_delay {
             self.latest_rtt -= ack_delay;
@@ -2296,14 +2189,133 @@ impl LossRecovery {
                 + 1.0 / 8.0 * (self.latest_rtt as f64)) as u64;
         }
     }
+}
+
+#[derive(Debug, Default)]
+struct LossRecoverySpace {
+    largest_acked_packet: u64,
+    loss_time: u64,
+    sent_packets: HashMap<u64, SentPacket>,
+}
+
+#[derive(Debug, Default)]
+struct LossRecovery {
+    loss_detection_timer: u64,
+    crypto_count: u32,
+    pto_count: u32,
+    time_of_last_sent_ack_eliciting_packet: u64,
+    time_of_last_sent_crypto_packet: u64,
+    rtt_vals: RttVals,
+    max_ack_delay: u64,
+    packet_spaces: [LossRecoverySpace; 3],
+}
+
+impl LossRecovery {
+    fn new() -> LossRecovery {
+        LossRecovery {
+            rtt_vals: RttVals {
+                min_rtt: u64::max_value(),
+                ..RttVals::default()
+            },
+            max_ack_delay: 25_000, // 25ms in microseconds
+            ..LossRecovery::default()
+        }
+    }
+
+    pub fn on_packet_sent(
+        &mut self,
+        pn_space: PNSpace,
+        packet_number: u64,
+        ack_eliciting: bool,
+        is_crypto_packet: bool,
+        tokens: Vec<Box<FrameGeneratorToken>>,
+        cur_time_nanos: u64,
+    ) {
+        let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
+        qdebug!(self, "packet {} sent.", packet_number);
+        self.packet_spaces[pn_space as usize].sent_packets.insert(
+            packet_number,
+            SentPacket {
+                time_sent: cur_time,
+                ack_eliciting: ack_eliciting,
+                is_crypto_packet: is_crypto_packet,
+                tokens: tokens,
+            },
+        );
+        if is_crypto_packet {
+            self.time_of_last_sent_crypto_packet = cur_time;
+        }
+        if ack_eliciting {
+            self.time_of_last_sent_ack_eliciting_packet = cur_time;
+            // TODO implement cc
+            //     cc.on_packet_sent(sent_bytes)
+        }
+
+        self.set_loss_detection_timer();
+    }
+
+    /// Returns (acked packets, lost packets)
+    pub fn on_ack_received(
+        &mut self,
+        pn_space: PNSpace,
+        largest_acked: u64,
+        acked_ranges: Vec<(u64, u64)>,
+        ack_delay: u64,
+        cur_time_nanos: u64,
+    ) -> (Vec<SentPacket>, Vec<SentPacket>) {
+        let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
+        qdebug!(self, "ack received - largest_acked={}.", largest_acked);
+
+        let packet_space = &mut self.packet_spaces[pn_space as usize];
+
+        packet_space.largest_acked_packet = max(largest_acked, packet_space.largest_acked_packet);
+
+        // If the largest acknowledged is newly acked and
+        // ack-eliciting, update the RTT.
+        if let Some(sent) = packet_space.sent_packets.get(&largest_acked) {
+            if sent.ack_eliciting {
+                self.rtt_vals.latest_rtt = cur_time - sent.time_sent;
+                self.rtt_vals.update_rtt(ack_delay, self.max_ack_delay);
+            }
+        }
+
+        // TODO Process ECN information if present.
+
+        let mut acked_packets = Vec::new();
+        for r in acked_ranges {
+            for pn in r.1..r.0 + 1 {
+                if let Some(sent_packet) = packet_space.sent_packets.remove(&pn) {
+                    qdebug!("acked={}", pn);
+                    acked_packets.push(sent_packet);
+                }
+            }
+        }
+
+        if acked_packets.is_empty() {
+            return (acked_packets, Vec::new());
+        }
+
+        let lost_packets = self.detect_lost_packets(pn_space, cur_time);
+
+        self.crypto_count = 0;
+        self.pto_count = 0;
+
+        self.set_loss_detection_timer();
+
+        (acked_packets, lost_packets)
+    }
 
     fn detect_lost_packets(&mut self, pn_space: PNSpace, cur_time: u64) -> Vec<SentPacket> {
-        self.loss_time[pn_space as usize] = 0;
+        let packet_space = &mut self.packet_spaces[pn_space as usize];
 
-        let loss_delay =
-            (TIME_THRESHOLD * (std::cmp::max(self.latest_rtt, self.smoothed_rtt) as f64)) as u64;
+        packet_space.loss_time = 0;
 
-        // Packets sent before this time are deemed lost. ( cur_time < loss_delay, can happen in test)
+        let loss_delay = (TIME_THRESHOLD
+            * (max(self.rtt_vals.latest_rtt, self.rtt_vals.smoothed_rtt) as f64))
+            as u64;
+
+        // Packets sent before this time are deemed lost. ( cur_time <
+        // loss_delay, can happen in test)
         let lost_send_time = if cur_time < loss_delay {
             0
         } else {
@@ -2311,8 +2323,8 @@ impl LossRecovery {
         };
 
         // Packets with packet numbers before this are deemed lost.
-        let lost_pn = if self.largest_acked_packet[pn_space as usize] > PACKET_THRESHOLD {
-            self.largest_acked_packet[pn_space as usize] - PACKET_THRESHOLD
+        let lost_pn = if packet_space.largest_acked_packet > PACKET_THRESHOLD {
+            packet_space.largest_acked_packet - PACKET_THRESHOLD
         } else {
             0
         };
@@ -2324,22 +2336,21 @@ impl LossRecovery {
             lost_pn
         );
 
-        let mut lost: Vec<u64> = Vec::new();
-        for iter in self.sent_packets[pn_space as usize].iter_mut() {
+        let packet_space = &mut self.packet_spaces[pn_space as usize];
+
+        let mut lost = Vec::new();
+        for (pn, packet) in &packet_space.sent_packets {
             // Mark packet as lost, or set time when it should be marked.
-            // Mark packet as lost, or set time when it should be marked.
-            if *iter.0 <= self.largest_acked_packet[pn_space as usize] {
-                if iter.1.time_sent <= lost_send_time || *iter.0 <= lost_pn {
-                    qdebug!("lost={}", iter.0);
-                    lost.push(*iter.0);
+            if *pn <= packet_space.largest_acked_packet {
+                if packet.time_sent <= lost_send_time || *pn <= lost_pn {
+                    qdebug!("lost={}", pn);
+                    lost.push(*pn);
                 } else {
-                    if self.loss_time[pn_space as usize] == 0 {
-                        self.loss_time[pn_space as usize] = iter.1.time_sent + loss_delay;
+                    if packet_space.loss_time == 0 {
+                        packet_space.loss_time = packet.time_sent + loss_delay;
                     } else {
-                        self.loss_time[pn_space as usize] = std::cmp::min(
-                            self.loss_time[pn_space as usize],
-                            iter.1.time_sent + loss_delay,
-                        );
+                        packet_space.loss_time =
+                            min(packet_space.loss_time, packet.time_sent + loss_delay);
                     }
                 }
             }
@@ -2347,7 +2358,7 @@ impl LossRecovery {
 
         let mut lost_packets = Vec::new();
         for pn in lost {
-            if let Some(sent_packet) = self.sent_packets[pn_space as usize].remove(&pn) {
+            if let Some(sent_packet) = packet_space.sent_packets.remove(&pn) {
                 lost_packets.push(sent_packet);
             }
         }
@@ -2368,17 +2379,20 @@ impl LossRecovery {
             PNSpace::Handshake,
             PNSpace::ApplicationData,
         ] {
-            if let Some(_) = self.sent_packets[*pn_space as usize]
-                .iter()
-                .filter(|(x, y)| y.is_crypto_packet)
-                .next()
+            let packet_space = &mut self.packet_spaces[*pn_space as usize];
+
+            if packet_space
+                .sent_packets
+                .values()
+                .any(|sp| sp.is_crypto_packet)
             {
                 has_crypto_out = true;
             }
-            if let Some(_) = self.sent_packets[*pn_space as usize]
-                .iter()
-                .filter(|(x, y)| y.ack_eliciting)
-                .next()
+
+            if packet_space
+                .sent_packets
+                .values()
+                .any(|sp| sp.ack_eliciting)
             {
                 has_ack_eliciting_out = true;
             }
@@ -2390,6 +2404,7 @@ impl LossRecovery {
             has_ack_eliciting_out,
             has_crypto_out
         );
+
         if !has_ack_eliciting_out && !has_crypto_out {
             self.loss_detection_timer = 0;
             return;
@@ -2403,8 +2418,8 @@ impl LossRecovery {
             self.set_timer_for_crypto_retransmission();
         } else {
             // Calculate PTO duration
-            let mut timeout = self.smoothed_rtt
-                + std::cmp::max(4 * self.rttvar, GRANULARITY)
+            let mut timeout = self.rtt_vals.smoothed_rtt
+                + max(4 * self.rtt_vals.rttvar, GRANULARITY)
                 + self.max_ack_delay;
             timeout = timeout * 2u64.pow(self.pto_count);
             self.loss_detection_timer = self.time_of_last_sent_ack_eliciting_packet + timeout;
@@ -2414,28 +2429,28 @@ impl LossRecovery {
 
     fn set_timer_for_crypto_retransmission(&mut self) {
         let mut timeout;
-        if self.smoothed_rtt == 0 {
+        if self.rtt_vals.smoothed_rtt == 0 {
             timeout = 2 * INITIAL_RTT;
         } else {
-            timeout = 2 * self.smoothed_rtt;
+            timeout = 2 * self.rtt_vals.smoothed_rtt;
         }
 
-        timeout = std::cmp::max(timeout, GRANULARITY);
+        timeout = max(timeout, GRANULARITY);
         timeout = timeout * 2u64.pow(self.crypto_count);
         self.loss_detection_timer = self.time_of_last_sent_crypto_packet + timeout;
     }
 
     fn get_earliest_loss_time(&self) -> (u64, PNSpace) {
-        let mut loss_time = self.loss_time[PNSpace::Initial as usize];
+        let mut loss_time = self.packet_spaces[PNSpace::Initial as usize].loss_time;
         let mut pn_space = PNSpace::Initial;
         for space in &[PNSpace::Handshake, PNSpace::ApplicationData] {
+            let packet_space = &self.packet_spaces[*space as usize];
+
             if loss_time == 0 {
-                loss_time = self.loss_time[*space as usize];
+                loss_time = packet_space.loss_time;
                 pn_space = *space;
-            } else if self.loss_time[*space as usize] != 0
-                && self.loss_time[*space as usize] < loss_time
-            {
-                loss_time = self.loss_time[*space as usize];
+            } else if packet_space.loss_time != 0 && packet_space.loss_time < loss_time {
+                loss_time = packet_space.loss_time;
                 pn_space = *space;
             }
         }
@@ -2446,10 +2461,10 @@ impl LossRecovery {
         self.loss_detection_timer * 1000
     }
 
-    //  there are3 outcome for this function, they correspond to (Vec<SentPacket>, bool, bool):
-    //  1) lost packets are detected and a list of the packet is return,
-    //  2) crypto timer expired, crypto data should be retransmitted,
-    //  3) pto, one or two packets should be transmitted.
+    //  The 3 return values for this function: (Vec<SentPacket>, bool, bool).
+    //  1) A list of detected lost packets
+    //  2) Crypto timer expired, crypto data should be retransmitted,
+    //  3) PTO, one or two packets should be transmitted.
     pub fn on_loss_detection_timeout(
         &mut self,
         cur_time_nanos: u64,
@@ -2471,22 +2486,15 @@ impl LossRecovery {
             // Time threshold loss Detection
             lost_packets = self.detect_lost_packets(pn_space, cur_time);
         } else {
-            let mut has_crypto_out = false;
-            let mut iter = self.sent_packets[PNSpace::Initial as usize]
-                .iter()
-                .filter(|(x, y)| y.ack_eliciting);
-            if let Some(_) = iter.next() {
-                has_crypto_out = true;
-            }
-
-            if !has_crypto_out {
-                let mut iter = self.sent_packets[PNSpace::Handshake as usize]
-                    .iter()
-                    .filter(|(x, y)| y.ack_eliciting);
-                if let Some(_) = iter.next() {
-                    has_crypto_out = true;
-                }
-            }
+            let has_crypto_out = self.packet_spaces[PNSpace::Initial as usize]
+                .sent_packets
+                .values()
+                .chain(
+                    self.packet_spaces[PNSpace::Handshake as usize]
+                        .sent_packets
+                        .values(),
+                )
+                .any(|sp| sp.ack_eliciting);
 
             // Retransmit crypto data if no packets were lost
             // and there are still crypto packets in flight.
@@ -2735,19 +2743,21 @@ mod tests {
     ) {
         println!(
             "{} {} {} {} {} {} {}",
-            lr.latest_rtt,
-            lr.smoothed_rtt,
-            lr.rttvar,
-            lr.min_rtt,
-            lr.loss_time[0],
-            lr.loss_time[1],
-            lr.loss_time[2]
+            lr.rtt_vals.latest_rtt,
+            lr.rtt_vals.smoothed_rtt,
+            lr.rtt_vals.rttvar,
+            lr.rtt_vals.min_rtt,
+            lr.packet_spaces[0].loss_time,
+            lr.packet_spaces[1].loss_time,
+            lr.packet_spaces[2].loss_time,
         );
-        assert_eq!(lr.latest_rtt, latest_rtt);
-        assert_eq!(lr.smoothed_rtt, smoothed_rtt);
-        assert_eq!(lr.rttvar, rttvar);
-        assert_eq!(lr.min_rtt, min_rtt);
-        assert_eq!(lr.loss_time, loss_time);
+        assert_eq!(lr.rtt_vals.latest_rtt, latest_rtt);
+        assert_eq!(lr.rtt_vals.smoothed_rtt, smoothed_rtt);
+        assert_eq!(lr.rtt_vals.rttvar, rttvar);
+        assert_eq!(lr.rtt_vals.min_rtt, min_rtt);
+        assert_eq!(lr.packet_spaces[0].loss_time, loss_time[0]);
+        assert_eq!(lr.packet_spaces[1].loss_time, loss_time[1]);
+        assert_eq!(lr.packet_spaces[2].loss_time, loss_time[2]);
     }
 
     #[test]
