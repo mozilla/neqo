@@ -494,7 +494,7 @@ struct CryptoState {
 }
 
 impl CryptoState {
-    fn ensure_recvd_state(&mut self, pn: u64) -> &mut RecvdPackets {
+    fn obtain_recvd_state(&mut self, pn: u64) -> &mut RecvdPackets {
         if self.recvd.is_none() {
             self.recvd = Some(RecvdPackets::new("label [TODO]", self.epoch, pn));
         }
@@ -865,7 +865,7 @@ impl Connection {
             // the rest of the datagram on the floor, but don't generate an error.
             // TODO(ekr@rtfm.com): This is incorrect, you need to try to process
             // the other packets.
-            let res = match self.ensure_crypto_state(hdr.epoch) {
+            let res = match self.obtain_crypto_state(hdr.epoch) {
                 Ok(cs) => decrypt_packet(&cs.rx, &PnCtx {}, &mut hdr, slc),
                 Err(e) => Err(e),
             };
@@ -894,10 +894,10 @@ impl Connection {
             let ack_eliciting = self.input_packet(hdr.epoch, Data::from_slice(&body), cur_time)?;
 
             // Mark the packet as received.
-            self.ensure_crypto_state(hdr.epoch)
+            self.obtain_crypto_state(hdr.epoch)
                 .as_mut()
                 .unwrap()
-                .ensure_recvd_state(hdr.pn)
+                .obtain_recvd_state(hdr.pn)
                 .set_received(cur_time, hdr.pn, ack_eliciting);
 
             match &self.paths {
@@ -973,12 +973,12 @@ impl Connection {
             let mut tokens = Vec::new();
             // Try to make our own crypo state and if we can't, skip this
             // epoch.
-            if self.ensure_crypto_state(epoch).is_err() {
+            if self.obtain_crypto_state(epoch).is_err() {
                 continue;
             }
 
             if let Some(recvd) = self
-                .ensure_crypto_state(epoch)
+                .obtain_crypto_state(epoch)
                 .as_mut()
                 .unwrap()
                 .recvd_state()
@@ -1013,7 +1013,7 @@ impl Connection {
                     assert!(d.written() <= self.pmtu);
                     if d.written() == self.pmtu {
                         // Filled this packet, get another one.
-                        ds.push((d, (ack_eliciting, is_crypto_packet, tokens)));
+                        ds.push((d, ack_eliciting, is_crypto_packet, tokens));
                         d = Data::default();
                         tokens = Vec::new();
                         ack_eliciting = false;
@@ -1024,10 +1024,10 @@ impl Connection {
             self.generators = generators;
 
             if d.written() > 0 {
-                ds.push((d, (ack_eliciting, is_crypto_packet, tokens)))
+                ds.push((d, ack_eliciting, is_crypto_packet, tokens))
             }
 
-            for mut d in ds {
+            for (data, ack_eliciting, is_crypto, tokens) in ds {
                 qdebug!(self, "Need to send a packet");
 
                 initial_only = epoch == 0;
@@ -1053,15 +1053,15 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(
                     Connection::pn_space(epoch),
                     hdr.pn,
-                    (d.1).0,
-                    (d.1).1,
-                    (d.1).2,
+                    ack_eliciting,
+                    is_crypto,
+                    tokens,
                     cur_time,
                 );
 
                 // Failure to have the state here is an internal error.
-                let cs = self.ensure_crypto_state(hdr.epoch).unwrap();
-                let packet = encode_packet(&cs.tx, &mut hdr, d.0.as_mut_vec());
+                let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
+                let packet = encode_packet(&cs.tx, &mut hdr, data.as_vec());
                 out_packets.push(packet);
             }
         }
@@ -1449,42 +1449,41 @@ impl Connection {
         });
     }
 
-    // Get a crypto state, making it if possible, otherwise return an error.
-    fn ensure_crypto_state(&mut self, epoch: Epoch) -> Res<&mut CryptoState> {
-        let cs = &self.crypto_states[epoch as usize];
+    // Get a crypto state, making it if necessary, otherwise return an error.
+    fn obtain_crypto_state(&mut self, epoch: Epoch) -> Res<&mut CryptoState> {
+        let cs = &mut self.crypto_states[epoch as usize];
 
-        // Note: I had originally written an early return, but the
-        // familiar non-lexical lifetimes Rust bug for returns
-        // tripped me up, so I went with this.
-        if matches!(cs, None) {
-            qinfo!(self, "No crypto state for epoch {}", epoch);
-            assert!(epoch != 0); // This state is made directly.
+        match cs {
+            Some(ref mut cs) => Ok(cs),
+            None => {
+                qinfo!("No crypto state for epoch {}", epoch);
+                assert!(epoch != 0); // This state is made directly.
 
-            let rso = self.tls.read_secret(epoch);
-            if matches!(rso, None) {
-                qinfo!(self, "Keying material not available for epoch {}", epoch);
-                return Err(Error::KeysNotFound);
+                let rs = self.tls.read_secret(epoch).ok_or_else(|| {
+                    qinfo!("Keying material not available for epoch {}", epoch);
+                    Error::KeysNotFound
+                })?;
+                let ws = self
+                    .tls
+                    .write_secret(epoch)
+                    .expect("ws must exist if rs exists");
+
+                // TODO(ekr@rtfm.com): The match covers up a bug in
+                // neqo-crypto where we set up the state too late. Fix when that
+                // gets fixed.
+                let cipher = match self.tls.info().as_ref() {
+                    Some(info) => info.cipher_suite(),
+                    None => TLS_AES_128_GCM_SHA256 as u16,
+                };
+                *cs = Some(CryptoState {
+                    epoch: epoch,
+                    rx: CryptoDxState::new(format!("read_epoch={}", epoch), rs, cipher),
+                    tx: CryptoDxState::new(format!("write_epoch={}", epoch), ws, cipher),
+                    recvd: None,
+                });
+                Ok(cs.as_mut().unwrap())
             }
-            let rs = rso.unwrap();
-            // This must succced because the secrets are made at the same time.
-            let ws = self.tls.write_secret(epoch).unwrap();
-
-            // TODO(ekr@rtfm.com): The match covers up a bug in
-            // neqo-crypto where we set up the state too late. Fix when that
-            // gets fixed.
-            let cipher = match self.tls.info().as_ref() {
-                Some(info) => info.cipher_suite(),
-                None => TLS_AES_128_GCM_SHA256 as u16,
-            };
-            self.crypto_states[epoch as usize] = Some(CryptoState {
-                epoch: epoch,
-                rx: CryptoDxState::new(format!("read_epoch={}", epoch), rs, cipher),
-                tx: CryptoDxState::new(format!("write_epoch={}", epoch), ws, cipher),
-                recvd: None,
-            });
         }
-
-        Ok(self.crypto_states[epoch as usize].as_mut().unwrap())
     }
 
     fn pn_space(epoch: Epoch) -> PNSpace {

@@ -327,12 +327,8 @@ pub fn decrypt_packet(
     )?)
 }
 
-fn encode_packet_short(
-    crypto: &CryptoCtx,
-    d: &mut Data,
-    hdr: &mut PacketHdr,
-    body: &[u8],
-) -> Vec<u8> {
+fn encode_packet_short(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
+    let mut d = Data::default();
     // Leading byte.
     let pnl = pn_length(hdr.pn);
     d.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | encode_pnl(pnl));
@@ -343,12 +339,9 @@ fn encode_packet_short(
 }
 
 /* Hanlde Initial, 0-RTT, Handshake. */
-fn encode_packet_long(
-    crypto: &CryptoCtx,
-    d: &mut Data,
-    hdr: &mut PacketHdr,
-    body: &[u8],
-) -> Vec<u8> {
+fn encode_packet_long(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
+    let mut d = Data::default();
+
     let pnl = pn_length(hdr.pn);
     d.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | hdr.tipe.code() << 4 | encode_pnl(pnl));
     d.encode_uint(hdr.version.unwrap(), 4);
@@ -368,7 +361,7 @@ fn encode_packet_long(
     encrypt_packet(crypto, hdr, d, body)
 }
 
-fn encrypt_packet(crypto: &CryptoCtx, hdr: &mut PacketHdr, d: &mut Data, body: &[u8]) -> Vec<u8> {
+fn encrypt_packet(crypto: &CryptoCtx, hdr: &PacketHdr, mut d: Data, body: &[u8]) -> Vec<u8> {
     let hdr_len = d.remaining();
     // Encrypt the packet. This has too many copies.
     let ct = crypto.aead_encrypt(hdr.pn, d.as_mut_vec(), body).unwrap();
@@ -396,16 +389,14 @@ fn pn_length(pn: PacketNumber) -> usize {
     return 3;
 }
 
-pub fn encode_packet(crypto: &CryptoCtx, hdr: &mut PacketHdr, body: &[u8]) -> Vec<u8> {
-    let mut d = Data::default();
-
+pub fn encode_packet(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     match hdr.tipe {
-        PacketType::Short => encode_packet_short(crypto, &mut d, hdr, body),
+        PacketType::Short => encode_packet_short(crypto, hdr, body),
         /*
         PacketType::VN(..) => encode_packet_vn(ctx, &d, hdr, body),
         PacketType::Retry(..) => encode_retry(ctx, &d, hdr, body), */
         PacketType::Initial(..) | PacketType::Handshake | PacketType::Retry(..) => {
-            encode_packet_long(crypto, &mut d, hdr, body)
+            encode_packet_long(crypto, hdr, body)
         }
         _ => unimplemented!(),
     }
