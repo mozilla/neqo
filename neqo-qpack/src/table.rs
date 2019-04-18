@@ -111,28 +111,27 @@ impl HeaderTable {
 
     pub fn get_dynamic(&self, i: u64, base: u64, post: bool) -> Res<&DynamicTableEntry> {
         if self.base < base {
-            Err(Error::HeaderLookupError)
-        } else {
-            let mut inx: u64;
-            if post {
-                inx = base + i;
-                if inx >= self.base {
-                    return Err(Error::HeaderLookupError);
-                }
-                inx = self.base - inx - 1;
-            } else {
-                inx = i + (self.base - base);
-            }
-            if inx as usize >= self.dynamic.len() {
+            return Err(Error::HeaderLookupError);
+        }
+        let inx: u64;
+        let base_rel = self.base - base;
+        if post {
+            if base_rel <= i {
                 return Err(Error::HeaderLookupError);
             }
-            let res = &self.dynamic[inx as usize];
-            Ok(res)
+            inx = base_rel - i - 1;
+        } else {
+            inx = base_rel + i;
         }
+        if inx as usize >= self.dynamic.len() {
+            return Err(Error::HeaderLookupError);
+        }
+        let res = &self.dynamic[inx as usize];
+        Ok(res)
     }
 
     pub fn get_last_added_entry(&mut self) -> Option<&mut DynamicTableEntry> {
-        self.dynamic.back_mut()
+        self.dynamic.front_mut()
     }
 
     // separate lookups because static entries can not be return mut and we need dynamic entries mutable.
@@ -178,12 +177,12 @@ impl HeaderTable {
 
     pub fn evict_to(&mut self, reduce: u64) -> bool {
         while (self.dynamic.len() > 0) && self.used > reduce {
-            if let Some(e) = self.dynamic.front() {
+            if let Some(e) = self.dynamic.back() {
                 if !e.can_reduce(self.acked_inserts_cnt) {
                     return false;
                 }
                 self.used -= e.size();
-                self.dynamic.pop_front();
+                self.dynamic.pop_back();
             }
         }
         return true;
@@ -205,7 +204,7 @@ impl HeaderTable {
         }
         self.base += 1;
         self.used += entry.size();
-        self.dynamic.push_back(entry);
+        self.dynamic.push_front(entry);
         Ok(())
     }
 

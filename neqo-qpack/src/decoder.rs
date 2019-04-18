@@ -121,7 +121,7 @@ impl QPackDecoder {
             .filter(|(_, req)| req <= &base)
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
-        self.blocked_streams.retain(|(_, req)| req <= &base);
+        self.blocked_streams.retain(|(_, req)| req > &base);
         Ok(r)
     }
 
@@ -255,8 +255,31 @@ impl QPackDecoder {
                             ref mut len,
                             ref mut cnt,
                         } => {
+                            let mut b = [0; 1];
+                            let mut prefix_len = 0;
+                            if *cnt == 0 {
+                                match s.read(&mut b) {
+                                    Err(_) => break Err(Error::DecoderStreamError),
+                                    Ok((amount, fin)) => {
+                                        if fin {
+                                            break Err(Error::ClosedCriticalStream);
+                                        }
+                                        if amount != 1 {
+                                            // wait for more data.
+                                            break Ok(());
+                                        }
+                                    }
+                                }
+                                prefix_len = 1;
+                                *value_is_huffman = b[0] & 0x80 != 0;
+                            }
                             let done = read_prefixed_encoded_int_with_recvable_wrap(
-                                s, len, cnt, 0, 0x0, false,
+                                s,
+                                len,
+                                cnt,
+                                prefix_len,
+                                b[0],
+                                if prefix_len > 0 { true } else { false },
                             )?;
                             if !done {
                                 // waiting for more data
@@ -278,7 +301,11 @@ impl QPackDecoder {
                             if value.len() == *offset {
                                 // We are done reading instruction, insert the new entry.
                                 let mut value_to_insert: Vec<u8> = Vec::new();
-                                mem::swap(&mut value_to_insert, value);
+                                if *value_is_huffman {
+                                    value_to_insert = Huffman::default().decode(value)?;
+                                } else {
+                                    mem::swap(&mut value_to_insert, value);
+                                }
                                 qdebug!(label, "received instruction - insert with name ref index={} static={} value={:x?}", name_index, name_static_table, value_to_insert);
                                 self.table.insert_with_name_ref(
                                     *name_static_table,
@@ -340,8 +367,31 @@ impl QPackDecoder {
                             ref mut len,
                             ref mut cnt,
                         } => {
+                            let mut b = [0; 1];
+                            let mut prefix_len = 0;
+                            if *cnt == 0 {
+                                match s.read(&mut b) {
+                                    Err(_) => break Err(Error::DecoderStreamError),
+                                    Ok((amount, fin)) => {
+                                        if fin {
+                                            break Err(Error::ClosedCriticalStream);
+                                        }
+                                        if amount != 1 {
+                                            // wait for more data.
+                                            break Ok(());
+                                        }
+                                    }
+                                }
+                                prefix_len = 1;
+                                *value_is_huffman = b[0] & 0x80 != 0;
+                            }
                             let done = read_prefixed_encoded_int_with_recvable_wrap(
-                                s, len, cnt, 0, 0x0, false,
+                                s,
+                                len,
+                                cnt,
+                                prefix_len,
+                                b[0],
+                                if prefix_len > 0 { true } else { false },
                             )?;
                             if !done {
                                 // waiting for more data
@@ -424,7 +474,7 @@ impl QPackDecoder {
         }
     }
 
-    fn set_capacity(&mut self, cap: u64) -> Res<()> {
+    pub fn set_capacity(&mut self, cap: u64) -> Res<()> {
         qdebug!(self, "received instruction capacity cap={}", cap);
         if cap > self.max_table_size as u64 {
             return Err(Error::EncoderStreamError);
@@ -565,7 +615,7 @@ impl QPackDecoder {
     }
 
     fn read_literal_with_name_ref(&self, buf: &mut BufWrapper, base: u64) -> Res<(String, String)> {
-        qdebug!(self, "insert with name reference.");
+        qdebug!(self, "read literal with name reference.");
         // ignore n bit.
         let static_table = buf.peek()? & 0x10 != 0;
         let index = read_prefixed_encoded_int_slice(buf, 4)?;
