@@ -114,6 +114,14 @@ impl StreamId {
         !self.is_self_initiated(role)
     }
 
+    fn is_send_only(&self, role: Role) -> bool {
+        self.is_uni() && self.is_self_initiated(self.role())
+    }
+
+    fn is_recv_only(&self, role: Role) -> bool {
+        self.is_uni() && self.is_peer_initiated(self.role())
+    }
+
     fn as_u64(&self) -> u64 {
         self.0
     }
@@ -1231,24 +1239,18 @@ impl Connection {
                 application_error_code,
                 final_size,
             } => {
-                let stream = self
-                    .recv_streams
-                    .get_mut(&stream_id.into())
-                    .ok_or_else(|| return Error::InvalidStreamId)?;
-
                 // TODO(agrover@mozilla.com): use final_size for connection MaxData calc
-                stream.reset(application_error_code);
+                if let (_, Some(rs)) = self.obtain_stream(stream_id.into())? {
+                    rs.reset(application_error_code);
+                }
             }
             Frame::StopSending {
                 stream_id,
                 application_error_code,
             } => {
-                let stream = self
-                    .send_streams
-                    .get_mut(&stream_id.into())
-                    .ok_or_else(|| return Error::InvalidStreamId)?;
-
-                stream.reset(application_error_code);
+                if let (Some(ss), _) = self.obtain_stream(stream_id.into())? {
+                    ss.reset(application_error_code);
+                }
             }
             Frame::Crypto { offset, data } => {
                 qdebug!(
@@ -1274,7 +1276,7 @@ impl Connection {
                 offset,
                 data,
             } => {
-                if let Some(rs) = self.obtain_stream(stream_id.into())? {
+                if let (_, Some(rs)) = self.obtain_stream(stream_id.into())? {
                     rs.inbound_stream_frame(fin, offset, data)?;
                 }
             }
@@ -1286,8 +1288,8 @@ impl Connection {
                 stream_id,
                 maximum_stream_data,
             } => {
-                if let Some(stream) = self.send_streams.get_mut(&stream_id.into()) {
-                    stream.max_stream_data(maximum_stream_data);
+                if let (Some(ss), _) = self.obtain_stream(stream_id.into())? {
+                    ss.max_stream_data(maximum_stream_data);
                 }
             }
             Frame::MaxStreams {
@@ -1309,14 +1311,19 @@ impl Connection {
                 stream_id,
                 stream_data_limit,
             } => {
-                // TODO(agrover@mozilla.com): terminate connection with
-                // SEND_STREAM_ERROR if send-only stream (-transport 19.13)
-
                 // TODO(agrover@mozilla.com): how should we be using
                 // currently-unused stream_data_limit?
 
-                if let Some(stream) = self.recv_streams.get_mut(&stream_id.into()) {
-                    stream.maybe_send_flowc_update();
+                let stream_id: StreamId = stream_id.into();
+
+                // Terminate connection with STREAM_STATE_ERROR if send-only
+                // stream (-transport 19.13)
+                if stream_id.is_send_only(self.role()) {
+                    return Err(Error::StreamStateError);
+                }
+
+                if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
+                    rs.maybe_send_flowc_update();
                 }
             }
             Frame::StreamsBlocked {
@@ -1542,8 +1549,12 @@ impl Connection {
         }
     }
 
-    /// Get or make a stream.
-    fn obtain_stream(&mut self, stream_id: StreamId) -> Res<Option<&mut RecvStream>> {
+    /// Get or make a stream, and implicitly open additional streams as
+    /// indicated by its stream id.
+    fn obtain_stream(
+        &mut self,
+        stream_id: StreamId,
+    ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
         let next_stream_idx = if stream_id.is_bidi() {
             &mut self.local_next_stream_idx_bidi
         } else {
@@ -1628,7 +1639,10 @@ impl Connection {
             }
         }
 
-        Ok(self.recv_streams.get_mut(&stream_id))
+        Ok((
+            self.send_streams.get_mut(&stream_id),
+            self.recv_streams.get_mut(&stream_id),
+        ))
     }
 
     // Returns new stream id
