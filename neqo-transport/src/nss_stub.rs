@@ -7,11 +7,10 @@
 // TODO(ekr@rtfm.com): Remove this once I've implemented everything.
 // Stub version of SSLRecord
 #![allow(unused_variables, dead_code)]
-use neqo_common::data::*;
-use neqo_common::{qdebug, qwarn};
-//use super::packet::*;
-use super::*;
-use lazy_static::*;
+use crate::{Error, Res};
+use lazy_static::lazy_static;
+use neqo_common::data::Data;
+use neqo_common::{qdebug, qinfo, qwarn};
 use std::collections::linked_list::LinkedList;
 use std::ops::{Deref, DerefMut};
 use std::string::String;

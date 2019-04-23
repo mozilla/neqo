@@ -7,9 +7,9 @@
 #![allow(unused_variables, dead_code)]
 use crate::connection::{Role, QUIC_VERSION};
 use crate::{Error, Res};
-use neqo_common::data::*;
+use neqo_common::data::Data;
 use neqo_common::hex;
-use neqo_common::varint::*;
+use neqo_common::varint::get_varint_len;
 use neqo_common::{qdebug, qtrace};
 use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
 use neqo_crypto::{HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS};
@@ -20,20 +20,20 @@ struct PreferredAddress {
 }
 
 pub mod consts {
-    pub const TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID: u16 = 0;
-    pub const TRANSPORT_PARAMETER_IDLE_TIMEOUT: u16 = 1;
-    pub const TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN: u16 = 2;
-    pub const TRANSPORT_PARAMETER_MAX_PACKET_SIZE: u16 = 3;
-    pub const TRANSPORT_PARAMETER_INITIAL_MAX_DATA: u16 = 4;
-    pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL: u16 = 5;
-    pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE: u16 = 6;
-    pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI: u16 = 7;
-    pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI: u16 = 8;
-    pub const TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI: u16 = 9;
-    pub const TRANSPORT_PARAMETER_ACK_DELAY_EXPONENT: u16 = 10;
-    pub const TRANSPORT_PARAMETER_MAX_ACK_DELAY: u16 = 11;
-    pub const TRANSPORT_PARAMETER_DISABLE_MIGRATION: u16 = 12;
-    pub const TRANSPORT_PARAMETER_PREFERRED_ADDRESS: u16 = 13;
+    pub const ORIGINAL_CONNECTION_ID: u16 = 0;
+    pub const IDLE_TIMEOUT: u16 = 1;
+    pub const STATELESS_RESET_TOKEN: u16 = 2;
+    pub const MAX_PACKET_SIZE: u16 = 3;
+    pub const INITIAL_MAX_DATA: u16 = 4;
+    pub const INITIAL_MAX_STREAM_DATA_BIDI_LOCAL: u16 = 5;
+    pub const INITIAL_MAX_STREAM_DATA_BIDI_REMOTE: u16 = 6;
+    pub const INITIAL_MAX_STREAM_DATA_UNI: u16 = 7;
+    pub const INITIAL_MAX_STREAMS_BIDI: u16 = 8;
+    pub const INITIAL_MAX_STREAMS_UNI: u16 = 9;
+    pub const ACK_DELAY_EXPONENT: u16 = 10;
+    pub const MAX_ACK_DELAY: u16 = 11;
+    pub const DISABLE_MIGRATION: u16 = 12;
+    pub const PREFERRED_ADDRESS: u16 = 13;
 }
 
 use self::consts::*;
@@ -74,32 +74,32 @@ impl TransportParameter {
         // of Data that returned another data that was a slice on
         // this one, so I could check the length more easily.
         let tp = match tipe {
-            TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID => {
+            ORIGINAL_CONNECTION_ID => {
                 TransportParameter::Bytes(d.decode_data(length)?)
             }
-            TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN => {
+            STATELESS_RESET_TOKEN => {
                 if length != 16 {
                     return Err(Error::TransportParameterError);
                 }
                 TransportParameter::Bytes(d.decode_data(length)?)
             },
-            TRANSPORT_PARAMETER_IDLE_TIMEOUT
-            | TRANSPORT_PARAMETER_INITIAL_MAX_DATA
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI
-            | TRANSPORT_PARAMETER_MAX_ACK_DELAY => TransportParameter::Integer(d.decode_varint()?),
+            IDLE_TIMEOUT
+            | INITIAL_MAX_DATA
+            | INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
+            | INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
+            | INITIAL_MAX_STREAM_DATA_UNI
+            | INITIAL_MAX_STREAMS_BIDI
+            | INITIAL_MAX_STREAMS_UNI
+            | MAX_ACK_DELAY => TransportParameter::Integer(d.decode_varint()?),
 
-            TRANSPORT_PARAMETER_MAX_PACKET_SIZE => {
+            MAX_PACKET_SIZE => {
                 let tmp = d.decode_varint()?;
                 if tmp < 1200 {
                     return Err(Error::TransportParameterError);
                 }
                 TransportParameter::Integer(tmp)
             },
-            TRANSPORT_PARAMETER_ACK_DELAY_EXPONENT => {
+            ACK_DELAY_EXPONENT => {
                 let tmp = d.decode_varint()?;
                 if tmp > 20 {
                     return Err(Error::TransportParameterError);
@@ -194,16 +194,16 @@ impl TransportParameters {
     // Get an integer type or a default.
     pub fn get_integer(&self, tipe: u16) -> u64 {
         let default = match tipe {
-            TRANSPORT_PARAMETER_IDLE_TIMEOUT
-            | TRANSPORT_PARAMETER_INITIAL_MAX_DATA
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI => 0,
-            TRANSPORT_PARAMETER_MAX_PACKET_SIZE => 65527,
-            TRANSPORT_PARAMETER_ACK_DELAY_EXPONENT => 3,
-            TRANSPORT_PARAMETER_MAX_ACK_DELAY => 25,
+            IDLE_TIMEOUT
+            | INITIAL_MAX_DATA
+            | INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
+            | INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
+            | INITIAL_MAX_STREAM_DATA_UNI
+            | INITIAL_MAX_STREAMS_BIDI
+            | INITIAL_MAX_STREAMS_UNI => 0,
+            MAX_PACKET_SIZE => 65527,
+            ACK_DELAY_EXPONENT => 3,
+            MAX_ACK_DELAY => 25,
             _ => panic!("Transport parameter not known or not an Integer"),
         };
         match self.params.get(&tipe) {
@@ -215,27 +215,26 @@ impl TransportParameters {
 
     // Get an integer type or a default.
     pub fn set_integer(&mut self, tipe: u16, value: u64) {
-        let default = match tipe {
-            TRANSPORT_PARAMETER_IDLE_TIMEOUT
-            | TRANSPORT_PARAMETER_INITIAL_MAX_DATA
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI
-            | TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI
-            | TRANSPORT_PARAMETER_MAX_PACKET_SIZE
-            | TRANSPORT_PARAMETER_ACK_DELAY_EXPONENT
-            | TRANSPORT_PARAMETER_MAX_ACK_DELAY => {
-                self.params.insert(tipe, TransportParameter::Integer(value))
+        match tipe {
+            IDLE_TIMEOUT
+            | INITIAL_MAX_DATA
+            | INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
+            | INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
+            | INITIAL_MAX_STREAM_DATA_UNI
+            | INITIAL_MAX_STREAMS_BIDI
+            | INITIAL_MAX_STREAMS_UNI
+            | MAX_PACKET_SIZE
+            | ACK_DELAY_EXPONENT
+            | MAX_ACK_DELAY => {
+                self.params.insert(tipe, TransportParameter::Integer(value));
             }
             _ => panic!("Transport parameter not known"),
-        };
+        }
     }
 
     pub fn get_bytes(&self, tipe: u16) -> Option<Vec<u8>> {
         match tipe {
-            TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID
-            | TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN => {}
+            ORIGINAL_CONNECTION_ID | STATELESS_RESET_TOKEN => {}
             _ => panic!("Transport parameter not known or not type bytes"),
         }
 
@@ -248,8 +247,7 @@ impl TransportParameters {
 
     pub fn set_bytes(&mut self, tipe: u16, value: Vec<u8>) {
         match tipe {
-            TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID
-            | TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN => {
+            ORIGINAL_CONNECTION_ID | STATELESS_RESET_TOKEN => {
                 self.params.insert(tipe, TransportParameter::Bytes(value));
             }
             _ => panic!("Transport parameter not known or not type bytes"),
@@ -322,13 +320,11 @@ mod tests {
     fn test_basic_tps() {
         let mut tps = TransportParameters::default();
         tps.params.insert(
-            TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN,
+            STATELESS_RESET_TOKEN,
             TransportParameter::Bytes(vec![1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8]),
         );
-        tps.params.insert(
-            TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI,
-            TransportParameter::Integer(10),
-        );
+        tps.params
+            .insert(INITIAL_MAX_STREAMS_BIDI, TransportParameter::Integer(10));
 
         let mut d = Data::default();
         tps.encode(Role::Client, &mut d).expect("Couldn't encode");
@@ -337,28 +333,16 @@ mod tests {
         assert_eq!(tps, tps2);
 
         println!("TPS = {:?}", tps);
-        assert_eq!(tps2.get_integer(TRANSPORT_PARAMETER_IDLE_TIMEOUT), 0); // Default
-        assert_eq!(tps2.get_integer(TRANSPORT_PARAMETER_MAX_ACK_DELAY), 25); // Default
+        assert_eq!(tps2.get_integer(IDLE_TIMEOUT), 0); // Default
+        assert_eq!(tps2.get_integer(MAX_ACK_DELAY), 25); // Default
+        assert_eq!(tps2.get_integer(INITIAL_MAX_STREAMS_BIDI), 10); // Sent
         assert_eq!(
-            tps2.get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI),
-            10
-        ); // Sent
-        assert_eq!(
-            tps2.get_bytes(TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN),
+            tps2.get_bytes(STATELESS_RESET_TOKEN),
             Some(vec![1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8])
         );
-        assert_eq!(
-            tps2.get_bytes(TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID),
-            None
-        );
-        assert_eq!(
-            tps2.was_sent(TRANSPORT_PARAMETER_ORIGINAL_CONNECTION_ID),
-            false
-        );
-        assert_eq!(
-            tps2.was_sent(TRANSPORT_PARAMETER_STATELESS_RESET_TOKEN),
-            true
-        );
+        assert_eq!(tps2.get_bytes(ORIGINAL_CONNECTION_ID), None);
+        assert_eq!(tps2.was_sent(ORIGINAL_CONNECTION_ID), false);
+        assert_eq!(tps2.was_sent(STATELESS_RESET_TOKEN), true);
 
         let mut d = Data::default();
         tps.encode(Role::Server, &mut d).expect("Couldn't encode");

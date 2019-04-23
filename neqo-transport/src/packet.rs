@@ -6,15 +6,14 @@
 
 // TODO(ekr@rtfm.com): Remove this once I've implemented everything.
 #![allow(unused_variables, dead_code)]
+use derive_more::Deref;
 
-use derive_more::*;
-
-use super::*;
-use neqo_common::data::*;
+use neqo_common::data::{Data, DataBuf};
 use neqo_common::hex;
 use neqo_common::{matches, qtrace};
 
 use crate::nss_stub::Epoch;
+use crate::{Error, Res};
 
 const PACKET_TYPE_INITIAL: u8 = 0x0;
 const PACKET_TYPE_0RTT: u8 = 0x01;

@@ -6,10 +6,10 @@
 
 // TODO(ekr@rtfm.com): Remove this once I've implemented everything.
 #![allow(unused_variables, dead_code)]
-use super::*;
 use crate::connection::StreamIndex;
 use crate::tracking::PacketRange;
-use neqo_common::data::*;
+use crate::{ConnectionError, Error, Res};
+use neqo_common::data::Data;
 use neqo_common::qdebug;
 
 pub type FrameType = u64;

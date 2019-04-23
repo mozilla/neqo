@@ -14,21 +14,27 @@ use std::net::SocketAddr;
 use std::ops::{AddAssign, Deref, DerefMut};
 use std::rc::Rc;
 
+use rand::Rng;
+
 use neqo_common::data::Data;
-use neqo_common::varint::*;
+use neqo_common::varint::get_varint_len;
 use neqo_common::{hex, matches, qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::aead::Aead;
-use neqo_crypto::constants::*;
 use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
-use rand::prelude::*;
 
 use crate::frame::{decode_frame, AckRange, Frame, FrameType, StreamType};
-use crate::nss::*;
-use crate::packet::*;
+use crate::nss::{
+    Agent, Cipher, Client, Epoch, HandshakeState, Record, Server, SymKey, TLS_AES_128_GCM_SHA256,
+    TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
+};
+use crate::packet::{
+    decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, CryptoCtx, PacketDecoder,
+    PacketHdr, PacketNumber, PacketNumberCtx, PacketType,
+};
 use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, TxBuffer};
-use crate::tparams::consts::*;
+use crate::tparams::consts as tp_const;
 use crate::tparams::TransportParametersHandler;
 use crate::tracking::RecvdPackets;
 use crate::{AppError, ConnectionError, Error, Recvable, Res, Sendable};
@@ -645,29 +651,29 @@ impl Connection {
     ) -> Connection {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         tphandler.borrow_mut().local.set_integer(
-            TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            tp_const::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
             RX_STREAM_DATA_WINDOW,
         );
         tphandler.borrow_mut().local.set_integer(
-            TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+            tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
             RX_STREAM_DATA_WINDOW,
-        );
-        tphandler.borrow_mut().local.set_integer(
-            TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI,
-            RX_STREAM_DATA_WINDOW,
-        );
-        tphandler.borrow_mut().local.set_integer(
-            TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI,
-            LOCAL_STREAM_LIMIT_BIDI,
-        );
-        tphandler.borrow_mut().local.set_integer(
-            TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI,
-            LOCAL_STREAM_LIMIT_UNI,
         );
         tphandler
             .borrow_mut()
             .local
-            .set_integer(TRANSPORT_PARAMETER_INITIAL_MAX_DATA, LOCAL_MAX_DATA);
+            .set_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI, RX_STREAM_DATA_WINDOW);
+        tphandler
+            .borrow_mut()
+            .local
+            .set_integer(tp_const::INITIAL_MAX_STREAMS_BIDI, LOCAL_STREAM_LIMIT_BIDI);
+        tphandler
+            .borrow_mut()
+            .local
+            .set_integer(tp_const::INITIAL_MAX_STREAMS_UNI, LOCAL_STREAM_LIMIT_UNI);
+        tphandler
+            .borrow_mut()
+            .local
+            .set_integer(tp_const::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
 
         Connection::configure_agent(&mut agent, protocols, tphandler.clone());
 
@@ -1187,7 +1193,7 @@ impl Connection {
                     .remote
                     .as_ref()
                     .expect("remote tparams are valid when State::Connected")
-                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_BIDI),
+                    .get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI),
             );
 
             self.peer_max_stream_idx_uni = StreamIndex::new(
@@ -1196,7 +1202,7 @@ impl Connection {
                     .remote
                     .as_ref()
                     .expect("remote tparams are valid when State::Connected")
-                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAMS_UNI),
+                    .get_integer(tp_const::INITIAL_MAX_STREAMS_UNI),
             );
             self.flow_mgr.borrow_mut().conn_increase_max_credit(
                 self.tps
@@ -1204,7 +1210,7 @@ impl Connection {
                     .remote
                     .as_ref()
                     .expect("remote tparams are valid when State::Connected")
-                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_DATA),
+                    .get_integer(tp_const::INITIAL_MAX_DATA),
             );
         }
         Ok(())
@@ -1582,7 +1588,7 @@ impl Connection {
                 self.tps
                     .borrow()
                     .local
-                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
+                    .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
             } else {
                 if stream_idx > self.local_max_stream_idx_uni {
                     return Err(Error::StreamLimitError);
@@ -1590,7 +1596,7 @@ impl Connection {
                 self.tps
                     .borrow()
                     .local
-                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI)
+                    .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI)
             };
 
             loop {
@@ -1617,7 +1623,7 @@ impl Connection {
                         .remote
                         .as_ref()
                         .expect("remote tparams are valid when State::Connected")
-                        .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+                        .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
                     self.send_streams.insert(
                         next_stream_id,
                         SendStream::new(
@@ -1671,7 +1677,7 @@ impl Connection {
                     .remote
                     .as_ref()
                     .expect("remote tparams are valid when State::Connected")
-                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_UNI);
+                    .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI);
 
                 self.send_streams.insert(
                     new_id,
@@ -1701,7 +1707,7 @@ impl Connection {
                     .remote
                     .as_ref()
                     .expect("remote tparams are valid when State::Connected")
-                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+                    .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
 
                 self.send_streams.insert(
                     new_id,
@@ -1717,7 +1723,7 @@ impl Connection {
                     .tps
                     .borrow()
                     .local
-                    .get_integer(TRANSPORT_PARAMETER_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
+                    .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
 
                 self.recv_streams.insert(
                     new_id,
@@ -2585,6 +2591,7 @@ impl ::std::fmt::Display for LossRecovery {
 mod tests {
     use super::*;
     use crate::frame::StreamType;
+    use neqo_crypto::init_db;
 
     fn loopback() -> SocketAddr {
         "127.0.0.1:443".parse().unwrap()
