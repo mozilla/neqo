@@ -108,24 +108,24 @@ impl StreamId {
         }
     }
 
-    fn is_self_initiated(&self, role: Role) -> bool {
-        match self.role() {
+    fn is_self_initiated(&self, my_role: Role) -> bool {
+        match my_role {
             Role::Client if self.is_client_initiated() => true,
             Role::Server if self.is_server_initiated() => true,
             _ => false,
         }
     }
 
-    fn is_peer_initiated(&self, role: Role) -> bool {
-        !self.is_self_initiated(role)
+    fn is_peer_initiated(&self, my_role: Role) -> bool {
+        !self.is_self_initiated(my_role)
     }
 
-    fn is_send_only(&self, role: Role) -> bool {
-        self.is_uni() && self.is_self_initiated(self.role())
+    fn is_send_only(&self, my_role: Role) -> bool {
+        self.is_uni() && self.is_self_initiated(my_role)
     }
 
-    fn is_recv_only(&self, role: Role) -> bool {
-        self.is_uni() && self.is_peer_initiated(self.role())
+    fn is_recv_only(&self, my_role: Role) -> bool {
+        self.is_uni() && self.is_peer_initiated(my_role)
     }
 
     fn as_u64(&self) -> u64 {
@@ -2603,6 +2603,41 @@ mod tests {
 
     fn now() -> u64 {
         0
+    }
+
+    #[test]
+    fn test_stream_id_methods() {
+        let id1 = StreamIndex::new(4).to_stream_id(StreamType::BiDi, Role::Client);
+        assert_eq!(id1.is_bidi(), true);
+        assert_eq!(id1.is_uni(), false);
+        assert_eq!(id1.is_client_initiated(), true);
+        assert_eq!(id1.is_server_initiated(), false);
+        assert_eq!(id1.role(), Role::Client);
+        assert_eq!(id1.is_self_initiated(Role::Client), true);
+        assert_eq!(id1.is_self_initiated(Role::Server), false);
+        assert_eq!(id1.is_peer_initiated(Role::Client), false);
+        assert_eq!(id1.is_peer_initiated(Role::Server), true);
+        assert_eq!(id1.is_send_only(Role::Server), false);
+        assert_eq!(id1.is_send_only(Role::Client), false);
+        assert_eq!(id1.is_recv_only(Role::Server), false);
+        assert_eq!(id1.is_recv_only(Role::Client), false);
+        assert_eq!(id1.as_u64(), 16);
+
+        let id2 = StreamIndex::new(8).to_stream_id(StreamType::UniDi, Role::Server);
+        assert_eq!(id2.is_bidi(), false);
+        assert_eq!(id2.is_uni(), true);
+        assert_eq!(id2.is_client_initiated(), false);
+        assert_eq!(id2.is_server_initiated(), true);
+        assert_eq!(id2.role(), Role::Server);
+        assert_eq!(id2.is_self_initiated(Role::Client), false);
+        assert_eq!(id2.is_self_initiated(Role::Server), true);
+        assert_eq!(id2.is_peer_initiated(Role::Client), true);
+        assert_eq!(id2.is_peer_initiated(Role::Server), false);
+        assert_eq!(id2.is_send_only(Role::Server), true);
+        assert_eq!(id2.is_send_only(Role::Client), false);
+        assert_eq!(id2.is_recv_only(Role::Server), false);
+        assert_eq!(id2.is_recv_only(Role::Client), true);
+        assert_eq!(id2.as_u64(), 35);
     }
 
     #[test]
