@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(unused_variables, dead_code)]
+#![allow(dead_code)]
 use crate::connection::{Role, QUIC_VERSION};
 use crate::{Error, Res};
 use neqo_common::data::Data;
@@ -313,6 +313,7 @@ impl ExtensionHandler for TransportParametersHandler {
 
 // TODO(ekr@rtfm.com): Need to write more TP unit tests.
 #[cfg(test)]
+#[allow(unused_variables)]
 mod tests {
     use super::*;
     use crate::connection::Role;

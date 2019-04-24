@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// TODO(ekr@rtfm.com): Remove this once I've implemented everything.
-#![allow(unused_variables, dead_code)]
 use crate::connection::StreamIndex;
 use crate::tracking::PacketRange;
 use crate::{ConnectionError, Error, Res};
@@ -430,7 +428,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
             let nr = d.decode_varint()?;
             let fa = d.decode_varint()?;
             let mut arr: Vec<AckRange> = Vec::with_capacity(nr as usize);
-            for i in 0..nr {
+            for _ in 0..nr {
                 let ar = AckRange {
                     gap: d.decode_varint()?,
                     range: d.decode_varint()?,

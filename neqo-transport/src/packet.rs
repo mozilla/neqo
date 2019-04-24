@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// TODO(ekr@rtfm.com): Remove this once I've implemented everything.
-#![allow(unused_variables, dead_code)]
 use derive_more::Deref;
 
 use neqo_common::data::{Data, DataBuf};
@@ -58,6 +56,7 @@ impl PacketType {
 
 pub type Version = u32;
 pub type PacketNumber = u64;
+
 #[derive(Default, Deref, Debug, PartialEq)]
 pub struct ConnectionId(pub Vec<u8>);
 
@@ -384,7 +383,7 @@ fn encrypt_packet(crypto: &CryptoCtx, hdr: &PacketHdr, mut d: Data, body: &[u8])
 }
 
 // TODO(ekr@rtfm.com): Minimal packet number lengths.
-fn pn_length(pn: PacketNumber) -> usize {
+fn pn_length(_pn: PacketNumber) -> usize {
     return 3;
 }
 
@@ -402,6 +401,7 @@ pub fn encode_packet(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8
 }
 
 #[cfg(test)]
+#[allow(unused_variables)]
 mod tests {
     use super::*;
 

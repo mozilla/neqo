@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(unused_variables, dead_code)]
+#![allow(dead_code)]
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
@@ -952,7 +952,7 @@ impl Connection {
         let mut out_dgrams = Vec::new();
         let mut errors = Vec::new();
         for p in &paths {
-            let res = match self.output_path(&p, cur_time) {
+            match self.output_path(&p, cur_time) {
                 Ok(ref mut dgrams) => out_dgrams.append(dgrams),
                 Err(e) => errors.push(e),
             };
@@ -1926,6 +1926,7 @@ impl FrameGenerator for CryptoGenerator {
         let tx_stream = &mut conn.crypto_streams[epoch as usize].tx;
         if let Some((offset, data)) = tx_stream.next_bytes(mode) {
             let data_len = data.len();
+            assert!(data_len <= remaining);
             let frame = Frame::Crypto {
                 offset,
                 data: data.to_vec(),
@@ -1972,7 +1973,9 @@ impl FrameGeneratorToken for CryptoGeneratorToken {
             .tx
             .mark_as_acked(self.offset, self.length as usize);
     }
-    fn lost(&mut self, conn: &mut Connection) {}
+    fn lost(&mut self, _conn: &mut Connection) {
+        // TODO(agrover@mozilla.com): @ekr: resend?
+    }
 }
 
 struct CloseGenerator {}
@@ -1981,9 +1984,9 @@ impl FrameGenerator for CloseGenerator {
     fn generate(
         &mut self,
         c: &mut Connection,
-        e: Epoch,
-        mode: TxMode,
-        remaining: usize,
+        _e: Epoch,
+        _mode: TxMode,
+        _remaining: usize,
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
         c.send_close()
     }
@@ -2128,7 +2131,7 @@ impl FrameGeneratorToken for FlowControlGeneratorToken {
                     application_error_code,
                     final_size
                 );
-                if let Some(ss) = conn.send_streams.get_mut(&stream_id.into()) {
+                if conn.send_streams.contains_key(&stream_id.into()) {
                     conn.flow_mgr.borrow_mut().stream_reset(
                         stream_id.into(),
                         application_error_code,
@@ -2152,8 +2155,8 @@ impl FrameGenerator for FlowControlGenerator {
     fn generate(
         &mut self,
         conn: &mut Connection,
-        epoch: u16,
-        mode: TxMode,
+        _epoch: u16,
+        _mode: TxMode,
         remaining: usize,
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
         if let Some(frame) = conn.flow_mgr.borrow().peek() {
@@ -2588,6 +2591,7 @@ impl ::std::fmt::Display for LossRecovery {
 }
 
 #[cfg(test)]
+#[allow(unused_variables)]
 mod tests {
     use super::*;
     use crate::frame::StreamType;

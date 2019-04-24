@@ -4,9 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// TODO(ekr@rtfm.com): Remove this once I've implemented everything.
-// Stub version of SSLRecord
-#![allow(unused_variables, dead_code)]
 use crate::{Error, Res};
 use lazy_static::lazy_static;
 use neqo_common::data::Data;
@@ -64,6 +61,7 @@ lazy_static! {
     ];
 }
 
+// Stub version of SSLRecord
 #[derive(Debug)]
 pub struct SslRecord {
     pub epoch: u16,
@@ -170,7 +168,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(server_name: &str) -> Res<Self> {
+    pub fn new(_server_name: &str) -> Res<Self> {
         let mut a = SecretAgent::default();
         a.client = true;
         Ok(Client { agent: a })
@@ -196,7 +194,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new<T>(certificates: T) -> Res<Self>
+    pub fn new<T>(_certificates: T) -> Res<Self>
     where
         T: IntoIterator,
         T::Item: ToString,
