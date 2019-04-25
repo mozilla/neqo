@@ -225,12 +225,12 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
         return Ok(p);
     }
 
-    let v = d.decode_uint(4)? as u32;
-    let idl = decode_cidl(d.decode_byte()?);
+    let version = d.decode_uint(4)? as u32;
+    let (dest_len, src_len) = decode_cidl(d.decode_byte()?);
 
-    p.dcid = ConnectionId(d.decode_data(idl.0 as usize)?);
-    p.scid = Some(ConnectionId(d.decode_data(idl.1 as usize)?));
-    if v == 0 {
+    p.dcid = ConnectionId(d.decode_data(dest_len.into())?);
+    p.scid = Some(ConnectionId(d.decode_data(src_len.into())?));
+    if version == 0 {
         let mut vns = vec![];
 
         while d.remaining() > 0 {
