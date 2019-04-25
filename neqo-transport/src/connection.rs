@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
@@ -52,7 +52,7 @@ const PACKET_THRESHOLD: u64 = 3;
 const GRANULARITY: u64 = 1000; // 1ms in microseconds
 const INITIAL_RTT: u64 = 100_000; // 100ms in microseconds
 
-const LOCAL_STREAM_LIMIT_BIDI: u64 = 16; // TODO(agrover@mozilla.com): these too low?
+const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
 
@@ -245,7 +245,6 @@ pub enum ConnectionEvent {
     SendStreamComplete { stream_id: u64 },
     /// Peer increased MAX_STREAMS
     SendStreamCreatable { stream_type: StreamType },
-    // TODO(agrover@mozilla.com): Are there more?
 }
 
 #[derive(Debug, Default)]
@@ -386,6 +385,11 @@ impl FlowMgr {
             stream_type,
             maximum_streams: stream_limit,
         };
+        self.from_conn.push_back(frame);
+    }
+
+    pub fn path_response(&mut self, data: [u8; 8]) {
+        let frame = Frame::PathResponse { data };
         self.from_conn.push_back(frame);
     }
 
@@ -573,13 +577,14 @@ pub struct Connection {
     peer_next_stream_idx_uni: StreamIndex,
     peer_next_stream_idx_bidi: StreamIndex,
     highest_stream: Option<u64>,
-    connection_ids: HashSet<(u64, Vec<u8>)>, // (sequence number, connection id)
+    connection_ids: HashMap<u64, (Vec<u8>, [u8; 16])>, // (sequence number, (connection id, reset token))
     send_streams: BTreeMap<StreamId, SendStream>,
     recv_streams: BTreeMap<StreamId, RecvStream>,
     pmtu: usize,
     flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
     events: Rc<RefCell<ConnectionEvents>>,
+    token: Option<Vec<u8>>,
 }
 
 impl Debug for Connection {
@@ -718,13 +723,14 @@ impl Connection {
             peer_next_stream_idx_uni: StreamIndex::new(0),
             peer_next_stream_idx_bidi: StreamIndex::new(0),
             highest_stream: None,
-            connection_ids: HashSet::new(),
+            connection_ids: HashMap::new(),
             send_streams: BTreeMap::new(),
             recv_streams: BTreeMap::new(),
             pmtu: 1280,
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             loss_recovery: LossRecovery::new(),
             events: Rc::new(RefCell::new(ConnectionEvents::default())),
+            token: None,
         };
 
         c.scid = c.generate_cid();
@@ -1221,7 +1227,6 @@ impl Connection {
     }
 
     pub fn input_frame(&mut self, epoch: Epoch, frame: Frame, cur_time: u64) -> Res<()> {
-        #[allow(unused_variables)]
         match frame {
             Frame::Padding => {
                 // Ignore
@@ -1247,7 +1252,7 @@ impl Connection {
             Frame::ResetStream {
                 stream_id,
                 application_error_code,
-                final_size,
+                final_size: _,
             } => {
                 // TODO(agrover@mozilla.com): use final_size for connection MaxData calc
                 if let (_, Some(rs)) = self.obtain_stream(stream_id.into())? {
@@ -1279,7 +1284,7 @@ impl Connection {
                     self.handshake(epoch, Some(&buf))?;
                 }
             }
-            Frame::NewToken { token } => {} // TODO(agrover@mozilla.com): stick the new token somewhere
+            Frame::NewToken { token } => self.token = Some(token),
             Frame::Stream {
                 fin,
                 stream_id,
@@ -1316,10 +1321,13 @@ impl Connection {
                     self.events.borrow_mut().send_stream_creatable(stream_type);
                 }
             }
-            Frame::DataBlocked { data_limit } => {} // TODO(agrover@mozilla.com): use as input to flow control algorithms
+            Frame::DataBlocked { data_limit } => {
+                // Should never happen since we set data limit to 2^62-1
+                qwarn!(self, "Received DataBlocked with data limit {}", data_limit);
+            }
             Frame::StreamDataBlocked {
                 stream_id,
-                stream_data_limit,
+                stream_data_limit: _,
             } => {
                 // TODO(agrover@mozilla.com): how should we be using
                 // currently-unused stream_data_limit?
@@ -1338,7 +1346,7 @@ impl Connection {
             }
             Frame::StreamsBlocked {
                 stream_type,
-                stream_limit,
+                stream_limit: _,
             } => {
                 let local_max = match stream_type {
                     StreamType::BiDi => &mut self.local_max_stream_idx_bidi,
@@ -1354,18 +1362,23 @@ impl Connection {
                 connection_id,
                 stateless_reset_token,
             } => {
-                self.connection_ids.insert((sequence_number, connection_id));
+                self.connection_ids
+                    .insert(sequence_number, (connection_id, stateless_reset_token));
             }
             Frame::RetireConnectionId { sequence_number } => {
-                //self.connection_ids.insert((sequence_number, connection_id));
-            } // TODO(agrover@mozilla.com): remove from list of connection IDs
-            Frame::PathChallenge { data } => {} // TODO(agrover@mozilla.com): generate PATH_RESPONSE
-            Frame::PathResponse { data } => {}  // TODO(agrover@mozilla.com): do something
+                self.connection_ids.remove(&sequence_number);
+            }
+            Frame::PathChallenge { data } => self.flow_mgr.borrow_mut().path_response(data),
+            Frame::PathResponse { data: _ } => {
+                // Should never see this, we don't support migration atm and
+                // do not send path challenges
+                qwarn!(self, "Received Path Response");
+            }
             Frame::ConnectionClose {
-                close_type,
-                error_code,
-                frame_type,
-                reason_phrase,
+                close_type: _,
+                error_code: _,
+                frame_type: _,
+                reason_phrase: _,
             } => {} // TODO(agrover@mozilla.com): close the connection
         };
 
@@ -1776,7 +1789,6 @@ impl Connection {
     }
 
     pub fn stream_reset(&mut self, stream_id: u64, err: AppError) -> Res<()> {
-        // TODO(agrover@mozilla.com): reset can create a stream
         let stream = self
             .send_streams
             .get_mut(&stream_id.into())
@@ -2724,7 +2736,6 @@ mod tests {
         let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
-        // TODO(agrover@mozilla.com): ACKs
         // <<-- Initial[0]: CRYPTO[SH] ACK[0]
         // <<-- Handshake[0]: CRYPTO[EE, CERT, CV, FIN]
 
