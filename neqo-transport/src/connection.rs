@@ -674,6 +674,10 @@ impl Connection {
             .borrow_mut()
             .local
             .set_integer(tp_const::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
+        tphandler
+            .borrow_mut()
+            .local
+            .set_empty(tp_const::DISABLE_MIGRATION);
 
         Connection::configure_agent(&mut agent, protocols, tphandler.clone());
 

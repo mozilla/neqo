@@ -74,15 +74,13 @@ impl TransportParameter {
         // of Data that returned another data that was a slice on
         // this one, so I could check the length more easily.
         let tp = match tipe {
-            ORIGINAL_CONNECTION_ID => {
-                TransportParameter::Bytes(d.decode_data(length)?)
-            }
+            ORIGINAL_CONNECTION_ID => TransportParameter::Bytes(d.decode_data(length)?),
             STATELESS_RESET_TOKEN => {
                 if length != 16 {
                     return Err(Error::TransportParameterError);
                 }
                 TransportParameter::Bytes(d.decode_data(length)?)
-            },
+            }
             IDLE_TIMEOUT
             | INITIAL_MAX_DATA
             | INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
@@ -98,7 +96,7 @@ impl TransportParameter {
                     return Err(Error::TransportParameterError);
                 }
                 TransportParameter::Integer(tmp)
-            },
+            }
             ACK_DELAY_EXPONENT => {
                 let tmp = d.decode_varint()?;
                 if tmp > 20 {
@@ -106,7 +104,7 @@ impl TransportParameter {
                 }
                 TransportParameter::Integer(tmp)
             }
-            ,
+            DISABLE_MIGRATION => TransportParameter::Empty,
             // Skip.
             // TODO(ekr@rtfm.com): Write a skip.
             _ => {
@@ -251,6 +249,15 @@ impl TransportParameters {
                 self.params.insert(tipe, TransportParameter::Bytes(value));
             }
             _ => panic!("Transport parameter not known or not type bytes"),
+        }
+    }
+
+    pub fn set_empty(&mut self, tipe: u16) {
+        match tipe {
+            DISABLE_MIGRATION => {
+                self.params.insert(tipe, TransportParameter::Empty);
+            }
+            _ => panic!("Transport parameter not known or not type empty"),
         }
     }
 
