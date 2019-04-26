@@ -1112,4 +1112,93 @@ mod tests {
         // test header acks and insert count increment command.
         test_sent_instructions(&mut decoder, &vec![0x82, 0x83, 0x84, 0x1]);
     }
+
+    #[test]
+    fn test_header_block_decoder_huffman() {
+        let test_cases: [TestElement; 6] = [
+            // test a header with ref to static - encode_indexed
+            TestElement {
+                headers: vec![(String::from(":method"), String::from("GET"))],
+                header_block: &[0x00, 0x00, 0xd1],
+                encoder_inst: &[],
+            },
+            // test encode_literal_with_name_ref
+            TestElement {
+                headers: vec![(String::from(":path"), String::from("/somewhere"))],
+                header_block: &[
+                    0x00, 0x00, 0x51, 0x87, 0x61, 0x07, 0xa4, 0xbe, 0x27, 0x2d, 0x85,
+                ],
+                encoder_inst: &[],
+            },
+            // test adding a new header and encode_post_base_index, also test fix_header_block_prefix
+            TestElement {
+                headers: vec![(String::from("my-header"), String::from("my-value"))],
+                header_block: &[0x02, 0x80, 0x10],
+                encoder_inst: &[
+                    0x67, 0xa7, 0xd2, 0xd3, 0x94, 0x72, 0x16, 0xcf, 0x86, 0xa7, 0xd2, 0xdd, 0xc7,
+                    0x45, 0xa5,
+                ],
+            },
+            // test encode_indexed with a ref to dynamic table.
+            TestElement {
+                headers: vec![(String::from("my-header"), String::from("my-value"))],
+                header_block: &[0x02, 0x00, 0x80],
+                encoder_inst: &[],
+            },
+            // test encode_literal_with_name_ref.
+            TestElement {
+                headers: vec![(String::from("my-header"), String::from("my-value2"))],
+                header_block: &[
+                    0x02, 0x00, 0x40, 0x87, 0xa7, 0xd2, 0xdd, 0xc7, 0x45, 0xa5, 0x17,
+                ],
+                encoder_inst: &[],
+            },
+            // test multiple headers
+            TestElement {
+                headers: vec![
+                    (String::from(":method"), String::from("GET")),
+                    (String::from(":path"), String::from("/somewhere")),
+                    (String::from(":authority"), String::from("example.com")),
+                    (String::from(":scheme"), String::from("https")),
+                ],
+                header_block: &[
+                    0x00, 0x01, 0xd1, 0x51, 0x87, 0x61, 0x07, 0xa4, 0xbe, 0x27, 0x2d, 0x85, 0x50,
+                    0x88, 0x2f, 0x91, 0xd3, 0x5d, 0x05, 0x5c, 0x87, 0xa7, 0xd7,
+                ],
+                encoder_inst: &[],
+            },
+        ];
+
+        let mut decoder = QPackDecoder::new(200, 100);
+        if let Err(_) = decoder.set_capacity(200) {
+            assert!(false);
+        }
+        let mut receiver = ReceiverForTests {
+            recv_buf: Vec::new(),
+        };
+        let mut i = 0;
+        for t in &test_cases {
+            receiver.recv_buf.extend(t.encoder_inst);
+
+            if let Err(_) = decoder.read_instructions(&mut receiver) {
+                assert!(false);
+            } else {
+                assert!(true);
+            }
+
+            if let Ok(headers) = decoder.decode_header_block(t.header_block, i) {
+                if let Some(h) = headers {
+                    assert_eq!(h, t.headers);
+                } else {
+                    assert!(false);
+                }
+            } else {
+                assert!(false);
+            }
+            i += 1;
+        }
+
+        // test header acks and insert count increment command.
+        test_sent_instructions(&mut decoder, &vec![0x82, 0x83, 0x84, 0x1]);
+    }
 }
