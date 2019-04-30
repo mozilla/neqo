@@ -306,8 +306,6 @@ pub struct FlowMgr {
 
     // (stream_type, discriminant) as key ensures only 1 of every frame type
     // per stream type will be queued.
-    // Note: Only StreamsBlocked is scoped on stream type so including disc in
-    // key is just for consistency.
     from_stream_types: HashMap<(StreamType, mem::Discriminant<Frame>), Frame>,
 
     used_data: u64,
