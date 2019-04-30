@@ -503,6 +503,7 @@ impl QPackDecoder {
         match s.send(self.send_buf.as_mut_vec()) {
             Err(_) => Err(Error::DecoderStreamError),
             Ok(r) => {
+                qdebug!(self, "{} bytes sent.", r);
                 self.send_buf.read(r as usize);
                 Ok(())
             }

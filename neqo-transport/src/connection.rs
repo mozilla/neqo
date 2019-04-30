@@ -290,7 +290,7 @@ impl ConnectionEvents {
             .insert(ConnectionEvent::SendStreamCreatable { stream_type });
     }
 
-    fn events(&mut self) -> BTreeSet<ConnectionEvent> {
+    pub fn events(&mut self) -> BTreeSet<ConnectionEvent> {
         mem::replace(&mut self.events, BTreeSet::new())
     }
 }

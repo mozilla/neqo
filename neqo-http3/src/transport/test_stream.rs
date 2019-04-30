@@ -12,30 +12,6 @@ use neqo_transport::{AppError, Res};
 use neqo_transport::{Recvable, Sendable};
 use std::collections::VecDeque;
 
-#[derive(Debug)]
-pub enum StreamTypeWithRole {
-    ClientBiDi,
-    ServerBiDi,
-    ClientUniDi,
-    ServerUniDi,
-}
-
-pub fn get_stream_type(r: Role, st: StreamType) -> StreamTypeWithRole {
-    if r == Role::Client {
-        if st == StreamType::UniDi {
-            StreamTypeWithRole::ClientUniDi
-        } else {
-            StreamTypeWithRole::ClientBiDi
-        }
-    } else {
-        if st == StreamType::UniDi {
-            StreamTypeWithRole::ServerUniDi
-        } else {
-            StreamTypeWithRole::ServerBiDi
-        }
-    }
-}
-
 impl Sendable for Stream {
     /// Enqueue some bytes to send
     fn send(&mut self, buf: &[u8]) -> Res<usize> {
@@ -83,7 +59,8 @@ pub struct Stream {
     pub send_side_closed: bool,
     pub send_side_stop_sending: bool,
     pub receive_side_closed: bool,
-    pub stream_type: StreamTypeWithRole,
+    pub role: Role,
+    pub stream_type: StreamType,
     send_buf_tmp: VecDeque<u8>,
     pub send_buf: Vec<u8>,
     pub recv_buf: Vec<u8>,
@@ -92,11 +69,12 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub fn new(st: StreamTypeWithRole) -> Stream {
+    pub fn new(role: Role, st: StreamType) -> Stream {
         Stream {
             send_side_closed: false,
             send_side_stop_sending: false,
             receive_side_closed: false,
+            role: role,
             stream_type: st,
             send_buf_tmp: VecDeque::new(),
             send_buf: Vec::new(),

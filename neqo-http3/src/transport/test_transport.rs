@@ -6,20 +6,24 @@
 
 #![allow(unused_variables, dead_code)]
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
-use super::test_stream::{get_stream_type, Stream};
-use neqo_transport::connection::{Datagram, Role, State};
+use super::test_stream::Stream;
+use neqo_transport::connection::{Datagram, Role, State, StreamId};
 use neqo_transport::frame::StreamType;
 use neqo_transport::{AppError, ConnectionError, Res};
-use neqo_transport::{Recvable, Sendable};
+use neqo_transport::{ConnectionEvent, ConnectionEvents, Recvable, Sendable};
 
+#[derive(Debug)]
 pub struct Connection {
-    rol: Role,
+    role: Role,
     st: State,
     deadline: u64,
     next_stream_id: u64,
     pub streams: HashMap<u64, Stream>,
+    events: Rc<RefCell<ConnectionEvents>>,
 }
 
 pub struct Agent {}
@@ -27,17 +31,18 @@ pub struct Agent {}
 impl Connection {
     fn new(r: Role) -> Connection {
         Connection {
-            rol: r,
+            role: r,
             st: State::Init,
             deadline: 0,
             next_stream_id: 0,
             streams: HashMap::new(),
+            events: Rc::new(RefCell::new(ConnectionEvents::default())),
         }
     }
 
     /// Get the current role.
     pub fn role(&self) -> Role {
-        self.rol
+        self.role
     }
 
     pub fn new_client() -> Connection {
@@ -51,7 +56,9 @@ impl Connection {
     where
         I: IntoIterator<Item = Datagram>,
     {
-        self.st = State::Connected;
+        if self.st == State::Init {
+            self.st = State::Connected;
+        }
     }
 
     pub fn process_output(&mut self, cur_time: u64) -> (Vec<Datagram>, u64) {
@@ -68,40 +75,45 @@ impl Connection {
 
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         let stream_id = self.next_stream_id;
-        self.streams
-            .insert(stream_id, Stream::new(get_stream_type(self.rol, st)));
+        self.streams.insert(stream_id, Stream::new(self.role, st));
         self.next_stream_id += 1;
         Ok(stream_id)
     }
 
-    pub fn get_recvable_streams<'a>(
-        &'a mut self,
-    ) -> Box<Iterator<Item = (u64, &mut dyn Recvable)> + 'a> {
-        Box::new(
-            self.streams
-                .iter_mut()
-                .map(|(x, y)| (*x, y as &mut Recvable)),
-        )
-    }
-
-    pub fn get_sendable_streams<'a>(
-        &'a mut self,
-    ) -> Box<Iterator<Item = (u64, &mut dyn Sendable)> + 'a> {
-        Box::new(
-            self.streams
-                .iter_mut()
-                .map(|(x, y)| (*x, y as &mut Sendable)),
-        )
-    }
-
-    pub fn close_receive_side(&mut self, id: u64) {
-        if let Some(s) = self.streams.get_mut(&id) {
-            s.receive_close();
+    pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
+        if let Some(s) = self.streams.get_mut(&stream_id) {
+            s.send(data)
+        } else {
+            Ok(0)
         }
     }
 
-    pub fn stream_reset(&mut self, id: u64, err: AppError) -> Res<()> {
-        if let Some(s) = self.streams.get_mut(&id) {
+    pub fn stream_recv(&mut self, stream_id: u64, data: &mut [u8]) -> Res<(usize, bool)> {
+        let mut rb = (0, false);
+        if let Some(s) = self.streams.get_mut(&stream_id) {
+            rb = s.read(data)?;
+        }
+        Ok((rb.0 as usize, rb.1))
+    }
+
+    pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
+        if let Some(s) = self.streams.get_mut(&stream_id) {
+            Sendable::close(s);
+        }
+        Ok(())
+    }
+
+    pub fn close_receive_side(&mut self, stream_id: u64) {
+        if let Some(s) = self.streams.get_mut(&stream_id) {
+            s.receive_close();
+            self.events
+                .borrow_mut()
+                .recv_stream_readable(StreamId::from(stream_id));
+        }
+    }
+
+    pub fn stream_reset(&mut self, stream_id: u64, err: AppError) -> Res<()> {
+        if let Some(s) = self.streams.get_mut(&stream_id) {
             s.reset(err);
         }
         Ok(())
@@ -113,5 +125,72 @@ impl Connection {
 
     pub fn state(&self) -> &State {
         &self.st
+    }
+
+    pub fn events(&mut self) -> Vec<ConnectionEvent> {
+        for (stream_id, s) in self.streams.iter_mut() {
+            if s.role == self.role || s.stream_type == StreamType::BiDi {
+                self.events
+                    .borrow_mut()
+                    .send_stream_writable(StreamId::from(*stream_id));
+            }
+            if s.recv_buf.len() > 0 {
+                self.events
+                    .borrow_mut()
+                    .recv_stream_readable(StreamId::from(*stream_id));
+            }
+        }
+        // Turn it into a vec for simplicity's sake
+        self.events.borrow_mut().events().into_iter().collect()
+    }
+
+    pub fn get_recv_stream_mut(&mut self, stream_id: u64) -> Option<&mut Recvable> {
+        self.streams
+            .get_mut(&stream_id)
+            .map(|rs| rs as &mut Recvable)
+    }
+
+    pub fn get_send_stream_mut(&mut self, stream_id: u64) -> Option<&mut Sendable> {
+        self.streams
+            .get_mut(&stream_id)
+            .map(|rs| rs as &mut Sendable)
+    }
+
+    // For tests
+    pub fn stream_recv_net(&mut self, stream_id: u64, data: &[u8]) {
+        match self.streams.get_mut(&stream_id) {
+            Some(s) => s.recv_buf.extend(data),
+            None => assert!(false, "There must be a stream"),
+        }
+    }
+
+    pub fn data_ready(&mut self, stream_id: u64) -> bool {
+        match self.streams.get_mut(&stream_id) {
+            Some(s) => s.data_ready(),
+            None => {
+                assert!(false, "There must be a stream");
+                false
+            }
+        }
+    }
+
+    pub fn recv_data_ready_amount(&mut self, stream_id: u64) -> usize {
+        match self.streams.get_mut(&stream_id) {
+            Some(s) => s.recv_data_ready_amount(),
+            None => {
+                assert!(false, "There must be a stream");
+                0
+            }
+        }
+    }
+
+    pub fn stream_create_net(&mut self, role: Role, st: StreamType) -> Res<u64> {
+        let stream_id = self.next_stream_id;
+        self.streams.insert(stream_id, Stream::new(role, st));
+        self.next_stream_id += 1;
+        self.events
+            .borrow_mut()
+            .new_stream(StreamId::from(stream_id), st);
+        Ok(stream_id)
     }
 }

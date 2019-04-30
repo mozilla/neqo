@@ -10,7 +10,12 @@
 use neqo_common::data::*;
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::*;
-use neqo_transport::Recvable;
+
+#[cfg(test)]
+use crate::transport::Connection;
+
+#[cfg(not(test))]
+use neqo_transport::Connection;
 
 use crate::recvable::RecvableWrapper;
 use crate::{Error, Res};
@@ -323,8 +328,8 @@ impl HFrameReader {
     }
 
     // returns true if quic stream was closed.
-    pub fn receive(&mut self, s: &mut Recvable) -> Res<bool> {
-        let mut w = RecvableWrapper::wrap(s);
+    pub fn receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
+        let mut w = RecvableWrapper::wrap(conn, stream_id);
         loop {
             match self.state {
                 HFrameReaderState::GetType => {
@@ -452,12 +457,18 @@ impl HFrameReader {
                         match st_read {
                             SETTINGS_MAX_HEADER_LIST_SIZE => {
                                 st = HSettingType::MaxHeaderListSize;
-                            }
+                            },
                             SETTINGS_NUM_PLACEHOLDERS => {
                                 st = HSettingType::NumPlaceholders;
-                            }
+                            },
+                            SETTINGS_QPACK_MAX_TABLE_CAPACITY => {
+                                st = HSettingType::MaxTableSize;
+                            },
+                            SETTINGS_QPACK_BLOCKED_STREAMS => {
+                                st = HSettingType::BlockedStreams;
+                            },
                             _ => {}
-                        }
+                        };
                         let v = decode_varint(&mut self.reader)?;
                         if st != HSettingType::UnknownType {
                             settings.push((st, v));
@@ -493,6 +504,7 @@ impl HFrameReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_transport::connection::Role;
     use num_traits::Num;
 
     fn enc_dec(f: &HFrame, st: &str, r: usize) {
@@ -505,7 +517,12 @@ mod tests {
         let len = d2.remaining();
         assert_eq!(d.as_mut_vec()[..], d2.as_mut_vec()[..len - r]);
 
-        let mut s = Stream::new(get_stream_type(Role::Client, StreamType::UniDi));
+        let mut conn = Connection::new_client();
+        let mut stream_id = 0;
+        match conn.stream_create_net(Role::Server, StreamType::UniDi) {
+            Ok(s) => stream_id = s,
+            Err(_) => assert!(false, "We must be able to create a stream"),
+        };
         let mut fr: HFrameReader = HFrameReader::new();
 
         // conver string into u8 vector
@@ -518,10 +535,10 @@ mod tests {
             let v = <u8 as Num>::from_str_radix(x.unwrap(), 16).unwrap();
             buf.push(v);
         }
-        s.recv_buf.extend(buf);
+        conn.stream_recv_net(stream_id, &buf);
 
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert_eq!(s.recv_data_ready_amount(), r);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert_eq!(conn.recv_data_ready_amount(stream_id), r);
         if !fr.done() {
             assert!(false);
         }
@@ -633,8 +650,6 @@ mod tests {
         enc_dec(&f, "0e0105", 0);
     }
 
-    use crate::transport::test_stream::{get_stream_type, Stream};
-    use neqo_transport::connection::Role;
     use neqo_transport::frame::StreamType;
 
     // We have 3 code paths in frame_reader:
@@ -645,28 +660,33 @@ mod tests {
     // Test SETTINGS
     #[test]
     fn test_frame_reading_with_stream_settings1() {
-        let mut s = Stream::new(get_stream_type(Role::Client, StreamType::UniDi));
+        let mut conn = Connection::new_client();
+        let mut stream_id = 0;
+        match conn.stream_create_net(Role::Server, StreamType::UniDi) {
+            Ok(s) => stream_id = s,
+            Err(_) => assert!(false, "We must be able to create a stream"),
+        };
         let mut fr: HFrameReader = HFrameReader::new();
 
         // Read settings frame 040406040804
-        s.recv_buf.extend(vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x6]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x8]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
+        conn.stream_recv_net(stream_id, &vec![0x4]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x4]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x6]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x4]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x8]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x4]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
         if !fr.done() {
             assert!(false);
         }
@@ -688,34 +708,39 @@ mod tests {
     // Test SETTINGS with larger varints
     #[test]
     fn test_frame_reading_with_stream_settings2() {
-        let mut s = Stream::new(get_stream_type(Role::Client, StreamType::UniDi));
+        let mut conn = Connection::new_client();
+        let mut stream_id = 0;
+        match conn.stream_create_net(Role::Server, StreamType::UniDi) {
+            Ok(s) => stream_id = s,
+            Err(_) => assert!(false, "We must be able to create a stream"),
+        };
         let mut fr: HFrameReader = HFrameReader::new();
 
         // Read settings frame 400406064004084100
-        s.recv_buf.extend(vec![0x40]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        s.recv_buf.extend(vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x6]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x6]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        s.recv_buf.extend(vec![0x40]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x8]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        s.recv_buf.extend(vec![0x41]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x0]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
+        conn.stream_recv_net(stream_id, &vec![0x40]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x4]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x6]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x6]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x40]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x4]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x8]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x41]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x0]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
         if !fr.done() {
             assert!(false);
         }
@@ -736,24 +761,29 @@ mod tests {
     // Test PUSH_PROMISE
     #[test]
     fn test_frame_reading_with_stream_push_promise() {
-        let mut s = Stream::new(get_stream_type(Role::Client, StreamType::UniDi));
+        let mut conn = Connection::new_client();
+        let mut stream_id = 0;
+        match conn.stream_create_net(Role::Server, StreamType::UniDi) {
+            Ok(s) => stream_id = s,
+            Err(_) => assert!(false, "We must be able to create a stream"),
+        };
         let mut fr: HFrameReader = HFrameReader::new();
 
         // Read pushpromise frame 05054101010203
-        s.recv_buf.extend(vec![0x5]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x5]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x41]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(!s.data_ready());
-        s.recv_buf.extend(vec![0x1, 0x1, 0x2, 0x3]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
+        conn.stream_recv_net(stream_id, &vec![0x5]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x5]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x41]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(!conn.data_ready(stream_id));
+        conn.stream_recv_net(stream_id, &vec![0x1, 0x1, 0x2, 0x3]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
 
         // headers are still on the stream.
-        assert_eq!(s.recv_data_ready_amount(), 3);
+        assert_eq!(conn.recv_data_ready_amount(stream_id), 3);
         if !fr.done() {
             assert!(false);
         }
@@ -773,13 +803,18 @@ mod tests {
     // Test DATA
     #[test]
     fn test_frame_reading_with_stream_data() {
-        let mut s = Stream::new(get_stream_type(Role::Client, StreamType::UniDi));
+        let mut conn = Connection::new_client();
+        let mut stream_id = 0;
+        match conn.stream_create_net(Role::Server, StreamType::UniDi) {
+            Ok(s) => stream_id = s,
+            Err(_) => assert!(false, "We must be able to create a stream"),
+        };
         let mut fr: HFrameReader = HFrameReader::new();
 
         // Read data frame 0003010203
-        s.recv_buf.extend(vec![0x0, 0x3, 0x1, 0x2, 0x3]);
-        assert_eq!(Ok(false), fr.receive(&mut s));
-        assert!(s.recv_data_ready_amount() == 3);
+        conn.stream_recv_net(stream_id, &vec![0x0, 0x3, 0x1, 0x2, 0x3]);
+        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        assert!(conn.recv_data_ready_amount(stream_id) == 3);
         if !fr.done() {
             assert!(false);
         }

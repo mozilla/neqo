@@ -9,14 +9,15 @@
 pub mod connection;
 pub mod hframe;
 mod recvable;
-mod transport;
+#[cfg(test)]
+pub mod transport;
 
 use neqo_qpack;
 use neqo_transport;
 
 use self::hframe::HFrameType;
 
-pub use connection::HttpConn;
+pub use connection::{HttpConn, ClientRequestServer};
 
 type Res<T> = Result<T, Error>;
 
