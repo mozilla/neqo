@@ -367,7 +367,6 @@ enum SendStreamState {
 }
 
 impl SendStreamState {
-    #[cfg(test)]
     fn tx_buf(&self) -> Option<&TxBuffer> {
         match self {
             SendStreamState::Send { send_buf } => Some(send_buf),
@@ -449,10 +448,10 @@ impl SendStream {
 
     /// Return the next range to be sent, if any.
     pub fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
+        let stream_credit_avail = self.credit_avail();
+        let conn_credit_avail = self.flow_mgr.borrow().conn_credit_avail();
+        let credit_avail = min(stream_credit_avail, conn_credit_avail);
         if let Some(tx_buf) = self.state.tx_buf_mut() {
-            let stream_credit_avail = self.max_stream_data - tx_buf.data_limit();
-            let conn_credit_avail = self.flow_mgr.borrow().conn_credit_remaining();
-            let credit_avail = min(stream_credit_avail, conn_credit_avail);
             qtrace!(
                 "next_bytes max_stream_data {}, data_limit {}, credit_avail {}",
                 self.max_stream_data,
@@ -491,7 +490,9 @@ impl SendStream {
         self.state
             .tx_buf_mut()
             .map(|buf| buf.mark_as_sent(offset, len));
-        self.flow_mgr.borrow_mut().conn_credit_used(len as u64);
+        self.flow_mgr
+            .borrow_mut()
+            .conn_increase_credit_used(len as u64);
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
@@ -532,7 +533,19 @@ impl SendStream {
         self.state.final_size()
     }
 
-    pub fn max_stream_data(&mut self, value: u64) {
+    pub fn credit_avail(&self) -> u64 {
+        if let Some(tx_buf) = self.state.tx_buf() {
+            self.max_stream_data - tx_buf.data_limit()
+        } else {
+            0
+        }
+    }
+
+    pub fn max_stream_data(&self) -> u64 {
+        self.max_stream_data
+    }
+
+    pub fn set_max_stream_data(&mut self, value: u64) {
         self.max_stream_data = max(self.max_stream_data, value)
     }
 

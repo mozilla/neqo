@@ -41,7 +41,7 @@ const STREAM_FRAME_BIT_FIN: u64 = 0x01;
 const STREAM_FRAME_BIT_LEN: u64 = 0x02;
 const STREAM_FRAME_BIT_OFF: u64 = 0x04;
 
-#[derive(PartialEq, Debug, Copy, Clone, PartialOrd, Eq, Ord)]
+#[derive(PartialEq, Debug, Copy, Clone, PartialOrd, Eq, Ord, Hash)]
 pub enum StreamType {
     BiDi,
     UniDi,
@@ -62,7 +62,7 @@ impl StreamType {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum CloseType {
     Transport,
     Application,
@@ -92,13 +92,13 @@ impl From<&ConnectionError> for CloseType {
     }
 }
 
-#[derive(PartialEq, Debug, Default)]
+#[derive(PartialEq, Debug, Default, Clone)]
 pub struct AckRange {
     gap: u64,
     range: u64,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Frame {
     Padding,
     Ping,
