@@ -17,7 +17,7 @@ use neqo_transport;
 
 use self::hframe::HFrameType;
 
-pub use connection::{HttpConn, ClientRequestServer};
+pub use connection::{ClientRequestServer, HttpConn};
 
 type Res<T> = Result<T, Error>;
 

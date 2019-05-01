@@ -6,7 +6,7 @@
 
 #![allow(unused_assignments)]
 
-use neqo_http3::{HttpConn, ClientRequestServer};
+use neqo_http3::{ClientRequestServer, HttpConn};
 use neqo_transport::{Connection, Datagram, State};
 
 use std::net::SocketAddr;
@@ -18,17 +18,27 @@ fn loopback() -> SocketAddr {
 }
 
 fn new_stream_callback(cr: &mut ClientRequestServer, error: bool) {
-  println!("Error: {}", error);
+    println!("Error: {}", error);
 
-  let request_headers = cr.get_request_headers();
+    let request_headers = cr.get_request_headers();
 
-  assert_eq!(request_headers, vec![(String::from(":method"), String::from("GET")),
-                                   (String::from(":scheme"), String::from("https")),
-                                   (String::from(":authority"), String::from("something.com")),
-                                   (String::from(":path"), String::from("/"))]);
+    assert_eq!(
+        request_headers,
+        vec![
+            (String::from(":method"), String::from("GET")),
+            (String::from(":scheme"), String::from("https")),
+            (String::from(":authority"), String::from("something.com")),
+            (String::from(":path"), String::from("/"))
+        ]
+    );
 
-  cr.set_response(&vec![(String::from(":status"), String::from("200")),
-                       (String::from("content-length"), String::from("3"))], &String::from("123"));
+    cr.set_response(
+        &vec![
+            (String::from(":status"), String::from("200")),
+            (String::from("content-length"), String::from("3")),
+        ],
+        &String::from("123"),
+    );
 }
 
 fn connect() -> (HttpConn, HttpConn, (Vec<Datagram>, u64)) {

@@ -457,16 +457,16 @@ impl HFrameReader {
                         match st_read {
                             SETTINGS_MAX_HEADER_LIST_SIZE => {
                                 st = HSettingType::MaxHeaderListSize;
-                            },
+                            }
                             SETTINGS_NUM_PLACEHOLDERS => {
                                 st = HSettingType::NumPlaceholders;
-                            },
+                            }
                             SETTINGS_QPACK_MAX_TABLE_CAPACITY => {
                                 st = HSettingType::MaxTableSize;
-                            },
+                            }
                             SETTINGS_QPACK_BLOCKED_STREAMS => {
                                 st = HSettingType::BlockedStreams;
-                            },
+                            }
                             _ => {}
                         };
                         let v = decode_varint(&mut self.reader)?;

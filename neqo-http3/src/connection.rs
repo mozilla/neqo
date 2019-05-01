@@ -342,13 +342,13 @@ impl ::std::fmt::Display for ClientRequest {
 
 #[derive(PartialEq, Debug)]
 enum ClientRequestServerState {
-  WaitingForRequestHeaders,
-  ReadingRequestHeaders { buf: Vec<u8>, offset: usize },
-  BlockedDecodingHeaders { buf: Vec<u8> },
-  ReadingRequestDone,
-  SendingResponse,
-  Error,
-  Closed,
+    WaitingForRequestHeaders,
+    ReadingRequestHeaders { buf: Vec<u8>, offset: usize },
+    BlockedDecodingHeaders { buf: Vec<u8> },
+    ReadingRequestDone,
+    SendingResponse,
+    Error,
+    Closed,
 }
 
 pub struct ClientRequestServer {
@@ -363,32 +363,32 @@ pub struct ClientRequestServer {
 }
 
 impl ClientRequestServer {
-  pub fn new(stream_id: u64) -> ClientRequestServer {
-    ClientRequestServer {
-      state: ClientRequestServerState::WaitingForRequestHeaders,
-      stream_id: stream_id,
-      frame_reader: HFrameReader::new(),
-      request_headers: None,
-      response_headers: Vec::new(),
-      data: String::new(),
-      response_buf: None,
-      fin: false,
+    pub fn new(stream_id: u64) -> ClientRequestServer {
+        ClientRequestServer {
+            state: ClientRequestServerState::WaitingForRequestHeaders,
+            stream_id: stream_id,
+            frame_reader: HFrameReader::new(),
+            request_headers: None,
+            response_headers: Vec::new(),
+            data: String::new(),
+            response_buf: None,
+            fin: false,
+        }
     }
-  }
 
-  pub fn get_request_headers(&self) -> Vec<(String, String)> {
-    if let Some(h) = &self.request_headers {
-      h.to_vec()
-    } else {
-      Vec::new()
+    pub fn get_request_headers(&self) -> Vec<(String, String)> {
+        if let Some(h) = &self.request_headers {
+            h.to_vec()
+        } else {
+            Vec::new()
+        }
     }
-  }
-  pub fn set_response(&mut self, headers: &Vec<(String, String)>, data: &String) {
-    self.response_headers.extend_from_slice(headers);
-    self.data = data.to_string();
-  }
+    pub fn set_response(&mut self, headers: &Vec<(String, String)>, data: &String) {
+        self.response_headers.extend_from_slice(headers);
+        self.data = data.to_string();
+    }
 
-  pub fn encode_response(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
+    pub fn encode_response(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
         qdebug!(self, "Encoding headers");
         let mut encoded_headers = encoder.encode_header_block(&self.response_headers, stream_id);
         let f = HFrame::Headers {
@@ -398,16 +398,16 @@ impl ClientRequestServer {
         f.encode(&mut d).unwrap();
         d.encode_vec(encoded_headers.as_mut_vec());
         if self.data.len() > 0 {
-          let d_frame = HFrame::Data {
-            len: self.data.len() as u64,
-          };
-          d_frame.encode(&mut d).unwrap();
-          d.encode_vec(&self.data.clone().into_bytes());
+            let d_frame = HFrame::Data {
+                len: self.data.len() as u64,
+            };
+            d_frame.encode(&mut d).unwrap();
+            d.encode_vec(&self.data.clone().into_bytes());
         }
         self.response_buf = Some(d);
     }
 
-  pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
+    pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
         let label = match ::log::log_enabled!(::log::Level::Debug) {
             true => format!("{}", self),
             _ => String::new(),
@@ -432,14 +432,14 @@ impl ClientRequestServer {
         Ok(())
     }
 
-  fn recv_frame(&mut self, conn: &mut Connection) -> Res<()> {
+    fn recv_frame(&mut self, conn: &mut Connection) -> Res<()> {
         if self.frame_reader.receive(conn, self.stream_id)? {
             self.state = ClientRequestServerState::Closed;
         }
         Ok(())
     }
 
-  pub fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
+    pub fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
         let label = match ::log::log_enabled!(::log::Level::Debug) {
             true => format!("{}", self),
             _ => String::new(),
@@ -472,7 +472,7 @@ impl ClientRequestServer {
                             break { Err(Error::WrongStream) };
                         }
                     };
-                },
+                }
                 ClientRequestServerState::ReadingRequestHeaders {
                     ref mut buf,
                     ref mut offset,
@@ -503,7 +503,7 @@ impl ClientRequestServer {
                     } else {
                         self.state = ClientRequestServerState::ReadingRequestDone;
                     }
-                },
+                }
                 ClientRequestServerState::BlockedDecodingHeaders { ref mut buf } => break Ok(()),
                 ClientRequestServerState::ReadingRequestDone => break Ok(()),
                 ClientRequestServerState::SendingResponse => break Ok(()),
@@ -677,7 +677,7 @@ pub struct HttpConn {
     client_requests: HashMap<u64, ClientRequest>,
     client_requests_server: HashMap<u64, ClientRequestServer>,
     settings_received: bool,
-    new_stream_callback: Option<Box<FnMut( &mut ClientRequestServer, bool)>>,
+    new_stream_callback: Option<Box<FnMut(&mut ClientRequestServer, bool)>>,
 }
 
 impl ::std::fmt::Display for HttpConn {
@@ -712,8 +712,11 @@ impl HttpConn {
         }
     }
 
-    pub fn set_new_stream_callback<CB: 'static + FnMut( &mut ClientRequestServer, bool)>(&mut self, c: CB) {
-      self.new_stream_callback = Some(Box::new(c));
+    pub fn set_new_stream_callback<CB: 'static + FnMut(&mut ClientRequestServer, bool)>(
+        &mut self,
+        c: CB,
+    ) {
+        self.new_stream_callback = Some(Box::new(c));
     }
 
     // This function takes the provided result and check for an error.
@@ -939,16 +942,16 @@ impl HttpConn {
             qdebug!(label, "Request/response stream {} is readable.", stream_id);
             if let Err(e) = cs.receive(&mut self.conn, &mut self.qpack_decoder) {
                 qdebug!(label, "Error {} ocurred", e);
-                if e.is_stream_error() { 
+                if e.is_stream_error() {
                     reset_stream_error = Some(e);
                 } else {
                     return Err(e);
                 }
             }
             if cs.state == ClientRequestServerState::ReadingRequestDone {
-              if let Some(cb) = &mut self.new_stream_callback {
-                (cb)(cs, false);
-              }
+                if let Some(cb) = &mut self.new_stream_callback {
+                    (cb)(cs, false);
+                }
             }
         } else if self
             .control_stream_remote
@@ -960,8 +963,9 @@ impl HttpConn {
                 stream_id
             );
             while self.control_stream_remote.frame_reader.done() || self.control_stream_remote.fin {
-              self.handle_control_frame()?;
-              self.control_stream_remote.receive_if_this_stream(&mut self.conn, stream_id)?;
+                self.handle_control_frame()?;
+                self.control_stream_remote
+                    .receive_if_this_stream(&mut self.conn, stream_id)?;
             }
         } else if self.qpack_encoder.is_recv_stream(stream_id) {
             qdebug!(
@@ -1198,7 +1202,8 @@ impl HttpConn {
 
     // SERVER SIDE ONLY FUNCTIONS
     fn handle_new_client_request(&mut self, stream_id: u64) {
-      self.client_requests_server.insert(stream_id, ClientRequestServer::new(stream_id));
+        self.client_requests_server
+            .insert(stream_id, ClientRequestServer::new(stream_id));
     }
 }
 
@@ -1551,7 +1556,7 @@ mod tests {
                 &"https".to_string(),
                 &"something.com".to_string(),
                 &"/".to_string(),
-                &Vec::<(String, String)>::new() 
+                &Vec::<(String, String)>::new()
             ),
             Ok(())
         );
