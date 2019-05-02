@@ -1141,25 +1141,6 @@ impl Connection {
         Ok(())
     }
 
-    fn send_close(&self) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
-        if let State::Closing(cerr, frame_type, reason) = self.state() {
-            Some((
-                Frame::ConnectionClose {
-                    close_type: cerr.into(),
-                    error_code: match cerr {
-                        ConnectionError::Application(e) => *e,
-                        ConnectionError::Transport(e) => e.code(),
-                    },
-                    frame_type: *frame_type,
-                    reason_phrase: Vec::from(reason.clone()),
-                },
-                None,
-            ))
-        } else {
-            None
-        }
-    }
-
     pub fn close<S: Into<String>>(&mut self, error: AppError, msg: S) {
         // TODO(mt): Set closing timer.
         self.set_state(State::Closing(
@@ -2010,7 +1991,22 @@ impl FrameGenerator for CloseGenerator {
         _mode: TxMode,
         _remaining: usize,
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
-        c.send_close()
+        if let State::Closing(cerr, frame_type, reason) = c.state() {
+            Some((
+                Frame::ConnectionClose {
+                    close_type: cerr.into(),
+                    error_code: match cerr {
+                        ConnectionError::Application(e) => *e,
+                        ConnectionError::Transport(e) => e.code(),
+                    },
+                    frame_type: *frame_type,
+                    reason_phrase: Vec::from(reason.clone()),
+                },
+                None,
+            ))
+        } else {
+            None
+        }
     }
 }
 
