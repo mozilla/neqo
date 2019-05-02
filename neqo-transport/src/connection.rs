@@ -1593,86 +1593,77 @@ impl Connection {
         &mut self,
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
-        let next_stream_idx = if stream_id.is_bidi() {
-            &mut self.local_next_stream_idx_bidi
-        } else {
-            &mut self.local_next_stream_idx_uni
-        };
-        let stream_idx: StreamIndex = stream_id.into();
-
-        if stream_idx >= *next_stream_idx {
-            // Creating new stream(s)
-            match (stream_id.is_client_initiated(), self.rol) {
-                (true, Role::Client) | (false, Role::Server) => {
-                    qwarn!(
-                        "Peer attempted to create local stream: {}",
-                        stream_id.as_u64()
-                    );
-                    return Err(Error::ProtocolViolation);
-                }
-                _ => {}
-            }
-
-            let recv_initial_max_stream_data = if stream_id.is_bidi() {
-                if stream_idx > self.local_max_stream_idx_bidi {
-                    return Err(Error::StreamLimitError);
-                }
-                self.tps
-                    .borrow()
-                    .local
-                    .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
+        // May require creating new stream(s)
+        if stream_id.is_peer_initiated(self.role()) {
+            let next_stream_idx = if stream_id.is_bidi() {
+                &mut self.local_next_stream_idx_bidi
             } else {
-                if stream_idx > self.local_max_stream_idx_uni {
-                    return Err(Error::StreamLimitError);
-                }
-                self.tps
-                    .borrow()
-                    .local
-                    .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI)
+                &mut self.local_next_stream_idx_uni
             };
+            let stream_idx: StreamIndex = stream_id.into();
 
-            loop {
-                let next_stream_id =
-                    next_stream_idx.to_stream_id(stream_id.stream_type(), stream_id.role());
-                self.recv_streams.insert(
-                    next_stream_id,
-                    RecvStream::new(
-                        next_stream_id,
-                        recv_initial_max_stream_data,
-                        self.flow_mgr.clone(),
-                        self.events.clone(),
-                    ),
-                );
-
-                if next_stream_id.is_uni() {
-                    self.events
-                        .borrow_mut()
-                        .new_stream(next_stream_id, StreamType::UniDi);
-                } else {
-                    let send_initial_max_stream_data = self
-                        .tps
+            if stream_idx >= *next_stream_idx {
+                let recv_initial_max_stream_data = if stream_id.is_bidi() {
+                    if stream_idx > self.local_max_stream_idx_bidi {
+                        return Err(Error::StreamLimitError);
+                    }
+                    self.tps
                         .borrow()
-                        .remote
-                        .as_ref()
-                        .expect("remote tparams are valid when State::Connected")
-                        .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
-                    self.send_streams.insert(
+                        .local
+                        .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
+                } else {
+                    if stream_idx > self.local_max_stream_idx_uni {
+                        return Err(Error::StreamLimitError);
+                    }
+                    self.tps
+                        .borrow()
+                        .local
+                        .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI)
+                };
+
+                loop {
+                    let next_stream_id =
+                        next_stream_idx.to_stream_id(stream_id.stream_type(), stream_id.role());
+                    self.recv_streams.insert(
                         next_stream_id,
-                        SendStream::new(
+                        RecvStream::new(
                             next_stream_id,
-                            send_initial_max_stream_data,
+                            recv_initial_max_stream_data,
                             self.flow_mgr.clone(),
                             self.events.clone(),
                         ),
                     );
-                    self.events
-                        .borrow_mut()
-                        .new_stream(next_stream_id, StreamType::BiDi);
-                }
 
-                *next_stream_idx += 1;
-                if *next_stream_idx > stream_idx {
-                    break;
+                    if next_stream_id.is_uni() {
+                        self.events
+                            .borrow_mut()
+                            .new_stream(next_stream_id, StreamType::UniDi);
+                    } else {
+                        let send_initial_max_stream_data = self
+                            .tps
+                            .borrow()
+                            .remote
+                            .as_ref()
+                            .expect("remote tparams are valid when State::Connected")
+                            .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+                        self.send_streams.insert(
+                            next_stream_id,
+                            SendStream::new(
+                                next_stream_id,
+                                send_initial_max_stream_data,
+                                self.flow_mgr.clone(),
+                                self.events.clone(),
+                            ),
+                        );
+                        self.events
+                            .borrow_mut()
+                            .new_stream(next_stream_id, StreamType::BiDi);
+                    }
+
+                    *next_stream_idx += 1;
+                    if *next_stream_idx > stream_idx {
+                        break;
+                    }
                 }
             }
         }
