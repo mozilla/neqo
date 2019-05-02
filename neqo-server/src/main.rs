@@ -8,6 +8,7 @@ use neqo_common::now;
 use neqo_crypto::init_db;
 use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
 use regex::Regex;
+use std::collections::HashMap;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
@@ -118,7 +119,6 @@ fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
     }
 }
 
-// TODO(mt): implement a server that can handle multiple connections.
 fn main() {
     let args = Args::from_args();
     assert!(args.key.len() > 0, "Need at least one key");
@@ -129,12 +129,12 @@ fn main() {
     let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
 
     let local_addr = socket.local_addr().expect("Socket local address not bound");
-    let mut server = Connection::new_server(args.key, args.alpn).expect("must succeed");
 
     println!("Server waiting for connection on: {:?}", local_addr);
 
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
+    let mut connections: HashMap<SocketAddr, Connection> = HashMap::new();
     loop {
         let (sz, remote_addr) = socket.recv_from(&mut buf[..]).expect("UDP error");
         if sz == buf.len() {
@@ -145,11 +145,17 @@ fn main() {
             in_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
         }
 
+        let mut server = connections.entry(remote_addr).or_insert_with(|| {
+            println!("New connection from {:?}", remote_addr);
+            Connection::new_server(args.key.clone(), args.alpn.clone()).expect("must succeed")
+        });
+
         // TODO use timer to set socket.set_read_timeout.
         server.process_input(in_dgrams.drain(..), now());
         if let State::Closed(e) = server.state() {
-            eprintln!("Closed: {:?}", e);
-            break;
+            eprintln!("Closed connection from {:?}: {:?}", remote_addr, e);
+            connections.remove(&remote_addr);
+            continue;
         }
 
         let mut streams = Vec::new();
