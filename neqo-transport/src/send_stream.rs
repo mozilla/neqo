@@ -331,7 +331,7 @@ impl TxBuffer {
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
-        assert!(self.ranges.highest_offset() > offset + len as u64);
+        assert!(self.ranges.highest_offset() >= offset + len as u64);
         assert!(offset >= self.retired);
 
         // Make eligible for sending again
