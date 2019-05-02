@@ -18,7 +18,7 @@ use rand::Rng;
 
 use neqo_common::data::Data;
 use neqo_common::varint::get_varint_len;
-use neqo_common::{hex, matches, qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
@@ -310,6 +310,8 @@ pub struct FlowMgr {
 
     used_data: u64,
     max_data: u64,
+
+    need_close_frame: bool,
 }
 
 impl FlowMgr {
@@ -446,6 +448,14 @@ impl FlowMgr {
                 }
             }
         }
+    }
+
+    fn need_close_frame(&self) -> bool {
+        self.need_close_frame
+    }
+
+    fn set_need_close_frame(&mut self, new: bool) {
+        self.need_close_frame = new
     }
 }
 
@@ -1371,11 +1381,14 @@ impl Connection {
                 qwarn!(self, "Received Path Response");
             }
             Frame::ConnectionClose {
-                close_type: _,
-                error_code: _,
-                frame_type: _,
-                reason_phrase: _,
-            } => {} // TODO(agrover@mozilla.com): close the connection
+                close_type,
+                error_code,
+                frame_type,
+                reason_phrase,
+            } => {
+                qinfo!(self, "ConnectionClose received. Closing. Close type: {:?} Error code: {} frame type {:x} reason {}",close_type, error_code, frame_type, String::from_utf8_lossy(&reason_phrase));
+                self.set_state(State::Closed(ConnectionError::Application(error_code)));
+            }
         };
 
         Ok(())
@@ -1440,6 +1453,7 @@ impl Connection {
                 State::Closing(..) => {
                     self.generators.clear();
                     self.generators.push(Box::new(CloseGenerator {}));
+                    self.flow_mgr.borrow_mut().set_need_close_frame(true);
                 }
                 _ => {}
             }
@@ -1992,21 +2006,29 @@ impl FrameGenerator for CloseGenerator {
         _remaining: usize,
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
         if let State::Closing(cerr, frame_type, reason) = c.state() {
-            Some((
-                Frame::ConnectionClose {
-                    close_type: cerr.into(),
-                    error_code: match cerr {
-                        ConnectionError::Application(e) => *e,
-                        ConnectionError::Transport(e) => e.code(),
+            if c.flow_mgr.borrow().need_close_frame() {
+                c.flow_mgr.borrow_mut().set_need_close_frame(false);
+                return Some((
+                    Frame::ConnectionClose {
+                        close_type: cerr.into(),
+                        error_code: match cerr {
+                            ConnectionError::Application(e) => *e,
+                            ConnectionError::Transport(e) => e.code(),
+                        },
+                        frame_type: *frame_type,
+                        reason_phrase: Vec::from(reason.clone()),
                     },
-                    frame_type: *frame_type,
-                    reason_phrase: Vec::from(reason.clone()),
-                },
-                None,
-            ))
+                    None,
+                ));
+            }
         } else {
-            None
+            qerror!(
+                "CloseGenerator.generate() called when in {:?}, not State::Closing",
+                c.state()
+            );
         }
+
+        None
     }
 }
 
