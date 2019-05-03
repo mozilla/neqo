@@ -257,7 +257,6 @@ impl SecretAgent {
         *auth_required_ptr = true;
         // NSS insists on getting SECWouldBlock here rather than accepting
         // the usual combination of PR_WOULD_BLOCK_ERROR and SECFailure.
-        // This will change when Bug 1471126 lands.
         ssl::_SECStatus_SECWouldBlock
     }
 
