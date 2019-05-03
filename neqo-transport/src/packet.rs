@@ -120,6 +120,8 @@ impl PacketNumberDecoder {
         PacketNumberDecoder { expected: largest_acknowledged + 1 }
     }
 
+    // TODO(mt) test this.  It's a strict implementation of the spec,
+    // but that doesn't mean we shouldn't test it.
     fn decode_pn(&self, pn: u64, w: usize) -> PacketNumber {
         let window = 1u64 << (w * 8);
         let candidate = (self.expected & !(window - 1)) | pn;
