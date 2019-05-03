@@ -579,7 +579,7 @@ impl From<&Datagram> for Path {
 pub struct Connection {
     version: crate::packet::Version,
     paths: Option<Path>,
-    rol: Role,
+    role: Role,
     state: State,
     tls: Agent,
     tps: Rc<RefCell<TransportParametersHandler>>,
@@ -616,7 +616,7 @@ impl Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_fmt(format_args!(
             "{:?} Connection: {:?} {:?}",
-            self.rol, self.state, self.paths
+            self.role, self.state, self.paths
         ))
     }
 }
@@ -714,7 +714,7 @@ impl Connection {
         let mut c = Connection {
             version: QUIC_VERSION,
             paths,
-            rol: r,
+            role: r,
             state: match r {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
@@ -759,7 +759,7 @@ impl Connection {
         };
 
         c.scid = c.generate_cid();
-        if c.rol == Role::Client {
+        if c.role == Role::Client {
             let dcid = c.generate_cid();
             c.create_initial_crypto_state(&dcid);
             c.dcid = dcid;
@@ -777,7 +777,7 @@ impl Connection {
 
     /// Get the current role.
     pub fn role(&self) -> Role {
-        self.rol
+        self.role
     }
 
     /// Get the state of the connection.
@@ -883,7 +883,7 @@ impl Connection {
                 State::WaitInitial => {
                     // Out DCID is the other side's SCID.
                     let scid = &hdr.scid.as_ref().unwrap().0;
-                    if self.rol == Role::Server {
+                    if self.role == Role::Server {
                         if hdr.dcid.len() < 8 {
                             qwarn!([self] "Peer DCID is too short");
                             return Ok(());
@@ -1133,7 +1133,7 @@ impl Connection {
             });
 
         // Pad Initial packets sent by the client to 1200 bytes.
-        if self.rol == Role::Client && initial_only && !out_dgrams.is_empty() {
+        if self.role == Role::Client && initial_only && !out_dgrams.is_empty() {
             qdebug!([self] "pad Initial to 1200");
             out_dgrams.last_mut().unwrap().resize(1200, 0);
         }
@@ -1465,7 +1465,7 @@ impl Connection {
         qinfo!(
             [self]
             "Creating initial cipher state role={:?} dcid={}",
-            self.rol,
+            self.role,
             hex(dcid)
         );
         //assert!(matches!(None, self.crypto_states[0]));
@@ -1473,7 +1473,7 @@ impl Connection {
         let cds = CryptoDxState::new_initial("client in", dcid);
         let sds = CryptoDxState::new_initial("server in", dcid);
 
-        self.crypto_states[0] = Some(match self.rol {
+        self.crypto_states[0] = Some(match self.role {
             Role::Client => CryptoState {
                 epoch: 0,
                 tx: cds,
@@ -1687,7 +1687,7 @@ impl Connection {
                 }
                 let new_id = self
                     .peer_next_stream_idx_uni
-                    .to_stream_id(StreamType::UniDi, self.rol);
+                    .to_stream_id(StreamType::UniDi, self.role);
                 self.peer_next_stream_idx_uni += 1;
                 let initial_max_stream_data = self
                     .tps
@@ -1717,7 +1717,7 @@ impl Connection {
                 }
                 let new_id = self
                     .peer_next_stream_idx_bidi
-                    .to_stream_id(StreamType::BiDi, self.rol);
+                    .to_stream_id(StreamType::BiDi, self.role);
                 self.peer_next_stream_idx_bidi += 1;
                 let send_initial_max_stream_data = self
                     .tps
@@ -1870,7 +1870,7 @@ impl Connection {
 
 impl ::std::fmt::Display for Connection {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{:?} {:p}", self.rol, self as *const Connection)
+        write!(f, "{:?} {:p}", self.role, self as *const Connection)
     }
 }
 
