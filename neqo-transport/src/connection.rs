@@ -862,7 +862,7 @@ impl Connection {
     fn input(&mut self, d: Datagram, cur_time: u64) -> Res<()> {
         let mut slc = &d[..];
 
-        qdebug!([self] "input {}", hex("", &**d));
+        qdebug!([self] "input {}", hex( &**d));
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
@@ -1118,7 +1118,7 @@ impl Connection {
         // Put packets in UDP datagrams
         let mut out_dgrams = out_packets
             .into_iter()
-            .inspect(|p| qdebug!([self] "{}", hex("Packet", p)))
+            .inspect(|p| qdebug!([self] "packet {}", hex(p)))
             .fold(Vec::new(), |mut vec: Vec<Datagram>, packet| {
                 let new_dgram: bool = vec
                     .last()
@@ -1464,9 +1464,9 @@ impl Connection {
     fn create_initial_crypto_state(&mut self, dcid: &[u8]) {
         qinfo!(
             [self]
-            "Creating initial cipher state role={:?} {}",
+            "Creating initial cipher state role={:?} dcid={}",
             self.rol,
-            hex("DCID", dcid)
+            hex(dcid)
         );
         //assert!(matches!(None, self.crypto_states[0]));
 
@@ -1877,17 +1877,17 @@ impl ::std::fmt::Display for Connection {
 impl CryptoCtx for CryptoDxState {
     fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
         let mask = self.hpkey.mask(sample)?;
-        qdebug!("HP {} {}", hex("sample", sample), hex("mask", &mask));
+        qdebug!("HP sample={} mask={}", hex(sample), hex(&mask));
         Ok(mask)
     }
 
     fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         qinfo!(
             [self.label]
-            "aead_decrypt pn={} {} {}",
+            "aead_decrypt pn={} hdr={} body={}",
             pn,
-            hex("hdr", hdr),
-            hex("body", body)
+            hex(hdr),
+            hex(body)
         );
         let mut out = Vec::with_capacity(body.len());
         out.resize(body.len(), 0);
@@ -1898,10 +1898,10 @@ impl CryptoCtx for CryptoDxState {
     fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         qinfo!(
             [self.label]
-            "aead_encrypt pn={} {} {}",
+            "aead_encrypt pn={} hdr={} body={}",
             pn,
-            hex("hdr", hdr),
-            hex("body", body)
+            hex(hdr),
+            hex(body)
         );
 
         let size = body.len() + MAX_AUTH_TAG;
@@ -1909,7 +1909,7 @@ impl CryptoCtx for CryptoDxState {
         out.resize(size, 0);
         let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
 
-        qdebug!([self.label] "aead_encrypt {}", hex("ct", res),);
+        qdebug!([self.label] "aead_encrypt ct={}", hex(res),);
 
         Ok(res.to_vec())
     }

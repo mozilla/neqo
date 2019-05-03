@@ -845,7 +845,7 @@ mod tests {
         ];
         let mut d = Data::default();
         Frame::encode_ack_frame(&packets, &mut d);
-        println!("Encoded {}", hex("ACK", d.as_vec()));
+        println!("Encoded ACK={}", hex(d.as_vec()));
 
         let f = decode_frame(&mut d).unwrap();
         match f {

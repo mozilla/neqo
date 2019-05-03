@@ -50,9 +50,9 @@ pub fn now() -> u64 {
         .as_nanos() as u64
 }
 
-pub fn hex(label: &str, buf: &[u8]) -> String {
-    let mut ret = String::with_capacity(label.len() + 10 + buf.len() * 3);
-    ret.push_str(&format!("{}[{}]: ", label, buf.len()));
+pub fn hex(buf: &[u8]) -> String {
+    let mut ret = String::with_capacity(10 + buf.len() * 3);
+    ret.push_str(&format!("[{}]: ", buf.len()));
     for b in buf {
         ret.push_str(&format!("{:02x}", b));
     }

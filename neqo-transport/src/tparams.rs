@@ -294,9 +294,9 @@ impl ExtensionHandler for TransportParametersHandler {
 
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
         qdebug!(
-            "Handling transport parameters, msg={:?} {}",
+            "Handling transport parameters, msg={:?} value={}",
             msg,
-            hex("Value", d),
+            hex(d),
         );
 
         let role = match msg {

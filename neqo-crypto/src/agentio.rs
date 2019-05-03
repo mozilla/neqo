@@ -73,7 +73,7 @@ impl fmt::Debug for Record {
             "Record {:?}:{:?} {}",
             self.epoch,
             self.ct,
-            hex("", &self.data[..])
+            hex(&self.data[..])
         )
     }
 }
@@ -169,7 +169,7 @@ impl AgentIoInput {
         }
 
         let src = unsafe { std::slice::from_raw_parts(self.input, amount) };
-        qtrace!([self] "{}", hex("read", src));
+        qtrace!([self] "read {}", hex(src));
         let dst = unsafe { std::slice::from_raw_parts_mut(buf, amount) };
         dst.copy_from_slice(&src);
         self.input = self.input.wrapping_offset(amount as isize);
@@ -223,7 +223,7 @@ impl AgentIo {
     // Stage output from TLS into the output buffer.
     fn save_output(&mut self, buf: *const u8, count: usize) {
         let slice = unsafe { std::slice::from_raw_parts(buf, count) };
-        qtrace!([self] "{}", hex("save output", slice));
+        qtrace!([self] "save output {}", hex(slice));
         self.output.extend_from_slice(slice);
     }
 
