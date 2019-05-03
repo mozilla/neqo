@@ -70,7 +70,7 @@ impl QPackEncoder {
             // TODO dragana check wat is the correct error.
             return Err(Error::EncoderStreamError);
         }
-        qdebug!(self, "Set max capacity to {}.", cap);
+        qdebug!([self] "Set max capacity to {}.", cap);
         self.max_entries = (cap as f64 / 32.0).floor() as u64;
         // we also set our table to the max allowed. TODO we may not want to use max allowed.
         self.change_capacity(cap);
@@ -90,7 +90,7 @@ impl QPackEncoder {
     }
 
     fn read_instructions(&mut self, s: &mut Recvable) -> Res<()> {
-        qdebug!(self, "read a new instraction");
+        qdebug!([self] "read a new instraction");
         loop {
             match self.instruction_reader_current_inst {
                 None => {
@@ -159,7 +159,7 @@ impl QPackEncoder {
 
     fn call_instruction(&mut self) {
         if let Some(inst) = &self.instruction_reader_current_inst {
-            qdebug!(self, "call intruction {:?}", inst);
+            qdebug!([self] "call intruction {:?}", inst);
             match inst {
                 DecoderInstructions::InsertCountIncrement => {
                     self.table.increment_acked(self.instruction_reader_value);
@@ -188,7 +188,7 @@ impl QPackEncoder {
         value: Vec<u8>,
     ) -> Res<()> {
         qdebug!(
-            self,
+            [self]
             "insert with name reference {} from {} value={:x?}.",
             name_index,
             if name_static_table {
@@ -211,7 +211,7 @@ impl QPackEncoder {
     }
 
     pub fn insert_with_name_literal(&mut self, name: Vec<u8>, value: Vec<u8>) -> Res<()> {
-        qdebug!(self, "insert name {:x?}, value={:x?}.", name, value);
+        qdebug!([self] "insert name {:x?}, value={:x?}.", name, value);
         // try to insert a new entry
         self.table.insert(name, value)?;
 
@@ -224,14 +224,14 @@ impl QPackEncoder {
     }
 
     pub fn duplicate(&mut self, index: u64) -> Res<()> {
-        qdebug!(self, "duplicate entry {}.", index);
+        qdebug!([self] "duplicate entry {}.", index);
         self.table.duplicate(index)?;
         self.send_buf.encode_prefixed_encoded_int(0x00, 3, index);
         Ok(())
     }
 
     pub fn change_capacity(&mut self, cap: u64) {
-        qdebug!(self, "change capacity: {}", cap);
+        qdebug!([self] "change capacity: {}", cap);
         self.table.set_capacity(cap);
         self.send_buf.encode_prefixed_encoded_int(0x20, 3, cap);
     }
@@ -240,7 +240,7 @@ impl QPackEncoder {
         match s.send(self.send_buf.as_mut_vec()) {
             Err(_) => Err(Error::EncoderStreamError),
             Ok(r) => {
-                qdebug!(self, "{} bytes sent.", r);
+                qdebug!([self] "{} bytes sent.", r);
                 self.send_buf.read(r as usize);
                 Ok(())
             }
@@ -248,7 +248,7 @@ impl QPackEncoder {
     }
 
     pub fn encode_header_block(&mut self, h: &Vec<(String, String)>, stream_id: u64) -> QPData {
-        qdebug!(self, "encoding headers.");
+        qdebug!([self] "encoding headers.");
         let mut encoded_h = QPData::default();
         let base = self.table.base();
         let mut req_insert_cnt = 0;
@@ -269,7 +269,7 @@ impl QPackEncoder {
                 // this is done in this way because otherwise it is complaining about mut borrow. TODO: look if we can do this better
                 let (e_s, e_d, found_value) = self.table.lookup(&name, &value);
                 if let Some(entry) = e_s {
-                    qtrace!(label, "found a static entry, value-match={}", found_value);
+                    qtrace!([label] "found a static entry, value-match={}", found_value);
                     can_use = true;
                     index = entry.index();
                     value_as_well = found_value;
@@ -279,7 +279,7 @@ impl QPackEncoder {
                         index = entry.index();
                         can_use = index < acked_inserts_cnt || can_be_blocked;
                         qtrace!(
-                            label,
+                            [label]
                             "found a dynamic entry - can_use={} value-match={},",
                             can_use,
                             found_value
@@ -364,7 +364,7 @@ impl QPackEncoder {
         positive: bool,
     ) {
         qdebug!(
-            self,
+            [self]
             "encode header block prefix req_insert_cnt={} delta={} (fix={}).",
             req_insert_cnt,
             delta,
@@ -413,7 +413,7 @@ impl QPackEncoder {
     }
 
     fn encode_indexed(&self, buf: &mut QPData, is_static: bool, index: u64) {
-        qdebug!(self, "encode index {} (static={}).", index, is_static);
+        qdebug!([self] "encode index {} (static={}).", index, is_static);
         let prefix = if is_static { 0xc0 } else { 0x80 };
         buf.encode_prefixed_encoded_int(prefix, 2, index);
     }
@@ -426,6 +426,7 @@ impl QPackEncoder {
         value: &[u8],
     ) {
         qdebug!(
+            [self]
             "encode literal with name ref - index={}, static={}, value={:x?}",
             index,
             is_static,
@@ -437,12 +438,13 @@ impl QPackEncoder {
     }
 
     fn encode_post_base_index(&self, buf: &mut QPData, index: u64) {
-        qdebug!(self, "encode post base index {}.", index);
+        qdebug!([self] "encode post base index {}.", index);
         buf.encode_prefixed_encoded_int(0x10, 4, index);
     }
 
     fn encode_literal_with_post_based_name_ref(&self, buf: &mut QPData, index: u64, value: &[u8]) {
         qdebug!(
+            [self]
             "encode literal with post base index - index={}, value={:x?}.",
             index,
             value
@@ -453,6 +455,7 @@ impl QPackEncoder {
 
     fn encode_literal_with_name_literal(&self, buf: &mut QPData, name: &[u8], value: &[u8]) {
         qdebug!(
+            [self]
             "encode literal with name literal - name={:x?}, value={:x?}.",
             name,
             value

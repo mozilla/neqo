@@ -509,13 +509,13 @@ impl SecretAgent {
             },
             false => HandshakeState::Complete(SecretAgentInfo::new(self.fd)?),
         };
-        qinfo!(self, "state -> {:?}", self.state);
+        qinfo!([self] "state -> {:?}", self.state);
         Ok(())
     }
 
     fn set_failed(&mut self) -> Error {
         let e = result::result(ssl::SECFailure).unwrap_err();
-        qwarn!(self, "error: {:?}", e);
+        qwarn!([self] "error: {:?}", e);
         self.state = HandshakeState::Failed(e.clone());
         return e;
     }
@@ -568,7 +568,7 @@ impl SecretAgent {
         // Fire off any authentication we might need to complete.
         if self.state == HandshakeState::Authenticated {
             let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
-            qdebug!(self, "SSL_AuthCertificateComplete: {:?}", rv);
+            qdebug!([self] "SSL_AuthCertificateComplete: {:?}", rv);
             self.update_state(rv)?;
             if let HandshakeState::Complete(_) = self.state {
                 return Ok(*records);

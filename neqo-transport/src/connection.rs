@@ -862,14 +862,14 @@ impl Connection {
     fn input(&mut self, d: Datagram, cur_time: u64) -> Res<()> {
         let mut slc = &d[..];
 
-        qdebug!(self, "input {}", hex("", &**d));
+        qdebug!([self] "input {}", hex("", &**d));
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
             let mut hdr = match decode_packet_hdr(self, slc) {
                 Ok(h) => h,
                 _ => {
-                    qinfo!(self, "Received indecipherable packet header {:?}", slc);
+                    qinfo!([self] "Received indecipherable packet header {:?}", slc);
                     return Ok(()); // Drop the remainder of the datagram.
                 }
             };
@@ -877,7 +877,7 @@ impl Connection {
             // TODO(ekr@rtfm.com): Check for bogus versions and reject.
             match self.state {
                 State::Init => {
-                    qinfo!(self, "Received message while in Init state");
+                    qinfo!([self] "Received message while in Init state");
                     return Ok(());
                 }
                 State::WaitInitial => {
@@ -885,7 +885,7 @@ impl Connection {
                     let scid = &hdr.scid.as_ref().unwrap().0;
                     if self.rol == Role::Server {
                         if hdr.dcid.len() < 8 {
-                            qwarn!(self, "Peer DCID is too short");
+                            qwarn!([self] "Peer DCID is too short");
                             return Ok(());
                         }
                         self.create_initial_crypto_state(&hdr.dcid);
@@ -896,7 +896,7 @@ impl Connection {
                 }
                 State::Handshaking | State::Connected => {
                     if !self.valid_cid(&hdr.dcid[..]) {
-                        qinfo!(self, "Bad CID {:?}", hdr.dcid);
+                        qinfo!([self] "Bad CID {:?}", hdr.dcid);
                         return Ok(());
                     }
                 }
@@ -907,7 +907,7 @@ impl Connection {
                 }
             }
 
-            qdebug!(self, "Received unverified packet {:?}", hdr);
+            qdebug!([self] "Received unverified packet {:?}", hdr);
 
             // Decryption failure, or not having keys is not fatal.
             // If the state isn't available, or we can't decrypt the packet, drop
@@ -1077,7 +1077,7 @@ impl Connection {
             }
 
             for (data, ack_eliciting, is_crypto, tokens) in ds {
-                qdebug!(self, "Need to send a packet");
+                qdebug!([self] "Need to send a packet");
 
                 initial_only = epoch == 0;
                 let mut hdr = PacketHdr::new(
@@ -1118,7 +1118,7 @@ impl Connection {
         // Put packets in UDP datagrams
         let mut out_dgrams = out_packets
             .into_iter()
-            .inspect(|p| qdebug!(self, "{}", hex("Packet", p)))
+            .inspect(|p| qdebug!([self] "{}", hex("Packet", p)))
             .fold(Vec::new(), |mut vec: Vec<Datagram>, packet| {
                 let new_dgram: bool = vec
                     .last()
@@ -1134,13 +1134,13 @@ impl Connection {
 
         // Pad Initial packets sent by the client to 1200 bytes.
         if self.rol == Role::Client && initial_only && !out_dgrams.is_empty() {
-            qdebug!(self, "pad Initial to 1200");
+            qdebug!([self] "pad Initial to 1200");
             out_dgrams.last_mut().unwrap().resize(1200, 0);
         }
 
         out_dgrams
             .iter()
-            .for_each(|dgram| qdebug!(self, "Datagram length: {}", dgram.len()));
+            .for_each(|dgram| qdebug!([self] "Datagram length: {}", dgram.len()));
 
         return Ok(out_dgrams);
     }
@@ -1165,7 +1165,7 @@ impl Connection {
         let mut rec: Option<Record> = None;
 
         if let Some(d) = data {
-            qdebug!(self, "Handshake received {:0x?} ", d);
+            qdebug!([self] "Handshake received {:0x?} ", d);
             rec = Some(Record {
                 ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
                 epoch,
@@ -1179,13 +1179,13 @@ impl Connection {
             // TODO(ekr@rtfm.com): IMPORTANT: This overrides
             // authentication and so is fantastically dangerous.
             // Fix before shipping.
-            qwarn!(self, "marking connection as authenticated without checking");
+            qwarn!([self] "marking connection as authenticated without checking");
             self.tls.authenticated();
             m = self.tls.handshake_raw(0, None);
         }
         match m {
             Err(e) => {
-                qwarn!(self, "Handshake failed");
+                qwarn!([self] "Handshake failed");
                 return Err(match self.tls.alert() {
                     Some(a) => Error::CryptoAlert(*a),
                     _ => Error::CryptoError(e),
@@ -1193,14 +1193,14 @@ impl Connection {
             }
             Ok(msgs) => {
                 for m in msgs {
-                    qdebug!(self, "Inserting message {:?}", m);
+                    qdebug!([self] "Inserting message {:?}", m);
                     assert_eq!(m.ct, 22);
                     self.crypto_streams[m.epoch as usize].tx.send(&m.data);
                 }
             }
         }
         if self.tls.state().connected() {
-            qinfo!(self, "TLS handshake completed");
+            qinfo!([self] "TLS handshake completed");
             self.set_state(State::Connected);
 
             self.peer_max_stream_idx_bidi = StreamIndex::new(
@@ -1275,7 +1275,7 @@ impl Connection {
             }
             Frame::Crypto { offset, data } => {
                 qdebug!(
-                    self,
+                    [self]
                     "Crypto frame on epoch={} offset={}, data={:0x?}",
                     epoch,
                     offset,
@@ -1329,7 +1329,7 @@ impl Connection {
             }
             Frame::DataBlocked { data_limit } => {
                 // Should never happen since we set data limit to 2^62-1
-                qwarn!(self, "Received DataBlocked with data limit {}", data_limit);
+                qwarn!([self] "Received DataBlocked with data limit {}", data_limit);
             }
             Frame::StreamDataBlocked {
                 stream_id,
@@ -1378,7 +1378,7 @@ impl Connection {
             Frame::PathResponse { data: _ } => {
                 // Should never see this, we don't support migration atm and
                 // do not send path challenges
-                qwarn!(self, "Received Path Response");
+                qwarn!([self] "Received Path Response");
             }
             Frame::ConnectionClose {
                 close_type,
@@ -1386,7 +1386,7 @@ impl Connection {
                 frame_type,
                 reason_phrase,
             } => {
-                qinfo!(self, "ConnectionClose received. Closing. Close type: {:?} Error code: {} frame type {:x} reason {}",close_type, error_code, frame_type, String::from_utf8_lossy(&reason_phrase));
+                qinfo!([self] "ConnectionClose received. Closing. Close type: {:?} Error code: {} frame type {:x} reason {}",close_type, error_code, frame_type, String::from_utf8_lossy(&reason_phrase));
                 self.set_state(State::Closed(ConnectionError::Application(error_code)));
             }
         };
@@ -1404,7 +1404,7 @@ impl Connection {
         cur_time: u64,
     ) -> Res<()> {
         qinfo!(
-            self,
+            [self]
             "Rx ACK epoch={}, largest_acked={}, first_ack_range={}, ranges={:?}",
             epoch,
             largest_acknowledged,
@@ -1433,7 +1433,7 @@ impl Connection {
 
     fn set_state(&mut self, state: State) {
         if state != self.state {
-            qinfo!(self, "State change from {:?} -> {:?}", self.state, state);
+            qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
             self.state = state;
             match &self.state {
                 State::Connected => {
@@ -1463,7 +1463,7 @@ impl Connection {
     // Create the initial crypto state.
     fn create_initial_crypto_state(&mut self, dcid: &[u8]) {
         qinfo!(
-            self,
+            [self]
             "Creating initial cipher state role={:?} {}",
             self.rol,
             hex("DCID", dcid)
@@ -1844,23 +1844,23 @@ impl Connection {
     }
 
     fn check_loss_detection_timeout(&mut self, cur_time: u64) {
-        qdebug!(self, "check_loss_detection_timeout");
+        qdebug!([self] "check_loss_detection_timeout");
         let (mut lost_packets, retransmit_unacked_crypto, send_one_or_two_packets) =
             self.loss_recovery.on_loss_detection_timeout(cur_time);
         if lost_packets.len() > 0 {
-            qdebug!(self, "check_loss_detection_timeout loss detected.");
+            qdebug!([self] "check_loss_detection_timeout loss detected.");
             for lost in lost_packets.iter_mut() {
                 lost.mark_lost(self);
             }
         } else if retransmit_unacked_crypto {
             qdebug!(
-                self,
+                [self]
                 "check_loss_detection_timeout - retransmit_unacked_crypto"
             );
-        // TOOD
+        // TODO
         } else if send_one_or_two_packets {
             qdebug!(
-                self,
+                [self]
                 "check_loss_detection_timeout -send_one_or_two_packets"
             );
             // TODO
@@ -1883,8 +1883,8 @@ impl CryptoCtx for CryptoDxState {
 
     fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         qinfo!(
-            "aead_decrypt label={} pn={} {} {}",
-            &self.label,
+            [self.label]
+            "aead_decrypt pn={} {} {}",
             pn,
             hex("hdr", hdr),
             hex("body", body)
@@ -1897,8 +1897,8 @@ impl CryptoCtx for CryptoDxState {
 
     fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         qinfo!(
-            "aead_encrypt label={} pn={} {} {}",
-            self.label,
+            [self.label]
+            "aead_encrypt pn={} {} {}",
             pn,
             hex("hdr", hdr),
             hex("body", body)
@@ -1909,7 +1909,7 @@ impl CryptoCtx for CryptoDxState {
         out.resize(size, 0);
         let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
 
-        qdebug!("aead_encrypt {}", hex("ct", res),);
+        qdebug!([self.label] "aead_encrypt {}", hex("ct", res),);
 
         Ok(res.to_vec())
     }
@@ -1951,7 +1951,7 @@ impl FrameGenerator for CryptoGenerator {
             tx_stream.mark_as_sent(offset, data_len);
 
             qdebug!(
-                conn,
+                [conn]
                 "Emitting crypto frame epoch={}, offset={}, len={}",
                 epoch,
                 offset,
@@ -1980,7 +1980,7 @@ struct CryptoGeneratorToken {
 impl FrameGeneratorToken for CryptoGeneratorToken {
     fn acked(&mut self, conn: &mut Connection) {
         qinfo!(
-            conn,
+            [conn]
             "Acked crypto frame epoch={} offset={} length={}",
             self.epoch,
             self.offset,
@@ -2107,7 +2107,7 @@ struct StreamGeneratorToken {
 impl FrameGeneratorToken for StreamGeneratorToken {
     fn acked(&mut self, conn: &mut Connection) {
         qinfo!(
-            conn,
+            [conn]
             "Acked frame stream={} offset={} length={}",
             self.id.as_u64(),
             self.offset,
@@ -2119,7 +2119,7 @@ impl FrameGeneratorToken for StreamGeneratorToken {
     }
     fn lost(&mut self, conn: &mut Connection) {
         qinfo!(
-            conn,
+            [conn]
             "Lost frame stream={} offset={} length={}",
             self.id.as_u64(),
             self.offset,
@@ -2142,7 +2142,7 @@ impl FrameGeneratorToken for FlowControlGeneratorToken {
                 final_size,
             } => {
                 qinfo!(
-                    conn,
+                    [conn]
                     "Reset received stream={} err={} final_size={}",
                     stream_id,
                     application_error_code,
@@ -2165,7 +2165,7 @@ impl FrameGeneratorToken for FlowControlGeneratorToken {
                 final_size,
             } => {
                 qinfo!(
-                    conn,
+                    [conn]
                     "Reset lost stream={} err={} final_size={}",
                     stream_id,
                     application_error_code,
@@ -2387,7 +2387,7 @@ impl LossRecovery {
         cur_time_nanos: u64,
     ) {
         let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
-        qdebug!(self, "packet {} sent.", packet_number);
+        qdebug!([self] "packet {} sent.", packet_number);
         self.packet_spaces[pn_space as usize].sent_packets.insert(
             packet_number,
             SentPacket {
@@ -2419,7 +2419,7 @@ impl LossRecovery {
         cur_time_nanos: u64,
     ) -> (Vec<SentPacket>, Vec<SentPacket>) {
         let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
-        qdebug!(self, "ack received - largest_acked={}.", largest_acked);
+        qdebug!([self] "ack received - largest_acked={}.", largest_acked);
 
         let packet_space = &mut self.packet_spaces[pn_space as usize];
 
@@ -2484,7 +2484,7 @@ impl LossRecovery {
             .saturating_sub(PACKET_THRESHOLD);
 
         qdebug!(
-            self,
+            [self]
             "detect lost packets - time={}, pn={}",
             lost_send_time,
             lost_pn
@@ -2524,7 +2524,7 @@ impl LossRecovery {
     }
 
     fn set_loss_detection_timer(&mut self) {
-        qdebug!(self, "set_loss_detection_timer.");
+        qdebug!([self] "set_loss_detection_timer.");
         let mut has_crypto_out = false;
         let mut has_ack_eliciting_out = false;
 
@@ -2553,7 +2553,7 @@ impl LossRecovery {
         }
 
         qdebug!(
-            self,
+            [self]
             "has_ack_eliciting_out={} has_crypto_out={}",
             has_ack_eliciting_out,
             has_crypto_out
@@ -2578,7 +2578,7 @@ impl LossRecovery {
             timeout = timeout * 2u64.pow(self.pto_count);
             self.loss_detection_timer = self.time_of_last_sent_ack_eliciting_packet + timeout;
         }
-        qdebug!(self, "loss_detection_timer={}", self.loss_detection_timer);
+        qdebug!([self] "loss_detection_timer={}", self.loss_detection_timer);
     }
 
     fn set_timer_for_crypto_retransmission(&mut self) {

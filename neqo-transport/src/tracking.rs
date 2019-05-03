@@ -81,7 +81,7 @@ impl RecvdPackets {
     }
 
     pub fn get_eligible_ack_ranges(&mut self) -> Vec<PacketRange> {
-        qinfo!(self, "Getting eligible ack ranges {:?}", self);
+        qinfo!([self] "Getting eligible ack ranges {:?}", self);
         if !self.unacked {
             return vec![];
         }
@@ -98,16 +98,16 @@ impl RecvdPackets {
         let mut ranges = vec![];
 
         loop {
-            qtrace!(self, "Examining PN={}, inrange={}", pn, inrange);
+            qtrace!([self] "Examining PN={}, inrange={}", pn, inrange);
             let mut needs_ack = false;
 
             match self.packets.get(&pn) {
                 None => {
-                    qtrace!(self, "Packet {} does not need acking", pn);
+                    qtrace!([self] "Packet {} does not need acking", pn);
                 }
                 Some(packet) => {
                     if !packet.acked2 {
-                        qtrace!(self, "Packet {} needs acking", pn);
+                        qtrace!([self] "Packet {} needs acking", pn);
                         needs_ack = true;
                         new_min_not_acked2 = pn;
                     }
@@ -117,7 +117,7 @@ impl RecvdPackets {
             match (inrange, needs_ack) {
                 (true, false) => {
                     // We are at the end of a range.
-                    qtrace!(self, "End of a range");
+                    qtrace!([self] "End of a range");
                     ranges.push(PacketRange {
                         largest: last,
                         length: last - pn,
@@ -126,7 +126,7 @@ impl RecvdPackets {
                 }
                 (false, true) => {
                     // We are now at the beginning of a range.
-                    qtrace!(self, "Beginning of a range");
+                    qtrace!([self] "Beginning of a range");
                     last = pn;
                     inrange = true;
                 }

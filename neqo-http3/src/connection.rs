@@ -72,7 +72,7 @@ impl Request {
     }
 
     pub fn encode_request(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
-        qdebug!(self, "Encoding headers for {}/{}", self.host, self.path);
+        qdebug!([self] "Encoding headers for {}/{}", self.host, self.path);
         let mut encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
         let f = HFrame::Headers {
             len: encoded_headers.len() as u64,
@@ -183,12 +183,12 @@ impl ClientRequest {
             }
             if let Some(d) = &mut self.request.buf {
                 let sent = conn.stream_send(self.stream_id, d.as_mut_vec())?;
-                qdebug!(label, "{} bytes sent", sent);
+                qdebug!([label] "{} bytes sent", sent);
                 if sent == d.remaining() {
                     self.request.buf = None;
                     conn.stream_close_send(self.stream_id)?;
                     self.state = ClientRequestState::WaitingForResponseHeaders;
-                    qdebug!(label, "done sending request");
+                    qdebug!([label] "done sending request");
                 } else {
                     d.read(sent);
                 }
@@ -209,7 +209,7 @@ impl ClientRequest {
             true => format!("{}", self),
             _ => String::new(),
         };
-        qdebug!(label, "state={:?}: receiving data.", self.state);
+        qdebug!([label] "state={:?}: receiving data.", self.state);
         loop {
             match self.state {
                 ClientRequestState::SendingRequest => {
@@ -221,7 +221,7 @@ impl ClientRequest {
                     if !self.frame_reader.done() {
                         break Ok(());
                     }
-                    qdebug!(label, "received a frame");
+                    qdebug!([label] "received a frame");
                     match self.frame_reader.get_frame()? {
                         HFrame::Priority {
                             priorized_elem_type,
@@ -243,7 +243,7 @@ impl ClientRequest {
                 } => {
                     let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[*offset..])?;
                     qdebug!(
-                        label,
+                        [label]
                         "state=ReadingHeaders: read {} bytes fin={}.",
                         amount,
                         fin
@@ -259,7 +259,7 @@ impl ClientRequest {
                     // we have read the headers.
                     self.response.headers = decoder.decode_header_block(buf, self.stream_id)?;
                     if let None = self.response.headers {
-                        qdebug!(label, "decoding header is blocked.");
+                        qdebug!([label] "decoding header is blocked.");
                         let mut tmp: Vec<u8> = Vec::new();
                         mem::swap(&mut tmp, buf);
                         self.state = ClientRequestState::BlockedDecodingHeaders { buf: tmp };
@@ -389,7 +389,7 @@ impl ClientRequestServer {
     }
 
     pub fn encode_response(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
-        qdebug!(self, "Encoding headers");
+        qdebug!([self] "Encoding headers");
         let mut encoded_headers = encoder.encode_header_block(&self.response_headers, stream_id);
         let f = HFrame::Headers {
             len: encoded_headers.len() as u64,
@@ -418,12 +418,12 @@ impl ClientRequestServer {
             }
             if let Some(d) = &mut self.response_buf {
                 let sent = conn.stream_send(self.stream_id, d.as_mut_vec())?;
-                qdebug!(label, "{} bytes sent", sent);
+                qdebug!([label] "{} bytes sent", sent);
                 if sent == d.remaining() {
                     self.response_buf = None;
                     conn.stream_close_send(self.stream_id)?;
                     self.state = ClientRequestServerState::Closed;
-                    qdebug!(label, "done sending request");
+                    qdebug!([label] "done sending request");
                 } else {
                     d.read(sent);
                 }
@@ -444,7 +444,7 @@ impl ClientRequestServer {
             true => format!("{}", self),
             _ => String::new(),
         };
-        qdebug!(label, "state={:?}: receiving data.", self.state);
+        qdebug!([label] "state={:?}: receiving data.", self.state);
         loop {
             match self.state {
                 ClientRequestServerState::WaitingForRequestHeaders => {
@@ -452,7 +452,7 @@ impl ClientRequestServer {
                     if !self.frame_reader.done() {
                         break Ok(());
                     }
-                    qdebug!(label, "received a frame");
+                    qdebug!([label] "received a frame");
                     match self.frame_reader.get_frame()? {
                         HFrame::Priority {
                             priorized_elem_type,
@@ -479,7 +479,7 @@ impl ClientRequestServer {
                 } => {
                     let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[*offset..])?;
                     qdebug!(
-                        label,
+                        [label]
                         "state=ReadingHeaders: read {} bytes fin={}.",
                         amount,
                         fin
@@ -496,7 +496,7 @@ impl ClientRequestServer {
                     // we have read the headers.
                     self.request_headers = decoder.decode_header_block(buf, self.stream_id)?;
                     if let None = self.request_headers {
-                        qdebug!(label, "decoding header is blocked.");
+                        qdebug!([label] "decoding header is blocked.");
                         let mut tmp: Vec<u8> = Vec::new();
                         mem::swap(&mut tmp, buf);
                         self.state = ClientRequestServerState::BlockedDecodingHeaders { buf: tmp };
@@ -724,7 +724,7 @@ impl HttpConn {
     fn check_result<T>(&mut self, res: Res<T>) {
         match &res {
             Err(e) => {
-                qinfo!(self, "Connection error: {}.", e);
+                qinfo!([self] "Connection error: {}.", e);
                 self.conn.close(e.code(), format!("{}", e));
             }
             _ => {}
@@ -746,13 +746,13 @@ impl HttpConn {
     where
         I: IntoIterator<Item = Datagram>,
     {
-        qdebug!(self, "Process.");
+        qdebug!([self] "Process.");
         let state_before = self.state().clone();
         self.conn.process_input(in_dgrams, cur_time);
         let state_after = self.state().clone();
         if state_after != state_before {
             qinfo!(
-                self,
+                [self]
                 "State has changed from {:?} to {:?}.",
                 state_before,
                 state_after
@@ -768,7 +768,7 @@ impl HttpConn {
     }
 
     fn on_connected(&mut self) -> Res<()> {
-        qdebug!(self, "OnConnect.");
+        qdebug!([self] "OnConnect.");
         self.create_control_stream()?;
         self.create_settings();
         self.create_qpack_streams()?;
@@ -776,7 +776,7 @@ impl HttpConn {
     }
 
     fn create_control_stream(&mut self) -> Res<()> {
-        qdebug!(self, "create_control_stream.");
+        qdebug!([self] "create_control_stream.");
         self.control_stream_local.stream_id = Some(self.conn.stream_create(StreamType::UniDi)?);
         self.control_stream_local
             .buf
@@ -785,7 +785,7 @@ impl HttpConn {
     }
 
     fn create_qpack_streams(&mut self) -> Res<()> {
-        qdebug!(self, "create_qpack_streams.");
+        qdebug!([self] "create_qpack_streams.");
         self.qpack_encoder
             .add_send_stream(self.conn.stream_create(StreamType::UniDi)?);
         self.qpack_decoder
@@ -794,7 +794,7 @@ impl HttpConn {
     }
 
     fn create_settings(&mut self) {
-        qdebug!(self, "create_settings.");
+        qdebug!([self] "create_settings.");
         self.control_stream_local.send_frame(HFrame::Settings {
             settings: vec![
                 (
@@ -811,7 +811,7 @@ impl HttpConn {
 
     // If this return an error the connection must be closed.
     fn check_connection_events(&mut self) -> Res<()> {
-        qdebug!(self, "check_connection_events");
+        qdebug!([self] "check_connection_events");
         let events = self.conn.events();
         for e in events {
             match e {
@@ -841,7 +841,7 @@ impl HttpConn {
     }
 
     fn handle_new_stream(&mut self, stream_id: u64, stream_type: StreamType) -> Res<()> {
-        qdebug!(self, "A new stream: {:?} {}.", stream_type, stream_id);
+        qdebug!([self] "A new stream: {:?} {}.", stream_type, stream_id);
         match stream_type {
             StreamType::BiDi => match self.role() {
                 Role::Server => self.handle_new_client_request(stream_id),
@@ -876,23 +876,23 @@ impl HttpConn {
             _ => String::new(),
         };
         if let Some(cs) = &mut self.client_requests.get_mut(&stream_id) {
-            qdebug!(label, "Request/response stream {} is writable.", stream_id);
+            qdebug!([label] "Request/response stream {} is writable.", stream_id);
             cs.send(&mut self.conn, &mut self.qpack_encoder)?;
         } else if let Some(cs) = &mut self.client_requests_server.get_mut(&stream_id) {
-            qdebug!(label, "Request/response stream {} is writable.", stream_id);
+            qdebug!([label] "Request/response stream {} is writable.", stream_id);
             cs.send(&mut self.conn, &mut self.qpack_encoder)?;
         } else if self
             .control_stream_local
             .send_if_this_stream(&mut self.conn, stream_id)?
         {
             qdebug!(
-                self,
+                [self]
                 "The local control stream ({}) is writable.",
                 stream_id
             );
         } else if self.qpack_encoder.is_send_stream(stream_id) {
             qdebug!(
-                self,
+                [self]
                 "The local qpack encoder stream ({}) is writable.",
                 stream_id
             );
@@ -902,7 +902,7 @@ impl HttpConn {
             };
         } else if self.qpack_decoder.is_send_stream(stream_id) {
             qdebug!(
-                self,
+                [self]
                 "The local qpack decoder stream ({}) is writable.",
                 stream_id
             );
@@ -917,7 +917,7 @@ impl HttpConn {
     }
 
     fn handle_stream_readable(&mut self, stream_id: u64) -> Res<()> {
-        qdebug!(self, "Readable stream {}.", stream_id);
+        qdebug!([self] "Readable stream {}.", stream_id);
         let mut reset_stream_error: Option<Error> = None;
         let mut remove_stream = false;
         let mut unblocked_streams: Vec<u64> = Vec::new();
@@ -926,9 +926,9 @@ impl HttpConn {
             _ => String::new(),
         };
         if let Some(cs) = &mut self.client_requests.get_mut(&stream_id) {
-            qdebug!(label, "Request/response stream {} is readable.", stream_id);
+            qdebug!([label] "Request/response stream {} is readable.", stream_id);
             if let Err(e) = cs.receive(&mut self.conn, &mut self.qpack_decoder) {
-                qdebug!(label, "Error {} ocurred", e);
+                qdebug!([label] "Error {} ocurred", e);
                 if e.is_stream_error() {
                     reset_stream_error = Some(e);
                 } else {
@@ -939,9 +939,9 @@ impl HttpConn {
                 }
             }
         } else if let Some(cs) = &mut self.client_requests_server.get_mut(&stream_id) {
-            qdebug!(label, "Request/response stream {} is readable.", stream_id);
+            qdebug!([label] "Request/response stream {} is readable.", stream_id);
             if let Err(e) = cs.receive(&mut self.conn, &mut self.qpack_decoder) {
-                qdebug!(label, "Error {} ocurred", e);
+                qdebug!([label] "Error {} ocurred", e);
                 if e.is_stream_error() {
                     reset_stream_error = Some(e);
                 } else {
@@ -958,7 +958,7 @@ impl HttpConn {
             .receive_if_this_stream(&mut self.conn, stream_id)?
         {
             qdebug!(
-                self,
+                [self]
                 "The remote control stream ({}) is readable.",
                 stream_id
             );
@@ -969,7 +969,7 @@ impl HttpConn {
             }
         } else if self.qpack_encoder.is_recv_stream(stream_id) {
             qdebug!(
-                self,
+                [self]
                 "The qpack encoder stream ({}) is readable.",
                 stream_id
             );
@@ -979,7 +979,7 @@ impl HttpConn {
             };
         } else if self.qpack_decoder.is_recv_stream(stream_id) {
             qdebug!(
-                self,
+                [self]
                 "The qpack decoder stream ({}) is readable.",
                 stream_id
             );
@@ -1015,7 +1015,7 @@ impl HttpConn {
             self.client_requests.remove(&stream_id);
         }
         for id in unblocked_streams {
-            qdebug!(self, "Stream {} is unblocked", id);
+            qdebug!([self] "Stream {} is unblocked", id);
             if let Some(client_request) = &mut self.client_requests.get_mut(&id) {
                 if let Err(e) = client_request.unblock(&mut self.qpack_decoder) {
                     if e.is_stream_error() {
@@ -1045,39 +1045,39 @@ impl HttpConn {
     fn decode_new_stream(&mut self, stream_type: u64, stream_id: u64) -> Res<()> {
         match stream_type {
             HTTP3_UNI_STREAM_TYPE_CONTROL => {
-                qinfo!(self, "A new control stream {}.", stream_id);
+                qinfo!([self] "A new control stream {}.", stream_id);
                 if let Some(_) = self.control_stream_remote.stream_id {
-                    qdebug!(self, "A control stream already exists");
+                    qdebug!([self] "A control stream already exists");
                     return Err(Error::WrongStreamCount);
                 }
                 self.control_stream_remote.stream_id = Some(stream_id);
             }
             HTTP3_UNI_STREAM_TYPE_PUSH => {
-                qdebug!(self, "A new push stream {}.", stream_id);
+                qdebug!([self] "A new push stream {}.", stream_id);
                 if self.role() == Role::Server {
-                    qdebug!(self, "Error: server receives a push stream!");
+                    qdebug!([self] "Error: server receives a push stream!");
                     self.conn
                         .stream_reset(stream_id, Error::WrongStreamDirection.code())?;
                 } else {
                     // TODO implement PUSH
-                    qdebug!(self, "PUSH is not implemented!");
+                    qdebug!([self] "PUSH is not implemented!");
                     if let Some(recv) = self.conn.get_recv_stream_mut(stream_id) {
                         recv.stop_sending(Error::PushRefused.code());
                     }
                 }
             }
             QPACK_UNI_STREAM_TYPE_ENCODER => {
-                qinfo!(self, "A new remote qpack encoder stream {}", stream_id);
+                qinfo!([self] "A new remote qpack encoder stream {}", stream_id);
                 if self.qpack_decoder.has_recv_stream() {
-                    qdebug!(self, "A qpack encoder stream already exists");
+                    qdebug!([self] "A qpack encoder stream already exists");
                     return Err(Error::WrongStreamCount);
                 }
                 self.qpack_decoder.add_recv_stream(stream_id);
             }
             QPACK_UNI_STREAM_TYPE_DECODER => {
-                qinfo!(self, "A new remore qpack decoder stream {}", stream_id);
+                qinfo!([self] "A new remore qpack decoder stream {}", stream_id);
                 if self.qpack_encoder.has_recv_stream() {
-                    qdebug!(self, "A qpack decoder stream already exists");
+                    qdebug!([self] "A qpack decoder stream already exists");
                     return Err(Error::WrongStreamCount);
                 }
                 self.qpack_encoder.add_recv_stream(stream_id);
@@ -1093,7 +1093,7 @@ impl HttpConn {
     }
 
     fn close(&mut self) {
-        qdebug!(self, "Closed.");
+        qdebug!([self] "Closed.");
         self.conn.close(0, "");
     }
 
@@ -1106,7 +1106,7 @@ impl HttpConn {
         headers: &[(String, String)],
     ) -> Res<()> {
         qdebug!(
-            self,
+            [self]
             "Fetch method={}, scheme={}, host={}, path={}",
             method,
             scheme,
@@ -1127,16 +1127,16 @@ impl HttpConn {
         }
         if self.control_stream_remote.frame_reader.done() {
             let f = self.control_stream_remote.frame_reader.get_frame()?;
-            qdebug!(self, "Handle a control frame {:?}", f);
+            qdebug!([self] "Handle a control frame {:?}", f);
             if let HFrame::Settings { .. } = f {
                 if self.settings_received {
-                    qdebug!(self, "SETTINGS frame already received");
+                    qdebug!([self] "SETTINGS frame already received");
                     return Err(Error::UnexpectedFrame);
                 }
                 self.settings_received = true;
             } else {
                 if !self.settings_received {
-                    qdebug!(self, "SETTINGS frame not received");
+                    qdebug!([self] "SETTINGS frame not received");
                     return Err(Error::MissingSettings);
                 }
             }
@@ -1153,9 +1153,9 @@ impl HttpConn {
     }
 
     fn handle_settings(&mut self, s: &Vec<(HSettingType, u64)>) -> Res<()> {
-        qdebug!(self, "Handle SETTINGS frame.");
+        qdebug!([self] "Handle SETTINGS frame.");
         for (t, v) in s {
-            qdebug!(self, " {:?} = {:?}", t, v);
+            qdebug!([self] " {:?} = {:?}", t, v);
             match t {
                 HSettingType::MaxHeaderListSize => {
                     self.max_header_list_size = *v;
@@ -1177,7 +1177,7 @@ impl HttpConn {
     }
 
     fn handle_goaway(&mut self, _id: u64) -> Res<()> {
-        qdebug!(self, "handle_goaway");
+        qdebug!([self] "handle_goaway");
         if self.role() == Role::Server {
             return Err(Error::UnexpectedFrame);
         } else {
@@ -1187,7 +1187,7 @@ impl HttpConn {
     }
 
     fn handle_max_push_id(&mut self, id: u64) -> Res<()> {
-        qdebug!(self, "handle_max_push_id={}.", id);
+        qdebug!([self] "handle_max_push_id={}.", id);
         if self.role() == Role::Client {
             return Err(Error::UnexpectedFrame);
         } else {

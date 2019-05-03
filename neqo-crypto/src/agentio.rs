@@ -84,7 +84,6 @@ pub struct RecordList {
 }
 
 impl RecordList {
-    // TODO(mt) define an enum for content type.
     fn append(&mut self, epoch: Epoch, ct: ssl::SSLContentType::Type, data: &[u8]) {
         self.records.push(Record::new(epoch, ct, data));
     }
@@ -170,7 +169,7 @@ impl AgentIoInput {
         }
 
         let src = unsafe { std::slice::from_raw_parts(self.input, amount) };
-        qtrace!(self, "{}", hex("read", src));
+        qtrace!([self] "{}", hex("read", src));
         let dst = unsafe { std::slice::from_raw_parts_mut(buf, amount) };
         dst.copy_from_slice(&src);
         self.input = self.input.wrapping_offset(amount as isize);
@@ -179,7 +178,7 @@ impl AgentIoInput {
     }
 
     fn reset(&mut self) {
-        qtrace!(self, "reset");
+        qtrace!([self] "reset");
         self.input = null();
         self.available = 0;
     }
@@ -224,12 +223,12 @@ impl AgentIo {
     // Stage output from TLS into the output buffer.
     fn save_output(&mut self, buf: *const u8, count: usize) {
         let slice = unsafe { std::slice::from_raw_parts(buf, count) };
-        qtrace!(self, "{}", hex("save output", slice));
+        qtrace!([self] "{}", hex("save output", slice));
         self.output.extend_from_slice(slice);
     }
 
     pub fn take_output(&mut self) -> Vec<u8> {
-        qtrace!(self, "take output");
+        qtrace!([self] "take output");
         mem::replace(&mut self.output, Vec::new())
     }
 }
