@@ -924,12 +924,15 @@ impl Connection {
             // the rest of the datagram on the floor, but don't generate an error.
             // TODO(ekr@rtfm.com): This is incorrect, you need to try to process
             // the other packets.
-            let largest_acknowledged = self.loss_recovery.space(PNSpace::from(hdr.epoch)).largest_acknowledged();
+            let largest_acknowledged = self
+                .loss_recovery
+                .space(PNSpace::from(hdr.epoch))
+                .largest_acknowledged();
             let res = match self.obtain_crypto_state(hdr.epoch) {
                 Ok(cs) => {
                     let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
                     decrypt_packet(&cs.rx, pn_decoder, &mut hdr, slc)
-                },
+                }
                 Err(e) => Err(e),
             };
             slc = &slc[hdr.hdr_len + hdr.body_len()..];
@@ -2363,17 +2366,17 @@ impl LossRecoverySpace {
     }
 
     // Remove all the acked packets.
-    fn remove_acked(&mut self,acked_ranges: Vec<(u64, u64)> ) -> Vec<SentPacket> {
+    fn remove_acked(&mut self, acked_ranges: Vec<(u64, u64)>) -> Vec<SentPacket> {
         let mut acked_packets = Vec::new();
-            for (end, start) in acked_ranges {
-                // ^^ Notabug: see Frame::decode_ack_frame()
-                for pn in start..end + 1 {
-                    if let Some(sent) = self.sent_packets.remove(&pn) {
-                        qdebug!("acked={}", pn);
-                        acked_packets.push(sent);
-                    }
+        for (end, start) in acked_ranges {
+            // ^^ Notabug: see Frame::decode_ack_frame()
+            for pn in start..end + 1 {
+                if let Some(sent) = self.sent_packets.remove(&pn) {
+                    qdebug!("acked={}", pn);
+                    acked_packets.push(sent);
                 }
             }
+        }
         acked_packets
     }
 }

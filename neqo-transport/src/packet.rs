@@ -113,11 +113,13 @@ pub trait CryptoCtx {
 }
 
 pub struct PacketNumberDecoder {
-    expected: u64
+    expected: u64,
 }
 impl PacketNumberDecoder {
     pub fn new(largest_acknowledged: u64) -> PacketNumberDecoder {
-        PacketNumberDecoder { expected: largest_acknowledged + 1 }
+        PacketNumberDecoder {
+            expected: largest_acknowledged + 1,
+        }
     }
 
     // TODO(mt) test this.  It's a strict implementation of the spec,
@@ -125,9 +127,9 @@ impl PacketNumberDecoder {
     fn decode_pn(&self, pn: u64, w: usize) -> PacketNumber {
         let window = 1u64 << (w * 8);
         let candidate = (self.expected & !(window - 1)) | pn;
-        if candidate + (window/2) <= self.expected {
+        if candidate + (window / 2) <= self.expected {
             candidate + window
-        } else if candidate > self.expected + (window/2) {
+        } else if candidate > self.expected + (window / 2) {
             match candidate.checked_sub(window) {
                 Some(pn_sub) => pn_sub,
                 None => candidate,
