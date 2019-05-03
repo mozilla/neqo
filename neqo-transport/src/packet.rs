@@ -112,8 +112,28 @@ pub trait CryptoCtx {
     fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>>;
 }
 
-pub trait PacketNumberCtx {
-    fn decode_pn(&self, pn: u64) -> Res<PacketNumber>;
+pub struct PacketNumberDecoder {
+    expected: u64
+}
+impl PacketNumberDecoder {
+    pub fn new(largest_acknowledged: u64) -> PacketNumberDecoder {
+        PacketNumberDecoder { expected: largest_acknowledged + 1 }
+    }
+
+    fn decode_pn(&self, pn: u64, w: usize) -> PacketNumber {
+        let window = 1u64 << (w * 8);
+        let candidate = (self.expected & !(window - 1)) | pn;
+        if candidate + (window/2) <= self.expected {
+            candidate + window
+        } else if candidate > self.expected + (window/2) {
+            match candidate.checked_sub(window) {
+                Some(pn_sub) => pn_sub,
+                None => candidate,
+            }
+        } else {
+            candidate
+        }
+    }
 }
 
 fn encode_cidl_half(l: usize) -> u8 {
@@ -274,7 +294,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
 
 pub fn decrypt_packet(
     crypto: &CryptoCtx,
-    pn: &PacketNumberCtx,
+    pn: PacketNumberDecoder,
     hdr: &mut PacketHdr,
     pkt: &[u8],
 ) -> Res<Vec<u8>> {
@@ -315,7 +335,7 @@ pub fn decrypt_packet(
     hdr.body_len -= pn_len;
 
     // Now call out to expand the PN.
-    hdr.pn = pn.decode_pn(pn_encoded)?;
+    hdr.pn = pn.decode_pn(pn_encoded, pn_len);
 
     // Finally, decrypt.
     Ok(crypto.aead_decrypt(
@@ -450,11 +470,6 @@ mod tests {
         }
     }
 
-    impl PacketNumberCtx for TestFixture {
-        fn decode_pn(&self, pn: u64) -> Res<PacketNumber> {
-            Ok(pn)
-        }
-    }
     impl PacketDecoder for TestFixture {
         fn get_cid_len(&self) -> usize {
             5
@@ -484,7 +499,7 @@ mod tests {
 
     fn test_decrypt_packet(f: &TestFixture, packet: Vec<u8>) -> Res<(PacketHdr, Vec<u8>)> {
         let mut phdr = decode_packet_hdr(f, &packet)?;
-        let body = decrypt_packet(f, f, &mut phdr, &packet)?;
+        let body = decrypt_packet(f, PacketNumberDecoder::new(0), &mut phdr, &packet)?;
         Ok((phdr, body))
     }
 

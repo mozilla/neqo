@@ -30,7 +30,7 @@ use crate::nss::{
 };
 use crate::packet::{
     decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, CryptoCtx, PacketDecoder,
-    PacketHdr, PacketNumber, PacketNumberCtx, PacketType,
+    PacketHdr, PacketNumber, PacketNumberDecoder, PacketType,
 };
 use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, TxBuffer};
@@ -924,8 +924,12 @@ impl Connection {
             // the rest of the datagram on the floor, but don't generate an error.
             // TODO(ekr@rtfm.com): This is incorrect, you need to try to process
             // the other packets.
+            let largest_acknowledged = self.loss_recovery.space(PNSpace::from(hdr.epoch)).largest_acknowledged();
             let res = match self.obtain_crypto_state(hdr.epoch) {
-                Ok(cs) => decrypt_packet(&cs.rx, &PnCtx {}, &mut hdr, slc),
+                Ok(cs) => {
+                    let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
+                    decrypt_packet(&cs.rx, pn_decoder, &mut hdr, slc)
+                },
                 Err(e) => Err(e),
             };
             slc = &slc[hdr.hdr_len + hdr.body_len()..];
@@ -1919,15 +1923,6 @@ impl CryptoCtx for CryptoDxState {
 impl PacketDecoder for Connection {
     fn get_cid_len(&self) -> usize {
         8
-    }
-}
-
-// TODO(ekr@rtfm.com): Really implement this.
-// TODO(ekr@rtfm.com): This is a kludge.
-struct PnCtx {}
-impl PacketNumberCtx for PnCtx {
-    fn decode_pn(&self, pn: u64) -> Res<PacketNumber> {
-        Ok(pn)
     }
 }
 
