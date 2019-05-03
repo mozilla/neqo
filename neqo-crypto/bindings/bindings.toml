@@ -33,7 +33,6 @@ functions = [
     "SSL_ForceHandshake",
     "SSL_ImportFD",
     "SSL_NamedGroupConfig",
-    "SSL_OptionGet",
     "SSL_OptionSet",
     "SSL_PeerCertificateChain",
     "SSL_ResetHandshake",
@@ -58,7 +57,7 @@ enums = [
     "SECStatus",
 ]
 variables = [
-    "SSL_LIBRARY_VERSION_.*",
+    "SSL_LIBRARY_VERSION_TLS_\\d_\\d",
     "SSL_NumImplementedCiphers",
     "ssl_preinfo_.*",
 ]
