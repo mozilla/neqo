@@ -184,6 +184,16 @@ pub enum PNSpace {
     ApplicationData,
 }
 
+impl From<Epoch> for PNSpace {
+    fn from(epoch: Epoch) -> PNSpace {
+        match epoch {
+            0 => PNSpace::Initial,
+            2 => PNSpace::Handshake,
+            _ => PNSpace::ApplicationData,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Datagram {
     src: SocketAddr,
@@ -589,7 +599,7 @@ pub struct Connection {
     recv_epoch: Epoch,
     crypto_streams: [CryptoStream; 4],
     crypto_states: [Option<CryptoState>; 4],
-    tx_pns: [u64; 4],
+    tx_pns: [u64; 3],
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
     generators: Vec<Box<FrameGenerator>>,
     deadline: u64,
@@ -737,7 +747,7 @@ impl Connection {
                 Box::new(StreamGenerator {}),
             ],
             crypto_states: [None, None, None, None],
-            tx_pns: [0; 4],
+            tx_pns: [0; 3],
             deadline: 0,
             local_max_stream_idx_bidi: StreamIndex::new(LOCAL_STREAM_LIMIT_BIDI),
             local_max_stream_idx_uni: StreamIndex::new(LOCAL_STREAM_LIMIT_UNI),
@@ -1093,14 +1103,14 @@ impl Connection {
                     Some(self.version),
                     ConnectionId(self.dcid.clone()),
                     Some(ConnectionId(self.scid.clone())),
-                    self.tx_pns[Connection::pn_space(epoch) as usize],
+                    self.tx_pns[PNSpace::from(epoch) as usize],
                     epoch,
                     0,
                 );
-                self.tx_pns[Connection::pn_space(epoch) as usize] += 1;
+                self.tx_pns[PNSpace::from(epoch) as usize] += 1;
 
                 self.loss_recovery.on_packet_sent(
-                    Connection::pn_space(epoch),
+                    PNSpace::from(epoch),
                     hdr.pn,
                     ack_eliciting,
                     is_crypto,
@@ -1415,7 +1425,7 @@ impl Connection {
         let acked_ranges =
             Frame::decode_ack_frame(largest_acknowledged, first_ack_range, ack_ranges)?;
         let (mut acked_packets, mut lost_packets) = self.loss_recovery.on_ack_received(
-            Connection::pn_space(epoch),
+            PNSpace::from(epoch),
             largest_acknowledged,
             acked_ranges,
             ack_delay,
@@ -1523,15 +1533,6 @@ impl Connection {
                 });
                 Ok(cs.as_mut().unwrap())
             }
-        }
-    }
-
-    fn pn_space(epoch: Epoch) -> PNSpace {
-        match epoch {
-            0 => PNSpace::Initial,
-            1 => PNSpace::ApplicationData,
-            2 => PNSpace::Handshake,
-            _ => PNSpace::ApplicationData,
         }
     }
 
@@ -2348,9 +2349,38 @@ impl RttVals {
 
 #[derive(Debug, Default)]
 struct LossRecoverySpace {
-    largest_acked_packet: u64,
+    largest_acked: u64,
     loss_time: u64,
     sent_packets: HashMap<u64, SentPacket>,
+}
+
+impl LossRecoverySpace {
+    pub fn largest_acknowledged(&self) -> u64 {
+        self.largest_acked
+    }
+
+    // Update the largest acknowledged and return the packet that this corresponds to.
+    fn update_largest_acked(&mut self, largest_acked: u64) -> Option<&SentPacket> {
+        if largest_acked > self.largest_acked {
+            self.largest_acked = largest_acked;
+        }
+        self.sent_packets.get(&largest_acked)
+    }
+
+    // Remove all the acked packets.
+    fn remove_acked(&mut self,acked_ranges: Vec<(u64, u64)> ) -> Vec<SentPacket> {
+        let mut acked_packets = Vec::new();
+            for (end, start) in acked_ranges {
+                // ^^ Notabug: see Frame::decode_ack_frame()
+                for pn in start..end + 1 {
+                    if let Some(sent) = self.sent_packets.remove(&pn) {
+                        qdebug!("acked={}", pn);
+                        acked_packets.push(sent);
+                    }
+                }
+            }
+        acked_packets
+    }
 }
 
 #[derive(Debug, Default)]
@@ -2377,6 +2407,13 @@ impl LossRecovery {
         }
     }
 
+    pub fn space(&self, pn_space: PNSpace) -> &LossRecoverySpace {
+        &self.packet_spaces[pn_space as usize]
+    }
+    fn space_mut(&mut self, pn_space: PNSpace) -> &mut LossRecoverySpace {
+        &mut self.packet_spaces[pn_space as usize]
+    }
+
     pub fn on_packet_sent(
         &mut self,
         pn_space: PNSpace,
@@ -2388,7 +2425,7 @@ impl LossRecovery {
     ) {
         let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
         qdebug!([self] "packet {} sent.", packet_number);
-        self.packet_spaces[pn_space as usize].sent_packets.insert(
+        self.space_mut(pn_space).sent_packets.insert(
             packet_number,
             SentPacket {
                 time_sent: cur_time,
@@ -2421,13 +2458,10 @@ impl LossRecovery {
         let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
         qdebug!([self] "ack received - largest_acked={}.", largest_acked);
 
-        let packet_space = &mut self.packet_spaces[pn_space as usize];
-
-        packet_space.largest_acked_packet = max(largest_acked, packet_space.largest_acked_packet);
-
+        let last_sent = self.space_mut(pn_space).update_largest_acked(largest_acked);
         // If the largest acknowledged is newly acked and
         // ack-eliciting, update the RTT.
-        if let Some(sent) = packet_space.sent_packets.get(&largest_acked) {
+        if let Some(sent) = last_sent {
             if sent.ack_eliciting {
                 self.rtt_vals.latest_rtt = cur_time - sent.time_sent;
                 self.rtt_vals.update_rtt(ack_delay, self.max_ack_delay);
@@ -2436,17 +2470,7 @@ impl LossRecovery {
 
         // TODO Process ECN information if present.
 
-        let mut acked_packets = Vec::new();
-        for (end, start) in acked_ranges {
-            // ^^ Notabug: see Frame::decode_ack_frame()
-            for pn in start..end + 1 {
-                if let Some(sent_packet) = packet_space.sent_packets.remove(&pn) {
-                    qdebug!("acked={}", pn);
-                    acked_packets.push(sent_packet);
-                }
-            }
-        }
-
+        let acked_packets = self.space_mut(pn_space).remove_acked(acked_ranges);
         if acked_packets.is_empty() {
             return (acked_packets, Vec::new());
         }
@@ -2462,16 +2486,14 @@ impl LossRecovery {
     }
 
     fn detect_lost_packets(&mut self, pn_space: PNSpace, cur_time: u64) -> Vec<SentPacket> {
-        let packet_space = &mut self.packet_spaces[pn_space as usize];
-
-        packet_space.loss_time = 0;
+        self.space_mut(pn_space).loss_time = 0;
 
         let loss_delay = (TIME_THRESHOLD
             * (max(self.rtt_vals.latest_rtt, self.rtt_vals.smoothed_rtt) as f64))
             as u64;
 
-        // Packets sent before this time are deemed lost. ( cur_time <
-        // loss_delay, can happen in test)
+        // Packets sent before this time are deemed lost.
+        // (cur_time < loss_delay, can happen in test)
         let lost_send_time = if cur_time < loss_delay {
             0
         } else {
@@ -2479,8 +2501,9 @@ impl LossRecovery {
         };
 
         // Packets with packet numbers before this are deemed lost.
-        let lost_pn = packet_space
-            .largest_acked_packet
+        let lost_pn = self
+            .space_mut(pn_space)
+            .largest_acked
             .saturating_sub(PACKET_THRESHOLD);
 
         qdebug!(
@@ -2490,12 +2513,12 @@ impl LossRecovery {
             lost_pn
         );
 
-        let packet_space = &mut self.packet_spaces[pn_space as usize];
+        let packet_space = self.space_mut(pn_space);
 
         let mut lost = Vec::new();
         for (pn, packet) in &packet_space.sent_packets {
             // Mark packet as lost, or set time when it should be marked.
-            if *pn <= packet_space.largest_acked_packet {
+            if *pn <= packet_space.largest_acked {
                 if packet.time_sent <= lost_send_time || *pn <= lost_pn {
                     qdebug!("lost={}", pn);
                     lost.push(*pn);
@@ -2640,14 +2663,11 @@ impl LossRecovery {
             // Time threshold loss Detection
             lost_packets = self.detect_lost_packets(pn_space, cur_time);
         } else {
-            let has_crypto_out = self.packet_spaces[PNSpace::Initial as usize]
+            let has_crypto_out = self
+                .space(PNSpace::Initial)
                 .sent_packets
                 .values()
-                .chain(
-                    self.packet_spaces[PNSpace::Handshake as usize]
-                        .sent_packets
-                        .values(),
-                )
+                .chain(self.space(PNSpace::Handshake).sent_packets.values())
                 .any(|sp| sp.ack_eliciting);
 
             // Retransmit crypto data if no packets were lost
@@ -2937,17 +2957,17 @@ mod tests {
             lr.rtt_vals.smoothed_rtt,
             lr.rtt_vals.rttvar,
             lr.rtt_vals.min_rtt,
-            lr.packet_spaces[0].loss_time,
-            lr.packet_spaces[1].loss_time,
-            lr.packet_spaces[2].loss_time,
+            lr.space(PNSpace::Initial).loss_time,
+            lr.space(PNSpace::Handshake).loss_time,
+            lr.space(PNSpace::ApplicationData).loss_time,
         );
         assert_eq!(lr.rtt_vals.latest_rtt, latest_rtt);
         assert_eq!(lr.rtt_vals.smoothed_rtt, smoothed_rtt);
         assert_eq!(lr.rtt_vals.rttvar, rttvar);
         assert_eq!(lr.rtt_vals.min_rtt, min_rtt);
-        assert_eq!(lr.packet_spaces[0].loss_time, loss_time[0]);
-        assert_eq!(lr.packet_spaces[1].loss_time, loss_time[1]);
-        assert_eq!(lr.packet_spaces[2].loss_time, loss_time[2]);
+        assert_eq!(lr.space(PNSpace::Initial).loss_time, loss_time[0]);
+        assert_eq!(lr.space(PNSpace::Handshake).loss_time, loss_time[1]);
+        assert_eq!(lr.space(PNSpace::ApplicationData).loss_time, loss_time[2]);
     }
 
     #[test]
