@@ -593,8 +593,8 @@ pub struct Connection {
     state: State,
     tls: Agent,
     tps: Rc<RefCell<TransportParametersHandler>>,
-    scid: Vec<u8>,
-    dcid: Vec<u8>,
+    scid: ConnectionId,
+    dcid: ConnectionId,
     send_epoch: Epoch,
     recv_epoch: Epoch,
     crypto_streams: [CryptoStream; 4],
@@ -731,8 +731,8 @@ impl Connection {
             },
             tls: agent,
             tps: tphandler,
-            scid: Vec::new(),
-            dcid: Vec::new(),
+            scid: ConnectionId::default(),
+            dcid: ConnectionId::default(),
             send_epoch: 0,
             recv_epoch: 0,
             crypto_streams: [
@@ -892,7 +892,7 @@ impl Connection {
                 }
                 State::WaitInitial => {
                     // Out DCID is the other side's SCID.
-                    let scid = &hdr.scid.as_ref().unwrap().0;
+                    let scid = hdr.scid.as_ref().unwrap();
                     if self.role == Role::Server {
                         if hdr.dcid.len() < 8 {
                             qwarn!([self] "Peer DCID is too short");
@@ -999,7 +999,7 @@ impl Connection {
     }
 
     fn output(&mut self, cur_time: u64) -> Vec<Datagram> {
-        // Can't iterate over self.paths while it is owned by self.
+        // Can't call a method on self while iterating over self.paths
         let paths = mem::replace(&mut self.paths, None);
         let mut out_dgrams = Vec::new();
         let mut errors = Vec::new();
@@ -1108,8 +1108,8 @@ impl Connection {
                         _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
                     },
                     Some(self.version),
-                    ConnectionId(self.dcid.clone()),
-                    Some(ConnectionId(self.scid.clone())),
+                    self.dcid.clone(),
+                    Some(self.scid.clone()),
                     self.tx_pns[PNSpace::from(epoch) as usize],
                     epoch,
                     0,
@@ -1806,10 +1806,10 @@ impl Connection {
         Ok(stream.reset(err))
     }
 
-    fn generate_cid(&mut self) -> Vec<u8> {
+    fn generate_cid(&mut self) -> ConnectionId {
         let mut v: [u8; 8] = [0; 8];
         rand::thread_rng().fill(&mut v);
-        v.to_vec()
+        ConnectionId(v.to_vec())
     }
 
     pub fn get_recv_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Recvable)> {
