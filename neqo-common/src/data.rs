@@ -177,6 +177,11 @@ impl Data {
         &(self.buf[self.read..])
     }
 
+    pub fn into_vec(self) -> Vec<u8> {
+        assert_eq!(self.read, 0);
+        self.buf
+    }
+
     pub fn read(&mut self, l: usize) {
         if l > self.remaining() {
             panic!("want to set more byte read than remaing in the buffer.");

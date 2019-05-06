@@ -620,6 +620,7 @@ pub struct Connection {
     loss_recovery: LossRecovery,
     events: Rc<RefCell<ConnectionEvents>>,
     token: Option<Vec<u8>>,
+    send_vn: Option<ConnectionId>,
 }
 
 impl Debug for Connection {
@@ -766,6 +767,7 @@ impl Connection {
             loss_recovery: LossRecovery::new(),
             events: Rc::new(RefCell::new(ConnectionEvents::default())),
             token: None,
+            send_vn: None,
         };
 
         c.scid = c.generate_cid();
@@ -884,6 +886,23 @@ impl Connection {
                 }
             };
 
+            if let PacketType::VN(_) = hdr.tipe {
+                assert_eq!(hdr.version, Some(0))
+            }
+
+            if let Some(version) = hdr.version {
+                if version != self.version {
+                    qwarn!(
+                        "hdr version {:?} and self.version {} disagree",
+                        hdr.version,
+                        self.version,
+                    );
+                    qwarn!([self] "Sending VN on next output");
+                    self.send_vn = Some(hdr.scid.unwrap().clone());
+                    return Ok(());
+                }
+            }
+
             // TODO(ekr@rtfm.com): Check for bogus versions and reject.
             match self.state {
                 State::Init => {
@@ -999,6 +1018,28 @@ impl Connection {
     }
 
     fn output(&mut self, cur_time: u64) -> Vec<Datagram> {
+        if let Some(scid) = self.send_vn.take() {
+            qinfo!("Sending VN Packet instead of normal output");
+            let supported_versions = vec![QUIC_VERSION, 0x4a4a4a4a];
+            let mut hdr = PacketHdr::new(
+                0,
+                PacketType::VN(supported_versions),
+                Some(0),
+                scid.clone(),
+                Some(self.scid.clone()),
+                0, // unused
+                0, // unused
+                0,
+            );
+            let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
+            let packet = encode_packet(&cs.tx, &mut hdr, &[]);
+            let mut out_dgrams = Vec::new();
+            if let Some(path) = &self.paths {
+                out_dgrams.push(Datagram::new(path.local, path.remote, packet));
+            }
+            return out_dgrams;
+        }
+
         // Can't call a method on self while iterating over self.paths
         let paths = mem::replace(&mut self.paths, None);
         let mut out_dgrams = Vec::new();

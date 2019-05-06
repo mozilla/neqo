@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use derive_more::Deref;
+use rand::Rng;
 
 use neqo_common::data::{Data, DataBuf};
 use neqo_common::hex;
@@ -249,12 +250,13 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
         return Ok(p);
     }
 
-    let version = d.decode_uint(4)? as u32;
+    p.version = Some(d.decode_uint(4)? as u32);
     let (dest_len, src_len) = decode_cidl(d.decode_byte()?);
 
     p.dcid = ConnectionId(d.decode_data(dest_len.into())?);
     p.scid = Some(ConnectionId(d.decode_data(src_len.into())?));
-    if version == 0 {
+
+    if p.version == Some(0) {
         let mut vns = vec![];
 
         while d.remaining() > 0 {
@@ -360,6 +362,20 @@ fn encode_packet_short(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<
     encrypt_packet(crypto, hdr, d, body)
 }
 
+fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
+    let mut d = Data::default();
+    let mut rand_byte: [u8; 1] = [0; 1];
+    rand::thread_rng().fill(&mut rand_byte);
+    d.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | rand_byte[0]);
+    d.encode_uint(0u64, 4); // version
+    d.encode_vec(&*hdr.dcid);
+    d.encode_vec(hdr.scid.as_ref().unwrap());
+    for ver in vers {
+        d.encode_uint(*ver, 4)
+    }
+    d.into_vec()
+}
+
 /* Hanlde Initial, 0-RTT, Handshake. */
 fn encode_packet_long(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     let mut d = Data::default();
@@ -412,10 +428,10 @@ fn pn_length(_pn: PacketNumber) -> usize {
 }
 
 pub fn encode_packet(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
-    match hdr.tipe {
+    match &hdr.tipe {
         PacketType::Short => encode_packet_short(crypto, hdr, body),
+        PacketType::VN(vers) => encode_packet_vn(hdr, &vers),
         /*
-        PacketType::VN(..) => encode_packet_vn(ctx, &d, hdr, body),
         PacketType::Retry(..) => encode_retry(ctx, &d, hdr, body), */
         PacketType::Initial(..) | PacketType::Handshake | PacketType::Retry(..) => {
             encode_packet_long(crypto, hdr, body)
