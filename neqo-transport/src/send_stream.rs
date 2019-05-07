@@ -11,7 +11,7 @@ use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
 
-use neqo_common::{qtrace, qwarn};
+use neqo_common::{qinfo, qtrace, qwarn};
 use slice_deque::SliceDeque;
 
 use crate::connection::{ConnectionEvents, FlowMgr, StreamId, TxMode};
@@ -201,6 +201,11 @@ impl RangeTracker {
     }
 
     fn mark_range(&mut self, off: u64, len: usize, state: RangeState) {
+        if len == 0 {
+            qinfo!("mark 0-length range at {}", off);
+            return;
+        }
+
         let subranges = self.chunk_range_on_edges(off, len as u64, state);
 
         for (sub_off, sub_len, sub_state) in subranges {
@@ -211,6 +216,11 @@ impl RangeTracker {
     }
 
     fn unmark_range(&mut self, off: u64, len: usize) {
+        if len == 0 {
+            qinfo!("unmark 0-length range at {}", off);
+            return;
+        }
+
         let len = len as u64;
         let end_off = off + len;
 
@@ -298,7 +308,7 @@ impl TxBuffer {
         can_buffer
     }
 
-    pub fn next_bytes(&mut self, _mode: TxMode) -> Option<(u64, &[u8])> {
+    pub fn next_bytes(&self, _mode: TxMode) -> Option<(u64, &[u8])> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
 
         if start == self.retired + self.buffered() as u64 {
@@ -359,9 +369,17 @@ impl TxBuffer {
 #[derive(Debug, PartialEq)]
 enum SendStreamState {
     Ready,
-    Send { send_buf: TxBuffer },
-    DataSent { send_buf: TxBuffer, final_size: u64 },
-    DataRecvd { final_size: u64 },
+    Send {
+        send_buf: TxBuffer,
+    },
+    DataSent {
+        send_buf: TxBuffer,
+        final_size: u64,
+        fin_sent: bool,
+    },
+    DataRecvd {
+        final_size: u64,
+    },
     ResetSent,
     ResetRecvd,
 }
@@ -451,7 +469,8 @@ impl SendStream {
         let stream_credit_avail = self.credit_avail();
         let conn_credit_avail = self.flow_mgr.borrow().conn_credit_avail();
         let credit_avail = min(stream_credit_avail, conn_credit_avail);
-        if let Some(tx_buf) = self.state.tx_buf_mut() {
+
+        if let Some(tx_buf) = self.state.tx_buf() {
             qtrace!(
                 "next_bytes max_stream_data {}, data_limit {}, credit_avail {}",
                 self.max_stream_data,
@@ -483,19 +502,41 @@ impl SendStream {
             }
         }
 
+        // No actual data to send, but we may need a 0-length frame with FIN
+        // to indicate stream is complete.
+        if let SendStreamState::DataSent {
+            final_size,
+            fin_sent,
+            ..
+        } = self.state
+        {
+            if !fin_sent {
+                return Some((final_size, &[]));
+            }
+        }
+
         None
     }
 
-    pub fn mark_as_sent(&mut self, offset: u64, len: usize) {
+    pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
         self.state
             .tx_buf_mut()
             .map(|buf| buf.mark_as_sent(offset, len));
+        if fin {
+            if let SendStreamState::DataSent {
+                ref mut fin_sent, ..
+            } = self.state
+            {
+                *fin_sent = true
+            }
+        }
+
         self.flow_mgr
             .borrow_mut()
             .conn_increase_credit_used(len as u64);
     }
 
-    pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
+    pub fn mark_as_acked(&mut self, offset: u64, len: usize, fin: bool) {
         match self.state {
             SendStreamState::Send { ref mut send_buf } => {
                 send_buf.mark_as_acked(offset, len);
@@ -508,25 +549,36 @@ impl SendStream {
             SendStreamState::DataSent {
                 ref mut send_buf,
                 final_size,
+                ..
             } => {
                 send_buf.mark_as_acked(offset, len);
-                if send_buf.buffered() == 0 {
-                    self.conn_events
-                        .borrow_mut()
-                        .send_stream_complete(self.stream_id);
-                    self.state.transition(SendStreamState::DataRecvd {
-                        final_size: final_size,
-                    });
+                if fin {
+                    if send_buf.buffered() == 0 {
+                        self.conn_events
+                            .borrow_mut()
+                            .send_stream_complete(self.stream_id);
+                        self.state.transition(SendStreamState::DataRecvd {
+                            final_size: final_size,
+                        });
+                    }
                 }
             }
             _ => qtrace!("mark_as_acked called from state {}", self.state.name()),
         }
     }
 
-    pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
+    pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
         self.state
             .tx_buf_mut()
             .map(|buf| buf.mark_as_lost(offset, len));
+        if fin {
+            if let SendStreamState::DataSent {
+                ref mut fin_sent, ..
+            } = self.state
+            {
+                *fin_sent = false
+            }
+        }
     }
 
     pub fn final_size(&self) -> Option<u64> {
@@ -609,6 +661,7 @@ impl Sendable for SendStream {
                 self.state.transition(SendStreamState::DataSent {
                     send_buf: owned_buf,
                     final_size,
+                    fin_sent: false,
                 });
             }
             SendStreamState::DataSent { .. } => qtrace!("already in DataSent state"),
@@ -721,7 +774,7 @@ mod tests {
 
         let res = s.send(&vec![4; 100]).unwrap();
         assert_eq!(res, 100);
-        s.mark_as_sent(0, 50);
+        s.mark_as_sent(0, 50, false);
         assert_eq!(s.state.tx_buf().unwrap().data_limit(), 100);
 
         // Should fill up send buffer
@@ -730,7 +783,7 @@ mod tests {
 
         // TODO(agrover@mozilla.com): test flow control somehow
         // TODO(agrover@mozilla.com): test ooo acks somehow
-        s.mark_as_acked(0, 40);
+        s.mark_as_acked(0, 40, false);
     }
 
     #[test]

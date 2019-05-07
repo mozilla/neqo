@@ -2123,13 +2123,14 @@ impl FrameGenerator for StreamGenerator {
                     offset,
                     data: data[..data_len].to_vec(),
                 };
-                stream.mark_as_sent(offset, data_len);
+                stream.mark_as_sent(offset, data_len, fin);
                 return Some((
                     frame,
                     Some(Box::new(StreamGeneratorToken {
                         id: *stream_id,
                         offset: offset,
                         length: data_len as u64,
+                        fin,
                     })),
                 ));
             }
@@ -2142,31 +2143,34 @@ struct StreamGeneratorToken {
     id: StreamId,
     offset: u64,
     length: u64,
+    fin: bool,
 }
 
 impl FrameGeneratorToken for StreamGeneratorToken {
     fn acked(&mut self, conn: &mut Connection) {
         qinfo!(
             [conn]
-            "Acked frame stream={} offset={} length={}",
+            "Acked frame stream={} offset={} length={} fin={}",
             self.id.as_u64(),
             self.offset,
-            self.length
+            self.length,
+            self.fin
         );
         if let Some(ss) = conn.send_streams.get_mut(&self.id) {
-            ss.mark_as_acked(self.offset, self.length as usize);
+            ss.mark_as_acked(self.offset, self.length as usize, self.fin);
         }
     }
     fn lost(&mut self, conn: &mut Connection) {
         qinfo!(
             [conn]
-            "Lost frame stream={} offset={} length={}",
+            "Lost frame stream={} offset={} length={} fin={}",
             self.id.as_u64(),
             self.offset,
-            self.length
+            self.length,
+            self.fin
         );
         if let Some(ss) = conn.send_streams.get_mut(&self.id) {
-            ss.mark_as_lost(self.offset, self.length as usize);
+            ss.mark_as_lost(self.offset, self.length as usize, self.fin);
         }
     }
 }
