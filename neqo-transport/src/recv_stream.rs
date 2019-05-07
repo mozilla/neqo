@@ -59,6 +59,11 @@ impl RxStreamOrderer {
             return Ok(());
         }
 
+        if new_data.len() == 0 {
+            // No data to insert
+            return Ok(());
+        }
+
         let (insert_new, remove_prev) = if let Some((&prev_start, prev_vec)) = self
             .data_ranges
             .range_mut((Unbounded, Included(new_start)))
