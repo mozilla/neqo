@@ -1003,7 +1003,7 @@ impl HttpConn {
 
         if let Some(e) = reset_stream_error {
             self.client_requests.remove(&stream_id);
-            self.conn.stream_reset(stream_id, e.code())?;
+            self.conn.stream_stop_sending(stream_id, e.code())?;
         } else if remove_stream {
             self.client_requests.remove(&stream_id);
         }
@@ -1013,7 +1013,7 @@ impl HttpConn {
                 if let Err(e) = client_request.unblock(&mut self.qpack_decoder) {
                     if e.is_stream_error() {
                         self.client_requests.remove(&id);
-                        self.conn.stream_reset(id, e.code())?;
+                        self.conn.stream_stop_sending(id, e.code())?;
                     } else {
                         return Err(e);
                     }
@@ -1661,12 +1661,15 @@ mod tests {
                 _ => {}
             }
         }
+        // Generate packet with the above bad h3 input
         r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, 0);
+        // Process bad input and generate stop sending frame
+        r = hconn.process(r.0, 0);
+        // Process stop sending frame and generate an event and a reset frame
+        r = neqo_trans_conn.process(r.0, now());
 
-        let events = hconn.conn.events();
         let mut stop_sending_event_found = false;
-        for e in events {
+        for e in neqo_trans_conn.events() {
             match e {
                 ConnectionEvent::SendStreamStopSending {
                     stream_id,
@@ -1679,6 +1682,24 @@ mod tests {
             }
         }
         assert!(stop_sending_event_found);
+        assert_eq!(*hconn.state(), State::Connected);
+
+        // Process reset frame
+        hconn.conn.process(r.0, 0);
+        let mut reset_event_found = false;
+        for e in hconn.conn.events() {
+            match e {
+                ConnectionEvent::RecvStreamReset {
+                    stream_id,
+                    app_error,
+                } => {
+                    reset_event_found = true;
+                    assert_eq!(app_error, err.code());
+                }
+                _ => {}
+            }
+        }
+        assert!(reset_event_found);
         assert_eq!(*hconn.state(), State::Connected);
     }
 
