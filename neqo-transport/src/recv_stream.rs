@@ -374,7 +374,6 @@ impl RecvStream {
 
                 if !fin {
                     recv_buf.inbound_frame(offset, data)?;
-                    self.maybe_send_flowc_update();
                 } else {
                     let final_size = offset + data.len() as u64;
                     if final_size < recv_buf.highest_seen_offset() {
@@ -483,7 +482,7 @@ impl RecvStream {
     }
 
     pub fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
-        match &mut self.state {
+        let res = match &mut self.state {
             RecvStreamState::Recv { recv_buf, .. }
             | RecvStreamState::SizeKnown { recv_buf, .. } => Ok((recv_buf.read(buf)?, false)),
             RecvStreamState::DataRecvd { recv_buf } => {
@@ -495,7 +494,9 @@ impl RecvStream {
                 Ok((bytes_read, fin_read))
             }
             RecvStreamState::DataRead | RecvStreamState::ResetRecvd => Err(Error::NoMoreData),
-        }
+        };
+        self.maybe_send_flowc_update();
+        res
     }
 
     pub fn stop_sending(&mut self, err: AppError) {
