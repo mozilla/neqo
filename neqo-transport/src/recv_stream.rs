@@ -7,7 +7,6 @@
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
-use std::fmt::Debug;
 use std::mem;
 use std::ops::Bound::{Included, Unbounded};
 use std::rc::Rc;
@@ -17,18 +16,6 @@ use crate::{AppError, Error, Res};
 use neqo_common::qtrace;
 
 pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
-
-pub trait Recvable: Debug {
-    /// Read buffered data from stream. bool says whether read bytes includes
-    /// the final data on stream.
-    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)>;
-
-    /// Application is no longer interested in this stream.
-    fn stop_sending(&mut self, err: AppError);
-
-    /// Bytes can be read from the stream.
-    fn data_ready(&self) -> bool;
-}
 
 /// Holds data not yet read by application. Orders and dedupes data ranges
 /// from incoming STREAM frames.
@@ -487,17 +474,15 @@ impl RecvStream {
             _ => false,
         }
     }
-}
 
-impl Recvable for RecvStream {
-    fn data_ready(&self) -> bool {
+    pub fn data_ready(&self) -> bool {
         self.state
             .recv_buf()
             .map(|recv_buf| recv_buf.data_ready())
             .unwrap_or(false)
     }
 
-    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
+    pub fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
         match &mut self.state {
             RecvStreamState::Recv { recv_buf, .. }
             | RecvStreamState::SizeKnown { recv_buf, .. } => Ok((recv_buf.read(buf)?, false)),
@@ -513,7 +498,7 @@ impl Recvable for RecvStream {
         }
     }
 
-    fn stop_sending(&mut self, err: AppError) {
+    pub fn stop_sending(&mut self, err: AppError) {
         qtrace!("stop_sending called when in state {}", self.state.name());
         match &self.state {
             RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {

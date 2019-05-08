@@ -37,7 +37,7 @@ use crate::send_stream::{SendStream, TxBuffer};
 use crate::tparams::consts as tp_const;
 use crate::tparams::TransportParametersHandler;
 use crate::tracking::RecvdPackets;
-use crate::{AppError, ConnectionError, Error, Recvable, Res, Sendable};
+use crate::{AppError, ConnectionError, Error, Res};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -1830,6 +1830,29 @@ impl Connection {
         stream.send(data)
     }
 
+    /// Close the stream. Enqueued data will be sent.
+    pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
+        let stream = self
+            .send_streams
+            .get_mut(&stream_id.into())
+            .ok_or_else(|| return Error::InvalidStreamId)?;
+
+        stream.close();
+        Ok(())
+    }
+
+    /// Abandon transmission of in-flight and future stream data.
+    pub fn stream_reset_send(&mut self, stream_id: u64, err: AppError) -> Res<()> {
+        let stream = self
+            .send_streams
+            .get_mut(&stream_id.into())
+            .ok_or_else(|| return Error::InvalidStreamId)?;
+
+        Ok(stream.reset(err))
+    }
+
+    /// Read buffered data from stream. bool says whether read bytes includes
+    /// the final data on stream.
     pub fn stream_recv(&mut self, stream_id: u64, data: &mut [u8]) -> Res<(usize, bool)> {
         let stream = self
             .recv_streams
@@ -1840,25 +1863,7 @@ impl Connection {
         Ok((rb.0 as usize, rb.1))
     }
 
-    pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
-        let stream = self
-            .send_streams
-            .get_mut(&stream_id.into())
-            .ok_or_else(|| return Error::InvalidStreamId)?;
-
-        Sendable::close(stream);
-        Ok(())
-    }
-
-    pub fn stream_reset(&mut self, stream_id: u64, err: AppError) -> Res<()> {
-        let stream = self
-            .send_streams
-            .get_mut(&stream_id.into())
-            .ok_or_else(|| return Error::InvalidStreamId)?;
-
-        Ok(stream.reset(err))
-    }
-
+    /// Application is no longer interested in this stream.
     pub fn stream_stop_sending(&mut self, stream_id: u64, err: AppError) -> Res<()> {
         let stream = self
             .recv_streams
@@ -1874,40 +1879,7 @@ impl Connection {
         ConnectionId(v.to_vec())
     }
 
-    pub fn get_recv_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Recvable)> {
-        self.recv_streams
-            .iter_mut()
-            .map(|(x, y)| (x.as_u64(), y as &mut Recvable))
-    }
-
-    pub fn get_recvable_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Recvable)> {
-        self.get_recv_streams()
-            .filter(|(_, stream)| stream.data_ready())
-    }
-
-    pub fn get_send_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Sendable)> {
-        self.send_streams
-            .iter_mut()
-            .map(|(x, y)| (x.as_u64(), y as &mut Sendable))
-    }
-
-    pub fn get_sendable_streams(&mut self) -> impl Iterator<Item = (u64, &mut dyn Sendable)> {
-        self.get_send_streams()
-            .filter(|(_, stream)| stream.send_data_ready())
-    }
-
-    pub fn get_recv_stream_mut(&mut self, stream_id: u64) -> Option<&mut Recvable> {
-        self.recv_streams
-            .get_mut(&stream_id.into())
-            .map(|rs| rs as &mut Recvable)
-    }
-
-    pub fn get_send_stream_mut(&mut self, stream_id: u64) -> Option<&mut Sendable> {
-        self.send_streams
-            .get_mut(&stream_id.into())
-            .map(|rs| rs as &mut Sendable)
-    }
-
+    /// Get events that indicate state changes on the connection.
     pub fn events(&mut self) -> Vec<ConnectionEvent> {
         // Turn it into a vec for simplicity's sake
         self.events.borrow_mut().events().into_iter().collect()
@@ -2943,17 +2915,25 @@ mod tests {
 
         let mut buf = vec![0; 4000];
 
-        let mut iter = server.get_recvable_streams();
-        let (stream_id, stream) = iter.next().unwrap();
-        let (received, fin) = stream.read(&mut buf).unwrap();
+        let active_streams = server
+            .events()
+            .into_iter()
+            .filter_map(|evt| match evt {
+                ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut iter = active_streams.iter();
+        let stream_id = iter.next().unwrap();
+        let (received, fin) = server.stream_recv(*stream_id, &mut buf).unwrap();
         assert_eq!(received, 4000);
         assert_eq!(fin, false);
-        let (received, fin) = stream.read(&mut buf).unwrap();
+        let (received, fin) = server.stream_recv(*stream_id, &mut buf).unwrap();
         assert_eq!(received, 140);
         assert_eq!(fin, false);
 
-        let (stream_id, stream) = iter.next().unwrap();
-        let (received, fin) = stream.read(&mut buf).unwrap();
+        let stream_id = iter.next().unwrap();
+        let (received, fin) = server.stream_recv(*stream_id, &mut buf).unwrap();
         assert_eq!(received, 60);
         assert_eq!(fin, true);
     }

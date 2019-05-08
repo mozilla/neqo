@@ -7,7 +7,6 @@
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
-use std::fmt::Debug;
 use std::mem;
 use std::rc::Rc;
 
@@ -19,20 +18,6 @@ use crate::connection::{ConnectionEvents, FlowMgr, StreamId, TxMode};
 use crate::{AppError, Error, Res};
 
 const TX_STREAM_BUFFER: usize = 0xFFFF; // 64 KiB
-
-pub trait Sendable: Debug {
-    /// Enqueue data to send on the stream. Returns bytes enqueued.
-    fn send(&mut self, buf: &[u8]) -> Res<usize>;
-
-    /// If attempting to enqueue some data with send() will return nonzero.
-    fn send_data_ready(&self) -> bool;
-
-    /// Close the stream. Enqueued data will be sent.
-    fn close(&mut self);
-
-    /// Abandon transmission of in-flight and future stream data.
-    fn reset(&mut self, err: AppError);
-}
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum RangeState {
@@ -620,10 +605,8 @@ impl SendStream {
             _ => false,
         }
     }
-}
 
-impl Sendable for SendStream {
-    fn send(&mut self, buf: &[u8]) -> Res<usize> {
+    pub fn send(&mut self, buf: &[u8]) -> Res<usize> {
         let sent = match self.state {
             SendStreamState::Ready => {
                 let mut send_buf = TxBuffer::new();
@@ -641,7 +624,7 @@ impl Sendable for SendStream {
         Ok(sent)
     }
 
-    fn send_data_ready(&self) -> bool {
+    pub fn send_data_ready(&self) -> bool {
         match self.state {
             SendStreamState::Ready => true,
             SendStreamState::Send { ref send_buf } => send_buf.data_ready(),
@@ -649,7 +632,7 @@ impl Sendable for SendStream {
         }
     }
 
-    fn close(&mut self) {
+    pub fn close(&mut self) {
         match self.state {
             SendStreamState::Ready => {
                 self.state
@@ -671,7 +654,7 @@ impl Sendable for SendStream {
         }
     }
 
-    fn reset(&mut self, err: AppError) {
+    pub fn reset(&mut self, err: AppError) {
         match &self.state {
             SendStreamState::Ready => {
                 self.flow_mgr

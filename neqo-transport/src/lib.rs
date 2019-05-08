@@ -20,8 +20,6 @@ mod tparams;
 mod tracking;
 
 pub use self::connection::{Connection, ConnectionEvent, ConnectionEvents, Datagram, State};
-pub use recv_stream::Recvable;
-pub use send_stream::Sendable;
 
 type TransportError = u16;
 
