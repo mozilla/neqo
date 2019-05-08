@@ -1218,6 +1218,7 @@ impl Connection {
         Ok(())
     }
 
+    /// Close the connection.
     pub fn close<S: Into<String>>(&mut self, error: AppError, msg: S) {
         // TODO(mt): Set closing timer.
         self.set_state(State::Closing(
@@ -1299,7 +1300,7 @@ impl Connection {
         Ok(())
     }
 
-    pub fn input_frame(&mut self, epoch: Epoch, frame: Frame, cur_time: u64) -> Res<()> {
+    fn input_frame(&mut self, epoch: Epoch, frame: Frame, cur_time: u64) -> Res<()> {
         match frame {
             Frame::Padding => {
                 // Ignore
@@ -1730,6 +1731,7 @@ impl Connection {
         ))
     }
 
+    /// Create a stream.
     // Returns new stream id
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         // Can't make streams before remote tparams are received as part of

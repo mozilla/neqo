@@ -32,7 +32,7 @@ pub enum PacketType {
     Short,
     ZeroRTT,
     Handshake,
-    VN(Vec<u32>),     // List of versions
+    VN(Vec<Version>), // List of versions
     Initial(Vec<u8>), // Token
     Retry(Vec<u8>),   // Token
 }
@@ -376,7 +376,7 @@ fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
     d.into_vec()
 }
 
-/* Hanlde Initial, 0-RTT, Handshake. */
+/* Handle Initial, 0-RTT, Handshake. */
 fn encode_packet_long(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     let mut d = Data::default();
 
