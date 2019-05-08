@@ -475,7 +475,7 @@ impl RecvStream {
         }
     }
 
-    pub fn data_ready(&self) -> bool {
+    fn data_ready(&self) -> bool {
         self.state
             .recv_buf()
             .map(|recv_buf| recv_buf.data_ready())

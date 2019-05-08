@@ -337,10 +337,6 @@ impl TxBuffer {
         self.buffered() as u64 + self.retired
     }
 
-    fn data_ready(&self) -> bool {
-        self.ranges.first_unmarked_range().0 != self.retired + self.buffered() as u64
-    }
-
     fn buffered(&self) -> usize {
         self.send_buf.len()
     }
@@ -622,14 +618,6 @@ impl SendStream {
         };
 
         Ok(sent)
-    }
-
-    pub fn send_data_ready(&self) -> bool {
-        match self.state {
-            SendStreamState::Ready => true,
-            SendStreamState::Send { ref send_buf } => send_buf.data_ready(),
-            _ => false,
-        }
     }
 
     pub fn close(&mut self) {
