@@ -10,11 +10,6 @@
 use neqo_common::data::*;
 use neqo_common::readbuf::ReadBuf;
 use neqo_common::varint::*;
-
-#[cfg(test)]
-use crate::transport::Connection;
-
-#[cfg(not(test))]
 use neqo_transport::Connection;
 
 use crate::recvable::RecvableWrapper;
@@ -504,10 +499,20 @@ impl HFrameReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_transport::connection::Role;
+    use neqo_crypto::init_db;
+    use neqo_transport::frame::StreamType;
     use num_traits::Num;
+    use std::net::SocketAddr;
 
-    fn enc_dec(f: &HFrame, st: &str, r: usize) {
+    fn loopback() -> SocketAddr {
+        "127.0.0.1:443".parse().unwrap()
+    }
+
+    fn now() -> u64 {
+        0
+    }
+
+    fn enc_dec(f: &HFrame, st: &str, remaining: usize) {
         let mut d = Data::default();
 
         f.encode(&mut d).unwrap();
@@ -515,14 +520,20 @@ mod tests {
         // For data, headers and push_promise we do not read all bytes from the buffer
         let mut d2 = Data::from_hex(st);
         let len = d2.remaining();
-        assert_eq!(d.as_mut_vec()[..], d2.as_mut_vec()[..len - r]);
+        assert_eq!(d.as_mut_vec()[..], d2.as_mut_vec()[..len - remaining]);
 
-        let mut conn = Connection::new_client();
-        let mut stream_id = 0;
-        match conn.stream_create_net(Role::Server, StreamType::UniDi) {
-            Ok(s) => stream_id = s,
-            Err(_) => assert!(false, "We must be able to create a stream"),
-        };
+        init_db("./../neqo-transport/db");
+        let mut conn_c =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut r = conn_c.process(vec![], now());
+        r = conn_s.process(r.0, now());
+        r = conn_c.process(r.0, now());
+        conn_s.process(r.0, now());
+
+        // create a stream
+        let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
+
         let mut fr: HFrameReader = HFrameReader::new();
 
         // conver string into u8 vector
@@ -535,10 +546,17 @@ mod tests {
             let v = <u8 as Num>::from_str_radix(x.unwrap(), 16).unwrap();
             buf.push(v);
         }
-        conn.stream_recv_net(stream_id, &buf);
+        conn_s.stream_send(stream_id, &buf).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
 
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert_eq!(conn.recv_data_ready_amount(stream_id), r);
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        // Check remaining data.
+        let mut buf = [0u8; 100];
+        let (amount, fin) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
+        assert_eq!(amount, remaining);
+
         if !fr.done() {
             assert!(false);
         }
@@ -650,8 +668,6 @@ mod tests {
         enc_dec(&f, "0e0105", 0);
     }
 
-    use neqo_transport::frame::StreamType;
-
     // We have 3 code paths in frame_reader:
     // 1) All frames except DATA, HEADERES and PUSH_PROMISE (here we test SETTING and SETTINGS with larger varints)
     // 2) PUSH_PUROMISE and
@@ -660,33 +676,51 @@ mod tests {
     // Test SETTINGS
     #[test]
     fn test_frame_reading_with_stream_settings1() {
-        let mut conn = Connection::new_client();
-        let mut stream_id = 0;
-        match conn.stream_create_net(Role::Server, StreamType::UniDi) {
-            Ok(s) => stream_id = s,
-            Err(_) => assert!(false, "We must be able to create a stream"),
-        };
+        init_db("./../neqo-transport/db");
+        let mut conn_c =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut r = conn_c.process(vec![], now());
+        r = conn_s.process(r.0, now());
+        r = conn_c.process(r.0, now());
+        conn_s.process(r.0, now());
+
+        // create a stream
+        let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
+
         let mut fr: HFrameReader = HFrameReader::new();
 
-        // Read settings frame 040406040804
-        conn.stream_recv_net(stream_id, &vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x6]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x8]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
+        // Send and read settings frame 040406040804
+        conn_s.stream_send(stream_id, &[0x4]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x4]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x6]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x4]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x8]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x4]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
         if !fr.done() {
             assert!(false);
         }
@@ -708,39 +742,66 @@ mod tests {
     // Test SETTINGS with larger varints
     #[test]
     fn test_frame_reading_with_stream_settings2() {
-        let mut conn = Connection::new_client();
-        let mut stream_id = 0;
-        match conn.stream_create_net(Role::Server, StreamType::UniDi) {
-            Ok(s) => stream_id = s,
-            Err(_) => assert!(false, "We must be able to create a stream"),
-        };
+        init_db("./../neqo-transport/db");
+        let mut conn_c =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut r = conn_c.process(vec![], now());
+        r = conn_s.process(r.0, now());
+        r = conn_c.process(r.0, now());
+        conn_s.process(r.0, now());
+
+        // create a stream
+        let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
+
         let mut fr: HFrameReader = HFrameReader::new();
 
         // Read settings frame 400406064004084100
-        conn.stream_recv_net(stream_id, &vec![0x40]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x6]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x6]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x40]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x4]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x8]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x41]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x0]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
+        conn_s.stream_send(stream_id, &[0x40]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x4]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x6]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x6]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x40]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x4]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x8]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x41]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x0]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
         if !fr.done() {
             assert!(false);
         }
@@ -761,29 +822,49 @@ mod tests {
     // Test PUSH_PROMISE
     #[test]
     fn test_frame_reading_with_stream_push_promise() {
-        let mut conn = Connection::new_client();
-        let mut stream_id = 0;
-        match conn.stream_create_net(Role::Server, StreamType::UniDi) {
-            Ok(s) => stream_id = s,
-            Err(_) => assert!(false, "We must be able to create a stream"),
-        };
+        init_db("./../neqo-transport/db");
+        let mut conn_c =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut r = conn_c.process(vec![], now());
+        r = conn_s.process(r.0, now());
+        r = conn_c.process(r.0, now());
+        conn_s.process(r.0, now());
+
+        // create a stream
+        let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
+
         let mut fr: HFrameReader = HFrameReader::new();
 
         // Read pushpromise frame 05054101010203
-        conn.stream_recv_net(stream_id, &vec![0x5]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x5]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x41]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(!conn.data_ready(stream_id));
-        conn.stream_recv_net(stream_id, &vec![0x1, 0x1, 0x2, 0x3]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
+        conn_s.stream_send(stream_id, &[0x5]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x5]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s.stream_send(stream_id, &[0x41]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        conn_s
+            .stream_send(stream_id, &[0x1, 0x1, 0x2, 0x3])
+            .unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         // headers are still on the stream.
-        assert_eq!(conn.recv_data_ready_amount(stream_id), 3);
+        // assert that we have 3 bytes in the stream
+        let mut buf = [0u8; 100];
+        let (amount, fin) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
+        assert_eq!(amount, 3);
+
         if !fr.done() {
             assert!(false);
         }
@@ -803,18 +884,34 @@ mod tests {
     // Test DATA
     #[test]
     fn test_frame_reading_with_stream_data() {
-        let mut conn = Connection::new_client();
-        let mut stream_id = 0;
-        match conn.stream_create_net(Role::Server, StreamType::UniDi) {
-            Ok(s) => stream_id = s,
-            Err(_) => assert!(false, "We must be able to create a stream"),
-        };
+        init_db("./../neqo-transport/db");
+        let mut conn_c =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut r = conn_c.process(vec![], now());
+        r = conn_s.process(r.0, now());
+        r = conn_c.process(r.0, now());
+        conn_s.process(r.0, now());
+
+        // create a stream
+        let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
+
         let mut fr: HFrameReader = HFrameReader::new();
 
         // Read data frame 0003010203
-        conn.stream_recv_net(stream_id, &vec![0x0, 0x3, 0x1, 0x2, 0x3]);
-        assert_eq!(Ok(false), fr.receive(&mut conn, stream_id));
-        assert!(conn.recv_data_ready_amount(stream_id) == 3);
+        conn_s
+            .stream_send(stream_id, &[0x0, 0x3, 0x1, 0x2, 0x3])
+            .unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        // headers are still on the stream.
+        // assert that we have 3 bytes in the stream
+        let mut buf = [0u8; 100];
+        let (amount, fin) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
+        assert_eq!(amount, 3);
+
         if !fr.done() {
             assert!(false);
         }

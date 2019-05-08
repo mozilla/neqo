@@ -18,15 +18,10 @@ use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::connection::Role;
 
+use neqo_transport::connection::Connection;
 use neqo_transport::frame::StreamType;
 use neqo_transport::{AppError, ConnectionEvent, Datagram, State};
 use std::collections::HashMap;
-
-#[cfg(not(test))]
-pub use neqo_transport::connection::Connection;
-
-#[cfg(test)]
-use crate::transport::Connection;
 
 use crate::{Error, Res};
 use std::mem;
@@ -646,7 +641,6 @@ impl NewStreamTypeReader {
                     if self.reader.done() {
                         match decode_varint(&mut self.reader) {
                             Ok(v) => {
-                                self.fin = true;
                                 break Some(v);
                             }
                             Err(_) => {
@@ -829,6 +823,10 @@ impl HttpConn {
                     stream_id,
                     app_error,
                 } => self.handle_stream_reset(stream_id, app_error)?,
+                ConnectionEvent::SendStreamStopSending {
+                    stream_id,
+                    app_error,
+                } => self.handle_stream_stop_sending(stream_id, app_error)?,
                 ConnectionEvent::SendStreamComplete { stream_id } => {
                     self.handle_stream_complete(stream_id)?
                 }
@@ -859,10 +857,10 @@ impl HttpConn {
                     fin = ns.fin;
                 }
 
-                if let Some(t) = stream_type {
-                    self.decode_new_stream(t, stream_id)?;
-                }
                 if fin {
+                    self.new_streams.remove(&stream_id);
+                } else if let Some(t) = stream_type {
+                    self.decode_new_stream(t, stream_id)?;
                     self.new_streams.remove(&stream_id);
                 }
             }
@@ -890,26 +888,24 @@ impl HttpConn {
                 "The local control stream ({}) is writable.",
                 stream_id
             );
-        } else if self.qpack_encoder.is_send_stream(stream_id) {
+        } else if self
+            .qpack_encoder
+            .send_if_encoder_stream(&mut self.conn, stream_id)?
+        {
             qdebug!(
                 [self]
                 "The local qpack encoder stream ({}) is writable.",
                 stream_id
             );
-            match self.conn.get_send_stream_mut(stream_id) {
-                None => assert!(false, "Stream must exist"),
-                Some(send) => self.qpack_encoder.send(send)?,
-            };
-        } else if self.qpack_decoder.is_send_stream(stream_id) {
+        } else if self
+            .qpack_decoder
+            .send_if_decoder_stream(&mut self.conn, stream_id)?
+        {
             qdebug!(
                 [self]
                 "The local qpack decoder stream ({}) is writable.",
                 stream_id
             );
-            match self.conn.get_send_stream_mut(stream_id) {
-                None => assert!(false, "Stream must exist"),
-                Some(send) => self.qpack_decoder.send(send)?,
-            };
         } else {
             assert!(false, "Unexpected - unknown stream {}", stream_id);
         }
@@ -967,44 +963,41 @@ impl HttpConn {
                 self.control_stream_remote
                     .receive_if_this_stream(&mut self.conn, stream_id)?;
             }
-        } else if self.qpack_encoder.is_recv_stream(stream_id) {
+        } else if self
+            .qpack_encoder
+            .recv_if_encoder_stream(&mut self.conn, stream_id)?
+        {
             qdebug!(
                 [self]
                 "The qpack encoder stream ({}) is readable.",
                 stream_id
             );
-            match self.conn.get_recv_stream_mut(stream_id) {
-                None => assert!(false, "Stream must exist"),
-                Some(recv) => self.qpack_encoder.receive(recv)?,
-            };
         } else if self.qpack_decoder.is_recv_stream(stream_id) {
             qdebug!(
                 [self]
                 "The qpack decoder stream ({}) is readable.",
                 stream_id
             );
-            match self.conn.get_recv_stream_mut(stream_id) {
-                None => assert!(false, "Stream must exist"),
-                Some(recv) => {
-                    unblocked_streams = self.qpack_decoder.receive(recv)?;
-                }
-            };
+            unblocked_streams = self.qpack_decoder.receive(&mut self.conn, stream_id)?;
         } else {
-            let mut stream_type = None;
-            let mut fin = false;
             if let Some(ns) = self.new_streams.get_mut(&stream_id) {
-                stream_type = ns.get_type(&mut self.conn, stream_id);
-                fin = ns.fin;
+                let stream_type = ns.get_type(&mut self.conn, stream_id);
+                let fin = ns.fin;
+                if fin {
+                    self.new_streams.remove(&stream_id);
+                }
+                if let Some(t) = stream_type {
+                    self.decode_new_stream(t, stream_id)?;
+                    self.new_streams.remove(&stream_id);
+                }
             } else {
-                // If we receive a stream that we do not know, we will close it,
-                // but in the same event list there can be a readable event as well.
-                qdebug!("Unknown stream, this is stream that we have closed");
-            }
-            if let Some(t) = stream_type {
-                self.decode_new_stream(t, stream_id)?;
-            }
-            if fin {
-                self.new_streams.remove(&stream_id);
+                // For a new stream we receive NewStream event and a
+                // RecvStreamReadable event.
+                // In most cases we decode a new stream already on the NewStream
+                // event and remove it from self.new_streams.
+                // Therefore, while processing RecvStreamReadable there will be no
+                // entry for the stream in self.new_streams.
+                qdebug!("Unknown stream, probably, the stream has been decoded already.");
             }
         }
 
@@ -1034,6 +1027,10 @@ impl HttpConn {
         Ok(())
     }
 
+    fn handle_stream_stop_sending(&mut self, stream_id: u64, app_err: AppError) -> Res<()> {
+        Ok(())
+    }
+
     fn handle_stream_complete(&mut self, stream_id: u64) -> Res<()> {
         Ok(())
     }
@@ -1057,13 +1054,12 @@ impl HttpConn {
                 if self.role() == Role::Server {
                     qdebug!([self] "Error: server receives a push stream!");
                     self.conn
-                        .stream_reset(stream_id, Error::WrongStreamDirection.code())?;
+                        .stream_stop_sending(stream_id, Error::WrongStreamDirection.code())?;
                 } else {
                     // TODO implement PUSH
                     qdebug!([self] "PUSH is not implemented!");
-                    if let Some(recv) = self.conn.get_recv_stream_mut(stream_id) {
-                        recv.stop_sending(Error::PushRefused.code());
-                    }
+                    self.conn
+                        .stream_stop_sending(stream_id, Error::PushRefused.code())?;
                 }
             }
             QPACK_UNI_STREAM_TYPE_ENCODER => {
@@ -1084,9 +1080,8 @@ impl HttpConn {
             }
             // TODO reserved stream types
             _ => {
-                if let Some(recv) = self.conn.get_recv_stream_mut(stream_id) {
-                    recv.stop_sending(Error::UnknownStreamType.code());
-                }
+                self.conn
+                    .stream_stop_sending(stream_id, Error::UnknownStreamType.code())?;
             }
         };
         Ok(())
@@ -1210,7 +1205,16 @@ impl HttpConn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_transport::recv_stream::Recvable;
+    use neqo_crypto::init_db;
+    use std::net::SocketAddr;
+
+    fn loopback() -> SocketAddr {
+        "127.0.0.1:443".parse().unwrap()
+    }
+
+    fn now() -> u64 {
+        0
+    }
 
     fn check_return_value(r: (Vec<Datagram>, u64)) {
         assert_eq!(r.0, Vec::new());
@@ -1226,94 +1230,154 @@ mod tests {
     }
 
     // Start a client/server and check setting frame.
-    fn connect(client: bool) -> HttpConn {
-        // create connection.
+    fn connect(client: bool) -> (HttpConn, Connection) {
+        // Create a client/server and connect it to a server/client.
+        // We will have a http3 server/client on one side and a neqo_transport
+        // connection on the other side so that we can check what the http3
+        // side sends and also to simulate an incorrectly behaving http3
+        // server/client.
+
+        init_db("./../neqo-transport/db");
         let mut hconn;
+        let mut neqo_trans_conn;
         if client {
-            hconn = HttpConn::new(Connection::new_client(), 100, 100);
-        } else {
-            hconn = HttpConn::new(Connection::new_server(), 100, 100);
-        }
-        assert_eq!(*hconn.state(), State::Init);
-        let mut r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        assert_eq!(*hconn.state(), State::Connected);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        if let Some(s) = hconn.conn.streams.get(&0) {
-            assert_eq!(
-                s.send_buf,
-                vec![0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]
+            hconn = HttpConn::new(
+                Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap(),
+                100,
+                100,
             );
+            neqo_trans_conn = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        } else {
+            hconn = HttpConn::new(
+                Connection::new_server(&["key"], &["alpn"]).unwrap(),
+                100,
+                100,
+            );
+            neqo_trans_conn =
+                Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
         }
-        hconn
+        if client {
+            assert_eq!(*hconn.state(), State::Init);
+            let mut r = hconn.process(vec![], now());
+            r = neqo_trans_conn.process(r.0, now());
+            r = hconn.process(r.0, now());
+            neqo_trans_conn.process(r.0, now());
+            assert_eq!(*hconn.state(), State::Connected);
+        } else {
+            assert_eq!(*hconn.state(), State::WaitInitial);
+            let mut r = neqo_trans_conn.process(vec![], now());
+            r = hconn.process(r.0, now());
+            r = neqo_trans_conn.process(r.0, now());
+            r = hconn.process(r.0, now());
+            assert_eq!(*hconn.state(), State::Connected);
+            neqo_trans_conn.process(r.0, now());
+        }
+
+        let events = neqo_trans_conn.events();
+        for e in events {
+            match e {
+                ConnectionEvent::NewStream {
+                    stream_id,
+                    stream_type,
+                } => {
+                    assert!(
+                        (client && ((stream_id == 2) || (stream_id == 6) || (stream_id == 10)))
+                            || ((stream_id == 3) || (stream_id == 7) || (stream_id == 11))
+                    );
+                    assert_eq!(stream_type, StreamType::UniDi);
+                }
+                ConnectionEvent::RecvStreamReadable { stream_id } => {
+                    if stream_id == 2 || stream_id == 3 {
+                        // the control stream
+                        let mut buf = [0u8; 100];
+                        let (amount, fin) =
+                            neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                        assert_eq!(fin, false);
+                        assert_eq!(amount, 9);
+                        assert_eq!(buf[..9], [0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
+                    } else if stream_id == 6 || stream_id == 7 {
+                        let mut buf = [0u8; 100];
+                        let (amount, fin) =
+                            neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                        assert_eq!(fin, false);
+                        assert_eq!(amount, 1);
+                        assert_eq!(buf[..1], [0x2]);
+                    } else if stream_id == 10 || stream_id == 11 {
+                        let mut buf = [0u8; 100];
+                        let (amount, fin) =
+                            neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                        assert_eq!(fin, false);
+                        assert_eq!(amount, 1);
+                        assert_eq!(buf[..1], [0x3]);
+                    } else {
+                        assert!(false, "unexpected event");
+                    }
+                }
+                ConnectionEvent::SendStreamWritable { stream_id } => {
+                    assert!((stream_id == 2) || (stream_id == 6) || (stream_id == 10));
+                }
+                _ => assert!(false, "unexpected event"),
+            }
+        }
+        (hconn, neqo_trans_conn)
     }
 
     // Test http3 connection inintialization.
-    // The client will open a control stream and send SETTINGS frame.
+    // The client will open the control and qpack streams and send SETTINGS frame.
     #[test]
     fn test_client_connect() {
-        let hconn = connect(true);
+        let _ = connect(true);
     }
 
     // Test http3 connection inintialization.
-    // The server will a control stream and send SETTINGS frame.
+    // The server will open the control and qpack streams and send SETTINGS frame.
     #[test]
     fn test_server_connect() {
-        let hconn = connect(false);
+        let _ = connect(false);
     }
 
-    fn connect_and_receive_control_stream(client: bool) -> (HttpConn, u64) {
-        let mut hconn = connect(client);
-        let remote_control_stream_id;
-        if client {
-            // create server control stream.
-            remote_control_stream_id = hconn
-                .conn
-                .stream_create_net(Role::Server, StreamType::UniDi)
-                .unwrap();
-            // send server settings.
-            hconn.conn.stream_recv_net(
-                remote_control_stream_id,
-                &vec![0x0, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0],
-            );
-        } else {
-            // create client control stream.
-            remote_control_stream_id = hconn
-                .conn
-                .stream_create_net(Role::Client, StreamType::UniDi)
-                .unwrap();
-            // send client settings.
-            hconn
-                .conn
-                .stream_recv_net(remote_control_stream_id, &vec![0x0, 0x4, 0x2, 0x6, 0x0]);
-        }
+    fn connect_and_receive_control_stream(client: bool) -> (HttpConn, Connection) {
+        let (mut hconn, mut neqo_trans_conn) = connect(client);
+        let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
+        let mut sent = neqo_trans_conn.stream_send(
+            control_stream,
+            &[0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64],
+        );
+        assert_eq!(sent, Ok(9));
+        let encoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
+        sent = neqo_trans_conn.stream_send(encoder_stream, &[0x2]);
+        assert_eq!(sent, Ok(1));
+        let decoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
+        sent = neqo_trans_conn.stream_send(decoder_stream, &[0x3]);
+        assert_eq!(sent, Ok(1));
+        let r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
 
-        let r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
+        // assert no error occured.
         assert_eq!(*hconn.state(), State::Connected);
-        (hconn, remote_control_stream_id)
+        (hconn, neqo_trans_conn)
     }
 
     // Client: Test receiving a new control stream and a SETTINGS frame.
     #[test]
     fn test_client_receive_control_frame() {
-        let hconn = connect_and_receive_control_stream(true);
+        let _ = connect_and_receive_control_stream(true);
     }
 
     // Server: Test receiving a new control stream and a SETTINGS frame.
     #[test]
     fn test_server_receive_control_frame() {
-        let hconn = connect_and_receive_control_stream(false);
+        let _ = connect_and_receive_control_stream(false);
     }
 
     // Client: Test that the connection will be closed if control stream
     // has been closed.
     #[test]
     fn test_client_close_control_stream() {
-        let (mut hconn, remote_control_stream_id) = connect_and_receive_control_stream(true);
-        hconn.conn.close_receive_side(remote_control_stream_id);
-        let _ = hconn.process(Vec::new(), 0);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(true);
+        neqo_trans_conn.stream_close_send(3).unwrap();
+        let r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
         assert_closed(&hconn, Error::ClosedCriticalStream);
     }
 
@@ -1321,9 +1385,10 @@ mod tests {
     // has been closed.
     #[test]
     fn test_server_close_control_stream() {
-        let (mut hconn, remote_control_stream_id) = connect_and_receive_control_stream(true);
-        hconn.conn.close_receive_side(remote_control_stream_id);
-        let _ = hconn.process(Vec::new(), 0);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(false);
+        neqo_trans_conn.stream_close_send(2).unwrap();
+        let r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
         assert_closed(&hconn, Error::ClosedCriticalStream);
     }
 
@@ -1331,20 +1396,15 @@ mod tests {
     // (the first frame sent is a PRIORITY frame).
     #[test]
     fn test_client_missing_settings() {
-        let mut hconn = connect(true);
+        let (mut hconn, mut neqo_trans_conn) = connect(true);
         // create server control stream.
-        let remote_control_stream_id = hconn
-            .conn
-            .stream_create_net(Role::Server, StreamType::UniDi)
-            .unwrap();
+        let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         // send a PRIORITY frame.
-        hconn.conn.stream_recv_net(
-            remote_control_stream_id,
-            &vec![0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3],
-        );
-        let r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        let _ = hconn.process(Vec::new(), 0);
+        let sent =
+            neqo_trans_conn.stream_send(control_stream, &[0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3]);
+        assert_eq!(sent, Ok(7));
+        let r = neqo_trans_conn.process(Vec::new(), 0);
+        hconn.process(r.0, 0);
         assert_closed(&hconn, Error::MissingSettings);
     }
 
@@ -1352,20 +1412,15 @@ mod tests {
     // (the first frame sent is a PRIORITY frame).
     #[test]
     fn test_server_missing_settings() {
-        let mut hconn = connect(false);
+        let (mut hconn, mut neqo_trans_conn) = connect(false);
         // create server control stream.
-        let remote_control_stream_id = hconn
-            .conn
-            .stream_create_net(Role::Client, StreamType::UniDi)
-            .unwrap();
+        let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         // send a PRIORITY frame.
-        hconn.conn.stream_recv_net(
-            remote_control_stream_id,
-            &vec![0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3],
-        );
-        let r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        let _ = hconn.process(Vec::new(), 0);
+        let sent =
+            neqo_trans_conn.stream_send(control_stream, &[0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3]);
+        assert_eq!(sent, Ok(7));
+        let r = neqo_trans_conn.process(Vec::new(), 0);
+        hconn.process(r.0, 0);
         assert_closed(&hconn, Error::MissingSettings);
     }
 
@@ -1373,17 +1428,12 @@ mod tests {
     // with error HTTP_UNEXPECTED_FRAME.
     #[test]
     fn test_client_receive_settings_twice() {
-        let (mut hconn, remote_control_stream_id) = connect_and_receive_control_stream(true);
-
-        // receive the second SETTINGS frame.
-        hconn.conn.stream_recv_net(
-            remote_control_stream_id,
-            &vec![0x4, 0x4, 0x6, 0x0, 0x8, 0x0],
-        );
-
-        let r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        let _ = hconn.process(Vec::new(), 0);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(true);
+        // send the second SETTINGS frame.
+        let sent = neqo_trans_conn.stream_send(3, &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
+        assert_eq!(sent, Ok(8));
+        let r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
         assert_closed(&hconn, Error::UnexpectedFrame);
     }
 
@@ -1391,84 +1441,92 @@ mod tests {
     // with error HTTP_UNEXPECTED_FRAME.
     #[test]
     fn test_server_receive_settings_twice() {
-        let (mut hconn, remote_control_stream_id) = connect_and_receive_control_stream(true);
-
-        // receive the second SETTINGS frame.
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x4, 0x2, 0x6, 0x0]);
-
-        let r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        let _ = hconn.process(Vec::new(), 0);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(false);
+        // send the second SETTINGS frame.
+        let sent = neqo_trans_conn.stream_send(2, &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
+        assert_eq!(sent, Ok(8));
+        let r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
         assert_closed(&hconn, Error::UnexpectedFrame);
     }
 
     fn test_wrong_frame_on_control_stream(client: bool, v: &[u8]) {
-        let (mut hconn, remote_control_stream_id) = connect_and_receive_control_stream(client);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(client);
 
         // receive a frame that is not allowed on the control stream.
-        hconn.conn.stream_recv_net(remote_control_stream_id, v);
+        if client {
+            let _ = neqo_trans_conn.stream_send(3, v);
+        } else {
+            let _ = neqo_trans_conn.stream_send(2, v);
+        }
 
-        let r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        let _ = hconn.process(Vec::new(), 0);
+        let r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
+
         assert_closed(&hconn, Error::WrongStream);
     }
 
     // send DATA frame on a cortrol stream
     #[test]
     fn test_data_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(true, &vec![0x0, 0x2, 0x1, 0x2]);
-        test_wrong_frame_on_control_stream(false, &vec![0x0, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(true, &[0x0, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(false, &[0x0, 0x2, 0x1, 0x2]);
     }
 
     // send HEADERS frame on a cortrol stream
     #[test]
     fn test_headers_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(true, &vec![0x1, 0x2, 0x1, 0x2]);
-        test_wrong_frame_on_control_stream(false, &vec![0x1, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(true, &[0x1, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(false, &[0x1, 0x2, 0x1, 0x2]);
     }
 
     // send PUSH_PROMISE frame on a cortrol stream
     #[test]
     fn test_push_promise_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(true, &vec![0x5, 0x2, 0x1, 0x2]);
-        test_wrong_frame_on_control_stream(false, &vec![0x5, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(true, &[0x5, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(false, &[0x5, 0x2, 0x1, 0x2]);
     }
 
     // send DUPLICATE_PUSH frame on a cortrol stream
     #[test]
     fn test_duplicate_push_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(true, &vec![0xe, 0x2, 0x1, 0x2]);
-        test_wrong_frame_on_control_stream(false, &vec![0xe, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(true, &[0xe, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(false, &[0xe, 0x2, 0x1, 0x2]);
     }
 
     // Client: receive unkonwn stream type
-    // also test getting stream id that does not fit into a single byte.
+    // This function also tests getting stream id that does not fit into a single byte.
     #[test]
     fn test_client_received_unknown_stream() {
-        let (mut hconn, remote_control_stream_id) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(true);
 
         // create a stream with unknown type.
-        let new_stream = hconn
-            .conn
-            .stream_create_net(Role::Server, StreamType::UniDi)
-            .unwrap();
-        hconn
-            .conn
-            .stream_recv_net(new_stream, &vec![0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
-        let r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
+        let new_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
+        let _ = neqo_trans_conn.stream_send(
+            new_stream_id,
+            &vec![0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0],
+        );
+        let mut r = neqo_trans_conn.process(vec![], now());
+        r = hconn.process(r.0, now());
+        neqo_trans_conn.process(r.0, now());
 
-        match hconn.conn.streams.get_mut(&new_stream) {
-            Some(s) => {
-                assert_eq!(s.stop_sending_error, Some(Error::UnknownStreamType.code()));
-            }
-            None => {
-                assert!(false);
+        // check for stop-sending with Error::UnknownStreamType.
+        let events = neqo_trans_conn.events();
+        let mut stop_sending_event_found = false;
+        for e in events {
+            match e {
+                ConnectionEvent::SendStreamStopSending {
+                    stream_id,
+                    app_error,
+                } => {
+                    stop_sending_event_found = true;
+                    assert_eq!(stream_id, new_stream_id);
+                    assert_eq!(app_error, Error::UnknownStreamType.code());
+                }
+                _ => {}
             }
         }
+        assert!(stop_sending_event_found);
         assert_eq!(*hconn.state(), State::Connected);
     }
 
@@ -1476,79 +1534,105 @@ mod tests {
     // also test getting stream id that does not fit into a single byte.
     #[test]
     fn test_server_received_unknown_stream() {
-        let mut hconn = connect(false);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(false);
 
         // create a stream with unknown type.
-        let new_stream = hconn
-            .conn
-            .stream_create_net(Role::Client, StreamType::UniDi)
-            .unwrap();
-        hconn
-            .conn
-            .stream_recv_net(new_stream, &vec![0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
-        let r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
+        let new_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
+        let _ = neqo_trans_conn.stream_send(
+            new_stream_id,
+            &vec![0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0],
+        );
+        let mut r = neqo_trans_conn.process(vec![], now());
+        r = hconn.process(r.0, now());
+        neqo_trans_conn.process(r.0, now());
 
-        match hconn.conn.streams.get_mut(&new_stream) {
-            Some(s) => {
-                assert_eq!(s.stop_sending_error, Some(Error::UnknownStreamType.code()));
-            }
-            None => {
-                assert!(false);
+        // check for stop-sending with Error::UnknownStreamType.
+        let events = neqo_trans_conn.events();
+        let mut stop_sending_event_found = false;
+        for e in events {
+            match e {
+                ConnectionEvent::SendStreamStopSending {
+                    stream_id,
+                    app_error,
+                } => {
+                    stop_sending_event_found = true;
+                    assert_eq!(stream_id, new_stream_id);
+                    assert_eq!(app_error, Error::UnknownStreamType.code());
+                }
+                _ => {}
             }
         }
+        assert!(stop_sending_event_found);
         assert_eq!(*hconn.state(), State::Connected);
     }
 
     // Client: receive a push stream
     #[test]
     fn test_client_received_push_stream() {
-        let mut hconn = connect(true);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(true);
 
-        let push_stream_id = hconn
-            .conn
-            .stream_create_net(Role::Server, StreamType::UniDi)
-            .unwrap();
-        hconn.conn.stream_recv_net(push_stream_id, &vec![0x1]);
-        let r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        match hconn.conn.streams.get_mut(&push_stream_id) {
-            Some(s) => {
-                assert_eq!(s.stop_sending_error, Some(Error::PushRefused.code()));
-            }
-            None => {
-                assert!(false);
+        // create a push stream.
+        let push_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
+        let _ = neqo_trans_conn.stream_send(push_stream_id, &vec![0x1]);
+        let mut r = neqo_trans_conn.process(vec![], now());
+        r = hconn.process(r.0, now());
+        neqo_trans_conn.process(r.0, now());
+
+        // check for stop-sending with Error::Error::PushRefused.
+        let events = neqo_trans_conn.events();
+        let mut stop_sending_event_found = false;
+        for e in events {
+            match e {
+                ConnectionEvent::SendStreamStopSending {
+                    stream_id,
+                    app_error,
+                } => {
+                    stop_sending_event_found = true;
+                    assert_eq!(stream_id, push_stream_id);
+                    assert_eq!(app_error, Error::PushRefused.code());
+                }
+                _ => {}
             }
         }
+        assert!(stop_sending_event_found);
         assert_eq!(*hconn.state(), State::Connected);
     }
 
     // Server: receiving a push stream on a server should cause WrongStreamDirection
     #[test]
     fn test_server_received_push_stream() {
-        let mut hconn = connect(false);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(false);
 
-        let push_stream_id = hconn
-            .conn
-            .stream_create_net(Role::Client, StreamType::UniDi)
-            .unwrap();
-        hconn.conn.stream_recv_net(push_stream_id, &vec![0x1]);
-        let r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        match hconn.conn.streams.get_mut(&push_stream_id) {
-            Some(s) => {
-                assert_eq!(s.error, Some(Error::WrongStreamDirection.code()));
-            }
-            None => {
-                assert!(false);
+        // create a push stream.
+        let push_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
+        let _ = neqo_trans_conn.stream_send(push_stream_id, &vec![0x1]);
+        let mut r = neqo_trans_conn.process(vec![], now());
+        r = hconn.process(r.0, now());
+        neqo_trans_conn.process(r.0, now());
+
+        // check for stop-sending with Error::WrongStreamDirection.
+        let events = neqo_trans_conn.events();
+        let mut stop_sending_event_found = false;
+        for e in events {
+            match e {
+                ConnectionEvent::SendStreamStopSending {
+                    stream_id,
+                    app_error,
+                } => {
+                    stop_sending_event_found = true;
+                    assert_eq!(stream_id, push_stream_id);
+                    assert_eq!(app_error, Error::WrongStreamDirection.code());
+                }
+                _ => {}
             }
         }
+        assert!(stop_sending_event_found);
         assert_eq!(*hconn.state(), State::Connected);
     }
 
     // Test wrong frame on req/rec stream
     fn test_wrong_frame_on_request_stream(v: &[u8], err: Error) {
-        let (mut hconn, remote_control_stream_id) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(true);
 
         assert_eq!(
             hconn.fetch(
@@ -1561,21 +1645,41 @@ mod tests {
             Ok(())
         );
 
-        let mut r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
+        let mut r = hconn.process(vec![], 0);
+        neqo_trans_conn.process(r.0, now());
 
-        hconn.conn.stream_recv_net(4, v);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-
-        match hconn.conn.streams.get_mut(&4) {
-            Some(s) => {
-                assert_eq!(s.error, Some(err.code()));
-            }
-            None => {
-                assert!(false);
+        // find the new request/response stream and send frame v on it.
+        let events = neqo_trans_conn.events();
+        for e in events {
+            match e {
+                ConnectionEvent::NewStream {
+                    stream_id,
+                    stream_type,
+                } => {
+                    let _ = neqo_trans_conn.stream_send(stream_id, v);
+                }
+                _ => {}
             }
         }
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, 0);
+
+        let events = hconn.conn.events();
+        let mut stop_sending_event_found = false;
+        for e in events {
+            match e {
+                ConnectionEvent::SendStreamStopSending {
+                    stream_id,
+                    app_error,
+                } => {
+                    stop_sending_event_found = true;
+                    assert_eq!(app_error, err.code());
+                }
+                _ => {}
+            }
+        }
+        assert!(stop_sending_event_found);
+        assert_eq!(*hconn.state(), State::Connected);
     }
 
     #[test]
@@ -1609,89 +1713,73 @@ mod tests {
     // Test reading of a slowly streamed frame. bytes are received one by one
     #[test]
     fn test_frame_reading() {
-        let mut hconn = connect(true);
-        let remote_control_stream_id = hconn
-            .conn
-            .stream_create_net(Role::Server, StreamType::UniDi)
-            .unwrap();
-        // send stream type
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x0]);
-        let mut r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
+        let (mut hconn, mut neqo_trans_conn) = connect(true);
+
+        // create a control stream.
+        let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
+
+        // send the stream type
+        let mut sent = neqo_trans_conn.stream_send(control_stream, &[0x0]);
+        assert_eq!(sent, Ok(1));
+        let mut r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
 
         // start sending SETTINGS frame
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x4]);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x4]);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x6]);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x0]);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x8]);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x0]);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        match hconn.conn.streams.get_mut(&remote_control_stream_id) {
-            Some(s) => {
-                assert!(!s.data_ready());
-            }
-            None => {
-                assert!(false);
-            }
-        }
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x4]);
+        assert_eq!(sent, Ok(1));
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
+
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x4]);
+        assert_eq!(sent, Ok(1));
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
+
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x6]);
+        assert_eq!(sent, Ok(1));
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
+
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x0]);
+        assert_eq!(sent, Ok(1));
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
+
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x8]);
+        assert_eq!(sent, Ok(1));
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
+
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x0]);
+        assert_eq!(sent, Ok(1));
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
+
+        assert_eq!(*hconn.state(), State::Connected);
 
         // Now test PushPromise
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x5]);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x5]);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
-        hconn
-            .conn
-            .stream_recv_net(remote_control_stream_id, &vec![0x4]);
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x5]);
+        assert_eq!(sent, Ok(1));
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
+
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x5]);
+        assert_eq!(sent, Ok(1));
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
+
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x4]);
+        assert_eq!(sent, Ok(1));
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, now());
 
         // PUSH_PROMISE on a control stream will cause an error
-        let _ = hconn.process(Vec::new(), 0);
         assert_closed(&hconn, Error::WrongStream);
-        match hconn.conn.streams.get_mut(&remote_control_stream_id) {
-            Some(s) => {
-                assert!(!s.data_ready());
-            }
-            None => {
-                assert!(false);
-            }
-        }
     }
 
     #[test]
     fn fetch() {
-        let (mut hconn, remote_control_stream_id) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_control_stream(true);
         assert_eq!(
             hconn.fetch(
                 &"GET".to_string(),
@@ -1702,47 +1790,51 @@ mod tests {
             ),
             Ok(())
         );
-        let mut r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
 
-        if let Some(s) = hconn.conn.streams.get(&4) {
-            assert_eq!(
-                s.send_buf,
-                vec![
-                    0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67, 0x35,
-                    0x53, 0x2e, 0x43, 0xd3, 0xc1,
-                ]
-            );
-            assert!(s.send_side_closed);
-        }
+        let mut r = hconn.process(vec![], 0);
+        neqo_trans_conn.process(r.0, now());
 
-        // send response.
-        hconn.conn.stream_recv_net(
-            4,
-            &vec![
-                0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // data frame
-                0x0, 0x3, 0x61, 0x62, 0x63,
-            ],
-        ); // 200  Content-Length: 3  abc
-        hconn.conn.close_receive_side(4);
-        r = hconn.process(Vec::new(), 0);
-        check_return_value(r);
+        // find the new request/response stream and send frame v on it.
+        let events = neqo_trans_conn.events();
+        for e in events {
+            match e {
+                ConnectionEvent::NewStream {
+                    stream_id,
+                    stream_type,
+                } => {
+                    assert_eq!(stream_id, 0);
+                    assert_eq!(stream_type, StreamType::BiDi);
+                }
+                ConnectionEvent::RecvStreamReadable { stream_id } => {
+                    assert_eq!(stream_id, 0);
+                    let mut buf = [0u8; 100];
+                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, true);
+                    assert_eq!(amount, 18);
+                    assert_eq!(
+                        buf[..18],
+                        [
+                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
+                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
+                        ]
+                    );
+                    // send response - 200  Content-Length: 3  abc .
+                    let _ = neqo_trans_conn.stream_send(
+                        stream_id,
+                        &[
+                            // headers
+                            0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // data frame
+                            0x0, 0x3, 0x61, 0x62, 0x63,
+                        ],
+                    );
+                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
+                }
+                _ => {}
+            }
+        }
+        r = neqo_trans_conn.process(vec![], now());
+        hconn.process(r.0, 0);
 
-        match hconn.conn.streams.get_mut(&2) {
-            Some(s) => {
-                assert!(!s.data_ready());
-            }
-            None => {
-                assert!(false);
-            }
-        }
-        match hconn.conn.streams.get_mut(&4) {
-            Some(s) => {
-                assert_eq!(s.recv_data_ready_amount(), 3);
-            }
-            None => {
-                assert!(false);
-            }
-        }
+        // TODO - check response. (the API is missing at the moment.)
     }
 }

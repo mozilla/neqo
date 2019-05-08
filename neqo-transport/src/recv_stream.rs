@@ -425,7 +425,7 @@ impl RecvStream {
             }
         }
 
-        if self.data_ready() {
+        if self.data_ready() || self.needs_to_inform_app_about_fin() {
             self.conn_events
                 .borrow_mut()
                 .recv_stream_readable(self.stream_id)
@@ -476,6 +476,14 @@ impl RecvStream {
     pub fn is_terminal(&self) -> bool {
         match self.state {
             RecvStreamState::ResetRecvd | RecvStreamState::DataRead => true,
+            _ => false,
+        }
+    }
+
+    // App got all data but did not get the fin signal.
+    fn needs_to_inform_app_about_fin(&self) -> bool {
+        match self.state {
+            RecvStreamState::DataRecvd { .. } => true,
             _ => false,
         }
     }

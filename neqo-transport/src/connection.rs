@@ -251,6 +251,8 @@ pub enum ConnectionEvent {
     RecvStreamReadable { stream_id: u64 },
     /// Peer reset the stream.
     RecvStreamReset { stream_id: u64, app_error: AppError },
+    /// Peer has sent STOP_SENDING
+    SendStreamStopSending { stream_id: u64, app_error: AppError },
     /// Peer has acked everything sent on the stream.
     SendStreamComplete { stream_id: u64 },
     /// Peer increased MAX_STREAMS
@@ -284,6 +286,13 @@ impl ConnectionEvents {
 
     pub fn recv_stream_reset(&mut self, stream_id: StreamId, app_error: AppError) {
         self.events.insert(ConnectionEvent::RecvStreamReset {
+            stream_id: stream_id.as_u64(),
+            app_error,
+        });
+    }
+
+    pub fn send_stream_stop_sending(&mut self, stream_id: StreamId, app_error: AppError) {
+        self.events.insert(ConnectionEvent::SendStreamStopSending {
             stream_id: stream_id.as_u64(),
             app_error,
         });
@@ -1847,6 +1856,15 @@ impl Connection {
         Ok(stream.reset(err))
     }
 
+    pub fn stream_stop_sending(&mut self, stream_id: u64, err: AppError) -> Res<()> {
+        let stream = self
+            .recv_streams
+            .get_mut(&stream_id.into())
+            .ok_or_else(|| return Error::InvalidStreamId)?;
+
+        Ok(stream.stop_sending(err))
+    }
+
     fn generate_cid(&mut self) -> ConnectionId {
         let mut v: [u8; 8] = [0; 8];
         rand::thread_rng().fill(&mut v);
@@ -2315,17 +2333,17 @@ impl FrameGenerator for FlowControlGenerator {
             frame.marshal(&mut d);
             if d.written() > remaining {
                 qtrace!("flowc frame doesn't fit in remaining");
-                None
-            } else {
-                let frame = conn.flow_mgr.borrow_mut().next().expect("just peeked this");
-                Some((
-                    frame.clone(),
-                    Some(Box::new(FlowControlGeneratorToken(frame))),
-                ))
+                return None;
             }
         } else {
-            None
+            return None;
         }
+        // There is enough space we can add this frame to the packet.
+        let frame = conn.flow_mgr.borrow_mut().next().expect("just peeked this");
+        Some((
+            frame.clone(),
+            Some(Box::new(FlowControlGeneratorToken(frame))),
+        ))
     }
 }
 

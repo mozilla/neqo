@@ -6,11 +6,6 @@
 
 use neqo_common::qinfo;
 use neqo_common::readbuf::Reader;
-
-#[cfg(test)]
-use crate::transport::Connection;
-
-#[cfg(not(test))]
 use neqo_transport::Connection;
 
 // A simple wrapper that wraps a Recvable so that it can be used with ReadBuf.

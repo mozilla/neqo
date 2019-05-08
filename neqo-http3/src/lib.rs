@@ -9,8 +9,6 @@
 pub mod connection;
 pub mod hframe;
 mod recvable;
-#[cfg(test)]
-pub mod transport;
 
 use neqo_qpack;
 use neqo_transport;
