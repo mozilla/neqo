@@ -678,9 +678,6 @@ impl Sendable for SendStream {
                     .borrow_mut()
                     .stream_reset(self.stream_id, err, 0);
 
-                self.conn_events
-                    .borrow_mut()
-                    .send_stream_stop_sending(self.stream_id, err);
                 self.state.transition(SendStreamState::ResetSent);
             }
             SendStreamState::Send { send_buf } => {
@@ -690,9 +687,6 @@ impl Sendable for SendStream {
                     send_buf.highest_sent(),
                 );
 
-                self.conn_events
-                    .borrow_mut()
-                    .send_stream_stop_sending(self.stream_id, err);
                 self.state.transition(SendStreamState::ResetSent);
             }
             SendStreamState::DataSent { final_size, .. } => {
@@ -700,9 +694,6 @@ impl Sendable for SendStream {
                     .borrow_mut()
                     .stream_reset(self.stream_id, err, *final_size);
 
-                self.conn_events
-                    .borrow_mut()
-                    .send_stream_stop_sending(self.stream_id, err);
                 self.state.transition(SendStreamState::ResetSent);
             }
             SendStreamState::DataRecvd { .. } => qtrace!("already in DataRecvd state"),

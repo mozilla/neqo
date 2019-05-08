@@ -1336,6 +1336,9 @@ impl Connection {
                 stream_id,
                 application_error_code,
             } => {
+                self.events
+                    .borrow_mut()
+                    .send_stream_stop_sending(stream_id.into(), application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(stream_id.into())? {
                     ss.reset(application_error_code);
                 }
