@@ -250,9 +250,8 @@ impl QPackEncoder {
 
     pub fn send_if_encoder_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         match self.local_stream_id {
-            Some(id) => {
-                if id == stream_id {
-                    match conn.stream_send(stream_id, self.send_buf.as_mut_vec()) {
+            Some(id) if id == stream_id => {
+                    match conn.stream_send(stream_id, &self.send_buf[..]) {
                         Err(_) => Err(Error::EncoderStreamError),
                         Ok(r) => {
                             qdebug!([self] "{} bytes sent.", r);
@@ -260,11 +259,8 @@ impl QPackEncoder {
                             Ok(true)
                         }
                     }
-                } else {
-                    Ok(false)
-                }
             }
-            None => Ok(false),
+            _ => Ok(false),
         }
     }
 
@@ -871,8 +867,8 @@ mod tests {
         );
 
         for t in &test_cases {
-            let mut buf = encoder.encode_header_block(&t.headers, 1);
-            assert_eq!(buf.as_mut_vec(), t.header_block);
+            let buf = encoder.encode_header_block(&t.headers, 1);
+            assert_eq!(&buf[..], t.header_block);
             test_sent_instructions(
                 &mut encoder,
                 &mut conn_c,
@@ -959,8 +955,8 @@ mod tests {
         );
 
         for t in &test_cases {
-            let mut buf = encoder.encode_header_block(&t.headers, 1);
-            assert_eq!(buf.as_mut_vec(), t.header_block);
+            let buf = encoder.encode_header_block(&t.headers, 1);
+            assert_eq!(&buf[..], t.header_block);
             test_sent_instructions(
                 &mut encoder,
                 &mut conn_c,
@@ -1121,11 +1117,11 @@ mod tests {
         }
 
         // send a header block
-        let mut buf = encoder.encode_header_block(
+        let buf = encoder.encode_header_block(
             &vec![(String::from("content-length"), String::from("1234"))],
             1,
         );
-        assert_eq!(buf.as_mut_vec(), &[0x02, 0x00, 0x80]);
+        assert_eq!(&buf[..], &[0x02, 0x00, 0x80]);
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,

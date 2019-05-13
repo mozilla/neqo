@@ -6,6 +6,8 @@
 
 #![allow(unused_variables, dead_code)]
 
+use std::ops::Deref;
+
 #[derive(Default, Debug, PartialEq)]
 pub struct QPData {
     buf: Vec<u8>,
@@ -95,16 +97,19 @@ impl QPData {
         self.buf.extend_from_slice(buf);
     }
 
-    pub fn as_mut_vec(&mut self) -> &mut [u8] {
-        &mut self.buf
-    }
-
     pub fn read(&mut self, r: usize) {
         if r > self.buf.len() {
             panic!("want to set more byte read than remaing in the buffer.");
         }
 
         self.buf = self.buf.split_off(r);
+    }
+}
+
+impl Deref for QPData {
+    type Target = [u8];
+    fn deref(&self) -> &Self::Target {
+        self.buf.deref()
     }
 }
 
@@ -116,20 +121,20 @@ mod tests {
     fn test_encode_prefixed_encoded_int_1() {
         let mut d = QPData::default();
         d.encode_prefixed_encoded_int(0xff, 2, 5);
-        assert_eq!(d.as_mut_vec(), [0xc5]);
+        assert_eq!(d[..], [0xc5]);
     }
 
     #[test]
     fn test_encode_prefixed_encoded_int_2() {
         let mut d = QPData::default();
         d.encode_prefixed_encoded_int(0xff, 2, 65);
-        assert_eq!(d.as_mut_vec(), [0xff, 0x02]);
+        assert_eq!(d[..], [0xff, 0x02]);
     }
 
     #[test]
     fn test_encode_prefixed_encoded_int_3() {
         let mut d = QPData::default();
         d.encode_prefixed_encoded_int(0xff, 2, 100_000);
-        assert_eq!(d.as_mut_vec(), [0xff, 0xe1, 0x8c, 0x06]);
+        assert_eq!(d[..], [0xff, 0xe1, 0x8c, 0x06]);
     }
 }

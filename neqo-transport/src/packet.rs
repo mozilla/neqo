@@ -7,9 +7,7 @@
 use derive_more::Deref;
 use rand::Rng;
 
-use neqo_common::data::{Data, DataBuf};
-use neqo_common::hex;
-use neqo_common::{matches, qtrace};
+use neqo_common::{hex, matches, qtrace, Decoder, Encoder};
 
 use crate::nss_stub::Epoch;
 use crate::{Error, Res};
@@ -230,12 +228,20 @@ fn decode_pnl(u: u8) -> usize {
 */
 
 pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
-    let mut p = PacketHdr::default();
+    macro_rules! d {
+        ($d:expr) => {
+            match $d {
+                Some(v) => v,
+                _ => return Err(Error::NoMoreData),
+            }
+        };
+    }
 
-    let mut d = Data::from_slice(pd);
+    let mut p = PacketHdr::default();
+    let mut d = Decoder::from(pd);
 
     // Get the type byte
-    p.tbyte = d.decode_byte()?;
+    p.tbyte = d!(d.decode_byte());
     if p.tbyte & 0x40 == 0 {
         return Err(Error::InvalidPacket);
     }
@@ -243,25 +249,24 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     if (p.tbyte & 0x80) == 0 {
         // Short Header.
         p.tipe = PacketType::Short;
-        p.dcid = ConnectionId(d.decode_data(dec.get_cid_len())?);
-        p.hdr_len = d.offset();
+        let cid = d!(d.decode(dec.get_cid_len()));
+        p.dcid = ConnectionId(cid.to_vec()); // TODO(mt) unnecessary copy
+        p.hdr_len = pd.len() - d.remaining();
         p.body_len = d.remaining();
         p.epoch = 3; // TODO(ekr@rtfm.com): Decode key phase bits.
         return Ok(p);
     }
 
-    p.version = Some(d.decode_uint(4)? as u32);
-    let (dest_len, src_len) = decode_cidl(d.decode_byte()?);
+    let version =d!(d.decode_uint(4)) as u32;
+    p.version = Some(version);
+    let (dest_len, src_len) = decode_cidl(d!(d.decode_byte()));
+    p.dcid = ConnectionId(d!(d.decode(dest_len.into())).to_vec());
+    p.scid = Some(ConnectionId(d!(d.decode(src_len.into())).to_vec()));
 
-    p.dcid = ConnectionId(d.decode_data(dest_len.into())?);
-    p.scid = Some(ConnectionId(d.decode_data(src_len.into())?));
-
-    if p.version == Some(0) {
+    if version == 0 {
         let mut vns = vec![];
-
         while d.remaining() > 0 {
-            let vn = d.decode_uint(4)? as u32;
-            vns.push(vn);
+            vns.push(d!(d.decode_uint(4)) as u32);
         }
         p.tipe = PacketType::VN(vns);
         // No need to set hdr_length and body_length
@@ -272,7 +277,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
             // TODO(ekr@rtfm.com): Check the 0 bits.
             PACKET_TYPE_INITIAL => {
                 p.epoch = 0;
-                PacketType::Initial(d.decode_data_and_len()?)
+                PacketType::Initial(d!(d.decode_vvec()).to_vec()) // TODO(mt) unnecessary copy
             }
             PACKET_TYPE_0RTT => {
                 p.epoch = 1;
@@ -283,7 +288,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
                 PacketType::Handshake
             }
             // TODO(ekr@rtfm.com): Read ODCIL.
-            PACKET_TYPE_RETRY => PacketType::Retry(d.decode_remainder()?),
+            PACKET_TYPE_RETRY => PacketType::Retry(d.decode_remainder().to_vec()), // TODO(mt) unnecessary copy
             _ => unreachable!(),
         };
 
@@ -292,8 +297,8 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
         }
     }
 
-    p.body_len = d.decode_varint()? as usize;
-    p.hdr_len = d.offset();
+    p.body_len = d!(d.decode_varint()) as usize;
+    p.hdr_len = pd.len() - d.remaining();
 
     Ok(p)
 }
@@ -352,74 +357,75 @@ pub fn decrypt_packet(
 }
 
 fn encode_packet_short(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
-    let mut d = Data::default();
+    let mut enc = Encoder::default();
     // Leading byte.
     let pnl = pn_length(hdr.pn);
-    d.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | encode_pnl(pnl));
-    d.encode_vec(&hdr.dcid.0);
-    d.encode_uint(hdr.pn, pnl);
+    enc.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | encode_pnl(pnl));
+    enc.encode(&hdr.dcid.0);
+    enc.encode_uint(pnl, hdr.pn);
 
-    encrypt_packet(crypto, hdr, d, body)
+    encrypt_packet(crypto, hdr, enc, body)
 }
 
 fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
-    let mut d = Data::default();
+    let mut d = Encoder::default();
     let mut rand_byte: [u8; 1] = [0; 1];
     rand::thread_rng().fill(&mut rand_byte);
     d.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | rand_byte[0]);
-    d.encode_uint(0u64, 4); // version
-    d.encode_vec(&*hdr.dcid);
-    d.encode_vec(hdr.scid.as_ref().unwrap());
+    d.encode_uint(4, 0u64); // version
+    d.encode(&*hdr.dcid);
+    d.encode(hdr.scid.as_ref().unwrap());
     for ver in vers {
-        d.encode_uint(*ver, 4)
+        d.encode_uint(4, *ver);
     }
-    d.into_vec()
+    d.into()
 }
 
 /* Handle Initial, 0-RTT, Handshake. */
 fn encode_packet_long(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
-    let mut d = Data::default();
+    let mut enc = Encoder::default();
 
     let pnl = pn_length(hdr.pn);
-    d.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | hdr.tipe.code() << 4 | encode_pnl(pnl));
-    d.encode_uint(hdr.version.unwrap(), 4);
-    d.encode_byte(encode_cidl(
+    enc.encode_byte(
+        PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | hdr.tipe.code() << 4 | encode_pnl(pnl),
+    );
+    enc.encode_uint(4, hdr.version.unwrap());
+    enc.encode_byte(encode_cidl(
         hdr.dcid.len(),
         hdr.scid.as_ref().unwrap().len(),
     ));
-    d.encode_vec(&*hdr.dcid);
-    d.encode_vec(&*hdr.scid.as_ref().unwrap());
+    enc.encode(&*hdr.dcid);
+    enc.encode(&*hdr.scid.as_ref().unwrap());
 
     if let PacketType::Initial(token) = &hdr.tipe {
-        d.encode_vec_and_len(&token);
+        enc.encode_vvec(&token);
     }
-    d.encode_varint((pnl + body.len() + AUTH_TAG_LEN) as u64);
-    d.encode_uint(hdr.pn, pnl);
+    enc.encode_varint((pnl + body.len() + AUTH_TAG_LEN) as u64);
+    enc.encode_uint(pnl, hdr.pn);
 
-    encrypt_packet(crypto, hdr, d, body)
+    encrypt_packet(crypto, hdr, enc, body)
 }
 
-fn encrypt_packet(crypto: &CryptoCtx, hdr: &PacketHdr, mut d: Data, body: &[u8]) -> Vec<u8> {
-    let hdr_len = d.remaining();
+fn encrypt_packet(crypto: &CryptoCtx, hdr: &PacketHdr, mut enc: Encoder, body: &[u8]) -> Vec<u8> {
+    let hdr_len = enc.len();
     // Encrypt the packet. This has too many copies.
-    let ct = crypto.aead_encrypt(hdr.pn, d.as_mut_vec(), body).unwrap();
-    d.encode_vec(&ct);
-    let ret = d.as_mut_vec();
-    qtrace!("mask hdr={}", hex(&ret[0..hdr_len]));
+    let ct = crypto.aead_encrypt(hdr.pn, &enc, body).unwrap();
+    enc.encode(&ct);
+    qtrace!("mask hdr={}", hex(&enc[0..hdr_len]));
     let pn_start = hdr_len - pn_length(hdr.pn);
     let mask = crypto
-        .compute_mask(&ret[pn_start + 4..pn_start + SAMPLE_SIZE + 4])
+        .compute_mask(&enc[pn_start + 4..pn_start + SAMPLE_SIZE + 4])
         .unwrap();
-    ret[0] ^= mask[0]
+    enc[0] ^= mask[0]
         & match hdr.tipe {
             PacketType::Short => 0x1f,
             _ => 0x0f,
         };
     for i in 0..pn_length(hdr.pn) {
-        ret[pn_start + i] ^= mask[i + 1];
+        enc[pn_start + i] ^= mask[i + 1];
     }
-    qtrace!("masked hdr={}", hex(&ret[0..hdr_len]));
-    ret.to_vec()
+    qtrace!("masked hdr={}", hex(&enc[0..hdr_len]));
+    enc.into()
 }
 
 // TODO(ekr@rtfm.com): Minimal packet number lengths.
@@ -479,14 +485,15 @@ mod tests {
         }
 
         fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-            let mut d = Data::from_slice(body);
-            d.encode_vec(&TestFixture::auth_tag(hdr, body));
-            let v = d.as_mut_vec();
-            for i in 0..v.len() {
-                v[i] ^= AEAD_MASK;
+            let tag = TestFixture::auth_tag(hdr, body);
+            let mut enc = Encoder::with_capacity(body.len() + tag.len());
+            enc.encode(body);
+            enc.encode(&tag);
+            for i in 0..enc.len() {
+                enc[i] ^= AEAD_MASK;
             }
 
-            Ok(v.to_vec())
+            Ok(enc.into())
         }
     }
 

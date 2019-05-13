@@ -1,8 +1,9 @@
 // Tests with the test vectors from the spec.
 #![deny(warnings)]
-use neqo_common::data::*;
-use neqo_crypto::*;
-use neqo_transport::*;
+use neqo_common::Encoder;
+use neqo_crypto::init_db;
+use neqo_transport::connection::State;
+use neqo_transport::{Connection, Datagram};
 use std::net::SocketAddr;
 
 const INITIAL_PACKET: &str = "c1ff000012508394c8f03e51570800449f0dbc195a0000f3a694c75775b4e546\
@@ -53,10 +54,10 @@ fn process_client_initial() {
     init_db("./db");
     let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
 
-    let mut d = Data::from_hex(INITIAL_PACKET);
-    let dgram = Datagram::new(loopback(), loopback(), d.as_mut_vec());
-    assert_eq!(*server.state(), connection::State::WaitInitial);
+    let pkt: Vec<u8> = Encoder::from_hex(INITIAL_PACKET).into();
+    let dgram = Datagram::new(loopback(), loopback(), pkt);
+    assert_eq!(*server.state(), State::WaitInitial);
     let (out, _) = server.process(vec![dgram], 0);
-    assert_eq!(*server.state(), connection::State::Handshaking);
+    assert_eq!(*server.state(), State::Handshaking);
     assert_eq!(out.len(), 1);
 }

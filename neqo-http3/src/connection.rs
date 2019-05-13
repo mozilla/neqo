@@ -9,11 +9,7 @@
 use crate::hframe::{
     ElementDependencyType, HFrame, HFrameReader, HSettingType, PrioritizedElementType,
 };
-use crate::recvable::RecvableWrapper;
-use neqo_common::data::Data;
-use neqo_common::readbuf::ReadBuf;
-use neqo_common::varint::decode_varint;
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{qdebug, qinfo, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::connection::Role;
@@ -39,7 +35,7 @@ struct Request {
     host: String,
     path: String,
     headers: Vec<(String, String)>,
-    buf: Option<Data>,
+    buf: Option<Vec<u8>>,
 }
 
 impl Request {
@@ -55,7 +51,7 @@ impl Request {
             scheme: scheme.to_owned(),
             host: host.to_owned(),
             path: path.to_owned(),
-            headers: Vec::new(),
+            headers: Vec::with_capacity(headers.len()),
             buf: None,
         };
         r.headers.push((":method".into(), method.to_owned()));
@@ -68,14 +64,15 @@ impl Request {
 
     pub fn encode_request(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
         qdebug!([self] "Encoding headers for {}/{}", self.host, self.path);
-        let mut encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
+
+        let encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
         let f = HFrame::Headers {
             len: encoded_headers.len() as u64,
         };
-        let mut d = Data::default();
-        f.encode(&mut d).unwrap();
-        d.encode_vec(encoded_headers.as_mut_vec());
-        self.buf = Some(d);
+        let mut d = Encoder::default();
+        f.encode(&mut d);
+        d.encode(&encoded_headers[..]);
+        self.buf = Some(d.into());
     }
 }
 
@@ -177,15 +174,16 @@ impl ClientRequest {
                 self.request.encode_request(encoder, self.stream_id);
             }
             if let Some(d) = &mut self.request.buf {
-                let sent = conn.stream_send(self.stream_id, d.as_mut_vec())?;
+                let sent = conn.stream_send(self.stream_id, &d[..])?;
                 qdebug!([label] "{} bytes sent", sent);
-                if sent == d.remaining() {
+                if sent == d.len() {
                     self.request.buf = None;
                     conn.stream_close_send(self.stream_id)?;
                     self.state = ClientRequestState::WaitingForResponseHeaders;
                     qdebug!([label] "done sending request");
                 } else {
-                    d.read(sent);
+                    let b = d.split_off(sent);
+                    self.request.buf = Some(b);
                 }
             }
         }
@@ -220,7 +218,7 @@ impl ClientRequest {
                     match self.frame_reader.get_frame()? {
                         HFrame::Priority {
                             priorized_elem_type,
-                            elem_dependensy_type,
+                            elem_dependency_type,
                             priority_elem_id,
                             elem_dependency_id,
                             weight,
@@ -352,8 +350,8 @@ pub struct ClientRequestServer {
     frame_reader: HFrameReader,
     request_headers: Option<Vec<(String, String)>>,
     response_headers: Vec<(String, String)>,
-    data: String,
-    response_buf: Option<Data>,
+    data: Vec<u8>,
+    response_buf: Option<Vec<u8>>,
     fin: bool,
 }
 
@@ -365,7 +363,7 @@ impl ClientRequestServer {
             frame_reader: HFrameReader::new(),
             request_headers: None,
             response_headers: Vec::new(),
-            data: String::new(),
+            data: Vec::new(),
             response_buf: None,
             fin: false,
         }
@@ -378,28 +376,29 @@ impl ClientRequestServer {
             Vec::new()
         }
     }
-    pub fn set_response(&mut self, headers: &Vec<(String, String)>, data: &String) {
+
+    pub fn set_response(&mut self, headers: &Vec<(String, String)>, data: String) {
         self.response_headers.extend_from_slice(headers);
-        self.data = data.to_string();
+        self.data = data.into_bytes(); // TODO(mt) looks like a stub
     }
 
     pub fn encode_response(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
         qdebug!([self] "Encoding headers");
-        let mut encoded_headers = encoder.encode_header_block(&self.response_headers, stream_id);
+        let encoded_headers = encoder.encode_header_block(&self.response_headers, stream_id);
         let f = HFrame::Headers {
             len: encoded_headers.len() as u64,
         };
-        let mut d = Data::default();
-        f.encode(&mut d).unwrap();
-        d.encode_vec(encoded_headers.as_mut_vec());
+        let mut d = Encoder::default();
+        f.encode(&mut d);
+        d.encode(&encoded_headers[..]);
         if self.data.len() > 0 {
             let d_frame = HFrame::Data {
                 len: self.data.len() as u64,
             };
-            d_frame.encode(&mut d).unwrap();
-            d.encode_vec(&self.data.clone().into_bytes());
+            d_frame.encode(&mut d);
+            d.encode(&self.data[..]);
         }
-        self.response_buf = Some(d);
+        self.response_buf = Some(d.into());
     }
 
     pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
@@ -412,15 +411,16 @@ impl ClientRequestServer {
                 self.encode_response(encoder, self.stream_id);
             }
             if let Some(d) = &mut self.response_buf {
-                let sent = conn.stream_send(self.stream_id, d.as_mut_vec())?;
+                let sent = conn.stream_send(self.stream_id, &d[..])?;
                 qdebug!([label] "{} bytes sent", sent);
-                if sent == d.remaining() {
+                if sent == d.len() {
                     self.response_buf = None;
                     conn.stream_close_send(self.stream_id)?;
                     self.state = ClientRequestServerState::Closed;
                     qdebug!([label] "done sending request");
                 } else {
-                    d.read(sent);
+                    let buf = d.split_off(sent);
+                    self.response_buf = Some(buf);
                 }
             }
         }
@@ -451,13 +451,13 @@ impl ClientRequestServer {
                     match self.frame_reader.get_frame()? {
                         HFrame::Priority {
                             priorized_elem_type,
-                            elem_dependensy_type,
+                            elem_dependency_type,
                             priority_elem_id,
                             elem_dependency_id,
                             weight,
                         } => self.handle_priority_frame(
                             priorized_elem_type,
-                            elem_dependensy_type,
+                            elem_dependency_type,
                             priority_elem_id,
                             elem_dependency_id,
                             weight,
@@ -513,7 +513,7 @@ impl ClientRequestServer {
     fn handle_priority_frame(
         &mut self,
         _priorized_elem_type: PrioritizedElementType,
-        _elem_dependensy_type: ElementDependencyType,
+        _elem_dependency_type: ElementDependencyType,
         _priority_elem_id: u64,
         _elem_dependency_id: u64,
         _weight: u8,
@@ -561,22 +561,25 @@ impl ::std::fmt::Display for ClientRequestServer {
 #[derive(Default, Debug)]
 struct ControlStreamLocal {
     stream_id: Option<u64>,
-    buf: Data,
+    buf: Vec<u8>,
 }
 
 impl ControlStreamLocal {
     pub fn send_frame(&mut self, f: HFrame) {
-        f.encode(&mut self.buf).unwrap();
+        let mut enc = Encoder::default();
+        f.encode(&mut enc);
+        self.buf.append(&mut enc.into());
     }
     pub fn send_if_this_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         if let Some(id) = self.stream_id {
             if id == stream_id {
-                if self.buf.remaining() != 0 {
-                    let sent = conn.stream_send(stream_id, self.buf.as_mut_vec())?;
-                    if sent == self.buf.remaining() {
+                if self.buf.len() > 0 {
+                    let sent = conn.stream_send(stream_id, &self.buf[..])?;
+                    if sent == self.buf.len() {
                         self.buf.clear();
                     } else {
-                        self.buf.read(sent);
+                        let b = self.buf.split_off(sent);
+                        self.buf = b;
                     }
                 }
                 return Ok(true);
@@ -616,41 +619,45 @@ impl ControlStreamRemote {
 
 #[derive(Debug)]
 struct NewStreamTypeReader {
-    reader: ReadBuf,
+    reader: IncrementalDecoder,
     fin: bool,
 }
 
 impl NewStreamTypeReader {
     pub fn new() -> NewStreamTypeReader {
         NewStreamTypeReader {
-            reader: ReadBuf::new(),
+            reader: IncrementalDecoder::decode_varint(),
             fin: false,
         }
     }
     pub fn get_type(&mut self, conn: &mut Connection, stream_id: u64) -> Option<u64> {
         // On any error we will only close this stream!
-        let mut w = RecvableWrapper::wrap(conn, stream_id);
         loop {
-            match self.reader.get_varint(&mut w) {
-                Ok((rv, fin)) => {
-                    if fin || rv == 0 {
-                        self.fin = fin;
-                        break None;
-                    }
-
-                    if self.reader.done() {
-                        match decode_varint(&mut self.reader) {
-                            Ok(v) => {
-                                break Some(v);
-                            }
-                            Err(_) => {
-                                self.fin = true;
-                                break None;
-                            }
+            let to_read = self.reader.min_remaining();
+            let mut buf = Vec::with_capacity(to_read);
+            buf.resize(to_read, 0);
+            match conn.stream_recv(stream_id, &mut buf[..]) {
+                Ok((_, true)) => {
+                    self.fin = true;
+                    break None;
+                }
+                Ok((0, false)) => {
+                    break None;
+                }
+                Ok((amount, false)) => {
+                    let mut dec = Decoder::from(&buf[..amount]);
+                    match self.reader.consume(&mut dec) {
+                        IncrementalDecoderResult::Uint(v) => {
+                            break Some(v);
+                        }
+                        IncrementalDecoderResult::InProgress => {}
+                        _ => {
+                            break None;
                         }
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    qdebug!([conn] "Error reading stream type for stream {}: {:?}", stream_id, e);
                     self.fin = true;
                     break None;
                 }
@@ -772,9 +779,9 @@ impl HttpConn {
     fn create_control_stream(&mut self) -> Res<()> {
         qdebug!([self] "create_control_stream.");
         self.control_stream_local.stream_id = Some(self.conn.stream_create(StreamType::UniDi)?);
-        self.control_stream_local
-            .buf
-            .encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
+        let mut enc = Encoder::default();
+        enc.encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
+        self.control_stream_local.buf.append(&mut enc.into());
         Ok(())
     }
 

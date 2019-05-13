@@ -38,7 +38,6 @@ pub enum Error {
     InvalidMigration,
     CryptoError(neqo_crypto::Error),
     CryptoAlert(u8),
-    IoError(neqo_common::Error),
     NoMoreData,
     TooMuchData,
     UnknownFrameType,
@@ -49,7 +48,6 @@ pub enum Error {
     UnexpectedMessage,
     HandshakeFailed,
     KeysNotFound,
-    UnknownTransportParameter,
     ConnectionState,
     AckedUnsentPacket,
 }
@@ -71,7 +69,6 @@ impl Error {
             Error::CryptoAlert(a) => 0x100 + (*a as u16),
             // TODO(ekr@rtfm.com): Map these errors.
             Error::CryptoError(_)
-            | Error::IoError(..)
             | Error::NoMoreData
             | Error::TooMuchData
             | Error::UnknownFrameType
@@ -82,7 +79,6 @@ impl Error {
             | Error::UnexpectedMessage
             | Error::HandshakeFailed
             | Error::KeysNotFound
-            | Error::UnknownTransportParameter
             | Error::ConnectionState
             | Error::AckedUnsentPacket => 1,
         }
@@ -96,18 +92,10 @@ impl From<neqo_crypto::Error> for Error {
     }
 }
 
-impl From<neqo_common::Error> for Error {
-    fn from(err: neqo_common::Error) -> Self {
-        qinfo!("IO error {:?}", err);
-        Error::IoError(err)
-    }
-}
-
 impl ::std::error::Error for Error {
     fn source(&self) -> Option<&(::std::error::Error + 'static)> {
         match self {
             Error::CryptoError(e) => Some(e),
-            Error::IoError(e) => Some(e),
             _ => None,
         }
     }

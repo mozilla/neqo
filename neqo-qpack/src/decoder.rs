@@ -498,15 +498,14 @@ impl QPackDecoder {
 
     pub fn send_if_decoder_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         match self.local_stream_id {
-            Some(id) => {
-                if id == stream_id {
+            Some(id) if id == stream_id => {
                     // Encode increment instruction if needed.
                     if self.increment > 0 {
                         self.send_buf
                             .encode_prefixed_encoded_int(0x00, 2, self.increment);
                         self.increment = 0;
                     }
-                    match conn.stream_send(stream_id, self.send_buf.as_mut_vec()) {
+                    match conn.stream_send(stream_id, &self.send_buf[..]) {
                         Err(_) => Err(Error::DecoderStreamError),
                         Ok(r) => {
                             qdebug!([self] "{} bytes sent.", r);
@@ -514,11 +513,8 @@ impl QPackDecoder {
                             Ok(true)
                         }
                     }
-                } else {
-                    Ok(false)
-                }
             }
-            None => Ok(false),
+            _ => Ok(false),
         }
     }
 
