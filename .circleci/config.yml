@@ -23,8 +23,12 @@ jobs:
 
       - run:
           name: Build
-          command: NSS_JOBS=3 cargo build
+          command: NSS_JOBS=3 cargo build -v
+
+      - run:
+          name: Show Files
+          command: find target -print
 
       - run:
           name: Test
-          command: cargo test
+          command: cargo test -v

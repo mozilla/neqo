@@ -39,10 +39,36 @@ fn is_debug() -> bool {
     }
 }
 
+// bindgen needs access to libclang.
+// On windows, this doesn't just work, you have to set LIBCLANG_PATH.
+// Rather than download the 400Mb+ files, like gecko does, let's just reuse their work.
+fn setup_clang() {
+    match env::var("LIBCLANG_PATH") {
+        Ok(_) => return,
+        _ => {},
+    };
+    let mozbuild_root = match env::var("MOZBUILD_STATE_PATH") {
+        Ok(dir) => PathBuf::from(dir.trim()),
+        _ => {
+            if std::env::consts::OS == "windows" {
+                eprintln!("warning: Building without a gecko setup is not likely to work.");
+                eprintln!("         A working libclang is needed to build neqo.");
+                eprintln!("");
+                eprintln!("    We recommend checking out https://github.com/mozilla/gecko-dev");
+                eprintln!("    Then run `./mach bootstrap` which will retrieve clang.");
+            }
+            return;
+        }
+    };
+    let libclang_dir = mozbuild_root.join("clang").join("lib");
+    env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+    println!("env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
+}
+
 fn nss_dir() -> PathBuf {
     let dir = match env::var("NSS_DIR") {
         Ok(dir) => PathBuf::from(dir.trim()),
-        Err(_) => {
+        _ => {
             let out_dir = env::var("OUT_DIR").unwrap();
             let dir = Path::new(&out_dir).join("nss");
             if !dir.exists() {
@@ -108,7 +134,8 @@ fn static_link() {
 }
 
 fn build_bindings(base: &str, bindings: &Bindings, includes: &[&Path]) {
-    let header = String::from(BINDINGS_DIR) + "/" + base + ".h";
+    let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + ".h");
+    let header = header_path.to_str().unwrap();
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join(String::from(base) + ".rs");
 
     println!("cargo:rerun-if-changed={}", header);
@@ -148,6 +175,8 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[&Path]) {
 }
 
 fn main() {
+    setup_clang();
+
     println!("cargo:rerun-if-env-changed=NSS_DIR");
     let nss = nss_dir();
     let mut build_nss = vec![String::from("-c"), String::from("./build.sh")];
