@@ -45,7 +45,7 @@ fn is_debug() -> bool {
 fn setup_clang() {
     match env::var("LIBCLANG_PATH") {
         Ok(_) => return,
-        _ => {},
+        _ => {}
     };
     let mozbuild_root = match env::var("MOZBUILD_STATE_PATH") {
         Ok(dir) => PathBuf::from(dir.trim()),
