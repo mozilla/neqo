@@ -50,12 +50,14 @@ fn setup_clang() {
     let mozbuild_root = match env::var("MOZBUILD_STATE_PATH") {
         Ok(dir) => PathBuf::from(dir.trim()),
         _ => {
-            if std::env::consts::OS == "windows" {
+            if env::consts::OS == "windows" {
                 eprintln!("warning: Building without a gecko setup is not likely to work.");
                 eprintln!("         A working libclang is needed to build neqo.");
+                eprintln!("         Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
                 eprintln!("");
                 eprintln!("    We recommend checking out https://github.com/mozilla/gecko-dev");
                 eprintln!("    Then run `./mach bootstrap` which will retrieve clang.");
+                eprintln!("    Make sure to export MOZBUILD_STATE_PATH when building.");
             }
             return;
         }
@@ -101,10 +103,40 @@ fn nss_dir() -> PathBuf {
     dir
 }
 
-fn static_link() {
+fn get_bash() -> PathBuf {
+    // When running under MOZILLABUILD, we need to make sure not to invoke
+    // another instance of bash that might be sitting around (like WSL).
+    match env::var("MOZILLABUILD") {
+        Ok(d) => PathBuf::from(d).join("msys").join("bin").join("bash.exe"),
+        _ => PathBuf::from("bash"),
+    }
+}
+
+fn build_nss(dir: PathBuf) {
+    let mut build_nss = vec![String::from("./build.sh")];
+    if is_debug() {
+        build_nss.push(String::from("--static"));
+    } else {
+        build_nss.push(String::from("-o"));
+    }
+    match env::var("NSS_JOBS") {
+        Ok(d) => {
+            build_nss.push(String::from("-j"));
+            build_nss.push(d);
+        }
+        _ => (),
+    }
+    Command::new(get_bash())
+        .args(build_nss)
+        .current_dir(dir)
+        .status()
+        .expect("NSS build failed");
+}
+
+fn static_link(nsstarget: &PathBuf) {
     // This is kludgy.
-    let debug_dir = nss_dir().join("out").join("Debug");
-    println!("cargo:rustc-link-search={}", debug_dir.to_str().unwrap());
+    let lib_dir = nsstarget.join("lib");
+    println!("cargo:rustc-link-search={}", lib_dir.to_str().unwrap());
     for lib in &[
         "certdb",
         "certhi",
@@ -126,14 +158,27 @@ fn static_link() {
         println!("cargo:rustc-link-lib=static={}", lib);
     }
 
-    for lib in &[
-        "sqlite3", "pthread", "dl", "c", "z", "plds4", "plc4", "nspr4",
-    ] {
+    let other_libs = if env::consts::OS == "windows" {
+        vec!["sqlite", "libplds4", "libplc4", "libnspr4"]
+    } else {
+        vec!["sqlite", "pthread", "dl", "c", "z", "plds4", "plc4", "nspr4"]
+    };
+    for lib in other_libs {
         println!("cargo:rustc-link-lib={}", lib);
     }
 }
 
-fn build_bindings(base: &str, bindings: &Bindings, includes: &[&Path]) {
+fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
+    let nsprinclude = nsstarget.join("include").join("nspr");
+    let nssinclude = nssdist.join("public").join("nss");
+    let includes = vec![nsprinclude, nssinclude];
+    for i in &includes {
+        println!("cargo:include={}", i.to_str().unwrap());
+    }
+    includes
+}
+
+fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
     let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + ".h");
     let header = header_path.to_str().unwrap();
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join(String::from(base) + ".rs");
@@ -142,6 +187,7 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[&Path]) {
 
     let mut builder = Builder::default().header(header).generate_comments(false);
 
+    builder = builder.clang_arg(String::from("-v"));
     for i in includes {
         builder = builder.clang_arg(String::from("-I") + i.to_str().unwrap());
     }
@@ -162,7 +208,6 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[&Path]) {
     }
     for v in bindings.opaque.as_ref().unwrap_or_else(|| &empty).iter() {
         builder = builder.opaque_type(v);
-        // .raw_line(String::from("pub enum ") + v + "{}");
     }
     for v in bindings.enums.as_ref().unwrap_or_else(|| &empty).iter() {
         builder = builder.constified_enum_module(v);
@@ -179,36 +224,16 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=NSS_DIR");
     let nss = nss_dir();
-    let mut build_nss = vec![String::from("-c"), String::from("./build.sh")];
-    if is_debug() {
-        build_nss.push(String::from("--test"));
-    }
-    match env::var("NSS_JOBS") {
-        Ok(d) => {
-            build_nss.push(String::from("-j"));
-            build_nss.push(d);
-        }
-        _ => (),
-    }
-    Command::new("bash")
-        .args(build_nss)
-        .current_dir(nss.clone())
-        .status()
-        .expect("NSS build failed");
+    build_nss(nss.clone());
 
     // $NSS_DIR/../dist/
-    let nssdist = nss.parent().unwrap().join("dist").canonicalize().unwrap();
+    let nssdist = nss.parent().unwrap().join("dist");
     println!("cargo:rerun-if-env-changed=NSS_TARGET");
     let nsstarget = env::var("NSS_TARGET")
         .unwrap_or_else(|_| fs::read_to_string(nssdist.join("latest")).unwrap());
     let nsstarget = nssdist.join(nsstarget.trim());
 
-    let nsprinclude = nsstarget.join("include").join("nspr");
-    let nssinclude = nssdist.join("public").join("nss");
-    let includes = vec![nsprinclude.as_path(), nssinclude.as_path()];
-    for i in &includes {
-        println!("cargo:include={}", i.to_str().unwrap());
-    }
+    let includes = get_includes(&nsstarget, &nssdist);
 
     let nsslibdir = nsstarget.join("lib");
     println!(
@@ -217,7 +242,7 @@ fn main() {
     );
 
     if is_debug() {
-        static_link();
+        static_link(&nsstarget);
     } else {
         println!("cargo:rustc-link-lib=nspr4");
         println!("cargo:rustc-link-lib=nss3");
