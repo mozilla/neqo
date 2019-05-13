@@ -250,16 +250,14 @@ impl QPackEncoder {
 
     pub fn send_if_encoder_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         match self.local_stream_id {
-            Some(id) if id == stream_id => {
-                    match conn.stream_send(stream_id, &self.send_buf[..]) {
-                        Err(_) => Err(Error::EncoderStreamError),
-                        Ok(r) => {
-                            qdebug!([self] "{} bytes sent.", r);
-                            self.send_buf.read(r as usize);
-                            Ok(true)
-                        }
-                    }
-            }
+            Some(id) if id == stream_id => match conn.stream_send(stream_id, &self.send_buf[..]) {
+                Err(_) => Err(Error::EncoderStreamError),
+                Ok(r) => {
+                    qdebug!([self] "{} bytes sent.", r);
+                    self.send_buf.read(r as usize);
+                    Ok(true)
+                }
+            },
             _ => Ok(false),
         }
     }

@@ -257,7 +257,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
         return Ok(p);
     }
 
-    let version =d!(d.decode_uint(4)) as u32;
+    let version = d!(d.decode_uint(4)) as u32;
     p.version = Some(version);
     let (dest_len, src_len) = decode_cidl(d!(d.decode_byte()));
     p.dcid = ConnectionId(d!(d.decode(dest_len.into())).to_vec());
