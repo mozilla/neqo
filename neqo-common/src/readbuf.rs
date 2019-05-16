@@ -155,9 +155,13 @@ impl ReadBuf {
         self.len = 0;
         self.state = ReadBufState::Uninit;
     }
+
+    pub fn has_data_recv(&mut self) -> bool {
+        self.offset > 0
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    // TODO(mt): Add some tests for this.
+    // TODO(mt): Add some tests for this. dragana: I think I will remove this, so we do not need any tests here.
 }
