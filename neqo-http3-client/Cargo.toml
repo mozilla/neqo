@@ -10,3 +10,4 @@ neqo-transport = { version = "0.1", path = "./../neqo-transport" }
 neqo-common = { version="0.1", path="./../neqo-common" }
 neqo-http3 = { version = "0.1", path = "./../neqo-http3" }
 structopt = "0.2.15"
+url = "1.7.2"

@@ -9,17 +9,19 @@ use neqo_crypto::init_db;
 use neqo_http3::{Http3Connection, Http3Event, Http3State};
 use neqo_transport::{Connection, Datagram};
 use std::collections::HashSet;
+use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
+use std::process::exit;
 use std::str::FromStr;
 use std::string::ParseError;
 use structopt::StructOpt;
+use url::Url;
 
 #[derive(Debug)]
 struct Headers {
     pub h: Vec<(String, String)>,
 }
-
 
 // dragana: this is a very stupid parser.
 // headers should be in form "[(something1, something2), (something3, something4)]"
@@ -42,7 +44,8 @@ impl FromStr for Headers {
                 .collect();
 
             if h2.len() == 2 {
-                res.h.push((h2[0].trim().to_string(), h2[1].trim().to_string()));
+                res.h
+                    .push((h2[0].trim().to_string(), h2[1].trim().to_string()));
             }
         }
 
@@ -62,40 +65,30 @@ struct Args {
     /// This client still only does HTTP3 no matter what the ALPN says.
     alpn: Vec<String>,
 
-    #[structopt(short = "4", long)]
-    /// Restrict to IPv4.
-    ipv4: bool,
-    #[structopt(short = "6", long)]
-    /// Restrict to IPv6.
-    ipv6: bool,
+    url: Url,
 
-    host: String,
-    port: u16,
-
+    #[structopt(short = "m", default_value = "GET")]
     method: String,
-    scheme: String,
-    path: String,
+
+    #[structopt(short = "h", long, default_value = "[]")]
     headers: Headers,
 
-    #[structopt(short = "t", long)]
+    #[structopt(short = "t", long, default_value = "128")]
     max_table_size: u32,
 
-    #[structopt(short = "b", long)]
+    #[structopt(short = "b", long, default_value = "128")]
     max_blocked_streams: u16,
 }
 
 impl Args {
-    fn addr(&self) -> SocketAddr {
-        self.to_socket_addrs()
-            .expect("Remote address error")
-            .next()
-            .expect("No remote addresses")
+    fn remote_addr(&self) -> Result<SocketAddr, io::Error> {
+        Ok(self.to_socket_addrs()?.next().expect("No remote addresses"))
     }
 
-    fn bind(&self) -> SocketAddr {
-        match self.addr() {
-            SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0),
-            SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
+    fn local_addr(&self) -> Result<SocketAddr, io::Error> {
+        match self.remote_addr()? {
+            SocketAddr::V4(..) => Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0)),
+            SocketAddr::V6(..) => Ok(SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0)),
         }
     }
 }
@@ -105,7 +98,15 @@ impl ToSocketAddrs for Args {
     fn to_socket_addrs(&self) -> ::std::io::Result<Self::Iter> {
         // This is idiotic.  There is no path from hostname: String to IpAddr.
         // And no means of controlling name resolution either.
-        std::fmt::format(format_args!("{}:{}", self.host, self.port)).to_socket_addrs()
+        if self.url.port_or_known_default().is_none() {
+            return Err(io::Error::new(ErrorKind::InvalidInput, "invalid port"));
+        }
+        std::fmt::format(format_args!(
+            "{}:{}",
+            self.url.host_str().unwrap_or("localhost"),
+            self.url.port_or_known_default().unwrap()
+        ))
+        .to_socket_addrs()
     }
 }
 
@@ -147,7 +148,13 @@ fn process_loop(
             return client.state();
         }
 
-        let sz = socket.recv(&mut buf[..]).expect("UDP error");
+        let sz = match socket.recv(&mut buf[..]) {
+            Err(err) => {
+                eprintln!("UDP error: {}", err);
+                exit(1)
+            }
+            Ok(sz) => sz,
+        };
         if sz == buf.len() {
             eprintln!("Received more than {} bytes", buf.len());
             continue;
@@ -225,17 +232,34 @@ fn main() {
     let args = Args::from_args();
     init_db(args.db.clone());
 
-    let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
+    let remote_addr = match args.remote_addr() {
+        Err(e) => {
+            eprintln!("Unable to resolve remote addr: {}", e);
+            exit(1)
+        }
+        Ok(addr) => addr,
+    };
+    let socket = match args.local_addr().and_then(|args| UdpSocket::bind(args)) {
+        Err(e) => {
+            eprintln!("Unable to bind UDP socket: {}", e);
+            exit(1)
+        }
+        Ok(s) => s,
+    };
     socket.connect(&args).expect("Unable to connect UDP socket");
 
     let local_addr = socket.local_addr().expect("Socket local address not bound");
-    let remote_addr = args.addr();
 
     println!("Client connecting: {:?} -> {:?}", local_addr, remote_addr);
 
     let mut client = Http3Connection::new(
-        Connection::new_client(args.host.as_str(), args.alpn, local_addr, remote_addr)
-            .expect("must succeed"),
+        Connection::new_client(
+            args.url.host_str().unwrap(),
+            args.alpn,
+            local_addr,
+            remote_addr,
+        )
+        .expect("must succeed"),
         args.max_table_size,
         args.max_blocked_streams,
     );
@@ -246,9 +270,9 @@ fn main() {
     let client_stream_id = client
         .fetch(
             &args.method,
-            &args.scheme,
-            &args.host,
-            &args.path,
+            &args.url.scheme(),
+            &args.url.host_str().unwrap(),
+            &args.url.path(),
             &args.headers.h,
         )
         .unwrap();
