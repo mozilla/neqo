@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
+use std::process::exit;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -21,22 +22,22 @@ struct Args {
     #[structopt(short = "h", long)]
     /// Optional local address to bind to, defaults to the unspecified address.
     host: Option<String>,
+
     /// Port number.
+    #[structopt(short = "p", long, default_value = "443")]
     port: u16,
 
-    /// A resource to request.
-    request: Vec<String>,
-
-    #[structopt(short = "t", long)]
+    #[structopt(short = "t", long, default_value = "128")]
     max_table_size: u32,
 
-    #[structopt(short = "b", long)]
+    #[structopt(short = "b", long, default_value = "128")]
     max_blocked_streams: u16,
 
     #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
     /// NSS database directory.
     db: PathBuf,
-    #[structopt(short = "k", long)]
+
+    #[structopt(short = "k", long, default_value = "key")]
     /// Name of keys from NSS database.
     key: Vec<String>,
 
@@ -46,24 +47,21 @@ struct Args {
     /// This server still only does HTTP3 no matter what the ALPN says.
     alpn: Vec<String>,
 
-    #[structopt(short = "4", long)]
-    /// Restrict to IPv4.
-    ipv4: bool,
     #[structopt(short = "6", long)]
-    /// Restrict to IPv6.
+    /// Use IPv6 instead of IPv4.
     ipv6: bool,
 }
 
 impl Args {
     fn bind(&self) -> SocketAddr {
-        match (&self.host, self.ipv4, self.ipv6) {
+        match (&self.host, self.ipv6) {
             (Some(..), ..) => self
                 .to_socket_addrs()
                 .expect("Remote address error")
                 .next()
                 .expect("No remote addresses"),
-            (_, false, true) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), self.port),
-            _ => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), self.port),
+            (None, true) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), self.port),
+            (None, false) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), self.port),
         }
     }
 }
@@ -71,9 +69,9 @@ impl Args {
 impl ToSocketAddrs for Args {
     type Iter = ::std::vec::IntoIter<SocketAddr>;
     fn to_socket_addrs(&self) -> ::std::io::Result<Self::Iter> {
-        let dflt = String::from(match (self.ipv4, self.ipv6) {
-            (false, true) => "::",
-            _ => "0.0.0.0",
+        let dflt = String::from(match self.ipv6 {
+            true => "::",
+            false => "0.0.0.0",
         });
         let h = self.host.as_ref().unwrap_or(&dflt);
         // This is idiotic.  There is no path from hostname: String to IpAddr.
@@ -140,9 +138,21 @@ fn main() {
     init_db(args.db.clone());
 
     // TODO(mt): listen on both v4 and v6.
-    let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
+    let socket = match UdpSocket::bind(args.bind()) {
+        Err(err) => {
+            eprintln!("Unable to bind UDP socket: {}", err);
+            exit(1)
+        }
+        Ok(s) => s,
+    };
 
-    let local_addr = socket.local_addr().expect("Socket local address not bound");
+    let local_addr = match socket.local_addr() {
+        Err(err) => {
+            eprintln!("Socket local address not bound: {}", err);
+            exit(1)
+        }
+        Ok(s) => s,
+    };
 
     println!("Server waiting for connection on: {:?}", local_addr);
 
@@ -150,7 +160,14 @@ fn main() {
     let mut in_dgrams = Vec::new();
     let mut connections: HashMap<SocketAddr, Http3Connection> = HashMap::new();
     loop {
-        let (sz, remote_addr) = socket.recv_from(&mut buf[..]).expect("UDP error");
+        let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
+            Err(err) => {
+                eprintln!("UDP recv error: {}", err);
+                exit(1)
+            }
+            Ok(res) => res,
+        };
+
         if sz == buf.len() {
             eprintln!("Might have received more than {} bytes", buf.len());
             continue;
@@ -164,7 +181,7 @@ fn main() {
             Http3Connection::new(
                 Connection::new_server(args.key.clone(), args.alpn.clone()).expect("must succeed"),
                 args.max_table_size,
-                args.max_blocked_streams
+                args.max_blocked_streams,
             )
         });
         server.set_new_stream_callback(http_serve);
