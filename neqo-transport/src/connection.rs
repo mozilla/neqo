@@ -2684,8 +2684,9 @@ impl LossRecovery {
         &mut self,
         cur_time_nanos: u64,
     ) -> (Vec<SentPacket>, bool, bool) {
-        let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
+        let cur_time = cur_time_nanos / 1000; //TODO(dragana) currently LossRecovery does everything in microseconds.
         let mut lost_packets = Vec::new();
+        //TODO(dragana) enable retransmit_unacked_crypto and send_one_or_two_packets when functionanlity to send not-lost packet is there.
         //let mut retransmit_unacked_crypto = false;
         //let mut send_one_or_two_packets = false;
         if cur_time < self.loss_detection_timer {
