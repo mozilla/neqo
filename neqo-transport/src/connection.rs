@@ -23,7 +23,7 @@ use neqo_crypto::aead::Aead;
 use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
 
-use crate::frame::{decode_frame, AckRange, Frame, FrameType, StreamType};
+use crate::frame::{decode_frame, AckRange, CloseType, Frame, FrameType, StreamType};
 use crate::nss::{
     Agent, Cipher, Client, Epoch, HandshakeState, Record, Server, SymKey, TLS_AES_128_GCM_SHA256,
     TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
@@ -257,6 +257,13 @@ pub enum ConnectionEvent {
     SendStreamComplete { stream_id: u64 },
     /// Peer increased MAX_STREAMS
     SendStreamCreatable { stream_type: StreamType },
+    /// Connection closed
+    ConnectionClosed {
+        close_type: CloseType,
+        error_code: u16,
+        frame_type: u64,
+        reason_phrase: String,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -307,6 +314,21 @@ impl ConnectionEvents {
     pub fn send_stream_creatable(&mut self, stream_type: StreamType) {
         self.events
             .insert(ConnectionEvent::SendStreamCreatable { stream_type });
+    }
+
+    pub fn connection_closed(
+        &mut self,
+        close_type: CloseType,
+        error_code: u16,
+        frame_type: u64,
+        reason_phrase: &str,
+    ) {
+        self.events.insert(ConnectionEvent::ConnectionClosed {
+            close_type,
+            error_code,
+            frame_type,
+            reason_phrase: reason_phrase.to_owned(),
+        });
     }
 
     pub fn events(&mut self) -> BTreeSet<ConnectionEvent> {
@@ -1457,7 +1479,19 @@ impl Connection {
                 frame_type,
                 reason_phrase,
             } => {
-                qinfo!([self] "ConnectionClose received. Closing. Close type: {:?} Error code: {} frame type {:x} reason {}",close_type, error_code, frame_type, String::from_utf8_lossy(&reason_phrase));
+                let reason_phrase = String::from_utf8_lossy(&reason_phrase);
+                qinfo!([self]
+                       "ConnectionClose received. Closing. Close type: {:?} Error code: {} frame type {:x} reason {}",
+                       close_type,
+                       error_code,
+                       frame_type,
+                       reason_phrase);
+                self.events.borrow_mut().connection_closed(
+                    close_type,
+                    error_code,
+                    frame_type,
+                    &reason_phrase,
+                );
                 self.set_state(State::Closed(ConnectionError::Application(error_code)));
             }
         };

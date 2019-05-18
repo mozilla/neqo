@@ -62,7 +62,7 @@ impl StreamType {
     }
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Debug, PartialOrd, Ord, Clone, Copy)]
 pub enum CloseType {
     Transport,
     Application,
