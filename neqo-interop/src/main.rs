@@ -1,7 +1,13 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use neqo_common::now;
 use neqo_crypto::init_db;
 use neqo_transport::frame::StreamType;
-use neqo_transport::{Connection, Datagram, State};
+use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
@@ -78,19 +84,20 @@ fn process_loop(
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     loop {
-        let (out_dgrams, _timer) = client.process(in_dgrams.drain(..), now());
-        emit_packets(&socket, &out_dgrams);
+        client.process_input(in_dgrams.drain(..), now());
 
-        let state = client.state().clone();
-        if let State::Closed(..) = state {
-            return state;
-        }
-        if !handler.handle(client) {
-            return state;
+        if let State::Closed(..) = client.state() {
+            return client.state().clone();
         }
 
-        let (out_dgrams, _timer) = client.process(vec![], now());
+        let exiting = !handler.handle(client);
+
+        let (out_dgrams, _timer) = client.process_output(now());
         emit_packets(&socket, &out_dgrams);
+
+        if exiting {
+            return client.state().clone();
+        }
 
         let sz = socket.recv(&mut buf[..]).expect("UDP error");
         if sz == buf.len() {
@@ -125,31 +132,39 @@ struct PostConnectHandler {
 // This is a bit fancier than actually needed.
 impl Handler for PostConnectHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
-        let iter = client.get_recvable_streams();
         let mut data = vec![0; 4000];
-        let mut streams = Vec::new();
-        for (stream_id, _stream) in iter {
-            if !self.streams.contains(&stream_id) {
-                println!("Data on unexpected stream: {}", stream_id);
-                return false;
+        for event in client.events() {
+            match event {
+                ConnectionEvent::RecvStreamReadable { stream_id } => {
+                    if !self.streams.contains(&stream_id) {
+                        println!("Data on unexpected stream: {}", stream_id);
+                        return false;
+                    }
+
+                    let (_sz, fin) = client
+                        .stream_recv(stream_id, &mut data)
+                        .expect("Read should succeed");
+                    println!(
+                        "READ[{}]: {}",
+                        stream_id,
+                        String::from_utf8(data.clone()).unwrap()
+                    );
+                    if fin {
+                        println!("<FIN[{}]>", stream_id);
+                        client.close(0, "kthxbye!");
+                        return false;
+                    }
+                }
+                ConnectionEvent::SendStreamWritable { stream_id } => {
+                    println!("stream {} writable", stream_id)
+                }
+                _ => {
+                    println!("Unexpected event {:?}", event);
+                }
             }
-            streams.push(stream_id);
         }
 
-        for stream_id in streams {
-            let (_sz, fin) = client
-                .stream_recv(stream_id, &mut data)
-                .expect("Read should succeed");
-            println!(
-                "READ[{}]: {}",
-                stream_id,
-                String::from_utf8(data.clone()).unwrap()
-            );
-            if fin {
-                println!("<FIN[{}]>", stream_id);
-            }
-        }
-        return true;
+        true
     }
 }
 
@@ -172,9 +187,7 @@ fn main() {
     process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h);
 
     let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
-    let req: String = "GET /10\n
-"
-    .to_string();
+    let req: String = "GET /10\r\n".to_string();
     client
         .stream_send(client_stream_id, req.as_bytes())
         .unwrap();
