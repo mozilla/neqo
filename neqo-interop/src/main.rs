@@ -229,11 +229,11 @@ fn run_peer(peer: &'static Peer) -> Vec<(&'static Test, String)> {
         }
     }
 
-    eprintln!("Tests for {} complete {:?}", peer.label, results);
+    println!("Tests for {} complete {:?}", peer.label, results);
     results
 }
 
-const PEERS: [Peer; 4] = [
+const PEERS: [Peer; 5] = [
     Peer {
         label: &"quant",
         host: &"quant.eggert.org",
@@ -251,7 +251,12 @@ const PEERS: [Peer; 4] = [
     },
     Peer {
         label: &"applequic",
-        host: &"192.168.200.19",
+        host: &"192.168.203.142",
+        port: 4433,
+    },
+    Peer {
+        label: &"f5",
+        host: &"208.85.208.226",
         port: 4433,
     },
 ];
