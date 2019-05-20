@@ -160,7 +160,7 @@ impl Peer {
 
     fn alpn(&self) -> Vec<String> {
         match self.label {
-            "quant" => vec![String::from("h3-20")],
+            "quant" => vec![String::from("hzzz")],
             "quicly" => vec![String::from("http/0.9")],
             _ => vec![String::from("hq-20")],
         }
@@ -194,9 +194,11 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     let mut h = PreConnectHandler {};
     process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h);
 
-    eprintln!("Completed {} {:?}", peer.label, test);
-
-    (test, String::from("OK"))
+    let st = client.state();
+    match st {
+        State::Connected => (test, String::from("OK")),
+        _ => (test, format!("{:?}", st)),
+    }
 }
 
 fn run_peer(peer: &'static Peer) -> Vec<(&'static Test, String)> {
