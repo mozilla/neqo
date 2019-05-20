@@ -5,14 +5,13 @@
 // except according to those terms.
 
 #![allow(dead_code)]
-use crate::connection::{Role, QUIC_VERSION};
 use crate::{Error, Res};
 use neqo_common::data::Data;
 use neqo_common::hex;
 use neqo_common::varint::get_varint_len;
 use neqo_common::{qdebug, qtrace};
 use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-use neqo_crypto::{HandshakeMessage, TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS};
+use neqo_crypto::HandshakeMessage;
 use std::collections::HashMap;
 
 struct PreferredAddress {
@@ -131,17 +130,7 @@ pub struct TransportParameters {
 }
 
 impl TransportParameters {
-    pub fn encode(&self, role: Role, d: &mut Data) -> Res<()> {
-        // TODO(ekr@rtfm.com): Remove this when we cut over
-        // to -19.
-        match role {
-            Role::Client => d.encode_uint(QUIC_VERSION, 4),
-            Role::Server => {
-                d.encode_uint(QUIC_VERSION, 4);
-                d.encode_uint(4u64, 1);
-                d.encode_uint(QUIC_VERSION, 4);
-            }
-        }
+    pub fn encode(&self, d: &mut Data) -> Res<()> {
         let mut d2 = Data::default();
         for (tipe, tp) in &self.params {
             tp.encode(&mut d2, *tipe)?;
@@ -152,22 +141,8 @@ impl TransportParameters {
         Ok(())
     }
 
-    pub fn decode(role: Role, d: &mut Data) -> Res<TransportParameters> {
+    pub fn decode(d: &mut Data) -> Res<TransportParameters> {
         let mut tps = TransportParameters::default();
-        // TODO(ekr@rtfm.com): Remove this when we cut over
-        // to -19.
-        let ver = d.decode_uint(4)?;
-        if ver != QUIC_VERSION as u64 {
-            return Err(Error::TransportParameterError);
-        }
-        match role {
-            Role::Server => {}
-            Role::Client => {
-                let l = d.decode_uint(1)?;
-                d.decode_data(l as usize)?;
-            }
-        }
-
         qtrace!("Parsed fixed TP header");
 
         let l = d.decode_uint(2)?;
@@ -274,18 +249,12 @@ pub struct TransportParametersHandler {
 
 impl ExtensionHandler for TransportParametersHandler {
     fn write(&mut self, msg: HandshakeMessage, d: &mut [u8]) -> ExtensionWriterResult {
-        let role = match msg {
-            TLS_HS_CLIENT_HELLO => Role::Client,
-            TLS_HS_ENCRYPTED_EXTENSIONS => Role::Server,
-            _ => return ExtensionWriterResult::Skip,
-        };
-
         qdebug!("Writing transport parameters, msg={:?}", msg);
 
         // TODO(ekr@rtfm.com): Modify to avoid a copy.
         let mut buf = Data::default();
         self.local
-            .encode(role, &mut buf)
+            .encode(&mut buf)
             .expect("Failed to encode transport parameters");
         assert!(buf.remaining() <= d.len());
         d[..buf.remaining()].copy_from_slice(&buf.as_mut_vec());
@@ -299,16 +268,10 @@ impl ExtensionHandler for TransportParametersHandler {
             hex(d),
         );
 
-        let role = match msg {
-            TLS_HS_CLIENT_HELLO => Role::Server,
-            TLS_HS_ENCRYPTED_EXTENSIONS => Role::Client,
-            _ => return ExtensionHandlerResult::Alert(110), // unsupported_extension
-        };
-
         // TODO(ekr@rtfm.com): Unnecessary copy.
         let mut buf = Data::from_slice(d);
 
-        match TransportParameters::decode(role, &mut buf) {
+        match TransportParameters::decode(&mut buf) {
             Err(_) => ExtensionHandlerResult::Alert(47), // illegal_parameter
             Ok(tp) => {
                 self.remote = Some(tp);
@@ -323,7 +286,6 @@ impl ExtensionHandler for TransportParametersHandler {
 #[allow(unused_variables)]
 mod tests {
     use super::*;
-    use crate::connection::Role;
     #[test]
     fn test_basic_tps() {
         let mut tps = TransportParameters::default();
@@ -335,9 +297,9 @@ mod tests {
             .insert(INITIAL_MAX_STREAMS_BIDI, TransportParameter::Integer(10));
 
         let mut d = Data::default();
-        tps.encode(Role::Client, &mut d).expect("Couldn't encode");
+        tps.encode(&mut d).expect("Couldn't encode");
 
-        let tps2 = TransportParameters::decode(Role::Server, &mut d).expect("Couldn't decode");
+        let tps2 = TransportParameters::decode(&mut d).expect("Couldn't decode");
         assert_eq!(tps, tps2);
 
         println!("TPS = {:?}", tps);
@@ -353,14 +315,8 @@ mod tests {
         assert_eq!(tps2.was_sent(STATELESS_RESET_TOKEN), true);
 
         let mut d = Data::default();
-        tps.encode(Role::Server, &mut d).expect("Couldn't encode");
+        tps.encode(&mut d).expect("Couldn't encode");
 
-        let tps2 = TransportParameters::decode(Role::Client, &mut d).expect("Couldn't decode");
-    }
-
-    #[test]
-    fn test_apple_tps() {
-        let mut d = Data::from_hex("ff00001204ff0000120049000100011e00020010449aeef472626f18a5bba2d51ae473be0003000244b0000400048015f9000005000480015f900006000480015f90000700048004000000080001080009000108");
-        let tps2 = TransportParameters::decode(Role::Client, &mut d).unwrap();
+        let tps2 = TransportParameters::decode(&mut d).expect("Couldn't decode");
     }
 }

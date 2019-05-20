@@ -42,7 +42,7 @@ use crate::{AppError, ConnectionError, Error, Res};
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
 
-pub const QUIC_VERSION: u32 = 0xff000012;
+pub const QUIC_VERSION: u32 = 0xff000014;
 const NUM_EPOCHS: Epoch = 4;
 const MAX_AUTH_TAG: usize = 32;
 
