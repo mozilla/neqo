@@ -16,7 +16,14 @@ use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-interop", about = "A QUIC interop client.")]
-struct Args {}
+struct Args {
+    #[structopt(short = "i", long)]
+    // Peers to include
+    include: Vec<String>,
+
+    #[structopt(short = "e", long)]
+    exclude: Vec<String>,
+}
 
 trait Handler {
     fn handle(&mut self, client: &mut Connection) -> bool;
@@ -74,11 +81,11 @@ fn process_loop(
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
-        if let State::Connected = client.state() {
-            println!("Connected");
-            return false;
+        match client.state() {
+            State::Connected => false,
+            State::Closing(..) => false,
+            _ => true,
         }
-        return true;
     }
 }
 
@@ -150,6 +157,13 @@ impl Peer {
     fn test_enabled(&self, _test: &Test) -> bool {
         true
     }
+
+    fn alpn(&self) -> Vec<String> {
+        match self.label {
+            "quant" => vec![String::from("h3-20")],
+            _ => vec![String::from("http/0.9")],
+        }
+    }
 }
 
 impl ToSocketAddrs for Peer {
@@ -161,14 +175,9 @@ impl ToSocketAddrs for Peer {
     }
 }
 
+#[derive(Debug)]
 enum Test {
     Connect,
-}
-
-impl Test {
-    fn alpn(&self) -> Vec<String> {
-        return vec![String::from("http/0.9")];
-    }
 }
 
 fn run_test<'t>(peer: &Peer, test: &'t Test) -> &'t Test {
@@ -178,12 +187,13 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> &'t Test {
     let local_addr = socket.local_addr().expect("Socket local address not bound");
     let remote_addr = peer.addr();
 
-    let mut client = Connection::new_client(peer.host, test.alpn(), local_addr, remote_addr)
+    let mut client = Connection::new_client(peer.host, peer.alpn(), local_addr, remote_addr)
         .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h);
 
+    println!("Completed {} {:?}", peer.label, test);
     test
 }
 
@@ -207,39 +217,55 @@ fn run_peer(peer: &'static Peer) -> Vec<&'static Test> {
 
     for child in children {
         match child.1.join() {
-            Ok(_) => results.push(child.0),
+            Ok(_) => {
+                println!("Success {:?}", child.0);
+                results.push(child.0)
+            }
             Err(_) => {}
         }
     }
 
-    println!("Tests for {} complete", peer.label);
+    println!("Tests for {} complete {:?}", peer.label, results);
     results
 }
 
-/*const PEERS: [Peer; 1] = [Peer {
-    label: &"quant",
-    host: &"quant.eggert.org",
-    port: 4433,
-}];*/
-
-const PEERS: [Peer; 1] = [Peer {
-    label: &"local",
-    host: &"127.0.0.1",
-    port: 4433,
-}];
+const PEERS: [Peer; 3] = [
+    Peer {
+        label: &"quant",
+        host: &"quant.eggert.org",
+        port: 4433,
+    },
+    Peer {
+        label: &"quicly",
+        host: "kazuhooku.com",
+        port: 4433,
+    },
+    Peer {
+        label: &"local",
+        host: &"127.0.0.1",
+        port: 4433,
+    },
+];
 
 const TESTS: [Test; 1] = [Test::Connect];
 
 fn main() {
     let _tests = vec![Test::Connect];
 
-    let _args = Args::from_args();
+    let args = Args::from_args();
     init();
 
     let mut children = Vec::new();
 
     // Start all the children.
     for peer in &PEERS {
+        if args.include.len() > 0 && !args.include.contains(&String::from(peer.label)) {
+            continue;
+        }
+        if args.exclude.contains(&String::from(peer.label)) {
+            continue;
+        }
+
         let child = thread::spawn(move || {
             run_peer(&peer);
         });
