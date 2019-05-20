@@ -4,13 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{now, Res};
+use neqo_common::now;
 use neqo_crypto::init_db;
-use neqo_transport::frame::StreamType;
+//use neqo_transport::frame::StreamType;
 use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
+use std::thread;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -18,47 +19,6 @@ use structopt::StructOpt;
 struct Args {
     #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
     db: PathBuf,
-
-    #[structopt(short = "a", long, default_value = "http/0.9")]
-    /// ALPN labels to negotiate.
-    ///
-    /// This client still only does HTTP/0.9 no matter what the ALPN says.
-    alpn: Vec<String>,
-
-    #[structopt(short = "4", long)]
-    /// Restrict to IPv4.
-    ipv4: bool,
-    #[structopt(short = "6", long)]
-    /// Restrict to IPv6.
-    ipv6: bool,
-
-    host: String,
-    port: u16,
-}
-
-impl Args {
-    fn addr(&self) -> SocketAddr {
-        self.to_socket_addrs()
-            .expect("Remote address error")
-            .next()
-            .expect("No remote addresses")
-    }
-
-    fn bind(&self) -> SocketAddr {
-        match self.addr() {
-            SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0),
-            SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
-        }
-    }
-}
-
-impl ToSocketAddrs for Args {
-    type Iter = ::std::vec::IntoIter<SocketAddr>;
-    fn to_socket_addrs(&self) -> ::std::io::Result<Self::Iter> {
-        // This is idiotic.  There is no path from hostname: String to IpAddr.
-        // And no means of controlling name resolution either.
-        std::fmt::format(format_args!("{}:{}", self.host, self.port)).to_socket_addrs()
-    }
 }
 
 trait Handler {
@@ -169,8 +129,29 @@ impl Handler for PostConnectHandler {
 }
 
 struct Peer {
-    host: String,
+    label: &'static str,
+    host: &'static str,
     port: u16,
+}
+
+impl Peer {
+    fn addr(&self) -> SocketAddr {
+        self.to_socket_addrs()
+            .expect("Remote address error")
+            .next()
+            .expect("No remote addresses")
+    }
+
+    fn bind(&self) -> SocketAddr {
+        match self.addr() {
+            SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0),
+            SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
+        }
+    }
+
+    fn test_enabled(&self, _test: &Test) -> bool {
+        true
+    }
 }
 
 impl ToSocketAddrs for Peer {
@@ -186,33 +167,61 @@ enum Test {
     Connect,
 }
 
-fn run_test(args: &Args, test: &Test, host: &str, port: u16) -> Res<()> {
-    let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
-    socket.connect(&args).expect("Unable to connect UDP socket");
-
-    let local_addr = socket.local_addr().expect("Socket local address not bound");
-    let remote_addr = args.addr();
-
-    println!("Client connecting: {:?} -> {:?}", local_addr, remote_addr);
+impl Test {
+    fn alpn(&self) -> Vec<String> {
+        return vec![String::from("http/0.9")];
+    }
 }
 
-fn main() {
-    let args = Args::from_args();
-    init_db(args.db.clone());
+fn run_test(peer: &Peer, test: &Test) -> bool {
+    let socket = UdpSocket::bind(peer.bind()).expect("Unable to bind UDP socket");
+    socket.connect(&peer).expect("Unable to connect UDP socket");
 
-    let mut client = Connection::new_client(args.host.as_str(), args.alpn, local_addr, remote_addr)
+    let local_addr = socket.local_addr().expect("Socket local address not bound");
+    let remote_addr = peer.addr();
+
+    let mut client = Connection::new_client(peer.host, test.alpn(), local_addr, remote_addr)
         .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h);
 
-    let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
-    let req: String = "GET /10\r\n".to_string();
-    client
-        .stream_send(client_stream_id, req.as_bytes())
-        .unwrap();
+    return true;
+}
 
-    let mut h2 = PostConnectHandler::default();
-    h2.streams.insert(client_stream_id);
-    process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h2);
+fn run_peer(peer: &'static Peer) -> Vec<&Test> {
+    let results = Vec::new();
+    println!("Running tests for {}", peer.label);
+    for test in &TESTS {
+        if !peer.test_enabled(&test) {
+            continue;
+        }
+
+        let _child = thread::spawn(move || {
+            run_test(peer, test);
+        });
+    }
+
+    results
+}
+
+const PEERS: [Peer; 1] = [Peer {
+    label: &"quant",
+    host: &"quant.eggert.org",
+    port: 4433,
+}];
+
+const TESTS: [Test; 1] = [Test::Connect];
+
+fn main() {
+    let _tests = vec![Test::Connect];
+
+    let args = Args::from_args();
+    init_db(args.db.clone());
+
+    for peer in &PEERS {
+        let _child = thread::spawn(move || {
+            run_peer(&peer);
+        });
+    }
 }
