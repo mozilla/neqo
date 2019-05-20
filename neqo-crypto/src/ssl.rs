@@ -1,3 +1,9 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
@@ -65,11 +71,6 @@ experimental_api!(SSL_SetResumptionTokenCallback(
     cb: SSLResumptionTokenCallback,
     arg: *mut c_void,
 ));
-experimental_api!(SSL_SecretCallback(
-    fd: *mut PRFileDesc,
-    cb: SSLSecretCallback,
-    arg: *mut c_void,
-));
 experimental_api!(SSL_RecordLayerWriteCallback(
     fd: *mut PRFileDesc,
     cb: SSLRecordWriteCallback,
@@ -81,11 +82,6 @@ experimental_api!(SSL_RecordLayerData(
     ct: SSLContentType::Type,
     data: *const u8,
     len: c_uint,
-));
-experimental_api!(SSL_GetCurrentEpoch(
-    fd: *mut PRFileDesc,
-    read_epoch: *mut PRUint16,
-    write_epoch: *mut PRUint16,
 ));
 experimental_api!(SSL_SetResumptionToken(
     fd: *mut PRFileDesc,

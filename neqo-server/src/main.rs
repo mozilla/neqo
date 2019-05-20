@@ -1,9 +1,17 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use neqo_common::now;
 use neqo_crypto::init_db;
-use neqo_transport::{Connection, Datagram, State};
+use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
+use regex::Regex;
+use std::collections::HashMap;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
-use std::time::Instant;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -67,7 +75,50 @@ impl ToSocketAddrs for Args {
     }
 }
 
-// TODO(mt): implement a server that can handle multiple connections.
+// World's dumbest HTTP 0.9 server. Assumes that the whole request is
+// in a single write.
+// TODO(ekr@rtfm.com): One imagines we could fix this.
+fn http_serve(server: &mut Connection, stream: u64) {
+    println!("Stream ID {}", stream);
+    let mut data = vec![0; 4000];
+    server
+        .stream_recv(stream, &mut data)
+        .expect("Read should succeed");
+    let msg = String::from_utf8(data.clone()).unwrap();
+    let re = Regex::new(r"GET +/(\d*)(\r)?\n").unwrap();
+    let m = re.captures(&msg);
+    if m.is_none() {
+        println!("Invalid HTTP request: {}", msg);
+        return;
+    }
+
+    let mut resp: Vec<u8> = vec![];
+    if m.as_ref().unwrap().get(1).is_some() {
+        let path = m.as_ref().unwrap().get(1).unwrap().as_str().clone();
+        println!("Path = {}", path);
+        let count = u32::from_str_radix(path, 10).unwrap();
+        for _i in 0..count {
+            resp.push(0x58);
+        }
+    } else {
+        resp = "Hello World".as_bytes().to_vec();
+    }
+    // TODO(ekr@rtfm.com): This won't work with flow control blocks.
+    server.stream_send(stream, &resp).expect("Successful write");
+    server.stream_close_send(stream).expect("Stream closed");
+}
+
+fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
+    for d in out_dgrams {
+        let sent = socket
+            .send_to(&d[..], d.destination())
+            .expect("Error sending datagram");
+        if sent != d.len() {
+            eprintln!("Unable to send all {} bytes of datagram", d.len());
+        }
+    }
+}
+
 fn main() {
     let args = Args::from_args();
     assert!(args.key.len() > 0, "Need at least one key");
@@ -78,12 +129,12 @@ fn main() {
     let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
 
     let local_addr = socket.local_addr().expect("Socket local address not bound");
-    let mut server = Connection::new_server(args.key, args.alpn).expect("must succeed");
 
     println!("Server waiting for connection on: {:?}", local_addr);
 
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
+    let mut connections: HashMap<SocketAddr, Connection> = HashMap::new();
     loop {
         let (sz, remote_addr) = socket.recv_from(&mut buf[..]).expect("UDP error");
         if sz == buf.len() {
@@ -94,19 +145,32 @@ fn main() {
             in_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
         }
 
-        let out_dgrams = server.process(in_dgrams.drain(..), Instant::now());
+        let mut server = connections.entry(remote_addr).or_insert_with(|| {
+            println!("New connection from {:?}", remote_addr);
+            Connection::new_server(args.key.clone(), args.alpn.clone()).expect("must succeed")
+        });
+
+        // TODO use timer to set socket.set_read_timeout.
+        server.process_input(in_dgrams.drain(..), now());
         if let State::Closed(e) = server.state() {
-            eprintln!("Closed: {:?}", e);
-            break;
+            eprintln!("Closed connection from {:?}: {:?}", remote_addr, e);
+            connections.remove(&remote_addr);
+            continue;
         }
 
-        for d in out_dgrams {
-            let sent = socket
-                .send_to(&d[..], d.destination())
-                .expect("Error sending datagram");
-            if sent != d.len() {
-                eprintln!("Unable to send all {} bytes of datagram", d.len());
+        let mut streams = Vec::new();
+        for event in server.events() {
+            match event {
+                ConnectionEvent::RecvStreamReadable { stream_id } => streams.push(stream_id),
+                _ => {}
             }
         }
+
+        for stream_id in streams {
+            http_serve(&mut server, stream_id);
+        }
+
+        let (out_dgrams, _timer) = server.process_output(now());
+        emit_packets(&socket, &out_dgrams);
     }
 }

@@ -1,0 +1,30 @@
+version: 2
+
+jobs:
+  build:
+    docker:
+      - image: martinthomson/neqo:latest
+
+    steps:
+      - checkout
+
+      - run:
+          name: Show Versions
+          command: |
+            rustup show
+            rustup --version
+            rustc --version
+            cargo --version
+            rustfmt --version
+
+      - run:
+          name: Check Formatting
+          command: cargo fmt -- --check
+
+      - run:
+          name: Build
+          command: NSS_JOBS=3 cargo build
+
+      - run:
+          name: Test
+          command: cargo test

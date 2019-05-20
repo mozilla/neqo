@@ -25,33 +25,33 @@ fn basic() {
     let mut server = Server::new(&["key"]).expect("should create server");
     println!("server {:p}", &server);
 
-    let (state, bytes) = client.handshake(NOW, &[]).expect("send CH");
+    let bytes = client.handshake(NOW, &[]).expect("send CH");
     assert!(bytes.len() > 0);
-    assert_eq!(state, HandshakeState::InProgress);
+    assert_eq!(*client.state(), HandshakeState::InProgress);
 
-    let (state, bytes) = server.handshake(NOW, &bytes[..]).expect("read CH, send SH");
+    let bytes = server.handshake(NOW, &bytes[..]).expect("read CH, send SH");
     assert!(bytes.len() > 0);
-    assert_eq!(state, HandshakeState::InProgress);
+    assert_eq!(*server.state(), HandshakeState::InProgress);
 
-    let (state, bytes) = client.handshake(NOW, &bytes[..]).expect("send CF");
+    let bytes = client.handshake(NOW, &bytes[..]).expect("send CF");
     assert_eq!(bytes.len(), 0);
-    assert_eq!(state, HandshakeState::AuthenticationPending);
+    assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
     client.authenticated();
     assert_eq!(*client.state(), HandshakeState::Authenticated);
 
     // Calling handshake() again indicates that we're happy with the cert.
-    let (state, bytes) = client.handshake(NOW, &[]).expect("send CF");
+    let bytes = client.handshake(NOW, &[]).expect("send CF");
     assert!(bytes.len() > 0);
-    assert_eq!(state, HandshakeState::Complete);
+    assert!(client.state().connected());
 
     let client_info = client.info().expect("got info");
     assert_eq!(TLS_VERSION_1_3, client_info.version());
     assert_eq!(TLS_AES_128_GCM_SHA256, client_info.cipher_suite());
 
-    let (state, bytes) = server.handshake(NOW, &bytes[..]).expect("finish");
+    let bytes = server.handshake(NOW, &bytes[..]).expect("finish");
     assert_eq!(bytes.len(), 0);
-    assert_eq!(state, HandshakeState::Complete);
+    assert!(server.state().connected());
 
     let server_info = server.info().expect("got info");
     assert_eq!(TLS_VERSION_1_3, server_info.version());
@@ -66,9 +66,9 @@ fn raw() {
     let mut server = Server::new(&["key"]).expect("should create server");
     println!("server {:?}", server);
 
-    let (state, client_records) = client.handshake_raw(NOW, None).expect("send CH");
+    let client_records = client.handshake_raw(NOW, None).expect("send CH");
     assert!(client_records.len() > 0);
-    assert_eq!(state, HandshakeState::InProgress);
+    assert_eq!(*client.state(), HandshakeState::InProgress);
 
     let client_preinfo = client.preinfo().expect("get preinfo");
     assert_eq!(client_preinfo.version(), None);
@@ -98,13 +98,13 @@ fn raw() {
     assert_eq!(*client.state(), HandshakeState::Authenticated);
 
     // Calling handshake() again indicates that we're happy with the cert.
-    let (state, client_records) = client.handshake_raw(NOW, None).expect("send CF");
+    let client_records = client.handshake_raw(NOW, None).expect("send CF");
     assert!(client_records.len() > 0);
-    assert_eq!(state, HandshakeState::Complete);
+    assert!(client.state().connected());
 
     let server_records = forward_records(&mut server, client_records).expect("finish");
     assert_eq!(server_records.len(), 0);
-    assert_eq!(*server.state(), HandshakeState::Complete);
+    assert!(server.state().connected());
 
     // The client should have one certificate for the server.
     let mut certs = client.peer_certificate().unwrap();

@@ -1,3 +1,9 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use std::convert::Into;
 
 use num_traits::Num;
@@ -67,7 +73,7 @@ impl Data {
     pub fn encode_uint<T: Into<u64>>(&mut self, v: T, l: usize) {
         let u: u64 = v.into();
         for i in 0..l {
-            self.encode_byte((u >> ((l - 1) - i) * 8) as u8);
+            self.encode_byte((u >> ((l - 1 - i) * 8)) as u8);
         }
     }
 
@@ -106,6 +112,10 @@ impl Data {
         self.buf.len() - self.offset
     }
 
+    pub fn written(&self) -> usize {
+        self.buf.len()
+    }
+
     pub fn peek_data(&mut self, l: usize) -> Res<Vec<u8>> {
         let _ = self.check_remaining(l)?;
 
@@ -120,7 +130,7 @@ impl Data {
         for _ in 0..l {
             res <<= 8;
             let z = self.decode_byte()?;
-            res += z as u64;
+            res += u64::from(z);
         }
 
         Ok(res)
@@ -165,6 +175,11 @@ impl Data {
 
     pub fn as_vec(&self) -> &[u8] {
         &(self.buf[self.read..])
+    }
+
+    pub fn into_vec(self) -> Vec<u8> {
+        assert_eq!(self.read, 0);
+        self.buf
     }
 
     pub fn read(&mut self, l: usize) {

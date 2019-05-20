@@ -1,9 +1,16 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use crate::constants::*;
 use crate::err::Res;
 use crate::p11::{PK11SymKey, PK11_ReferenceSymKey, SymKey};
 use crate::result;
 use crate::ssl::{PRFileDesc, SSLSecretCallback, SSLSecretDirection};
 
+use neqo_common::qdebug;
 use std::os::raw::c_void;
 use std::ptr::NonNull;
 
@@ -65,7 +72,7 @@ impl Secrets {
     }
 
     pub fn put(&mut self, dir: SecretDirection, epoch: Epoch, key: SymKey) {
-        println!("{:?} secret for {:?}", dir, epoch);
+        qdebug!("{:?} secret available for {:?}", dir, epoch);
         let keys = match dir {
             SecretDirection::Read => &mut self.r,
             SecretDirection::Write => &mut self.w,

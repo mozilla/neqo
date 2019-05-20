@@ -1,7 +1,12 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use crate::constants::*;
 use crate::err::Res;
 use crate::result;
-use crate::ssl;
 use crate::ssl::{
     PRBool, PRFileDesc, SECFailure, SECStatus, SECSuccess, SSLAlertDescription,
     SSLExtensionHandler, SSLExtensionWriter, SSLHandshakeType,
@@ -13,7 +18,7 @@ use std::os::raw::{c_uint, c_void};
 use std::rc::Rc;
 
 experimental_api!(SSL_InstallExtensionHooks(
-    fd: *mut ssl::PRFileDesc,
+    fd: *mut PRFileDesc,
     extension: u16,
     writer: SSLExtensionWriter,
     writer_arg: *mut c_void,
@@ -105,7 +110,7 @@ impl ExtensionTracker {
     }
 
     pub fn new(
-        fd: *mut ssl::PRFileDesc,
+        fd: *mut PRFileDesc,
         extension: Extension,
         handler: Rc<RefCell<dyn ExtensionHandler>>,
     ) -> Res<ExtensionTracker> {

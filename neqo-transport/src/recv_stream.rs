@@ -1,29 +1,24 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
-use std::fmt::Debug;
+use std::mem;
+use std::ops::Bound::{Included, Unbounded};
+use std::rc::Rc;
 
+use crate::connection::{ConnectionEvents, FlowMgr, StreamId};
 use crate::{AppError, Error, Res};
+use neqo_common::qtrace;
 
-const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
+pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
 
-pub trait Recvable: Debug {
-    /// Read buffered data from stream. bool says whether is final data on
-    /// stream.
-    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)>;
-
-    /// Read with defined amount.
-    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)>;
-
-    /// Application is no longer interested in this stream.
-    fn stop_sending(&mut self, err: AppError);
-
-    /// Close the stream.
-    fn close(&mut self);
-
-    /// Bytes can be read from the stream.
-    fn data_ready(&self) -> bool;
-}
-
+/// Holds data not yet read by application. Orders and dedupes data ranges
+/// from incoming STREAM frames.
 #[derive(Debug, Default, PartialEq)]
 pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
@@ -51,10 +46,18 @@ impl RxStreamOrderer {
             return Ok(());
         }
 
-        let (insert_new, remove_prev) = if let Some((&prev_start, prev_vec)) =
-            self.data_ranges.range_mut(..new_start + 1).next_back()
+        if new_data.len() == 0 {
+            // No data to insert
+            return Ok(());
+        }
+
+        let (insert_new, remove_prev) = if let Some((&prev_start, prev_vec)) = self
+            .data_ranges
+            .range_mut((Unbounded, Included(new_start)))
+            .next_back()
         {
             let prev_end = prev_start + prev_vec.len() as u64;
+
             match (new_start > prev_start, new_end > prev_end) {
                 (true, true) => {
                     // PPPPPP    ->  PP
@@ -122,6 +125,7 @@ impl RxStreamOrderer {
         if insert_new {
             // Now handle possible overlap with next entries
             let mut to_remove = Vec::new(); // TODO(agrover@mozilla.com): use smallvec?
+
             for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
                 let next_end = next_start + next_data.len() as u64;
                 let overlap = new_end.saturating_sub(next_start);
@@ -129,14 +133,14 @@ impl RxStreamOrderer {
                     break;
                 } else {
                     if next_end > new_end {
-                        let truncate_to = new_data.len() - overlap as usize;
-                        new_data.truncate(truncate_to);
                         qtrace!(
                             "New frame {}-{} overlaps with next frame by {}, truncating",
                             new_start,
                             new_end,
                             overlap
                         );
+                        let truncate_to = new_data.len() - overlap as usize;
+                        new_data.truncate(truncate_to);
                         break;
                     } else {
                         qtrace!(
@@ -170,7 +174,7 @@ impl RxStreamOrderer {
             .unwrap_or(false)
     }
 
-    /// how many bytes are readable?
+    /// How many bytes are readable?
     fn bytes_ready(&self) -> usize {
         let mut prev_end = self.retired;
         self.data_ranges
@@ -194,38 +198,23 @@ impl RxStreamOrderer {
     }
 
     /// Bytes read by the application.
-    pub fn retired(&self) -> u64 {
+    fn retired(&self) -> u64 {
         self.retired
     }
 
     /// Data bytes buffered. Could be more than bytes_readable if there are
     /// ranges missing.
-    pub fn buffered(&self) -> u64 {
+    fn buffered(&self) -> u64 {
         self.data_ranges
             .iter()
             .map(|(&start, data)| data.len() as u64 - (self.retired.saturating_sub(start)))
             .sum()
     }
 
-    /// Caller has been told data is available on a stream, and they want to
-    /// retrieve it.
-    /// Returns bytes copied.
-    pub fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
-        self.read_with_amount(buf, buf.len() as u64)
-    }
-
-    pub fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Res<u64> {
-        let orig_len = buf.len();
-        buf.resize(orig_len + self.bytes_ready(), 0);
-        self.read(&mut buf[orig_len..])
-    }
-
-    /// Caller has been told data is available on a stream, and they want to
-    /// retrieve it.
-    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<u64> {
-        assert!(buf.len() >= amount as usize);
-        qtrace!("Reading {} bytes, {} available", amount, self.buffered());
-        let mut buf_remaining = amount as usize;
+    /// Copy received data (if any) into the buffer. Returns bytes copied.
+    fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
+        qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
+        let mut buf_remaining = buf.len() as usize;
         let mut copied = 0;
 
         for (&range_start, range_data) in &mut self.data_ranges {
@@ -260,7 +249,14 @@ impl RxStreamOrderer {
         Ok(copied as u64)
     }
 
-    pub fn highest_seen_offset(&self) -> u64 {
+    /// Extend the given Vector with any available data.
+    pub fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Res<u64> {
+        let orig_len = buf.len();
+        buf.resize(orig_len + self.bytes_ready(), 0);
+        self.read(&mut buf[orig_len..])
+    }
+
+    fn highest_seen_offset(&self) -> u64 {
         let maybe_ooo_last = self
             .data_ranges
             .iter()
@@ -270,46 +266,88 @@ impl RxStreamOrderer {
     }
 }
 
+/// QUIC receiving states, based on -transport 3.2.
 #[derive(Debug, PartialEq)]
 enum RecvStreamState {
-    Open {
-        rx_window: u64,
-        rx_orderer: RxStreamOrderer,
+    Recv {
+        recv_buf: RxStreamOrderer,
+        max_bytes: u64, // Maximum size of recv_buf
+        max_stream_data: u64,
     },
-    Closed,
+    SizeKnown {
+        recv_buf: RxStreamOrderer,
+        final_size: u64,
+    },
+    DataRecvd {
+        recv_buf: RxStreamOrderer,
+    },
+    DataRead,
+    ResetRecvd,
+    // Defined by spec but we don't use it: ResetRead
 }
 
 impl RecvStreamState {
-    fn new() -> RecvStreamState {
-        RecvStreamState::Open {
-            rx_window: RX_STREAM_DATA_WINDOW,
-            rx_orderer: RxStreamOrderer::new(),
+    fn new(max_bytes: u64) -> RecvStreamState {
+        RecvStreamState::Recv {
+            recv_buf: RxStreamOrderer::new(),
+            max_bytes,
+            max_stream_data: max_bytes,
         }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            RecvStreamState::Recv { .. } => "Recv",
+            RecvStreamState::SizeKnown { .. } => "SizeKnown",
+            RecvStreamState::DataRecvd { .. } => "DataRecvd",
+            RecvStreamState::DataRead => "DataRead",
+            RecvStreamState::ResetRecvd => "ResetRecvd",
+        }
+    }
+
+    fn recv_buf(&self) -> Option<&RxStreamOrderer> {
+        match self {
+            RecvStreamState::Recv { recv_buf, .. } => Some(recv_buf),
+            RecvStreamState::SizeKnown { recv_buf, .. } => Some(recv_buf),
+            RecvStreamState::DataRecvd { recv_buf } => Some(recv_buf),
+            RecvStreamState::DataRead | RecvStreamState::ResetRecvd => None,
+        }
+    }
+
+    fn final_size(&self) -> Option<u64> {
+        match self {
+            RecvStreamState::SizeKnown { final_size, .. } => Some(*final_size),
+            _ => None,
+        }
+    }
+
+    fn transition(&mut self, new_state: RecvStreamState) {
+        qtrace!("RecvStream state {} -> {}", self.name(), new_state.name());
+        *self = new_state;
     }
 }
 
-#[derive(Debug, PartialEq)]
+/// Implement a QUIC receive stream.
+#[derive(Debug)]
 pub struct RecvStream {
-    final_size: Option<u64>,
+    stream_id: StreamId,
     state: RecvStreamState,
+    flow_mgr: Rc<RefCell<FlowMgr>>,
+    conn_events: Rc<RefCell<ConnectionEvents>>,
 }
 
 impl RecvStream {
-    pub fn new() -> RecvStream {
+    pub fn new(
+        stream_id: StreamId,
+        max_stream_data: u64,
+        flow_mgr: Rc<RefCell<FlowMgr>>,
+        conn_events: Rc<RefCell<ConnectionEvents>>,
+    ) -> RecvStream {
         RecvStream {
-            final_size: None,
-            state: RecvStreamState::new(),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn orderer(&self) -> Option<&RxStreamOrderer> {
-        match &self.state {
-            RecvStreamState::Open {
-                rx_window: _,
-                rx_orderer,
-            } => Some(&rx_orderer),
-            RecvStreamState::Closed => None,
+            stream_id,
+            state: RecvStreamState::new(max_stream_data),
+            flow_mgr,
+            conn_events,
         }
     }
 
@@ -317,113 +355,161 @@ impl RecvStream {
         let new_end = offset + data.len() as u64;
 
         // Send final size errors even if stream is closed
-        if let Some(final_size) = self.final_size {
+        if let Some(final_size) = self.state.final_size() {
             if new_end > final_size || (fin && new_end != final_size) {
                 return Err(Error::FinalSizeError);
             }
         }
 
         match &mut self.state {
-            RecvStreamState::Closed => {
-                Err(Error::TooMuchData) // send STOP_SENDING
-            }
-            RecvStreamState::Open {
-                rx_window,
-                rx_orderer,
+            RecvStreamState::Recv {
+                recv_buf,
+                max_stream_data,
+                ..
             } => {
-                if fin && self.final_size == None {
-                    let final_size = offset + data.len() as u64;
-                    if final_size < rx_orderer.highest_seen_offset() {
-                        return Err(Error::FinalSizeError);
-                    }
-                    self.final_size = Some(offset + data.len() as u64);
-                }
-
-                if new_end > *rx_window {
-                    qtrace!("Stream RX window {} exceeded: {}", rx_window, new_end);
+                if new_end > *max_stream_data {
+                    qtrace!("Stream RX window {} exceeded: {}", max_stream_data, new_end);
                     return Err(Error::FlowControlError);
                 }
 
-                rx_orderer.inbound_frame(offset, data)
+                if !fin {
+                    recv_buf.inbound_frame(offset, data)?;
+                } else {
+                    let final_size = offset + data.len() as u64;
+                    if final_size < recv_buf.highest_seen_offset() {
+                        return Err(Error::FinalSizeError);
+                    }
+                    recv_buf.inbound_frame(offset, data)?;
+
+                    let buf = mem::replace(recv_buf, RxStreamOrderer::new());
+                    if final_size == buf.retired() + buf.bytes_ready() as u64 {
+                        self.state
+                            .transition(RecvStreamState::DataRecvd { recv_buf: buf });
+                    } else {
+                        self.state.transition(RecvStreamState::SizeKnown {
+                            recv_buf: buf,
+                            final_size,
+                        });
+                    }
+                }
+            }
+            RecvStreamState::SizeKnown {
+                recv_buf,
+                final_size,
+            } => {
+                recv_buf.inbound_frame(offset, data)?;
+                if *final_size == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
+                    let buf = mem::replace(recv_buf, RxStreamOrderer::new());
+                    self.state
+                        .transition(RecvStreamState::DataRecvd { recv_buf: buf });
+                }
+            }
+            RecvStreamState::DataRecvd { .. }
+            | RecvStreamState::DataRead
+            | RecvStreamState::ResetRecvd => {
+                qtrace!("data received when we are in state {}", self.state.name())
+            }
+        }
+
+        if self.data_ready() || self.needs_to_inform_app_about_fin() {
+            self.conn_events
+                .borrow_mut()
+                .recv_stream_readable(self.stream_id)
+        }
+
+        Ok(())
+    }
+
+    pub fn reset(&mut self, application_error_code: AppError) {
+        match self.state {
+            RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
+                self.conn_events
+                    .borrow_mut()
+                    .recv_stream_reset(self.stream_id, application_error_code);
+                self.state.transition(RecvStreamState::ResetRecvd);
+            }
+            _ => {
+                // Ignore reset if in DataRecvd, DataRead, or ResetRecvd
             }
         }
     }
 
     /// If we should tell the sender they have more credit, return an offset
-    pub fn needs_flowc_update(&mut self) -> Option<u64> {
-        match &mut self.state {
-            RecvStreamState::Closed => None,
-            RecvStreamState::Open {
-                rx_window,
-                rx_orderer,
-            } => {
-                let lowater = RX_STREAM_DATA_WINDOW / 2;
-                let new_window = rx_orderer.retired() + RX_STREAM_DATA_WINDOW;
-                if self.final_size.is_none() && new_window > lowater + *rx_window {
-                    *rx_window = new_window;
-                    Some(new_window)
-                } else {
-                    None
+    pub fn maybe_send_flowc_update(&mut self) {
+        if let RecvStreamState::Recv {
+            max_bytes,
+            max_stream_data,
+            recv_buf,
+        } = &mut self.state
+        {
+            {
+                // Algo: send an update if app has consumed more than half
+                // the data in the current window
+                // TODO(agrover@mozilla.com): This algo is not great but
+                // should prevent Silly Window Syndrome. Spec refers to using
+                // highest seen offset somehow? RTT maybe?
+                let maybe_new_max = recv_buf.retired() + *max_bytes;
+                if maybe_new_max > (*max_bytes / 2) + *max_stream_data {
+                    *max_stream_data = maybe_new_max;
+                    self.flow_mgr
+                        .borrow_mut()
+                        .max_stream_data(self.stream_id, maybe_new_max)
                 }
             }
         }
     }
 
-    pub fn final_size(&self) -> Option<u64> {
-        self.final_size
-    }
-}
-
-impl Recvable for RecvStream {
-    fn data_ready(&self) -> bool {
-        match &self.state {
-            RecvStreamState::Open {
-                rx_window: _,
-                rx_orderer,
-            } => rx_orderer.data_ready(),
-            RecvStreamState::Closed => false,
+    pub fn is_terminal(&self) -> bool {
+        match self.state {
+            RecvStreamState::ResetRecvd | RecvStreamState::DataRead => true,
+            _ => false,
         }
     }
 
-    /// caller has been told data is available on a stream, and they want to
-    /// retrieve it.
-    fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
-        self.read_with_amount(buf, buf.len() as u64)
+    // App got all data but did not get the fin signal.
+    fn needs_to_inform_app_about_fin(&self) -> bool {
+        match self.state {
+            RecvStreamState::DataRecvd { .. } => true,
+            _ => false,
+        }
     }
 
-    fn read_with_amount(&mut self, buf: &mut [u8], amount: u64) -> Res<(u64, bool)> {
-        assert!(buf.len() >= amount as usize);
+    fn data_ready(&self) -> bool {
+        self.state
+            .recv_buf()
+            .map(|recv_buf| recv_buf.data_ready())
+            .unwrap_or(false)
+    }
 
-        match &mut self.state {
-            RecvStreamState::Closed => return Err(Error::NoMoreData),
-            RecvStreamState::Open {
-                rx_window: _,
-                rx_orderer,
-            } => {
-                let read_bytes = rx_orderer.read_with_amount(buf, amount)?;
+    pub fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
+        let res = match &mut self.state {
+            RecvStreamState::Recv { recv_buf, .. }
+            | RecvStreamState::SizeKnown { recv_buf, .. } => Ok((recv_buf.read(buf)?, false)),
+            RecvStreamState::DataRecvd { recv_buf } => {
+                let bytes_read = recv_buf.read(buf)?;
+                let fin_read = recv_buf.buffered() == 0;
+                if fin_read {
+                    self.state.transition(RecvStreamState::DataRead)
+                }
+                Ok((bytes_read, fin_read))
+            }
+            RecvStreamState::DataRead | RecvStreamState::ResetRecvd => Err(Error::NoMoreData),
+        };
+        self.maybe_send_flowc_update();
+        res
+    }
 
-                let fin = if let Some(final_size) = self.final_size {
-                    if final_size == rx_orderer.retired() {
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-
-                Ok((read_bytes, fin))
+    pub fn stop_sending(&mut self, err: AppError) {
+        qtrace!("stop_sending called when in state {}", self.state.name());
+        match &self.state {
+            RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
+                self.flow_mgr.borrow_mut().stop_sending(self.stream_id, err)
+            }
+            RecvStreamState::DataRecvd { .. } => self.state.transition(RecvStreamState::DataRead),
+            RecvStreamState::DataRead | RecvStreamState::ResetRecvd => {
+                // Already in terminal state
             }
         }
-    }
-
-    fn close(&mut self) {
-        self.state = RecvStreamState::Closed
-    }
-
-    #[allow(dead_code, unused_variables)]
-    fn stop_sending(&mut self, err: AppError) {
-        unimplemented!();
     }
 }
 
@@ -433,54 +519,62 @@ mod tests {
 
     #[test]
     fn test_stream_rx() {
-        let mut s = RecvStream::new();
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+
+        let mut s = RecvStream::new(567.into(), 1024, flow_mgr.clone(), conn_events.clone());
 
         // test receiving a contig frame and reading it works
         s.inbound_stream_frame(false, 0, vec![1; 10]).unwrap();
         assert_eq!(s.data_ready(), true);
         let mut buf = vec![0u8; 100];
         assert_eq!(s.read(&mut buf).unwrap(), (10, false));
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 0);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 0);
 
         // test receiving a noncontig frame
         s.inbound_stream_frame(false, 12, vec![2; 12]).unwrap();
         assert_eq!(s.data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 12);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 12);
 
         // another frame that overlaps the first
         s.inbound_stream_frame(false, 14, vec![3; 8]).unwrap();
         assert_eq!(s.data_ready(), false);
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 12);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 12);
 
         // fill in the gap, but with a FIN
         s.inbound_stream_frame(true, 10, vec![4; 6]).unwrap_err();
         assert_eq!(s.data_ready(), false);
         assert_eq!(s.read(&mut buf).unwrap(), (0, false));
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 12);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 12);
 
         // fill in the gap
         s.inbound_stream_frame(false, 10, vec![5; 10]).unwrap();
         assert_eq!(s.data_ready(), true);
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 14);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 14);
 
         // a legit FIN
         s.inbound_stream_frame(true, 24, vec![6; 18]).unwrap();
-        assert_eq!(s.orderer().unwrap().retired(), 10);
-        assert_eq!(s.orderer().unwrap().buffered(), 32);
+        assert_eq!(s.state.recv_buf().unwrap().retired(), 10);
+        assert_eq!(s.state.recv_buf().unwrap().buffered(), 32);
         assert_eq!(s.data_ready(), true);
         assert_eq!(s.read(&mut buf).unwrap(), (32, true));
-        assert_eq!(s.read(&mut buf).unwrap(), (0, true));
+
+        // Stream now no longer readable (is in DataRead state)
+        s.read(&mut buf).unwrap_err();
     }
 
     #[test]
     fn test_stream_rx_dedupe() {
-        let mut s = RecvStream::new();
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+
+        let mut s = RecvStream::new(3.into(), 1024, flow_mgr.clone(), conn_events.clone());
 
         let mut buf = vec![0u8; 100];
 
@@ -490,7 +584,7 @@ mod tests {
         // See inbound_frame(). Test (true, true) case
         s.inbound_stream_frame(false, 2, vec![2; 6]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -502,7 +596,7 @@ mod tests {
         // Test (true, false) case
         s.inbound_stream_frame(false, 4, vec![3; 4]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -514,7 +608,7 @@ mod tests {
         // Test (false, true) case
         s.inbound_stream_frame(false, 2, vec![4; 8]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -526,7 +620,7 @@ mod tests {
         // Test (false, false) case
         s.inbound_stream_frame(false, 2, vec![5; 2]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 0);
             assert_eq!(item.1.len(), 2);
@@ -543,7 +637,7 @@ mod tests {
         // a. insert where new frame gets truncated
         s.inbound_stream_frame(false, 99, vec![7; 6]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 99);
             assert_eq!(item.1.len(), 1);
@@ -556,7 +650,7 @@ mod tests {
         // b. insert where new frame spans next frame
         s.inbound_stream_frame(false, 98, vec![8; 10]).unwrap();
         {
-            let mut i = s.orderer().unwrap().data_ranges.iter();
+            let mut i = s.state.recv_buf().unwrap().data_ranges.iter();
             let item = i.next().unwrap();
             assert_eq!(*item.0, 98);
             assert_eq!(item.1.len(), 10);
@@ -566,28 +660,56 @@ mod tests {
 
     #[test]
     fn test_stream_flowc_update() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = RecvStream::new();
+        let mut s = RecvStream::new(
+            4.into(),
+            RX_STREAM_DATA_WINDOW,
+            flow_mgr.clone(),
+            conn_events.clone(),
+        );
 
         let mut buf = vec![0u8; RX_STREAM_DATA_WINDOW as usize * 4]; // Make it overlarge
 
-        assert_eq!(s.needs_flowc_update(), None);
+        s.maybe_send_flowc_update();
+        assert_eq!(s.flow_mgr.borrow().peek(), None);
         s.inbound_stream_frame(false, 0, frame1).unwrap();
-        assert_eq!(s.needs_flowc_update(), None);
+        s.maybe_send_flowc_update();
+        assert_eq!(s.flow_mgr.borrow().peek(), None);
         assert_eq!(s.read(&mut buf).unwrap(), (RX_STREAM_DATA_WINDOW, false));
         assert_eq!(s.data_ready(), false);
-        assert_eq!(s.needs_flowc_update(), Some(RX_STREAM_DATA_WINDOW * 2));
-        assert_eq!(s.needs_flowc_update(), None);
+        s.maybe_send_flowc_update();
+
+        // flow msg generated!
+        assert!(s.flow_mgr.borrow().peek().is_some());
+
+        // consume it
+        s.flow_mgr.borrow_mut().next().unwrap();
+
+        // it should be gone
+        s.maybe_send_flowc_update();
+        assert_eq!(s.flow_mgr.borrow().peek(), None);
     }
 
     #[test]
-    fn test_stream_rx_window() {
+    fn test_stream_max_stream_data() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
-        let mut s = RecvStream::new();
+        let mut s = RecvStream::new(
+            67.into(),
+            RX_STREAM_DATA_WINDOW,
+            flow_mgr.clone(),
+            conn_events.clone(),
+        );
 
-        assert_eq!(s.needs_flowc_update(), None);
+        s.maybe_send_flowc_update();
+        assert_eq!(s.flow_mgr.borrow().peek(), None);
         s.inbound_stream_frame(false, 0, frame1).unwrap();
         s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, vec![1; 1])
             .unwrap_err();

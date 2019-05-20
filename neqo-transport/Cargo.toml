@@ -9,9 +9,10 @@ default = ["crypto"]
 crypto = ["neqo-crypto"]
 
 [dependencies]
-neqo-crypto = { version = "0.1", path = "../neqo-crypto", optional = true }
-neqo-common = { version = "0.1", path = "../neqo-common" }
+neqo-crypto = { path = "../neqo-crypto", optional = true }
+neqo-common = { path = "../neqo-common" }
 derive_more = "0.13"
 lazy_static = "1.0"
 rand = "0.6"
 slice-deque = "0.1.16"
+log = "0.4.0"

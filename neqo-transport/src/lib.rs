@@ -1,8 +1,12 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 #![deny(warnings)]
 
-#[macro_use]
-extern crate neqo_common;
-
+use neqo_common::qinfo;
 use neqo_crypto;
 
 pub mod connection;
@@ -13,10 +17,9 @@ pub mod packet;
 pub mod recv_stream;
 pub mod send_stream;
 mod tparams;
+mod tracking;
 
-pub use self::connection::{Connection, Datagram, State};
-pub use recv_stream::Recvable;
-pub use send_stream::Sendable;
+pub use self::connection::{Connection, ConnectionEvent, ConnectionEvents, Datagram, State};
 
 type TransportError = u16;
 
@@ -47,6 +50,8 @@ pub enum Error {
     HandshakeFailed,
     KeysNotFound,
     UnknownTransportParameter,
+    ConnectionState,
+    AckedUnsentPacket,
 }
 
 impl Error {
@@ -64,6 +69,7 @@ impl Error {
             Error::ProtocolViolation => 10,
             Error::InvalidMigration => 12,
             Error::CryptoAlert(a) => 0x100 + (*a as u16),
+            // TODO(ekr@rtfm.com): Map these errors.
             Error::CryptoError(_)
             | Error::IoError(..)
             | Error::NoMoreData
@@ -76,7 +82,9 @@ impl Error {
             | Error::UnexpectedMessage
             | Error::HandshakeFailed
             | Error::KeysNotFound
-            | Error::UnknownTransportParameter => 1,
+            | Error::UnknownTransportParameter
+            | Error::ConnectionState
+            | Error::AckedUnsentPacket => 1,
         }
     }
 }
@@ -96,7 +104,7 @@ impl From<neqo_common::Error> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(::std::error::Error + 'static)> {
         match self {
             Error::CryptoError(e) => Some(e),
             Error::IoError(e) => Some(e),
@@ -129,12 +137,3 @@ impl ConnectionError {
 }
 
 pub type Res<T> = std::result::Result<T, Error>;
-
-pub fn hex(label: &str, buf: &[u8]) -> String {
-    let mut ret = String::with_capacity(label.len() + 10 + buf.len() * 3);
-    ret.push_str(&format!("{}[{}]: ", label, buf.len()));
-    for b in buf {
-        ret.push_str(&format!("{:02x}", b));
-    }
-    ret
-}

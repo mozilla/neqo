@@ -1,7 +1,14 @@
-// TODO(ekr@rtfm.com): Remove this once I've implemented everything.
-#![allow(unused_variables, dead_code)]
-use super::*;
-use neqo_common::data::*;
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use crate::connection::StreamIndex;
+use crate::tracking::PacketRange;
+use crate::{ConnectionError, Error, Res};
+use neqo_common::data::Data;
+use neqo_common::qdebug;
 
 pub type FrameType = u64;
 
@@ -34,7 +41,7 @@ const STREAM_FRAME_BIT_FIN: u64 = 0x01;
 const STREAM_FRAME_BIT_LEN: u64 = 0x02;
 const STREAM_FRAME_BIT_OFF: u64 = 0x04;
 
-#[derive(PartialEq, Debug, Copy, Clone)]
+#[derive(PartialEq, Debug, Copy, Clone, PartialOrd, Eq, Ord, Hash)]
 pub enum StreamType {
     BiDi,
     UniDi,
@@ -55,7 +62,7 @@ impl StreamType {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug, PartialOrd, Ord, Clone, Copy)]
 pub enum CloseType {
     Transport,
     Application,
@@ -85,13 +92,13 @@ impl From<&ConnectionError> for CloseType {
     }
 }
 
-#[derive(PartialEq, Debug, Default)]
+#[derive(PartialEq, Debug, Default, Clone)]
 pub struct AckRange {
     gap: u64,
     range: u64,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Frame {
     Padding,
     Ping,
@@ -132,7 +139,7 @@ pub enum Frame {
     },
     MaxStreams {
         stream_type: StreamType,
-        maximum_streams: u64,
+        maximum_streams: StreamIndex,
     },
     DataBlocked {
         data_limit: u64,
@@ -143,7 +150,7 @@ pub enum Frame {
     },
     StreamsBlocked {
         stream_type: StreamType,
-        stream_limit: u64,
+        stream_limit: StreamIndex,
     },
     NewConnectionId {
         sequence_number: u64,
@@ -224,7 +231,7 @@ impl Frame {
                 d.encode_varint(*ack_delay);
                 d.encode_varint(ack_ranges.len() as u64);
                 d.encode_varint(*first_ack_range);
-                for ref r in ack_ranges {
+                for r in ack_ranges {
                     d.encode_varint(r.gap);
                     d.encode_varint(r.range);
                 }
@@ -277,7 +284,7 @@ impl Frame {
             Frame::MaxStreams {
                 maximum_streams, ..
             } => {
-                d.encode_varint(*maximum_streams);
+                d.encode_varint(maximum_streams.as_u64());
             }
             Frame::DataBlocked { data_limit } => {
                 d.encode_varint(*data_limit);
@@ -290,7 +297,7 @@ impl Frame {
                 d.encode_varint(*stream_data_limit);
             }
             Frame::StreamsBlocked { stream_limit, .. } => {
-                d.encode_varint(*stream_limit);
+                d.encode_varint(stream_limit.as_u64());
             }
             Frame::NewConnectionId {
                 sequence_number,
@@ -323,6 +330,84 @@ impl Frame {
             }
         }
     }
+
+    pub fn encode_ack_frame(ranges: &Vec<PacketRange>, d: &mut Data) {
+        if ranges.len() == 0 {
+            return;
+        }
+
+        let mut ack_ranges = Vec::new();
+        let mut last = ranges[0].smallest();
+
+        for r in &ranges[1..] {
+            ack_ranges.push(AckRange {
+                // the difference must be at least 2 (because 0-length gaps,
+                // (difference 1) are illegal.
+                gap: last - r.largest - 2,
+                range: r.length - 1,
+            });
+            last = r.smallest();
+        }
+
+        let f = Frame::Ack {
+            largest_acknowledged: ranges[0].largest,
+            ack_delay: 0,
+            first_ack_range: ranges[0].length - 1,
+            ack_ranges: ack_ranges,
+        };
+
+        f.marshal(d)
+    }
+
+    pub fn ack_eliciting(&self) -> bool {
+        match self {
+            Frame::Ack { .. } | Frame::Padding => false,
+            _ => true,
+        }
+    }
+
+    /// Converts AckRanges as encoded in a ACK frame (see -transport
+    /// 19.3.1) into ranges of acked packets (end, start), inclusive of
+    /// start and end values.
+    pub fn decode_ack_frame(
+        largest_acked: u64,
+        first_ack_range: u64,
+        ack_ranges: Vec<AckRange>,
+    ) -> Res<Vec<(u64, u64)>> {
+        let mut acked_ranges = Vec::new();
+
+        if largest_acked < first_ack_range {
+            return Err(Error::FrameEncodingError);
+        }
+        acked_ranges.push((largest_acked, largest_acked - first_ack_range));
+        if !ack_ranges.is_empty() && largest_acked < first_ack_range + 1 {
+            return Err(Error::FrameEncodingError);
+        }
+        let mut cur = if !ack_ranges.is_empty() {
+            largest_acked - first_ack_range - 1
+        } else {
+            0
+        };
+        for r in ack_ranges {
+            if cur < r.gap + 1 {
+                return Err(Error::FrameEncodingError);
+            }
+            cur = cur - r.gap - 1;
+
+            if cur < r.range {
+                return Err(Error::FrameEncodingError);
+            }
+            acked_ranges.push((cur, cur - r.range));
+
+            if cur > r.range + 1 {
+                cur = cur - r.range - 1;
+            } else {
+                cur = cur - r.range;
+            }
+        }
+
+        Ok(acked_ranges)
+    }
 }
 
 pub fn decode_frame(d: &mut Data) -> Res<Frame> {
@@ -343,7 +428,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
             let nr = d.decode_varint()?;
             let fa = d.decode_varint()?;
             let mut arr: Vec<AckRange> = Vec::with_capacity(nr as usize);
-            for i in 0..nr {
+            for _ in 0..nr {
                 let ar = AckRange {
                     gap: d.decode_varint()?,
                     range: d.decode_varint()?,
@@ -391,13 +476,13 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
             }
             let l: u64;
             let mut data: Vec<u8>;
-            println!("{}", t);
+            qdebug!("{}", t);
             if (t & STREAM_FRAME_BIT_LEN) != 0 {
-                println!("Decoding length");
+                qdebug!("Decoding length");
                 l = d.decode_varint()?;
                 data = d.decode_data(l as usize)?;
             } else {
-                println!("Decoding without length");
+                qdebug!("Decoding without length");
                 data = d.decode_remainder()?;
             }
             Ok(Frame::Stream {
@@ -416,7 +501,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
         }),
         FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => Ok(Frame::MaxStreams {
             stream_type: StreamType::from_type_bit(t),
-            maximum_streams: d.decode_varint()?,
+            maximum_streams: StreamIndex::new(d.decode_varint()?),
         }),
 
         FRAME_TYPE_DATA_BLOCKED => Ok(Frame::DataBlocked {
@@ -429,7 +514,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
         FRAME_TYPE_STREAMS_BLOCKED_BIDI | FRAME_TYPE_STREAMS_BLOCKED_UNIDI => {
             Ok(Frame::StreamsBlocked {
                 stream_type: StreamType::from_type_bit(t),
-                stream_limit: d.decode_varint()?,
+                stream_limit: StreamIndex::new(d.decode_varint()?),
             })
         }
         FRAME_TYPE_NEW_CONNECTION_ID => {
@@ -476,6 +561,7 @@ pub fn decode_frame(d: &mut Data) -> Res<Frame> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_common::hex;
 
     fn enc_dec(f: &Frame, s: &str) {
         let mut d = Data::default();
@@ -615,14 +701,14 @@ mod tests {
     fn test_max_streams() {
         let mut f = Frame::MaxStreams {
             stream_type: StreamType::BiDi,
-            maximum_streams: 0x1234,
+            maximum_streams: StreamIndex::new(0x1234),
         };
 
         enc_dec(&f, "125234");
 
         f = Frame::MaxStreams {
             stream_type: StreamType::UniDi,
-            maximum_streams: 0x1234,
+            maximum_streams: StreamIndex::new(0x1234),
         };
 
         enc_dec(&f, "135234");
@@ -649,14 +735,14 @@ mod tests {
     fn test_streams_blocked() {
         let mut f = Frame::StreamsBlocked {
             stream_type: StreamType::BiDi,
-            stream_limit: 0x1234,
+            stream_limit: StreamIndex::new(0x1234),
         };
 
         enc_dec(&f, "165234");
 
         f = Frame::StreamsBlocked {
             stream_type: StreamType::UniDi,
-            stream_limit: 0x1234,
+            stream_limit: StreamIndex::new(0x1234),
         };
 
         enc_dec(&f, "175234");
@@ -745,4 +831,46 @@ mod tests {
         assert_ne!(f3, f6);
     }
 
+    #[test]
+    fn test_encode_ack_frame() {
+        let packets = vec![
+            PacketRange {
+                largest: 7,
+                length: 3,
+            },
+            PacketRange {
+                largest: 3,
+                length: 4,
+            },
+        ];
+        let mut d = Data::default();
+        Frame::encode_ack_frame(&packets, &mut d);
+        println!("Encoded ACK={}", hex(d.as_vec()));
+
+        let f = decode_frame(&mut d).unwrap();
+        match f {
+            Frame::Ack {
+                largest_acknowledged,
+                ack_delay,
+                first_ack_range,
+                ack_ranges,
+            } => {
+                assert_eq!(largest_acknowledged, 7);
+                assert_eq!(ack_delay, 0);
+                assert_eq!(first_ack_range, 2);
+                assert_eq!(ack_ranges.len(), 1);
+                assert_eq!(ack_ranges[0].gap, 0);
+                assert_eq!(ack_ranges[0].range, 3);
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn test_decode_ack_frame() {
+        match Frame::decode_ack_frame(7, 2, vec![AckRange { gap: 0, range: 3 }]) {
+            Err(_) => assert!(false),
+            Ok(r) => assert_eq!(r, vec![(7, 5), (3, 0)]),
+        };
+    }
 }

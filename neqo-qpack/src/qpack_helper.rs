@@ -1,18 +1,25 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use crate::{Error, Res};
-use neqo_transport::Recvable;
+use neqo_transport::connection::Connection;
 
 pub trait ReadByte {
     fn read_byte(&mut self) -> Res<u8>;
 }
 
 struct ReceiverWrapper<'a> {
-    receiver: &'a mut Recvable,
+    conn: &'a mut Connection,
+    stream_id: u64,
 }
 
 impl<'a> ReadByte for ReceiverWrapper<'a> {
     fn read_byte(&mut self) -> Res<u8> {
         let mut b = [0];
-        let (amount, fin) = self.receiver.read(&mut b)?;
+        let (amount, fin) = self.conn.stream_recv(self.stream_id, &mut b)?;
         if fin {
             return Err(Error::ClosedCriticalStream);
         }
@@ -63,15 +70,19 @@ impl<'a> ReadByte for BufWrapper<'a> {
     }
 }
 
-pub fn read_prefixed_encoded_int_with_recvable(
-    s: &mut Recvable,
+pub fn read_prefixed_encoded_int_with_connection(
+    conn: &mut Connection,
+    stream_id: u64,
     val: &mut u64,
     cnt: &mut u8,
     prefix_len: u8,
     first_byte: u8,
     have_first_byte: bool,
 ) -> Res<bool> {
-    let mut recv = ReceiverWrapper { receiver: s };
+    let mut recv = ReceiverWrapper {
+        conn: conn,
+        stream_id: stream_id,
+    };
     match read_prefixed_encoded_int(&mut recv, val, cnt, prefix_len, first_byte, have_first_byte) {
         Ok(()) => Ok(true),
         Err(Error::NoMoreData) => Ok(false),

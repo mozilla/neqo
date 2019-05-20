@@ -1,3 +1,9 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use crate::data::DataBuf;
 use crate::varint::*;
 use crate::{Error, Res};
@@ -39,6 +45,12 @@ impl DataBuf<Error> for ReadBuf {
     }
 }
 
+impl Default for ReadBuf {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReadBuf {
     pub fn new() -> ReadBuf {
         ReadBuf {
@@ -55,6 +67,10 @@ impl ReadBuf {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     // We need to propagate fin as well.
@@ -83,7 +99,7 @@ impl ReadBuf {
             self.offset = 0;
         }
 
-        return Ok((rv, fin));
+        Ok((rv, fin))
     }
 
     pub fn get_len(&mut self, len: u64) {
@@ -96,7 +112,7 @@ impl ReadBuf {
 
     // We need to propagate fin as well.
     // returns number of read byte and bool (stream has been closed or not)
-    pub fn get<T: Reader>(&mut self, reader: &mut T) -> Res<(u64, bool)> {
+    pub fn get(&mut self, reader: &mut Reader) -> Res<(u64, bool)> {
         let r = self.read(reader)?;
         if self.len == self.offset {
             self.state = ReadBufState::Done;
@@ -139,9 +155,13 @@ impl ReadBuf {
         self.len = 0;
         self.state = ReadBufState::Uninit;
     }
+
+    pub fn has_data_recv(&mut self) -> bool {
+        self.offset > 0
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    // TODO(mt): Add some tests for this.
+    // TODO(mt): Add some tests for this. dragana: I think I will remove this, so we do not need any tests here.
 }

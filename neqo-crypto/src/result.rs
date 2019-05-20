@@ -1,3 +1,9 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
 use crate::err::{
     Error, NSPRErrorCodes, PR_ErrorToName, PR_ErrorToString, PR_GetError, Res,
     PR_LANGUAGE_I_DEFAULT,
@@ -95,8 +101,8 @@ mod tests {
             Error::NssError { name, code, .. } => {
                 assert_eq!(name, "UNKNOWN_ERROR");
                 assert_eq!(code, 0);
-                // TODO(mt): This fails on OSX with the message: |Undefined error: 0|
-                //assert_eq!(desc, "Success");
+                // Note that we don't test |desc| here because that comes from
+                // strerror(0), which is platform-dependent.
             }
             _ => assert!(false),
         }
