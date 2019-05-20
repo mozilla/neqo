@@ -29,7 +29,7 @@ struct Args {
     #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
     /// NSS database directory.
     db: PathBuf,
-    #[structopt(short = "k", long)]
+    #[structopt(short = "k", long, default_value = "key")]
     /// Name of keys from NSS database.
     key: Vec<String>,
 
