@@ -575,7 +575,7 @@ impl SecretAgent {
     // Ideally, this only includes records from the current epoch.
     // If you send data from multiple epochs, you might end up being sad.
     pub fn handshake_raw(&mut self, _now: u64, input: Option<Record>) -> Res<RecordList> {
-                let records = self.setup_raw()?;
+        let records = self.setup_raw()?;
 
         // Fire off any authentication we might need to complete.
         if self.state == HandshakeState::Authenticated {

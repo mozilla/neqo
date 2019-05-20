@@ -63,8 +63,12 @@ fn setup_clang() {
         }
     };
     let libclang_dir = mozbuild_root.join("clang").join("lib");
-    env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
-    println!("env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
+    if libclang_dir.is_dir() {
+        env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
+        println!("env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
+    } else {
+        println!("warning: LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
+    }
 }
 
 fn nss_dir() -> PathBuf {
@@ -161,7 +165,9 @@ fn static_link(nsstarget: &PathBuf) {
     let other_libs = if env::consts::OS == "windows" {
         vec!["sqlite", "libplds4", "libplc4", "libnspr4"]
     } else {
-        vec!["sqlite", "pthread", "dl", "c", "z", "plds4", "plc4", "nspr4"]
+        vec![
+            "sqlite", "pthread", "dl", "c", "z", "plds4", "plc4", "nspr4",
+        ]
     };
     for lib in other_libs {
         println!("cargo:rustc-link-lib={}", lib);
