@@ -161,7 +161,8 @@ impl Peer {
     fn alpn(&self) -> Vec<String> {
         match self.label {
             "quant" => vec![String::from("h3-20")],
-            _ => vec![String::from("http/0.9")],
+            "quicly" => vec![String::from("http/0.9")],
+            _ => vec![String::from("hq-20")],
         }
     }
 }
@@ -229,7 +230,7 @@ fn run_peer(peer: &'static Peer) -> Vec<&'static Test> {
     results
 }
 
-const PEERS: [Peer; 3] = [
+const PEERS: [Peer; 4] = [
     Peer {
         label: &"quant",
         host: &"quant.eggert.org",
@@ -243,6 +244,11 @@ const PEERS: [Peer; 3] = [
     Peer {
         label: &"local",
         host: &"127.0.0.1",
+        port: 4433,
+    },
+    Peer {
+        label: &"applequic",
+        host: &"192.168.200.19",
         port: 4433,
     },
 ];
@@ -266,9 +272,7 @@ fn main() {
             continue;
         }
 
-        let child = thread::spawn(move || {
-            run_peer(&peer);
-        });
+        let child = thread::spawn(move || run_peer(&peer));
         children.push((peer, child));
     }
 

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::now;
+use neqo_common::{hex, now};
 use neqo_crypto::init_db;
 use neqo_transport::frame::StreamType;
 use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
@@ -189,6 +189,8 @@ fn main() {
 
     let mut client = Connection::new_client(args.host.as_str(), args.alpn, local_addr, remote_addr)
         .expect("must succeed");
+
+    println!("SCID={}", hex(&client.scid()));
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h);

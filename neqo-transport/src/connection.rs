@@ -835,6 +835,11 @@ impl Connection {
         &self.state
     }
 
+    // Get the SCID.
+    pub fn scid(&self) -> ConnectionId {
+        self.scid.clone()
+    }
+
     // This function wraps a call to another function and sets the connection state
     // properly if that call fails.
     fn capture_error<T>(&mut self, frame_type: FrameType, res: Res<T>) -> Res<T> {
@@ -912,7 +917,7 @@ impl Connection {
     fn input(&mut self, d: Datagram, cur_time: u64) -> Res<()> {
         let mut slc = &d[..];
 
-        qdebug!([self] "input {}", hex( &**d));
+        qinfo!([self] "input {}", hex( &**d));
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
@@ -1982,7 +1987,7 @@ impl CryptoCtx for CryptoDxState {
     }
 
     fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-        qinfo!(
+        qdebug!(
             [self.label]
             "aead_encrypt pn={} hdr={} body={}",
             pn,
