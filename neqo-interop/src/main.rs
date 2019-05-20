@@ -102,29 +102,29 @@ impl Handler for PostConnectHandler {
             match event {
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
-                        println!("Data on unexpected stream: {}", stream_id);
+                        eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
 
                     let (_sz, fin) = client
                         .stream_recv(stream_id, &mut data)
                         .expect("Read should succeed");
-                    println!(
+                    eprintln!(
                         "READ[{}]: {}",
                         stream_id,
                         String::from_utf8(data.clone()).unwrap()
                     );
                     if fin {
-                        println!("<FIN[{}]>", stream_id);
+                        eprintln!("<FIN[{}]>", stream_id);
                         client.close(0, "kthxbye!");
                         return false;
                     }
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    println!("stream {} writable", stream_id)
+                    eprintln!("stream {} writable", stream_id)
                 }
                 _ => {
-                    println!("Unexpected event {:?}", event);
+                    eprintln!("Unexpected event {:?}", event);
                 }
             }
         }
@@ -181,7 +181,7 @@ enum Test {
     Connect,
 }
 
-fn run_test<'t>(peer: &Peer, test: &'t Test) -> &'t Test {
+fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     let socket = UdpSocket::bind(peer.bind()).expect("Unable to bind UDP socket");
     socket.connect(&peer).expect("Unable to connect UDP socket");
 
@@ -194,14 +194,15 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> &'t Test {
     let mut h = PreConnectHandler {};
     process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h);
 
-    println!("Completed {} {:?}", peer.label, test);
-    test
+    eprintln!("Completed {} {:?}", peer.label, test);
+
+    (test, String::from("OK"))
 }
 
-fn run_peer(peer: &'static Peer) -> Vec<&'static Test> {
-    let mut results: Vec<&'static Test> = Vec::new();
+fn run_peer(peer: &'static Peer) -> Vec<(&'static Test, String)> {
+    let mut results: Vec<(&'static Test, String)> = Vec::new();
 
-    println!("Running tests for {}", peer.label);
+    eprintln!("Running tests for {}", peer.label);
 
     let mut children = Vec::new();
 
@@ -210,23 +211,24 @@ fn run_peer(peer: &'static Peer) -> Vec<&'static Test> {
             continue;
         }
 
-        let child = thread::spawn(move || {
-            run_test(peer, test);
-        });
+        let child = thread::spawn(move || run_test(peer, test));
         children.push((test, child));
     }
 
     for child in children {
         match child.1.join() {
-            Ok(_) => {
-                println!("Success {:?}", child.0);
-                results.push(child.0)
+            Ok(e) => {
+                eprintln!("Test complete {:?}, {:?}", child.0, e);
+                results.push(e)
             }
-            Err(_) => {}
+            Err(_) => {
+                eprintln!("Thread crashed {:?}", child.0);
+                results.push((child.0, String::from("CRASHED")));
+            }
         }
     }
 
-    println!("Tests for {} complete {:?}", peer.label, results);
+    eprintln!("Tests for {} complete {:?}", peer.label, results);
     results
 }
 
@@ -279,6 +281,6 @@ fn main() {
     // Now wait for them.
     for child in children {
         let res = child.1.join().unwrap();
-        println!("{} -> {:?}", child.0.label, res);
+        eprintln!("{} -> {:?}", child.0.label, res);
     }
 }
