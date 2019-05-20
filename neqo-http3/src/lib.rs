@@ -9,13 +9,16 @@
 pub mod connection;
 pub mod hframe;
 mod recvable;
+mod request_stream_client;
+pub mod request_stream_server;
 
 use neqo_qpack;
 use neqo_transport;
 
 use self::hframe::HFrameType;
 
-pub use connection::{ClientRequestServer, HttpConn};
+pub use connection::{Http3Connection, Http3Event, Http3State};
+pub use request_stream_server::RequestStreamServer;
 
 type Res<T> = Result<T, Error>;
 
@@ -133,5 +136,21 @@ impl ::std::error::Error for Error {
 impl ::std::fmt::Display for Error {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "HTTP/3 error: {:?}", self)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
+pub enum Http3Error {
+    InvalidStreamId,
+    TransportError,
+    AlreadyClosed,
+    DataNotReady,
+    ConnectionError,
+    NetReset,
+}
+
+impl ::std::fmt::Display for Http3Error {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "HTTP/3 app error: {:?}", self)
     }
 }

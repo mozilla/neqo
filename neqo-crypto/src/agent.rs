@@ -134,9 +134,10 @@ impl SecretAgentPreInfo {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SecretAgentInfo {
-    ver: Version,
+    version: Version,
     cipher: Cipher,
     group: Group,
+    resumed: bool,
     early_data: bool,
     alpn: Option<String>,
 }
@@ -153,22 +154,26 @@ impl SecretAgentInfo {
         };
         result::result(rv)?;
         Ok(SecretAgentInfo {
-            ver: info.protocolVersion as Version,
+            version: info.protocolVersion as Version,
             cipher: info.cipherSuite as Cipher,
             group: info.keaGroup as Group,
+            resumed: info.resumed != 0,
             early_data: info.earlyDataAccepted != 0,
             alpn: get_alpn(fd, false)?,
         })
     }
 
     pub fn version(&self) -> Version {
-        self.ver
+        self.version
     }
     pub fn cipher_suite(&self) -> Cipher {
         self.cipher
     }
     pub fn key_exchange(&self) -> Group {
         self.group
+    }
+    pub fn resumed(&self) -> bool {
+        self.resumed
     }
     pub fn early_data_accepted(&self) -> bool {
         self.early_data
@@ -547,13 +552,8 @@ impl SecretAgent {
         Ok(output)
     }
 
-    // Drive the TLS handshake, but get the raw content of records, not
-    // protected records as bytes. This function is incompatible with
-    // handshake(); use either this or handshake() exclusively.
-    //
-    // Ideally, this only includes records from the current epoch.
-    // If you send data from multiple epochs, you might end up being sad.
-    pub fn handshake_raw(&mut self, _now: u64, input: Option<Record>) -> Res<RecordList> {
+    /// Setup to receive records for raw handshake functions.
+    fn setup_raw(&mut self) -> Res<Box<RecordList>> {
         self.set_raw(true)?;
 
         // Setup for accepting records.
@@ -564,6 +564,18 @@ impl SecretAgent {
         if rv != ssl::SECSuccess {
             return Err(self.set_failed());
         }
+
+        Ok(records)
+    }
+
+    // Drive the TLS handshake, but get the raw content of records, not
+    // protected records as bytes. This function is incompatible with
+    // handshake(); use either this or handshake() exclusively.
+    //
+    // Ideally, this only includes records from the current epoch.
+    // If you send data from multiple epochs, you might end up being sad.
+    pub fn handshake_raw(&mut self, _now: u64, input: Option<Record>) -> Res<RecordList> {
+                let records = self.setup_raw()?;
 
         // Fire off any authentication we might need to complete.
         if self.state == HandshakeState::Authenticated {
@@ -586,6 +598,16 @@ impl SecretAgent {
         // Drive the handshake once more.
         let rv = unsafe { ssl::SSL_ForceHandshake(self.fd) };
         self.update_state(rv)?;
+
+        Ok(*records)
+    }
+
+    pub fn send_session_ticket(&mut self, extra: &[u8]) -> Res<RecordList> {
+        let records = self.setup_raw()?;
+
+        let rv =
+            unsafe { ssl::SSL_SendSessionTicket(self.fd, extra.as_ptr(), extra.len() as c_uint) };
+        result::result(rv)?;
 
         Ok(*records)
     }

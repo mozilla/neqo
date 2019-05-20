@@ -242,3 +242,30 @@ fn alpn_server_only() {
     assert_eq!(None, client.info().unwrap().alpn());
     assert_eq!(None, server.info().unwrap().alpn());
 }
+
+#[test]
+fn resume() {
+    init_db("./db");
+    let mut client = Client::new("server.example").expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+
+    connect(&mut client, &mut server);
+
+    let records = server.send_session_ticket(&[]).expect("token sent");
+    assert_eq!(records.len(), 1);
+    let resp = forward_records(&mut client, records).expect("handle resumption token");
+    assert_eq!(resp.len(), 0);
+
+    let token = client.resumption_token();
+    assert!(token.is_some());
+
+    let mut client2 = Client::new("server.example").expect("should create client2");
+    let mut server2 = Server::new(&["key"]).expect("should create server2");
+
+    client2
+        .set_resumption_token(token.unwrap())
+        .expect("token should be accepted");
+    connect(&mut client2, &mut server2);
+
+    assert!(client2.info().unwrap().resumed());
+}

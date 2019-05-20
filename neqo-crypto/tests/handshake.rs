@@ -8,6 +8,7 @@ pub const NOW: u64 = 20;
 pub fn forward_records(agent: &mut SecretAgent, records_in: RecordList) -> Res<RecordList> {
     let mut expected_state = match agent.state() {
         HandshakeState::New => HandshakeState::New,
+        HandshakeState::Complete(info) => HandshakeState::Complete(info.clone()),
         _ => HandshakeState::InProgress,
     };
     let mut records_out: RecordList = Default::default();

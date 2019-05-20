@@ -496,29 +496,28 @@ impl QPackDecoder {
             .encode_prefixed_encoded_int(0x40, 1, stream_id);
     }
 
-    pub fn send_if_decoder_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
-        match self.local_stream_id {
-            Some(id) => {
-                if id == stream_id {
-                    // Encode increment instruction if needed.
-                    if self.increment > 0 {
-                        self.send_buf
-                            .encode_prefixed_encoded_int(0x00, 2, self.increment);
-                        self.increment = 0;
+    pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
+        // Encode increment instruction if needed.
+        if self.increment > 0 {
+            self.send_buf
+                .encode_prefixed_encoded_int(0x00, 2, self.increment);
+            self.increment = 0;
+        }
+        if self.send_buf.len() == 0 {
+            Ok(())
+        } else {
+            if let Some(stream_id) = self.local_stream_id {
+                match conn.stream_send(stream_id, self.send_buf.as_mut_vec()) {
+                    Err(_) => Err(Error::DecoderStreamError),
+                    Ok(r) => {
+                        qdebug!([self] "{} bytes sent.", r);
+                        self.send_buf.read(r as usize);
+                        Ok(())
                     }
-                    match conn.stream_send(stream_id, self.send_buf.as_mut_vec()) {
-                        Err(_) => Err(Error::DecoderStreamError),
-                        Ok(r) => {
-                            qdebug!([self] "{} bytes sent.", r);
-                            self.send_buf.read(r as usize);
-                            Ok(true)
-                        }
-                    }
-                } else {
-                    Ok(false)
                 }
+            } else {
+                Ok(())
             }
-            None => Ok(false),
         }
     }
 
@@ -881,9 +880,7 @@ mod tests {
             };
         }
 
-        decoder
-            .send_if_decoder_stream(&mut conn_c, send_stream_id)
-            .unwrap();
+        decoder.send(&mut conn_c).unwrap();
         r = conn_c.process(vec![], now());
         conn_s.process(r.0, now());
         let mut found_instruction = false;
@@ -993,9 +990,7 @@ mod tests {
             assert!(false)
         }
 
-        decoder
-            .send_if_decoder_stream(&mut conn_c, send_stream_id)
-            .unwrap();
+        decoder.send(&mut conn_c).unwrap();
         r = conn_c.process(vec![], now());
         conn_s.process(r.0, now());
         let mut found_instruction = false;
@@ -1110,9 +1105,7 @@ mod tests {
         }
 
         // test header acks and the insert count increment command
-        decoder
-            .send_if_decoder_stream(&mut conn_c, send_stream_id)
-            .unwrap();
+        decoder.send(&mut conn_c).unwrap();
         let r = conn_c.process(vec![], now());
         conn_s.process(r.0, now());
         let mut found_instruction = false;
@@ -1220,9 +1213,7 @@ mod tests {
         }
 
         // test header acks and the insert count increment command
-        decoder
-            .send_if_decoder_stream(&mut conn_c, send_stream_id)
-            .unwrap();
+        decoder.send(&mut conn_c).unwrap();
         let r = conn_c.process(vec![], now());
         conn_s.process(r.0, now());
         let mut found_instruction = false;

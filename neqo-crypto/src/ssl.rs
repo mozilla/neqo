@@ -88,6 +88,11 @@ experimental_api!(SSL_SetResumptionToken(
     token: *const u8,
     len: c_uint,
 ));
+experimental_api!(SSL_SendSessionTicket(
+    fd: *mut PRFileDesc,
+    extra: *const u8,
+    len: c_uint,
+));
 
 #[cfg(test)]
 mod tests {
