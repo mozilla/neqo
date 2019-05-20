@@ -157,7 +157,11 @@ fn main() {
             connections.remove(&remote_addr);
             continue;
         }
-
+        if let State::Closing(e, ..) = server.state() {
+            eprintln!("Closing connection from {:?}: {:?}", remote_addr, e);
+            // TOOD(ekr@rtfm.com): Do I need to remove?
+            continue;
+        }
         let mut streams = Vec::new();
         for event in server.events() {
             match event {

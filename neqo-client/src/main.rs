@@ -117,10 +117,17 @@ fn process_loop(
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
-        if let State::Connected = client.state() {
-            return false;
+        match client.state() {
+            State::Connected => {
+                println!("Connected");
+                false
+            }
+            State::Closing(error, ..) => {
+                println!("Handshake failure {:?}", error);
+                false
+            }
+            _ => true,
         }
-        return true;
     }
 }
 

@@ -948,6 +948,7 @@ impl Connection {
                     return Ok(());
                 }
                 State::WaitInitial => {
+                    qinfo!([self] "Received packet in WaitInitial");
                     // Out DCID is the other side's SCID.
                     let scid = hdr.scid.as_ref().unwrap();
                     if self.role == Role::Server {
@@ -1608,11 +1609,11 @@ impl Connection {
         match cs {
             Some(ref mut cs) => Ok(cs),
             None => {
-                qinfo!("No crypto state for epoch {}", epoch);
+                qtrace!("No crypto state for epoch {}", epoch);
                 assert!(epoch != 0); // This state is made directly.
 
                 let rs = self.tls.read_secret(epoch).ok_or_else(|| {
-                    qinfo!("Keying material not available for epoch {}", epoch);
+                    qtrace!("Keying material not available for epoch {}", epoch);
                     Error::KeysNotFound
                 })?;
                 let ws = self
