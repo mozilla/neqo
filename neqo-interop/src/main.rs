@@ -160,7 +160,6 @@ impl Peer {
 
     fn alpn(&self) -> Vec<String> {
         match self.label {
-            "quant" => vec![String::from("hzzz")],
             "quicly" => vec![String::from("http/0.9")],
             _ => vec![String::from("hq-20")],
         }
