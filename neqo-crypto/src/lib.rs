@@ -107,11 +107,6 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
                 return;
             }
 
-            match std::env::var("LD_LIBRARY_PATH") {
-                Ok(v) => eprintln!("LD_LIBRARY_PATH={}", v),
-                _ => eprintln!("no LD_LIBRARY_PATH"),
-            };
-
             let path = dir.into();
             assert!(path.is_dir());
             let pathstr = path.to_str().expect("path converts to string").to_string();
