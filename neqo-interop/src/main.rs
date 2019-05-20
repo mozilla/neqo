@@ -75,6 +75,7 @@ struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
         if let State::Connected = client.state() {
+            println!("Connected");
             return false;
         }
         return true;
@@ -170,7 +171,7 @@ impl Test {
     }
 }
 
-fn run_test(peer: &Peer, test: &Test) -> bool {
+fn run_test<'t>(peer: &Peer, test: &'t Test) -> &'t Test {
     let socket = UdpSocket::bind(peer.bind()).expect("Unable to bind UDP socket");
     socket.connect(&peer).expect("Unable to connect UDP socket");
 
@@ -183,29 +184,47 @@ fn run_test(peer: &Peer, test: &Test) -> bool {
     let mut h = PreConnectHandler {};
     process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h);
 
-    return true;
+    test
 }
 
-fn run_peer(peer: &'static Peer) -> Vec<&Test> {
-    let results = Vec::new();
+fn run_peer(peer: &'static Peer) -> Vec<&'static Test> {
+    let mut results: Vec<&'static Test> = Vec::new();
 
     println!("Running tests for {}", peer.label);
+
+    let mut children = Vec::new();
+
     for test in &TESTS {
         if !peer.test_enabled(&test) {
             continue;
         }
 
-        let _child = thread::spawn(move || {
+        let child = thread::spawn(move || {
             run_test(peer, test);
         });
+        children.push((test, child));
     }
 
+    for child in children {
+        match child.1.join() {
+            Ok(_) => results.push(child.0),
+            Err(_) => {}
+        }
+    }
+
+    println!("Tests for {} complete", peer.label);
     results
 }
 
-const PEERS: [Peer; 1] = [Peer {
+/*const PEERS: [Peer; 1] = [Peer {
     label: &"quant",
     host: &"quant.eggert.org",
+    port: 4433,
+}];*/
+
+const PEERS: [Peer; 1] = [Peer {
+    label: &"local",
+    host: &"127.0.0.1",
     port: 4433,
 }];
 
