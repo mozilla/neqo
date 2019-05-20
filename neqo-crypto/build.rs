@@ -157,17 +157,16 @@ fn static_link(nsstarget: &PathBuf) {
         "pkcs7",
         "smime",
         "softokn_static",
+        "sqlite",
         "ssl",
     ] {
         println!("cargo:rustc-link-lib=static={}", lib);
     }
 
     let other_libs = if env::consts::OS == "windows" {
-        vec!["sqlite", "libplds4", "libplc4", "libnspr4"]
+        vec!["libplds4", "libplc4", "libnspr4"]
     } else {
-        vec![
-            "sqlite", "pthread", "dl", "c", "z", "plds4", "plc4", "nspr4",
-        ]
+        vec!["pthread", "dl", "c", "z", "plds4", "plc4", "nspr4"]
     };
     for lib in other_libs {
         println!("cargo:rustc-link-lib={}", lib);
