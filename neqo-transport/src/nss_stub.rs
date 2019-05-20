@@ -6,8 +6,7 @@
 
 use crate::{Error, Res};
 use lazy_static::lazy_static;
-use neqo_common::data::Data;
-use neqo_common::{qdebug, qinfo, qwarn};
+use neqo_common::{qdebug, qinfo, qwarn, Decoder, Encoder};
 use std::collections::linked_list::LinkedList;
 use std::ops::{Deref, DerefMut};
 use std::string::String;
@@ -143,19 +142,22 @@ impl SecretAgent {
         self.next == HANDSHAKE_MESSAGES.len()
     }
     fn send_message(&mut self, m: &HandshakeMessage) -> Vec<u8> {
-        let mut d = Data::default();
-        d.encode_vec_and_len(&m.name.clone().into_bytes());
-        d.as_mut_vec().to_vec()
+        let mut e = Encoder::default();
+        e.encode_vvec(&m.name.clone().into_bytes());
+        e.into()
     }
 
     fn process_message(&mut self, r: &SslRecord) -> Res<HandshakeMessage> {
-        let mut d = Data::from_slice(&r.data);
-        let v = d.decode_data_and_len()?;
+        let mut d = Decoder::from(&r.data[..]);
+        let name = match d.decode_vvec() {
+            Some(v) => String::from(std::str::from_utf8(v).unwrap()),
+            _ => return Err(Error::NoMoreData),
+        };
         if d.remaining() > 0 {
             return Err(Error::TooMuchData);
         }
         Ok(HandshakeMessage {
-            name: String::from_utf8(v).unwrap(),
+            name,
             epoch: r.epoch,
             client: !self.client,
         })

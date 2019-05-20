@@ -6,10 +6,13 @@
 
 #![deny(warnings)]
 
-pub mod data;
+mod codec;
+mod incrdecoder;
 pub mod log;
-pub mod readbuf;
-pub mod varint;
+
+pub use self::codec::{Decoder, Encoder};
+pub use self::incrdecoder::{IncrementalDecoder, IncrementalDecoderResult};
+
 use std::time::SystemTime;
 
 // Cribbed from the |matches| crate, for simplicity.
@@ -20,26 +23,6 @@ macro_rules! matches {
             $($pattern)+ => true,
             _ => false
         }
-    }
-}
-
-type Res<T> = Result<T, Error>;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Error {
-    NoMoreData,
-    ReadError, // TODO (mt): Copy the reader error through.
-}
-
-impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
-        None
-    }
-}
-
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Reader error: {:?}", self)
     }
 }
 

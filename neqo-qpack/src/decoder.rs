@@ -507,7 +507,7 @@ impl QPackDecoder {
             Ok(())
         } else {
             if let Some(stream_id) = self.local_stream_id {
-                match conn.stream_send(stream_id, self.send_buf.as_mut_vec()) {
+                match conn.stream_send(stream_id, &self.send_buf[..]) {
                     Err(_) => Err(Error::DecoderStreamError),
                     Ok(r) => {
                         qdebug!([self] "{} bytes sent.", r);

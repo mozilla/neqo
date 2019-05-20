@@ -8,7 +8,6 @@
 
 pub mod connection;
 pub mod hframe;
-mod recvable;
 mod request_stream_client;
 pub mod request_stream_server;
 
@@ -53,7 +52,6 @@ pub enum Error {
     Unexpected,
     // So we can wrap and report these errors.
     TransportError(neqo_transport::Error),
-    IoError(neqo_common::Error),
     QpackError(neqo_qpack::Error),
 }
 
@@ -91,8 +89,7 @@ impl Error {
             | Error::DecodingFrame
             | Error::NotEnoughData
             | Error::Unexpected
-            | Error::TransportError(..)
-            | Error::IoError(..) => 3,
+            | Error::TransportError(..) => 3,
             Error::QpackError(e) => e.code() as neqo_transport::AppError,
         }
     }
@@ -114,12 +111,6 @@ impl From<neqo_transport::Error> for Error {
 impl From<neqo_qpack::Error> for Error {
     fn from(err: neqo_qpack::Error) -> Self {
         Error::QpackError(err)
-    }
-}
-
-impl From<neqo_common::Error> for Error {
-    fn from(err: neqo_common::Error) -> Self {
-        Error::IoError(err)
     }
 }
 

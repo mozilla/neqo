@@ -16,9 +16,7 @@ use std::rc::Rc;
 
 use rand::Rng;
 
-use neqo_common::data::Data;
-use neqo_common::varint::get_varint_len;
-use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn};
+use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
@@ -60,6 +58,12 @@ const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
 pub enum Role {
     Client,
     Server,
+}
+
+impl ::std::fmt::Display for Role {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -546,12 +550,15 @@ impl CryptoDxState {
 
     fn new_initial<S: Into<String> + Clone>(label: S, dcid: &[u8]) -> CryptoDxState {
         let cipher = TLS_AES_128_GCM_SHA256;
-        let initial_salt = Data::from_hex("ef4fb0abb47470c41befcf8031334fae485e09a0");
+        const INITIAL_SALT: &[u8] = &[
+            0xef, 0x4f, 0xb0, 0xab, 0xb4, 0x74, 0x70, 0xc4, 0x1b, 0xef, 0xcf, 0x80, 0x31, 0x33,
+            0x4f, 0xae, 0x48, 0x5e, 0x09, 0xa0,
+        ];
         let initial_secret = hkdf::extract(
             TLS_VERSION_1_3,
             cipher,
             Some(
-                hkdf::import_key(TLS_VERSION_1_3, cipher, initial_salt.as_vec())
+                hkdf::import_key(TLS_VERSION_1_3, cipher, INITIAL_SALT)
                     .as_ref()
                     .unwrap(),
             ),
@@ -1007,7 +1014,7 @@ impl Connection {
                 self.set_state(State::Handshaking);
             }
 
-            let ack_eliciting = self.input_packet(hdr.epoch, Data::from_slice(&body), cur_time)?;
+            let ack_eliciting = self.input_packet(hdr.epoch, Decoder::from(&body[..]), cur_time)?;
 
             // Mark the packet as received.
             self.obtain_crypto_state(hdr.epoch)
@@ -1033,7 +1040,7 @@ impl Connection {
     }
 
     // Return whether the packet had ack-eliciting frames.
-    fn input_packet(&mut self, epoch: Epoch, mut d: Data, cur_time: u64) -> Res<(bool)> {
+    fn input_packet(&mut self, epoch: Epoch, mut d: Decoder, cur_time: u64) -> Res<(bool)> {
         let mut ack_eliciting = false;
 
         // Handle each frame in the packet
@@ -1106,7 +1113,7 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for epoch in 0..NUM_EPOCHS {
-            let mut d = Data::default();
+            let mut encoder = Encoder::default();
             let mut ds = Vec::new();
             let mut tokens = Vec::new();
             // Try to make our own crypo state and if we can't, skip this
@@ -1122,10 +1129,10 @@ impl Connection {
                 .recvd_state()
             {
                 let acks = recvd.get_eligible_ack_ranges();
-                Frame::encode_ack_frame(&acks, &mut d);
+                Frame::encode_ack_frame(&acks, &mut encoder);
                 // TODO(ekr@rtfm.com): Deal with the case where ACKs don't fit
                 // in an entire packet.
-                assert!(d.written() <= self.pmtu);
+                assert!(encoder.len() <= self.pmtu);
             }
 
             let mut ack_eliciting = false;
@@ -1136,7 +1143,7 @@ impl Connection {
             for generator in &mut generators {
                 // TODO(ekr@rtfm.com): Fix TxMode
                 while let Some((frame, token)) =
-                    generator.generate(self, epoch, TxMode::Normal, self.pmtu - d.written())
+                    generator.generate(self, epoch, TxMode::Normal, self.pmtu - encoder.len())
                 {
                     //qtrace!("pmtu {} written {}", self.pmtu, d.written());
                     ack_eliciting = ack_eliciting || frame.ack_eliciting();
@@ -1144,15 +1151,15 @@ impl Connection {
                         Frame::Crypto { .. } => true,
                         _ => is_crypto_packet,
                     };
-                    frame.marshal(&mut d);
+                    frame.marshal(&mut encoder);
                     if let Some(t) = token {
                         tokens.push(t);
                     }
-                    assert!(d.written() <= self.pmtu);
-                    if d.written() == self.pmtu {
+                    assert!(encoder.len() <= self.pmtu);
+                    if encoder.len() == self.pmtu {
                         // Filled this packet, get another one.
-                        ds.push((d, ack_eliciting, is_crypto_packet, tokens));
-                        d = Data::default();
+                        ds.push((encoder, ack_eliciting, is_crypto_packet, tokens));
+                        encoder = Encoder::default();
                         tokens = Vec::new();
                         ack_eliciting = false;
                         is_crypto_packet = false;
@@ -1161,11 +1168,11 @@ impl Connection {
             }
             self.generators = generators;
 
-            if d.written() > 0 {
-                ds.push((d, ack_eliciting, is_crypto_packet, tokens))
+            if encoder.len() > 0 {
+                ds.push((encoder, ack_eliciting, is_crypto_packet, tokens))
             }
 
-            for (data, ack_eliciting, is_crypto, tokens) in ds {
+            for (encoded, ack_eliciting, is_crypto, tokens) in ds {
                 qdebug!([self] "Need to send a packet");
 
                 initial_only = epoch == 0;
@@ -1199,7 +1206,7 @@ impl Connection {
 
                 // Failure to have the state here is an internal error.
                 let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
-                let packet = encode_packet(&cs.tx, &mut hdr, data.as_vec());
+                let packet = encode_packet(&cs.tx, &mut hdr, &encoded);
                 out_packets.push(packet);
             }
         }
@@ -2104,13 +2111,13 @@ impl FrameGenerator for CloseGenerator {
 /// Calculate the frame header size so we know how much data we can fit
 fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> usize {
     let mut hdr_len = 1; // for frame type
-    hdr_len += get_varint_len(stream_id.as_u64());
+    hdr_len += Encoder::varint_len(stream_id.as_u64());
     if offset > 0 {
-        hdr_len += get_varint_len(offset);
+        hdr_len += Encoder::varint_len(offset);
     }
 
-    // We always specify length
-    hdr_len as usize + get_varint_len(remaining as u64) as usize
+    // We always include a length field.
+    hdr_len + Encoder::varint_len(remaining as u64)
 }
 
 struct StreamGenerator {}
@@ -2340,9 +2347,9 @@ impl FrameGenerator for FlowControlGenerator {
         if let Some(frame) = conn.flow_mgr.borrow().peek() {
             // A suboptimal way to figure out if the frame fits within remaining
             // space.
-            let mut d = Data::default();
+            let mut d = Encoder::default();
             frame.marshal(&mut d);
-            if d.written() > remaining {
+            if d.len() > remaining {
                 qtrace!("flowc frame doesn't fit in remaining");
                 return None;
             }

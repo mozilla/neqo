@@ -8,8 +8,7 @@ use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEAD
 
 use crate::connection::Http3Events;
 
-use neqo_common::data::Data;
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{qdebug, qinfo, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::connection::Connection;
@@ -26,7 +25,7 @@ struct Request {
     host: String,
     path: String,
     headers: Vec<(String, String)>,
-    buf: Option<Data>,
+    buf: Option<Vec<u8>>,
 }
 
 impl Request {
@@ -55,14 +54,14 @@ impl Request {
 
     pub fn encode_request(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
         qdebug!([self] "Encoding headers for {}/{}", self.host, self.path);
-        let mut encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
+        let encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
         let f = HFrame::Headers {
             len: encoded_headers.len() as u64,
         };
-        let mut d = Data::default();
-        f.encode(&mut d).unwrap();
-        d.encode_vec(encoded_headers.as_mut_vec());
-        self.buf = Some(d);
+        let mut d = Encoder::default();
+        f.encode(&mut d);
+        d.encode(&encoded_headers[..]);
+        self.buf = Some(d.into());
     }
 }
 
@@ -163,15 +162,16 @@ impl RequestStreamClient {
                 self.request.encode_request(encoder, self.stream_id);
             }
             if let Some(d) = &mut self.request.buf {
-                let sent = conn.stream_send(self.stream_id, d.as_mut_vec())?;
+                let sent = conn.stream_send(self.stream_id, &d[..])?;
                 qdebug!([label] "{} bytes sent", sent);
-                if sent == d.remaining() {
+                if sent == d.len() {
                     self.request.buf = None;
                     conn.stream_close_send(self.stream_id)?;
                     self.state = RequestStreamClientState::WaitingForResponseHeaders;
                     qdebug!([label] "done sending request");
                 } else {
-                    d.read(sent);
+                    let b = d.split_off(sent);
+                    self.request.buf = Some(b);
                 }
             }
         }

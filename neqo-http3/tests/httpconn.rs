@@ -37,7 +37,7 @@ fn new_stream_callback(cr: &mut RequestStreamServer, error: bool) {
             (String::from(":status"), String::from("200")),
             (String::from("content-length"), String::from("3")),
         ],
-        &String::from("123"),
+        String::from("123"),
     );
 }
 

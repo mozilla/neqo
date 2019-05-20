@@ -6,8 +6,7 @@
 
 use crate::hframe::{ElementDependencyType, HFrame, HFrameReader, PrioritizedElementType};
 use crate::{Error, Res};
-use neqo_common::data::Data;
-use neqo_common::qdebug;
+use neqo_common::{qdebug, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::connection::Connection;
@@ -30,8 +29,8 @@ pub struct RequestStreamServer {
     frame_reader: HFrameReader,
     request_headers: Option<Vec<(String, String)>>,
     response_headers: Vec<(String, String)>,
-    data: String,
-    response_buf: Option<Data>,
+    data: Vec<u8>,
+    response_buf: Option<Vec<u8>>,
     fin: bool,
 }
 
@@ -43,7 +42,7 @@ impl RequestStreamServer {
             frame_reader: HFrameReader::new(),
             request_headers: None,
             response_headers: Vec::new(),
-            data: String::new(),
+            data: Vec::new(),
             response_buf: None,
             fin: false,
         }
@@ -56,29 +55,29 @@ impl RequestStreamServer {
             Vec::new()
         }
     }
-    pub fn set_response(&mut self, headers: &Vec<(String, String)>, data: &String) {
+    pub fn set_response(&mut self, headers: &Vec<(String, String)>, data: String) {
         self.response_headers.extend_from_slice(headers);
-        self.data = data.clone();
+        self.data = data.into_bytes(); // TODO(mt) this looks like a stub
         self.state = RequestStreamServerState::SendingResponse;
     }
 
     fn encode_response(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
         qdebug!([self] "Encoding headers");
-        let mut encoded_headers = encoder.encode_header_block(&self.response_headers, stream_id);
+        let encoded_headers = encoder.encode_header_block(&self.response_headers, stream_id);
         let f = HFrame::Headers {
             len: encoded_headers.len() as u64,
         };
-        let mut d = Data::default();
-        f.encode(&mut d).unwrap();
-        d.encode_vec(encoded_headers.as_mut_vec());
+        let mut d = Encoder::default();
+        f.encode(&mut d);
+        d.encode(&encoded_headers[..]);
         if self.data.len() > 0 {
             let d_frame = HFrame::Data {
                 len: self.data.len() as u64,
             };
-            d_frame.encode(&mut d).unwrap();
-            d.encode_vec(&self.data.clone().into_bytes());
+            d_frame.encode(&mut d);
+            d.encode(&self.data[..]);
         }
-        self.response_buf = Some(d);
+        self.response_buf = Some(d.into());
     }
 
     pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
@@ -91,15 +90,16 @@ impl RequestStreamServer {
                 self.encode_response(encoder, self.stream_id);
             }
             if let Some(d) = &mut self.response_buf {
-                let sent = conn.stream_send(self.stream_id, d.as_mut_vec())?;
+                let sent = conn.stream_send(self.stream_id, &d[..])?;
                 qdebug!([label] "{} bytes sent", sent);
-                if sent == d.remaining() {
+                if sent == d.len() {
                     self.response_buf = None;
                     conn.stream_close_send(self.stream_id)?;
                     self.state = RequestStreamServerState::Closed;
                     qdebug!([label] "done sending request");
                 } else {
-                    d.read(sent);
+                    let b = d.split_off(sent);
+                    self.response_buf = Some(b);
                 }
             }
         }
@@ -130,13 +130,13 @@ impl RequestStreamServer {
                     match self.frame_reader.get_frame()? {
                         HFrame::Priority {
                             priorized_elem_type,
-                            elem_dependensy_type,
+                            elem_dependency_type,
                             priority_elem_id,
                             elem_dependency_id,
                             weight,
                         } => self.handle_priority_frame(
                             priorized_elem_type,
-                            elem_dependensy_type,
+                            elem_dependency_type,
                             priority_elem_id,
                             elem_dependency_id,
                             weight,

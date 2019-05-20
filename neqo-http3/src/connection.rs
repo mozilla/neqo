@@ -5,13 +5,9 @@
 // except according to those terms.
 
 use crate::hframe::{HFrame, HFrameReader, HSettingType};
-use crate::recvable::RecvableWrapper;
 use crate::request_stream_client::RequestStreamClient;
 use crate::request_stream_server::RequestStreamServer;
-use neqo_common::data::Data;
-use neqo_common::readbuf::ReadBuf;
-use neqo_common::varint::decode_varint;
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{qdebug, qinfo, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::connection::Role;
@@ -36,21 +32,24 @@ const NUM_PLACEHOLDERS_DEFAULT: u64 = 0;
 #[derive(Default, Debug)]
 struct ControlStreamLocal {
     stream_id: Option<u64>,
-    buf: Data,
+    buf: Vec<u8>,
 }
 
 impl ControlStreamLocal {
     pub fn send_frame(&mut self, f: HFrame) {
-        f.encode(&mut self.buf).unwrap();
+        let mut enc = Encoder::default();
+        f.encode(&mut enc);
+        self.buf.append(&mut enc.into());
     }
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         if let Some(stream_id) = self.stream_id {
-            if self.buf.remaining() != 0 {
-                let sent = conn.stream_send(stream_id, self.buf.as_mut_vec())?;
-                if sent == self.buf.remaining() {
+            if self.buf.len() > 0 {
+                let sent = conn.stream_send(stream_id, &self.buf[..])?;
+                if sent == self.buf.len() {
                     self.buf.clear();
                 } else {
-                    self.buf.read(sent);
+                    let b = self.buf.split_off(sent);
+                    self.buf = b;
                 }
             }
             return Ok(());
@@ -105,41 +104,45 @@ impl ControlStreamRemote {
 
 #[derive(Debug)]
 struct NewStreamTypeReader {
-    reader: ReadBuf,
+    reader: IncrementalDecoder,
     fin: bool,
 }
 
 impl NewStreamTypeReader {
     pub fn new() -> NewStreamTypeReader {
         NewStreamTypeReader {
-            reader: ReadBuf::new(),
+            reader: IncrementalDecoder::decode_varint(),
             fin: false,
         }
     }
     pub fn get_type(&mut self, conn: &mut Connection, stream_id: u64) -> Option<u64> {
         // On any error we will only close this stream!
-        let mut w = RecvableWrapper::wrap(conn, stream_id);
         loop {
-            match self.reader.get_varint(&mut w) {
-                Ok((rv, fin)) => {
-                    if fin || rv == 0 {
-                        self.fin = fin;
-                        break None;
-                    }
-
-                    if self.reader.done() {
-                        match decode_varint(&mut self.reader) {
-                            Ok(v) => {
-                                break Some(v);
-                            }
-                            Err(_) => {
-                                self.fin = true;
-                                break None;
-                            }
+            let to_read = self.reader.min_remaining();
+            let mut buf = Vec::with_capacity(to_read);
+            buf.resize(to_read, 0);
+            match conn.stream_recv(stream_id, &mut buf[..]) {
+                Ok((_, true)) => {
+                    self.fin = true;
+                    break None;
+                }
+                Ok((0, false)) => {
+                    break None;
+                }
+                Ok((amount, false)) => {
+                    let mut dec = Decoder::from(&buf[..amount]);
+                    match self.reader.consume(&mut dec) {
+                        IncrementalDecoderResult::Uint(v) => {
+                            break Some(v);
+                        }
+                        IncrementalDecoderResult::InProgress => {}
+                        _ => {
+                            break None;
                         }
                     }
                 }
-                Err(_) => {
+                Err(e) => {
+                    qdebug!([conn] "Error reading stream type for stream {}: {:?}", stream_id, e);
                     self.fin = true;
                     break None;
                 }
@@ -225,9 +228,9 @@ impl Http3Connection {
     fn create_control_stream(&mut self) -> Res<()> {
         qdebug!([self] "create_control_stream.");
         self.control_stream_local.stream_id = Some(self.conn.stream_create(StreamType::UniDi)?);
-        self.control_stream_local
-            .buf
-            .encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
+        let mut enc = Encoder::default();
+        enc.encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
+        self.control_stream_local.buf.append(&mut enc.into());
         Ok(())
     }
 

@@ -4,12 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::data::*;
-use neqo_common::readbuf::{ReadBuf, Reader};
-use neqo_common::varint::*;
+use neqo_common::{
+    hex, qdebug, qtrace, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
+};
 use neqo_transport::Connection;
 
-use crate::recvable::RecvableWrapper;
+use std::mem;
+
 use crate::{Error, Res};
 
 pub type HFrameType = u64;
@@ -95,7 +96,7 @@ pub enum HFrame {
     },
     Priority {
         priorized_elem_type: PrioritizedElementType,
-        elem_dependensy_type: ElementDependencyType,
+        elem_dependency_type: ElementDependencyType,
         priority_elem_id: u64,
         elem_dependency_id: u64,
         weight: u8,
@@ -136,84 +137,82 @@ impl HFrame {
         }
     }
 
-    pub fn encode(&self, d: &mut Data) -> Res<()> {
-        d.encode_varint(self.get_type());
+    pub fn encode(&self, enc: &mut Encoder) {
+        enc.encode_varint(self.get_type());
 
         match self {
-            HFrame::Data { len } => {
-                d.encode_varint(*len);
-            }
-            HFrame::Headers { len } => {
-                d.encode_varint(*len);
+            HFrame::Data { len } | HFrame::Headers { len } => {
+                // DATA and HEADERS frames only encode the length here.
+                enc.encode_varint(*len);
             }
             HFrame::Priority {
                 priorized_elem_type,
-                elem_dependensy_type,
+                elem_dependency_type,
                 priority_elem_id,
                 elem_dependency_id,
                 weight,
             } => {
-                d.encode_varint(
-                    1 + get_varint_len(*priority_elem_id) + get_varint_len(*elem_dependency_id) + 1,
-                );
-                d.encode_byte((*priorized_elem_type as u8) | ((*elem_dependensy_type as u8) << 2));
-                d.encode_varint(*priority_elem_id);
-                d.encode_varint(*elem_dependency_id);
-                d.encode_byte(*weight);
+                enc.encode_vvec_with(|enc_inner| {
+                    enc_inner.encode_byte(
+                        (*priorized_elem_type as u8) | ((*elem_dependency_type as u8) << 2),
+                    );
+                    enc_inner.encode_varint(*priority_elem_id);
+                    enc_inner.encode_varint(*elem_dependency_id);
+                    enc_inner.encode_byte(*weight);
+                });
             }
             HFrame::CancelPush { push_id } => {
-                d.encode_varint(get_varint_len(*push_id));
-                d.encode_varint(*push_id);
+                enc.encode_vvec_with(|enc_inner| {
+                    enc_inner.encode_varint(*push_id);
+                });
             }
             HFrame::Settings { settings } => {
-                let mut len = 0;
-                // finding the length in this way ok since we only have 2 setting types
-                for iter in settings.iter() {
-                    if iter.0 != HSettingType::UnknownType {
-                        len += 1 + get_varint_len(iter.1); // setting types are 6 and 8 so day fit in one byte
+                enc.encode_vvec_with(|enc_inner| {
+                    for iter in settings.iter() {
+                        match iter.0 {
+                            HSettingType::MaxHeaderListSize => {
+                                enc_inner.encode_varint(SETTINGS_MAX_HEADER_LIST_SIZE as u64);
+                                enc_inner.encode_varint(iter.1);
+                            }
+                            HSettingType::NumPlaceholders => {
+                                enc_inner.encode_varint(SETTINGS_NUM_PLACEHOLDERS as u64);
+                                enc_inner.encode_varint(iter.1);
+                            }
+                            HSettingType::MaxTableSize => {
+                                enc_inner.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY as u64);
+                                enc_inner.encode_varint(iter.1);
+                            }
+                            HSettingType::BlockedStreams => {
+                                enc_inner.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS as u64);
+                                enc_inner.encode_varint(iter.1);
+                            }
+                            HSettingType::UnknownType => {}
+                        }
                     }
-                }
-                d.encode_varint(len);
-                for iter in settings.iter() {
-                    match iter.0 {
-                        HSettingType::MaxHeaderListSize => {
-                            d.encode_varint(SETTINGS_MAX_HEADER_LIST_SIZE as u64);
-                            d.encode_varint(iter.1);
-                        }
-                        HSettingType::NumPlaceholders => {
-                            d.encode_varint(SETTINGS_NUM_PLACEHOLDERS as u64);
-                            d.encode_varint(iter.1);
-                        }
-                        HSettingType::MaxTableSize => {
-                            d.encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY as u64);
-                            d.encode_varint(iter.1);
-                        }
-                        HSettingType::BlockedStreams => {
-                            d.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS as u64);
-                            d.encode_varint(iter.1);
-                        }
-                        HSettingType::UnknownType => {}
-                    }
-                }
+                });
             }
             HFrame::PushPromise { push_id, len } => {
-                d.encode_varint(*len + get_varint_len(*push_id));
-                d.encode_varint(*push_id);
+                // This one is tricky because we don't encode the body, we encode the length.
+                // TODO(mt) work out whether this needs to stay this way.
+                enc.encode_varint(*len + (Encoder::varint_len(*push_id) as u64));
+                enc.encode_varint(*push_id);
             }
             HFrame::Goaway { stream_id } => {
-                d.encode_varint(get_varint_len(*stream_id));
-                d.encode_varint(*stream_id);
+                enc.encode_vvec_with(|enc_inner| {
+                    enc_inner.encode_varint(*stream_id);
+                });
             }
             HFrame::MaxPushId { push_id } => {
-                d.encode_varint(get_varint_len(*push_id));
-                d.encode_varint(*push_id);
+                enc.encode_vvec_with(|enc_inner| {
+                    enc_inner.encode_varint(*push_id);
+                });
             }
             HFrame::DuplicatePush { push_id } => {
-                d.encode_varint(get_varint_len(*push_id));
-                d.encode_varint(*push_id);
+                enc.encode_vvec_with(|enc_inner| {
+                    enc_inner.encode_varint(*push_id);
+                });
             }
         }
-        Ok(())
     }
 
     pub fn is_allowed(&self, s: HStreamType) -> bool {
@@ -287,20 +286,23 @@ impl HFrame {
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 enum HFrameReaderState {
+    BeforeFrame,
     GetType,
     GetLength,
     GetPushPromiseData,
     GetData,
-    UnknownFrameDischargeData { offset: u64 },
+    UnknownFrameDischargeData,
     Done,
 }
 
 #[derive(Debug)]
 pub struct HFrameReader {
     state: HFrameReaderState,
-    reader: ReadBuf,
+    decoder: IncrementalDecoder,
     hframe_type: u64,
     hframe_len: u64,
+    push_id_len: usize,
+    payload: Vec<u8>,
 }
 
 impl HFrameReader {
@@ -309,141 +311,128 @@ impl HFrameReader {
             state: HFrameReaderState::GetType,
             hframe_type: 0,
             hframe_len: 0,
-            reader: ReadBuf::new(),
+            push_id_len: 0, // TODO(mt) remove this, it's bad
+            decoder: IncrementalDecoder::decode_varint(),
+            payload: Vec::new(),
         }
     }
 
     pub fn reset(&mut self) {
-        self.state = HFrameReaderState::GetType;
-        self.reader.reset();
+        self.state = HFrameReaderState::BeforeFrame;
+        self.decoder = IncrementalDecoder::decode_varint();
     }
 
     // returns true if quic stream was closed.
     pub fn receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
-        let mut w = RecvableWrapper::wrap(conn, stream_id);
         loop {
+            let to_read = std::cmp::min(self.decoder.min_remaining(), 4096);
+            let mut buf = Vec::with_capacity(to_read);
+            buf.resize(to_read, 0);
+            let mut input = match conn.stream_recv(stream_id, &mut buf[..]) {
+                Ok((_, true)) => {
+                    break match self.state {
+                        HFrameReaderState::BeforeFrame => Ok(true),
+                        _ => Err(Error::MalformedFrame(0xff)),
+                    };
+                }
+                Ok((0, false)) => break Ok(false),
+                Ok((amount, false)) => Decoder::from(&buf[..amount]),
+                Err(e) => {
+                    qdebug!([conn] "Error reading data from stream {}: {:?}", stream_id, e);
+                    break Err(e.into());
+                }
+            };
+
+            // TODO(mt) this amount_read thing is terrible.
+            let mut amount_read = input.remaining();
+            let progress = self.decoder.consume(&mut input);
+            amount_read -= input.remaining();
             match self.state {
-                HFrameReaderState::GetType => {
-                    let (rv, fin) = self.reader.get_varint(&mut w)?;
-                    if fin && (self.reader.has_data_recv() || self.reader.done()) {
-                        break Err(Error::MalformedFrame(0xff));
-                    }
-
-                    if rv == 0 {
-                        break Ok(fin);
-                    }
-
-                    if self.reader.done() {
-                        self.hframe_type = decode_varint(&mut self.reader)?;
-                        self.reader.reset();
+                HFrameReaderState::BeforeFrame | HFrameReaderState::GetType => match progress {
+                    IncrementalDecoderResult::Uint(v) => {
+                        self.hframe_type = v;
+                        self.decoder = IncrementalDecoder::decode_varint();
                         self.state = HFrameReaderState::GetLength;
                     }
-
-                    if fin {
-                        break Ok(fin);
+                    IncrementalDecoderResult::InProgress => {
+                        self.state = HFrameReaderState::GetType;
                     }
-                }
+                    _ => {
+                        break Err(Error::MalformedFrame(0xff));
+                    }
+                },
 
                 HFrameReaderState::GetLength => {
-                    let (rv, fin) = self.reader.get_varint(&mut w)?;
-                    if rv == 0 {
-                        break Ok(fin);
-                    }
-                    if self.reader.done() {
-                        self.hframe_len = decode_varint(&mut self.reader)?;
-                        self.reader.reset();
-
-                        match self.hframe_type {
-                            // DATA and HEADERS payload are left on the quic stream and picked up separately
-                            H3_FRAME_TYPE_DATA | H3_FRAME_TYPE_HEADERS => {
-                                self.state = HFrameReaderState::Done;
-                            }
-                            // For push frame we only decode the first varint. Headers blocks will be picked up separately.
-                            H3_FRAME_TYPE_PUSH_PROMISE => {
-                                self.state = HFrameReaderState::GetPushPromiseData;
-                            }
-                            // for othere frame get all data before decoding.
-                            H3_FRAME_TYPE_PRIORITY
-                            | H3_FRAME_TYPE_CANCEL_PUSH
-                            | H3_FRAME_TYPE_SETTINGS
-                            | H3_FRAME_TYPE_GOAWAY
-                            | H3_FRAME_TYPE_MAX_PUSH_ID
-                            | H3_FRAME_TYPE_DUPLICATE_PUSH => {
-                                if self.hframe_len > 0 {
-                                    self.reader.get_len(self.hframe_len);
-                                    self.state = HFrameReaderState::GetData;
-                                } else {
-                                    self.state = HFrameReaderState::Done;
+                    match progress {
+                        IncrementalDecoderResult::Uint(len) => {
+                            self.hframe_len = len;
+                            self.state = match self.hframe_type {
+                                // DATA and HEADERS payload are left on the quic stream and picked up separately
+                                H3_FRAME_TYPE_DATA | H3_FRAME_TYPE_HEADERS => {
+                                    HFrameReaderState::Done
                                 }
-                            }
-                            _ => {
-                                if self.hframe_len > 0 {
-                                    self.state =
-                                        HFrameReaderState::UnknownFrameDischargeData { offset: 0 };
-                                } else {
-                                    // Forget abouth this frame.
-                                    self.reset();
+                                // For push frame we only decode the first varint. Headers blocks will be picked up separately.
+                                H3_FRAME_TYPE_PUSH_PROMISE => {
+                                    self.decoder = IncrementalDecoder::decode_varint();
+                                    HFrameReaderState::GetPushPromiseData
                                 }
-                            }
+                                // for other frames get all data before decoding.
+                                H3_FRAME_TYPE_PRIORITY
+                                | H3_FRAME_TYPE_CANCEL_PUSH
+                                | H3_FRAME_TYPE_SETTINGS
+                                | H3_FRAME_TYPE_GOAWAY
+                                | H3_FRAME_TYPE_MAX_PUSH_ID
+                                | H3_FRAME_TYPE_DUPLICATE_PUSH => {
+                                    self.decoder = IncrementalDecoder::decode(len as usize);
+                                    HFrameReaderState::GetData
+                                }
+                                _ => {
+                                    self.decoder = IncrementalDecoder::ignore(len as usize);
+                                    HFrameReaderState::UnknownFrameDischargeData
+                                }
+                            };
                         }
-                    }
-
-                    if fin {
-                        break Ok(fin);
+                        IncrementalDecoderResult::InProgress => {}
+                        _ => break Err(Error::NoMoreData),
                     }
                 }
                 HFrameReaderState::GetPushPromiseData => {
-                    let (rv, fin) = self.reader.get_varint(&mut w)?;
-                    if rv == 0 {
-                        break Ok(fin);
-                    }
-                    if self.reader.done() {
-                        // we will read payload when we decode th frame.
-                        self.state = HFrameReaderState::Done
-                    }
-
-                    if fin {
-                        break Ok(fin);
-                    }
+                    self.push_id_len += amount_read;
+                    match progress {
+                        IncrementalDecoderResult::Uint(push_id) => {
+                            // put the push ID back into the payload
+                            // TODO(mt) this is not a good design
+                            let mut enc = Encoder::with_capacity(8);
+                            enc.encode_uint(8, push_id);
+                            self.payload = enc.into();
+                            self.state = HFrameReaderState::Done;
+                            break Ok(false);
+                        }
+                        IncrementalDecoderResult::InProgress => {}
+                        _ => break Err(Error::NoMoreData),
+                    };
                 }
                 HFrameReaderState::GetData => {
-                    let (rv, fin) = self.reader.get(&mut w)?;
-                    if rv == 0 {
-                        break Ok(fin);
-                    }
-                    if self.reader.done() {
-                        self.state = HFrameReaderState::Done;
-                    }
-
-                    if fin {
-                        break Ok(fin);
-                    }
+                    match progress {
+                        IncrementalDecoderResult::Buffer(data) => {
+                            qtrace!([conn] "received frame {}: {}", self.hframe_type, hex(&data[..]));
+                            self.payload = data;
+                            self.state = HFrameReaderState::Done;
+                            break Ok(false);
+                        }
+                        IncrementalDecoderResult::InProgress => {}
+                        _ => break Err(Error::NoMoreData),
+                    };
                 }
-                HFrameReaderState::UnknownFrameDischargeData { mut offset } => {
-                    assert!(offset < self.hframe_len);
-                    let mut buf: [u8; 1024] = [0; 1024];
-                    while {
-                        let amount: usize = if (self.hframe_len - offset) > 1024 {
-                            1024
-                        } else {
-                            (self.hframe_len - offset) as usize
-                        };
-                        let (rv, fin) = w.read(&mut buf[..amount])?;
-
-                        if rv == 0 {
-                            return Ok(fin);
+                HFrameReaderState::UnknownFrameDischargeData => {
+                    match progress {
+                        IncrementalDecoderResult::Ignored => {
+                            self.reset();
+                            break Ok(false);
                         }
-                        offset += rv as u64;
-
-                        if fin {
-                            if offset == self.hframe_len {
-                                self.reset();
-                            }
-                            return Ok(fin);
-                        }
-                        offset < self.hframe_len
-                    } {}
-                    self.reset();
+                        IncrementalDecoderResult::InProgress => {}
+                        _ => break Err(Error::NoMoreData),
+                    };
                 }
                 HFrameReaderState::Done => {
                     break Ok(false);
@@ -458,80 +447,103 @@ impl HFrameReader {
 
     pub fn get_frame(&mut self) -> Res<HFrame> {
         if self.state != HFrameReaderState::Done {
-            Err(Error::NotEnoughData)
-        } else {
-            let f = match self.hframe_type {
-                H3_FRAME_TYPE_DATA => HFrame::Data {
-                    len: self.hframe_len,
-                },
-                H3_FRAME_TYPE_HEADERS => HFrame::Headers {
-                    len: self.hframe_len,
-                },
-                H3_FRAME_TYPE_PRIORITY => {
-                    let tb = self.reader.decode_byte()?;
-                    let pe = decode_varint(&mut self.reader)?;
-                    let de = decode_varint(&mut self.reader)?;
-                    let w = self.reader.decode_byte()?;
-                    HFrame::Priority {
-                        priorized_elem_type: prior_elem_from_byte(tb),
-                        elem_dependensy_type: elem_dep_from_byte(tb),
-                        priority_elem_id: pe,
-                        elem_dependency_id: de,
-                        weight: w,
-                    }
-                }
-                H3_FRAME_TYPE_CANCEL_PUSH => HFrame::CancelPush {
-                    push_id: decode_varint(&mut self.reader)?,
-                },
-                H3_FRAME_TYPE_SETTINGS => {
-                    let mut settings: Vec<(HSettingType, u64)> = Vec::new();
-                    while self.reader.remaining() > 0 {
-                        let st_read = decode_varint(&mut self.reader)?;
-                        let mut st = HSettingType::UnknownType;
-                        match st_read {
-                            SETTINGS_MAX_HEADER_LIST_SIZE => {
-                                st = HSettingType::MaxHeaderListSize;
-                            }
-                            SETTINGS_NUM_PLACEHOLDERS => {
-                                st = HSettingType::NumPlaceholders;
-                            }
-                            SETTINGS_QPACK_MAX_TABLE_CAPACITY => {
-                                st = HSettingType::MaxTableSize;
-                            }
-                            SETTINGS_QPACK_BLOCKED_STREAMS => {
-                                st = HSettingType::BlockedStreams;
-                            }
-                            _ => {}
-                        };
-                        let v = decode_varint(&mut self.reader)?;
-                        if st != HSettingType::UnknownType {
-                            settings.push((st, v));
-                        }
-                    }
-                    HFrame::Settings { settings: settings }
-                }
-                H3_FRAME_TYPE_PUSH_PROMISE => {
-                    let p = decode_varint(&mut self.reader)?;
-                    let len = self.hframe_len - self.reader.len() as u64;
-                    HFrame::PushPromise {
-                        push_id: p,
-                        len: len,
-                    }
-                }
-                H3_FRAME_TYPE_GOAWAY => HFrame::Goaway {
-                    stream_id: decode_varint(&mut self.reader)?,
-                },
-                H3_FRAME_TYPE_MAX_PUSH_ID => HFrame::MaxPushId {
-                    push_id: decode_varint(&mut self.reader)?,
-                },
-                H3_FRAME_TYPE_DUPLICATE_PUSH => HFrame::DuplicatePush {
-                    push_id: decode_varint(&mut self.reader)?,
-                },
-                _ => panic!("We should not be in sate Done with unknown frame type!"),
-            };
-            self.reset();
-            Ok(f)
+            return Err(Error::NotEnoughData);
         }
+
+        let payload = mem::replace(&mut self.payload, Vec::new());
+        let mut dec = Decoder::from(&payload[..]);
+        let f = match self.hframe_type {
+            H3_FRAME_TYPE_DATA => HFrame::Data {
+                len: self.hframe_len,
+            },
+            H3_FRAME_TYPE_HEADERS => HFrame::Headers {
+                len: self.hframe_len,
+            },
+            H3_FRAME_TYPE_PRIORITY => {
+                let tb = match dec.decode_byte() {
+                    Some(v) => v,
+                    _ => return Err(Error::NotEnoughData),
+                };
+                let pe = match dec.decode_varint() {
+                    Some(v) => v,
+                    _ => return Err(Error::NotEnoughData),
+                };
+                let de = match dec.decode_varint() {
+                    Some(v) => v,
+                    _ => return Err(Error::NotEnoughData),
+                };
+                let w = match dec.decode_byte() {
+                    Some(v) => v,
+                    _ => return Err(Error::NotEnoughData),
+                };
+                HFrame::Priority {
+                    priorized_elem_type: prior_elem_from_byte(tb),
+                    elem_dependency_type: elem_dep_from_byte(tb),
+                    priority_elem_id: pe,
+                    elem_dependency_id: de,
+                    weight: w,
+                }
+            }
+            H3_FRAME_TYPE_CANCEL_PUSH => HFrame::CancelPush {
+                push_id: match dec.decode_varint() {
+                    Some(v) => v,
+                    _ => return Err(Error::NotEnoughData),
+                },
+            },
+            H3_FRAME_TYPE_SETTINGS => {
+                let mut settings: Vec<(HSettingType, u64)> = Vec::new();
+                while dec.remaining() > 0 {
+                    let st_read = match dec.decode_varint() {
+                        Some(v) => v,
+                        _ => return Err(Error::NotEnoughData),
+                    };
+                    let st = match st_read {
+                        SETTINGS_MAX_HEADER_LIST_SIZE => HSettingType::MaxHeaderListSize,
+                        SETTINGS_NUM_PLACEHOLDERS => HSettingType::NumPlaceholders,
+                        SETTINGS_QPACK_MAX_TABLE_CAPACITY => HSettingType::MaxTableSize,
+                        SETTINGS_QPACK_BLOCKED_STREAMS => HSettingType::BlockedStreams,
+                        _ => HSettingType::UnknownType,
+                    };
+                    let v = match dec.decode_varint() {
+                        Some(v) => v,
+                        _ => return Err(Error::NotEnoughData),
+                    };
+                    if st != HSettingType::UnknownType {
+                        settings.push((st, v));
+                    }
+                }
+                HFrame::Settings { settings: settings }
+            }
+            H3_FRAME_TYPE_PUSH_PROMISE => {
+                let push_id = match dec.decode_uint(8) {
+                    Some(v) => v,
+                    _ => unreachable!(),
+                };
+                let len = self.hframe_len - self.push_id_len as u64;
+                HFrame::PushPromise { push_id, len }
+            }
+            H3_FRAME_TYPE_GOAWAY => HFrame::Goaway {
+                stream_id: match dec.decode_varint() {
+                    Some(v) => v,
+                    _ => return Err(Error::NotEnoughData),
+                },
+            },
+            H3_FRAME_TYPE_MAX_PUSH_ID => HFrame::MaxPushId {
+                push_id: match dec.decode_varint() {
+                    Some(v) => v,
+                    _ => return Err(Error::NotEnoughData),
+                },
+            },
+            H3_FRAME_TYPE_DUPLICATE_PUSH => HFrame::DuplicatePush {
+                push_id: match dec.decode_varint() {
+                    Some(v) => v,
+                    _ => return Err(Error::NotEnoughData),
+                },
+            },
+            _ => panic!("We should not be in state Done with unknown frame type!"),
+        };
+        self.reset();
+        Ok(f)
     }
 }
 
@@ -552,14 +564,13 @@ mod tests {
     }
 
     fn enc_dec(f: &HFrame, st: &str, remaining: usize) {
-        let mut d = Data::default();
+        let mut d = Encoder::default();
 
-        f.encode(&mut d).unwrap();
+        f.encode(&mut d);
 
         // For data, headers and push_promise we do not read all bytes from the buffer
-        let mut d2 = Data::from_hex(st);
-        let len = d2.remaining();
-        assert_eq!(d.as_mut_vec()[..], d2.as_mut_vec()[..len - remaining]);
+        let d2 = Encoder::from_hex(st);
+        assert_eq!(&d[..], &d2[..d.len()]);
 
         init_db("./../neqo-transport/db");
         let mut conn_c =
@@ -622,7 +633,7 @@ mod tests {
     fn test_priority_frame1() {
         let f = HFrame::Priority {
             priorized_elem_type: PrioritizedElementType::RequestStream,
-            elem_dependensy_type: ElementDependencyType::RequestStream,
+            elem_dependency_type: ElementDependencyType::RequestStream,
             priority_elem_id: 2,
             elem_dependency_id: 1,
             weight: 3,
@@ -634,7 +645,7 @@ mod tests {
     fn test_priority_frame2() {
         let f = HFrame::Priority {
             priorized_elem_type: PrioritizedElementType::PushStream,
-            elem_dependensy_type: ElementDependencyType::PushStream,
+            elem_dependency_type: ElementDependencyType::PushStream,
             priority_elem_id: 2,
             elem_dependency_id: 1,
             weight: 3,
@@ -646,7 +657,7 @@ mod tests {
     fn test_priority_frame3() {
         let f = HFrame::Priority {
             priorized_elem_type: PrioritizedElementType::Placeholder,
-            elem_dependensy_type: ElementDependencyType::Placeholder,
+            elem_dependency_type: ElementDependencyType::Placeholder,
             priority_elem_id: 2,
             elem_dependency_id: 1,
             weight: 3,
@@ -658,7 +669,7 @@ mod tests {
     fn test_priority_frame4() {
         let f = HFrame::Priority {
             priorized_elem_type: PrioritizedElementType::CurrentStream,
-            elem_dependensy_type: ElementDependencyType::Root,
+            elem_dependency_type: ElementDependencyType::Root,
             priority_elem_id: 2,
             elem_dependency_id: 1,
             weight: 3,

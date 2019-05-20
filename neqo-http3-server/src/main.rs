@@ -116,7 +116,7 @@ fn http_serve(cr: &mut RequestStreamServer, _error: bool) {
             (String::from(":status"), String::from("200")),
             (String::from("content-length"), resp.len().to_string()),
         ],
-        &resp,
+        resp,
     );
 }
 
