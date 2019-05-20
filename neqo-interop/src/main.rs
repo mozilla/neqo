@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::now;
+use neqo_common::{now, Res};
 use neqo_crypto::init_db;
 use neqo_transport::frame::StreamType;
 use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
@@ -168,10 +168,25 @@ impl Handler for PostConnectHandler {
     }
 }
 
-fn main() {
-    let args = Args::from_args();
-    init_db(args.db.clone());
+struct Peer {
+    host: String,
+    port: u16,
+}
 
+impl ToSocketAddrs for Peer {
+    type Iter = ::std::vec::IntoIter<SocketAddr>;
+    fn to_socket_addrs(&self) -> ::std::io::Result<Self::Iter> {
+        // This is idiotic.  There is no path from hostname: String to IpAddr.
+        // And no means of controlling name resolution either.
+        std::fmt::format(format_args!("{}:{}", self.host, self.port)).to_socket_addrs()
+    }
+}
+
+enum Test {
+    Connect,
+}
+
+fn run_test(args: &Args, test: &Test, host: &str, port: u16) -> Res<()> {
     let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
     socket.connect(&args).expect("Unable to connect UDP socket");
 
@@ -179,6 +194,11 @@ fn main() {
     let remote_addr = args.addr();
 
     println!("Client connecting: {:?} -> {:?}", local_addr, remote_addr);
+}
+
+fn main() {
+    let args = Args::from_args();
+    init_db(args.db.clone());
 
     let mut client = Connection::new_client(args.host.as_str(), args.alpn, local_addr, remote_addr)
         .expect("must succeed");
