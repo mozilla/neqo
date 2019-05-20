@@ -141,7 +141,7 @@ fn static_link(nsstarget: &PathBuf) {
     // This is kludgy.
     let lib_dir = nsstarget.join("lib");
     println!("cargo:rustc-link-search={}", lib_dir.to_str().unwrap());
-    for lib in &[
+    let mut static_libs = vec![
         "certdb",
         "certhi",
         "cryptohi",
@@ -157,17 +157,23 @@ fn static_link(nsstarget: &PathBuf) {
         "pkcs7",
         "smime",
         "softokn_static",
-        "sqlite",
         "ssl",
-    ] {
+    ];
+    if env::consts::OS != "macos" {
+        static_libs.push("sqlite");
+    }
+    for lib in static_libs {
         println!("cargo:rustc-link-lib=static={}", lib);
     }
 
-    let other_libs = if env::consts::OS == "windows" {
+    let mut other_libs = if env::consts::OS == "windows" {
         vec!["libplds4", "libplc4", "libnspr4"]
     } else {
         vec!["pthread", "dl", "c", "z", "plds4", "plc4", "nspr4"]
     };
+    if env::consts::OS == "macos" {
+        other_libs.push("sqlite3");
+    }
     for lib in other_libs {
         println!("cargo:rustc-link-lib={}", lib);
     }
