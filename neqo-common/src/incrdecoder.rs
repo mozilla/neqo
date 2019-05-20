@@ -29,6 +29,7 @@ pub enum IncrementalDecoder {
     InUint { v: u64, remaining: usize },
     InBufferLen(Box<IncrementalDecoder>),
     InBuffer { v: Vec<u8>, remaining: usize },
+    Ignoring { remaining: usize },
 }
 
 /// IncrementalDecoderResult is the result of decoding a partial input.
@@ -38,6 +39,7 @@ pub enum IncrementalDecoderResult {
     InProgress,
     Uint(u64),
     Buffer(Vec<u8>),
+    Ignored,
     Error,
 }
 
@@ -70,6 +72,11 @@ impl IncrementalDecoder {
         IncrementalDecoder::InBufferLen(Box::new(IncrementalDecoder::decode_varint()))
     }
 
+    /// Ignore a certain number of bytes.
+    pub fn ignore(n: usize) -> IncrementalDecoder {
+        IncrementalDecoder::Ignoring{ remaining: n }
+    }
+
     /// For callers that might need to request additional data, provide an indication
     /// of the minimum amount of data that should be requested to make progress.
     /// The guarantee is that this will never return a value larger than a subsequent
@@ -78,7 +85,8 @@ impl IncrementalDecoder {
         match self {
             IncrementalDecoder::BeforeVarint => 1,
             IncrementalDecoder::InUint { remaining, .. }
-            | IncrementalDecoder::InBuffer { remaining, .. } => *remaining,
+            | IncrementalDecoder::InBuffer { remaining, .. }
+            | IncrementalDecoder::Ignoring { remaining } => *remaining,
             IncrementalDecoder::InBufferLen(in_len) => in_len.min_remaining(),
             _ => 0,
         }
@@ -180,6 +188,18 @@ impl IncrementalDecoder {
 
             IncrementalDecoder::InBuffer { v, remaining } => {
                 self.consume_buffer_remainder(v, remaining, dv)
+            },
+
+            IncrementalDecoder::Ignoring { remaining } => {
+                if remaining <= dv.remaining() {
+                    let _ = dv.decode(remaining);
+                    *self = IncrementalDecoder::Idle;
+                    IncrementalDecoderResult::Ignored
+                } else {
+                    *self = IncrementalDecoder::Ignoring { remaining: remaining - dv.remaining() };
+                    let _ = dv.decode_remainder();
+                    IncrementalDecoderResult::InProgress
+                }
             }
         }
     }
@@ -375,5 +395,11 @@ mod tests {
             _ => panic!("should be idle"),
         };
         assert_eq!(dec.remaining(), enc.len());
+    }
+
+    #[test]
+    fn ignore() {
+        let enc = Encoder::from_hex("12345678");
+        run_split(IncrementalDecoder::ignore(4), enc, IncrementalDecoderResult::Ignored);
     }
 }

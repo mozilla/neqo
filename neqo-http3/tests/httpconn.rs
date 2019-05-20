@@ -6,8 +6,8 @@
 
 #![allow(unused_assignments)]
 
-use neqo_http3::{ClientRequestServer, HttpConn};
-use neqo_transport::{Connection, Datagram, State};
+use neqo_http3::{Http3Connection, Http3State, RequestStreamServer};
+use neqo_transport::{Connection, Datagram};
 
 use std::net::SocketAddr;
 
@@ -17,7 +17,7 @@ fn loopback() -> SocketAddr {
     "127.0.0.1:443".parse().unwrap()
 }
 
-fn new_stream_callback(cr: &mut ClientRequestServer, error: bool) {
+fn new_stream_callback(cr: &mut RequestStreamServer, error: bool) {
     println!("Error: {}", error);
 
     let request_headers = cr.get_request_headers();
@@ -41,35 +41,29 @@ fn new_stream_callback(cr: &mut ClientRequestServer, error: bool) {
     );
 }
 
-fn connect() -> (HttpConn, HttpConn, (Vec<Datagram>, u64)) {
+fn connect() -> (Http3Connection, Http3Connection, (Vec<Datagram>, u64)) {
     init_db("../neqo-transport/db");
 
-    let mut hconn_c = HttpConn::new(
+    let mut hconn_c = Http3Connection::new(
         Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap(),
         100,
         100,
     );
-    let mut hconn_s = HttpConn::new(
+    let mut hconn_s = Http3Connection::new(
         Connection::new_server(&["key"], &["alpn"]).unwrap(),
         100,
         100,
     );
     hconn_s.set_new_stream_callback(new_stream_callback);
 
-    assert_eq!(*hconn_c.state(), State::Init);
-    assert_eq!(*hconn_s.state(), State::WaitInitial);
+    assert_eq!(hconn_c.state(), Http3State::Initializing);
+    assert_eq!(hconn_s.state(), Http3State::Initializing);
     let mut r = hconn_c.process(Vec::new(), 0);
-    assert_eq!(*hconn_c.state(), State::WaitInitial);
-    assert_eq!(*hconn_s.state(), State::WaitInitial);
     r = hconn_s.process(r.0, 0);
-    assert_eq!(*hconn_c.state(), State::WaitInitial);
-    assert_eq!(*hconn_s.state(), State::Handshaking);
     r = hconn_c.process(r.0, 0);
-    assert_eq!(*hconn_c.state(), State::Connected);
-    assert_eq!(*hconn_s.state(), State::Handshaking);
     r = hconn_s.process(r.0, 0);
-    assert_eq!(*hconn_c.state(), State::Connected);
-    assert_eq!(*hconn_s.state(), State::Connected);
+    assert_eq!(hconn_c.state(), Http3State::Connected);
+    assert_eq!(hconn_s.state(), Http3State::Connected);
     r = hconn_c.process(r.0, 0);
     r = hconn_s.process(r.0, 0);
     // assert_eq!(hconn_s.settings_received, true);
@@ -89,16 +83,13 @@ fn test_fetch() {
     let (mut hconn_c, mut hconn_s, mut r) = connect();
 
     eprintln!("-----client");
-    assert_eq!(
-        hconn_c.fetch("GET", "https", "something.com", "/", &[]),
-        Ok(())
-    );
+    let req = hconn_c
+        .fetch("GET", "https", "something.com", "/", &[])
+        .unwrap();
+    assert_eq!(req, 0);
     r = hconn_c.process(r.0, 0);
     eprintln!("-----server");
     r = hconn_s.process(r.0, 0);
-    // BUG: incoming fetch on stream 0 currently being interpreted as a
-    // unicast push stream; need to handle bidi streams differently than uni
-    // TODO: some kind of server API needed to create response
 
     eprintln!("-----client");
     r = hconn_c.process(r.0, 0);

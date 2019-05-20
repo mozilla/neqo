@@ -4,9 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// TODO(dragana) remove this
-#![allow(unused_variables, dead_code)]
-
 use neqo_common::{
     hex, qdebug, qtrace, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
 };
@@ -18,8 +15,8 @@ use crate::{Error, Res};
 
 pub type HFrameType = u64;
 
-const H3_FRAME_TYPE_DATA: HFrameType = 0x0;
-const H3_FRAME_TYPE_HEADERS: HFrameType = 0x1;
+pub const H3_FRAME_TYPE_DATA: HFrameType = 0x0;
+pub const H3_FRAME_TYPE_HEADERS: HFrameType = 0x1;
 const H3_FRAME_TYPE_PRIORITY: HFrameType = 0x2;
 const H3_FRAME_TYPE_CANCEL_PUSH: HFrameType = 0x3;
 const H3_FRAME_TYPE_SETTINGS: HFrameType = 0x4;
@@ -27,8 +24,6 @@ const H3_FRAME_TYPE_PUSH_PROMISE: HFrameType = 0x5;
 const H3_FRAME_TYPE_GOAWAY: HFrameType = 0x7;
 const H3_FRAME_TYPE_MAX_PUSH_ID: HFrameType = 0xd;
 const H3_FRAME_TYPE_DUPLICATE_PUSH: HFrameType = 0xe;
-
-const H3_FRAME_TYPE_UNKNOWN: u64 = 0xff; // this is only internal!!!
 
 type SettingsType = u64;
 
@@ -291,10 +286,12 @@ impl HFrame {
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 enum HFrameReaderState {
+    BeforeFrame,
     GetType,
     GetLength,
     GetPushPromiseData,
     GetData,
+    UnknownFrameDischargeData,
     Done,
 }
 
@@ -321,18 +318,23 @@ impl HFrameReader {
     }
 
     pub fn reset(&mut self) {
-        self.state = HFrameReaderState::GetType;
+        self.state = HFrameReaderState::BeforeFrame;
         self.decoder = IncrementalDecoder::decode_varint();
     }
 
     // returns true if quic stream was closed.
     pub fn receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         loop {
-            let to_read = self.decoder.min_remaining();
+            let to_read = std::cmp::min(self.decoder.min_remaining(), 4096);
             let mut buf = Vec::with_capacity(to_read);
             buf.resize(to_read, 0);
             let mut input = match conn.stream_recv(stream_id, &mut buf[..]) {
-                Ok((_, true)) => break Ok(true),
+                Ok((_, true)) => {
+                    break match self.state {
+                        HFrameReaderState::BeforeFrame => Ok(true),
+                        _ => Err(Error::MalformedFrame(0xff)),
+                    };
+                }
                 Ok((0, false)) => break Ok(false),
                 Ok((amount, false)) => Decoder::from(&buf[..amount]),
                 Err(e) => {
@@ -346,15 +348,17 @@ impl HFrameReader {
             let progress = self.decoder.consume(&mut input);
             amount_read -= input.remaining();
             match self.state {
-                HFrameReaderState::GetType => match progress {
+                HFrameReaderState::BeforeFrame |                HFrameReaderState::GetType => match progress {
                     IncrementalDecoderResult::Uint(v) => {
                         self.hframe_type = v;
                         self.decoder = IncrementalDecoder::decode_varint();
                         self.state = HFrameReaderState::GetLength;
                     }
-                    IncrementalDecoderResult::InProgress => {}
+                    IncrementalDecoderResult::InProgress => {
+                        self.state = HFrameReaderState::GetType;
+                    }
                     _ => {
-                        break Err(Error::NoMoreData);
+                        break Err(Error::MalformedFrame(0xff));
                     }
                 },
 
@@ -373,9 +377,18 @@ impl HFrameReader {
                                     HFrameReaderState::GetPushPromiseData
                                 }
                                 // for other frames get all data before decoding.
-                                _ => {
+                                H3_FRAME_TYPE_PRIORITY
+                            | H3_FRAME_TYPE_CANCEL_PUSH
+                            | H3_FRAME_TYPE_SETTINGS
+                            | H3_FRAME_TYPE_GOAWAY
+                            | H3_FRAME_TYPE_MAX_PUSH_ID
+                            | H3_FRAME_TYPE_DUPLICATE_PUSH => {
                                     self.decoder = IncrementalDecoder::decode(len as usize);
                                     HFrameReaderState::GetData
+                                }
+                                _ => {
+                                    self.decoder = IncrementalDecoder::ignore(len as usize);
+                                    HFrameReaderState::UnknownFrameDischargeData
                                 }
                             };
                         }
@@ -405,6 +418,16 @@ impl HFrameReader {
                             qtrace!([conn] "received frame {}: {}", self.hframe_type, hex(&data[..]));
                             self.payload = data;
                             self.state = HFrameReaderState::Done;
+                            break Ok(false);
+                        }
+                        IncrementalDecoderResult::InProgress => {}
+                        _ => break Err(Error::NoMoreData),
+                    };
+                }
+                HFrameReaderState::UnknownFrameDischargeData => {
+                    match progress {
+                        IncrementalDecoderResult::Ignored => {
+                            self.reset();
                             break Ok(false);
                         }
                         IncrementalDecoderResult::InProgress => {}
@@ -581,7 +604,7 @@ mod tests {
 
         // Check remaining data.
         let mut buf = [0u8; 100];
-        let (amount, fin) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
+        let (amount, _) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(amount, remaining);
 
         if !fr.done() {
@@ -889,7 +912,7 @@ mod tests {
         // headers are still on the stream.
         // assert that we have 3 bytes in the stream
         let mut buf = [0u8; 100];
-        let (amount, fin) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
+        let (amount, _) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(amount, 3);
 
         if !fr.done() {
@@ -933,10 +956,10 @@ mod tests {
         conn_c.process(r.0, now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
-        // headers are still on the stream.
+        // payloead is still on the stream.
         // assert that we have 3 bytes in the stream
         let mut buf = [0u8; 100];
-        let (amount, fin) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
+        let (amount, _) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(amount, 3);
 
         if !fr.done() {
@@ -946,6 +969,57 @@ mod tests {
         if let Ok(f) = f1 {
             if let HFrame::Data { len } = f {
                 assert!(len == 3);
+            } else {
+                assert!(false);
+            }
+        } else {
+            assert!(false);
+        }
+    }
+
+    // Test an unknow frame
+    #[test]
+    fn test_unknown_frame() {
+        init_db("./../neqo-transport/db");
+        let mut conn_c =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut r = conn_c.process(vec![], now());
+        r = conn_s.process(r.0, now());
+        r = conn_c.process(r.0, now());
+        conn_s.process(r.0, now());
+
+        // create a stream
+        let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
+
+        let mut fr: HFrameReader = HFrameReader::new();
+
+        // Read an unknown frame
+        let mut buf: [u8; 1500] = [0; 1500];
+        // random type 1028
+        buf[0] = 0x44;
+        buf[1] = 0x04;
+        // length 1496
+        buf[2] = 0x45;
+        buf[3] = 0xd8;
+        conn_s.stream_send(stream_id, &buf).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        // now receive a CANCEL_PUSH fram to see that frame reader is ok.
+        conn_s.stream_send(stream_id, &[0x03, 0x01, 0x05]).unwrap();
+        r = conn_s.process(vec![], now());
+        conn_c.process(r.0, now());
+        assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
+
+        if !fr.done() {
+            assert!(false);
+        }
+        let f1 = fr.get_frame();
+        if let Ok(f) = f1 {
+            if let HFrame::CancelPush { push_id } = f {
+                assert!(push_id == 5);
             } else {
                 assert!(false);
             }

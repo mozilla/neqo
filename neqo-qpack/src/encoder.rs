@@ -248,17 +248,22 @@ impl QPackEncoder {
         self.send_buf.encode_prefixed_encoded_int(0x20, 3, cap);
     }
 
-    pub fn send_if_encoder_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
-        match self.local_stream_id {
-            Some(id) if id == stream_id => match conn.stream_send(stream_id, &self.send_buf[..]) {
-                Err(_) => Err(Error::EncoderStreamError),
-                Ok(r) => {
-                    qdebug!([self] "{} bytes sent.", r);
-                    self.send_buf.read(r as usize);
-                    Ok(true)
+    pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
+        if self.send_buf.len() == 0 {
+            Ok(())
+        } else {
+            if let Some(stream_id) = self.local_stream_id {
+                match conn.stream_send(stream_id, &self.send_buf[..]) {
+                    Err(_) => Err(Error::EncoderStreamError),
+                    Ok(r) => {
+                        qdebug!([self] "{} bytes sent.", r);
+                        self.send_buf.read(r as usize);
+                        Ok(())
+                    }
                 }
-            },
-            _ => Ok(false),
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -569,9 +574,7 @@ mod tests {
         send_stream_id: u64,
         encoder_instruction: &[u8],
     ) {
-        encoder
-            .send_if_encoder_stream(&mut conn_c, send_stream_id)
-            .unwrap();
+        encoder.send(&mut conn_c).unwrap();
         let r = conn_c.process(vec![], now());
         conn_s.process(r.0, now());
         let mut found_instruction = false;
