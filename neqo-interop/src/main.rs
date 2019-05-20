@@ -233,7 +233,7 @@ fn run_peer(peer: &'static Peer) -> Vec<(&'static Test, String)> {
     results
 }
 
-const PEERS: [Peer; 5] = [
+const PEERS: [Peer; 6] = [
     Peer {
         label: &"quant",
         host: &"quant.eggert.org",
@@ -257,6 +257,11 @@ const PEERS: [Peer; 5] = [
     Peer {
         label: &"f5",
         host: &"208.85.208.226",
+        port: 4433,
+    },
+    Peer {
+        label: &"msft",
+        host: &"quic.westus.cloudapp.azure.com",
         port: 4433,
     },
 ];
