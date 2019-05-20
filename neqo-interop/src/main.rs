@@ -5,21 +5,18 @@
 // except according to those terms.
 
 use neqo_common::now;
-use neqo_crypto::init_db;
+use neqo_crypto::init;
 //use neqo_transport::frame::StreamType;
 use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
-use std::path::PathBuf;
+// use std::path::PathBuf;
 use std::thread;
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "neqo-client", about = "A basic QUIC client.")]
-struct Args {
-    #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
-    db: PathBuf,
-}
+#[structopt(name = "neqo-interop", about = "A QUIC interop client.")]
+struct Args {}
 
 trait Handler {
     fn handle(&mut self, client: &mut Connection) -> bool;
@@ -191,6 +188,7 @@ fn run_test(peer: &Peer, test: &Test) -> bool {
 
 fn run_peer(peer: &'static Peer) -> Vec<&Test> {
     let results = Vec::new();
+
     println!("Running tests for {}", peer.label);
     for test in &TESTS {
         if !peer.test_enabled(&test) {
@@ -216,12 +214,22 @@ const TESTS: [Test; 1] = [Test::Connect];
 fn main() {
     let _tests = vec![Test::Connect];
 
-    let args = Args::from_args();
-    init_db(args.db.clone());
+    let _args = Args::from_args();
+    init();
 
+    let mut children = Vec::new();
+
+    // Start all the children.
     for peer in &PEERS {
-        let _child = thread::spawn(move || {
+        let child = thread::spawn(move || {
             run_peer(&peer);
         });
+        children.push((peer, child));
+    }
+
+    // Now wait for them.
+    for child in children {
+        let res = child.1.join().unwrap();
+        println!("{} -> {:?}", child.0.label, res);
     }
 }
