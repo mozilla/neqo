@@ -410,10 +410,7 @@ impl Http3Connection {
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.handle_stream_creatable(stream_type)?
                 }
-                ConnectionEvent::ConnectionClosed { .. } => {
-                    // Peer closed the connection.
-                    // TODO: Dragana, what should we do here?
-                }
+                ConnectionEvent::ConnectionClosed { .. } => self.handle_connection_closed()?,
             }
         }
         Ok(())
@@ -535,6 +532,10 @@ impl Http3Connection {
     }
 
     fn handle_stream_creatable(&mut self, _stream_type: StreamType) -> Res<()> {
+        Ok(())
+    }
+
+    fn handle_connection_closed(&mut self) -> Res<()> {
         Ok(())
     }
 
