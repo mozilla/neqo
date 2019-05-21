@@ -825,6 +825,17 @@ impl Connection {
         Ok(())
     }
 
+    /// Return the resumption token.
+    pub fn resumption_token(&self) -> Option<&Vec<u8>> {
+        self.tls.resumption_token()
+    }
+
+    /// Enable resumption, using a token previously provided.
+    pub fn set_resumption_token(&mut self, token: &[u8]) -> Res<()> {
+        self.tls.set_resumption_token(token)?;
+        Ok(())
+    }
+
     /// Get the current role.
     pub fn role(&self) -> Role {
         self.role
