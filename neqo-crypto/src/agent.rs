@@ -14,7 +14,7 @@ use crate::initialized;
 use crate::p11;
 use crate::prio;
 use crate::result;
-use crate::secrets::Secrets;
+use crate::secrets::SecretHolder;
 use crate::ssl;
 
 use neqo_common::{qdebug, qinfo, qwarn};
@@ -187,7 +187,7 @@ impl SecretAgentInfo {
 #[derive(Debug)]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
-    secrets: Secrets,
+    secrets: SecretHolder,
     raw: Option<bool>,
     io: Box<AgentIo>,
     state: HandshakeState,
@@ -506,23 +506,32 @@ impl SecretAgent {
         self.state = HandshakeState::Authenticated;
     }
 
+    fn capture_error<T>(&mut self, res: Res<T>) -> Res<T> {
+        if let Err(e) = &res {
+            qwarn!([self] "error: {:?}", e);
+            self.state = HandshakeState::Failed(e.clone());
+        }
+        res
+    }
+
     fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
-        self.state = match result::result_or_blocked(rv)? {
+        let res = self.capture_error(result::result_or_blocked(rv))?;
+        self.state = match res {
             true => match *self.auth_required {
                 true => HandshakeState::AuthenticationPending,
                 false => HandshakeState::InProgress,
             },
-            false => HandshakeState::Complete(SecretAgentInfo::new(self.fd)?),
+            false => {
+                let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
+                HandshakeState::Complete(info)
+            }
         };
         qinfo!([self] "state -> {:?}", self.state);
         Ok(())
     }
 
     fn set_failed(&mut self) -> Error {
-        let e = result::result(ssl::SECFailure).unwrap_err();
-        qwarn!([self] "error: {:?}", e);
-        self.state = HandshakeState::Failed(e.clone());
-        return e;
+        self.capture_error(result::result(ssl::SECFailure)).unwrap_err()
     }
 
     // Drive the TLS handshake, taking bytes from @input and putting
@@ -581,10 +590,8 @@ impl SecretAgent {
         if self.state == HandshakeState::Authenticated {
             let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
             qdebug!([self] "SSL_AuthCertificateComplete: {:?}", rv);
-            self.update_state(rv)?;
-            if let HandshakeState::Complete(_) = self.state {
-                return Ok(*records);
-            }
+            // This should return SECSuccess, so don't use update_state().
+            self.capture_error(result::result(rv))?;
         }
 
         // Feed in any records.
