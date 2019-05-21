@@ -145,7 +145,7 @@ impl Handler for H9Handler {
                     self.rbytes += sz;
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
-                        client.close(0, "kthxbye!");
+                        client.close(0, 0, "kthxbye!");
                         self.rsfin = true;
                         return false;
                     }

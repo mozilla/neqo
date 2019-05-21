@@ -72,7 +72,7 @@ pub enum State {
     WaitInitial,
     Handshaking,
     Connected,
-    Closing(ConnectionError, FrameType, String),
+    Closing(ConnectionError, FrameType, String, u64), // u64 = closing period end time
     Closed(ConnectionError),
 }
 
@@ -842,7 +842,7 @@ impl Connection {
 
     // This function wraps a call to another function and sets the connection state
     // properly if that call fails.
-    fn capture_error<T>(&mut self, frame_type: FrameType, res: Res<T>) -> Res<T> {
+    fn capture_error<T>(&mut self, cur_time: u64, frame_type: FrameType, res: Res<T>) -> Res<T> {
         if let Err(v) = &res {
             #[cfg(debug_assertions)]
             let msg = String::from(format!("{:?}", v));
@@ -852,6 +852,7 @@ impl Connection {
                 ConnectionError::Transport(v.clone()),
                 frame_type,
                 msg,
+                self.get_closing_period_time(cur_time),
             ));
         }
         res
@@ -859,8 +860,8 @@ impl Connection {
 
     /// For use with process().  Errors there can be ignored, but this needs to
     /// ensure that the state is updated.
-    fn absorb_error(&mut self, res: Res<()>) {
-        let _ = self.capture_error(0, res);
+    fn absorb_error(&mut self, cur_time: u64, res: Res<()>) {
+        let _ = self.capture_error(cur_time, 0, res);
     }
 
     /// Call in to process activity on the connection. Either new packets have
@@ -871,7 +872,7 @@ impl Connection {
     {
         for dgram in in_dgrams {
             let res = self.input(dgram, cur_time);
-            self.absorb_error(res);
+            self.absorb_error(cur_time, res);
         }
 
         self.cleanup_streams();
@@ -881,7 +882,7 @@ impl Connection {
             match self.state {
                 State::Init => {
                     let res = self.client_start();
-                    self.absorb_error(res);
+                    self.absorb_error(cur_time, res);
                 }
                 _ => {
                     // Nothing to do.
@@ -893,11 +894,21 @@ impl Connection {
     /// Get output packets, as a result of receiving packets, or actions taken
     /// by the application.
     pub fn process_output(&mut self, cur_time: u64) -> (Vec<Datagram>, u64) {
-        if let State::Closed(..) = self.state {
-            (Vec::new(), 0)
-        } else {
-            self.check_loss_detection_timeout(cur_time);
-            (self.output(cur_time), self.loss_recovery.get_timer())
+        match &self.state {
+            State::Closing(error, _, _, timeout) => {
+                if *timeout < cur_time {
+                    (self.output(cur_time), 0)
+                } else {
+                    // Close timeout expired, move to Closed
+                    self.set_state(State::Closed(error.clone()));
+                    (Vec::new(), 0)
+                }
+            }
+            State::Closed(..) => (Vec::new(), 0),
+            _ => {
+                self.check_loss_detection_timeout(cur_time);
+                (self.output(cur_time), self.loss_recovery.get_timer())
+            }
         }
     }
 
@@ -1060,7 +1071,7 @@ impl Connection {
             ack_eliciting |= f.ack_eliciting();
             let t = f.get_type();
             let res = self.input_frame(epoch, f, cur_time);
-            self.capture_error(t, res)?;
+            self.capture_error(cur_time, t, res)?;
         }
 
         Ok(ack_eliciting)
@@ -1106,7 +1117,7 @@ impl Connection {
             _ => false,
         };
         if !closing && errors.len() > 0 {
-            self.absorb_error(Err(errors.pop().unwrap()));
+            self.absorb_error(cur_time, Err(errors.pop().unwrap()));
             // We just closed, so run this again to produce CONNECTION_CLOSE.
             self.output(cur_time)
         } else {
@@ -1259,13 +1270,18 @@ impl Connection {
         Ok(())
     }
 
+    fn get_closing_period_time(&self, cur_time: u64) -> u64 {
+        // Spec says close time should be at least PTO times 3.
+        cur_time + (self.loss_recovery.rtt_vals.pto() * 3)
+    }
+
     /// Close the connection.
-    pub fn close<S: Into<String>>(&mut self, error: AppError, msg: S) {
-        // TODO(mt): Set closing timer.
+    pub fn close<S: Into<String>>(&mut self, cur_time: u64, error: AppError, msg: S) {
         self.set_state(State::Closing(
             ConnectionError::Application(error),
             0,
             msg.into(),
+            self.get_closing_period_time(cur_time),
         ));
     }
 
@@ -1310,6 +1326,13 @@ impl Connection {
         }
         if self.tls.state().connected() {
             qinfo!([self] "TLS handshake completed");
+
+            if self.tls.info().map(|i| i.alpn()).is_none() {
+                // 120 = no_application_protocol
+                let err = Error::CryptoAlert(120);
+                return Err(err);
+            }
+
             self.set_state(State::Connected);
 
             self.peer_max_stream_idx_bidi = StreamIndex::new(
@@ -1560,20 +1583,7 @@ impl Connection {
             qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
             self.state = state;
             match &self.state {
-                State::Connected => {
-                    if let None = match self.tls.info() {
-                        Some(i) => i.alpn(),
-                        _ => None,
-                    } {
-                        // 120 = no_application_protocol
-                        let err = Error::CryptoAlert(120);
-                        self.set_state(State::Closing(
-                            ConnectionError::Transport(err),
-                            0,
-                            String::from("no ALPN"),
-                        ));
-                    }
-                }
+                State::Connected => {}
                 State::Closing(..) => {
                     self.send_streams.clear();
                     self.recv_streams.clear();
@@ -2105,7 +2115,7 @@ impl FrameGenerator for CloseGenerator {
         _mode: TxMode,
         _remaining: usize,
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
-        if let State::Closing(cerr, frame_type, reason) = c.state() {
+        if let State::Closing(cerr, frame_type, reason, _) = c.state() {
             if c.flow_mgr.borrow().need_close_frame() {
                 c.flow_mgr.borrow_mut().set_need_close_frame(false);
                 return Some((
@@ -2415,18 +2425,20 @@ impl SentPacket {
 
 #[derive(Debug, Default)]
 struct RttVals {
-    pub latest_rtt: u64,
-    pub smoothed_rtt: u64,
-    pub rttvar: u64,
-    pub min_rtt: u64,
+    latest_rtt: u64,
+    smoothed_rtt: u64,
+    rttvar: u64,
+    min_rtt: u64,
+    max_ack_delay: u64,
 }
 
 impl RttVals {
-    fn update_rtt(&mut self, mut ack_delay: u64, max_ack_delay: u64) {
+    fn update_rtt(&mut self, latest_rtt: u64, mut ack_delay: u64) {
+        self.latest_rtt = latest_rtt;
         // min_rtt ignores ack delay.
         self.min_rtt = min(self.min_rtt, self.latest_rtt);
         // Limit ack_delay by max_ack_delay
-        ack_delay = min(ack_delay, max_ack_delay);
+        ack_delay = min(ack_delay, self.max_ack_delay);
         // Adjust for ack delay if it's plausible.
         if self.latest_rtt - self.min_rtt > ack_delay {
             self.latest_rtt -= ack_delay;
@@ -2447,6 +2459,22 @@ impl RttVals {
             self.smoothed_rtt = (7.0 / 8.0 * (self.smoothed_rtt as f64)
                 + 1.0 / 8.0 * (self.latest_rtt as f64)) as u64;
         }
+    }
+
+    fn pto(&self) -> u64 {
+        self.smoothed_rtt + max(4 * self.rttvar, GRANULARITY) + self.max_ack_delay
+    }
+
+    fn timer_for_crypto_retransmission(&mut self, crypto_count: u32) -> u64 {
+        let mut timeout;
+        if self.smoothed_rtt == 0 {
+            timeout = 2 * INITIAL_RTT;
+        } else {
+            timeout = 2 * self.smoothed_rtt;
+        }
+
+        timeout = max(timeout, GRANULARITY);
+        timeout * 2u64.pow(crypto_count)
     }
 }
 
@@ -2494,7 +2522,6 @@ struct LossRecovery {
     time_of_last_sent_ack_eliciting_packet: u64,
     time_of_last_sent_crypto_packet: u64,
     rtt_vals: RttVals,
-    max_ack_delay: u64,
     packet_spaces: [LossRecoverySpace; 3],
 }
 
@@ -2503,9 +2530,10 @@ impl LossRecovery {
         LossRecovery {
             rtt_vals: RttVals {
                 min_rtt: u64::max_value(),
+                max_ack_delay: 25_000, // 25ms in microseconds
                 ..RttVals::default()
             },
-            max_ack_delay: 25_000, // 25ms in microseconds
+
             ..LossRecovery::default()
         }
     }
@@ -2566,8 +2594,8 @@ impl LossRecovery {
         // ack-eliciting, update the RTT.
         if let Some(sent) = last_sent {
             if sent.ack_eliciting {
-                self.rtt_vals.latest_rtt = cur_time - sent.time_sent;
-                self.rtt_vals.update_rtt(ack_delay, self.max_ack_delay);
+                let latest_rtt = cur_time - sent.time_sent;
+                self.rtt_vals.update_rtt(latest_rtt, ack_delay);
             }
         }
 
@@ -2695,29 +2723,16 @@ impl LossRecovery {
         if loss_time != 0 {
             self.loss_detection_timer = loss_time;
         } else if has_crypto_out {
-            self.set_timer_for_crypto_retransmission();
+            self.loss_detection_timer = self.time_of_last_sent_crypto_packet
+                + self
+                    .rtt_vals
+                    .timer_for_crypto_retransmission(self.crypto_count);
         } else {
             // Calculate PTO duration
-            let mut timeout = self.rtt_vals.smoothed_rtt
-                + max(4 * self.rtt_vals.rttvar, GRANULARITY)
-                + self.max_ack_delay;
-            timeout = timeout * 2u64.pow(self.pto_count);
+            let timeout = self.rtt_vals.pto() * 2u64.pow(self.pto_count);
             self.loss_detection_timer = self.time_of_last_sent_ack_eliciting_packet + timeout;
         }
         qdebug!([self] "loss_detection_timer={}", self.loss_detection_timer);
-    }
-
-    fn set_timer_for_crypto_retransmission(&mut self) {
-        let mut timeout;
-        if self.rtt_vals.smoothed_rtt == 0 {
-            timeout = 2 * INITIAL_RTT;
-        } else {
-            timeout = 2 * self.rtt_vals.smoothed_rtt;
-        }
-
-        timeout = max(timeout, GRANULARITY);
-        timeout = timeout * 2u64.pow(self.crypto_count);
-        self.loss_detection_timer = self.time_of_last_sent_crypto_packet + timeout;
     }
 
     fn get_earliest_loss_time(&self) -> (u64, PNSpace) {
