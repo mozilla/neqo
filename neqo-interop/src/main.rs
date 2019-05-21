@@ -524,43 +524,43 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
 
 const PEERS: [Peer; 8] = [
     Peer {
-        label: &"quant",
-        host: &"quant.eggert.org",
+        label: "quant",
+        host: "quant.eggert.org",
         port: 4433,
     },
     Peer {
-        label: &"quicly",
+        label: "quicly",
         host: "kazuhooku.com",
         port: 4433,
     },
     Peer {
-        label: &"local",
-        host: &"127.0.0.1",
+        label: "local",
+        host: "127.0.0.1",
         port: 4433,
     },
     Peer {
-        label: &"applequic",
-        host: &"192.168.203.142",
+        label: "applequic",
+        host: "192.168.203.142",
         port: 4433,
     },
     Peer {
-        label: &"f5",
-        host: &"208.85.208.226",
+        label: "f5",
+        host: "208.85.208.226",
         port: 4433,
     },
     Peer {
-        label: &"msft",
-        host: &"quic.westus.cloudapp.azure.com",
+        label: "msft",
+        host: "quic.westus.cloudapp.azure.com",
         port: 4433,
     },
     Peer {
-        label: &"mvfst",
-        host: &"fb.mvfst.net",
+        label: "mvfst",
+        host: "fb.mvfst.net",
         port: 4433,
     },
     Peer {
-        label: &"google",
-        host: &"quic.rocks",
+        label: "google",
+        host: "quic.rocks",
         port: 4433,
     },
 ];
