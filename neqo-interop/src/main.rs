@@ -604,8 +604,8 @@ const PEERS: [Peer; 9] = [
         port: 4433,
     },
     Peer {
-        label: &"ngtcp2",
-        host: &"nghttp2.org",
+        label: "ngtcp2",
+        host: "nghttp2.org",
         port: 4433,
     },
 ];
