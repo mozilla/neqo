@@ -7,6 +7,7 @@
 use neqo_common::now;
 use neqo_crypto::init;
 //use neqo_transport::frame::StreamType;
+use neqo_transport::frame::StreamType;
 use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
@@ -15,15 +16,21 @@ use std::thread;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, StructOpt, Clone)]
 #[structopt(name = "neqo-interop", about = "A QUIC interop client.")]
 struct Args {
-    #[structopt(short = "i", long)]
+    #[structopt(short = "p", long)]
     // Peers to include
     include: Vec<String>,
 
-    #[structopt(short = "e", long)]
+    #[structopt(short = "P", long)]
     exclude: Vec<String>,
+
+    #[structopt(short = "t", long)]
+    include_tests: Vec<String>,
+
+    #[structopt(short = "T", long)]
+    exclude_tests: Vec<String>,
 }
 
 trait Handler {
@@ -40,9 +47,7 @@ fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
 }
 
 fn process_loop(
-    local_addr: &SocketAddr,
-    remote_addr: &SocketAddr,
-    socket: &UdpSocket,
+    nctx: &NetworkCtx,
     client: &mut Connection,
     handler: &mut Handler,
     timeout: &Duration,
@@ -59,9 +64,8 @@ fn process_loop(
         }
 
         let exiting = !handler.handle(client);
-
         let (out_dgrams, _timer) = client.process_output(now());
-        emit_packets(&socket, &out_dgrams);
+        emit_packets(&nctx.socket, &out_dgrams);
 
         if exiting {
             return Ok(client.state().clone());
@@ -71,10 +75,10 @@ fn process_loop(
         if spent > *timeout {
             return Err(String::from("Timed out"));
         }
-        socket
+        nctx.socket
             .set_read_timeout(Some(*timeout - spent))
             .expect("Read timeout");
-        let sz = match socket.recv(&mut buf[..]) {
+        let sz = match nctx.socket.recv(&mut buf[..]) {
             Ok(sz) => sz,
             Err(e) => {
                 return Err(String::from(match e.kind() {
@@ -90,8 +94,8 @@ fn process_loop(
         }
         if sz > 0 {
             in_dgrams.push(Datagram::new(
-                remote_addr.clone(),
-                local_addr.clone(),
+                nctx.remote_addr.clone(),
+                nctx.local_addr.clone(),
                 &buf[..sz],
             ));
         }
@@ -110,15 +114,18 @@ impl Handler for PreConnectHandler {
 }
 
 #[derive(Default)]
-struct PostConnectHandler {
+struct H9Handler {
+    rbytes: usize,
+    rsfin: bool,
     streams: HashSet<u64>,
 }
 
 // This is a bit fancier than actually needed.
-impl Handler for PostConnectHandler {
+impl Handler for H9Handler {
     fn handle(&mut self, client: &mut Connection) -> bool {
         let mut data = vec![0; 4000];
         for event in client.events() {
+            eprintln!("Event: {:?}", event);
             match event {
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
@@ -126,7 +133,7 @@ impl Handler for PostConnectHandler {
                         return false;
                     }
 
-                    let (_sz, fin) = client
+                    let (sz, fin) = client
                         .stream_recv(stream_id, &mut data)
                         .expect("Read should succeed");
                     eprintln!(
@@ -134,9 +141,11 @@ impl Handler for PostConnectHandler {
                         stream_id,
                         String::from_utf8(data.clone()).unwrap()
                     );
+                    self.rbytes += sz;
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
                         client.close(0, "kthxbye!");
+                        self.rsfin = true;
                         return false;
                     }
                 }
@@ -177,13 +186,6 @@ impl Peer {
     fn test_enabled(&self, _test: &Test) -> bool {
         true
     }
-
-    fn alpn(&self) -> Vec<String> {
-        match self.label {
-            "quicly" => vec![String::from("http/0.9")],
-            _ => vec![String::from("hq-20")],
-        }
-    }
 }
 
 impl ToSocketAddrs for Peer {
@@ -198,6 +200,75 @@ impl ToSocketAddrs for Peer {
 #[derive(Debug)]
 enum Test {
     Connect,
+    H9,
+}
+
+impl Test {
+    fn alpn(&self) -> Vec<String> {
+        match self {
+            _ => vec![String::from("hq-20")],
+        }
+    }
+
+    fn label(&self) -> String {
+        String::from(match self {
+            Test::Connect => "connect",
+            Test::H9 => "h9",
+        })
+    }
+}
+
+struct NetworkCtx {
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
+    socket: UdpSocket,
+}
+
+fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connection), String> {
+    let mut client =
+        Connection::new_client(peer.host, test.alpn(), nctx.local_addr, nctx.remote_addr)
+            .expect("must succeed");
+    // Temporary here to help out the type inference engine
+    let mut h = PreConnectHandler {};
+    let res = process_loop(nctx, &mut client, &mut h, &Duration::new(5, 0));
+
+    let st = match res {
+        Ok(st) => st,
+        Err(e) => {
+            return Err(format!("ERROR: {}", e));
+        }
+    };
+
+    match st {
+        State::Connected => Ok(client),
+        _ => Err(format!("{:?}", st)),
+    }
+}
+
+fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
+    let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    let req: String = "GET /10\r\n".to_string();
+    client
+        .stream_send(client_stream_id, req.as_bytes())
+        .unwrap();
+    let mut hc = H9Handler::default();
+    hc.streams.insert(client_stream_id);
+    let res = process_loop(nctx, client, &mut hc, &Duration::new(5, 0));
+
+    match res {
+        Err(e) => {
+            return Err(format!("ERROR: {}", e));
+        }
+        _ => {}
+    };
+
+    if hc.rbytes == 0 {
+        return Err(String::from("Empty response"));
+    }
+    if !hc.rsfin {
+        return Err(String::from("No FIN"));
+    }
+    Ok(())
 }
 
 fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
@@ -207,33 +278,37 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     let local_addr = socket.local_addr().expect("Socket local address not bound");
     let remote_addr = peer.addr();
 
-    let mut client = Connection::new_client(peer.host, peer.alpn(), local_addr, remote_addr)
-        .expect("must succeed");
-    // Temporary here to help out the type inference engine
-    let mut h = PreConnectHandler {};
-    let res = process_loop(
-        &local_addr,
-        &remote_addr,
-        &socket,
-        &mut client,
-        &mut h,
-        &Duration::new(5, 0),
-    );
-
-    let st = match res {
-        Ok(st) => st,
-        Err(e) => {
-            return (test, format!("ERROR: {}", e));
-        }
+    let nctx = NetworkCtx {
+        socket: socket,
+        local_addr: local_addr,
+        remote_addr: remote_addr,
     };
 
-    match st {
-        State::Connected => (test, String::from("OK")),
-        _ => (test, format!("{:?}", st)),
+    let mut client = match test_connect(&nctx, test, peer) {
+        Ok(client) => client,
+        Err(e) => return (test, e),
+    };
+
+    let res = match test {
+        Test::Connect => {
+            return (test, String::from("OK"));
+        }
+        Test::H9 => test_h9(&nctx, &mut client),
+    };
+
+    match res {
+        Ok(_) => {}
+        Err(e) => return (test, e),
     }
+
+    match test {
+        _ => {
+            return (test, String::from("OK"));
+        }
+    };
 }
 
-fn run_peer(peer: &'static Peer) -> Vec<(&'static Test, String)> {
+fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
     let mut results: Vec<(&'static Test, String)> = Vec::new();
 
     eprintln!("Running tests for {}", peer.label);
@@ -242,6 +317,13 @@ fn run_peer(peer: &'static Peer) -> Vec<(&'static Test, String)> {
 
     for test in &TESTS {
         if !peer.test_enabled(&test) {
+            continue;
+        }
+
+        if args.include_tests.len() > 0 && !args.include_tests.contains(&test.label()) {
+            continue;
+        }
+        if args.exclude_tests.contains(&test.label()) {
             continue;
         }
 
@@ -304,7 +386,7 @@ const PEERS: [Peer; 7] = [
     },
 ];
 
-const TESTS: [Test; 1] = [Test::Connect];
+const TESTS: [Test; 2] = [Test::Connect, Test::H9];
 
 fn main() {
     let _tests = vec![Test::Connect];
@@ -323,7 +405,8 @@ fn main() {
             continue;
         }
 
-        let child = thread::spawn(move || run_peer(&peer));
+        let at = args.clone();
+        let child = thread::spawn(move || run_peer(&at, &peer));
         children.push((peer, child));
     }
 
