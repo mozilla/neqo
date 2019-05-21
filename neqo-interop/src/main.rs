@@ -140,11 +140,8 @@ impl Handler for H9Handler {
                     let (sz, fin) = client
                         .stream_recv(stream_id, &mut data)
                         .expect("Read should succeed");
-                    eprintln!(
-                        "READ[{}]: {}",
-                        stream_id,
-                        String::from_utf8(data.clone()).unwrap()
-                    );
+                    data.truncate(sz);
+                    eprintln!("Length={}", sz);
                     self.rbytes += sz;
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
