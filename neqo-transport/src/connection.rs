@@ -974,7 +974,7 @@ impl Connection {
                     }
                 }
                 State::Closing(..) => {
-                    // Don't bother processing the packet.Instead ask to get a
+                    // Don't bother processing the packet. Instead ask to get a
                     // new close frame.
                     self.flow_mgr.borrow_mut().set_need_close_frame(true);
                     return Ok(());
@@ -1579,6 +1579,12 @@ impl Connection {
                     self.generators.clear();
                     self.generators.push(Box::new(CloseGenerator {}));
                     self.flow_mgr.borrow_mut().set_need_close_frame(true);
+                }
+                State::Closed(..) => {
+                    // Equivalent to spec's "draining" state -- never send anything.
+                    self.send_streams.clear();
+                    self.recv_streams.clear();
+                    self.generators.clear();
                 }
                 _ => {}
             }
