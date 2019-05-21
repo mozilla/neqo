@@ -46,7 +46,7 @@ fn process_loop(
     client: &mut Connection,
     handler: &mut Handler,
     timeout: &Duration,
-) -> neqo_transport::connection::State {
+) -> Result<neqo_transport::connection::State, String> {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     let start = Instant::now();
@@ -55,7 +55,7 @@ fn process_loop(
         client.process_input(in_dgrams.drain(..), now());
 
         if let State::Closed(..) = client.state() {
-            return client.state().clone();
+            return Ok(client.state().clone());
         }
 
         let exiting = !handler.handle(client);
@@ -64,17 +64,26 @@ fn process_loop(
         emit_packets(&socket, &out_dgrams);
 
         if exiting {
-            return client.state().clone();
+            return Ok(client.state().clone());
         }
 
         let spent = Instant::now() - start;
         if spent > *timeout {
-            panic!("Timeout");
+            return Err(String::from("Timed out"));
         }
         socket
             .set_read_timeout(Some(*timeout - spent))
             .expect("Read timeout");
-        let sz = socket.recv(&mut buf[..]).expect("UDP error");
+        let sz = match socket.recv(&mut buf[..]) {
+            Ok(sz) => sz,
+            Err(e) => {
+                return Err(String::from(match e.kind() {
+                    std::io::ErrorKind::WouldBlock => "Timed out",
+                    _ => "Read error",
+                }));
+            }
+        };
+
         if sz == buf.len() {
             eprintln!("Received more than {} bytes", buf.len());
             continue;
@@ -202,7 +211,7 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
-    process_loop(
+    let res = process_loop(
         &local_addr,
         &remote_addr,
         &socket,
@@ -211,7 +220,13 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         &Duration::new(5, 0),
     );
 
-    let st = client.state();
+    let st = match res {
+        Ok(st) => st,
+        Err(e) => {
+            return (test, format!("ERROR: {}", e));
+        }
+    };
+
     match st {
         State::Connected => (test, String::from("OK")),
         _ => (test, format!("{:?}", st)),
