@@ -1253,6 +1253,7 @@ impl Connection {
     }
 
     fn client_start(&mut self) -> Res<()> {
+        qinfo!([self] "client_start SCID={}", hex(&self.scid));
         self.handshake(0, None)?;
         self.set_state(State::WaitInitial);
         Ok(())
