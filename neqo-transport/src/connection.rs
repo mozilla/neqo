@@ -941,12 +941,15 @@ impl Connection {
                 }
                 (PacketType::Retry { odcid, token }, State::WaitInitial, Role::Client) => {
                     if *odcid != self.dcid {
-                        // Not for us drop it.
-                        qwarn!("received retry, but not for us, dropping it");
+                        qwarn!("received Retry, but not for us, dropping it");
                         return Ok(());
                     }
                     if token.len() == 0 {
-                        qwarn!("received retry, but no token, dropping it");
+                        qwarn!("received Retry, but no token, dropping it");
+                        return Ok(());
+                    }
+                    if self.retry_token.is_some() {
+                        qwarn!("received another Retry, dropping it");
                         return Ok(());
                     }
                     self.retry_token = Some(token.clone());
@@ -1220,8 +1223,13 @@ impl Connection {
                 let mut hdr = PacketHdr::new(
                     0,
                     match epoch {
-                        // TODO(ekr@rtfm.com): Retry token
-                        0 => PacketType::Initial(Vec::new()),
+                        0 => {
+                            let token = match &self.retry_token {
+                                Some(v) => v.clone(),
+                                _ => Vec::new(),
+                            };
+                            PacketType::Initial(token)
+                        }
                         1 => PacketType::ZeroRTT,
                         2 => PacketType::Handshake,
                         3 => PacketType::Short,
