@@ -14,8 +14,6 @@ use std::net::SocketAddr;
 use std::ops::{AddAssign, Deref, DerefMut};
 use std::rc::Rc;
 
-use rand::Rng;
-
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hkdf;
@@ -27,8 +25,8 @@ use crate::nss::{
     TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
 };
 use crate::packet::{
-    decode_packet_hdr, decrypt_packet, encode_packet, encode_retry, ConnectionId, CryptoCtx,
-    PacketDecoder, PacketHdr, PacketNumber, PacketNumberDecoder, PacketType,
+    decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, CryptoCtx, PacketDecoder,
+    PacketHdr, PacketNumber, PacketNumberDecoder, PacketType,
 };
 use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, TxBuffer};
@@ -43,6 +41,7 @@ struct Packet(Vec<u8>);
 pub const QUIC_VERSION: u32 = 0xff000014;
 const NUM_EPOCHS: Epoch = 4;
 const MAX_AUTH_TAG: usize = 32;
+const CID_LENGTH: usize = 8;
 
 const TIME_THRESHOLD: f64 = 9.0 / 8.0;
 const PACKET_THRESHOLD: u64 = 3;
@@ -812,9 +811,9 @@ impl Connection {
             send_retry: None,
         };
 
-        c.scid = c.generate_cid();
+        c.scid = ConnectionId::generate(CID_LENGTH);
         if c.role == Role::Client {
-            let dcid = c.generate_cid();
+            let dcid = ConnectionId::generate(CID_LENGTH);
             c.create_initial_crypto_state(&dcid);
             c.dcid = dcid;
         }
@@ -1115,33 +1114,9 @@ impl Connection {
         }
     }
 
-    fn output_retry(&mut self, ptype: PacketType) -> Datagram {
-        qinfo!("Sending Retry");
-
-        assert!(matches!(ptype, PacketType::Retry{..}));
-        let mut hdr = PacketHdr::new(
-            0,
-            ptype,
-            Some(self.version),
-            self.dcid.clone(),
-            Some(self.scid.clone()),
-            0, // Packet number
-            0, // Epoch
-        );
-        let packet = encode_retry(&mut hdr);
-        if let Some(path) = &self.paths {
-            Datagram::new(path.local, path.remote, packet)
-        } else {
-            unreachable!()
-        }
-    }
-
     fn output(&mut self, cur_time: u64) -> Vec<Datagram> {
         if let Some(scid) = self.send_vn.take() {
             return vec![self.output_vn(scid)];
-        }
-        if let Some(ptype) = self.send_retry.take() {
-            return vec![self.output_retry(ptype)];
         }
 
         // Can't call a method on self while iterating over self.paths
@@ -1994,12 +1969,6 @@ impl Connection {
         Ok(stream.stop_sending(err))
     }
 
-    fn generate_cid(&mut self) -> ConnectionId {
-        let mut v: [u8; 8] = [0; 8];
-        rand::thread_rng().fill(&mut v);
-        ConnectionId(v.to_vec())
-    }
-
     /// Get events that indicate state changes on the connection.
     pub fn events(&mut self) -> Vec<ConnectionEvent> {
         // Turn it into a vec for simplicity's sake
@@ -2080,7 +2049,7 @@ impl CryptoCtx for CryptoDxState {
 
 impl PacketDecoder for Connection {
     fn get_cid_len(&self) -> usize {
-        8
+        CID_LENGTH
     }
 }
 

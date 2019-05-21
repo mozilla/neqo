@@ -59,6 +59,16 @@ pub type PacketNumber = u64;
 #[derive(Default, Deref, Debug, PartialEq, Clone)]
 pub struct ConnectionId(pub Vec<u8>);
 
+impl ConnectionId {
+    pub fn generate(len: usize) -> ConnectionId {
+        assert!(matches!(len, 4...18));
+        let mut v = Vec::with_capacity(len);
+        v.resize(len, 0);
+        rand::thread_rng().fill(&mut v[..]);
+        ConnectionId(v)
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct PacketHdr {
     pub tbyte: u8,
