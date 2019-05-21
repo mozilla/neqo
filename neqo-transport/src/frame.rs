@@ -407,6 +407,30 @@ impl Frame {
 
         Ok(acked_ranges)
     }
+
+    pub fn dump(&self) -> Option<String> {
+        match self {
+            Frame::Crypto { offset, data } => Some(format!(
+                "Crypto {{ offset: {}, len: {} }}",
+                offset,
+                data.len()
+            )),
+            Frame::Stream {
+                stream_id,
+                offset,
+                data,
+                fin,
+            } => Some(format!(
+                "Stream {{ stream_id: {}, offset: {}, len: {} fin: {} }}",
+                stream_id,
+                offset,
+                data.len(),
+                fin,
+            )),
+            Frame::Padding => None,
+            _ => Some(format!("{:?}", self)),
+        }
+    }
 }
 
 pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {

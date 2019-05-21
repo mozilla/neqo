@@ -21,6 +21,7 @@ use neqo_crypto::aead::Aead;
 use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
 
+use crate::dump::*;
 use crate::frame::{decode_frame, AckRange, CloseType, Frame, FrameType, StreamType};
 use crate::nss::{
     Agent, Cipher, Client, Epoch, HandshakeState, Record, Server, SymKey, TLS_AES_128_GCM_SHA256,
@@ -1033,6 +1034,7 @@ impl Connection {
                     continue;
                 }
             };
+            dump_packet(self, "rx", &hdr, &body);
 
             // TODO(ekr@rtfm.com): Have the server blow away the initial
             // crypto state if this fails? Otherwise, we will get a panic
@@ -1240,6 +1242,7 @@ impl Connection {
                 // Failure to have the state here is an internal error.
                 let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
                 let packet = encode_packet(&cs.tx, &mut hdr, &encoded);
+                dump_packet(self, "tx", &hdr, &encoded);
                 out_packets.push(packet);
             }
         }
