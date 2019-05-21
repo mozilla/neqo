@@ -38,6 +38,7 @@ struct Args {
 
 trait Handler {
     fn handle(&mut self, client: &mut Connection) -> bool;
+    fn rewrite_out(&mut self, _dgrams: &mut Vec<Datagram>) {}
 }
 
 fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
@@ -67,7 +68,8 @@ fn process_loop(
         }
 
         let exiting = !handler.handle(client);
-        let (out_dgrams, _timer) = client.process_output(now());
+        let (mut out_dgrams, _timer) = client.process_output(now());
+        handler.rewrite_out(&mut out_dgrams);
         emit_packets(&nctx.socket, &out_dgrams);
 
         if exiting {
@@ -347,6 +349,7 @@ enum Test {
     Connect,
     H9,
     H3,
+    VN,
 }
 
 impl Test {
@@ -362,6 +365,7 @@ impl Test {
             Test::Connect => "connect",
             Test::H9 => "h9",
             Test::H3 => "h3",
+            Test::VN => "vn",
         })
     }
 }
@@ -444,6 +448,33 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
     Ok(())
 }
 
+struct VnHandler {}
+
+impl Handler for VnHandler {
+    fn handle(&mut self, client: &mut Connection) -> bool {
+        match client.state() {
+            State::Connected => false,
+            State::Closing(..) => false,
+            _ => true,
+        }
+    }
+
+    fn rewrite_out(&mut self, dgrams: &mut Vec<Datagram>) {
+        assert!(dgrams.len() == 1);
+        dgrams[0].d[1] = 0x1a;
+    }
+}
+fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
+    let mut client =
+        Connection::new_client(peer.host, vec!["hq-20"], nctx.local_addr, nctx.remote_addr)
+            .expect("must succeed");
+    // Temporary here to help out the type inference engine
+    let mut h = VnHandler {};
+    let _res = process_loop(nctx, &mut client, &mut h, &Duration::new(5, 0));
+
+    Ok(client)
+}
+
 fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     let socket = UdpSocket::bind(peer.bind()).expect("Unable to bind UDP socket");
     socket.connect(&peer).expect("Unable to connect UDP socket");
@@ -457,6 +488,14 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         remote_addr: remote_addr,
     };
 
+    match test {
+        Test::VN => {
+            let _res = test_vn(&nctx, peer);
+            unimplemented!();
+        }
+        _ => {}
+    }
+
     let mut client = match test_connect(&nctx, test, peer) {
         Ok(client) => client,
         Err(e) => return (test, e),
@@ -468,6 +507,7 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         }
         Test::H9 => test_h9(&nctx, &mut client),
         Test::H3 => test_h3(&nctx, peer, client),
+        Test::VN => unimplemented!(),
     };
 
     match res {
@@ -565,7 +605,7 @@ const PEERS: [Peer; 8] = [
     },
 ];
 
-const TESTS: [Test; 3] = [Test::Connect, Test::H9, Test::H3];
+const TESTS: [Test; 4] = [Test::Connect, Test::H9, Test::H3, Test::VN];
 
 fn main() {
     let _tests = vec![Test::Connect];

@@ -202,7 +202,7 @@ impl From<Epoch> for PNSpace {
 pub struct Datagram {
     src: SocketAddr,
     dst: SocketAddr,
-    d: Vec<u8>,
+    pub d: Vec<u8>,
 }
 
 impl Datagram {
