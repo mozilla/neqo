@@ -973,9 +973,14 @@ impl Connection {
                         return Ok(());
                     }
                 }
-                State::Closing(..) | State::Closed(..) => {
-                    // Don't bother processing the packet.
-                    // output() will generate a new closing packet.
+                State::Closing(..) => {
+                    // Don't bother processing the packet.Instead ask to get a
+                    // new close frame.
+                    self.flow_mgr.borrow_mut().set_need_close_frame(true);
+                    return Ok(());
+                }
+                State::Closed(..) => {
+                    // Do nothing.
                     return Ok(());
                 }
             }
@@ -1569,6 +1574,8 @@ impl Connection {
                     }
                 }
                 State::Closing(..) => {
+                    self.send_streams.clear();
+                    self.recv_streams.clear();
                     self.generators.clear();
                     self.generators.push(Box::new(CloseGenerator {}));
                     self.flow_mgr.borrow_mut().set_need_close_frame(true);
@@ -1697,6 +1704,10 @@ impl Connection {
         &mut self,
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
+        if self.state != State::Connected {
+            return Err(Error::ConnectionState);
+        }
+
         // May require creating new stream(s)
         if stream_id.is_peer_initiated(self.role()) {
             let next_stream_idx = if stream_id.is_bidi() {
@@ -1782,7 +1793,7 @@ impl Connection {
     // Returns new stream id
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         // Can't make streams before remote tparams are received as part of
-        // handshake
+        // handshake. Can't make streams when closing/closed.
         if self.state != State::Connected {
             return Err(Error::ConnectionState);
         }
