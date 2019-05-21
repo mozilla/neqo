@@ -12,6 +12,7 @@ use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 // use std::path::PathBuf;
 use std::thread;
+use std::time::{Duration, Instant};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -44,9 +45,12 @@ fn process_loop(
     socket: &UdpSocket,
     client: &mut Connection,
     handler: &mut Handler,
+    timeout: &Duration,
 ) -> neqo_transport::connection::State {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
+    let start = Instant::now();
+
     loop {
         client.process_input(in_dgrams.drain(..), now());
 
@@ -63,6 +67,13 @@ fn process_loop(
             return client.state().clone();
         }
 
+        let spent = Instant::now() - start;
+        if spent > *timeout {
+            panic!("Timeout");
+        }
+        socket
+            .set_read_timeout(Some(*timeout - spent))
+            .expect("Read timeout");
         let sz = socket.recv(&mut buf[..]).expect("UDP error");
         if sz == buf.len() {
             eprintln!("Received more than {} bytes", buf.len());
@@ -191,7 +202,14 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
-    process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h);
+    process_loop(
+        &local_addr,
+        &remote_addr,
+        &socket,
+        &mut client,
+        &mut h,
+        &Duration::new(5, 0),
+    );
 
     let st = client.state();
     match st {
