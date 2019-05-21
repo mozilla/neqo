@@ -7,11 +7,14 @@
 use neqo_common::now;
 use neqo_crypto::init;
 //use neqo_transport::frame::StreamType;
+use neqo_http3::{Http3Connection, Http3Event};
 use neqo_transport::frame::StreamType;
 use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 // use std::path::PathBuf;
+use std::str::FromStr;
+use std::string::ParseError;
 use std::thread;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
@@ -113,6 +116,7 @@ impl Handler for PreConnectHandler {
     }
 }
 
+// HTTP/0.9 IMPLEMENTATION
 #[derive(Default)]
 struct H9Handler {
     rbytes: usize,
@@ -162,6 +166,150 @@ impl Handler for H9Handler {
     }
 }
 
+// HTTP/3 IMPLEMENTATION
+#[derive(Debug)]
+struct Headers {
+    pub h: Vec<(String, String)>,
+}
+
+// dragana: this is a very stupid parser.
+// headers should be in form "[(something1, something2), (something3, something4)]"
+impl FromStr for Headers {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut res = Headers { h: Vec::new() };
+        let h1: Vec<&str> = s
+            .trim_matches(|p| p == '[' || p == ']')
+            .split(")")
+            .collect();
+
+        for h in h1 {
+            let h2: Vec<&str> = h
+                .trim_matches(|p| p == ',')
+                .trim()
+                .trim_matches(|p| p == '(' || p == ')')
+                .split(",")
+                .collect();
+
+            if h2.len() == 2 {
+                res.h
+                    .push((h2[0].trim().to_string(), h2[1].trim().to_string()));
+            }
+        }
+
+        Ok(res)
+    }
+}
+
+struct H3Handler {
+    streams: HashSet<u64>,
+    h3: Http3Connection,
+    host: String,
+    path: String,
+}
+
+// TODO(ekr@rtfm.com): Figure out how to merge this.
+fn process_loop_h3(
+    nctx: &NetworkCtx,
+    handler: &mut H3Handler,
+    timeout: &Duration,
+) -> Result<neqo_transport::connection::State, String> {
+    let buf = &mut [0u8; 2048];
+    let mut in_dgrams = Vec::new();
+    let start = Instant::now();
+
+    loop {
+        handler.h3.conn().process_input(in_dgrams.drain(..), now());
+
+        if let State::Closed(..) = handler.h3.conn().state() {
+            return Ok(handler.h3.conn().state().clone());
+        }
+
+        let exiting = !handler.handle();
+        let (out_dgrams, _timer) = handler.h3.conn().process_output(now());
+        emit_packets(&nctx.socket, &out_dgrams);
+
+        if exiting {
+            return Ok(handler.h3.conn().state().clone());
+        }
+
+        let spent = Instant::now() - start;
+        if spent > *timeout {
+            return Err(String::from("Timed out"));
+        }
+        nctx.socket
+            .set_read_timeout(Some(*timeout - spent))
+            .expect("Read timeout");
+        let sz = match nctx.socket.recv(&mut buf[..]) {
+            Ok(sz) => sz,
+            Err(e) => {
+                return Err(String::from(match e.kind() {
+                    std::io::ErrorKind::WouldBlock => "Timed out",
+                    _ => "Read error",
+                }));
+            }
+        };
+
+        if sz == buf.len() {
+            eprintln!("Received more than {} bytes", buf.len());
+            continue;
+        }
+        if sz > 0 {
+            in_dgrams.push(Datagram::new(
+                nctx.remote_addr.clone(),
+                nctx.local_addr.clone(),
+                &buf[..sz],
+            ));
+        }
+    }
+}
+
+// This is a bit fancier than actually needed.
+impl H3Handler {
+    fn handle(&mut self) -> bool {
+        let mut data = vec![0; 4000];
+        self.h3.process_http3();
+        for event in self.h3.events() {
+            match event {
+                Http3Event::HeaderReady { stream_id } => {
+                    if !self.streams.contains(&stream_id) {
+                        println!("Data on unexpected stream: {}", stream_id);
+                        return false;
+                    }
+
+                    let headers = self.h3.get_headers(stream_id);
+                    println!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                }
+                Http3Event::DataReadable { stream_id } => {
+                    if !self.streams.contains(&stream_id) {
+                        println!("Data on unexpected stream: {}", stream_id);
+                        return false;
+                    }
+
+                    let (_sz, fin) = self
+                        .h3
+                        .read_data(stream_id, &mut data)
+                        .expect("Read should succeed");
+                    println!(
+                        "READ[{}]: {}",
+                        stream_id,
+                        String::from_utf8(data.clone()).unwrap()
+                    );
+                    if fin {
+                        println!("<FIN[{}]>", stream_id);
+                        self.h3.close(0, "kthxbye!");
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        true
+    }
+}
+
 struct Peer {
     label: &'static str,
     host: &'static str,
@@ -201,11 +349,13 @@ impl ToSocketAddrs for Peer {
 enum Test {
     Connect,
     H9,
+    H3,
 }
 
 impl Test {
     fn alpn(&self) -> Vec<String> {
         match self {
+            Test::H3 => vec![String::from("h3-20")],
             _ => vec![String::from("hq-20")],
         }
     }
@@ -214,6 +364,7 @@ impl Test {
         String::from(match self {
             Test::Connect => "connect",
             Test::H9 => "h9",
+            Test::H3 => "h3",
         })
     }
 }
@@ -271,6 +422,31 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
     Ok(())
 }
 
+fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), String> {
+    let mut hc = H3Handler {
+        streams: HashSet::new(),
+        h3: Http3Connection::new(client, 128, 128),
+        host: String::from(peer.host.clone()),
+        path: String::from("/"),
+    };
+
+    let client_stream_id = hc
+        .h3
+        .fetch("GET", "https", &hc.host, &hc.path, &vec![])
+        .unwrap();
+
+    hc.streams.insert(client_stream_id);
+    let res = process_loop_h3(nctx, &mut hc, &Duration::new(5, 0));
+    match res {
+        Err(e) => {
+            return Err(format!("ERROR: {}", e));
+        }
+        _ => {}
+    };
+
+    Ok(())
+}
+
 fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     let socket = UdpSocket::bind(peer.bind()).expect("Unable to bind UDP socket");
     socket.connect(&peer).expect("Unable to connect UDP socket");
@@ -294,6 +470,7 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
             return (test, String::from("OK"));
         }
         Test::H9 => test_h9(&nctx, &mut client),
+        Test::H3 => test_h3(&nctx, peer, client),
     };
 
     match res {
@@ -386,7 +563,7 @@ const PEERS: [Peer; 7] = [
     },
 ];
 
-const TESTS: [Test; 2] = [Test::Connect, Test::H9];
+const TESTS: [Test; 3] = [Test::Connect, Test::H9, Test::H3];
 
 fn main() {
     let _tests = vec![Test::Connect];

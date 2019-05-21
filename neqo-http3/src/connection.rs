@@ -276,7 +276,7 @@ impl Http3Connection {
         self.conn.role()
     }
 
-    fn check_state_change(&mut self) {
+    pub fn check_state_change(&mut self) {
         match self.state {
             Http3State::Initializing => {
                 if self.conn.state().clone() == State::Connected {
@@ -311,6 +311,10 @@ impl Http3Connection {
         qdebug!([self] "Process input.");
         self.conn.process_input(in_dgrams, cur_time);
         self.check_state_change();
+    }
+
+    pub fn conn(&mut self) -> &mut Connection {
+        &mut self.conn
     }
 
     pub fn process_http3(&mut self) {
