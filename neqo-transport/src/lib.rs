@@ -10,6 +10,7 @@ use neqo_common::qinfo;
 use neqo_crypto;
 
 pub mod connection;
+mod dump;
 pub mod frame;
 mod nss;
 pub mod nss_stub;

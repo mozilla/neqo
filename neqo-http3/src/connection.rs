@@ -690,7 +690,7 @@ impl Http3Connection {
         }
         self.request_streams_client.clear();
         self.request_streams_server.clear();
-        self.conn.close(error, msg);
+        self.conn.close(0, error, msg);
     }
 
     pub fn fetch(
