@@ -27,8 +27,8 @@ use crate::nss::{
     TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
 };
 use crate::packet::{
-    decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, CryptoCtx, PacketDecoder,
-    PacketHdr, PacketNumber, PacketNumberDecoder, PacketType,
+    decode_packet_hdr, decrypt_packet, encode_packet, encode_retry, ConnectionId, CryptoCtx,
+    PacketDecoder, PacketHdr, PacketNumber, PacketNumberDecoder, PacketType,
 };
 use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, TxBuffer};
@@ -633,6 +633,7 @@ pub struct Connection {
     tps: Rc<RefCell<TransportParametersHandler>>,
     scid: ConnectionId,
     dcid: ConnectionId,
+    retry_token: Option<Vec<u8>>,
     send_epoch: Epoch,
     recv_epoch: Epoch,
     crypto_streams: [CryptoStream; 4],
@@ -659,6 +660,7 @@ pub struct Connection {
     events: Rc<RefCell<ConnectionEvents>>,
     token: Option<Vec<u8>>,
     send_vn: Option<ConnectionId>,
+    send_retry: Option<PacketType>, // This will be PacketType::Retry.
 }
 
 impl Debug for Connection {
@@ -772,6 +774,7 @@ impl Connection {
             tps: tphandler,
             scid: ConnectionId::default(),
             dcid: ConnectionId::default(),
+            retry_token: None,
             send_epoch: 0,
             recv_epoch: 0,
             crypto_streams: [
@@ -806,6 +809,7 @@ impl Connection {
             events: Rc::new(RefCell::new(ConnectionEvents::default())),
             token: None,
             send_vn: None,
+            send_retry: None,
         };
 
         c.scid = c.generate_cid();
@@ -1066,27 +1070,54 @@ impl Connection {
         Ok(ack_eliciting)
     }
 
+    fn output_vn(&mut self, scid: ConnectionId) -> Datagram {
+        qinfo!("Sending VN Packet instead of normal output");
+        let supported_versions = vec![QUIC_VERSION, 0x4a4a4a4a];
+        let mut hdr = PacketHdr::new(
+            0,
+            PacketType::VN(supported_versions),
+            Some(0),
+            scid.clone(),
+            Some(self.scid.clone()),
+            0, // unused
+            0, // unused
+        );
+        let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
+        let packet = encode_packet(&cs.tx, &mut hdr, &[]);
+        if let Some(path) = &self.paths {
+            Datagram::new(path.local, path.remote, packet)
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn output_retry(&mut self, ptype: PacketType) -> Datagram {
+        qinfo!("Sending Retry");
+
+        assert!(matches!(ptype, PacketType::Retry{..}));
+        let mut hdr = PacketHdr::new(
+            0,
+            ptype,
+            Some(self.version),
+            self.dcid.clone(),
+            Some(self.scid.clone()),
+            0, // Packet number
+            0, // Epoch
+        );
+        let packet = encode_retry(&mut hdr);
+        if let Some(path) = &self.paths {
+            Datagram::new(path.local, path.remote, packet)
+        } else {
+            unreachable!()
+        }
+    }
+
     fn output(&mut self, cur_time: u64) -> Vec<Datagram> {
         if let Some(scid) = self.send_vn.take() {
-            qinfo!("Sending VN Packet instead of normal output");
-            let supported_versions = vec![QUIC_VERSION, 0x4a4a4a4a];
-            let mut hdr = PacketHdr::new(
-                0,
-                PacketType::VN(supported_versions),
-                Some(0),
-                scid.clone(),
-                Some(self.scid.clone()),
-                0, // unused
-                0, // unused
-                0,
-            );
-            let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
-            let packet = encode_packet(&cs.tx, &mut hdr, &[]);
-            let mut out_dgrams = Vec::new();
-            if let Some(path) = &self.paths {
-                out_dgrams.push(Datagram::new(path.local, path.remote, packet));
-            }
-            return out_dgrams;
+            return vec![self.output_vn(scid)];
+        }
+        if let Some(ptype) = self.send_retry.take() {
+            return vec![self.output_retry(ptype)];
         }
 
         // Can't call a method on self while iterating over self.paths
@@ -1202,7 +1233,6 @@ impl Connection {
                     Some(self.scid.clone()),
                     self.tx_pns[PNSpace::from(epoch) as usize],
                     epoch,
-                    0,
                 );
                 self.tx_pns[PNSpace::from(epoch) as usize] += 1;
 
