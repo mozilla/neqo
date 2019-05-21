@@ -217,7 +217,7 @@ fn process_loop_h3(
     let start = Instant::now();
 
     loop {
-        handler.h3.conn().process_input(in_dgrams.drain(..), now());
+        handler.h3.process_input(in_dgrams.drain(..), now());
 
         if let State::Closed(..) = handler.h3.conn().state() {
             return Ok(handler.h3.conn().state().clone());
@@ -531,7 +531,7 @@ const PEERS: [Peer; 8] = [
     Peer {
         label: &"quicly",
         host: "kazuhooku.com",
-        port: 4433,
+        port: 8443,
     },
     Peer {
         label: &"local",
