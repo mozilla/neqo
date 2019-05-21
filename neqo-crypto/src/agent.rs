@@ -531,7 +531,8 @@ impl SecretAgent {
     }
 
     fn set_failed(&mut self) -> Error {
-        self.capture_error(result::result(ssl::SECFailure)).unwrap_err()
+        self.capture_error(result::result(ssl::SECFailure))
+            .unwrap_err()
     }
 
     // Drive the TLS handshake, taking bytes from @input and putting

@@ -933,9 +933,33 @@ impl Connection {
                 }
             };
 
-            if let PacketType::VN(_) = hdr.tipe {
-                assert_eq!(hdr.version, Some(0))
-            }
+            match (&hdr.tipe, &self.state, &self.role) {
+                (PacketType::VN(_), State::WaitInitial, Role::Client) => {
+                    self.set_state(State::Closed(ConnectionError::Transport(
+                        Error::VersionNegotiation,
+                    )));
+                    return Err(Error::VersionNegotiation);
+                }
+                (PacketType::Retry { odcid, token }, State::WaitInitial, Role::Client) => {
+                    if *odcid != self.dcid {
+                        // Not for us drop it.
+                        qwarn!("received retry, but not for us, dropping it");
+                        return Ok(());
+                    }
+                    if token.len() == 0 {
+                        qwarn!("received retry, but no token, dropping it");
+                        return Ok(());
+                    }
+                    self.retry_token = Some(token.clone());
+                    self.dcid = hdr.scid.as_ref().expect("no SCID on Retry").clone();
+                    return Ok(());
+                }
+                (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {
+                    qwarn!("dropping {:?}", hdr.tipe);
+                    return Ok(());
+                }
+                _ => {}
+            };
 
             if let Some(version) = hdr.version {
                 if version != self.version {

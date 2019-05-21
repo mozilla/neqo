@@ -50,6 +50,7 @@ pub enum Error {
     KeysNotFound,
     ConnectionState,
     AckedUnsentPacket,
+    VersionNegotiation,
 }
 
 impl Error {
@@ -80,7 +81,8 @@ impl Error {
             | Error::HandshakeFailed
             | Error::KeysNotFound
             | Error::ConnectionState
-            | Error::AckedUnsentPacket => 1,
+            | Error::AckedUnsentPacket
+            | Error::VersionNegotiation => 1,
         }
     }
 }
