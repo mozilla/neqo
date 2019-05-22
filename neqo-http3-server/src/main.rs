@@ -11,10 +11,17 @@ use neqo_transport::{Connection, Datagram};
 //use regex::Regex;
 use std::collections::HashMap;
 use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::io;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
+
 use structopt::StructOpt;
+
+use mio::net::UdpSocket;
+use mio::{Events, Poll, PollOpt, Ready, Token};
+
+const SERVER: Token = Token(0);
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-http3-server", about = "A basic HTTP3 server.")]
@@ -131,14 +138,14 @@ fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
     }
 }
 
-fn main() {
+fn main() -> Result<(), io::Error> {
     let args = Args::from_args();
     assert!(args.key.len() > 0, "Need at least one key");
 
     init_db(args.db.clone());
 
     // TODO(mt): listen on both v4 and v6.
-    let socket = match UdpSocket::bind(args.bind()) {
+    let socket = match UdpSocket::bind(&args.bind()) {
         Err(err) => {
             eprintln!("Unable to bind UDP socket: {}", err);
             exit(1)
@@ -154,48 +161,85 @@ fn main() {
         Ok(s) => s,
     };
 
+    let poll = Poll::new()?;
+
     println!("Server waiting for connection on: {:?}", local_addr);
 
+    poll.register(
+        &socket,
+        SERVER,
+        Ready::readable() | Ready::writable(),
+        PollOpt::edge(),
+    )?;
+
     let buf = &mut [0u8; 2048];
-    let mut in_dgrams = Vec::new();
     let mut connections: HashMap<SocketAddr, Http3Connection> = HashMap::new();
+
+    let mut events = Events::with_capacity(1024);
+
     loop {
-        let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
-            Err(err) => {
-                eprintln!("UDP recv error: {}", err);
-                exit(1)
+        poll.poll(&mut events, None)?;
+        for event in &events {
+            match event.token() {
+                SERVER => {
+                    let mut in_dgrams = HashMap::new();
+                    let mut out_dgrams = Vec::new();
+
+                    // Read all datagrams and group by remote host
+                    loop {
+                        let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
+                            Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => break,
+                            Err(err) => {
+                                eprintln!("UDP recv error: {:?}", err);
+                                exit(1);
+                            }
+                            Ok(res) => res,
+                        };
+
+                        if sz == buf.len() {
+                            eprintln!("Might have received more than {} bytes", buf.len());
+                        }
+
+                        if sz == 0 {
+                            eprintln!("zero length datagram received?");
+                        } else {
+                            let conn_dgrams = in_dgrams.entry(remote_addr).or_insert(Vec::new());
+                            conn_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
+                        }
+                    }
+
+                    // Process each connections' packets
+                    for (remote_addr, mut dgrams) in in_dgrams {
+                        let server = connections.entry(remote_addr).or_insert_with(|| {
+                            println!("New connection from {:?}", remote_addr);
+                            Http3Connection::new(
+                                Connection::new_server(args.key.clone(), args.alpn.clone())
+                                    .expect("must succeed"),
+                                args.max_table_size,
+                                args.max_blocked_streams,
+                            )
+                        });
+                        server.set_new_stream_callback(http_serve);
+
+                        // TODO use timer to set socket.set_read_timeout.
+                        server.process_input(dgrams.drain(..), now());
+                        if let Http3State::Closed(e) = server.state() {
+                            eprintln!("Closed connection from {:?}: {:?}", remote_addr, e);
+                            connections.remove(&remote_addr);
+                            continue;
+                        }
+
+                        server.process_http3();
+                        let (conn_out_dgrams, _timer) = server.process_output(now());
+                        out_dgrams.extend(conn_out_dgrams);
+                    }
+                    emit_packets(&socket, &out_dgrams);
+                }
+                val => {
+                    eprintln!("invalid event token {:?}", val);
+                    exit(1);
+                }
             }
-            Ok(res) => res,
-        };
-
-        if sz == buf.len() {
-            eprintln!("Might have received more than {} bytes", buf.len());
-            continue;
         }
-        if sz > 0 {
-            in_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
-        }
-
-        let server = connections.entry(remote_addr).or_insert_with(|| {
-            println!("New connection from {:?}", remote_addr);
-            Http3Connection::new(
-                Connection::new_server(args.key.clone(), args.alpn.clone()).expect("must succeed"),
-                args.max_table_size,
-                args.max_blocked_streams,
-            )
-        });
-        server.set_new_stream_callback(http_serve);
-
-        // TODO use timer to set socket.set_read_timeout.
-        server.process_input(in_dgrams.drain(..), now());
-        if let Http3State::Closed(e) = server.state() {
-            eprintln!("Closed connection from {:?}: {:?}", remote_addr, e);
-            connections.remove(&remote_addr);
-            continue;
-        }
-
-        server.process_http3();
-        let (out_dgrams, _timer) = server.process_output(now());
-        emit_packets(&socket, &out_dgrams);
     }
 }
