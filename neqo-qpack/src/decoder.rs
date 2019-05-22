@@ -771,10 +771,7 @@ impl QPackDecoder {
     }
 
     pub fn has_recv_stream(&self) -> bool {
-        match self.remote_stream_id {
-            Some(_) => true,
-            None => false,
-        }
+        self.remote_stream_id.is_some()
     }
 }
 

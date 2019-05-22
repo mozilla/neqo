@@ -457,6 +457,7 @@ impl Http3Connection {
             _ => String::new(),
         };
         let mut unblocked_streams: Vec<u64> = Vec::new();
+
         if self.read_stream_client(stream_id, false)? {
             qdebug!([label] "Request/response stream {} read.", stream_id);
         } else if self.read_stream_server(stream_id, false)? {
@@ -765,7 +766,7 @@ impl Http3Connection {
                     }
                 }
                 HSettingType::MaxTableSize => self.qpack_encoder.set_max_capacity(*v)?,
-                HSettingType::BlockedStreams => self.qpack_encoder.set_blocked_streams(*v)?,
+                HSettingType::BlockedStreams => self.qpack_encoder.set_max_blocked_streams(*v)?,
 
                 _ => {}
             }

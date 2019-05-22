@@ -77,10 +77,11 @@ impl QPackEncoder {
         Ok(())
     }
 
-    pub fn set_blocked_streams(&mut self, blocked_streams: u64) -> Res<()> {
+    pub fn set_max_blocked_streams(&mut self, blocked_streams: u64) -> Res<()> {
         if blocked_streams > (1 << 16) - 1 {
             return Err(Error::EncoderStreamError);
         }
+        qdebug!([self] "Set max blocked streams to {}.", blocked_streams);
         self.max_blocked_streams = blocked_streams as u16;
         Ok(())
     }
@@ -501,10 +502,7 @@ impl QPackEncoder {
     }
 
     pub fn has_recv_stream(&self) -> bool {
-        match self.remote_stream_id {
-            Some(_) => true,
-            None => false,
-        }
+        self.remote_stream_id.is_some()
     }
 }
 
@@ -851,12 +849,9 @@ mod tests {
 
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
 
-        if let Err(_) = encoder.set_blocked_streams(100) {
-            assert!(false);
-        }
-        if let Err(_) = encoder.set_max_capacity(200) {
-            assert!(false);
-        }
+        encoder.set_max_blocked_streams(100).unwrap();
+        encoder.set_max_capacity(200).unwrap();
+
         // test the change capacity instruction.
         test_sent_instructions(
             &mut encoder,
@@ -939,12 +934,9 @@ mod tests {
 
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(true);
 
-        if let Err(_) = encoder.set_blocked_streams(100) {
-            assert!(false);
-        }
-        if let Err(_) = encoder.set_max_capacity(200) {
-            assert!(false);
-        }
+        encoder.set_max_blocked_streams(100).unwrap();
+        encoder.set_max_capacity(200).unwrap();
+
         // test the change capacity instruction.
         test_sent_instructions(
             &mut encoder,
@@ -974,9 +966,8 @@ mod tests {
     fn test_insertion_blocked_on_insert_count_feedback() {
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
 
-        if let Err(_) = encoder.set_max_capacity(60) {
-            assert!(false);
-        }
+        encoder.set_max_capacity(60).unwrap();
+
         // test the change capacity instruction.
         test_sent_instructions(
             &mut encoder,
