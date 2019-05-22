@@ -416,7 +416,9 @@ impl Http3Connection {
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.handle_stream_creatable(stream_type)?
                 }
-                ConnectionEvent::ConnectionClosed { .. } => self.handle_connection_closed()?,
+                ConnectionEvent::ConnectionClosed { error_code, .. } => {
+                    self.handle_connection_closed(error_code)?
+                }
             }
         }
         Ok(())
@@ -546,7 +548,9 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_connection_closed(&mut self) -> Res<()> {
+    fn handle_connection_closed(&mut self, error_code: u16) -> Res<()> {
+        self.events.borrow_mut().connection_closed(error_code);
+        self.state = Http3State::Closed(error_code);
         Ok(())
     }
 
@@ -772,51 +776,43 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_goaway(&mut self, stream_id: u64) -> Res<()> {
+    fn handle_goaway(&mut self, goaway_stream_id: u64) -> Res<()> {
         qdebug!([self] "handle_goaway");
         if self.role() == Role::Server {
             return Err(Error::UnexpectedFrame);
         } else {
-            let stream_reset = self
-                .request_streams_client
+            // Issue reset events for streams >= goaway stream id
+            self.request_streams_client
                 .iter()
-                .filter(|(id, _)| **id >= stream_id)
+                .filter(|(id, _)| **id >= goaway_stream_id)
                 .map(|(id, _)| *id)
+                .for_each(|id| {
+                    self.events
+                        .borrow_mut()
+                        .request_closed(id, Http3Error::NetReset)
+                });
+
+            // Actually remove (i.e. don't retain) these streams
+            self.request_streams_client
+                .retain(|id, _| *id < goaway_stream_id);
+
+            // Remove events for any of these streams by creating a new set of
+            // filtered events and then swapping with the original set.
+            let updated_events = self
+                .events
+                .borrow()
+                .events
+                .iter()
+                .filter(|evt| match evt {
+                    Http3Event::HeaderReady { stream_id }
+                    | Http3Event::DataReadable { stream_id }
+                    | Http3Event::NewPushStream { stream_id } => *stream_id < goaway_stream_id,
+                    Http3Event::RequestClosed { .. } | Http3Event::ConnectionClosed { .. } => true,
+                })
+                .cloned()
                 .collect::<BTreeSet<_>>();
-            self.request_streams_client.retain(|id, _| *id < stream_id);
-            // we need to remove events for a reset stream.
-            let events = self.events.borrow_mut().events();
-            for e in events {
-                match e {
-                    Http3Event::HeaderReady { stream_id } => {
-                        if !stream_reset.contains(&stream_id) {
-                            self.events.borrow_mut().header_ready(stream_id);
-                        }
-                    }
-                    Http3Event::DataReadable { stream_id } => {
-                        if !stream_reset.contains(&stream_id) {
-                            self.events.borrow_mut().data_readable(stream_id);
-                        }
-                    }
+            mem::replace(&mut self.events.borrow_mut().events, updated_events);
 
-                    Http3Event::RequestClosed { stream_id, error } => {
-                        if !stream_reset.contains(&stream_id) {
-                            self.events.borrow_mut().request_closed(stream_id, error);
-                        }
-                    }
-                    Http3Event::NewPushStream { stream_id } => {
-                        if !stream_reset.contains(&stream_id) {
-                            self.events.borrow_mut().new_push_stream(stream_id);
-                        }
-                    }
-                }
-            }
-
-            for id in stream_reset {
-                self.events
-                    .borrow_mut()
-                    .request_closed(id, Http3Error::NetReset);
-            }
             if self.state == Http3State::Connected {
                 self.state = Http3State::GoingAway;
             }
@@ -905,7 +901,7 @@ impl Http3Connection {
     }
 }
 
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub enum Http3Event {
     /// Space available in the buffer for an application write to succeed.
     HeaderReady { stream_id: u64 },
@@ -915,6 +911,8 @@ pub enum Http3Event {
     RequestClosed { stream_id: u64, error: Http3Error },
     /// A new push stream
     NewPushStream { stream_id: u64 },
+    /// Peer closed the connection
+    ConnectionClosed { error_code: u16 },
 }
 
 #[derive(Debug, Default)]
@@ -946,6 +944,12 @@ impl Http3Events {
         self.events.insert(Http3Event::NewPushStream {
             stream_id: stream_id,
         });
+    }
+
+    pub fn connection_closed(&mut self, error_code: u16) {
+        self.events.clear();
+        self.events
+            .insert(Http3Event::ConnectionClosed { error_code });
     }
 
     pub fn events(&mut self) -> BTreeSet<Http3Event> {
