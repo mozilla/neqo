@@ -72,7 +72,12 @@ pub enum State {
     WaitInitial,
     Handshaking,
     Connected,
-    Closing(ConnectionError, FrameType, String, u64), // u64 = closing period end time
+    Closing {
+        error: ConnectionError,
+        frame_type: FrameType,
+        msg: String,
+        timeout: u64,
+    },
     Closed(ConnectionError),
 }
 
@@ -863,12 +868,12 @@ impl Connection {
             let msg = String::from(format!("{:?}", v));
             #[cfg(not(debug_assertions))]
             let msg = String::from("");
-            self.set_state(State::Closing(
-                ConnectionError::Transport(v.clone()),
+            self.set_state(State::Closing {
+                error: ConnectionError::Transport(v.clone()),
                 frame_type,
                 msg,
-                self.get_closing_period_time(cur_time),
-            ));
+                timeout: self.get_closing_period_time(cur_time),
+            });
         }
         res
     }
@@ -910,7 +915,7 @@ impl Connection {
     /// by the application.
     pub fn process_output(&mut self, cur_time: u64) -> (Vec<Datagram>, u64) {
         match &self.state {
-            State::Closing(error, _, _, timeout) => {
+            State::Closing { error, timeout, .. } => {
                 if *timeout < cur_time {
                     (self.output(cur_time), 0)
                 } else {
@@ -1027,7 +1032,7 @@ impl Connection {
                         return Ok(());
                     }
                 }
-                State::Closing(..) => {
+                State::Closing { .. } => {
                     // Don't bother processing the packet. Instead ask to get a
                     // new close frame.
                     self.flow_mgr.borrow_mut().set_need_close_frame(true);
@@ -1160,7 +1165,7 @@ impl Connection {
         self.paths = paths;
 
         let closing = match self.state {
-            State::Closing(..) => true,
+            State::Closing { .. } => true,
             _ => false,
         };
         if !closing && errors.len() > 0 {
@@ -1329,12 +1334,12 @@ impl Connection {
 
     /// Close the connection.
     pub fn close<S: Into<String>>(&mut self, cur_time: u64, error: AppError, msg: S) {
-        self.set_state(State::Closing(
-            ConnectionError::Application(error),
-            0,
-            msg.into(),
-            self.get_closing_period_time(cur_time),
-        ));
+        self.set_state(State::Closing {
+            error: ConnectionError::Application(error),
+            frame_type: 0,
+            msg: msg.into(),
+            timeout: self.get_closing_period_time(cur_time),
+        });
     }
 
     fn handshake(&mut self, epoch: u16, data: Option<&[u8]>) -> Res<()> {
@@ -1636,7 +1641,7 @@ impl Connection {
             self.state = state;
             match &self.state {
                 State::Connected => {}
-                State::Closing(..) => {
+                State::Closing { .. } => {
                     self.send_streams.clear();
                     self.recv_streams.clear();
                     self.generators.clear();
@@ -2161,7 +2166,13 @@ impl FrameGenerator for CloseGenerator {
         _mode: TxMode,
         _remaining: usize,
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
-        if let State::Closing(cerr, frame_type, reason, _) = c.state() {
+        if let State::Closing {
+            error: cerr,
+            frame_type,
+            msg: reason,
+            ..
+        } = c.state()
+        {
             if c.flow_mgr.borrow().need_close_frame() {
                 c.flow_mgr.borrow_mut().set_need_close_frame(false);
                 return Some((
@@ -3074,7 +3085,7 @@ mod tests {
         let mut records = Vec::new();
         let is_done = |c: &mut Connection| match c.state() {
             // TODO(mt): Finish on Closed and not Closing.
-            State::Connected | State::Closing(..) | State::Closed(..) => true,
+            State::Connected | State::Closing { .. } | State::Closed(..) => true,
             _ => false,
         };
         while !is_done(a) {
@@ -3093,8 +3104,8 @@ mod tests {
     fn assert_error(c: &Connection, err: ConnectionError) {
         match c.state() {
             // TODO(mt): Finish on Closed and not Closing.
-            State::Closing(e, ..) | State::Closed(e, ..) => {
-                assert_eq!(*e, err);
+            State::Closing { error, .. } | State::Closed(error) => {
+                assert_eq!(*error, err);
             }
             _ => panic!("bad state {:?}", c.state()),
         }

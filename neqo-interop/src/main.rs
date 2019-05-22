@@ -112,7 +112,7 @@ impl Handler for PreConnectHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
         match client.state() {
             State::Connected => false,
-            State::Closing(..) => false,
+            State::Closing { .. } => false,
             _ => true,
         }
     }
@@ -454,7 +454,7 @@ impl Handler for VnHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
         match client.state() {
             State::Connected => false,
-            State::Closing(..) => false,
+            State::Closing { .. } => false,
             _ => true,
         }
     }

@@ -157,8 +157,8 @@ fn main() {
             connections.remove(&remote_addr);
             continue;
         }
-        if let State::Closing(e, ..) = server.state() {
-            eprintln!("Closing connection from {:?}: {:?}", remote_addr, e);
+        if let State::Closing { error, .. } = server.state() {
+            eprintln!("Closing connection from {:?}: {:?}", remote_addr, error);
             // TOOD(ekr@rtfm.com): Do I need to remove?
             continue;
         }
