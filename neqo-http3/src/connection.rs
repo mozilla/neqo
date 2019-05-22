@@ -7,7 +7,9 @@
 use crate::hframe::{HFrame, HFrameReader, HSettingType};
 use crate::request_stream_client::RequestStreamClient;
 use crate::request_stream_server::RequestStreamServer;
-use neqo_common::{qdebug, qinfo, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult};
+use neqo_common::{
+    qdebug, qerror, qinfo, qwarn, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
+};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::connection::Role;
@@ -425,7 +427,11 @@ impl Http3Connection {
         match stream_type {
             StreamType::BiDi => match self.role() {
                 Role::Server => self.handle_new_client_request(stream_id),
-                Role::Client => assert!(false, "Client received a new bidirectiona stream!"),
+                Role::Client => {
+                    qerror!("Client received a new bidirectional stream!");
+                    // TODO: passing app error of 0, check if there's a better value
+                    self.conn.stream_stop_sending(stream_id, 0)?;
+                }
             },
             StreamType::UniDi => {
                 let stream_type;
@@ -655,7 +661,7 @@ impl Http3Connection {
                 Ok(())
             }
             QPACK_UNI_STREAM_TYPE_DECODER => {
-                qinfo!([self] "A new remore qpack decoder stream {}", stream_id);
+                qinfo!([self] "A new remote qpack decoder stream {}", stream_id);
                 if self.qpack_encoder.has_recv_stream() {
                     qdebug!([self] "A qpack decoder stream already exists");
                     return Err(Error::WrongStreamCount);
@@ -679,15 +685,7 @@ impl Http3Connection {
         if ((self.request_streams_client.len() > 0) | (self.request_streams_server.len() > 0))
             && (error == 0)
         {
-            assert!(
-                false,
-                "We should not call close when we still have streams active."
-            );
-        }
-        for (id, _) in self.request_streams_client.iter() {
-            self.events
-                .borrow_mut()
-                .request_closed(*id, Http3Error::ConnectionError);
+            qwarn!("close() called when streams still active");
         }
         self.request_streams_client.clear();
         self.request_streams_server.clear();
