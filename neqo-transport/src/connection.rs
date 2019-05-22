@@ -915,7 +915,8 @@ impl Connection {
                     (self.output(cur_time), 0)
                 } else {
                     // Close timeout expired, move to Closed
-                    self.set_state(State::Closed(error.clone()));
+                    let st = State::Closed(error.clone());
+                    self.set_state(st);
                     (Vec::new(), 0)
                 }
             }
