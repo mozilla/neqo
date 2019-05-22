@@ -212,14 +212,15 @@ fn main() -> Result<(), io::Error> {
                     for (remote_addr, mut dgrams) in in_dgrams {
                         let server = connections.entry(remote_addr).or_insert_with(|| {
                             println!("New connection from {:?}", remote_addr);
-                            Http3Connection::new(
+                            let mut srv = Http3Connection::new(
                                 Connection::new_server(args.key.clone(), args.alpn.clone())
                                     .expect("must succeed"),
                                 args.max_table_size,
                                 args.max_blocked_streams,
-                            )
+                            );
+                            srv.set_new_stream_callback(http_serve);
+                            srv
                         });
-                        server.set_new_stream_callback(http_serve);
 
                         // TODO use timer to set socket.set_read_timeout.
                         server.process_input(dgrams.drain(..), now());
