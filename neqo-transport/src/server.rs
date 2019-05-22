@@ -1,0 +1,89 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+use neqo_common::{hex, qinfo, qtrace};
+
+use crate::connection::Datagram;
+use crate::packet::{
+    decode_packet_hdr, encode_retry, ConnectionId, PacketDecoder, PacketHdr, PacketType,
+};
+use crate::{Error, Res};
+
+#[derive(Debug, Default)]
+pub struct Server {
+    version: crate::packet::Version,
+    cidlen: usize,
+}
+
+pub enum RetryResult {
+    Ok,
+    SendRetry(Datagram),
+}
+
+const FIXED_TOKEN: &[u8] = &[1, 2, 3];
+
+impl Server {
+    fn token_is_ok(&self, token: &[u8]) -> bool {
+        token == &FIXED_TOKEN[..]
+    }
+
+    fn generate_token(&self) -> Vec<u8> {
+        Vec::from(FIXED_TOKEN)
+    }
+
+    fn generate_cid(&self) -> ConnectionId {
+        ConnectionId::generate(self.cidlen)
+    }
+
+    pub fn check_retry(&self, received: Datagram) -> Res<RetryResult> {
+        qinfo!("Generating a Retry packet");
+        qtrace!("Received packet: {}", hex(&received[..]));
+
+        let hdr = decode_packet_hdr(self, &received[..])?;
+        if let PacketType::Initial(token) = hdr.tipe {
+            if self.token_is_ok(&token) {
+                return Ok(RetryResult::Ok);
+            }
+            if token.len() > 0 {
+                return Err(Error::ProtocolViolation);
+            }
+        } else {
+            return Ok(RetryResult::Ok);
+        }
+
+        let mut hdr = PacketHdr::new(
+            0, // tbyte (unused on encode)
+            PacketType::Retry {
+                odcid: hdr.dcid,
+                token: self.generate_token(),
+            },
+            Some(self.version),
+            hdr.scid.as_ref().unwrap().clone(),
+            Some(self.generate_cid()),
+            0, // Packet number
+            0, // Epoch
+        );
+        let retry = encode_retry(&mut hdr);
+        let dgram = Datagram::new(
+            received.destination().clone(),
+            received.source().clone(),
+            retry,
+        );
+        Ok(RetryResult::SendRetry(dgram))
+    }
+}
+
+impl PacketDecoder for Server {
+    fn get_cid_len(&self) -> usize {
+        self.cidlen
+    }
+}
+
+impl ::std::fmt::Display for Server {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Server")
+    }
+}
