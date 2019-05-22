@@ -1794,6 +1794,9 @@ impl Connection {
             if stream_idx >= *next_stream_idx {
                 let recv_initial_max_stream_data = if stream_id.is_bidi() {
                     if stream_idx > self.local_max_stream_idx_bidi {
+                        qwarn!([self] "peer bidi stream create blocked, next={:?} max={:?}",
+                               stream_idx,
+                               self.local_max_stream_idx_bidi);
                         return Err(Error::StreamLimitError);
                     }
                     self.tps
@@ -1802,6 +1805,9 @@ impl Connection {
                         .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
                 } else {
                     if stream_idx > self.local_max_stream_idx_uni {
+                        qwarn!([self] "peer uni stream create blocked, next={:?} max={:?}",
+                               stream_idx,
+                               self.local_max_stream_idx_uni);
                         return Err(Error::StreamLimitError);
                     }
                     self.tps
@@ -1878,6 +1884,9 @@ impl Connection {
                     self.flow_mgr
                         .borrow_mut()
                         .streams_blocked(self.peer_max_stream_idx_uni, StreamType::UniDi);
+                    qwarn!([self] "local uni stream create blocked, next={:?} max={:?}",
+                           self.peer_next_stream_idx_uni,
+                           self.peer_max_stream_idx_uni);
                     return Err(Error::StreamLimitError);
                 }
                 let new_id = self
@@ -1908,6 +1917,9 @@ impl Connection {
                     self.flow_mgr
                         .borrow_mut()
                         .streams_blocked(self.peer_max_stream_idx_bidi, StreamType::BiDi);
+                    qwarn!([self] "local bidi stream create blocked, next={:?} max={:?}",
+                           self.peer_next_stream_idx_bidi,
+                           self.peer_max_stream_idx_bidi);
                     return Err(Error::StreamLimitError);
                 }
                 let new_id = self

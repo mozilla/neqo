@@ -109,7 +109,7 @@ impl TransportParameter {
         if d.remaining() > 0 {
             return Err(Error::TooMuchData);
         }
-
+        qtrace!("TP decoded; type {:x} val {:?}", tipe, tp);
         Ok(Some((tipe, tp)))
     }
 }
