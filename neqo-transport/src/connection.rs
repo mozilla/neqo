@@ -32,6 +32,7 @@ use crate::packet::{
 };
 use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, TxBuffer};
+use crate::stats::Stats;
 use crate::tparams::consts as tp_const;
 use crate::tparams::TransportParametersHandler;
 use crate::tracking::RecvdPackets;
@@ -204,7 +205,7 @@ impl From<Epoch> for PNSpace {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Datagram {
     src: SocketAddr,
     dst: SocketAddr,
@@ -666,6 +667,7 @@ pub struct Connection {
     token: Option<Vec<u8>>,
     send_vn: Option<ConnectionId>,
     send_retry: Option<PacketType>, // This will be PacketType::Retry.
+    stats: Stats,
 }
 
 impl Debug for Connection {
@@ -815,6 +817,7 @@ impl Connection {
             token: None,
             send_vn: None,
             send_retry: None,
+            stats: Stats::default(),
         };
 
         c.scid = ConnectionId::generate(CID_LENGTH);
@@ -858,6 +861,11 @@ impl Connection {
     // Get the SCID.
     pub fn scid(&self) -> ConnectionId {
         self.scid.clone()
+    }
+
+    /// Get statistics
+    pub fn stats(&self) -> &Stats {
+        &self.stats
     }
 
     // This function wraps a call to another function and sets the connection state
@@ -955,7 +963,7 @@ impl Connection {
                     return Ok(()); // Drop the remainder of the datagram.
                 }
             };
-
+            self.stats.packets_rx += 1;
             match (&hdr.tipe, &self.state, &self.role) {
                 (PacketType::VN(_), State::WaitInitial, Role::Client) => {
                     self.set_state(State::Closed(ConnectionError::Transport(
@@ -1023,7 +1031,7 @@ impl Connection {
                 }
                 State::Handshaking | State::Connected => {
                     if !self.valid_cid(&hdr.dcid[..]) {
-                        qinfo!([self] "Bad CID {:?}", hdr.dcid);
+                        qinfo!([self] "Bad CID {}", hex(&hdr.dcid));
                         return Ok(());
                     }
                 }
@@ -1072,8 +1080,6 @@ impl Connection {
             // on the assert for doesn't exist.
             // OK, we have a valid packet.
 
-            // TODO(ekr@rtfm.com): Check for duplicates.
-            // TODO(ekr@rtfm.com): Mark this packet received.
             // TODO(ekr@rtfm.com): Filter for valid for this epoch.
 
             if matches!(self.state, State::WaitInitial) {
@@ -1081,13 +1087,14 @@ impl Connection {
             }
 
             let ack_eliciting = self.input_packet(hdr.epoch, Decoder::from(&body[..]), cur_time)?;
-
-            // Mark the packet as received.
-            self.obtain_crypto_state(hdr.epoch)
-                .as_mut()
-                .unwrap()
-                .obtain_recvd_state(hdr.pn)
-                .set_received(cur_time, hdr.pn, ack_eliciting);
+            let mut tmp = self.obtain_crypto_state(hdr.epoch); // Keep the Res alive.
+            let rstate = tmp.as_mut().unwrap().obtain_recvd_state(hdr.pn);
+            if rstate.was_received(hdr.pn) {
+                qdebug!([self] "Received duplicate packet epoch={} pn={}", hdr.epoch, hdr.pn);
+                self.stats.dups_rx += 1;
+                continue;
+            }
+            rstate.set_received(cur_time, hdr.pn, ack_eliciting);
 
             match &self.paths {
                 None => {
@@ -1135,6 +1142,7 @@ impl Connection {
         );
         let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
         let packet = encode_packet(&cs.tx, &hdr, &[]);
+        self.stats.packets_tx += 1;
         if let Some(path) = &self.paths {
             Datagram::new(path.local, path.remote, packet)
         } else {
@@ -1267,7 +1275,7 @@ impl Connection {
                     epoch,
                 );
                 self.tx_pns[PNSpace::from(epoch) as usize] += 1;
-
+                self.stats.packets_tx += 1;
                 self.loss_recovery.on_packet_sent(
                     PNSpace::from(epoch),
                     hdr.pn,
@@ -3331,5 +3339,41 @@ mod tests {
 
         // there is no more outstanding data - timer is set to 0.
         assert_eq!(lr_module.get_timer(), 0);
+    }
+
+    #[test]
+    #[test]
+    fn test_dup_server_flight1() {
+        init_db("./db");
+        qdebug!("---- client: generate CH");
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let (res, _) = client.process(Vec::new(), now());
+        assert_eq!(res.len(), 1);
+        assert_eq!(res.first().unwrap().len(), 1200);
+        qdebug!("Output={:0x?}", res);
+
+        qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let (res, _) = server.process(res, now());
+        assert_eq!(res.len(), 1);
+        qdebug!("Output={:0x?}", res);
+
+        qdebug!("---- client: SH..FIN -> FIN");
+        let (res2, _) = client.process(res.clone(), now());
+        assert_eq!(res2.len(), 1);
+        qdebug!("Output={:0x?}", res);
+
+        assert_eq!(2, client.stats().packets_rx);
+        assert_eq!(0, client.stats().dups_rx);
+
+        qdebug!("---- Dup, ignored");
+        let (res2, _) = client.process(res.clone(), now());
+        assert_eq!(res2.len(), 0);
+        qdebug!("Output={:0x?}", res);
+
+        // Four packets total received, two of them are dups
+        assert_eq!(4, client.stats().packets_rx);
+        assert_eq!(2, client.stats().dups_rx);
     }
 }

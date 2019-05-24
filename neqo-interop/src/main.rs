@@ -370,6 +370,15 @@ impl Test {
             Test::VN => "vn",
         })
     }
+
+    /*    fn letters(&self) -> Vec<char> {
+        match self {
+            Test::Connect => vec!['H'],
+            Test::H9 => vec!['D', 'C'],
+            Test::H3 => vec!['3'],
+            Test::VN => vec!['V'],
+        }
+    }*/
 }
 
 struct NetworkCtx {
@@ -639,6 +648,6 @@ fn main() {
     // Now wait for them.
     for child in children {
         let res = child.1.join().unwrap();
-        eprintln!("{} -> {:?}", child.0.label, res);
+        println!("{} -> {:?}", child.0.label, res);
     }
 }

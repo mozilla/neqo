@@ -18,6 +18,7 @@ pub mod packet;
 pub mod recv_stream;
 pub mod send_stream;
 pub mod server;
+pub mod stats;
 mod tparams;
 mod tracking;
 
