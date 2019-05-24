@@ -3301,7 +3301,7 @@ mod tests {
         assert_values(&lr_module, 100_000, 100_000, 50_000, 100_000, [0, 0, 0]);
         assert_eq!(lr_module.get_timer(), 385_000_000);
 
-        // Receive an ack with a gap. ackes 0 and 2.
+        // Receive an ack with a gap. acks 0 and 2.
         lr_module.on_ack_received(
             PNSpace::ApplicationData,
             2,
