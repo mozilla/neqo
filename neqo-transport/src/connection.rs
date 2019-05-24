@@ -1008,7 +1008,6 @@ impl Connection {
                 }
             }
 
-            // TODO(ekr@rtfm.com): Check for bogus versions and reject.
             match self.state {
                 State::Init => {
                     qinfo!([self] "Received message while in Init state");
