@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![deny(warnings)]
 use neqo_common::now;
 use neqo_crypto::init_db;
 use neqo_http3::{Http3Connection, Http3Event, Http3State};

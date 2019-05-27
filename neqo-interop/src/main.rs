@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::all)]
+#![deny(warnings)]
 
 use neqo_common::now;
 use neqo_crypto::init;
@@ -43,7 +43,7 @@ trait Handler {
     fn rewrite_out(&mut self, _dgrams: &mut Vec<Datagram>) {}
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
+fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
     for d in out_dgrams {
         let sent = socket.send(&d[..]).expect("Error sending datagram");
         if sent != d.len() {
@@ -101,8 +101,8 @@ fn process_loop(
         }
         if sz > 0 {
             in_dgrams.push(Datagram::new(
-                nctx.remote_addr.clone(),
-                nctx.local_addr.clone(),
+                nctx.remote_addr,
+                nctx.local_addr,
                 &buf[..sz],
             ));
         }
@@ -182,7 +182,7 @@ impl FromStr for Headers {
         let mut res = Headers { h: Vec::new() };
         let h1: Vec<&str> = s
             .trim_matches(|p| p == '[' || p == ']')
-            .split(")")
+            .split(')')
             .collect();
 
         for h in h1 {
@@ -190,7 +190,7 @@ impl FromStr for Headers {
                 .trim_matches(|p| p == ',')
                 .trim()
                 .trim_matches(|p| p == '(' || p == ')')
-                .split(",")
+                .split(',')
                 .collect();
 
             if h2.len() == 2 {
@@ -258,8 +258,8 @@ fn process_loop_h3(
         }
         if sz > 0 {
             in_dgrams.push(Datagram::new(
-                nctx.remote_addr.clone(),
-                nctx.local_addr.clone(),
+                nctx.remote_addr,
+                nctx.local_addr,
                 &buf[..sz],
             ));
         }
@@ -409,13 +409,9 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
     hc.streams.insert(client_stream_id);
     let res = process_loop(nctx, client, &mut hc, &Duration::new(5, 0));
 
-    match res {
-        Err(e) => {
-            return Err(format!("ERROR: {}", e));
-        }
-        _ => {}
-    };
-
+    if let Err(e) = res {
+        return Err(format!("ERROR: {}", e));
+    }
     if hc.rbytes == 0 {
         return Err(String::from("Empty response"));
     }
@@ -429,23 +425,19 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
     let mut hc = H3Handler {
         streams: HashSet::new(),
         h3: Http3Connection::new(client, 128, 128),
-        host: String::from(peer.host.clone()),
+        host: String::from(peer.host),
         path: String::from("/"),
     };
 
     let client_stream_id = hc
         .h3
-        .fetch("GET", "https", &hc.host, &hc.path, &vec![])
+        .fetch("GET", "https", &hc.host, &hc.path, &[])
         .unwrap();
 
     hc.streams.insert(client_stream_id);
-    let res = process_loop_h3(nctx, &mut hc, &Duration::new(5, 0));
-    match res {
-        Err(e) => {
+    if let Err(e) = process_loop_h3(nctx, &mut hc, &Duration::new(5, 0)) {
             return Err(format!("ERROR: {}", e));
         }
-        _ => {}
-    };
 
     Ok(())
 }
@@ -485,18 +477,15 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     let remote_addr = peer.addr();
 
     let nctx = NetworkCtx {
-        socket: socket,
-        local_addr: local_addr,
-        remote_addr: remote_addr,
+        socket,
+        local_addr,
+        remote_addr,
     };
 
-    match test {
-        Test::VN => {
+    if let Test::VN = test {
             let _res = test_vn(&nctx, peer);
             unimplemented!();
         }
-        _ => {}
-    }
 
     let mut client = match test_connect(&nctx, test, peer) {
         Ok(client) => client,
@@ -512,16 +501,10 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         Test::VN => unimplemented!(),
     };
 
-    match res {
-        Ok(_) => {}
-        Err(e) => return (test, e),
+    if let        Err(e) = res { return (test, e);
     }
 
-    match test {
-        _ => {
-            return (test, String::from("OK"));
-        }
-    };
+    (test, String::from("OK"))
 }
 
 fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
@@ -536,7 +519,7 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
             continue;
         }
 
-        if args.include_tests.len() > 0 && !args.include_tests.contains(&test.label()) {
+        if !args.include_tests.is_empty() && !args.include_tests.contains(&test.label()) {
             continue;
         }
         if args.exclude_tests.contains(&test.label()) {
@@ -624,7 +607,7 @@ fn main() {
 
     // Start all the children.
     for peer in &PEERS {
-        if args.include.len() > 0 && !args.include.contains(&String::from(peer.label)) {
+        if !args.include.is_empty() && !args.include.contains(&String::from(peer.label)) {
             continue;
         }
         if args.exclude.contains(&String::from(peer.label)) {
