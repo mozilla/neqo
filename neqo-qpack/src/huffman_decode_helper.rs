@@ -40,7 +40,7 @@ pub const HUFFMAN_DECODE_ROOT: &HuffmanDecodeTable = &HuffmanDecodeTable {
 const HUFFMAN_DECODE_NEXT_TABLE_ROOT: &[&HuffmanDecodeTable] =
     &[HUFFMAN_DECODE_254, HUFFMAN_DECODE_255];
 
-    macro_rules! huffman_decode_entries {
+macro_rules! huffman_decode_entries {
         [$($v:expr => $p:expr),+ $(,)?] => {
             &[
                 $(HuffmanDecodeEntry { val: $v, prefix_len: $p }),+

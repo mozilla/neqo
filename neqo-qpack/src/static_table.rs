@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(unused_variables, dead_code)]
-
 #[derive(Debug)]
 pub struct StaticTableEntry {
     index: u64,
