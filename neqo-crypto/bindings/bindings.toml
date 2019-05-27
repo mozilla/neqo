@@ -186,11 +186,9 @@ variables = [
 [nspr_io]
 types = ["PRIOMethods"]
 functions = [
+    "PR_Close",
     "PR_CreateIOLayerStub",
     "PR_GetUniqueIdentity",
-    # These aren't being used yet.
-    # "PR_Read",
-    # "PR_Write",
 ]
 variables = [
     "PR_AF_INET",

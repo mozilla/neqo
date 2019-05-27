@@ -245,9 +245,9 @@ impl SecretAgent {
             ssl::SSL_ImportFD(null_mut(), base_fd as *mut ssl::PRFileDesc)
         };
         if fd.is_null() {
+            unsafe { prio::PR_Close(base_fd) };
             return Err(Error::CreateSslSocket);
         }
-        mem::forget(base_fd); // Free the base.
         self.fd = fd;
         Ok(())
     }
@@ -435,7 +435,7 @@ impl SecretAgent {
         ext: Extension,
         handler: Rc<RefCell<dyn ExtensionHandler>>,
     ) -> Res<()> {
-        let tracker = ExtensionTracker::new(self.fd, ext, handler)?;
+        let tracker = unsafe { ExtensionTracker::new(self.fd, ext, handler) }?;
         self.extension_handlers.push(tracker);
         Ok(())
     }
@@ -513,16 +513,16 @@ impl SecretAgent {
     }
 
     fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
-        let res = self.capture_error(result::result_or_blocked(rv))?;
-        self.state = match res {
-            true => match *self.auth_required {
-                true => HandshakeState::AuthenticationPending,
-                false => HandshakeState::InProgress,
-            },
-            false => {
-                let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
-                HandshakeState::Complete(info)
+        let blocked = self.capture_error(result::result_or_blocked(rv))?;
+        self.state = if blocked {
+            if *self.auth_required {
+                HandshakeState::AuthenticationPending
+            } else {
+                HandshakeState::InProgress
             }
+        } else {
+            let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
+            HandshakeState::Complete(info)
         };
         qinfo!([self] "state -> {:?}", self.state);
         Ok(())

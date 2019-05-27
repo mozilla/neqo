@@ -127,7 +127,7 @@ impl QPackDecoder {
         Ok(r)
     }
 
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     #[allow(clippy::useless_let_if_seq)]
     fn read_instructions(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
         let label = self.to_string();

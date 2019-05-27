@@ -63,10 +63,10 @@ impl Aead {
         prefix: S,
     ) -> Res<Aead> {
         let s: *mut PK11SymKey = **secret;
-        Aead::from_raw(version, cipher, s, prefix)
+        unsafe { Aead::from_raw(version, cipher, s, prefix) }
     }
 
-    pub fn from_raw<S: Into<String>>(
+    unsafe fn from_raw<S: Into<String>>(
         version: Version,
         cipher: Cipher,
         secret: *mut PK11SymKey,
@@ -75,16 +75,14 @@ impl Aead {
         let prefix_str = prefix.into();
         let p = prefix_str.as_bytes();
         let mut ctx: *mut ssl::SSLAeadContext = null_mut();
-        let rv = unsafe {
-            SSL_MakeAead(
-                version,
-                cipher,
-                secret,
-                p.as_ptr() as *const i8,
-                p.len() as u32,
-                &mut ctx,
-            )
-        };
+        let rv = SSL_MakeAead(
+            version,
+            cipher,
+            secret,
+            p.as_ptr() as *const i8,
+            p.len() as u32,
+            &mut ctx,
+        );
         result::result(rv)?;
         match NonNull::new(ctx) {
             Some(ctx_ptr) => Ok(Aead {

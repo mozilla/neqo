@@ -49,9 +49,9 @@ pub fn extract_hp<S: Into<String>>(
     let mut secret: *mut PK11SymKey = null_mut();
 
     let (mech, key_size) = match cipher {
-        TLS_AES_128_GCM_SHA256 => (CKM_AES_ECB as CK_MECHANISM_TYPE, 16),
-        TLS_AES_256_GCM_SHA384 => (CKM_AES_ECB as CK_MECHANISM_TYPE, 32),
-        TLS_CHACHA20_POLY1305_SHA256 => (CKM_NSS_CHACHA20_CTR as CK_MECHANISM_TYPE, 32),
+        TLS_AES_128_GCM_SHA256 => (CK_MECHANISM_TYPE::from(CKM_AES_ECB), 16),
+        TLS_AES_256_GCM_SHA384 => (CK_MECHANISM_TYPE::from(CKM_AES_ECB), 32),
+        TLS_CHACHA20_POLY1305_SHA256 => (CK_MECHANISM_TYPE::from(CKM_NSS_CHACHA20_CTR), 32),
         _ => unreachable!(),
     };
 
@@ -96,8 +96,8 @@ impl HpKey {
         };
         let zero = vec![0u8; block_size];
         let (iv, inbuf) = match () {
-            _ if mech == CKM_AES_ECB as CK_MECHANISM_TYPE => (null_mut(), sample),
-            _ if mech == CKM_NSS_CHACHA20_CTR as CK_MECHANISM_TYPE => {
+            _ if mech == CK_MECHANISM_TYPE::from(CKM_AES_ECB) => (null_mut(), sample),
+            _ if mech == CK_MECHANISM_TYPE::from(CKM_NSS_CHACHA20_CTR) => {
                 (&mut item as *mut SECItem, &zero[..])
             }
             _ => unreachable!(),
