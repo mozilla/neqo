@@ -368,7 +368,7 @@ impl SecretAgent {
 
     pub fn set_groups(&mut self, groups: &[Group]) -> Res<()> {
         // SSLNamedGroup is a different size to Group, so copy one by one.
-        let group_vec: Vec<_> = groups.iter().map(|&g| u32::from(g)).collect();
+        let group_vec: Vec<_> = groups.iter().map(|&g| SSLNamedGroup::from(g)).collect();
 
         let ptr = group_vec.as_slice().as_ptr();
         let rv = unsafe { ssl::SSL_NamedGroupConfig(self.fd, ptr, group_vec.len() as c_uint) };

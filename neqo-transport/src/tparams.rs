@@ -103,7 +103,6 @@ impl TransportParameter {
 
             DISABLE_MIGRATION => TransportParameter::Empty,
             // Skip.
-            // TODO(ekr@rtfm.com): Write a skip.
             _ => return Ok(None),
         };
         if d.remaining() > 0 {
