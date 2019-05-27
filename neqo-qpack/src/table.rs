@@ -4,13 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(unused_variables, dead_code)]
-
 use crate::static_table::{StaticTableEntry, HEADER_STATIC_TABLE};
 use crate::{Error, QPackSide, Res};
 use std::collections::{HashMap, VecDeque};
-
-const QPACK_MAX_TABLE_CAPACITY: u64 = 0;
 
 #[derive(Debug)]
 pub struct DynamicTableEntry {
@@ -21,10 +17,6 @@ pub struct DynamicTableEntry {
 }
 
 impl DynamicTableEntry {
-    pub fn base(&self) -> u64 {
-        self.base
-    }
-
     pub fn can_reduce(&self, first_not_acked: u64) -> bool {
         self.refs.is_empty() && self.base < first_not_acked
     }
@@ -95,10 +87,6 @@ impl HeaderTable {
     pub fn set_capacity(&mut self, c: u64) {
         self.evict_to(c);
         self.capacity = c;
-    }
-
-    pub fn used(&self) -> u64 {
-        self.used
     }
 
     pub fn get_static(&self, index: u64) -> Res<&StaticTableEntry> {
