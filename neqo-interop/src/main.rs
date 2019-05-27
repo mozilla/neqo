@@ -100,11 +100,7 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(
-                nctx.remote_addr,
-                nctx.local_addr,
-                &buf[..sz],
-            ));
+            in_dgrams.push(Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]));
         }
     }
 }
@@ -257,11 +253,7 @@ fn process_loop_h3(
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(
-                nctx.remote_addr,
-                nctx.local_addr,
-                &buf[..sz],
-            ));
+            in_dgrams.push(Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]));
         }
     }
 }
@@ -436,8 +428,8 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
 
     hc.streams.insert(client_stream_id);
     if let Err(e) = process_loop_h3(nctx, &mut hc, &Duration::new(5, 0)) {
-            return Err(format!("ERROR: {}", e));
-        }
+        return Err(format!("ERROR: {}", e));
+    }
 
     Ok(())
 }
@@ -483,9 +475,9 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     };
 
     if let Test::VN = test {
-            let _res = test_vn(&nctx, peer);
-            unimplemented!();
-        }
+        let _res = test_vn(&nctx, peer);
+        unimplemented!();
+    }
 
     let mut client = match test_connect(&nctx, test, peer) {
         Ok(client) => client,
@@ -501,7 +493,8 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         Test::VN => unimplemented!(),
     };
 
-    if let        Err(e) = res { return (test, e);
+    if let Err(e) = res {
+        return (test, e);
     }
 
     (test, String::from("OK"))
