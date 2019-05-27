@@ -213,8 +213,12 @@ fn alpn_no_protocol() {
     server.set_alpn(&["b"]).expect("should set ALPN");
 
     connect_fail(&mut client, &mut server);
-
-    // TODO(mt) check the error code
+    if let HandshakeState::Failed(Error::NssError { code, .. }) = *server.state() {
+        assert_eq!(code, SSLErrorCodes::SSL_ERROR_RX_MALFORMED_CLIENT_HELLO);
+    } else {
+        panic!("Invalid server state: {:?}", server.state());
+    }
+    assert_eq!(*server.alert().expect("should sent alert"), 120); // no_application_protocol
 }
 
 #[test]

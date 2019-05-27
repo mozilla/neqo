@@ -37,7 +37,7 @@ pub use self::agent::{
     SecretAgentPreInfo, Server,
 };
 pub use self::constants::*;
-pub use self::err::{Error, Res};
+pub use self::err::{Error, Res, SSLErrorCodes};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
 pub use self::p11::SymKey;
 pub use self::secrets::SecretDirection;

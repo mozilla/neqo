@@ -494,8 +494,8 @@ impl SecretAgent {
     }
 
     /// Return any fatal alert that the TLS stack might have sent.
-    pub fn alert(&self) -> &Option<Alert> {
-        &*self.alert
+    pub fn alert(&self) -> Option<&Alert> {
+        (&*self.alert).as_ref()
     }
 
     /// Call this function to mark the peer as authenticated.
