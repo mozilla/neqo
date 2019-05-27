@@ -12,6 +12,7 @@ use crate::qpack_helper::{
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
+use neqo_common::qdebug;
 use neqo_transport::connection::Connection;
 use std::{mem, str};
 
@@ -798,7 +799,7 @@ mod tests {
     use super::*;
     use neqo_crypto::init_db;
     use neqo_transport::frame::StreamType;
-    use neqo_transport::{AppError, ConnectionEvent, Res};
+    use neqo_transport::ConnectionEvent;
     use std::net::SocketAddr;
 
     fn loopback() -> SocketAddr {

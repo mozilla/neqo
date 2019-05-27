@@ -11,6 +11,7 @@ use crate::qpack_helper::read_prefixed_encoded_int_with_connection;
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
+use neqo_common::{qdebug, qtrace};
 use neqo_transport::connection::Connection;
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
@@ -531,7 +532,7 @@ mod tests {
     use super::*;
     use neqo_crypto::init_db;
     use neqo_transport::frame::StreamType;
-    use neqo_transport::{AppError, ConnectionEvent, Res};
+    use neqo_transport::ConnectionEvent;
     use std::net::SocketAddr;
 
     fn loopback() -> SocketAddr {
