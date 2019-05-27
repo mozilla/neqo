@@ -4,12 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 
 use crate::hex;
-
-// TODO(mt) add bounds checks on u64<->usize conversions.
 
 /// Decoder is a view into a byte array that has a read offset.  Use it for parsing.
 pub struct Decoder<'a> {
@@ -62,6 +61,18 @@ impl<'a> Decoder<'a> {
         Some(res)
     }
 
+    fn decode_checked(&mut self, n: u64) -> Option<&[u8]> {
+        match TryFrom::try_from(n) {
+            Ok(len) => self.decode(len),
+            _ => {
+                // sizeof(usize) < sizeof(u64) and the value is greater than usize can hold.
+                // Throw away the rest of the input.
+                self.offset = self.buf.len();
+                None
+            }
+        }
+    }
+
     /// Decodes an unsigned integer of length 1..8.
     pub fn decode_uint(&mut self, n: usize) -> Option<u64> {
         assert!(n > 0 && n <= 8);
@@ -105,7 +116,7 @@ impl<'a> Decoder<'a> {
             Some(l) => l,
             None => return None,
         };
-        self.decode(len as usize)
+        self.decode_checked(len)
     }
 
     /// Decodes a QUIC-variant-length prefixed buffer.
@@ -114,7 +125,7 @@ impl<'a> Decoder<'a> {
             Some(l) => l,
             None => return None,
         };
-        self.decode(len as usize)
+        self.decode_checked(len)
     }
 }
 
@@ -212,7 +223,7 @@ impl Encoder {
         let v = v.into();
         assert!(n > 0 && n <= 8);
         for i in 0..n {
-            self.encode_byte((v >> (8 * (n - i - 1))) as u8);
+            self.encode_byte(((v >> (8 * (n - i - 1))) & 0xff) as u8);
         }
         self
     }
@@ -232,7 +243,7 @@ impl Encoder {
 
     /// Encode a vector in TLS style.
     pub fn encode_vec(&mut self, n: usize, v: &[u8]) -> &mut Self {
-        self.encode_uint(n, v.len() as u64).encode(v)
+        self.encode_uint(n, u64::try_from(v.len()).unwrap()).encode(v)
     }
 
     /// Encode a vector in TLS style using a closure for the contents.
@@ -242,14 +253,14 @@ impl Encoder {
         f(self);
         let len = self.buf.len() - start - n;
         for i in 0..n {
-            self.buf[start + i] = (len >> (8 * (n - i - 1))) as u8
+            self.buf[start + i] = ((len >> (8 * (n - i - 1))) & 0xff)as u8
         }
         self
     }
 
     /// Encode a vector with a varint length.
     pub fn encode_vvec(&mut self, v: &[u8]) -> &mut Self {
-        self.encode_varint(v.len() as u64).encode(v)
+        self.encode_varint(u64::try_from(v.len()).unwrap()).encode(v)
     }
 
     /// Encode a vector with a varint length using a closure.
@@ -257,7 +268,7 @@ impl Encoder {
         let start = self.buf.len();
         f(self);
         let len = self.buf.len() - start;
-        self.encode_varint(len as u64);
+        self.encode_varint(u64::try_from(len).unwrap());
         // Unfortunately, this moves all the data that was encoded.  Without knowing
         // the length of what is encoded, this is what we get.
         // We could reserve one octet and optimize for small vectors,
