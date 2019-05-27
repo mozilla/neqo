@@ -240,6 +240,7 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         .expect("must succeed"),
         args.max_table_size,
         args.max_blocked_streams,
+        None,
     );
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
