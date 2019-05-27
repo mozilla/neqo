@@ -27,500 +27,110 @@ impl StaticTableEntry {
     }
 }
 
-pub const HEADER_STATIC_TABLE: &[StaticTableEntry] = &[
-    StaticTableEntry {
-        index: 0,
-        name: b":authority",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 1,
-        name: b":path",
-        value: b"/",
-    },
-    StaticTableEntry {
-        index: 2,
-        name: b"age",
-        value: b"0",
-    },
-    StaticTableEntry {
-        index: 3,
-        name: b"content-disposition",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 4,
-        name: b"content-length",
-        value: b"0",
-    },
-    StaticTableEntry {
-        index: 5,
-        name: b"cookie",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 6,
-        name: b"date",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 7,
-        name: b"etag",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 8,
-        name: b"if-modified-since",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 9,
-        name: b"if-none-match",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 10,
-        name: b"last-modified",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 11,
-        name: b"link",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 12,
-        name: b"location",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 13,
-        name: b"referer",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 14,
-        name: b"set-cookie",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 15,
-        name: b":method",
-        value: b"CONNECT",
-    },
-    StaticTableEntry {
-        index: 16,
-        name: b":method",
-        value: b"DELETE",
-    },
-    StaticTableEntry {
-        index: 17,
-        name: b":method",
-        value: b"GET",
-    },
-    StaticTableEntry {
-        index: 18,
-        name: b":method",
-        value: b"HEAD",
-    },
-    StaticTableEntry {
-        index: 19,
-        name: b":method",
-        value: b"OPTIONS",
-    },
-    StaticTableEntry {
-        index: 20,
-        name: b":method",
-        value: b"POST",
-    },
-    StaticTableEntry {
-        index: 21,
-        name: b":method",
-        value: b"PUT",
-    },
-    StaticTableEntry {
-        index: 22,
-        name: b":scheme",
-        value: b"http",
-    },
-    StaticTableEntry {
-        index: 23,
-        name: b":scheme",
-        value: b"https",
-    },
-    StaticTableEntry {
-        index: 24,
-        name: b":status",
-        value: b"103",
-    },
-    StaticTableEntry {
-        index: 25,
-        name: b":status",
-        value: b"200",
-    },
-    StaticTableEntry {
-        index: 26,
-        name: b":status",
-        value: b"304",
-    },
-    StaticTableEntry {
-        index: 27,
-        name: b":status",
-        value: b"404",
-    },
-    StaticTableEntry {
-        index: 28,
-        name: b":status",
-        value: b"503",
-    },
-    StaticTableEntry {
-        index: 29,
-        name: b"accept",
-        value: b"*/*",
-    },
-    StaticTableEntry {
-        index: 30,
-        name: b"accept",
-        value: b"application/dns-message",
-    },
-    StaticTableEntry {
-        index: 31,
-        name: b"accept-encoding",
-        value: b"gzip, deflate, br",
-    },
-    StaticTableEntry {
-        index: 32,
-        name: b"accept-ranges",
-        value: b"bytes",
-    },
-    StaticTableEntry {
-        index: 33,
-        name: b"access-control-allow-headers",
-        value: b"cache-control",
-    },
-    StaticTableEntry {
-        index: 34,
-        name: b"access-control-allow-headers",
-        value: b"content-type",
-    },
-    StaticTableEntry {
-        index: 35,
-        name: b"access-control-allow-origin",
-        value: b"*",
-    },
-    StaticTableEntry {
-        index: 36,
-        name: b"cache-control",
-        value: b"max-age=0",
-    },
-    StaticTableEntry {
-        index: 37,
-        name: b"cache-control",
-        value: b"max-age=2592000",
-    },
-    StaticTableEntry {
-        index: 38,
-        name: b"cache-control",
-        value: b"max-age=604800",
-    },
-    StaticTableEntry {
-        index: 39,
-        name: b"cache-control",
-        value: b"no-cache",
-    },
-    StaticTableEntry {
-        index: 40,
-        name: b"cache-control",
-        value: b"no-store",
-    },
-    StaticTableEntry {
-        index: 41,
-        name: b"cache-control",
-        value: b"public, max-age=31536000",
-    },
-    StaticTableEntry {
-        index: 42,
-        name: b"content-encoding",
-        value: b"br",
-    },
-    StaticTableEntry {
-        index: 43,
-        name: b"content-encoding",
-        value: b"gzip",
-    },
-    StaticTableEntry {
-        index: 44,
-        name: b"content-type",
-        value: b"application/dns-message",
-    },
-    StaticTableEntry {
-        index: 45,
-        name: b"content-type",
-        value: b"application/javascript",
-    },
-    StaticTableEntry {
-        index: 46,
-        name: b"content-type",
-        value: b"application/json",
-    },
-    StaticTableEntry {
-        index: 47,
-        name: b"content-type",
-        value: b"application/x-www-form-urlencoded",
-    },
-    StaticTableEntry {
-        index: 48,
-        name: b"content-type",
-        value: b"image/gif",
-    },
-    StaticTableEntry {
-        index: 49,
-        name: b"content-type",
-        value: b"image/jpeg",
-    },
-    StaticTableEntry {
-        index: 50,
-        name: b"content-type",
-        value: b"image/png",
-    },
-    StaticTableEntry {
-        index: 51,
-        name: b"content-type",
-        value: b"text/css",
-    },
-    StaticTableEntry {
-        index: 52,
-        name: b"content-type",
-        value: b"text/html; charset=utf-8",
-    },
-    StaticTableEntry {
-        index: 53,
-        name: b"content-type",
-        value: b"text/plain",
-    },
-    StaticTableEntry {
-        index: 54,
-        name: b"content-type",
-        value: b"text/plain;charset=utf-8",
-    },
-    StaticTableEntry {
-        index: 55,
-        name: b"range",
-        value: b"bytes=0-",
-    },
-    StaticTableEntry {
-        index: 56,
-        name: b"strict-transport-security",
-        value: b"max-age=31536000",
-    },
-    StaticTableEntry {
-        index: 57,
-        name: b"strict-transport-security",
-        value: b"max-age=31536000; includesubdomains",
-    },
-    StaticTableEntry {
-        index: 58,
-        name: b"strict-transport-security",
-        value: b"max-age=31536000; includesubdomains; preload",
-    },
-    StaticTableEntry {
-        index: 59,
-        name: b"vary",
-        value: b"accept-encoding",
-    },
-    StaticTableEntry {
-        index: 60,
-        name: b"vary",
-        value: b"origin",
-    },
-    StaticTableEntry {
-        index: 61,
-        name: b"x-content-type-options",
-        value: b"nosniff",
-    },
-    StaticTableEntry {
-        index: 62,
-        name: b"x-xss-protection",
-        value: b"1; mode=block",
-    },
-    StaticTableEntry {
-        index: 63,
-        name: b":status",
-        value: b"100",
-    },
-    StaticTableEntry {
-        index: 64,
-        name: b":status",
-        value: b"204",
-    },
-    StaticTableEntry {
-        index: 65,
-        name: b":status",
-        value: b"206",
-    },
-    StaticTableEntry {
-        index: 66,
-        name: b":status",
-        value: b"302",
-    },
-    StaticTableEntry {
-        index: 67,
-        name: b":status",
-        value: b"400",
-    },
-    StaticTableEntry {
-        index: 68,
-        name: b":status",
-        value: b"403",
-    },
-    StaticTableEntry {
-        index: 69,
-        name: b":status",
-        value: b"421",
-    },
-    StaticTableEntry {
-        index: 70,
-        name: b":status",
-        value: b"425",
-    },
-    StaticTableEntry {
-        index: 71,
-        name: b":status",
-        value: b"500",
-    },
-    StaticTableEntry {
-        index: 72,
-        name: b"accept-language",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 73,
-        name: b"access-control-allow-credentials",
-        value: b"FALSE",
-    },
-    StaticTableEntry {
-        index: 74,
-        name: b"access-control-allow-credentials",
-        value: b"TRUE",
-    },
-    StaticTableEntry {
-        index: 75,
-        name: b"access-control-allow-headers",
-        value: b"*",
-    },
-    StaticTableEntry {
-        index: 76,
-        name: b"access-control-allow-methods",
-        value: b"get",
-    },
-    StaticTableEntry {
-        index: 77,
-        name: b"access-control-allow-methods",
-        value: b"get, post, options",
-    },
-    StaticTableEntry {
-        index: 78,
-        name: b"access-control-allow-methods",
-        value: b"options",
-    },
-    StaticTableEntry {
-        index: 79,
-        name: b"access-control-expose-headers",
-        value: b"content-length",
-    },
-    StaticTableEntry {
-        index: 80,
-        name: b"access-control-request-headers",
-        value: b"content-type",
-    },
-    StaticTableEntry {
-        index: 81,
-        name: b"access-control-request-method",
-        value: b"get",
-    },
-    StaticTableEntry {
-        index: 82,
-        name: b"access-control-request-method",
-        value: b"post",
-    },
-    StaticTableEntry {
-        index: 83,
-        name: b"alt-svc",
-        value: b"clear",
-    },
-    StaticTableEntry {
-        index: 84,
-        name: b"authorization",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 85,
-        name: b"content-security-policy",
-        value: b"script-src 'none'; object-src 'none'; base-uri 'none'",
-    },
-    StaticTableEntry {
-        index: 86,
-        name: b"early-data",
-        value: b"1",
-    },
-    StaticTableEntry {
-        index: 87,
-        name: b"expect-ct",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 88,
-        name: b"forwarded",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 89,
-        name: b"if-range",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 90,
-        name: b"origin",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 91,
-        name: b"purpose",
-        value: b"prefetch",
-    },
-    StaticTableEntry {
-        index: 92,
-        name: b"server",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 93,
-        name: b"timing-allow-origin",
-        value: b"*",
-    },
-    StaticTableEntry {
-        index: 94,
-        name: b"upgrade-insecure-requests",
-        value: b"1",
-    },
-    StaticTableEntry {
-        index: 95,
-        name: b"user-agent",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 96,
-        name: b"x-forwarded-for",
-        value: b"",
-    },
-    StaticTableEntry {
-        index: 97,
-        name: b"x-frame-options",
-        value: b"deny",
-    },
-    StaticTableEntry {
-        index: 98,
-        name: b"x-frame-options",
-        value: b"sameorigin",
-    },
+macro_rules! static_table_entries {
+    [$($i:expr, $n:expr, $v:expr);+ $(;)?] => {
+        &[ $(StaticTableEntry { index: $i, name: $n, value: $v }),+ ]
+    };
+}
+
+pub const HEADER_STATIC_TABLE: &[StaticTableEntry] = static_table_entries![
+    0, b":authority", b"";
+    1, b":path", b"/";
+    2, b"age", b"0";
+    3, b"content-disposition", b"";
+    4, b"content-length", b"0";
+    5, b"cookie", b"";
+    6, b"date", b"";
+    7, b"etag", b"";
+    8, b"if-modified-since", b"";
+    9, b"if-none-match", b"";
+    10, b"last-modified", b"";
+    11, b"link", b"";
+    12, b"location", b"";
+    13, b"referer", b"";
+    14, b"set-cookie", b"";
+    15, b":method", b"CONNECT";
+    16, b":method", b"DELETE";
+    17, b":method", b"GET";
+    18, b":method", b"HEAD";
+    19, b":method", b"OPTIONS";
+    20, b":method", b"POST";
+    21, b":method", b"PUT";
+    22, b":scheme", b"http";
+    23, b":scheme", b"https";
+    24, b":status", b"103";
+    25, b":status", b"200";
+    26, b":status", b"304";
+    27, b":status", b"404";
+    28, b":status", b"503";
+    29, b"accept", b"*/*";
+    30, b"accept", b"application/dns-message";
+    31, b"accept-encoding", b"gzip, deflate, br";
+    32, b"accept-ranges", b"bytes";
+    33, b"access-control-allow-headers", b"cache-control";
+    34, b"access-control-allow-headers", b"content-type";
+    35, b"access-control-allow-origin", b"*";
+    36, b"cache-control", b"max-age=0";
+    37, b"cache-control", b"max-age=2592000";
+    38, b"cache-control", b"max-age=604800";
+    39, b"cache-control", b"no-cache";
+    40, b"cache-control", b"no-store";
+    41, b"cache-control", b"public, max-age=31536000";
+    42, b"content-encoding", b"br";
+    43, b"content-encoding", b"gzip";
+    44, b"content-type", b"application/dns-message";
+    45, b"content-type", b"application/javascript";
+    46, b"content-type", b"application/json";
+    47, b"content-type", b"application/x-www-form-urlencoded";
+    48, b"content-type", b"image/gif";
+    49, b"content-type", b"image/jpeg";
+    50, b"content-type", b"image/png";
+    51, b"content-type", b"text/css";
+    52, b"content-type", b"text/html; charset=utf-8";
+    53, b"content-type", b"text/plain";
+    54, b"content-type", b"text/plain;charset=utf-8";
+    55, b"range", b"bytes=0-";
+    56, b"strict-transport-security", b"max-age=31536000";
+    57, b"strict-transport-security", b"max-age=31536000; includesubdomains";
+    58, b"strict-transport-security", b"max-age=31536000; includesubdomains; preload";
+    59, b"vary", b"accept-encoding";
+    60, b"vary", b"origin";
+    61, b"x-content-type-options", b"nosniff";
+    62, b"x-xss-protection", b"1; mode=block";
+    63, b":status", b"100";
+    64, b":status", b"204";
+    65, b":status", b"206";
+    66, b":status", b"302";
+    67, b":status", b"400";
+    68, b":status", b"403";
+    69, b":status", b"421";
+    70, b":status", b"425";
+    71, b":status", b"500";
+    72, b"accept-language", b"";
+    73, b"access-control-allow-credentials", b"FALSE";
+    74, b"access-control-allow-credentials", b"TRUE";
+    75, b"access-control-allow-headers", b"*";
+    76, b"access-control-allow-methods", b"get";
+    77, b"access-control-allow-methods", b"get, post, options";
+    78, b"access-control-allow-methods", b"options";
+    79, b"access-control-expose-headers", b"content-length";
+    80, b"access-control-request-headers", b"content-type";
+    81, b"access-control-request-method", b"get";
+    82, b"access-control-request-method", b"post";
+    83, b"alt-svc", b"clear";
+    84, b"authorization", b"";
+    85, b"content-security-policy", b"script-src 'none'; object-src 'none'; base-uri 'none'";
+    86, b"early-data", b"1";
+    87, b"expect-ct", b"";
+    88, b"forwarded", b"";
+    89, b"if-range", b"";
+    90, b"origin", b"";
+    91, b"purpose", b"prefetch";
+    92, b"server", b"";
+    93, b"timing-allow-origin", b"*";
+    94, b"upgrade-insecure-requests", b"1";
+    95, b"user-agent", b"";
+    96, b"x-forwarded-for", b"";
+    97, b"x-frame-options", b"deny";
+    98, b"x-frame-options", b"sameorigin";
 ];
