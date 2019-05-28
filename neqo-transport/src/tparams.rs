@@ -231,6 +231,7 @@ impl TransportParameters {
 pub struct TransportParametersHandler {
     pub local: TransportParameters,
     pub remote: Option<TransportParameters>,
+    pub remote_0rtt: Option<TransportParameters>,
 }
 
 impl ExtensionHandler for TransportParametersHandler {

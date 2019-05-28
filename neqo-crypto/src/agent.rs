@@ -8,6 +8,7 @@ use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{Record, RecordList};
 pub use crate::cert::CertificateChain;
 use crate::constants::*;
+use crate::convert::{to_prtime, to_c_uint};
 use crate::err::{Error, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
 use crate::initialized;
@@ -16,6 +17,7 @@ use crate::prio;
 use crate::result;
 use crate::secrets::SecretHolder;
 use crate::ssl;
+use crate::ssl::PRTime;
 
 use neqo_common::{qdebug, qinfo, qwarn};
 use std::cell::RefCell;
@@ -55,7 +57,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
             &mut alpn_state,
             chosen.as_mut_ptr(),
             &mut chosen_len,
-            chosen.len() as c_uint,
+            to_c_uint(chosen.len())?,
         )
     };
     result::result(rv)?;
@@ -198,6 +200,8 @@ pub struct SecretAgent {
     alert: Box<Option<Alert>>,
     /// Records the last resumption token.
     resumption: Box<Option<Vec<u8>>>,
+    /// The current time.
+    now: Box<PRTime>,
 
     extension_handlers: Vec<ExtensionTracker>,
     inf: Option<SecretAgentInfo>,
@@ -215,6 +219,7 @@ impl SecretAgent {
             auth_required: Box::new(false),
             alert: Box::new(None),
             resumption: Box::new(None),
+            now: Box::new(0),
 
             extension_handlers: Default::default(),
             inf: Default::default(),
@@ -300,6 +305,11 @@ impl SecretAgent {
         ssl::SECSuccess
     }
 
+    unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
+        let p = arg as *mut PRTime as *const PRTime;
+        *p.as_ref().unwrap()
+    }
+
     // Ready this for connecting.
     fn ready(&mut self, is_server: bool) -> Res<()> {
         let rv = unsafe {
@@ -329,6 +339,16 @@ impl SecretAgent {
         };
         result::result(rv)?;
 
+        let rv = unsafe {
+            ssl::SSL_SetTimeFunc(
+                self.fd,
+                Some(SecretAgent::time_func),
+                &mut *self.now as *mut PRTime as *mut c_void,
+            )
+        };
+        result::result(rv)?;
+
+
         self.configure()?;
         result::result(unsafe { ssl::SSL_ResetHandshake(self.fd, is_server as ssl::PRBool) })
     }
@@ -338,6 +358,7 @@ impl SecretAgent {
         self.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
         self.set_option(ssl::Opt::Locking, false)?;
         self.set_option(ssl::Opt::Tickets, false)?;
+        self.set_option(ssl::Opt::OcspStapling, true)?;
         Ok(())
     }
 
@@ -374,12 +395,18 @@ impl SecretAgent {
             .collect();
 
         let ptr = group_vec.as_slice().as_ptr();
-        let rv = unsafe { ssl::SSL_NamedGroupConfig(self.fd, ptr, group_vec.len() as c_uint) };
+        let rv = unsafe { ssl::SSL_NamedGroupConfig(self.fd, ptr, to_c_uint(group_vec.len())?) };
         result::result(rv)
     }
 
+    /// Set TLS options.
     pub fn set_option(&mut self, opt: ssl::Opt, value: bool) -> Res<()> {
         result::result(unsafe { ssl::SSL_OptionSet(self.fd, opt.as_int(), opt.map_enabled(value)) })
+    }
+
+    /// Enable 0-RTT.
+    pub fn enable_0rtt(&mut self) -> Res<()> {
+        self.set_option(ssl::Opt::EarlyData, true)
     }
 
     /// set_alpn sets a list of preferred protocols, starting with the most preferred.
@@ -422,7 +449,7 @@ impl SecretAgent {
             ssl::SSL_SetNextProtoNego(
                 self.fd,
                 encoded.as_slice().as_ptr(),
-                encoded.len() as c_uint,
+                to_c_uint(encoded.len())?,
             )
         };
         result::result(rv)
@@ -489,7 +516,7 @@ impl SecretAgent {
     /// Enable resumption, using a token previously provided.
     pub fn set_resumption_token(&mut self, token: &[u8]) -> Res<()> {
         let rv =
-            unsafe { ssl::SSL_SetResumptionToken(self.fd, token.as_ptr(), token.len() as c_uint) };
+            unsafe { ssl::SSL_SetResumptionToken(self.fd, token.as_ptr(), to_c_uint(token.len())?) };
         result::result(rv)
     }
 
@@ -543,7 +570,8 @@ impl SecretAgent {
     // is complete and how many bytes were written to @output, respectively.
     // If the state is HandshakeState::AuthenticationPending, then ONLY call this
     // function if you want to proceed, because this will mark the certificate as OK.
-    pub fn handshake(&mut self, _now: u64, input: &[u8]) -> Res<Vec<u8>> {
+    pub fn handshake(&mut self, now: u64, input: &[u8]) -> Res<Vec<u8>> {
+        *self.now = to_prtime(now)?;
         self.set_raw(false)?;
 
         let rv = {
@@ -585,7 +613,8 @@ impl SecretAgent {
     //
     // Ideally, this only includes records from the current epoch.
     // If you send data from multiple epochs, you might end up being sad.
-    pub fn handshake_raw(&mut self, _now: u64, input: Option<Record>) -> Res<RecordList> {
+    pub fn handshake_raw(&mut self, now: u64, input: Option<Record>) -> Res<RecordList> {
+        *self.now = to_prtime(now)?;
         let records = self.setup_raw()?;
 
         // Fire off any authentication we might need to complete.
@@ -607,16 +636,6 @@ impl SecretAgent {
         // Drive the handshake once more.
         let rv = unsafe { ssl::SSL_ForceHandshake(self.fd) };
         self.update_state(rv)?;
-
-        Ok(*records)
-    }
-
-    pub fn send_session_ticket(&mut self, extra: &[u8]) -> Res<RecordList> {
-        let records = self.setup_raw()?;
-
-        let rv =
-            unsafe { ssl::SSL_SendSessionTicket(self.fd, extra.as_ptr(), extra.len() as c_uint) };
-        result::result(rv)?;
 
         Ok(*records)
     }
@@ -708,6 +727,35 @@ impl Server {
         agent.ready(true)?;
         Ok(Server { agent })
     }
+
+    /// Initialize anti-replay.  Failure to call this function results in all
+    /// early data being rejected by a server.
+    pub fn init_anti_replay(now: u64, window: std::time::Duration, k: usize, bits: usize) -> Res<()> {
+        let rv = unsafe { ssl::SSL_InitAntiReplay(to_prtime(now)?, to_prtime(window.as_nanos())?, to_c_uint(k)?, to_c_uint(bits)?) };
+        result::result(rv)
+    }
+
+    /// Enable 0-RTT.  This shadows the function of the same name that can be accessed
+    /// via the Deref implementation on Server.
+    pub fn enable_0rtt(&mut self, max_early_data: u32) -> Res<()> {
+        self.set_option(ssl::Opt::EarlyData, true)?;
+        let rv = unsafe { ssl::SSL_SetMaxEarlyDataSize(self.agent.fd, max_early_data) };
+        result::result(rv)
+    }
+
+    /// Send a session ticket to the client.
+    /// This adds |extra| application-specific content into that ticket.
+    /// The records that are sent are captured and returned.
+    pub fn send_ticket(&mut self, now: u64, extra: &[u8]) -> Res<RecordList> {
+        *self.agent.now = to_prtime(now)?;
+        let records = self.setup_raw()?;
+
+        let rv =
+            unsafe { ssl::SSL_SendSessionTicket(self.fd, extra.as_ptr(), to_c_uint(extra.len())?) };
+        result::result(rv)?;
+
+        Ok(*records)
+    }
 }
 
 impl Deref for Server {
@@ -734,8 +782,8 @@ impl Deref for Agent {
     type Target = SecretAgent;
     fn deref(&self) -> &SecretAgent {
         match self {
-            Agent::Client(c) => c.deref(),
-            Agent::Server(s) => s.deref(),
+            Agent::Client(c) => &*c,
+            Agent::Server(s) => &*s,
         }
     }
 }

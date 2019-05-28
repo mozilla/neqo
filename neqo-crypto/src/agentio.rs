@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::constants::*;
+use crate::convert::to_c_uint;
 use crate::err::{Error, NSPRErrorCodes, PR_SetError, Res};
 use crate::prio;
 use crate::result;
@@ -59,7 +60,7 @@ impl Record {
                 self.epoch,
                 self.ct,
                 self.data.as_ptr(),
-                self.data.len() as c_uint,
+                to_c_uint(self.data.len())?,
             )
         };
         result::result(rv)

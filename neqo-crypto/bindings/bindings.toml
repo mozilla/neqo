@@ -4,6 +4,7 @@
 [nss_ssl]
 types = [
     "PRCList",
+    "PRTime",
     "PRUint16",
     "PRUint64",
     "PRUint8",
@@ -13,9 +14,10 @@ types = [
     "SSLExtensionType",
     "SSLExtensionWriter",
     "SSLProtocolVariant",
+    "SSLRecordWriteCallback",
     "SSLResumptionTokenCallback",
     "SSLSecretCallback",
-    "SSLRecordWriteCallback",
+    "SSLTimeFunc",
 ]
 functions = [
     "SSL_AlertSentCallback",

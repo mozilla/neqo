@@ -24,6 +24,7 @@ pub enum Error {
     CreateSslSocket,
     HkdfError,
     InternalError,
+    IntegerOverflow,
     InvalidEpoch,
     MixedHandshakeMethod,
     NoDataAvailable,
@@ -33,6 +34,7 @@ pub enum Error {
         desc: String,
     },
     OverrunError,
+    TimeTooFarFuture,
     UnsupportedCipher,
     UnsupportedVersion,
 }

@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::constants::*;
+use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
 use crate::p11::{
     PK11SymKey, PK11_Encrypt, PK11_GetBlockSize, PK11_GetMechanism, SECItem, SECItemType, SymKey,
@@ -65,7 +66,7 @@ pub fn extract_hp<S: Into<String>>(
             null(),
             0,
             l.as_ptr() as *const c_char,
-            l.len() as c_uint,
+            to_c_uint(l.len())?,
             mech,
             key_size,
             &mut secret,
@@ -92,7 +93,7 @@ impl HpKey {
         let mut item = SECItem {
             type_: SECItemType::siBuffer,
             data: sample.as_ptr() as *mut u8,
-            len: sample.len() as c_uint,
+            len: to_c_uint(sample.len())?,
         };
         let zero = vec![0u8; block_size];
         let (iv, inbuf) = match () {
@@ -109,9 +110,9 @@ impl HpKey {
                 iv,
                 output_slice.as_mut_ptr(),
                 &mut output_len,
-                output.len() as c_uint,
+                to_c_uint(output.len())?,
                 inbuf.as_ptr() as *const u8,
-                inbuf.len() as c_uint,
+                to_c_uint(inbuf.len())?,
             )
         };
         result::result(rv)?;

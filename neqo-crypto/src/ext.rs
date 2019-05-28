@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::constants::*;
+use crate::convert::to_c_uint;
 use crate::err::Res;
 use crate::result;
 use crate::ssl::{
@@ -81,7 +82,7 @@ impl ExtensionTracker {
         ExtensionTracker::wrap_handler_call(arg, |handler| {
             match handler.write(message as HandshakeMessage, d) {
                 ExtensionWriterResult::Write(sz) => {
-                    *len = sz as c_uint;
+                    *len = to_c_uint(sz).expect("integer overflow from extension writer");
                     1
                 }
                 ExtensionWriterResult::Skip => 0,
