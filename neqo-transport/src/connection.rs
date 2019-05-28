@@ -1970,6 +1970,20 @@ impl Connection {
         stream.send(data)
     }
 
+    /// Bytes of available send stream credit, based upon current stream and
+    /// connection-level flow control values.
+    pub fn stream_credit_avail_send(&self, stream_id: u64) -> Res<u64> {
+        let stream = self
+            .send_streams
+            .get(&stream_id.into())
+            .ok_or_else(|| Error::InvalidStreamId)?;
+
+        Ok(min(
+            stream.credit_avail(),
+            self.flow_mgr.borrow().conn_credit_avail(),
+        ))
+    }
+
     /// Close the stream. Enqueued data will be sent.
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
         let stream = self
