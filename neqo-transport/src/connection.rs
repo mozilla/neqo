@@ -23,8 +23,8 @@ use neqo_crypto::hp::{extract_hp, HpKey};
 use crate::dump::*;
 use crate::frame::{decode_frame, AckRange, CloseType, Frame, FrameType, StreamType};
 use crate::nss::{
-    Agent, Cipher, Client, Epoch, HandshakeState, Record, Server, SymKey, TLS_AES_128_GCM_SHA256,
-    TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
+    Agent, Cipher, Client, Epoch, HandshakeState, Record, RecordList, Server, SymKey,
+    TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
 };
 use crate::packet::{
     decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, CryptoCtx, PacketDecoder,
@@ -34,7 +34,7 @@ use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, TxBuffer};
 use crate::stats::Stats;
 use crate::tparams::consts as tp_const;
-use crate::tparams::TransportParametersHandler;
+use crate::tparams::{TransportParameters, TransportParametersHandler};
 use crate::tracking::RecvdPackets;
 use crate::{AppError, ConnectionError, Error, Res};
 
@@ -60,6 +60,15 @@ const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
 pub enum Role {
     Client,
     Server,
+}
+
+impl Role {
+    pub fn peer(&self) -> Self {
+        match self {
+            Role::Client => Role::Server,
+            Role::Server => Role::Client,
+        }
+    }
 }
 
 impl ::std::fmt::Display for Role {
@@ -729,6 +738,27 @@ impl Connection {
             .extension_handler(0xffa5, tphandler)
             .expect("Could not set extension handler");
         agent.set_alpn(protocols).expect("Could not set ALPN");
+        match agent {
+            Agent::Client(c) => c.enable_0rtt(),
+            Agent::Server(s) => s.enable_0rtt(0xffffffff),
+        }
+        .expect("Could not enable 0-RTT");
+    }
+
+    fn set_tp_defaults(tps: &mut TransportParameters) {
+        tps.set_integer(
+            tp_const::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            RX_STREAM_DATA_WINDOW,
+        );
+        tps.set_integer(
+            tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+            RX_STREAM_DATA_WINDOW,
+        );
+        tps.set_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI, RX_STREAM_DATA_WINDOW);
+        tps.set_integer(tp_const::INITIAL_MAX_STREAMS_BIDI, LOCAL_STREAM_LIMIT_BIDI);
+        tps.set_integer(tp_const::INITIAL_MAX_STREAMS_UNI, LOCAL_STREAM_LIMIT_UNI);
+        tps.set_integer(tp_const::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
+        tps.set_empty(tp_const::DISABLE_MIGRATION)
     }
 
     fn new<A: ToString, I: IntoIterator<Item = A>>(
@@ -738,35 +768,7 @@ impl Connection {
         paths: Option<Path>,
     ) -> Connection {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
-        tphandler.borrow_mut().local.set_integer(
-            tp_const::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
-            RX_STREAM_DATA_WINDOW,
-        );
-        tphandler.borrow_mut().local.set_integer(
-            tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
-            RX_STREAM_DATA_WINDOW,
-        );
-        tphandler
-            .borrow_mut()
-            .local
-            .set_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI, RX_STREAM_DATA_WINDOW);
-        tphandler
-            .borrow_mut()
-            .local
-            .set_integer(tp_const::INITIAL_MAX_STREAMS_BIDI, LOCAL_STREAM_LIMIT_BIDI);
-        tphandler
-            .borrow_mut()
-            .local
-            .set_integer(tp_const::INITIAL_MAX_STREAMS_UNI, LOCAL_STREAM_LIMIT_UNI);
-        tphandler
-            .borrow_mut()
-            .local
-            .set_integer(tp_const::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
-        tphandler
-            .borrow_mut()
-            .local
-            .set_empty(tp_const::DISABLE_MIGRATION);
-
+        Connection::set_tp_defaults(&mut tphandler.borrow_mut().local);
         Connection::configure_agent(&mut agent, protocols, tphandler.clone());
 
         let mut c = Connection {
@@ -837,15 +839,71 @@ impl Connection {
         Ok(())
     }
 
-    /// Return the resumption token.
-    pub fn resumption_token(&self) -> Option<&Vec<u8>> {
-        self.tls.resumption_token()
+    /// Access the latest resumption token on the connection.
+    pub fn resumption_token(&self) -> Option<Vec<u8>> {
+        if self.state != State::Connected {
+            return None;
+        }
+        match self.tls {
+            Agent::Client(ref c) => match c.resumption_token() {
+                Some(ref t) => {
+                    qtrace!("TLS token {}", hex(&t));
+                    let mut enc = Encoder::default();
+                    enc.encode_vvec_with(|enc_inner| {
+                        self.tps
+                            .borrow()
+                            .remote
+                            .as_ref()
+                            .expect("should have transport parameters")
+                            .encode(enc_inner);
+                    });
+                    enc.encode(&t[..]);
+                    qinfo!("resumption token {}", hex(&enc[..]));
+                    Some(enc.into())
+                }
+                None => None,
+            },
+            Agent::Server(_) => None,
+        }
     }
 
     /// Enable resumption, using a token previously provided.
     pub fn set_resumption_token(&mut self, token: &[u8]) -> Res<()> {
-        self.tls.set_resumption_token(token)?;
+        qinfo!([self] "resumption token {}", hex(token));
+        let mut dec = Decoder::from(token);
+        let tp_slice = match dec.decode_vvec() {
+            Some(v) => v,
+            _ => return Err(Error::InvalidResumptionToken),
+        };
+        qtrace!([self] "  transport parameters {}", hex(&tp_slice));
+        let mut dec_tp = Decoder::from(tp_slice);
+        let tp = TransportParameters::decode(&mut dec_tp)?;
+
+        let tok = dec.decode_remainder();
+        qtrace!([self] "  TLS token {}", hex(&tok));
+        match self.tls {
+            Agent::Client(ref mut c) => c.set_resumption_token(&tok)?,
+            Agent::Server(_) => return Err(Error::WrongRole),
+        }
+
+        self.tps.borrow_mut().remote_0rtt = Some(tp);
+        self.set_initial_limits();
+
         Ok(())
+    }
+
+    pub fn send_ticket(&mut self, now: u64) -> Res<()> {
+        match self.tls {
+            Agent::Server(ref mut s) => {
+                let mut enc = Encoder::default();
+                self.tps.borrow().local.encode(&mut enc);
+                let records = s.send_ticket(now, &enc[..])?;
+                qinfo!([self] "send session ticket {}", hex(&enc));
+                self.buffer_crypto_records(records);
+                Ok(())
+            }
+            Agent::Client(_) => Err(Error::WrongRole),
+        }
     }
 
     /// Get the current role.
@@ -1342,6 +1400,36 @@ impl Connection {
         });
     }
 
+    /// Buffer crypto records for sending.
+    fn buffer_crypto_records(&mut self, records: RecordList) {
+        for r in records {
+            assert_eq!(r.ct, 22);
+            if r.epoch == 1 {
+                qinfo!([self] "Discarding EndOfEarlyData");
+                assert_eq!(r.data, &[]);
+            } else {
+                qdebug!([self] "Inserting message {:?}", r);
+                self.crypto_streams[r.epoch as usize].tx.send(&r.data);
+            }
+        }
+    }
+
+    fn set_initial_limits(&mut self) {
+        let swapped = mem::replace(&mut self.tps, Rc::default());
+        {
+            let tph = swapped.borrow();
+            let tps = tph.remote();
+            self.peer_max_stream_idx_bidi =
+                StreamIndex::new(tps.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
+            self.peer_max_stream_idx_uni =
+                StreamIndex::new(tps.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
+            self.flow_mgr
+                .borrow_mut()
+                .conn_increase_max_credit(tps.get_integer(tp_const::INITIAL_MAX_DATA));
+        }
+        mem::replace(&mut self.tps, swapped);
+    }
+
     fn handshake(&mut self, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         qdebug!("Handshake epoch={} data={:0x?}", epoch, data);
         let mut rec: Option<Record> = None;
@@ -1373,13 +1461,7 @@ impl Connection {
                     _ => Error::CryptoError(e),
                 });
             }
-            Ok(msgs) => {
-                for m in msgs {
-                    qdebug!([self] "Inserting message {:?}", m);
-                    assert_eq!(m.ct, 22);
-                    self.crypto_streams[m.epoch as usize].tx.send(&m.data);
-                }
-            }
+            Ok(msgs) => self.buffer_crypto_records(msgs),
         }
         if self.tls.state().connected() {
             qinfo!([self] "TLS handshake completed");
@@ -1391,32 +1473,7 @@ impl Connection {
             }
 
             self.set_state(State::Connected);
-
-            self.peer_max_stream_idx_bidi = StreamIndex::new(
-                self.tps
-                    .borrow()
-                    .remote
-                    .as_ref()
-                    .expect("remote tparams are valid when State::Connected")
-                    .get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI),
-            );
-
-            self.peer_max_stream_idx_uni = StreamIndex::new(
-                self.tps
-                    .borrow()
-                    .remote
-                    .as_ref()
-                    .expect("remote tparams are valid when State::Connected")
-                    .get_integer(tp_const::INITIAL_MAX_STREAMS_UNI),
-            );
-            self.flow_mgr.borrow_mut().conn_increase_max_credit(
-                self.tps
-                    .borrow()
-                    .remote
-                    .as_ref()
-                    .expect("remote tparams are valid when State::Connected")
-                    .get_integer(tp_const::INITIAL_MAX_DATA),
-            );
+            self.set_initial_limits();
         }
         Ok(())
     }
@@ -3339,7 +3396,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn test_dup_server_flight1() {
         init_db("./db");
         qdebug!("---- client: generate CH");
@@ -3372,5 +3428,32 @@ mod tests {
         // Four packets total received, two of them are dups
         assert_eq!(4, client.stats().packets_rx);
         assert_eq!(2, client.stats().dups_rx);
+    }
+
+    fn exchange_ticket(client: &mut Connection, server: &mut Connection) -> Vec<u8> {
+        server.send_ticket(now()).expect("can send ticket");
+        let (dgrams, _timer) = server.process_output(now());
+        assert_eq!(dgrams.len(), 1);
+        client.process_input(dgrams, now());
+        assert_eq!(*client.state(), State::Connected);
+        client.resumption_token().expect("should have token")
+    }
+
+    #[test]
+    fn resume() {
+        init_db("./db");
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        connect(&mut client, &mut server);
+
+        let token = exchange_ticket(&mut client, &mut server);
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        client
+            .set_resumption_token(&token[..])
+            .expect("should set token");
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        connect(&mut client, &mut server);
     }
 }

@@ -198,8 +198,6 @@ pub struct SecretAgent {
     auth_required: Box<bool>,
     /// Records any fatal alert that is sent by the stack.
     alert: Box<Option<Alert>>,
-    /// Records the last resumption token.
-    resumption: Box<Option<Vec<u8>>>,
     /// The current time.
     now: Box<PRTime>,
 
@@ -218,7 +216,6 @@ impl SecretAgent {
 
             auth_required: Box::new(false),
             alert: Box::new(None),
-            resumption: Box::new(None),
             now: Box::new(0),
 
             extension_handlers: Default::default(),
@@ -291,20 +288,6 @@ impl SecretAgent {
         }
     }
 
-    unsafe extern "C" fn resumption_token_cb(
-        _fd: *mut ssl::PRFileDesc,
-        token: *const u8,
-        len: c_uint,
-        arg: *mut c_void,
-    ) -> ssl::SECStatus {
-        let resumption_ptr = arg as *mut Option<Vec<u8>>;
-        let resumption = resumption_ptr.as_mut().unwrap();
-        let mut v = Vec::with_capacity(len as usize);
-        v.extend_from_slice(std::slice::from_raw_parts(token, len as usize));
-        *resumption = Some(v);
-        ssl::SECSuccess
-    }
-
     unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
         let p = arg as *mut PRTime as *const PRTime;
         *p.as_ref().unwrap()
@@ -326,15 +309,6 @@ impl SecretAgent {
                 self.fd,
                 Some(SecretAgent::alert_sent_cb),
                 &mut *self.alert as *mut Option<Alert> as *mut c_void,
-            )
-        };
-        result::result(rv)?;
-
-        let rv = unsafe {
-            ssl::SSL_SetResumptionTokenCallback(
-                self.fd,
-                Some(SecretAgent::resumption_token_cb),
-                &mut *self.resumption as *mut Option<Vec<u8>> as *mut c_void,
             )
         };
         result::result(rv)?;
@@ -507,19 +481,6 @@ impl SecretAgent {
         CertificateChain::new(self.fd)
     }
 
-    /// Return the resumption token.
-    pub fn resumption_token(&self) -> Option<&Vec<u8>> {
-        (*self.resumption).as_ref()
-    }
-
-    /// Enable resumption, using a token previously provided.
-    pub fn set_resumption_token(&mut self, token: &[u8]) -> Res<()> {
-        let rv = unsafe {
-            ssl::SSL_SetResumptionToken(self.fd, token.as_ptr(), to_c_uint(token.len())?)
-        };
-        result::result(rv)
-    }
-
     /// Return any fatal alert that the TLS stack might have sent.
     pub fn alert(&self) -> Option<&Alert> {
         (&*self.alert).as_ref()
@@ -664,6 +625,9 @@ impl ::std::fmt::Display for SecretAgent {
 #[derive(Debug)]
 pub struct Client {
     agent: SecretAgent,
+
+    /// Records the last resumption token.
+    resumption: Box<Option<Vec<u8>>>,
 }
 
 impl Client {
@@ -675,7 +639,50 @@ impl Client {
         }
         result::result(unsafe { ssl::SSL_SetURL(agent.fd, url.unwrap().as_ptr()) })?;
         agent.ready(false)?;
-        Ok(Client { agent })
+        let mut client = Client {
+            agent,
+            resumption: Box::new(None),
+        };
+        client.ready()?;
+        Ok(client)
+    }
+
+    unsafe extern "C" fn resumption_token_cb(
+        _fd: *mut ssl::PRFileDesc,
+        token: *const u8,
+        len: c_uint,
+        arg: *mut c_void,
+    ) -> ssl::SECStatus {
+        let resumption_ptr = arg as *mut Option<Vec<u8>>;
+        let resumption = resumption_ptr.as_mut().unwrap();
+        let mut v = Vec::with_capacity(len as usize);
+        v.extend_from_slice(std::slice::from_raw_parts(token, len as usize));
+        *resumption = Some(v);
+        ssl::SECSuccess
+    }
+
+    fn ready(&mut self) -> Res<()> {
+        let rv = unsafe {
+            ssl::SSL_SetResumptionTokenCallback(
+                self.fd,
+                Some(Client::resumption_token_cb),
+                &mut *self.resumption as *mut Option<Vec<u8>> as *mut c_void,
+            )
+        };
+        result::result(rv)
+    }
+
+    /// Return the resumption token.
+    pub fn resumption_token(&self) -> Option<&Vec<u8>> {
+        (*self.resumption).as_ref()
+    }
+
+    /// Enable resumption, using a token previously provided.
+    pub fn set_resumption_token(&mut self, token: &[u8]) -> Res<()> {
+        let rv = unsafe {
+            ssl::SSL_SetResumptionToken(self.agent.fd, token.as_ptr(), to_c_uint(token.len())?)
+        };
+        result::result(rv)
     }
 }
 

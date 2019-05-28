@@ -17,25 +17,33 @@ struct PreferredAddress {
 }
 
 pub mod consts {
-    pub const ORIGINAL_CONNECTION_ID: u16 = 0;
-    pub const IDLE_TIMEOUT: u16 = 1;
-    pub const STATELESS_RESET_TOKEN: u16 = 2;
-    pub const MAX_PACKET_SIZE: u16 = 3;
-    pub const INITIAL_MAX_DATA: u16 = 4;
-    pub const INITIAL_MAX_STREAM_DATA_BIDI_LOCAL: u16 = 5;
-    pub const INITIAL_MAX_STREAM_DATA_BIDI_REMOTE: u16 = 6;
-    pub const INITIAL_MAX_STREAM_DATA_UNI: u16 = 7;
-    pub const INITIAL_MAX_STREAMS_BIDI: u16 = 8;
-    pub const INITIAL_MAX_STREAMS_UNI: u16 = 9;
-    pub const ACK_DELAY_EXPONENT: u16 = 10;
-    pub const MAX_ACK_DELAY: u16 = 11;
-    pub const DISABLE_MIGRATION: u16 = 12;
-    pub const PREFERRED_ADDRESS: u16 = 13;
+    pub type TransportParameterId = u16;
+    macro_rules! tpids {
+        { $($n:ident = $v:expr),+ $(,)? } => {
+            $(pub const $n: TransportParameterId = $v as TransportParameterId;)+
+        };
+    }
+    tpids! {
+        ORIGINAL_CONNECTION_ID = 0,
+        IDLE_TIMEOUT = 1,
+        STATELESS_RESET_TOKEN = 2,
+        MAX_PACKET_SIZE = 3,
+        INITIAL_MAX_DATA = 4,
+        INITIAL_MAX_STREAM_DATA_BIDI_LOCAL = 5,
+        INITIAL_MAX_STREAM_DATA_BIDI_REMOTE = 6,
+        INITIAL_MAX_STREAM_DATA_UNI = 7,
+        INITIAL_MAX_STREAMS_BIDI = 8,
+        INITIAL_MAX_STREAMS_UNI = 9,
+        ACK_DELAY_EXPONENT = 10,
+        MAX_ACK_DELAY = 11,
+        DISABLE_MIGRATION = 12,
+        PREFERRED_ADDRESS = 13,
+    }
 }
 
 use self::consts::*;
 
-#[derive(PartialEq, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum TransportParameter {
     Bytes(Vec<u8>),
     Integer(u64),
@@ -113,12 +121,22 @@ impl TransportParameter {
     }
 }
 
-#[derive(Default, PartialEq, Debug)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TransportParameters {
     params: HashMap<u16, TransportParameter>,
 }
 
 impl TransportParameters {
+    /// Set a value.
+    pub fn set(&mut self, k: u16, v: TransportParameter) {
+        self.params.insert(k, v);
+    }
+
+    /// Clear a key.
+    pub fn remove(&mut self, k: u16) {
+        self.params.remove(&k);
+    }
+
     /// Decode is a static function that parses transport parameters
     /// using the provided decoder.
     pub fn decode(d: &mut Decoder) -> Res<TransportParameters> {
@@ -133,7 +151,7 @@ impl TransportParameters {
         while d2.remaining() > 0 {
             match TransportParameter::decode(&mut d2) {
                 Ok(Some((tipe, tp))) => {
-                    tps.params.insert(tipe, tp);
+                    tps.set(tipe, tp);
                 }
                 Ok(None) => {}
                 Err(e) => return Err(e),
@@ -185,7 +203,7 @@ impl TransportParameters {
             | MAX_PACKET_SIZE
             | ACK_DELAY_EXPONENT
             | MAX_ACK_DELAY => {
-                self.params.insert(tipe, TransportParameter::Integer(value));
+                self.set(tipe, TransportParameter::Integer(value));
             }
             _ => panic!("Transport parameter not known"),
         }
@@ -207,7 +225,7 @@ impl TransportParameters {
     pub fn set_bytes(&mut self, tipe: u16, value: Vec<u8>) {
         match tipe {
             ORIGINAL_CONNECTION_ID | STATELESS_RESET_TOKEN => {
-                self.params.insert(tipe, TransportParameter::Bytes(value));
+                self.set(tipe, TransportParameter::Bytes(value));
             }
             _ => panic!("Transport parameter not known or not type bytes"),
         }
@@ -216,10 +234,42 @@ impl TransportParameters {
     pub fn set_empty(&mut self, tipe: u16) {
         match tipe {
             DISABLE_MIGRATION => {
-                self.params.insert(tipe, TransportParameter::Empty);
+                self.set(tipe, TransportParameter::Empty);
             }
             _ => panic!("Transport parameter not known or not type empty"),
         }
+    }
+
+    /// Return true if the remembered transport parameters are OK for 0-RTT.
+    /// Generally this means that any value that is currently in effect is greater than
+    /// or equal to the promised value.
+    pub fn ok_for_0rtt(&self, remembered: &TransportParameters) -> bool {
+        for (k, v_rem) in &remembered.params {
+            // Skip checks for these, which don't affect 0-RTT.
+            if matches!(
+                *k,
+                ORIGINAL_CONNECTION_ID
+                    | STATELESS_RESET_TOKEN
+                    | IDLE_TIMEOUT
+                    | ACK_DELAY_EXPONENT
+                    | MAX_ACK_DELAY
+            ) {
+                continue;
+            }
+            match self.params.get(k) {
+                Some(v_self) => match (v_self, v_rem) {
+                    (TransportParameter::Integer(i_self), TransportParameter::Integer(i_rem)) => {
+                        if *i_self < *i_rem {
+                            return false;
+                        }
+                    }
+                    (TransportParameter::Empty, TransportParameter::Empty) => {}
+                    _ => return false,
+                },
+                _ => return false,
+            }
+        }
+        true
     }
 
     fn was_sent(&self, tipe: u16) -> bool {
@@ -232,6 +282,15 @@ pub struct TransportParametersHandler {
     pub local: TransportParameters,
     pub remote: Option<TransportParameters>,
     pub remote_0rtt: Option<TransportParameters>,
+}
+
+impl TransportParametersHandler {
+    pub fn remote(&self) -> &TransportParameters {
+        match (self.remote.as_ref(), self.remote_0rtt.as_ref()) {
+            (Some(tp), _) | (_, Some(tp)) => tp,
+            _ => panic!("no transport parameters from peer"),
+        }
+    }
 }
 
 impl ExtensionHandler for TransportParametersHandler {
@@ -281,7 +340,7 @@ mod tests {
     #[test]
     fn test_basic_tps() {
         let mut tps = TransportParameters::default();
-        tps.params.insert(
+        tps.set(
             STATELESS_RESET_TOKEN,
             TransportParameter::Bytes(vec![1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8]),
         );
@@ -310,6 +369,71 @@ mod tests {
         tps.encode(&mut enc);
 
         let tps2 = TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
+    }
+
+    #[test]
+    fn compatible_0rtt_ignored_values() {
+        let mut tps_a = TransportParameters::default();
+        tps_a.set(
+            STATELESS_RESET_TOKEN,
+            TransportParameter::Bytes(vec![1, 2, 3]),
+        );
+        tps_a.set(IDLE_TIMEOUT, TransportParameter::Integer(10));
+        tps_a.set(MAX_ACK_DELAY, TransportParameter::Integer(22));
+
+        let mut tps_b = TransportParameters::default();
+        assert!(tps_a.ok_for_0rtt(&tps_b));
+        assert!(tps_b.ok_for_0rtt(&tps_a));
+
+        tps_b.set(
+            STATELESS_RESET_TOKEN,
+            TransportParameter::Bytes(vec![8, 9, 10]),
+        );
+        tps_b.set(IDLE_TIMEOUT, TransportParameter::Integer(100));
+        tps_b.set(MAX_ACK_DELAY, TransportParameter::Integer(2));
+        assert!(tps_a.ok_for_0rtt(&tps_b));
+        assert!(tps_b.ok_for_0rtt(&tps_a));
+    }
+
+    #[test]
+    fn compatible_0rtt_integers() {
+        let mut tps_a = TransportParameters::default();
+        const INTEGER_KEYS: &[TransportParameterId] = &[
+            INITIAL_MAX_DATA,
+            INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+            INITIAL_MAX_STREAM_DATA_UNI,
+            INITIAL_MAX_STREAMS_BIDI,
+            INITIAL_MAX_STREAMS_UNI,
+            MAX_PACKET_SIZE,
+        ];
+        for i in INTEGER_KEYS {
+            tps_a.set(*i, TransportParameter::Integer(12));
+        }
+
+        let tps_b = tps_a.clone();
+        assert!(tps_a.ok_for_0rtt(&tps_b));
+        assert!(tps_b.ok_for_0rtt(&tps_a));
+
+        // For each integer key, increase the value by one.
+        for i in INTEGER_KEYS {
+            let mut tps_b = tps_a.clone();
+            tps_b.set(*i, TransportParameter::Integer(13));
+            // If a increased value is remembered, then we can't attempt 0-RTT with these parameters.
+            assert!(!tps_a.ok_for_0rtt(&tps_b));
+            // If a increased value is lower, then we can attempt 0-RTT with these parameters.
+            assert!(tps_b.ok_for_0rtt(&tps_a));
+        }
+
+        // Drop integer values and check.
+        for i in INTEGER_KEYS {
+            let mut tps_b = tps_a.clone();
+            tps_b.remove(*i);
+            // A value that is missing from what is rememebered is OK.
+            assert!(tps_a.ok_for_0rtt(&tps_b));
+            // A value that is rememebered, but not current is not OK.
+            assert!(!tps_b.ok_for_0rtt(&tps_a));
+        }
     }
 
     #[test]

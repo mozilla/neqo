@@ -54,6 +54,8 @@ pub enum Error {
     ConnectionState,
     AckedUnsentPacket,
     VersionNegotiation,
+    InvalidResumptionToken,
+    WrongRole,
 }
 
 impl Error {
@@ -85,7 +87,9 @@ impl Error {
             | Error::KeysNotFound
             | Error::ConnectionState
             | Error::AckedUnsentPacket
-            | Error::VersionNegotiation => 1,
+            | Error::VersionNegotiation
+            | Error::WrongRole
+            | Error::InvalidResumptionToken => 1,
         }
     }
 }
