@@ -243,7 +243,8 @@ impl Encoder {
 
     /// Encode a vector in TLS style.
     pub fn encode_vec(&mut self, n: usize, v: &[u8]) -> &mut Self {
-        self.encode_uint(n, u64::try_from(v.len()).unwrap()).encode(v)
+        self.encode_uint(n, u64::try_from(v.len()).unwrap())
+            .encode(v)
     }
 
     /// Encode a vector in TLS style using a closure for the contents.
@@ -253,14 +254,15 @@ impl Encoder {
         f(self);
         let len = self.buf.len() - start - n;
         for i in 0..n {
-            self.buf[start + i] = ((len >> (8 * (n - i - 1))) & 0xff)as u8
+            self.buf[start + i] = ((len >> (8 * (n - i - 1))) & 0xff) as u8
         }
         self
     }
 
     /// Encode a vector with a varint length.
     pub fn encode_vvec(&mut self, v: &[u8]) -> &mut Self {
-        self.encode_varint(u64::try_from(v.len()).unwrap()).encode(v)
+        self.encode_varint(u64::try_from(v.len()).unwrap())
+            .encode(v)
     }
 
     /// Encode a vector with a varint length using a closure.

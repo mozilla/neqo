@@ -8,7 +8,7 @@ use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{Record, RecordList};
 pub use crate::cert::CertificateChain;
 use crate::constants::*;
-use crate::convert::{to_prtime, to_c_uint};
+use crate::convert::{to_c_uint, to_prtime};
 use crate::err::{Error, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
 use crate::initialized;
@@ -348,7 +348,6 @@ impl SecretAgent {
         };
         result::result(rv)?;
 
-
         self.configure()?;
         result::result(unsafe { ssl::SSL_ResetHandshake(self.fd, is_server as ssl::PRBool) })
     }
@@ -515,8 +514,9 @@ impl SecretAgent {
 
     /// Enable resumption, using a token previously provided.
     pub fn set_resumption_token(&mut self, token: &[u8]) -> Res<()> {
-        let rv =
-            unsafe { ssl::SSL_SetResumptionToken(self.fd, token.as_ptr(), to_c_uint(token.len())?) };
+        let rv = unsafe {
+            ssl::SSL_SetResumptionToken(self.fd, token.as_ptr(), to_c_uint(token.len())?)
+        };
         result::result(rv)
     }
 
@@ -730,8 +730,20 @@ impl Server {
 
     /// Initialize anti-replay.  Failure to call this function results in all
     /// early data being rejected by a server.
-    pub fn init_anti_replay(now: u64, window: std::time::Duration, k: usize, bits: usize) -> Res<()> {
-        let rv = unsafe { ssl::SSL_InitAntiReplay(to_prtime(now)?, to_prtime(window.as_nanos())?, to_c_uint(k)?, to_c_uint(bits)?) };
+    pub fn init_anti_replay(
+        now: u64,
+        window: std::time::Duration,
+        k: usize,
+        bits: usize,
+    ) -> Res<()> {
+        let rv = unsafe {
+            ssl::SSL_InitAntiReplay(
+                to_prtime(now)?,
+                to_prtime(window.as_nanos())?,
+                to_c_uint(k)?,
+                to_c_uint(bits)?,
+            )
+        };
         result::result(rv)
     }
 

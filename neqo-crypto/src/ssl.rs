@@ -66,7 +66,12 @@ impl Opt {
     }
 }
 
-experimental_api!(SSL_InitAntiReplay(now: PRTime, window: PRTime, k: c_uint, bits: c_uint));
+experimental_api!(SSL_InitAntiReplay(
+    now: PRTime,
+    window: PRTime,
+    k: c_uint,
+    bits: c_uint,
+));
 experimental_api!(SSL_RecordLayerWriteCallback(
     fd: *mut PRFileDesc,
     cb: SSLRecordWriteCallback,
@@ -95,7 +100,11 @@ experimental_api!(SSL_SetResumptionTokenCallback(
     cb: SSLResumptionTokenCallback,
     arg: *mut c_void,
 ));
-experimental_api!(SSL_SetTimeFunc(fd: *mut PRFileDesc, cb: SSLTimeFunc, arg: *mut c_void));
+experimental_api!(SSL_SetTimeFunc(
+    fd: *mut PRFileDesc,
+    cb: SSLTimeFunc,
+    arg: *mut c_void,
+));
 
 #[cfg(test)]
 mod tests {

@@ -84,7 +84,9 @@ pub fn resumption_setup(z: Resumption) -> Vec<u8> {
     init_db("./db");
     // We need to pretend that initialization was in the past.
     // That way, the anti-replay filter is cleared when we try to connect at |NOW|.
-    let start_time = NOW.checked_sub(ANTI_REPLAY_WINDOW.as_nanos() as u64).unwrap();
+    let start_time = NOW
+        .checked_sub(ANTI_REPLAY_WINDOW.as_nanos() as u64)
+        .unwrap();
     Server::init_anti_replay(start_time, ANTI_REPLAY_WINDOW, 1, 3)
         .expect("anti-replay setup successful");
 
