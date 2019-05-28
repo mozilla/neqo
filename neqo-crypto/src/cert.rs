@@ -48,10 +48,9 @@ impl<'a> Iterator for &'a mut CertificateChain {
         };
         let cert = unsafe { *self.cursor }.cert;
         let rv = unsafe { CERT_GetCertificateDer(cert, &mut item) };
-        match result::result(rv) {
-            Err(_) => panic!("Error getting DER from certificate"),
-            _ => {}
-        };
+        if result::result(rv).is_err() {
+            panic!("Error getting DER from certificate");
+        }
         Some(unsafe { std::slice::from_raw_parts(item.data, item.len as usize) })
     }
 }

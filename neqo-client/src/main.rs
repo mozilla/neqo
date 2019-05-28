@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![deny(warnings)]
 use neqo_common::now;
 use neqo_crypto::init_db;
 use neqo_http3::{Http3Connection, Http3Event, Http3State};
@@ -32,7 +33,7 @@ impl FromStr for Headers {
         let mut res = Headers { h: Vec::new() };
         let h1: Vec<&str> = s
             .trim_matches(|p| p == '[' || p == ']')
-            .split(")")
+            .split(')')
             .collect();
 
         for h in h1 {
@@ -40,7 +41,7 @@ impl FromStr for Headers {
                 .trim_matches(|p| p == ',')
                 .trim()
                 .trim_matches(|p| p == '(' || p == ')')
-                .split(",")
+                .split(',')
                 .collect();
 
             if h2.len() == 2 {
@@ -121,7 +122,7 @@ trait Handler {
     fn handle(&mut self, client: &mut Http3Connection) -> bool;
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
+fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
     for d in out_dgrams {
         let sent = socket.send(&d[..]).expect("Error sending datagram");
         if sent != d.len() {
@@ -167,11 +168,7 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(
-                remote_addr.clone(),
-                local_addr.clone(),
-                &buf[..sz],
-            ));
+            in_dgrams.push(Datagram::new(*remote_addr, *local_addr, &buf[..sz]));
         }
     }
 }
@@ -179,10 +176,7 @@ fn process_loop(
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, client: &mut Http3Connection) -> bool {
-        if let Http3State::Connected = client.state() {
-            return false;
-        }
-        return true;
+        Http3State::Connected != client.state()
     }
 }
 
@@ -277,7 +271,7 @@ fn main() {
         }
         Ok(addr) => addr,
     };
-    let socket = match args.local_addr().and_then(|args| UdpSocket::bind(args)) {
+    let socket = match args.local_addr().and_then(UdpSocket::bind) {
         Err(e) => {
             eprintln!("Unable to bind UDP socket: {}", e);
             exit(1)
@@ -315,10 +309,7 @@ mod old {
     struct PreConnectHandlerOld {}
     impl HandlerOld for PreConnectHandlerOld {
         fn handle(&mut self, client: &mut Connection) -> bool {
-            if let State::Connected = dbg!(client.state()) {
-                return false;
-            }
-            return true;
+            State::Connected != *dbg!(client.state())
         }
     }
 
@@ -403,11 +394,7 @@ mod old {
                 continue;
             }
             if sz > 0 {
-                in_dgrams.push(Datagram::new(
-                    remote_addr.clone(),
-                    local_addr.clone(),
-                    &buf[..sz],
-                ));
+                in_dgrams.push(Datagram::new(*remote_addr, *local_addr, &buf[..sz]));
             }
         }
     }

@@ -5,15 +5,6 @@
 // except according to those terms.
 
 #![deny(warnings)]
-// For some reason the macro_use around log is causing a failure
-// even though it is used in the crate. TODO(ekr@rtfm.com)
-#![allow(unused_imports)]
-
-#[macro_use]
-extern crate neqo_common;
-
-#[macro_use]
-extern crate log;
 
 pub mod decoder;
 pub mod encoder;

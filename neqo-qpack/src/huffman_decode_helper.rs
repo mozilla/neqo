@@ -4,9 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// TOTO(dragana) remove this
-#![allow(unused_variables, dead_code)]
-
 pub struct HuffmanDecodeEntry {
     pub val: u16,
     pub prefix_len: u16,
@@ -16,7 +13,6 @@ pub struct HuffmanDecodeTable<'a> {
     entry: &'a [HuffmanDecodeEntry],
     next_table: &'a [&'a HuffmanDecodeTable<'a>],
     index_of_first_next_table: u16,
-    prefix_len: u8,
 }
 
 impl<'a> HuffmanDecodeTable<'a> {
@@ -39,2065 +35,546 @@ pub const HUFFMAN_DECODE_ROOT: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_ROOT,
     next_table: HUFFMAN_DECODE_NEXT_TABLE_ROOT,
     index_of_first_next_table: 254,
-    prefix_len: 8,
 };
 
 const HUFFMAN_DECODE_NEXT_TABLE_ROOT: &[&HuffmanDecodeTable] =
     &[HUFFMAN_DECODE_254, HUFFMAN_DECODE_255];
 
-const HUFFMAN_DECODE_ENTRIES_ROOT: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 48,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 48,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 48,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 48,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 48,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 48,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 48,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 48,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 49,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 49,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 49,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 49,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 49,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 49,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 49,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 49,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 50,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 50,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 50,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 50,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 50,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 50,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 50,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 50,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 97,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 97,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 97,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 97,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 97,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 97,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 97,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 97,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 99,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 99,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 99,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 99,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 99,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 99,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 99,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 99,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 101,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 101,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 101,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 101,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 101,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 101,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 101,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 101,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 105,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 105,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 105,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 105,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 105,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 105,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 105,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 105,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 111,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 111,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 111,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 111,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 111,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 111,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 111,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 111,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 115,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 115,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 115,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 115,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 115,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 115,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 115,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 115,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 116,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 116,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 116,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 116,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 116,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 116,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 116,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 116,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 32,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 32,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 32,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 32,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 37,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 37,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 37,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 37,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 45,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 45,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 45,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 45,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 46,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 46,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 46,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 46,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 47,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 47,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 47,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 47,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 51,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 51,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 51,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 51,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 52,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 52,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 52,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 52,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 53,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 53,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 53,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 53,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 54,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 54,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 54,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 54,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 55,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 55,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 55,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 55,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 56,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 56,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 56,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 56,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 57,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 57,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 57,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 57,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 61,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 61,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 61,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 61,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 65,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 65,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 65,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 65,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 95,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 95,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 95,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 95,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 98,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 98,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 98,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 98,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 100,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 100,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 100,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 100,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 102,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 102,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 102,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 102,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 103,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 103,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 103,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 103,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 104,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 104,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 104,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 104,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 108,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 108,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 108,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 108,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 109,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 109,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 109,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 109,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 110,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 110,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 110,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 110,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 112,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 112,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 112,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 112,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 114,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 114,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 114,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 114,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 117,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 117,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 117,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 117,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 58,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 58,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 66,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 66,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 67,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 67,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 68,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 68,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 69,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 69,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 70,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 70,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 71,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 71,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 72,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 72,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 73,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 73,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 74,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 74,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 75,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 75,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 76,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 76,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 77,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 77,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 78,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 78,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 79,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 79,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 80,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 80,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 81,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 81,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 82,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 82,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 83,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 83,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 84,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 84,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 85,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 85,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 86,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 86,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 87,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 87,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 89,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 89,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 106,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 106,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 107,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 107,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 113,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 113,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 118,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 118,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 119,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 119,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 120,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 120,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 121,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 121,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 122,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 122,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 38,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 42,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 44,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 59,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 88,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 90,
-        prefix_len: 8,
-    },
+macro_rules! huffman_decode_entries {
+        [$($v:expr => $p:expr),+ $(,)?] => {
+            &[
+                $(HuffmanDecodeEntry { val: $v, prefix_len: $p }),+
+            ]
+        };
+    }
+
+const HUFFMAN_DECODE_ENTRIES_ROOT: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    48 => 5,
+    48 => 5,
+    48 => 5,
+    48 => 5,
+    48 => 5,
+    48 => 5,
+    48 => 5,
+    48 => 5,
+    49 => 5,
+    49 => 5,
+    49 => 5,
+    49 => 5,
+    49 => 5,
+    49 => 5,
+    49 => 5,
+    49 => 5,
+    50 => 5,
+    50 => 5,
+    50 => 5,
+    50 => 5,
+    50 => 5,
+    50 => 5,
+    50 => 5,
+    50 => 5,
+    97 => 5,
+    97 => 5,
+    97 => 5,
+    97 => 5,
+    97 => 5,
+    97 => 5,
+    97 => 5,
+    97 => 5,
+    99 => 5,
+    99 => 5,
+    99 => 5,
+    99 => 5,
+    99 => 5,
+    99 => 5,
+    99 => 5,
+    99 => 5,
+    101 => 5,
+    101 => 5,
+    101 => 5,
+    101 => 5,
+    101 => 5,
+    101 => 5,
+    101 => 5,
+    101 => 5,
+    105 => 5,
+    105 => 5,
+    105 => 5,
+    105 => 5,
+    105 => 5,
+    105 => 5,
+    105 => 5,
+    105 => 5,
+    111 => 5,
+    111 => 5,
+    111 => 5,
+    111 => 5,
+    111 => 5,
+    111 => 5,
+    111 => 5,
+    111 => 5,
+    115 => 5,
+    115 => 5,
+    115 => 5,
+    115 => 5,
+    115 => 5,
+    115 => 5,
+    115 => 5,
+    115 => 5,
+    116 => 5,
+    116 => 5,
+    116 => 5,
+    116 => 5,
+    116 => 5,
+    116 => 5,
+    116 => 5,
+    116 => 5,
+    32 => 6,
+    32 => 6,
+    32 => 6,
+    32 => 6,
+    37 => 6,
+    37 => 6,
+    37 => 6,
+    37 => 6,
+    45 => 6,
+    45 => 6,
+    45 => 6,
+    45 => 6,
+    46 => 6,
+    46 => 6,
+    46 => 6,
+    46 => 6,
+    47 => 6,
+    47 => 6,
+    47 => 6,
+    47 => 6,
+    51 => 6,
+    51 => 6,
+    51 => 6,
+    51 => 6,
+    52 => 6,
+    52 => 6,
+    52 => 6,
+    52 => 6,
+    53 => 6,
+    53 => 6,
+    53 => 6,
+    53 => 6,
+    54 => 6,
+    54 => 6,
+    54 => 6,
+    54 => 6,
+    55 => 6,
+    55 => 6,
+    55 => 6,
+    55 => 6,
+    56 => 6,
+    56 => 6,
+    56 => 6,
+    56 => 6,
+    57 => 6,
+    57 => 6,
+    57 => 6,
+    57 => 6,
+    61 => 6,
+    61 => 6,
+    61 => 6,
+    61 => 6,
+    65 => 6,
+    65 => 6,
+    65 => 6,
+    65 => 6,
+    95 => 6,
+    95 => 6,
+    95 => 6,
+    95 => 6,
+    98 => 6,
+    98 => 6,
+    98 => 6,
+    98 => 6,
+    100 => 6,
+    100 => 6,
+    100 => 6,
+    100 => 6,
+    102 => 6,
+    102 => 6,
+    102 => 6,
+    102 => 6,
+    103 => 6,
+    103 => 6,
+    103 => 6,
+    103 => 6,
+    104 => 6,
+    104 => 6,
+    104 => 6,
+    104 => 6,
+    108 => 6,
+    108 => 6,
+    108 => 6,
+    108 => 6,
+    109 => 6,
+    109 => 6,
+    109 => 6,
+    109 => 6,
+    110 => 6,
+    110 => 6,
+    110 => 6,
+    110 => 6,
+    112 => 6,
+    112 => 6,
+    112 => 6,
+    112 => 6,
+    114 => 6,
+    114 => 6,
+    114 => 6,
+    114 => 6,
+    117 => 6,
+    117 => 6,
+    117 => 6,
+    117 => 6,
+    58 => 7,
+    58 => 7,
+    66 => 7,
+    66 => 7,
+    67 => 7,
+    67 => 7,
+    68 => 7,
+    68 => 7,
+    69 => 7,
+    69 => 7,
+    70 => 7,
+    70 => 7,
+    71 => 7,
+    71 => 7,
+    72 => 7,
+    72 => 7,
+    73 => 7,
+    73 => 7,
+    74 => 7,
+    74 => 7,
+    75 => 7,
+    75 => 7,
+    76 => 7,
+    76 => 7,
+    77 => 7,
+    77 => 7,
+    78 => 7,
+    78 => 7,
+    79 => 7,
+    79 => 7,
+    80 => 7,
+    80 => 7,
+    81 => 7,
+    81 => 7,
+    82 => 7,
+    82 => 7,
+    83 => 7,
+    83 => 7,
+    84 => 7,
+    84 => 7,
+    85 => 7,
+    85 => 7,
+    86 => 7,
+    86 => 7,
+    87 => 7,
+    87 => 7,
+    89 => 7,
+    89 => 7,
+    106 => 7,
+    106 => 7,
+    107 => 7,
+    107 => 7,
+    113 => 7,
+    113 => 7,
+    118 => 7,
+    118 => 7,
+    119 => 7,
+    119 => 7,
+    120 => 7,
+    120 => 7,
+    121 => 7,
+    121 => 7,
+    122 => 7,
+    122 => 7,
+    38 => 8,
+    42 => 8,
+    44 => 8,
+    59 => 8,
+    88 => 8,
+    90 => 8,
 ];
 
 const HUFFMAN_DECODE_255: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255,
     next_table: HUFFMAN_DECODE_NEXT_TABLE_255,
     index_of_first_next_table: 254,
-    prefix_len: 7,
 };
 
 const HUFFMAN_DECODE_NEXT_TABLE_255: &[&HuffmanDecodeTable] =
     &[HUFFMAN_DECODE_255_254, HUFFMAN_DECODE_255_255];
 
-const HUFFMAN_DECODE_ENTRIES_255: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 63,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 39,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 43,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 124,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 35,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 62,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 0,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 0,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 0,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 0,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 0,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 0,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 0,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 0,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 36,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 36,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 36,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 36,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 36,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 36,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 36,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 36,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 64,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 64,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 64,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 64,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 64,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 64,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 64,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 64,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 91,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 91,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 91,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 91,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 91,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 91,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 91,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 91,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 93,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 93,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 93,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 93,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 93,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 93,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 93,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 93,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 126,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 126,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 126,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 126,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 126,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 126,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 126,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 126,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 94,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 94,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 94,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 94,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 125,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 125,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 125,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 125,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 60,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 60,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 96,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 96,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 123,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 123,
-        prefix_len: 7,
-    },
+const HUFFMAN_DECODE_ENTRIES_255: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    63 => 2,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    39 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    43 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    124 => 3,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    35 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    62 => 4,
+    0 => 5,
+    0 => 5,
+    0 => 5,
+    0 => 5,
+    0 => 5,
+    0 => 5,
+    0 => 5,
+    0 => 5,
+    36 => 5,
+    36 => 5,
+    36 => 5,
+    36 => 5,
+    36 => 5,
+    36 => 5,
+    36 => 5,
+    36 => 5,
+    64 => 5,
+    64 => 5,
+    64 => 5,
+    64 => 5,
+    64 => 5,
+    64 => 5,
+    64 => 5,
+    64 => 5,
+    91 => 5,
+    91 => 5,
+    91 => 5,
+    91 => 5,
+    91 => 5,
+    91 => 5,
+    91 => 5,
+    91 => 5,
+    93 => 5,
+    93 => 5,
+    93 => 5,
+    93 => 5,
+    93 => 5,
+    93 => 5,
+    93 => 5,
+    93 => 5,
+    126 => 5,
+    126 => 5,
+    126 => 5,
+    126 => 5,
+    126 => 5,
+    126 => 5,
+    126 => 5,
+    126 => 5,
+    94 => 6,
+    94 => 6,
+    94 => 6,
+    94 => 6,
+    125 => 6,
+    125 => 6,
+    125 => 6,
+    125 => 6,
+    60 => 7,
+    60 => 7,
+    96 => 7,
+    96 => 7,
+    123 => 7,
+    123 => 7,
 ];
 
 const HUFFMAN_DECODE_255_255: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255,
     next_table: HUFFMAN_DECODE_NEXT_TABLE_255_255,
     index_of_first_next_table: 246,
-    prefix_len: 8,
 };
 
 const HUFFMAN_DECODE_NEXT_TABLE_255_255: &[&HuffmanDecodeTable] = &[
@@ -2113,13397 +590,3431 @@ const HUFFMAN_DECODE_NEXT_TABLE_255_255: &[&HuffmanDecodeTable] = &[
     &HUFFMAN_DECODE_255_255_255,
 ];
 
-const HUFFMAN_DECODE_ENTRIES_255_255: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 176,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 176,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 176,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 176,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 176,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 176,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 176,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 176,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 177,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 177,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 177,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 177,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 177,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 177,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 177,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 177,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 179,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 179,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 179,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 179,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 179,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 179,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 179,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 179,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 209,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 209,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 209,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 209,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 209,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 209,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 209,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 209,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 216,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 216,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 216,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 216,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 216,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 216,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 216,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 216,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 217,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 217,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 217,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 217,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 217,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 217,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 217,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 217,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 227,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 227,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 227,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 227,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 227,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 227,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 227,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 227,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 229,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 229,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 229,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 229,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 229,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 229,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 229,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 229,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 230,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 230,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 230,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 230,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 230,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 230,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 230,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 230,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 129,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 129,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 129,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 129,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 132,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 132,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 132,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 132,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 133,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 133,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 133,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 133,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 134,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 134,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 134,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 134,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 136,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 136,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 136,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 136,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 146,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 146,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 146,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 146,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 154,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 154,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 154,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 154,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 156,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 156,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 156,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 156,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 160,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 160,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 160,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 160,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 163,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 163,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 163,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 163,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 164,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 164,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 164,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 164,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 169,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 169,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 169,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 169,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 170,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 170,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 170,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 170,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 173,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 173,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 173,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 173,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 178,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 178,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 178,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 178,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 181,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 181,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 181,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 181,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 185,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 185,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 185,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 185,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 186,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 186,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 186,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 186,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 187,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 187,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 187,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 187,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 189,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 189,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 189,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 189,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 190,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 190,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 190,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 190,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 196,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 196,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 196,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 196,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 198,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 198,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 198,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 198,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 228,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 228,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 228,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 228,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 232,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 232,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 232,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 232,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 233,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 233,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 233,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 233,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 1,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 1,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 135,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 135,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 137,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 137,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 138,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 138,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 139,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 139,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 140,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 140,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 141,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 141,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 143,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 143,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 147,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 147,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 149,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 149,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 150,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 150,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 151,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 151,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 152,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 152,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 155,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 155,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 157,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 157,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 158,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 158,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 165,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 165,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 166,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 166,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 168,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 168,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 174,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 174,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 175,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 175,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 180,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 180,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 182,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 182,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 183,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 183,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 188,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 188,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 191,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 191,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 197,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 197,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 231,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 231,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 239,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 239,
-        prefix_len: 7,
-    },
-    HuffmanDecodeEntry {
-        val: 9,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 142,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 144,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 145,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 148,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 159,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 171,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 206,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 215,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 225,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 236,
-        prefix_len: 8,
-    },
-    HuffmanDecodeEntry {
-        val: 237,
-        prefix_len: 8,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    176 => 5,
+    176 => 5,
+    176 => 5,
+    176 => 5,
+    176 => 5,
+    176 => 5,
+    176 => 5,
+    176 => 5,
+    177 => 5,
+    177 => 5,
+    177 => 5,
+    177 => 5,
+    177 => 5,
+    177 => 5,
+    177 => 5,
+    177 => 5,
+    179 => 5,
+    179 => 5,
+    179 => 5,
+    179 => 5,
+    179 => 5,
+    179 => 5,
+    179 => 5,
+    179 => 5,
+    209 => 5,
+    209 => 5,
+    209 => 5,
+    209 => 5,
+    209 => 5,
+    209 => 5,
+    209 => 5,
+    209 => 5,
+    216 => 5,
+    216 => 5,
+    216 => 5,
+    216 => 5,
+    216 => 5,
+    216 => 5,
+    216 => 5,
+    216 => 5,
+    217 => 5,
+    217 => 5,
+    217 => 5,
+    217 => 5,
+    217 => 5,
+    217 => 5,
+    217 => 5,
+    217 => 5,
+    227 => 5,
+    227 => 5,
+    227 => 5,
+    227 => 5,
+    227 => 5,
+    227 => 5,
+    227 => 5,
+    227 => 5,
+    229 => 5,
+    229 => 5,
+    229 => 5,
+    229 => 5,
+    229 => 5,
+    229 => 5,
+    229 => 5,
+    229 => 5,
+    230 => 5,
+    230 => 5,
+    230 => 5,
+    230 => 5,
+    230 => 5,
+    230 => 5,
+    230 => 5,
+    230 => 5,
+    129 => 6,
+    129 => 6,
+    129 => 6,
+    129 => 6,
+    132 => 6,
+    132 => 6,
+    132 => 6,
+    132 => 6,
+    133 => 6,
+    133 => 6,
+    133 => 6,
+    133 => 6,
+    134 => 6,
+    134 => 6,
+    134 => 6,
+    134 => 6,
+    136 => 6,
+    136 => 6,
+    136 => 6,
+    136 => 6,
+    146 => 6,
+    146 => 6,
+    146 => 6,
+    146 => 6,
+    154 => 6,
+    154 => 6,
+    154 => 6,
+    154 => 6,
+    156 => 6,
+    156 => 6,
+    156 => 6,
+    156 => 6,
+    160 => 6,
+    160 => 6,
+    160 => 6,
+    160 => 6,
+    163 => 6,
+    163 => 6,
+    163 => 6,
+    163 => 6,
+    164 => 6,
+    164 => 6,
+    164 => 6,
+    164 => 6,
+    169 => 6,
+    169 => 6,
+    169 => 6,
+    169 => 6,
+    170 => 6,
+    170 => 6,
+    170 => 6,
+    170 => 6,
+    173 => 6,
+    173 => 6,
+    173 => 6,
+    173 => 6,
+    178 => 6,
+    178 => 6,
+    178 => 6,
+    178 => 6,
+    181 => 6,
+    181 => 6,
+    181 => 6,
+    181 => 6,
+    185 => 6,
+    185 => 6,
+    185 => 6,
+    185 => 6,
+    186 => 6,
+    186 => 6,
+    186 => 6,
+    186 => 6,
+    187 => 6,
+    187 => 6,
+    187 => 6,
+    187 => 6,
+    189 => 6,
+    189 => 6,
+    189 => 6,
+    189 => 6,
+    190 => 6,
+    190 => 6,
+    190 => 6,
+    190 => 6,
+    196 => 6,
+    196 => 6,
+    196 => 6,
+    196 => 6,
+    198 => 6,
+    198 => 6,
+    198 => 6,
+    198 => 6,
+    228 => 6,
+    228 => 6,
+    228 => 6,
+    228 => 6,
+    232 => 6,
+    232 => 6,
+    232 => 6,
+    232 => 6,
+    233 => 6,
+    233 => 6,
+    233 => 6,
+    233 => 6,
+    1 => 7,
+    1 => 7,
+    135 => 7,
+    135 => 7,
+    137 => 7,
+    137 => 7,
+    138 => 7,
+    138 => 7,
+    139 => 7,
+    139 => 7,
+    140 => 7,
+    140 => 7,
+    141 => 7,
+    141 => 7,
+    143 => 7,
+    143 => 7,
+    147 => 7,
+    147 => 7,
+    149 => 7,
+    149 => 7,
+    150 => 7,
+    150 => 7,
+    151 => 7,
+    151 => 7,
+    152 => 7,
+    152 => 7,
+    155 => 7,
+    155 => 7,
+    157 => 7,
+    157 => 7,
+    158 => 7,
+    158 => 7,
+    165 => 7,
+    165 => 7,
+    166 => 7,
+    166 => 7,
+    168 => 7,
+    168 => 7,
+    174 => 7,
+    174 => 7,
+    175 => 7,
+    175 => 7,
+    180 => 7,
+    180 => 7,
+    182 => 7,
+    182 => 7,
+    183 => 7,
+    183 => 7,
+    188 => 7,
+    188 => 7,
+    191 => 7,
+    191 => 7,
+    197 => 7,
+    197 => 7,
+    231 => 7,
+    231 => 7,
+    239 => 7,
+    239 => 7,
+    9 => 8,
+    142 => 8,
+    144 => 8,
+    145 => 8,
+    148 => 8,
+    159 => 8,
+    171 => 8,
+    206 => 8,
+    215 => 8,
+    225 => 8,
+    236 => 8,
+    237 => 8,
 ];
 
 const HUFFMAN_DECODE_255_255_255: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_255,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 6,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_255: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 19,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 20,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 21,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 23,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 24,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 25,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 26,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 27,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 28,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 29,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 30,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 31,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 127,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 220,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 249,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 10,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 10,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 10,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 10,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 13,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 13,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 13,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 13,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 22,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 22,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 22,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 22,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 256,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 256,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 256,
-        prefix_len: 6,
-    },
-    HuffmanDecodeEntry {
-        val: 256,
-        prefix_len: 6,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255_255: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    19 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    20 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    21 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    23 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    24 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    25 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    26 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    27 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    28 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    29 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    30 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    31 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    127 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    220 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    249 => 4,
+    10 => 6,
+    10 => 6,
+    10 => 6,
+    10 => 6,
+    13 => 6,
+    13 => 6,
+    13 => 6,
+    13 => 6,
+    22 => 6,
+    22 => 6,
+    22 => 6,
+    22 => 6,
+    256 => 6,
+    256 => 6,
+    256 => 6,
+    256 => 6,
 ];
 
 const HUFFMAN_DECODE_255_255_254: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_254,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 4,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_254: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 254,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 2,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 3,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 4,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 5,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 6,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 7,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 8,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 11,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 12,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 14,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 15,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 16,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 17,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 18,
-        prefix_len: 4,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255_254: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    254 => 3,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    2 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    3 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    4 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    5 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    6 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    7 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    8 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    11 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    12 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    14 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    15 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    16 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    17 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
+    18 => 4,
 ];
 
 const HUFFMAN_DECODE_255_255_253: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_253,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 3,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_253: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 245,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 246,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 247,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 248,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 250,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 251,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 252,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 253,
-        prefix_len: 3,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255_253: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    245 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    246 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    247 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    248 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    250 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    251 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    252 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
+    253 => 3,
 ];
 
 const HUFFMAN_DECODE_255_255_252: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_252,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 3,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_252: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 211,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 212,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 214,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 221,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 222,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 223,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 241,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 244,
-        prefix_len: 3,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255_252: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    211 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    212 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    214 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    221 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    222 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    223 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    241 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
+    244 => 3,
 ];
 
 const HUFFMAN_DECODE_255_255_251: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_251,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 3,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_251: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 242,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 243,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 255,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 203,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 204,
-        prefix_len: 3,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255_251: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    242 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    243 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    255 => 2,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    203 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
+    204 => 3,
 ];
 
 const HUFFMAN_DECODE_255_255_250: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_250,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 2,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_250: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 218,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 219,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 238,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 240,
-        prefix_len: 2,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255_250: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    218 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    219 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    238 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
+    240 => 2,
 ];
 
 const HUFFMAN_DECODE_255_255_249: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_249,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 2,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_249: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 202,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 205,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 210,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 213,
-        prefix_len: 2,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255_249: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    202 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    205 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    210 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
+    213 => 2,
 ];
 
 const HUFFMAN_DECODE_255_255_248: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_248,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 2,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_248: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 192,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 193,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 200,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 201,
-        prefix_len: 2,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255_248: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    192 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    193 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    200 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
+    201 => 2,
 ];
 
 const HUFFMAN_DECODE_255_255_247: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_247,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 1,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_247: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 234,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 235,
-        prefix_len: 1,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255_247: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    234 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
+    235 => 1,
 ];
 
 const HUFFMAN_DECODE_255_255_246: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_255_246,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 1,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_255_246: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 199,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
-    HuffmanDecodeEntry {
-        val: 207,
-        prefix_len: 1,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_255_246: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    199 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
+    207 => 1,
 ];
 
 const HUFFMAN_DECODE_255_254: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_255_254,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 5,
 };
 
-const HUFFMAN_DECODE_ENTRIES_255_254: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 92,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 195,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 208,
-        prefix_len: 3,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 128,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 130,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 131,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 162,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 184,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 194,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 224,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 226,
-        prefix_len: 4,
-    },
-    HuffmanDecodeEntry {
-        val: 153,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 153,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 153,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 153,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 153,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 153,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 153,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 153,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 161,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 161,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 161,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 161,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 161,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 161,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 161,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 161,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 167,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 167,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 167,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 167,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 167,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 167,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 167,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 167,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 172,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 172,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 172,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 172,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 172,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 172,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 172,
-        prefix_len: 5,
-    },
-    HuffmanDecodeEntry {
-        val: 172,
-        prefix_len: 5,
-    },
+const HUFFMAN_DECODE_ENTRIES_255_254: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    92 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    195 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    208 => 3,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    128 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    130 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    131 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    162 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    184 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    194 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    224 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    226 => 4,
+    153 => 5,
+    153 => 5,
+    153 => 5,
+    153 => 5,
+    153 => 5,
+    153 => 5,
+    153 => 5,
+    153 => 5,
+    161 => 5,
+    161 => 5,
+    161 => 5,
+    161 => 5,
+    161 => 5,
+    161 => 5,
+    161 => 5,
+    161 => 5,
+    167 => 5,
+    167 => 5,
+    167 => 5,
+    167 => 5,
+    167 => 5,
+    167 => 5,
+    167 => 5,
+    167 => 5,
+    172 => 5,
+    172 => 5,
+    172 => 5,
+    172 => 5,
+    172 => 5,
+    172 => 5,
+    172 => 5,
+    172 => 5,
 ];
 
 const HUFFMAN_DECODE_254: &HuffmanDecodeTable = &HuffmanDecodeTable {
     entry: HUFFMAN_DECODE_ENTRIES_254,
     next_table: &[],
     index_of_first_next_table: 256,
-    prefix_len: 2,
 };
 
-const HUFFMAN_DECODE_ENTRIES_254: &[HuffmanDecodeEntry] = &[
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 33,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 34,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 40,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
-    HuffmanDecodeEntry {
-        val: 41,
-        prefix_len: 2,
-    },
+const HUFFMAN_DECODE_ENTRIES_254: &[HuffmanDecodeEntry] = huffman_decode_entries![
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    33 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    34 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    40 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
+    41 => 2,
 ];

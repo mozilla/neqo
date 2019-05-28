@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![deny(warnings)]
+
 use neqo_common::now;
 use neqo_crypto::init_db;
 use neqo_http3::{Http3Connection, Http3State, RequestStreamServer};
@@ -66,7 +68,7 @@ fn http_serve(cr: &mut RequestStreamServer, _error: bool) {
     let mut resp = String::new();
 
     for header in request_headers {
-        if header.0 == String::from(":path") {
+        if header.0 == ":path" {
             println!("path {}", header.1);
             let length;
             match header.1.trim_matches(|p| p == '/').parse::<u32>() {
@@ -89,7 +91,7 @@ fn http_serve(cr: &mut RequestStreamServer, _error: bool) {
     }
 
     cr.set_response(
-        &vec![
+        &[
             (String::from(":status"), String::from("200")),
             (String::from("content-length"), resp.len().to_string()),
         ],
@@ -97,7 +99,7 @@ fn http_serve(cr: &mut RequestStreamServer, _error: bool) {
     );
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
+fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
     for d in out_dgrams {
         let sent = socket
             .send_to(&d[..], d.destination())
@@ -110,7 +112,7 @@ fn emit_packets(socket: &UdpSocket, out_dgrams: &Vec<Datagram>) {
 
 fn main() -> Result<(), io::Error> {
     let args = Args::from_args();
-    assert!(args.key.len() > 0, "Need at least one key");
+    assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
 
@@ -196,7 +198,7 @@ fn main() -> Result<(), io::Error> {
                     if sz == 0 {
                         eprintln!("zero length datagram received?");
                     } else {
-                        let conn_dgrams = in_dgrams.entry(remote_addr).or_insert(Vec::new());
+                        let conn_dgrams = in_dgrams.entry(remote_addr).or_insert_with(Vec::new);
                         conn_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
                     }
                 }

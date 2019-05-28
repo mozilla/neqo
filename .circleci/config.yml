@@ -26,5 +26,9 @@ jobs:
           command: NSS_JOBS=3 cargo build -v
 
       - run:
+          name: Clippy
+          command: NSS_JOBS=3 cargo clippy -v
+
+      - run:
           name: Test
           command: cargo test -v

@@ -4,820 +4,277 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::unreadable_literal)]
-
 #[derive(Debug, Copy, Clone)]
 pub struct HuffmanTableEntry {
     pub len: u8,
     pub val: u32,
 }
 
+macro_rules! huffman_table {
+    [$($v:expr => $l:expr),+ $(,)?] => {
+        &[
+            $(HuffmanTableEntry { len: $l, val: $v }),+
+        ]
+    };
+}
+
 // Table contains the raw HPACK Huffman table
-pub const HUFFMAN_TABLE: &[HuffmanTableEntry] = &[
-    HuffmanTableEntry {
-        len: 13,
-        val: 0x1ff8,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffd8,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffe2,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffe3,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffe4,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffe5,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffe6,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffe7,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffe8,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xffffea,
-    },
-    HuffmanTableEntry {
-        len: 30,
-        val: 0x3ffffffc,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffe9,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffea,
-    },
-    HuffmanTableEntry {
-        len: 30,
-        val: 0x3ffffffd,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffeb,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffec,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffed,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffee,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xfffffef,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffff0,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffff1,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffff2,
-    },
-    HuffmanTableEntry {
-        len: 30,
-        val: 0x3ffffffe,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffff3,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffff4,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffff5,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffff6,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffff7,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffff8,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffff9,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffffa,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffffb,
-    },
-    HuffmanTableEntry { len: 6, val: 0x14 }, // ' '
-    HuffmanTableEntry {
-        len: 10,
-        val: 0x3f8,
-    }, // !
-    HuffmanTableEntry {
-        len: 10,
-        val: 0x3f9,
-    }, // '"'
-    HuffmanTableEntry {
-        len: 12,
-        val: 0xffa,
-    }, // '#'
-    HuffmanTableEntry {
-        len: 13,
-        val: 0x1ff9,
-    }, // '$'
-    HuffmanTableEntry { len: 6, val: 0x15 }, // '%'
-    HuffmanTableEntry { len: 8, val: 0xf8 }, // '&'
-    HuffmanTableEntry {
-        len: 11,
-        val: 0x7fa,
-    }, // '''
-    HuffmanTableEntry {
-        len: 10,
-        val: 0x3fa,
-    }, // '('
-    HuffmanTableEntry {
-        len: 10,
-        val: 0x3fb,
-    }, // ')'
-    HuffmanTableEntry { len: 8, val: 0xf9 }, // '*'
-    HuffmanTableEntry {
-        len: 11,
-        val: 0x7fb,
-    }, // '+'
-    HuffmanTableEntry { len: 8, val: 0xfa }, // ','
-    HuffmanTableEntry { len: 6, val: 0x16 }, // '-'
-    HuffmanTableEntry { len: 6, val: 0x17 }, // '.'
-    HuffmanTableEntry { len: 6, val: 0x18 }, // '/'
-    HuffmanTableEntry { len: 5, val: 0x0 },  // '0'
-    HuffmanTableEntry { len: 5, val: 0x1 },  // '1'
-    HuffmanTableEntry { len: 5, val: 0x2 },  // '2'
-    HuffmanTableEntry { len: 6, val: 0x19 }, // '3'
-    HuffmanTableEntry { len: 6, val: 0x1a }, // '4'
-    HuffmanTableEntry { len: 6, val: 0x1b }, // '5'
-    HuffmanTableEntry { len: 6, val: 0x1c }, // '6'
-    HuffmanTableEntry { len: 6, val: 0x1d }, // '7'
-    HuffmanTableEntry { len: 6, val: 0x1e }, // '8'
-    HuffmanTableEntry { len: 6, val: 0x1f }, // '9'
-    HuffmanTableEntry { len: 7, val: 0x5c }, // ':'
-    HuffmanTableEntry { len: 8, val: 0xfb }, // ';'
-    HuffmanTableEntry {
-        len: 15,
-        val: 0x7ffc,
-    }, // '<'
-    HuffmanTableEntry { len: 6, val: 0x20 }, // '='
-    HuffmanTableEntry {
-        len: 12,
-        val: 0xffb,
-    }, // '>'
-    HuffmanTableEntry {
-        len: 10,
-        val: 0x3fc,
-    }, // '?'
-    HuffmanTableEntry {
-        len: 13,
-        val: 0x1ffa,
-    }, // '@'
-    HuffmanTableEntry { len: 6, val: 0x21 }, // 'A'
-    HuffmanTableEntry { len: 7, val: 0x5d }, // 'B'
-    HuffmanTableEntry { len: 7, val: 0x5e }, // 'C'
-    HuffmanTableEntry { len: 7, val: 0x5f }, // 'D'
-    HuffmanTableEntry { len: 7, val: 0x60 }, // 'E'
-    HuffmanTableEntry { len: 7, val: 0x61 }, // 'F'
-    HuffmanTableEntry { len: 7, val: 0x62 }, // 'G'
-    HuffmanTableEntry { len: 7, val: 0x63 }, // 'H'
-    HuffmanTableEntry { len: 7, val: 0x64 }, // 'I'
-    HuffmanTableEntry { len: 7, val: 0x65 }, // 'J'
-    HuffmanTableEntry { len: 7, val: 0x66 }, // 'K'
-    HuffmanTableEntry { len: 7, val: 0x67 }, // 'L'
-    HuffmanTableEntry { len: 7, val: 0x68 }, // 'M'
-    HuffmanTableEntry { len: 7, val: 0x69 }, // 'N'
-    HuffmanTableEntry { len: 7, val: 0x6a }, // 'O'
-    HuffmanTableEntry { len: 7, val: 0x6b }, // 'P'
-    HuffmanTableEntry { len: 7, val: 0x6c }, // 'Q'
-    HuffmanTableEntry { len: 7, val: 0x6d }, // 'R'
-    HuffmanTableEntry { len: 7, val: 0x6e }, // 'S'
-    HuffmanTableEntry { len: 7, val: 0x6f }, // 'T'
-    HuffmanTableEntry { len: 7, val: 0x70 }, // 'U'
-    HuffmanTableEntry { len: 7, val: 0x71 }, // 'V'
-    HuffmanTableEntry { len: 7, val: 0x72 }, // 'W'
-    HuffmanTableEntry { len: 8, val: 0xfc }, // 'X'
-    HuffmanTableEntry { len: 7, val: 0x73 }, // 'Y'
-    HuffmanTableEntry { len: 8, val: 0xfd }, // 'Z'
-    HuffmanTableEntry {
-        len: 13,
-        val: 0x1ffb,
-    }, // '['
-    HuffmanTableEntry {
-        len: 19,
-        val: 0x7fff0,
-    }, // '\'
-    HuffmanTableEntry {
-        len: 13,
-        val: 0x1ffc,
-    }, // ']'
-    HuffmanTableEntry {
-        len: 14,
-        val: 0x3ffc,
-    }, // '^'
-    HuffmanTableEntry { len: 6, val: 0x22 }, // '_'
-    HuffmanTableEntry {
-        len: 15,
-        val: 0x7ffd,
-    }, // '`'
-    HuffmanTableEntry { len: 5, val: 0x3 },  // 'a'
-    HuffmanTableEntry { len: 6, val: 0x23 }, // 'b'
-    HuffmanTableEntry { len: 5, val: 0x4 },  // 'c'
-    HuffmanTableEntry { len: 6, val: 0x24 }, // 'd'
-    HuffmanTableEntry { len: 5, val: 0x5 },  // 'e'
-    HuffmanTableEntry { len: 6, val: 0x25 }, // 'f'
-    HuffmanTableEntry { len: 6, val: 0x26 }, // 'g'
-    HuffmanTableEntry { len: 6, val: 0x27 }, // 'h'
-    HuffmanTableEntry { len: 5, val: 0x6 },  // 'i'
-    HuffmanTableEntry { len: 7, val: 0x74 }, // 'j'
-    HuffmanTableEntry { len: 7, val: 0x75 }, // 'k'
-    HuffmanTableEntry { len: 6, val: 0x28 }, // 'l'
-    HuffmanTableEntry { len: 6, val: 0x29 }, // 'm'
-    HuffmanTableEntry { len: 6, val: 0x2a }, // 'n'
-    HuffmanTableEntry { len: 5, val: 0x7 },  // 'o'
-    HuffmanTableEntry { len: 6, val: 0x2b }, // 'p'
-    HuffmanTableEntry { len: 7, val: 0x76 }, // 'q'
-    HuffmanTableEntry { len: 6, val: 0x2c }, // 'r'
-    HuffmanTableEntry { len: 5, val: 0x8 },  // 's'
-    HuffmanTableEntry { len: 5, val: 0x9 },  // 't'
-    HuffmanTableEntry { len: 6, val: 0x2d }, // 'u'
-    HuffmanTableEntry { len: 7, val: 0x77 }, // 'v'
-    HuffmanTableEntry { len: 7, val: 0x78 }, // 'w'
-    HuffmanTableEntry { len: 7, val: 0x79 }, // 'x'
-    HuffmanTableEntry { len: 7, val: 0x7a }, // 'y'
-    HuffmanTableEntry { len: 7, val: 0x7b }, // 'z'
-    HuffmanTableEntry {
-        len: 15,
-        val: 0x7ffe,
-    }, // '{'
-    HuffmanTableEntry {
-        len: 11,
-        val: 0x7fc,
-    }, // '|'
-    HuffmanTableEntry {
-        len: 14,
-        val: 0x3ffd,
-    }, // '}'
-    HuffmanTableEntry {
-        len: 13,
-        val: 0x1ffd,
-    }, // ~
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffffc,
-    },
-    HuffmanTableEntry {
-        len: 20,
-        val: 0xfffe6,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffd2,
-    },
-    HuffmanTableEntry {
-        len: 20,
-        val: 0xfffe7,
-    },
-    HuffmanTableEntry {
-        len: 20,
-        val: 0xfffe8,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffd3,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffd4,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffd5,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffd9,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffd6,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffda,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffdb,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffdc,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffdd,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffde,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xffffeb,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffdf,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xffffec,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xffffed,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffd7,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffe0,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xffffee,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffe1,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffe2,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffe3,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffe4,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffdc,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffd8,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffe5,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffd9,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffe6,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffe7,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xffffef,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffda,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffdd,
-    },
-    HuffmanTableEntry {
-        len: 20,
-        val: 0xfffe9,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffdb,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffdc,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffe8,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffe9,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffde,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffea,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffdd,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffde,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xfffff0,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffdf,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffdf,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffeb,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffec,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffe0,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffe1,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffe0,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffe2,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffed,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffe1,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffee,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7fffef,
-    },
-    HuffmanTableEntry {
-        len: 20,
-        val: 0xfffea,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffe2,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffe3,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffe4,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7ffff0,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffe5,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffe6,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7ffff1,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffe0,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffe1,
-    },
-    HuffmanTableEntry {
-        len: 20,
-        val: 0xfffeb,
-    },
-    HuffmanTableEntry {
-        len: 19,
-        val: 0x7fff1,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffe7,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7ffff2,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffe8,
-    },
-    HuffmanTableEntry {
-        len: 25,
-        val: 0x1ffffec,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffe2,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffe3,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffe4,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffde,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffdf,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffe5,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xfffff1,
-    },
-    HuffmanTableEntry {
-        len: 25,
-        val: 0x1ffffed,
-    },
-    HuffmanTableEntry {
-        len: 19,
-        val: 0x7fff2,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffe3,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffe6,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffe0,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffe1,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffe7,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffe2,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xfffff2,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffe4,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffe5,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffe8,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffe9,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffffd,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffe3,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffe4,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffe5,
-    },
-    HuffmanTableEntry {
-        len: 20,
-        val: 0xfffec,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xfffff3,
-    },
-    HuffmanTableEntry {
-        len: 20,
-        val: 0xfffed,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffe6,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffe9,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffe7,
-    },
-    HuffmanTableEntry {
-        len: 21,
-        val: 0x1fffe8,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7ffff3,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffea,
-    },
-    HuffmanTableEntry {
-        len: 22,
-        val: 0x3fffeb,
-    },
-    HuffmanTableEntry {
-        len: 25,
-        val: 0x1ffffee,
-    },
-    HuffmanTableEntry {
-        len: 25,
-        val: 0x1ffffef,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xfffff4,
-    },
-    HuffmanTableEntry {
-        len: 24,
-        val: 0xfffff5,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffea,
-    },
-    HuffmanTableEntry {
-        len: 23,
-        val: 0x7ffff4,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffeb,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffe6,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffec,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffed,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffe7,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffe8,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffe9,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffea,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffeb,
-    },
-    HuffmanTableEntry {
-        len: 28,
-        val: 0xffffffe,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffec,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffed,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffee,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7ffffef,
-    },
-    HuffmanTableEntry {
-        len: 27,
-        val: 0x7fffff0,
-    },
-    HuffmanTableEntry {
-        len: 26,
-        val: 0x3ffffee,
-    },
-    HuffmanTableEntry {
-        len: 30,
-        val: 0x3fffffff,
-    },
+pub const HUFFMAN_TABLE: &[HuffmanTableEntry] = huffman_table![
+    0x1ff8 => 13,
+    0x007f_ffd8 => 23,
+    0x0fff_ffe2 => 28,
+    0x0fff_ffe3 => 28,
+    0x0fff_ffe4 => 28,
+    0x0fff_ffe5 => 28,
+    0x0fff_ffe6 => 28,
+    0x0fff_ffe7 => 28,
+    0x0fff_ffe8 => 28,
+    0x00ff_ffea => 24,
+    0x3fff_fffc => 30,
+    0x0fff_ffe9 => 28,
+    0x0fff_ffea => 28,
+    0x3fff_fffd => 30,
+    0x0fff_ffeb => 28,
+    0x0fff_ffec => 28,
+    0x0fff_ffed => 28,
+    0x0fff_ffee => 28,
+    0x0fff_ffef => 28,
+    0x0fff_fff0 => 28,
+    0x0fff_fff1 => 28,
+    0x0fff_fff2 => 28,
+    0x3fff_fffe => 30,
+    0x0fff_fff3 => 28,
+    0x0fff_fff4 => 28,
+    0x0fff_fff5 => 28,
+    0x0fff_fff6 => 28,
+    0x0fff_fff7 => 28,
+    0x0fff_fff8 => 28,
+    0x0fff_fff9 => 28,
+    0x0fff_fffa => 28,
+    0x0fff_fffb => 28,
+    0x14 => 6, // ' '
+    0x3f8 => 10, // '!'
+    0x3f9 => 10, // '"'
+    0xffa => 12, // '#'
+    0x1ff9 => 13, // '$'
+    0x15 => 6, // '%'
+    0xf8 => 8, // '&'
+    0x7fa => 11, // '''
+    0x3fa => 10, // '('
+    0x3fb => 10, // ')'
+    0xf9 => 8, // '*'
+    0x7fb => 11, // '+'
+    0xfa => 8, // ','
+    0x16 => 6, // '-'
+    0x17 => 6, // '.'
+    0x18 => 6, // '/'
+    0x0 => 5, // '0'
+    0x1 => 5, // '1'
+    0x2 => 5, // '2'
+    0x19 => 6, // '3'
+    0x1a => 6, // '4'
+    0x1b => 6, // '5'
+    0x1c => 6, // '6'
+    0x1d => 6, // '7'
+    0x1e => 6, // '8'
+    0x1f => 6, // '9'
+    0x5c => 7, // ':'
+    0xfb => 8, // ';'
+    0x7ffc => 15, // '<'
+    0x20 => 6, // '='
+    0xffb => 12, // '>'
+    0x3fc => 10, // '?'
+    0x1ffa => 13, // '@'
+    0x21 => 6, // 'A'
+    0x5d => 7, // 'B'
+    0x5e => 7, // 'C'
+    0x5f => 7, // 'D'
+    0x60 => 7, // 'E'
+    0x61 => 7, // 'F'
+    0x62 => 7, // 'G'
+    0x63 => 7, // 'H'
+    0x64 => 7, // 'I'
+    0x65 => 7, // 'J'
+    0x66 => 7, // 'K'
+    0x67 => 7, // 'L'
+    0x68 => 7, // 'M'
+    0x69 => 7, // 'N'
+    0x6a => 7, // 'O'
+    0x6b => 7, // 'P'
+    0x6c => 7, // 'Q'
+    0x6d => 7, // 'R'
+    0x6e => 7, // 'S'
+    0x6f => 7, // 'T'
+    0x70 => 7, // 'U'
+    0x71 => 7, // 'V'
+    0x72 => 7, // 'W'
+    0xfc => 8, // 'X'
+    0x73 => 7, // 'Y'
+    0xfd => 8, // 'Z'
+    0x1ffb => 13, // '['
+    0x0007_fff0 => 19, // '\'
+    0x1ffc => 13, // ']'
+    0x3ffc => 14, // '^'
+    0x22 => 6, // '_'
+    0x7ffd => 15, // '`'
+    0x3 => 5, // 'a'
+    0x23 => 6, // 'b'
+    0x4 => 5, // 'c'
+    0x24 => 6, // 'd'
+    0x5 => 5, // 'e'
+    0x25 => 6, // 'f'
+    0x26 => 6, // 'g'
+    0x27 => 6, // 'h'
+    0x6 => 5, // 'i'
+    0x74 => 7, // 'j'
+    0x75 => 7, // 'k'
+    0x28 => 6, // 'l'
+    0x29 => 6, // 'm'
+    0x2a => 6, // 'n'
+    0x7 => 5, // 'o'
+    0x2b => 6, // 'p'
+    0x76 => 7, // 'q'
+    0x2c => 6, // 'r'
+    0x8 => 5, // 's'
+    0x9 => 5, // 't'
+    0x2d => 6, // 'u'
+    0x77 => 7, // 'v'
+    0x78 => 7, // 'w'
+    0x79 => 7, // 'x'
+    0x7a => 7, // 'y'
+    0x7b => 7, // 'z'
+    0x7ffe => 15, // '{'
+    0x7fc => 11, // '|'
+    0x3ffd => 14, // '}'
+    0x1ffd => 13, // '~'
+    0x0fff_fffc => 28,
+    0x000f_ffe6 => 20,
+    0x003f_ffd2 => 22,
+    0x000f_ffe7 => 20,
+    0x000f_ffe8 => 20,
+    0x003f_ffd3 => 22,
+    0x003f_ffd4 => 22,
+    0x003f_ffd5 => 22,
+    0x007f_ffd9 => 23,
+    0x003f_ffd6 => 22,
+    0x007f_ffda => 23,
+    0x007f_ffdb => 23,
+    0x007f_ffdc => 23,
+    0x007f_ffdd => 23,
+    0x007f_ffde => 23,
+    0x00ff_ffeb => 24,
+    0x007f_ffdf => 23,
+    0x00ff_ffec => 24,
+    0x00ff_ffed => 24,
+    0x003f_ffd7 => 22,
+    0x007f_ffe0 => 23,
+    0x00ff_ffee => 24,
+    0x007f_ffe1 => 23,
+    0x007f_ffe2 => 23,
+    0x007f_ffe3 => 23,
+    0x007f_ffe4 => 23,
+    0x001f_ffdc => 21,
+    0x003f_ffd8 => 22,
+    0x007f_ffe5 => 23,
+    0x003f_ffd9 => 22,
+    0x007f_ffe6 => 23,
+    0x007f_ffe7 => 23,
+    0x00ff_ffef => 24,
+    0x003f_ffda => 22,
+    0x001f_ffdd => 21,
+    0x000f_ffe9 => 20,
+    0x003f_ffdb => 22,
+    0x003f_ffdc => 22,
+    0x007f_ffe8 => 23,
+    0x007f_ffe9 => 23,
+    0x001f_ffde => 21,
+    0x007f_ffea => 23,
+    0x003f_ffdd => 22,
+    0x003f_ffde => 22,
+    0x00ff_fff0 => 24,
+    0x001f_ffdf => 21,
+    0x003f_ffdf => 22,
+    0x007f_ffeb => 23,
+    0x007f_ffec => 23,
+    0x001f_ffe0 => 21,
+    0x001f_ffe1 => 21,
+    0x003f_ffe0 => 22,
+    0x001f_ffe2 => 21,
+    0x007f_ffed => 23,
+    0x003f_ffe1 => 22,
+    0x007f_ffee => 23,
+    0x007f_ffef => 23,
+    0x000f_ffea => 20,
+    0x003f_ffe2 => 22,
+    0x003f_ffe3 => 22,
+    0x003f_ffe4 => 22,
+    0x007f_fff0 => 23,
+    0x003f_ffe5 => 22,
+    0x003f_ffe6 => 22,
+    0x007f_fff1 => 23,
+    0x03ff_ffe0 => 26,
+    0x03ff_ffe1 => 26,
+    0x000f_ffeb => 20,
+    0x0007_fff1 => 19,
+    0x003f_ffe7 => 22,
+    0x007f_fff2 => 23,
+    0x003f_ffe8 => 22,
+    0x01ff_ffec => 25,
+    0x03ff_ffe2 => 26,
+    0x03ff_ffe3 => 26,
+    0x03ff_ffe4 => 26,
+    0x07ff_ffde => 27,
+    0x07ff_ffdf => 27,
+    0x03ff_ffe5 => 26,
+    0x00ff_fff1 => 24,
+    0x01ff_ffed => 25,
+    0x0007_fff2 => 19,
+    0x001f_ffe3 => 21,
+    0x03ff_ffe6 => 26,
+    0x07ff_ffe0 => 27,
+    0x07ff_ffe1 => 27,
+    0x03ff_ffe7 => 26,
+    0x07ff_ffe2 => 27,
+    0x00ff_fff2 => 24,
+    0x001f_ffe4 => 21,
+    0x001f_ffe5 => 21,
+    0x03ff_ffe8 => 26,
+    0x03ff_ffe9 => 26,
+    0x0fff_fffd => 28,
+    0x07ff_ffe3 => 27,
+    0x07ff_ffe4 => 27,
+    0x07ff_ffe5 => 27,
+    0x000f_ffec => 20,
+    0x00ff_fff3 => 24,
+    0x000f_ffed => 20,
+    0x001f_ffe6 => 21,
+    0x003f_ffe9 => 22,
+    0x001f_ffe7 => 21,
+    0x001f_ffe8 => 21,
+    0x007f_fff3 => 23,
+    0x003f_ffea => 22,
+    0x003f_ffeb => 22,
+    0x01ff_ffee => 25,
+    0x01ff_ffef => 25,
+    0x00ff_fff4 => 24,
+    0x00ff_fff5 => 24,
+    0x03ff_ffea => 26,
+    0x007f_fff4 => 23,
+    0x03ff_ffeb => 26,
+    0x07ff_ffe6 => 27,
+    0x03ff_ffec => 26,
+    0x03ff_ffed => 26,
+    0x07ff_ffe7 => 27,
+    0x07ff_ffe8 => 27,
+    0x07ff_ffe9 => 27,
+    0x07ff_ffea => 27,
+    0x07ff_ffeb => 27,
+    0x0fff_fffe => 28,
+    0x07ff_ffec => 27,
+    0x07ff_ffed => 27,
+    0x07ff_ffee => 27,
+    0x07ff_ffef => 27,
+    0x07ff_fff0 => 27,
+    0x03ff_ffee => 26,
+    0x3fff_ffff => 30,
 ];

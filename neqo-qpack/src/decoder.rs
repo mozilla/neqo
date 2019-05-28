@@ -12,6 +12,7 @@ use crate::qpack_helper::{
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
+use neqo_common::qdebug;
 use neqo_transport::connection::Connection;
 use std::{mem, str};
 
@@ -127,7 +128,7 @@ impl QPackDecoder {
         Ok(r)
     }
 
-    #[allow(clippy::cyclomatic_complexity)]
+    #[allow(clippy::cognitive_complexity)]
     #[allow(clippy::useless_let_if_seq)]
     fn read_instructions(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
         let label = self.to_string();
@@ -798,7 +799,7 @@ mod tests {
     use super::*;
     use neqo_crypto::init_db;
     use neqo_transport::frame::StreamType;
-    use neqo_transport::{AppError, ConnectionEvent, Res};
+    use neqo_transport::ConnectionEvent;
     use std::net::SocketAddr;
 
     fn loopback() -> SocketAddr {

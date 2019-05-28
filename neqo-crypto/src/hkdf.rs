@@ -60,9 +60,9 @@ pub fn import_key(version: Version, cipher: Cipher, buf: &[u8]) -> Res<SymKey> {
     let key_ptr = unsafe {
         PK11_ImportSymKey(
             *slot,
-            mech as CK_MECHANISM_TYPE,
+            CK_MECHANISM_TYPE::from(mech),
             PK11Origin::PK11_OriginUnwrap,
-            CKA_DERIVE as CK_ATTRIBUTE_TYPE,
+            CK_ATTRIBUTE_TYPE::from(CKA_DERIVE),
             &mut item,
             null_mut(),
         )
