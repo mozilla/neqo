@@ -28,7 +28,7 @@ mod ssl;
 
 pub use self::agent::{
     Agent, Client, HandshakeState, Record, RecordList, SecretAgent, SecretAgentInfo,
-    SecretAgentPreInfo, Server,
+    SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
 };
 pub use self::constants::*;
 pub use self::err::{Error, Res, SSLErrorCodes};

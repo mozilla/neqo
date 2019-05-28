@@ -9,8 +9,10 @@ use crate::{Error, Res};
 use neqo_common::{hex, matches, qdebug, qtrace, Decoder, Encoder};
 use neqo_crypto::constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS};
 use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-use neqo_crypto::HandshakeMessage;
+use neqo_crypto::{HandshakeMessage, ZeroRttChecker, ZeroRttCheckResult};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 struct PreferredAddress {
     // TODO(ekr@rtfm.com): Implement.
@@ -327,6 +329,41 @@ impl ExtensionHandler for TransportParametersHandler {
                 ExtensionHandlerResult::Ok
             }
             _ => ExtensionHandlerResult::Alert(47), // illegal_parameter
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct TpZeroRttChecker {
+    handler: Rc<RefCell<TransportParametersHandler>>,
+}
+
+impl TpZeroRttChecker {
+    pub fn new(handler: Rc<RefCell<TransportParametersHandler>>) -> Box<dyn ZeroRttChecker> {
+        Box::new(TpZeroRttChecker{handler})
+    }
+}
+
+impl ZeroRttChecker for TpZeroRttChecker {
+    fn check(&self, first_hello: bool, token: &[u8]) -> ZeroRttCheckResult {
+        // Reject 0-RTT if we sent HelloRetryRequest or there is no token.
+        if !first_hello || token.len() == 0 {
+            return ZeroRttCheckResult::Reject;
+        }
+        let mut dec = Decoder::from(token);
+        let tpslice = match dec.decode_vvec() {
+            Some(v) => v,
+            _ => return ZeroRttCheckResult::Fail,
+        };
+        let mut dec_tp = Decoder::from(tpslice);
+        let remembered = match TransportParameters::decode(&mut dec_tp) {
+            Ok(v) => v,
+            _ => return ZeroRttCheckResult::Fail,
+        };
+        if self.handler.borrow().local.ok_for_0rtt(&remembered) {
+            ZeroRttCheckResult::Accept
+        } else {
+            ZeroRttCheckResult::Reject
         }
     }
 }

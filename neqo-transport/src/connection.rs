@@ -34,7 +34,7 @@ use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, TxBuffer};
 use crate::stats::Stats;
 use crate::tparams::consts as tp_const;
-use crate::tparams::{TransportParameters, TransportParametersHandler};
+use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
 use crate::tracking::RecvdPackets;
 use crate::{AppError, ConnectionError, Error, Res};
 
@@ -734,15 +734,15 @@ impl Connection {
         agent
             .enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])
             .expect("Could not set ciphers");
-        agent
-            .extension_handler(0xffa5, tphandler)
-            .expect("Could not set extension handler");
         agent.set_alpn(protocols).expect("Could not set ALPN");
         match agent {
             Agent::Client(c) => c.enable_0rtt(),
-            Agent::Server(s) => s.enable_0rtt(0xffffffff),
+            Agent::Server(s) => s.enable_0rtt(0xffffffff, TpZeroRttChecker::new(tphandler.clone())),
         }
         .expect("Could not enable 0-RTT");
+        agent
+            .extension_handler(0xffa5, tphandler)
+            .expect("Could not set extension handler");
     }
 
     fn set_tp_defaults(tps: &mut TransportParameters) {
@@ -758,7 +758,7 @@ impl Connection {
         tps.set_integer(tp_const::INITIAL_MAX_STREAMS_BIDI, LOCAL_STREAM_LIMIT_BIDI);
         tps.set_integer(tp_const::INITIAL_MAX_STREAMS_UNI, LOCAL_STREAM_LIMIT_UNI);
         tps.set_integer(tp_const::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
-        tps.set_empty(tp_const::DISABLE_MIGRATION)
+        tps.set_empty(tp_const::DISABLE_MIGRATION);
     }
 
     fn new<A: ToString, I: IntoIterator<Item = A>>(
@@ -892,18 +892,24 @@ impl Connection {
         Ok(())
     }
 
-    pub fn send_ticket(&mut self, now: u64) -> Res<()> {
-        match self.tls {
+    pub fn send_ticket(&mut self, now: u64, extra: &[u8]) -> Res<()> {
+        let tps = mem::replace(&mut self.tps, Default::default());
+        let res = match self.tls {
             Agent::Server(ref mut s) => {
                 let mut enc = Encoder::default();
-                self.tps.borrow().local.encode(&mut enc);
-                let records = s.send_ticket(now, &enc[..])?;
+                enc.encode_vvec_with(|mut enc_inner|{
+                    tps.borrow().local.encode(&mut enc_inner);
+                });
+                enc.encode(extra);
+                let records = s.send_ticket(now, &enc)?;
                 qinfo!([self] "send session ticket {}", hex(&enc));
                 self.buffer_crypto_records(records);
                 Ok(())
             }
             Agent::Client(_) => Err(Error::WrongRole),
-        }
+        };
+        self.tps = tps;
+        res
     }
 
     /// Get the current role.
@@ -3430,8 +3436,16 @@ mod tests {
         assert_eq!(2, client.stats().dups_rx);
     }
 
+    // #[derive(Debug)]
+    // struct PermissiveZeroRttChecker {}
+    // impl ZeroRttChecker for PermissiveZeroRttChecker {
+    //     fn check(&self, _first: bool, _token: &[u8]) -> ZeroRttCheckResult {
+    //         ZeroRttCheckResult::Accept
+    //     }
+    // }
+
     fn exchange_ticket(client: &mut Connection, server: &mut Connection) -> Vec<u8> {
-        server.send_ticket(now()).expect("can send ticket");
+        server.send_ticket(now(), &[]).expect("can send ticket");
         let (dgrams, _timer) = server.process_output(now());
         assert_eq!(dgrams.len(), 1);
         client.process_input(dgrams, now());

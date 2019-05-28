@@ -271,9 +271,41 @@ fn zero_rtt() {
         .set_resumption_token(&token[..])
         .expect("should accept token");
     client.enable_0rtt().expect("should enable 0-RTT");
-    server.enable_0rtt(0xffffffff).expect("should enable 0-RTT");
+    server
+        .enable_0rtt(PermissiveZeroRttChecker::new(), 0xffffffff)
+        .expect("should enable 0-RTT");
 
     connect(&mut client, &mut server);
     assert!(client.info().unwrap().early_data_accepted());
     assert!(server.info().unwrap().early_data_accepted());
+}
+
+#[derive(Debug)]
+struct RejectZeroRtt {}
+impl ZeroRttChecker for RejectZeroRtt {
+    fn check(&self, first_hello: bool, token: &[u8]) -> ZeroRttCheckResult {
+        assert!(first_hello);
+        assert_eq!(ZERO_RTT_TOKEN_DATA, token);
+        ZeroRttCheckResult::Reject
+    }
+}
+
+#[test]
+fn reject_zero_rtt() {
+    let token = resumption_setup(Resumption::WithZeroRtt);
+
+    // Finally, 0-RTT should succeed.
+    let mut client = Client::new("server.example").expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    client
+        .set_resumption_token(&token[..])
+        .expect("should accept token");
+    client.enable_0rtt().expect("should enable 0-RTT");
+    server
+        .enable_0rtt(0xffffffff, Box::new(RejectZeroRtt {}))
+        .expect("should enable 0-RTT");
+
+    connect(&mut client, &mut server);
+    assert!(!client.info().unwrap().early_data_accepted());
+    assert!(!server.info().unwrap().early_data_accepted());
 }

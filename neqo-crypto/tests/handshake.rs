@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use neqo_common::qinfo;
 use neqo_crypto::*;
 use std::mem;
 use std::time::Duration;
@@ -59,7 +60,8 @@ fn handshake(now: u64, client: &mut SecretAgent, server: &mut SecretAgent) {
 
 pub fn connect_at(now: u64, client: &mut SecretAgent, server: &mut SecretAgent) {
     handshake(now, client, server);
-    eprintln!("client: {:?}", client.state());
+    qinfo!("client: {:?}", client.state());
+    qinfo!("server: {:?}", server.state());
     assert!(client.state().connected());
     assert!(server.state().connected());
 }
@@ -80,7 +82,30 @@ pub enum Resumption {
     WithZeroRtt,
 }
 
-pub fn resumption_setup(z: Resumption) -> Vec<u8> {
+pub const ZERO_RTT_TOKEN_DATA: &[u8] = b"zero-rtt-token";
+
+#[derive(Debug)]
+pub struct PermissiveZeroRttChecker {
+    resuming: bool
+}
+impl PermissiveZeroRttChecker {
+    pub fn new() -> Box<dyn ZeroRttChecker> {
+        Box::new(PermissiveZeroRttChecker {resuming: true})
+    }
+}
+impl ZeroRttChecker for PermissiveZeroRttChecker {
+    fn check(&self, first: bool, token: &[u8]) -> ZeroRttCheckResult {
+        assert!(first);
+        if self.resuming {
+            assert_eq!(ZERO_RTT_TOKEN_DATA, token);
+        } else {
+            assert!(token.is_empty());
+        }
+        ZeroRttCheckResult::Accept
+    }
+}
+
+pub fn resumption_setup(mode: Resumption) -> Vec<u8> {
     init_db("./db");
     // We need to pretend that initialization was in the past.
     // That way, the anti-replay filter is cleared when we try to connect at |NOW|.
@@ -92,9 +117,11 @@ pub fn resumption_setup(z: Resumption) -> Vec<u8> {
 
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
-    if let Resumption::WithZeroRtt = z {
+    if let Resumption::WithZeroRtt = mode {
         client.enable_0rtt().expect("should enable 0-RTT");
-        server.enable_0rtt(0xffffffff).expect("should enable 0-RTT");
+        server
+            .enable_0rtt(0xffffffff, Box::new(PermissiveZeroRttChecker{resuming: false}))
+            .expect("should enable 0-RTT");
     }
 
     connect(&mut client, &mut server);
@@ -104,7 +131,9 @@ pub fn resumption_setup(z: Resumption) -> Vec<u8> {
     assert!(!client.info().unwrap().early_data_accepted());
     assert!(!server.info().unwrap().early_data_accepted());
 
-    let server_records = server.send_ticket(NOW, &[]).expect("ticket sent");
+    let server_records = server
+        .send_ticket(NOW, ZERO_RTT_TOKEN_DATA)
+        .expect("ticket sent");
     assert_eq!(server_records.len(), 1);
     let client_records = client
         .handshake_raw(NOW, server_records.into_iter().next())

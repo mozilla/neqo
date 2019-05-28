@@ -62,10 +62,15 @@ impl Opt {
             Opt::Locking => !enabled,
             _ => enabled,
         };
-        v as PRIntn
+        PRIntn::from(v)
     }
 }
 
+experimental_api!(SSL_HelloRetryRequestCallback(
+    fd: *mut PRFileDesc,
+    cb: SSLHelloRetryRequestCallback,
+    arg: *mut c_void,
+));
 experimental_api!(SSL_InitAntiReplay(
     now: PRTime,
     window: PRTime,

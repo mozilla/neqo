@@ -17,10 +17,11 @@ use crate::prio;
 use crate::result;
 use crate::secrets::SecretHolder;
 use crate::ssl;
-use crate::ssl::PRTime;
+use crate::ssl::{PRBool, PRTime};
 
 use neqo_common::{qdebug, qinfo, qwarn};
 use std::cell::RefCell;
+use std::convert::TryFrom;
 use std::ffi::CString;
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -699,9 +700,44 @@ impl DerefMut for Client {
     }
 }
 
+/// ZeroRttCheckResult encapsulates the options for handling a ClientHello.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ZeroRttCheckResult {
+    /// Accept 0-RTT; the default.
+    Accept,
+    /// Reject 0-RTT, but continue the handshake normally.
+    Reject,
+    /// Send HelloRetryRequest (probably not needed for QUIC).
+    HelloRetryRequest(Vec<u8>),
+    /// Fail the handshake.
+    Fail,
+}
+
+/// A ZeroRttChecker is used by the agent to validate the application token (as provided by send_ticket)
+pub trait ZeroRttChecker: std::fmt::Debug {
+    fn check(&self, first_hello: bool, token: &[u8]) -> ZeroRttCheckResult;
+}
+
+#[derive(Debug)]
+struct ZeroRttCheckState {
+    fd: *mut ssl::PRFileDesc,
+    checker: Box<dyn ZeroRttChecker>,
+}
+
+impl ZeroRttCheckState {
+    pub fn new(
+        fd: *mut ssl::PRFileDesc,
+        checker: Box<dyn ZeroRttChecker>,
+    ) -> Box<ZeroRttCheckState> {
+        Box::new(ZeroRttCheckState { fd, checker })
+    }
+}
+
 #[derive(Debug)]
 pub struct Server {
     agent: SecretAgent,
+    /// This holds the HRR callback context.
+    zero_rtt_check: Option<Box<ZeroRttCheckState>>,
 }
 
 impl Server {
@@ -732,7 +768,53 @@ impl Server {
         }
 
         agent.ready(true)?;
-        Ok(Server { agent })
+        Ok(Server {
+            agent,
+            zero_rtt_check: None,
+        })
+    }
+
+    unsafe extern "C" fn hello_retry_cb(
+        first_hello: PRBool,
+        client_token: *const u8,
+        client_token_len: c_uint,
+        retry_token: *mut u8,
+        retry_token_len: *mut c_uint,
+        retry_token_max: c_uint,
+        arg: *mut c_void,
+    ) -> ssl::SSLHelloRetryRequestAction::Type {
+        let p = arg as *mut ZeroRttCheckState;
+        let check_state = p.as_mut().unwrap();
+        let token = if client_token.is_null() {
+            &[]
+        } else {
+            std::slice::from_raw_parts(client_token, client_token_len as usize)
+        };
+        match check_state.checker.check(first_hello != 0, token) {
+            ZeroRttCheckResult::Accept => ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept,
+            ZeroRttCheckResult::Fail => ssl::SSLHelloRetryRequestAction::ssl_hello_retry_fail,
+            ZeroRttCheckResult::Reject => {
+                // Just disable 0-RTT from here.
+                ssl::SSL_OptionSet(
+                    check_state.fd,
+                    ssl::Opt::EarlyData.as_int(),
+                    ssl::PRIntn::from(false),
+                );
+                ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept
+            }
+            ZeroRttCheckResult::HelloRetryRequest(tok) => {
+                // Don't bother propagating errors from these, because these are dumb errors.
+                assert_eq!(
+                    first_hello, 0,
+                    "got HRR token from check on second ClientHello"
+                );
+                assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
+                let slc = std::slice::from_raw_parts_mut(retry_token, tok.len());
+                slc.copy_from_slice(&tok);
+                *retry_token_len = to_c_uint(tok.len()).expect("token was way too big");
+                ssl::SSLHelloRetryRequestAction::ssl_hello_retry_request
+            }
+        }
     }
 
     /// Initialize anti-replay.  Failure to call this function results in all
@@ -756,10 +838,22 @@ impl Server {
 
     /// Enable 0-RTT.  This shadows the function of the same name that can be accessed
     /// via the Deref implementation on Server.
-    pub fn enable_0rtt(&mut self, max_early_data: u32) -> Res<()> {
-        self.set_option(ssl::Opt::EarlyData, true)?;
+    pub fn enable_0rtt(
+        &mut self,
+        max_early_data: u32,
+        checker: Box<dyn ZeroRttChecker>,
+    ) -> Res<()> {
+        let mut check_state = ZeroRttCheckState::new(self.agent.fd, checker);
+        let arg = &mut *check_state as *mut ZeroRttCheckState as *mut c_void;
+        let rv = unsafe {
+            ssl::SSL_HelloRetryRequestCallback(self.agent.fd, Some(Server::hello_retry_cb), arg)
+        };
+        result::result(rv)?;
         let rv = unsafe { ssl::SSL_SetMaxEarlyDataSize(self.agent.fd, max_early_data) };
-        result::result(rv)
+        result::result(rv)?;
+        self.zero_rtt_check = Some(check_state);
+        self.agent.enable_0rtt()?;
+        Ok(())
     }
 
     /// Send a session ticket to the client.
