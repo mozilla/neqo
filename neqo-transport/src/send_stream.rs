@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::mem;
 use std::rc::Rc;
 
-use neqo_common::{qinfo, qtrace, qwarn};
+use neqo_common::{qerror, qinfo, qtrace, qwarn};
 use slice_deque::SliceDeque;
 
 use crate::connection::{ConnectionEvents, FlowMgr, StreamId, TxMode};
@@ -571,6 +571,11 @@ impl SendStream {
     }
 
     pub fn send(&mut self, buf: &[u8]) -> Res<usize> {
+        if buf.is_empty() {
+            qerror!("zero-length send on stream {}", self.stream_id.as_u64());
+            return Err(Error::InvalidInput);
+        }
+
         if let SendStreamState::Ready = self.state {
             self.state.transition(SendStreamState::Send {
                 send_buf: TxBuffer::new(),
@@ -582,18 +587,21 @@ impl SendStream {
         let credit_avail = min(stream_credit_avail, conn_credit_avail);
         let can_send_bytes = min(credit_avail, buf.len() as u64);
 
-        if !buf.is_empty() && can_send_bytes == 0 {
-            // We had some bytes to send but were blocked by flow
-            // control.
-            assert!(stream_credit_avail == 0 || conn_credit_avail == 0);
-            if stream_credit_avail == 0 {
+        if can_send_bytes != buf.len() as u64 {
+            // We had some bytes to send but were entirely or partially
+            // blocked by flow control.
+            if stream_credit_avail < buf.len() as u64 {
                 self.flow_mgr
                     .borrow_mut()
                     .stream_data_blocked(self.stream_id, self.max_stream_data);
             }
-            if conn_credit_avail == 0 {
+            if conn_credit_avail < buf.len() as u64 {
                 self.flow_mgr.borrow_mut().data_blocked();
             }
+        }
+
+        if can_send_bytes == 0 {
+            return Ok(0);
         }
 
         let buf = &buf[..can_send_bytes as usize];

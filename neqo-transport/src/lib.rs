@@ -54,6 +54,7 @@ pub enum Error {
     ConnectionState,
     AckedUnsentPacket,
     VersionNegotiation,
+    InvalidInput,
 }
 
 impl Error {
@@ -85,7 +86,8 @@ impl Error {
             | Error::KeysNotFound
             | Error::ConnectionState
             | Error::AckedUnsentPacket
-            | Error::VersionNegotiation => 1,
+            | Error::VersionNegotiation
+            | Error::InvalidInput => 1,
         }
     }
 }
