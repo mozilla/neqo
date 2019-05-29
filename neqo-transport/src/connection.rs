@@ -87,15 +87,15 @@ pub enum State {
 pub struct StreamId(u64);
 
 impl StreamId {
-    fn is_bidi(self) -> bool {
+    pub fn is_bidi(self) -> bool {
         self.0 & 0x02 == 0
     }
 
-    fn is_uni(self) -> bool {
+    pub fn is_uni(self) -> bool {
         !self.is_bidi()
     }
 
-    fn stream_type(self) -> StreamType {
+    pub fn stream_type(self) -> StreamType {
         if self.is_bidi() {
             StreamType::BiDi
         } else {
@@ -103,15 +103,15 @@ impl StreamId {
         }
     }
 
-    fn is_client_initiated(self) -> bool {
+    pub fn is_client_initiated(self) -> bool {
         self.0 & 0x01 == 0
     }
 
-    fn is_server_initiated(self) -> bool {
+    pub fn is_server_initiated(self) -> bool {
         !self.is_client_initiated()
     }
 
-    fn role(self) -> Role {
+    pub fn role(self) -> Role {
         if self.is_client_initiated() {
             Role::Client
         } else {
@@ -119,7 +119,7 @@ impl StreamId {
         }
     }
 
-    fn is_self_initiated(self, my_role: Role) -> bool {
+    pub fn is_self_initiated(self, my_role: Role) -> bool {
         match my_role {
             Role::Client if self.is_client_initiated() => true,
             Role::Server if self.is_server_initiated() => true,
@@ -127,19 +127,19 @@ impl StreamId {
         }
     }
 
-    fn is_peer_initiated(self, my_role: Role) -> bool {
+    pub fn is_peer_initiated(self, my_role: Role) -> bool {
         !self.is_self_initiated(my_role)
     }
 
-    fn is_send_only(self, my_role: Role) -> bool {
+    pub fn is_send_only(self, my_role: Role) -> bool {
         self.is_uni() && self.is_self_initiated(my_role)
     }
 
-    fn is_recv_only(self, my_role: Role) -> bool {
+    pub fn is_recv_only(self, my_role: Role) -> bool {
         self.is_uni() && self.is_peer_initiated(my_role)
     }
 
-    fn as_u64(self) -> u64 {
+    pub fn as_u64(self) -> u64 {
         self.0
     }
 }
