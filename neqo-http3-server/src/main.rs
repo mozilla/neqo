@@ -8,7 +8,7 @@
 
 use neqo_common::now;
 use neqo_crypto::init_db;
-use neqo_http3::{Http3Connection, Http3State, RequestStreamServer};
+use neqo_http3::{Http3Connection, Http3State};
 use neqo_transport::{Connection, Datagram};
 use std::collections::HashMap;
 use std::io;
@@ -59,10 +59,12 @@ impl Args {
     }
 }
 
-fn http_serve(cr: &RequestStreamServer, _error: bool) -> (Vec<(String, String)>, Vec<u8>) {
+fn http_serve(
+    request_headers: &[(String, String)],
+    _error: bool,
+) -> (Vec<(String, String)>, Vec<u8>) {
     println!("Serve a request");
 
-    let request_headers = cr.get_request_headers();
     println!("Headers: {:?}", request_headers);
 
     let path_hdr = request_headers.iter().find(|(k, _)| k == ":path");

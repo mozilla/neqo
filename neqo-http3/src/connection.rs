@@ -178,7 +178,7 @@ pub struct Http3Connection {
     events: Rc<RefCell<Http3Events>>,
     request_streams_client: HashMap<u64, RequestStreamClient>,
     // Server only
-    handler: Option<Box<FnMut(&RequestStreamServer, bool) -> (Vec<(String, String)>, Vec<u8>)>>,
+    handler: Option<Box<FnMut(&[(String, String)], bool) -> (Vec<(String, String)>, Vec<u8>)>>,
     request_streams_server: HashMap<u64, RequestStreamServer>,
 }
 
@@ -193,7 +193,7 @@ impl Http3Connection {
         c: Connection,
         max_table_size: u32,
         max_blocked_streams: u16,
-        handler: Option<Box<FnMut(&RequestStreamServer, bool) -> (Vec<(String, String)>, Vec<u8>)>>,
+        handler: Option<Box<FnMut(&[(String, String)], bool) -> (Vec<(String, String)>, Vec<u8>)>>,
     ) -> Http3Connection {
         qinfo!(
             "Create new http connection with max_table_size: {} and max_blocked_streams: {}",
@@ -623,7 +623,7 @@ impl Http3Connection {
             }
             if request_stream.done_reading_request() {
                 if let Some(ref mut cb) = self.handler {
-                    let (headers, data) = (cb)(request_stream, false);
+                    let (headers, data) = (cb)(request_stream.get_request_headers(), false);
                     request_stream.set_response(&headers, data, &mut self.qpack_encoder);
                 }
                 if request_stream.has_data_to_send() {

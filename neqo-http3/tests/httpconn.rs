@@ -6,7 +6,7 @@
 
 #![allow(unused_assignments)]
 
-use neqo_http3::{Http3Connection, Http3State, RequestStreamServer};
+use neqo_http3::{Http3Connection, Http3State};
 use neqo_transport::{Connection, Datagram};
 
 use std::net::SocketAddr;
@@ -17,10 +17,11 @@ fn loopback() -> SocketAddr {
     "127.0.0.1:443".parse().unwrap()
 }
 
-fn new_stream_callback(cr: &RequestStreamServer, error: bool) -> (Vec<(String, String)>, Vec<u8>) {
+fn new_stream_callback(
+    request_headers: &[(String, String)],
+    error: bool,
+) -> (Vec<(String, String)>, Vec<u8>) {
     println!("Error: {}", error);
-
-    let request_headers = cr.get_request_headers();
 
     assert_eq!(
         request_headers,
