@@ -374,7 +374,7 @@ impl Http3Connection {
             for stream_id in to_send {
                 let mut remove_stream = false;
                 if let Some(cs) = &mut self.request_streams_server.get_mut(&stream_id) {
-                    cs.send(&mut self.conn, &mut self.qpack_encoder)?;
+                    cs.send(&mut self.conn)?;
                     if cs.has_data_to_send() {
                         self.streams_have_data_to_send.insert(stream_id);
                     } else {
@@ -624,7 +624,7 @@ impl Http3Connection {
             if request_stream.done_reading_request() {
                 if let Some(ref mut cb) = self.handler {
                     let (headers, data) = (cb)(request_stream, false);
-                    request_stream.set_response(&headers, data);
+                    request_stream.set_response(&headers, data, &mut self.qpack_encoder);
                 }
                 if request_stream.has_data_to_send() {
                     self.streams_have_data_to_send.insert(stream_id);
