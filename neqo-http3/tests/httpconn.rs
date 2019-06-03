@@ -6,10 +6,12 @@
 
 #![allow(unused_assignments)]
 
+use neqo_common::now;
 use neqo_http3::{Http3Connection, Http3State};
 use neqo_transport::{Connection, Datagram};
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use neqo_crypto::init_db;
 
@@ -42,7 +44,11 @@ fn new_stream_callback(
     )
 }
 
-fn connect() -> (Http3Connection, Http3Connection, (Vec<Datagram>, u64)) {
+fn connect() -> (
+    Http3Connection,
+    Http3Connection,
+    (Vec<Datagram>, Option<Duration>),
+) {
     init_db("../neqo-transport/db");
 
     let mut hconn_c = Http3Connection::new(
@@ -60,16 +66,16 @@ fn connect() -> (Http3Connection, Http3Connection, (Vec<Datagram>, u64)) {
 
     assert_eq!(hconn_c.state(), Http3State::Initializing);
     assert_eq!(hconn_s.state(), Http3State::Initializing);
-    let mut r = hconn_c.process(Vec::new(), 0);
-    r = hconn_s.process(r.0, 0);
-    r = hconn_c.process(r.0, 0);
-    r = hconn_s.process(r.0, 0);
+    let mut r = hconn_c.process(Vec::new(), now());
+    r = hconn_s.process(r.0, now());
+    r = hconn_c.process(r.0, now());
+    r = hconn_s.process(r.0, now());
     assert_eq!(hconn_c.state(), Http3State::Connected);
     assert_eq!(hconn_s.state(), Http3State::Connected);
-    r = hconn_c.process(r.0, 0);
-    r = hconn_s.process(r.0, 0);
+    r = hconn_c.process(r.0, now());
+    r = hconn_s.process(r.0, now());
     // assert_eq!(hconn_s.settings_received, true);
-    r = hconn_c.process(r.0, 0);
+    r = hconn_c.process(r.0, now());
     // assert_eq!(hconn_c.settings_received, true);
 
     (hconn_c, hconn_s, r)
@@ -89,12 +95,12 @@ fn test_fetch() {
         .fetch("GET", "https", "something.com", "/", &[])
         .unwrap();
     assert_eq!(req, 0);
-    r = hconn_c.process(r.0, 0);
+    r = hconn_c.process(r.0, now());
     eprintln!("-----server");
-    r = hconn_s.process(r.0, 0);
+    r = hconn_s.process(r.0, now());
 
     eprintln!("-----client");
-    r = hconn_c.process(r.0, 0);
+    r = hconn_c.process(r.0, now());
     // TODO: some kind of client API needed to read result of fetch
     // TODO: assert result is as expected e.g. (200 "abc")
     // assert!(false);

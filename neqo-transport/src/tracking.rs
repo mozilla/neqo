@@ -9,6 +9,7 @@ use neqo_common::{qinfo, qtrace};
 use neqo_crypto::constants::Epoch;
 use std::cmp::{max, min};
 use std::collections::HashMap;
+use std::time::Instant;
 
 #[derive(Debug, Default)]
 pub struct PacketRange {
@@ -22,11 +23,11 @@ impl PacketRange {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct PacketMeta {
     pn: u64,
     //    non_acks: bool,
-    t: u64,
+    t: Instant,
     acked2: bool,
 }
 
@@ -52,7 +53,7 @@ impl RecvdPackets {
         }
     }
 
-    pub fn set_received(&mut self, now: u64, pn: u64, non_acks: bool) {
+    pub fn set_received(&mut self, now: Instant, pn: u64, non_acks: bool) {
         assert!(!self.packets.contains_key(&pn));
         self.max_received = max(self.max_received, pn);
         self.min_not_acked2 = min(self.min_not_acked2, pn);
@@ -171,7 +172,7 @@ mod tests {
         let mut packets2 = HashSet::new();
 
         for pn in pns {
-            rp.set_received(0, pn, true);
+            rp.set_received(Instant::now(), pn, true);
             packets.insert(pn);
         }
 
@@ -212,7 +213,7 @@ mod tests {
     #[test]
     fn test_two_acks() {
         let mut rp = RecvdPackets::new("[label]", 0, 0);
-        rp.set_received(0, 0, true);
+        rp.set_received(Instant::now(), 0, true);
         let ranges = rp.get_eligible_ack_ranges();
         assert_eq!(ranges.len(), 1);
         let ranges = rp.get_eligible_ack_ranges();
@@ -222,7 +223,7 @@ mod tests {
     #[test]
     fn test_ack_only() {
         let mut rp = RecvdPackets::new("[label]", 0, 0);
-        rp.set_received(0, 0, false);
+        rp.set_received(Instant::now(), 0, false);
         let ranges = rp.get_eligible_ack_ranges();
         assert_eq!(ranges.len(), 0);
     }

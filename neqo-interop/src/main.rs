@@ -145,7 +145,7 @@ impl Handler for H9Handler {
                     self.rbytes += sz;
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
-                        client.close(0, 0, "kthxbye!");
+                        client.close(now(), 0, "kthxbye!");
                         self.rsfin = true;
                         return false;
                     }
@@ -426,7 +426,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
     let mut hc = H3Handler {
         streams: HashSet::new(),
         h3: Http3Connection::new(client, 128, 128, None),
-        host: String::from(peer.host.clone()),
+        host: String::from(peer.host),
         path: String::from("/"),
     };
 

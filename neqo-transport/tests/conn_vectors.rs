@@ -1,6 +1,6 @@
 // Tests with the test vectors from the spec.
 #![deny(warnings)]
-use neqo_common::Encoder;
+use neqo_common::{now, Encoder};
 use neqo_crypto::init_db;
 use neqo_transport::connection::State;
 use neqo_transport::{Connection, Datagram};
@@ -20,7 +20,7 @@ fn process_client_initial() {
     let pkt: Vec<u8> = Encoder::from_hex(INITIAL_PACKET).into();
     let dgram = Datagram::new(loopback(), loopback(), pkt);
     assert_eq!(*server.state(), State::WaitInitial);
-    let (out, _) = server.process(vec![dgram], 0);
+    let (out, _) = server.process(vec![dgram], now());
     assert_eq!(*server.state(), State::Handshaking);
     assert_eq!(out.len(), 1);
 }

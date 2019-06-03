@@ -501,6 +501,7 @@ impl HFrameReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_common::now;
     use neqo_crypto::init_db;
     use neqo_transport::frame::StreamType;
     use num_traits::Num;
@@ -508,10 +509,6 @@ mod tests {
 
     fn loopback() -> SocketAddr {
         "127.0.0.1:443".parse().unwrap()
-    }
-
-    fn now() -> u64 {
-        0
     }
 
     #[allow(clippy::many_single_char_names)]

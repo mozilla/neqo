@@ -8,7 +8,8 @@ use crate::hframe::{HFrame, HFrameReader, HSettingType};
 use crate::request_stream_client::RequestStreamClient;
 use crate::request_stream_server::RequestStreamServer;
 use neqo_common::{
-    qdebug, qerror, qinfo, qwarn, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
+    now, qdebug, qerror, qinfo, qwarn, Decoder, Encoder, IncrementalDecoder,
+    IncrementalDecoderResult,
 };
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
@@ -21,6 +22,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::mem;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use crate::{Error, Http3Error, Res};
 
@@ -178,6 +180,7 @@ pub struct Http3Connection {
     events: Rc<RefCell<Http3Events>>,
     request_streams_client: HashMap<u64, RequestStreamClient>,
     // Server only
+    #[allow(clippy::type_complexity)]
     handler: Option<Box<FnMut(&[(String, String)], bool) -> (Vec<(String, String)>, Vec<u8>)>>,
     request_streams_server: HashMap<u64, RequestStreamServer>,
 }
@@ -189,6 +192,7 @@ impl ::std::fmt::Display for Http3Connection {
 }
 
 impl Http3Connection {
+    #[allow(clippy::type_complexity)]
     pub fn new(
         c: Connection,
         max_table_size: u32,
@@ -300,7 +304,11 @@ impl Http3Connection {
         }
     }
 
-    pub fn process<I>(&mut self, in_dgrams: I, cur_time: u64) -> (Vec<Datagram>, u64)
+    pub fn process<I>(
+        &mut self,
+        in_dgrams: I,
+        cur_time: Instant,
+    ) -> (Vec<Datagram>, Option<Duration>)
     where
         I: IntoIterator<Item = Datagram>,
     {
@@ -310,7 +318,7 @@ impl Http3Connection {
         self.process_output(cur_time)
     }
 
-    pub fn process_input<I>(&mut self, in_dgrams: I, cur_time: u64)
+    pub fn process_input<I>(&mut self, in_dgrams: I, cur_time: Instant)
     where
         I: IntoIterator<Item = Datagram>,
     {
@@ -342,7 +350,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn process_output(&mut self, cur_time: u64) -> (Vec<Datagram>, u64) {
+    pub fn process_output(&mut self, cur_time: Instant) -> (Vec<Datagram>, Option<Duration>) {
         qdebug!([self] "Process output.");
         self.conn.process_output(cur_time)
     }
@@ -695,7 +703,7 @@ impl Http3Connection {
         }
         self.request_streams_client.clear();
         self.request_streams_server.clear();
-        self.conn.close(0, error, msg);
+        self.conn.close(now(), error, msg);
     }
 
     pub fn fetch(
@@ -947,15 +955,12 @@ impl Http3Events {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_common::now;
     use neqo_crypto::init_db;
     use std::net::SocketAddr;
 
     fn loopback() -> SocketAddr {
         "127.0.0.1:443".parse().unwrap()
-    }
-
-    fn now() -> u64 {
-        0
     }
 
     fn assert_closed(hconn: &Http3Connection, expected: Error) {
@@ -997,10 +1002,14 @@ mod tests {
         if client {
             assert_eq!(hconn.state(), Http3State::Initializing);
             let mut r = hconn.process(vec![], now());
+            assert_eq!(hconn.state(), Http3State::Initializing);
+            assert_eq!(*neqo_trans_conn.state(), State::WaitInitial);
             r = neqo_trans_conn.process(r.0, now());
+            assert_eq!(*neqo_trans_conn.state(), State::Handshaking);
+            assert_eq!(hconn.state(), Http3State::Initializing);
             r = hconn.process(r.0, now());
-            neqo_trans_conn.process(r.0, now());
             assert_eq!(hconn.state(), Http3State::Connected);
+            neqo_trans_conn.process(r.0, now());
         } else {
             assert_eq!(hconn.state(), Http3State::Initializing);
             let mut r = neqo_trans_conn.process(vec![], now());
@@ -1141,8 +1150,8 @@ mod tests {
         let sent =
             neqo_trans_conn.stream_send(control_stream, &[0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3]);
         assert_eq!(sent, Ok(7));
-        let r = neqo_trans_conn.process(Vec::new(), 0);
-        hconn.process(r.0, 0);
+        let r = neqo_trans_conn.process(Vec::new(), now());
+        hconn.process(r.0, now());
         assert_closed(&hconn, Error::MissingSettings);
     }
 
@@ -1157,8 +1166,8 @@ mod tests {
         let sent =
             neqo_trans_conn.stream_send(control_stream, &[0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3]);
         assert_eq!(sent, Ok(7));
-        let r = neqo_trans_conn.process(Vec::new(), 0);
-        hconn.process(r.0, 0);
+        let r = neqo_trans_conn.process(Vec::new(), now());
+        hconn.process(r.0, now());
         assert_closed(&hconn, Error::MissingSettings);
     }
 
@@ -1383,7 +1392,7 @@ mod tests {
             Ok(0)
         );
 
-        let mut r = hconn.process(vec![], 0);
+        let mut r = hconn.process(vec![], now());
         neqo_trans_conn.process(r.0, now());
 
         // find the new request/response stream and send frame v on it.
@@ -1403,7 +1412,7 @@ mod tests {
         // Generate packet with the above bad h3 input
         r = neqo_trans_conn.process(vec![], now());
         // Process bad input and generate stop sending frame
-        r = hconn.process(r.0, 0);
+        r = hconn.process(r.0, now());
         // Process stop sending frame and generate an event and a reset frame
         r = neqo_trans_conn.process(r.0, now());
 
@@ -1425,7 +1434,7 @@ mod tests {
         assert_eq!(hconn.state(), Http3State::Connected);
 
         // Process reset frame
-        hconn.conn.process(r.0, 0);
+        hconn.conn.process(r.0, now());
         let mut reset_event_found = false;
         for e in hconn.conn.events() {
             match e {
@@ -1552,7 +1561,7 @@ mod tests {
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
-        let mut r = hconn.process(vec![], 0);
+        let mut r = hconn.process(vec![], now());
         neqo_trans_conn.process(r.0, now());
 
         // find the new request/response stream and send frame v on it.
@@ -1600,7 +1609,7 @@ mod tests {
             }
         }
         r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, 0);
+        hconn.process(r.0, now());
 
         let http_events = hconn.events();
         for e in http_events {
@@ -1673,7 +1682,7 @@ mod tests {
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
-        let mut r = hconn.process(vec![], 0);
+        let mut r = hconn.process(vec![], now());
         neqo_trans_conn.process(r.0, now());
 
         // find the new request/response stream and send frame v on it.
@@ -1709,7 +1718,7 @@ mod tests {
             }
         }
         r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, 0);
+        hconn.process(r.0, now());
 
         let http_events = hconn.events();
         for e in http_events {
@@ -1800,7 +1809,7 @@ mod tests {
             .unwrap();
         assert_eq!(request_stream_id_3, 8);
 
-        let mut r = hconn.process(vec![], 0);
+        let mut r = hconn.process(vec![], now());
         neqo_trans_conn.process(r.0, now());
 
         let _ = neqo_trans_conn.stream_send(
@@ -1840,7 +1849,7 @@ mod tests {
             }
         }
         r = neqo_trans_conn.process(vec![], now());
-        hconn.process(r.0, 0);
+        hconn.process(r.0, now());
 
         let mut stream_reset = false;
         let mut http_events = hconn.events();

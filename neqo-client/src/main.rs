@@ -341,7 +341,7 @@ mod old {
                         );
                         if fin {
                             println!("<FIN[{}]>", stream_id);
-                            client.close(0, 0, "kthxbye!");
+                            client.close(now(), 0, "kthxbye!");
                             return false;
                         }
                     }
