@@ -6,10 +6,10 @@
 
 #![allow(dead_code)]
 use crate::{Error, Res};
-use neqo_common::{hex, matches, qdebug, qtrace, Decoder, Encoder};
+use neqo_common::{hex, matches, qdebug, qinfo, qtrace, Decoder, Encoder};
 use neqo_crypto::constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS};
 use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-use neqo_crypto::{HandshakeMessage, ZeroRttChecker, ZeroRttCheckResult};
+use neqo_crypto::{HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -340,29 +340,38 @@ pub struct TpZeroRttChecker {
 
 impl TpZeroRttChecker {
     pub fn new(handler: Rc<RefCell<TransportParametersHandler>>) -> Box<dyn ZeroRttChecker> {
-        Box::new(TpZeroRttChecker{handler})
+        Box::new(TpZeroRttChecker { handler })
     }
 }
 
 impl ZeroRttChecker for TpZeroRttChecker {
-    fn check(&self, first_hello: bool, token: &[u8]) -> ZeroRttCheckResult {
-        // Reject 0-RTT if we sent HelloRetryRequest or there is no token.
-        if !first_hello || token.len() == 0 {
+    fn check(&self, token: &[u8]) -> ZeroRttCheckResult {
+        // Reject 0-RTT if there is no token.
+        if token.len() == 0 {
+            qdebug!("0-RTT: no token, no 0-RTT");
             return ZeroRttCheckResult::Reject;
         }
         let mut dec = Decoder::from(token);
         let tpslice = match dec.decode_vvec() {
             Some(v) => v,
-            _ => return ZeroRttCheckResult::Fail,
+            _ => {
+                qinfo!("0-RTT: token code error");
+                return ZeroRttCheckResult::Fail;
+            }
         };
         let mut dec_tp = Decoder::from(tpslice);
         let remembered = match TransportParameters::decode(&mut dec_tp) {
             Ok(v) => v,
-            _ => return ZeroRttCheckResult::Fail,
+            _ => {
+                qinfo!("0-RTT: transport parameter decode error");
+                return ZeroRttCheckResult::Fail;
+            }
         };
         if self.handler.borrow().local.ok_for_0rtt(&remembered) {
+            qinfo!("0-RTT: transport parameters OK, accepting");
             ZeroRttCheckResult::Accept
         } else {
+            qinfo!("0-RTT: transport parameters bad, rejecting");
             ZeroRttCheckResult::Reject
         }
     }
@@ -456,9 +465,9 @@ mod tests {
         for i in INTEGER_KEYS {
             let mut tps_b = tps_a.clone();
             tps_b.set(*i, TransportParameter::Integer(13));
-            // If a increased value is remembered, then we can't attempt 0-RTT with these parameters.
+            // If an increased value is remembered, then we can't attempt 0-RTT with these parameters.
             assert!(!tps_a.ok_for_0rtt(&tps_b));
-            // If a increased value is lower, then we can attempt 0-RTT with these parameters.
+            // If an increased value is lower, then we can attempt 0-RTT with these parameters.
             assert!(tps_b.ok_for_0rtt(&tps_a));
         }
 

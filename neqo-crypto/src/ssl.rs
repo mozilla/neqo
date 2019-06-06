@@ -66,6 +66,11 @@ impl Opt {
     }
 }
 
+experimental_api!(SSL_GetCurrentEpoch(
+    fd: *mut PRFileDesc,
+    read_epoch: *mut u16,
+    write_epoch: *mut u16,
+));
 experimental_api!(SSL_HelloRetryRequestCallback(
     fd: *mut PRFileDesc,
     cb: SSLHelloRetryRequestCallback,

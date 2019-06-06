@@ -88,6 +88,11 @@ impl RecordList {
     fn append(&mut self, epoch: Epoch, ct: ssl::SSLContentType::Type, data: &[u8]) {
         self.records.push(Record::new(epoch, ct, data));
     }
+
+    /// Filter out EndOfEarlyData messages.
+    pub fn remove_eoed(&mut self) {
+        self.records.retain(|rec| rec.epoch != 1);
+    }
 }
 
 impl Deref for RecordList {

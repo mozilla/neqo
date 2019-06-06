@@ -86,16 +86,15 @@ pub const ZERO_RTT_TOKEN_DATA: &[u8] = b"zero-rtt-token";
 
 #[derive(Debug)]
 pub struct PermissiveZeroRttChecker {
-    resuming: bool
+    resuming: bool,
 }
 impl PermissiveZeroRttChecker {
     pub fn new() -> Box<dyn ZeroRttChecker> {
-        Box::new(PermissiveZeroRttChecker {resuming: true})
+        Box::new(PermissiveZeroRttChecker { resuming: true })
     }
 }
 impl ZeroRttChecker for PermissiveZeroRttChecker {
-    fn check(&self, first: bool, token: &[u8]) -> ZeroRttCheckResult {
-        assert!(first);
+    fn check(&self, token: &[u8]) -> ZeroRttCheckResult {
         if self.resuming {
             assert_eq!(ZERO_RTT_TOKEN_DATA, token);
         } else {
@@ -120,7 +119,10 @@ pub fn resumption_setup(mode: Resumption) -> Vec<u8> {
     if let Resumption::WithZeroRtt = mode {
         client.enable_0rtt().expect("should enable 0-RTT");
         server
-            .enable_0rtt(0xffffffff, Box::new(PermissiveZeroRttChecker{resuming: false}))
+            .enable_0rtt(
+                0xffffffff,
+                Box::new(PermissiveZeroRttChecker { resuming: false }),
+            )
             .expect("should enable 0-RTT");
     }
 

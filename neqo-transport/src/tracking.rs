@@ -10,6 +10,23 @@ use neqo_crypto::constants::Epoch;
 use std::cmp::{max, min};
 use std::collections::HashMap;
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum PNSpace {
+    Initial,
+    Handshake,
+    ApplicationData,
+}
+
+impl From<Epoch> for PNSpace {
+    fn from(epoch: Epoch) -> PNSpace {
+        match epoch {
+            0 => PNSpace::Initial,
+            2 => PNSpace::Handshake,
+            _ => PNSpace::ApplicationData,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct PacketRange {
     pub largest: u64,

@@ -138,7 +138,12 @@ fn build_nss(dir: PathBuf) {
 }
 
 fn static_link(nsstarget: &PathBuf) {
-    // This is kludgy.
+    let (lib_prefix, lib_suffix) = if env::consts::OS == "windows" {
+        (String::from(""), ".lib")
+    } else {
+        (String::from("lib"), ".a")
+    };
+
     let lib_dir = nsstarget.join("lib");
     println!("cargo:rustc-link-search={}", lib_dir.to_str().unwrap());
     let mut static_libs = vec![
@@ -163,6 +168,8 @@ fn static_link(nsstarget: &PathBuf) {
         static_libs.push("sqlite");
     }
     for lib in static_libs {
+        let lib_file = lib_dir.join(lib_prefix.clone() + lib + lib_suffix);
+        println!("cargo:rerun-if-changed={}", lib_file.to_str().unwrap());
         println!("cargo:rustc-link-lib=static={}", lib);
     }
 

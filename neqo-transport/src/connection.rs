@@ -35,7 +35,7 @@ use crate::send_stream::{SendStream, TxBuffer};
 use crate::stats::Stats;
 use crate::tparams::consts as tp_const;
 use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
-use crate::tracking::RecvdPackets;
+use crate::tracking::{PNSpace, RecvdPackets};
 use crate::{AppError, ConnectionError, Error, Res};
 
 #[derive(Debug, Default)]
@@ -194,23 +194,6 @@ impl From<StreamId> for StreamIndex {
 impl AddAssign<u64> for StreamIndex {
     fn add_assign(&mut self, other: u64) {
         *self = StreamIndex::new(self.as_u64() + other)
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum PNSpace {
-    Initial,
-    Handshake,
-    ApplicationData,
-}
-
-impl From<Epoch> for PNSpace {
-    fn from(epoch: Epoch) -> PNSpace {
-        match epoch {
-            0 => PNSpace::Initial,
-            2 => PNSpace::Handshake,
-            _ => PNSpace::ApplicationData,
-        }
     }
 }
 
@@ -546,24 +529,46 @@ impl Debug for FrameGeneratorToken {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum CryptoDxDirection {
+    Read,
+    Write,
+}
+
 #[derive(Debug)]
 struct CryptoDxState {
-    label: String,
+    direction: CryptoDxDirection,
+    epoch: Epoch,
     aead: Aead,
     hpkey: HpKey,
 }
 
 impl CryptoDxState {
-    fn new<S: Into<String>>(label: S, secret: &SymKey, cipher: Cipher) -> CryptoDxState {
-        qinfo!("Making CryptoDxState, cipher={}", cipher);
+    fn new(
+        direction: CryptoDxDirection,
+        epoch: Epoch,
+        secret: &SymKey,
+        cipher: Cipher,
+    ) -> CryptoDxState {
+        qinfo!(
+            "Making {:?} {} CryptoDxState, cipher={}",
+            direction,
+            epoch,
+            cipher
+        );
         CryptoDxState {
-            label: label.into(),
+            direction,
+            epoch,
             aead: Aead::new(TLS_VERSION_1_3, cipher, secret, "quic ").unwrap(),
             hpkey: extract_hp(TLS_VERSION_1_3, cipher, secret, "quic hp").unwrap(),
         }
     }
 
-    fn new_initial<S: Into<String> + Clone>(label: S, dcid: &[u8]) -> CryptoDxState {
+    fn new_initial<S: Into<String>>(
+        direction: CryptoDxDirection,
+        label: S,
+        dcid: &[u8],
+    ) -> Option<CryptoDxState> {
         let cipher = TLS_AES_128_GCM_SHA256;
         const INITIAL_SALT: &[u8] = &[
             0xef, 0x4f, 0xb0, 0xab, 0xb4, 0x74, 0x70, 0xc4, 0x1b, 0xef, 0xcf, 0x80, 0x31, 0x33,
@@ -584,18 +589,17 @@ impl CryptoDxState {
         .unwrap();
 
         let secret =
-            hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label.clone())
-                .unwrap();
+            hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label).unwrap();
 
-        CryptoDxState::new(label.clone(), &secret, cipher)
+        Some(CryptoDxState::new(direction, 0, &secret, cipher))
     }
 }
 
 #[derive(Debug)]
 struct CryptoState {
     epoch: Epoch,
-    rx: CryptoDxState,
-    tx: CryptoDxState,
+    rx: Option<CryptoDxState>,
+    tx: Option<CryptoDxState>,
     recvd: Option<RecvdPackets>,
 }
 
@@ -735,6 +739,7 @@ impl Connection {
             .enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])
             .expect("Could not set ciphers");
         agent.set_alpn(protocols).expect("Could not set ALPN");
+        agent.disable_end_of_early_data();
         match agent {
             Agent::Client(c) => c.enable_0rtt(),
             Agent::Server(s) => s.enable_0rtt(0xffffffff, TpZeroRttChecker::new(tphandler.clone())),
@@ -897,7 +902,7 @@ impl Connection {
         let res = match self.tls {
             Agent::Server(ref mut s) => {
                 let mut enc = Encoder::default();
-                enc.encode_vvec_with(|mut enc_inner|{
+                enc.encode_vvec_with(|mut enc_inner| {
                     tps.borrow().local.encode(&mut enc_inner);
                 });
                 enc.encode(extra);
@@ -972,7 +977,7 @@ impl Connection {
         if cur_time >= self.deadline {
             // Timer expired.
             if let State::Init = self.state {
-                let res = self.client_start();
+                let res = self.client_start(cur_time);
                 self.absorb_error(cur_time, res);
             }
         }
@@ -1120,10 +1125,13 @@ impl Connection {
                 .space(PNSpace::from(hdr.epoch))
                 .largest_acknowledged();
             let res = match self.obtain_crypto_state(hdr.epoch) {
-                Ok(cs) => {
-                    let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
-                    decrypt_packet(&cs.rx, pn_decoder, &mut hdr, slc)
-                }
+                Ok(cs) => match cs.rx.as_ref() {
+                    Some(rx) => {
+                        let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
+                        decrypt_packet(rx, pn_decoder, &mut hdr, slc)
+                    }
+                    _ => Err(Error::KeysNotFound),
+                },
                 Err(e) => Err(e),
             };
             slc = &slc[hdr.hdr_len + hdr.body_len()..];
@@ -1201,8 +1209,8 @@ impl Connection {
             0, // unused
             0, // unused
         );
-        let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
-        let packet = encode_packet(&cs.tx, &hdr, &[]);
+        let cs = self.obtain_crypto_state(0).unwrap();
+        let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &[]);
         self.stats.packets_tx += 1;
         if let Some(path) = &self.paths {
             Datagram::new(path.local, path.remote, packet)
@@ -1260,6 +1268,10 @@ impl Connection {
                 continue;
             }
 
+            // TODO(mt) this is a complete disaster.  Crypto state is
+            // tracking received packets by epoch, but it should be tracking by PNSpace.
+            // Also, loss recovery should be the place to track that sort of thing.
+            // Also, this fails badly with 0-RTT.
             if let Some(recvd) = self
                 .obtain_crypto_state(epoch)
                 .as_mut()
@@ -1348,7 +1360,7 @@ impl Connection {
 
                 // Failure to have the state here is an internal error.
                 let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
-                let packet = encode_packet(&cs.tx, &hdr, &encoded);
+                let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &encoded);
                 dump_packet(self, "tx", &hdr, &encoded);
                 out_packets.push(packet);
             }
@@ -1384,9 +1396,9 @@ impl Connection {
         Ok(out_dgrams)
     }
 
-    fn client_start(&mut self) -> Res<()> {
+    fn client_start(&mut self, now: u64) -> Res<()> {
         qinfo!([self] "client_start SCID={}", hex(&self.scid));
-        self.handshake(0, None)?;
+        self.handshake(now, 0, None)?;
         self.set_state(State::WaitInitial);
         Ok(())
     }
@@ -1410,13 +1422,8 @@ impl Connection {
     fn buffer_crypto_records(&mut self, records: RecordList) {
         for r in records {
             assert_eq!(r.ct, 22);
-            if r.epoch == 1 {
-                qinfo!([self] "Discarding EndOfEarlyData");
-                assert_eq!(r.data, &[]);
-            } else {
-                qdebug!([self] "Inserting message {:?}", r);
-                self.crypto_streams[r.epoch as usize].tx.send(&r.data);
-            }
+            qdebug!([self] "Inserting message {:?}", r);
+            self.crypto_streams[r.epoch as usize].tx.send(&r.data);
         }
     }
 
@@ -1436,7 +1443,7 @@ impl Connection {
         mem::replace(&mut self.tps, swapped);
     }
 
-    fn handshake(&mut self, epoch: u16, data: Option<&[u8]>) -> Res<()> {
+    fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         qdebug!("Handshake epoch={} data={:0x?}", epoch, data);
         let mut rec: Option<Record> = None;
 
@@ -1449,7 +1456,7 @@ impl Connection {
             });
         }
 
-        let mut m = self.tls.handshake_raw(0, rec);
+        let mut m = self.tls.handshake_raw(now, rec);
 
         if matches!(m, Ok(_)) && *self.tls.state() == HandshakeState::AuthenticationPending {
             // TODO(ekr@rtfm.com): IMPORTANT: This overrides
@@ -1457,7 +1464,7 @@ impl Connection {
             // Fix before shipping.
             qwarn!([self] "marking connection as authenticated without checking");
             self.tls.authenticated();
-            m = self.tls.handshake_raw(0, None);
+            m = self.tls.handshake_raw(now, None);
         }
         match m {
             Err(e) => {
@@ -1542,7 +1549,7 @@ impl Connection {
                     let mut buf = Vec::new();
                     let read = rx.read_to_end(&mut buf)?;
                     qdebug!("Read {} bytes", read);
-                    self.handshake(epoch, Some(&buf))?;
+                    self.handshake(cur_time, epoch, Some(&buf))?;
                 }
             }
             Frame::NewToken { token } => self.token = Some(token),
@@ -1697,7 +1704,13 @@ impl Connection {
             qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
             self.state = state;
             match &self.state {
-                State::Connected => {}
+                State::Connected => {
+                    // Tell 0-RTT packets that they were "lost".
+                    // TODO(mt) remove these from "bytes in flight" too.
+                    for mut dropped in self.loss_recovery.drop_0rtt() {
+                        dropped.mark_lost(self);
+                    }
+                }
                 State::Closing { .. } => {
                     self.send_streams.clear();
                     self.recv_streams.clear();
@@ -1724,62 +1737,76 @@ impl Connection {
             self.role,
             hex(dcid)
         );
-        //assert!(matches!(None, self.crypto_states[0]));
+        assert!(self.crypto_states[0].is_none());
 
-        let cds = CryptoDxState::new_initial("client in", dcid);
-        let sds = CryptoDxState::new_initial("server in", dcid);
+        const CLIENT_INITIAL_LABEL: &str = "client in";
+        const SERVER_INITIAL_LABEL: &str = "server in";
+        let (write_label, read_label) = match self.role {
+            Role::Client => (CLIENT_INITIAL_LABEL, SERVER_INITIAL_LABEL),
+            Role::Server => (SERVER_INITIAL_LABEL, CLIENT_INITIAL_LABEL),
+        };
 
-        self.crypto_states[0] = Some(match self.role {
-            Role::Client => CryptoState {
-                epoch: 0,
-                tx: cds,
-                rx: sds,
-                recvd: None,
-            },
-            Role::Server => CryptoState {
-                epoch: 0,
-                tx: sds,
-                rx: cds,
-                recvd: None,
-            },
+        self.crypto_states[0] = Some(CryptoState {
+            epoch: 0,
+            tx: CryptoDxState::new_initial(CryptoDxDirection::Write, write_label, dcid),
+            rx: CryptoDxState::new_initial(CryptoDxDirection::Read, read_label, dcid),
+            recvd: None,
         });
     }
 
     // Get a crypto state, making it if necessary, otherwise return an error.
     fn obtain_crypto_state(&mut self, epoch: Epoch) -> Res<&mut CryptoState> {
+        #[cfg(debug_assertions)]
+        let label = format!("{:?}", self);
+        #[cfg(not(debug_assertions))]
+        let label = "";
+
         let cs = &mut self.crypto_states[epoch as usize];
+        if cs.is_none() {
+            qtrace!([label] "Build crypto state for epoch {}", epoch);
+            assert!(epoch != 0); // This state is made directly.
 
-        match cs {
-            Some(ref mut cs) => Ok(cs),
-            None => {
-                qtrace!("No crypto state for epoch {}", epoch);
-                assert!(epoch != 0); // This state is made directly.
-
-                let rs = self.tls.read_secret(epoch).ok_or_else(|| {
-                    qtrace!("Keying material not available for epoch {}", epoch);
-                    Error::KeysNotFound
-                })?;
-                let ws = self
-                    .tls
-                    .write_secret(epoch)
-                    .expect("ws must exist if rs exists");
-
-                // TODO(ekr@rtfm.com): The match covers up a bug in
-                // neqo-crypto where we set up the state too late. Fix when that
-                // gets fixed.
-                let cipher = match self.tls.info().as_ref() {
-                    Some(info) => info.cipher_suite(),
-                    None => TLS_AES_128_GCM_SHA256 as u16,
-                };
-                *cs = Some(CryptoState {
-                    epoch,
-                    rx: CryptoDxState::new(format!("read_epoch={}", epoch), rs, cipher),
-                    tx: CryptoDxState::new(format!("write_epoch={}", epoch), ws, cipher),
-                    recvd: None,
-                });
-                Ok(cs.as_mut().unwrap())
+            let cipher = match (epoch, self.tls.info()) {
+                (1, _) => self.tls.preinfo()?.early_data_cipher(),
+                (_, None) => self.tls.preinfo()?.cipher_suite(),
+                (_, Some(info)) => Some(info.cipher_suite()),
+            };
+            if cipher.is_none() {
+                qdebug!([label] "cipher info not available yet");
+                return Err(Error::KeysNotFound);
             }
+            let cipher = cipher.unwrap();
+
+            let rx = self
+                .tls
+                .read_secret(epoch)
+                .map(|rs| CryptoDxState::new(CryptoDxDirection::Read, epoch, rs, cipher));
+            let tx = self
+                .tls
+                .write_secret(epoch)
+                .map(|ws| CryptoDxState::new(CryptoDxDirection::Write, epoch, ws, cipher));
+
+            // Validate the key setup.
+            match (&rx, &tx, self.role, epoch) {
+                (None, Some(_), Role::Client, 1)
+                | (Some(_), None, Role::Server, 1)
+                | (Some(_), Some(_), _, _) => {}
+                (None, None, _, _) => {
+                    qdebug!([label] "Keying material not available for epoch {}", epoch);
+                    return Err(Error::KeysNotFound);
+                }
+                _ => panic!("bad configuration of keys"),
+            }
+
+            *cs = Some(CryptoState {
+                epoch,
+                rx,
+                tx,
+                recvd: None,
+            });
         }
+
+        Ok(cs.as_mut().unwrap())
     }
 
     fn cleanup_streams(&mut self) {
@@ -2124,7 +2151,7 @@ impl CryptoCtx for CryptoDxState {
 
     fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         qinfo!(
-            [self.label]
+            [self]
             "aead_decrypt pn={} hdr={} body={}",
             pn,
             hex(hdr),
@@ -2137,7 +2164,7 @@ impl CryptoCtx for CryptoDxState {
 
     fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         qdebug!(
-            [self.label]
+            [self]
             "aead_encrypt pn={} hdr={} body={}",
             pn,
             hex(hdr),
@@ -2148,9 +2175,15 @@ impl CryptoCtx for CryptoDxState {
         let mut out = vec![0; size];
         let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
 
-        qdebug!([self.label] "aead_encrypt ct={}", hex(res),);
+        qdebug!([self] "aead_encrypt ct={}", hex(res),);
 
         Ok(res.to_vec())
+    }
+}
+
+impl std::fmt::Display for CryptoDxState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "epoch {} {:?}", self.epoch, self.direction)
     }
 }
 
@@ -2290,8 +2323,7 @@ impl FrameGenerator for StreamGenerator {
         mode: TxMode,
         remaining: usize,
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
-        // only send in 1rtt epoch?
-        if epoch != 3 {
+        if epoch != 3 && epoch != 1 {
             return None;
         }
 
@@ -2622,6 +2654,18 @@ impl LossRecoverySpace {
         }
         acked_packets
     }
+
+    /// Remove all tracked packets from the space.
+    /// This is called when 0-RTT packets are dropped at a client.
+    fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
+        // The largest acknowledged or loss_time should still be zero.
+        // The client should not have received any ACK frames when it drops 0-RTT.
+        assert_eq!(self.largest_acked, 0);
+        assert_eq!(self.loss_time, 0);
+        std::mem::replace(&mut self.sent_packets, Default::default())
+            .into_iter()
+            .map(|(_, v)| v)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -2653,6 +2697,10 @@ impl LossRecovery {
     }
     fn space_mut(&mut self, pn_space: PNSpace) -> &mut LossRecoverySpace {
         &mut self.packet_spaces[pn_space as usize]
+    }
+
+    pub fn drop_0rtt(&mut self) -> impl Iterator<Item = SentPacket> {
+        self.space_mut(PNSpace::ApplicationData).remove_ignored()
     }
 
     pub fn on_packet_sent(
@@ -2937,14 +2985,13 @@ mod tests {
     use super::*;
     use crate::frame::StreamType;
     use neqo_crypto::init_db;
+    use std::time::Duration;
 
     fn loopback() -> SocketAddr {
         "127.0.0.1:443".parse().unwrap()
     }
 
-    fn now() -> u64 {
-        0
-    }
+    const NOW: u64 = 123_456_789; // needs to be larger than the anti-replay window.
 
     #[test]
     fn test_stream_id_methods() {
@@ -2987,18 +3034,18 @@ mod tests {
 
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let (res, _) = client.process(vec![], now());
+        let (res, _) = client.process(vec![], NOW);
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
-        let (res, _) = server.process(res, now());
+        let (res, _) = server.process(res, NOW);
 
-        let (res, _) = client.process(res, now());
+        let (res, _) = client.process(res, NOW);
         // client now in State::Connected
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 4);
 
-        let (res, _) = server.process(res, now());
+        let (res, _) = server.process(res, NOW);
         // server now in State::Connected
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 3);
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 7);
@@ -3012,29 +3059,29 @@ mod tests {
         qdebug!("---- client: generate CH");
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let (res, _) = client.process(Vec::new(), now());
+        let (res, _) = client.process(Vec::new(), NOW);
         assert_eq!(res.len(), 1);
         assert_eq!(res.first().unwrap().len(), 1200);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
-        let (res, _) = server.process(res, now());
+        let (res, _) = server.process(res, NOW);
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: SH..FIN -> FIN");
-        let (res, _) = client.process(res, now());
+        let (res, _) = client.process(res, NOW);
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: FIN -> ACKS");
-        let (res, _) = server.process(res, now());
+        let (res, _) = server.process(res, NOW);
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: ACKS -> 0");
-        let (res, _) = client.process(res, now());
+        let (res, _) = client.process(res, NOW);
         assert!(res.is_empty());
         qdebug!("Output={:0x?}", res);
 
@@ -3052,20 +3099,20 @@ mod tests {
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
 
         qdebug!("---- client");
-        let (res, _) = client.process(Vec::new(), now());
+        let (res, _) = client.process(Vec::new(), NOW);
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // -->> Initial[0]: CRYPTO[CH]
 
         qdebug!("---- server");
-        let (res, _) = server.process(res, now());
+        let (res, _) = server.process(res, NOW);
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // <<-- Initial[0]: CRYPTO[SH] ACK[0]
         // <<-- Handshake[0]: CRYPTO[EE, CERT, CV, FIN]
 
         qdebug!("---- client");
-        let (res, _) = client.process(res, now());
+        let (res, _) = client.process(res, NOW);
         assert_eq!(res.len(), 1);
         assert_eq!(*client.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -3073,7 +3120,7 @@ mod tests {
         // -->> Handshake[0]: CRYPTO[FIN], ACK[0]
 
         qdebug!("---- server");
-        let (res, _) = server.process(res, now());
+        let (res, _) = server.process(res, NOW);
         assert_eq!(res.len(), 1);
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -3096,36 +3143,33 @@ mod tests {
         client
             .stream_send(client_stream_id2, &vec![7; 50])
             .unwrap_err();
-        let (res, _) = client.process(res, now());
+        let (res, _) = client.process(res, NOW);
         assert_eq!(res.len(), 4);
 
         qdebug!("---- server");
-        let (res, _) = server.process(res, now());
+        let (res, _) = server.process(res, NOW);
         assert_eq!(res.len(), 1);
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
 
         let mut buf = vec![0; 4000];
 
-        let active_streams = server
-            .events()
-            .into_iter()
-            .filter_map(|evt| match evt {
-                ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let mut iter = active_streams.iter();
-        let stream_id = iter.next().unwrap();
-        let (received, fin) = server.stream_recv(*stream_id, &mut buf).unwrap();
+        let mut stream_ids = server.events().into_iter().filter_map(|evt| match evt {
+            ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
+            _ => None,
+        });
+        let stream_id = stream_ids.next().expect("should have a new stream event");
+        let (received, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(received, 4000);
         assert_eq!(fin, false);
-        let (received, fin) = server.stream_recv(*stream_id, &mut buf).unwrap();
+        let (received, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(received, 140);
         assert_eq!(fin, false);
 
-        let stream_id = iter.next().unwrap();
-        let (received, fin) = server.stream_recv(*stream_id, &mut buf).unwrap();
+        let stream_id = stream_ids
+            .next()
+            .expect("should have a second new stream event");
+        let (received, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(received, 60);
         assert_eq!(fin, true);
     }
@@ -3141,7 +3185,7 @@ mod tests {
             _ => false,
         };
         while !is_done(a) {
-            let (r, _) = a.process(records, now());
+            let (r, _) = a.process(records, NOW);
             records = r;
             b = mem::replace(&mut a, b);
         }
@@ -3407,19 +3451,19 @@ mod tests {
         qdebug!("---- client: generate CH");
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let (res, _) = client.process(Vec::new(), now());
+        let (res, _) = client.process(Vec::new(), NOW);
         assert_eq!(res.len(), 1);
         assert_eq!(res.first().unwrap().len(), 1200);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
-        let (res, _) = server.process(res, now());
+        let (res, _) = server.process(res, NOW);
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: SH..FIN -> FIN");
-        let (res2, _) = client.process(res.clone(), now());
+        let (res2, _) = client.process(res.clone(), NOW);
         assert_eq!(res2.len(), 1);
         qdebug!("Output={:0x?}", res);
 
@@ -3427,7 +3471,7 @@ mod tests {
         assert_eq!(0, client.stats().dups_rx);
 
         qdebug!("---- Dup, ignored");
-        let (res2, _) = client.process(res.clone(), now());
+        let (res2, _) = client.process(res.clone(), NOW);
         assert_eq!(res2.len(), 0);
         qdebug!("Output={:0x?}", res);
 
@@ -3436,19 +3480,11 @@ mod tests {
         assert_eq!(2, client.stats().dups_rx);
     }
 
-    // #[derive(Debug)]
-    // struct PermissiveZeroRttChecker {}
-    // impl ZeroRttChecker for PermissiveZeroRttChecker {
-    //     fn check(&self, _first: bool, _token: &[u8]) -> ZeroRttCheckResult {
-    //         ZeroRttCheckResult::Accept
-    //     }
-    // }
-
     fn exchange_ticket(client: &mut Connection, server: &mut Connection) -> Vec<u8> {
-        server.send_ticket(now(), &[]).expect("can send ticket");
-        let (dgrams, _timer) = server.process_output(now());
+        server.send_ticket(NOW, &[]).expect("can send ticket");
+        let (dgrams, _timer) = server.process_output(NOW);
         assert_eq!(dgrams.len(), 1);
-        client.process_input(dgrams, now());
+        client.process_input(dgrams, NOW);
         assert_eq!(*client.state(), State::Connected);
         client.resumption_token().expect("should have token")
     }
@@ -3469,5 +3505,87 @@ mod tests {
             .expect("should set token");
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
         connect(&mut client, &mut server);
+        assert!(client.tls.info().unwrap().resumed());
+        assert!(server.tls.info().unwrap().resumed());
     }
+
+    const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
+
+    #[test]
+    fn zero_rtt_negotiate() {
+        init_db("./db");
+
+        let start_time = NOW
+            .checked_sub(ANTI_REPLAY_WINDOW.as_nanos() as u64)
+            .unwrap();
+        Server::init_anti_replay(start_time, ANTI_REPLAY_WINDOW, 1, 3)
+            .expect("anti-replay setup successful");
+
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        connect(&mut client, &mut server);
+
+        let token = exchange_ticket(&mut client, &mut server);
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        client
+            .set_resumption_token(&token[..])
+            .expect("should set token");
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        connect(&mut client, &mut server);
+        assert!(client.tls.info().unwrap().early_data_accepted());
+        assert!(server.tls.info().unwrap().early_data_accepted());
+    }
+
+    #[test]
+    fn zero_rtt_send_recv() {
+        init_db("./db");
+
+        let start_time = NOW
+            .checked_sub(ANTI_REPLAY_WINDOW.as_nanos() as u64)
+            .unwrap();
+        Server::init_anti_replay(start_time, ANTI_REPLAY_WINDOW, 1, 3)
+            .expect("anti-replay setup successful");
+
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        connect(&mut client, &mut server);
+
+        let token = exchange_ticket(&mut client, &mut server);
+        let mut client =
+            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        client
+            .set_resumption_token(&token[..])
+            .expect("should set token");
+        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+
+        // Send ClientHello.
+        let (client_hs, _) = client.process(Vec::new(), NOW);
+        assert_eq!(client_hs.len(), 1);
+
+        // Now send a 0-RTT packet.
+        // TODO(mt) work out how to coalesce this with the ClientHello.
+        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        client
+            .stream_send(client_stream_id, &vec![1, 2, 3])
+            .unwrap();
+        let (client_0rtt, _) = client.process(Vec::new(), NOW);
+        assert_eq!(client_0rtt.len(), 1);
+
+        let (server_hs, _) = server.process(client_hs.into_iter().chain(client_0rtt), NOW);
+        assert_eq!(server_hs.len(), 1);
+
+        let server_stream_id = server
+            .events()
+            .into_iter()
+            .find_map(|evt| match evt {
+                ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
+                _ => None,
+            })
+            .expect("should have received a new stream event");
+        assert_eq!(client_stream_id, server_stream_id);
+    }
+
 }

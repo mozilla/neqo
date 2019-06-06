@@ -204,6 +204,9 @@ pub struct SecretAgent {
 
     extension_handlers: Vec<ExtensionTracker>,
     inf: Option<SecretAgentInfo>,
+
+    /// Whether or not EndOfEarlyData should be suppressed.
+    no_eoed: bool,
 }
 
 impl SecretAgent {
@@ -221,6 +224,8 @@ impl SecretAgent {
 
             extension_handlers: Default::default(),
             inf: Default::default(),
+
+            no_eoed: false,
         };
         agent.create_fd()?;
         Ok(agent)
@@ -381,6 +386,11 @@ impl SecretAgent {
     /// Enable 0-RTT.
     pub fn enable_0rtt(&mut self) -> Res<()> {
         self.set_option(ssl::Opt::EarlyData, true)
+    }
+
+    /// Disable the EndOfEarlyData message.
+    pub fn disable_end_of_early_data(&mut self) {
+        self.no_eoed = true;
     }
 
     /// set_alpn sets a list of preferred protocols, starting with the most preferred.
@@ -569,6 +579,29 @@ impl SecretAgent {
         Ok(records)
     }
 
+    fn inject_eoed(&mut self) -> Res<()> {
+        // EndOfEarlyData is as follows:
+        // struct {
+        //    HandshakeType msg_type = end_of_early_data(5);
+        //    uint24 length = 0;
+        // };
+        const END_OF_EARLY_DATA: &[u8] = &[5, 0, 0, 0];
+
+        if self.no_eoed {
+            let mut read_epoch: u16 = 0;
+            let rv = unsafe { ssl::SSL_GetCurrentEpoch(self.fd, &mut read_epoch, null_mut()) };
+            result::result(rv)?;
+            if read_epoch == 1 {
+                // It's waiting for EndOfEarlyData, so feed one in.
+                // Note that this is the test that ensures that we only do this for the server.
+                let eoed = Record::new(1, 22, END_OF_EARLY_DATA);
+                self.capture_error(emit_record(self.fd, eoed))?;
+            }
+        }
+        self.no_eoed = false;
+        Ok(())
+    }
+
     // Drive the TLS handshake, but get the raw content of records, not
     // protected records as bytes. This function is incompatible with
     // handshake(); use either this or handshake() exclusively.
@@ -577,7 +610,7 @@ impl SecretAgent {
     // If you send data from multiple epochs, you might end up being sad.
     pub fn handshake_raw(&mut self, now: u64, input: Option<Record>) -> Res<RecordList> {
         *self.now = to_prtime(now)?;
-        let records = self.setup_raw()?;
+        let mut records = self.setup_raw()?;
 
         // Fire off any authentication we might need to complete.
         if self.state == HandshakeState::Authenticated {
@@ -589,15 +622,19 @@ impl SecretAgent {
 
         // Feed in any records.
         if let Some(rec) = input {
-            let res = emit_record(self.fd, rec);
-            if res.is_err() {
-                return Err(self.set_failed());
+            if rec.epoch == 2 {
+                self.inject_eoed()?;
             }
+            self.capture_error(emit_record(self.fd, rec))?;
         }
 
         // Drive the handshake once more.
         let rv = unsafe { ssl::SSL_ForceHandshake(self.fd) };
         self.update_state(rv)?;
+
+        if self.no_eoed {
+            records.remove_eoed();
+        }
 
         Ok(*records)
     }
@@ -715,7 +752,7 @@ pub enum ZeroRttCheckResult {
 
 /// A ZeroRttChecker is used by the agent to validate the application token (as provided by send_ticket)
 pub trait ZeroRttChecker: std::fmt::Debug {
-    fn check(&self, first_hello: bool, token: &[u8]) -> ZeroRttCheckResult;
+    fn check(&self, token: &[u8]) -> ZeroRttCheckResult;
 }
 
 #[derive(Debug)]
@@ -783,6 +820,11 @@ impl Server {
         retry_token_max: c_uint,
         arg: *mut c_void,
     ) -> ssl::SSLHelloRetryRequestAction::Type {
+        if first_hello == 0 {
+            // On the second ClientHello after HelloRetryRequest, skip checks.
+            return ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept;
+        }
+
         let p = arg as *mut ZeroRttCheckState;
         let check_state = p.as_mut().unwrap();
         let token = if client_token.is_null() {
@@ -790,24 +832,14 @@ impl Server {
         } else {
             std::slice::from_raw_parts(client_token, client_token_len as usize)
         };
-        match check_state.checker.check(first_hello != 0, token) {
+        match check_state.checker.check(token) {
             ZeroRttCheckResult::Accept => ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept,
             ZeroRttCheckResult::Fail => ssl::SSLHelloRetryRequestAction::ssl_hello_retry_fail,
             ZeroRttCheckResult::Reject => {
-                // Just disable 0-RTT from here.
-                ssl::SSL_OptionSet(
-                    check_state.fd,
-                    ssl::Opt::EarlyData.as_int(),
-                    ssl::PRIntn::from(false),
-                );
-                ssl::SSLHelloRetryRequestAction::ssl_hello_retry_accept
+                ssl::SSLHelloRetryRequestAction::ssl_hello_retry_reject_0rtt
             }
             ZeroRttCheckResult::HelloRetryRequest(tok) => {
-                // Don't bother propagating errors from these, because these are dumb errors.
-                assert_eq!(
-                    first_hello, 0,
-                    "got HRR token from check on second ClientHello"
-                );
+                // Don't bother propagating errors from this, because it should be caught in testing.
                 assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
                 let slc = std::slice::from_raw_parts_mut(retry_token, tok.len());
                 slc.copy_from_slice(&tok);
