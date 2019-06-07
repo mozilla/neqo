@@ -21,7 +21,10 @@ use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
 
 use crate::dump::*;
-use crate::frame::{decode_frame, AckRange, CloseType, Frame, FrameType, StreamType};
+use crate::frame::{
+    decode_frame, AckRange, CloseType, Frame, FrameGenerator, FrameGeneratorToken, FrameType,
+    StreamType, TxMode,
+};
 use crate::nss::{
     Agent, Cipher, Client, Epoch, HandshakeState, Record, RecordList, Server, SymKey,
     TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
@@ -35,7 +38,7 @@ use crate::send_stream::{SendStream, TxBuffer};
 use crate::stats::Stats;
 use crate::tparams::consts as tp_const;
 use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
-use crate::tracking::{PNSpace, RecvdPackets};
+use crate::tracking::{AckTracker, PNSpace, RecvdPackets};
 use crate::{AppError, ConnectionError, Error, Res};
 
 #[derive(Debug, Default)]
@@ -233,12 +236,6 @@ impl DerefMut for Datagram {
     fn deref_mut(&mut self) -> &mut Vec<u8> {
         &mut self.d
     }
-}
-
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum TxMode {
-    Normal,
-    Pto,
 }
 
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
@@ -502,33 +499,6 @@ impl Iterator for FlowMgr {
     }
 }
 
-trait FrameGenerator {
-    fn generate(
-        &mut self,
-        conn: &mut Connection,
-        epoch: Epoch,
-        tx_mode: TxMode,
-        remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)>;
-}
-
-impl Debug for FrameGenerator {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("<FrameGenerator Function>")
-    }
-}
-
-pub trait FrameGeneratorToken {
-    fn acked(&mut self, conn: &mut Connection);
-    fn lost(&mut self, conn: &mut Connection);
-}
-
-impl Debug for FrameGeneratorToken {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("<FrameGenerator Token>")
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 enum CryptoDxDirection {
     Read,
@@ -600,21 +570,8 @@ struct CryptoState {
     epoch: Epoch,
     rx: Option<CryptoDxState>,
     tx: Option<CryptoDxState>,
-    recvd: Option<RecvdPackets>,
 }
 
-impl CryptoState {
-    fn obtain_recvd_state(&mut self, pn: u64) -> &mut RecvdPackets {
-        if self.recvd.is_none() {
-            self.recvd = Some(RecvdPackets::new("label [TODO]", self.epoch, pn));
-        }
-        self.recvd.as_mut().unwrap()
-    }
-
-    fn recvd_state(&mut self) -> Option<&mut RecvdPackets> {
-        self.recvd.as_mut()
-    }
-}
 #[derive(Debug, Default)]
 struct CryptoStream {
     tx: TxBuffer,
@@ -658,6 +615,7 @@ pub struct Connection {
     crypto_streams: [CryptoStream; 4],
     crypto_states: [Option<CryptoState>; 4],
     tx_pns: [u64; 3],
+    pub(crate) acks: AckTracker,
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
     generators: Vec<Box<FrameGenerator>>,
     deadline: u64,
@@ -804,6 +762,7 @@ impl Connection {
             ],
             crypto_states: [None, None, None, None],
             tx_pns: [0; 3],
+            acks: AckTracker::default(),
             deadline: 0,
             local_max_stream_idx_bidi: StreamIndex::new(LOCAL_STREAM_LIMIT_BIDI),
             local_max_stream_idx_uni: StreamIndex::new(LOCAL_STREAM_LIMIT_UNI),
@@ -1000,7 +959,11 @@ impl Connection {
             State::Closed(..) => (Vec::new(), 0),
             _ => {
                 self.check_loss_detection_timeout(cur_time);
-                (self.output(cur_time), self.loss_recovery.get_timer())
+                let mut delay = self.loss_recovery.get_timer();
+                if let Some(t) = self.acks.ack_time() {
+                    delay = min(delay, t);
+                }
+                (self.output(cur_time), delay)
             }
         }
     }
@@ -1156,14 +1119,13 @@ impl Connection {
             }
 
             let ack_eliciting = self.input_packet(hdr.epoch, Decoder::from(&body[..]), cur_time)?;
-            let mut tmp = self.obtain_crypto_state(hdr.epoch); // Keep the Res alive.
-            let rstate = tmp.as_mut().unwrap().obtain_recvd_state(hdr.pn);
-            if rstate.was_received(hdr.pn) {
+            let space = PNSpace::from(hdr.epoch);
+            if self.acks[space].is_duplicate(hdr.pn) {
                 qdebug!([self] "Received duplicate packet epoch={} pn={}", hdr.epoch, hdr.pn);
                 self.stats.dups_rx += 1;
                 continue;
             }
-            rstate.set_received(cur_time, hdr.pn, ack_eliciting);
+            self.acks[space].set_received(cur_time, hdr.pn, ack_eliciting);
 
             match &self.paths {
                 None => {
@@ -1259,30 +1221,38 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for epoch in 0..NUM_EPOCHS {
+            let space = PNSpace::from(epoch);
             let mut encoder = Encoder::default();
             let mut ds = Vec::new();
             let mut tokens = Vec::new();
-            // Try to make our own crypo state and if we can't, skip this
-            // epoch.
-            if self.obtain_crypto_state(epoch).is_err() {
-                continue;
+
+            // Try to make our own crypo state and if we can't, skip this epoch.
+            {
+                let cs = match self.obtain_crypto_state(epoch) {
+                    Ok(c) => c,
+                    _ => continue,
+                };
+                if cs.tx.is_none() {
+                    continue;
+                }
             }
 
-            // TODO(mt) this is a complete disaster.  Crypto state is
-            // tracking received packets by epoch, but it should be tracking by PNSpace.
-            // Also, loss recovery should be the place to track that sort of thing.
-            // Also, this fails badly with 0-RTT.
-            if let Some(recvd) = self
-                .obtain_crypto_state(epoch)
-                .as_mut()
-                .unwrap()
-                .recvd_state()
-            {
-                let acks = recvd.get_eligible_ack_ranges();
-                Frame::encode_ack_frame(&acks, &mut encoder);
-                // TODO(ekr@rtfm.com): Deal with the case where ACKs don't fit
-                // in an entire packet.
-                assert!(encoder.len() <= self.pmtu);
+            // Add an ACK frame as necessary.
+            let mut ack_needed = self.acks[space].ack_now(cur_time);
+            if ack_needed {
+                let mut recvd = mem::replace(&mut self.acks[space], RecvdPackets::new(space));
+                if let Some((frame, token)) = recvd.generate(
+                    self,
+                    cur_time,
+                    epoch,
+                    TxMode::Normal,
+                    self.pmtu - encoder.len(),
+                ) {
+                    frame.marshal(&mut encoder);
+                    tokens.push(token.unwrap());
+                }
+                mem::replace(&mut self.acks[space], recvd);
+                ack_needed = false;
             }
 
             let mut ack_eliciting = false;
@@ -1292,10 +1262,20 @@ impl Connection {
             let mut generators = mem::replace(&mut self.generators, Vec::new());
             for generator in &mut generators {
                 // TODO(ekr@rtfm.com): Fix TxMode
-                while let Some((frame, token)) =
-                    generator.generate(self, epoch, TxMode::Normal, self.pmtu - encoder.len())
-                {
-                    //qtrace!("pmtu {} written {}", self.pmtu, d.written());
+                while let Some((frame, token)) = generator.generate(
+                    self,
+                    cur_time,
+                    epoch,
+                    TxMode::Normal,
+                    self.pmtu - encoder.len(),
+                ) {
+                    if ack_needed {
+                        // TODO(mt) send an ACK here.  This doesn't work right now because
+                        // we just told the other frame generator that it has the rest
+                        // of the packet available to it, so it might have taken all of it.
+                        ack_needed = false;
+                    }
+
                     ack_eliciting = ack_eliciting || frame.ack_eliciting();
                     is_crypto_packet = match frame {
                         Frame::Crypto { .. } => true,
@@ -1344,13 +1324,13 @@ impl Connection {
                     Some(self.version),
                     self.dcid.clone(),
                     Some(self.scid.clone()),
-                    self.tx_pns[PNSpace::from(epoch) as usize],
+                    self.tx_pns[space as usize], // TODO(mt) EnumMap or Index
                     epoch,
                 );
-                self.tx_pns[PNSpace::from(epoch) as usize] += 1;
+                self.tx_pns[space as usize] += 1;
                 self.stats.packets_tx += 1;
                 self.loss_recovery.on_packet_sent(
-                    PNSpace::from(epoch),
+                    space,
                     hdr.pn,
                     ack_eliciting,
                     is_crypto,
@@ -1750,7 +1730,6 @@ impl Connection {
             epoch: 0,
             tx: CryptoDxState::new_initial(CryptoDxDirection::Write, write_label, dcid),
             rx: CryptoDxState::new_initial(CryptoDxDirection::Read, read_label, dcid),
-            recvd: None,
         });
     }
 
@@ -1798,12 +1777,7 @@ impl Connection {
                 _ => panic!("bad configuration of keys"),
             }
 
-            *cs = Some(CryptoState {
-                epoch,
-                rx,
-                tx,
-                recvd: None,
-            });
+            *cs = Some(CryptoState { epoch, rx, tx });
         }
 
         Ok(cs.as_mut().unwrap())
@@ -2199,6 +2173,7 @@ impl FrameGenerator for CryptoGenerator {
     fn generate(
         &mut self,
         conn: &mut Connection,
+        _now: u64,
         epoch: u16,
         mode: TxMode,
         remaining: usize,
@@ -2264,6 +2239,7 @@ impl FrameGenerator for CloseGenerator {
     fn generate(
         &mut self,
         c: &mut Connection,
+        _now: u64,
         _e: Epoch,
         _mode: TxMode,
         _remaining: usize,
@@ -2319,6 +2295,7 @@ impl FrameGenerator for StreamGenerator {
     fn generate(
         &mut self,
         conn: &mut Connection,
+        _now: u64,
         epoch: u16,
         mode: TxMode,
         remaining: usize,
@@ -2518,6 +2495,7 @@ impl FrameGenerator for FlowControlGenerator {
     fn generate(
         &mut self,
         conn: &mut Connection,
+        _now: u64,
         _epoch: u16,
         _mode: TxMode,
         remaining: usize,
