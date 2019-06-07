@@ -136,17 +136,17 @@ impl RecvdPackets {
         }
     }
 
+    /// Get the time at which the next ACK should be sent.
+    pub fn ack_time(&self) -> Option<u64> {
+        self.ack_time
+    }
+
     /// Returns true if an ACK frame should be sent now.
     pub fn ack_now(&self, now: u64) -> bool {
         match self.ack_time {
             Some(t) => t <= now,
             _ => false,
         }
-    }
-
-    /// Get the time at which the next ACK should be sent.
-    pub fn ack_time(&self) -> Option<u64> {
-        self.ack_time
     }
 
     // A simple addition of a packet number to the tracked set.
@@ -186,7 +186,7 @@ impl RecvdPackets {
             let oldest = self.ranges.pop_back().unwrap();
             if oldest.ack_needed {
                 qwarn!([self] "Dropping unacknowledged ACK range: {}", oldest);
-            // TODO(mt) track this better
+            // TODO(mt) Record some statistics about this so we can tune MAX_TRACKED_RANGES.
             } else {
                 qdebug!([self] "Drop ACK range: {}", oldest);
             }
@@ -251,9 +251,13 @@ impl FrameGenerator for RecvdPackets {
     /// Generate an ACK frame.
     ///
     /// Unlike other frame generators this doesn't modify the underlying instance
-    /// to track what has been sent.  When sending ACKs, we want to always send
-    /// available ranges.  We only remove ACK ranges when they are completely
-    /// acknowledged or we start to accumulate too many.
+    /// to track what has been sent.  This only clears the delayed ACK timer.
+    ///
+    /// When sending ACKs, we want to always send the most recent ranges,
+    /// even if they have been sent in other packets.
+    ///
+    /// We don't send ranges that have been acknowledged,
+    /// but they still need to be tracked so that duplicates can be detected.
     fn generate(
         &mut self,
         _conn: &mut Connection,
@@ -284,7 +288,7 @@ impl FrameGenerator for RecvdPackets {
 
         for range in iter {
             ack_ranges.push(AckRange {
-                // the difference must be at least 2 (because 0-length gaps,
+                // the difference must be at least 2 because 0-length gaps,
                 // (difference 1) are illegal.
                 gap: last - range.largest - 2,
                 range: range.len() - 1,
@@ -326,7 +330,12 @@ pub struct AckTracker {
 
 impl AckTracker {
     pub fn ack_time(&self) -> Option<u64> {
-        match self.spaces.iter().filter_map(|x| x.ack_time()).fold(::std::u64::MAX, ::std::cmp::min) {
+        match self
+            .spaces
+            .iter()
+            .filter_map(|x| x.ack_time())
+            .fold(::std::u64::MAX, ::std::cmp::min)
+        {
             ::std::u64::MAX => None,
             v => Some(v),
         }

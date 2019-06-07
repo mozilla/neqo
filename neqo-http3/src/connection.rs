@@ -418,6 +418,10 @@ impl Http3Connection {
                 ConnectionEvent::ConnectionClosed { error_code, .. } => {
                     self.handle_connection_closed(error_code)?
                 }
+                ConnectionEvent::ZeroRttRejected => {
+                    // TODO(mt) work out what to do here.
+                    // Everything will have to be redone: SETTINGS, qpack streams, and requests.
+                }
             }
         }
         Ok(())

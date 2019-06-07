@@ -80,7 +80,7 @@ impl ::std::fmt::Display for Role {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum State {
     Init,
     WaitInitial,
@@ -93,6 +93,15 @@ pub enum State {
         timeout: u64,
     },
     Closed(ConnectionError),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ZeroRttState {
+    Init,
+    Enabled,
+    Sending,
+    Accepted,
+    Rejected,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash)]
@@ -264,6 +273,10 @@ pub enum ConnectionEvent {
         frame_type: u64,
         reason_phrase: String,
     },
+    /// The server rejected 0-RTT.
+    /// This event invalidates all state in streams that has been created.
+    /// Any data written to streams needs to be written again.
+    ZeroRttRejected,
 }
 
 #[derive(Debug, Default)]
@@ -329,6 +342,11 @@ impl ConnectionEvents {
             frame_type,
             reason_phrase: reason_phrase.to_owned(),
         });
+    }
+
+    pub fn client_0rtt_rejected(&mut self) {
+        self.events.clear();
+        self.events.insert(ConnectionEvent::ZeroRttRejected);
     }
 
     pub fn events(&mut self) -> BTreeSet<ConnectionEvent> {
@@ -582,36 +600,42 @@ struct CryptoStream {
 struct Path {
     local: SocketAddr,
     remote: SocketAddr,
+    local_cids: Vec<ConnectionId>,
+    remote_cid: ConnectionId,
 }
 
 impl Path {
-    fn received_on(&self, d: &Datagram) -> bool {
-        self.local == d.dst && self.remote == d.src
-    }
-}
-
-impl From<&Datagram> for Path {
-    fn from(d: &Datagram) -> Self {
+    // Used to create a path when receiving a packet.
+    pub fn new(d: &Datagram, peer_cid: ConnectionId) -> Path {
         Path {
             local: d.dst,
             remote: d.src,
+            local_cids: Vec::new(),
+            remote_cid: peer_cid,
         }
+    }
+
+    pub fn received_on(&self, d: &Datagram) -> bool {
+        self.local == d.dst && self.remote == d.src
     }
 }
 
 #[allow(unused_variables)]
 pub struct Connection {
     version: crate::packet::Version,
-    paths: Option<Path>,
     role: Role,
     state: State,
     tls: Agent,
     tps: Rc<RefCell<TransportParametersHandler>>,
-    scid: ConnectionId,
-    dcid: ConnectionId,
+    /// What we are doing with 0-RTT.
+    zero_rtt_state: ZeroRttState,
+    /// Network paths.  Right now, this tracks at most one path, so it uses `Option`.
+    paths: Option<Path>,
+    /// The connection IDs that we will accept.
+    /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
+    /// During the handshake at the server, it also includes the randomized DCID pick by the client.
+    valid_cids: Vec<ConnectionId>,
     retry_token: Option<Vec<u8>>,
-    send_epoch: Epoch,
-    recv_epoch: Epoch,
     crypto_streams: [CryptoStream; 4],
     crypto_states: [Option<CryptoState>; 4],
     tx_pns: [u64; 3],
@@ -636,7 +660,7 @@ pub struct Connection {
     loss_recovery: LossRecovery,
     events: Rc<RefCell<ConnectionEvents>>,
     token: Option<Vec<u8>>,
-    send_vn: Option<ConnectionId>,
+    send_vn: Option<(PacketHdr, SocketAddr, SocketAddr)>,
     send_retry: Option<PacketType>, // This will be PacketType::Retry.
     stats: Stats,
 }
@@ -657,15 +681,20 @@ impl Connection {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
     ) -> Res<Connection> {
-        Ok(Connection::new(
+        let dcid = ConnectionId::generate(CID_LENGTH);
+        let mut c = Connection::new(
             Role::Client,
             Client::new(server_name)?.into(),
             protocols,
             Some(Path {
                 local: local_addr,
                 remote: remote_addr,
+                local_cids: vec![ConnectionId::generate(CID_LENGTH)],
+                remote_cid: dcid.clone(),
             }),
-        ))
+        );
+        c.create_initial_crypto_state(&dcid);
+        Ok(c)
     }
 
     pub fn new_server<
@@ -734,24 +763,22 @@ impl Connection {
         Connection::set_tp_defaults(&mut tphandler.borrow_mut().local);
         Connection::configure_agent(&mut agent, protocols, tphandler.clone());
 
-        let mut c = Connection {
+        Connection {
             version: QUIC_VERSION,
-            paths,
             role: r,
             state: match r {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
             },
             tls: agent,
+            paths,
+            valid_cids: Vec::new(),
             tps: tphandler,
-            scid: ConnectionId::default(),
-            dcid: ConnectionId::default(),
+            zero_rtt_state: ZeroRttState::Init,
             retry_token: None,
-            send_epoch: 0,
-            recv_epoch: 0,
             crypto_streams: [
                 CryptoStream::default(),
-                CryptoStream::default(),
+                CryptoStream::default(), // Not used.
                 CryptoStream::default(),
                 CryptoStream::default(),
             ],
@@ -784,16 +811,7 @@ impl Connection {
             send_vn: None,
             send_retry: None,
             stats: Stats::default(),
-        };
-
-        c.scid = ConnectionId::generate(CID_LENGTH);
-        if c.role == Role::Client {
-            let dcid = ConnectionId::generate(CID_LENGTH);
-            c.create_initial_crypto_state(&dcid);
-            c.dcid = dcid;
         }
-
-        c
     }
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
@@ -886,11 +904,6 @@ impl Connection {
         &self.state
     }
 
-    // Get the SCID.
-    pub fn scid(&self) -> ConnectionId {
-        self.scid.clone()
-    }
-
     /// Get statistics
     pub fn stats(&self) -> &Stats {
         &self.stats
@@ -977,8 +990,8 @@ impl Connection {
         self.process_output(cur_time)
     }
 
-    fn valid_cid(&self, cid: &[u8]) -> bool {
-        &self.scid[..] == cid
+    fn is_valid_cid(&self, cid: &ConnectionId) -> bool {
+        self.valid_cids.contains(cid) || self.paths.iter().any(|p| p.local_cids.contains(cid))
     }
 
     fn input(&mut self, d: Datagram, cur_time: u64) -> Res<()> {
@@ -991,7 +1004,7 @@ impl Connection {
             let mut hdr = match decode_packet_hdr(self, slc) {
                 Ok(h) => h,
                 _ => {
-                    qinfo!([self] "Received indecipherable packet header {:?}", slc);
+                    qinfo!([self] "Received indecipherable packet header {}", hex(slc));
                     return Ok(()); // Drop the remainder of the datagram.
                 }
             };
@@ -1004,20 +1017,24 @@ impl Connection {
                     return Err(Error::VersionNegotiation);
                 }
                 (PacketType::Retry { odcid, token }, State::WaitInitial, Role::Client) => {
-                    if *odcid != self.dcid {
-                        qwarn!("received Retry, but not for us, dropping it");
+                    if self.retry_token.is_some() {
+                        qwarn!("received another Retry, dropping it");
                         return Ok(());
                     }
                     if token.is_empty() {
                         qwarn!("received Retry, but no token, dropping it");
                         return Ok(());
                     }
-                    if self.retry_token.is_some() {
-                        qwarn!("received another Retry, dropping it");
-                        return Ok(());
+                    {
+                        let path = self.paths.iter_mut().find(|p| p.remote_cid == *odcid);
+                        if path.is_none() {
+                            qwarn!("received Retry, but not for us, dropping it");
+                            return Ok(());
+                        }
+                        path.unwrap().remote_cid =
+                            hdr.scid.as_ref().expect("no SCID on Retry").clone();
                     }
                     self.retry_token = Some(token.clone());
-                    self.dcid = hdr.scid.as_ref().expect("no SCID on Retry").clone();
                     return Ok(());
                 }
                 (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {
@@ -1035,7 +1052,7 @@ impl Connection {
                         self.version,
                     );
                     qwarn!([self] "Sending VN on next output");
-                    self.send_vn = Some(hdr.scid.unwrap().clone());
+                    self.send_vn = Some((hdr, d.src, d.dst));
                     return Ok(());
                 }
             }
@@ -1047,8 +1064,6 @@ impl Connection {
                 }
                 State::WaitInitial => {
                     qinfo!([self] "Received packet in WaitInitial");
-                    // Out DCID is the other side's SCID.
-                    let scid = hdr.scid.as_ref().unwrap();
                     if self.role == Role::Server {
                         if hdr.dcid.len() < 8 {
                             qwarn!([self] "Peer DCID is too short");
@@ -1056,13 +1071,10 @@ impl Connection {
                         }
                         self.create_initial_crypto_state(&hdr.dcid);
                     }
-
-                    // Imprint on the remote parameters.
-                    self.dcid = scid.clone();
                 }
                 State::Handshaking | State::Connected => {
-                    if !self.valid_cid(&hdr.dcid[..]) {
-                        qinfo!([self] "Bad CID {}", hex(&hdr.dcid));
+                    if !self.is_valid_cid(&hdr.dcid) {
+                        qinfo!([self] "Ignoring packet with CID {:?}", hdr.dcid);
                         return Ok(());
                     }
                 }
@@ -1114,10 +1126,6 @@ impl Connection {
 
             // TODO(ekr@rtfm.com): Filter for valid for this epoch.
 
-            if matches!(self.state, State::WaitInitial) {
-                self.set_state(State::Handshaking);
-            }
-
             let ack_eliciting = self.input_packet(hdr.epoch, Decoder::from(&body[..]), cur_time)?;
             let space = PNSpace::from(hdr.epoch);
             if self.acks[space].is_duplicate(hdr.pn) {
@@ -1127,16 +1135,40 @@ impl Connection {
             }
             self.acks[space].set_received(cur_time, hdr.pn, ack_eliciting);
 
-            match &self.paths {
-                None => {
-                    self.paths = Some(Path::from(&d));
+            if matches!(self.state, State::WaitInitial) {
+                if self.role == Role::Server {
+                    assert!(matches!(hdr.tipe, PacketType::Initial(..)));
+                    // A server needs to accept the client's selected CID during the handshake.
+                    self.valid_cids.push(hdr.dcid.clone());
+                    // Install a path.
+                    assert!(self.paths.is_none());
+                    let mut p = Path::new(&d, hdr.scid.unwrap());
+                    p.local_cids.push(ConnectionId::generate(CID_LENGTH));
+                    self.paths = Some(p);
+
+                    // SecretAgentPreinfo::early_data() always returns false for a server,
+                    // but a non-zero maximum tells us if we are accepting 0-RTT.
+                    self.zero_rtt_state = if self.tls.preinfo()?.max_early_data() > 0 {
+                        ZeroRttState::Accepted
+                    } else {
+                        ZeroRttState::Rejected
+                    };
+                } else {
+                    let p = self
+                        .paths
+                        .iter_mut()
+                        .find(|p| p.received_on(&d))
+                        .expect("should have a path for sending Initial");
+                    // Start using the server's CID.
+                    p.remote_cid = hdr.scid.unwrap();
                 }
-                Some(p) => {
-                    if !p.received_on(&d) {
-                        // Right now, we don't support any form of migration.
-                        return Err(Error::InvalidMigration);
-                    }
-                }
+                self.set_state(State::Handshaking);
+            }
+
+            if !self.paths.iter().any(|p| p.received_on(&d)) {
+                // Right now, we don't support any form of migration.
+                // So generate an error if a packet is received on a new path.
+                return Err(Error::InvalidMigration);
             }
         }
 
@@ -1159,31 +1191,31 @@ impl Connection {
         Ok(ack_eliciting)
     }
 
-    fn output_vn(&mut self, scid: ConnectionId) -> Datagram {
+    fn output_vn(
+        &mut self,
+        recvd_hdr: PacketHdr,
+        remote: SocketAddr,
+        local: SocketAddr,
+    ) -> Datagram {
         qinfo!("Sending VN Packet instead of normal output");
-        let supported_versions = vec![QUIC_VERSION, 0x4a4a_4a4a];
         let hdr = PacketHdr::new(
             0,
-            PacketType::VN(supported_versions),
+            PacketType::VN(vec![QUIC_VERSION, 0x4a4a_4a4a]),
             Some(0),
-            scid.clone(),
-            Some(self.scid.clone()),
+            recvd_hdr.scid.unwrap().clone(),
+            Some(recvd_hdr.dcid.clone()),
             0, // unused
             0, // unused
         );
         let cs = self.obtain_crypto_state(0).unwrap();
         let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &[]);
         self.stats.packets_tx += 1;
-        if let Some(path) = &self.paths {
-            Datagram::new(path.local, path.remote, packet)
-        } else {
-            unreachable!()
-        }
+        Datagram::new(local, remote, packet)
     }
 
     fn output(&mut self, cur_time: u64) -> Vec<Datagram> {
-        if let Some(scid) = self.send_vn.take() {
-            return vec![self.output_vn(scid)];
+        if let Some((vn_hdr, remote, local)) = self.send_vn.take() {
+            return vec![self.output_vn(vn_hdr, remote, local)];
         }
 
         // Can't call a method on self while iterating over self.paths
@@ -1237,9 +1269,8 @@ impl Connection {
                 }
             }
 
-            // Add an ACK frame as necessary.
-            let mut ack_needed = self.acks[space].ack_now(cur_time);
-            if ack_needed {
+            // Always send an ACK if there is one to send.
+            if self.acks[space].ack_now(cur_time) {
                 let mut recvd = mem::replace(&mut self.acks[space], RecvdPackets::new(space));
                 if let Some((frame, token)) = recvd.generate(
                     self,
@@ -1252,7 +1283,6 @@ impl Connection {
                     tokens.push(token.unwrap());
                 }
                 mem::replace(&mut self.acks[space], recvd);
-                ack_needed = false;
             }
 
             let mut ack_eliciting = false;
@@ -1269,13 +1299,6 @@ impl Connection {
                     TxMode::Normal,
                     self.pmtu - encoder.len(),
                 ) {
-                    if ack_needed {
-                        // TODO(mt) send an ACK here.  This doesn't work right now because
-                        // we just told the other frame generator that it has the rest
-                        // of the packet available to it, so it might have taken all of it.
-                        ack_needed = false;
-                    }
-
                     ack_eliciting = ack_eliciting || frame.ack_eliciting();
                     is_crypto_packet = match frame {
                         Frame::Crypto { .. } => true,
@@ -1316,14 +1339,18 @@ impl Connection {
                             };
                             PacketType::Initial(token)
                         }
-                        1 => PacketType::ZeroRTT,
+                        1 => {
+                            assert!(self.zero_rtt_state != ZeroRttState::Rejected);
+                            self.zero_rtt_state = ZeroRttState::Sending;
+                            PacketType::ZeroRTT
+                        }
                         2 => PacketType::Handshake,
                         3 => PacketType::Short,
                         _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
                     },
                     Some(self.version),
-                    self.dcid.clone(),
-                    Some(self.scid.clone()),
+                    path.remote_cid.clone(),
+                    path.local_cids.first().cloned(),
                     self.tx_pns[space as usize], // TODO(mt) EnumMap or Index
                     epoch,
                 );
@@ -1377,9 +1404,13 @@ impl Connection {
     }
 
     fn client_start(&mut self, now: u64) -> Res<()> {
-        qinfo!([self] "client_start SCID={}", hex(&self.scid));
+        qinfo!([self] "client_start");
         self.handshake(now, 0, None)?;
         self.set_state(State::WaitInitial);
+        if self.tls.preinfo()?.early_data() {
+            qdebug!([self] "Enabling 0-RTT");
+            self.zero_rtt_state = ZeroRttState::Enabled;
+        }
         Ok(())
     }
 
@@ -1679,16 +1710,40 @@ impl Connection {
         Ok(())
     }
 
+    /// When the server rejects 0-RTT we need to drop a bunch of stuff.
+    fn client_0rtt_rejected(&mut self) {
+        if self.zero_rtt_state != ZeroRttState::Sending {
+            return;
+        }
+
+        // Tell 0-RTT packets that they were "lost".
+        // TODO(mt) remove these from "bytes in flight" when we
+        // have a congestion controller.
+        for mut dropped in self.loss_recovery.drop_0rtt() {
+            dropped.mark_lost(self);
+        }
+        self.send_streams.clear();
+        self.recv_streams.clear();
+        self.events.borrow_mut().client_0rtt_rejected();
+    }
+
     fn set_state(&mut self, state: State) {
         if state != self.state {
             qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
             self.state = state;
             match &self.state {
                 State::Connected => {
-                    // Tell 0-RTT packets that they were "lost".
-                    // TODO(mt) remove these from "bytes in flight" too.
-                    for mut dropped in self.loss_recovery.drop_0rtt() {
-                        dropped.mark_lost(self);
+                    if self.role == Role::Server {
+                        // Remove the randomized client CID from the list of acceptable CIDs.
+                        assert_eq!(1, self.valid_cids.len());
+                        self.valid_cids.clear();
+                    } else {
+                        self.zero_rtt_state = if self.tls.info().unwrap().early_data_accepted() {
+                            ZeroRttState::Accepted
+                        } else {
+                            self.client_0rtt_rejected();
+                            ZeroRttState::Rejected
+                        }
                     }
                 }
                 State::Closing { .. } => {
@@ -1836,8 +1891,9 @@ impl Connection {
         &mut self,
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
-        if self.state != State::Connected {
-            return Err(Error::ConnectionState);
+        match (&self.state, self.zero_rtt_state) {
+            (State::Connected, _) | (State::Handshaking, ZeroRttState::Accepted) => (),
+            _ => return Err(Error::ConnectionState),
         }
 
         // May require creating new stream(s)
@@ -1895,9 +1951,7 @@ impl Connection {
                         let send_initial_max_stream_data = self
                             .tps
                             .borrow()
-                            .remote
-                            .as_ref()
-                            .expect("remote tparams are valid when State::Connected")
+                            .remote()
                             .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
                         self.send_streams.insert(
                             next_stream_id,
@@ -1930,9 +1984,20 @@ impl Connection {
     /// Create a stream.
     // Returns new stream id
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
-        // Can't make streams before remote tparams are received as part of
-        // handshake. Can't make streams when closing/closed.
-        if self.state != State::Connected {
+        // Can't make streams while closing, otherwise rely on the stream limits.
+        match self.state {
+            State::Closing { .. } | State::Closed { .. } => return Err(Error::ConnectionState),
+            State::WaitInitial | State::Handshaking => {
+                if matches!(
+                    self.zero_rtt_state,
+                    ZeroRttState::Init | ZeroRttState::Rejected
+                ) {
+                    return Err(Error::ConnectionState);
+                }
+            }
+            _ => (),
+        }
+        if self.tps.borrow().remote.is_none() && self.tps.borrow().remote_0rtt.is_none() {
             return Err(Error::ConnectionState);
         }
 
@@ -1954,9 +2019,7 @@ impl Connection {
                 let initial_max_stream_data = self
                     .tps
                     .borrow()
-                    .remote
-                    .as_ref()
-                    .expect("remote tparams are valid when State::Connected")
+                    .remote()
                     .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI);
 
                 self.send_streams.insert(
@@ -1987,9 +2050,7 @@ impl Connection {
                 let send_initial_max_stream_data = self
                     .tps
                     .borrow()
-                    .remote
-                    .as_ref()
-                    .expect("remote tparams are valid when State::Connected")
+                    .remote()
                     .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
 
                 self.send_streams.insert(
@@ -3126,7 +3187,7 @@ mod tests {
 
         qdebug!("---- server");
         let (res, _) = server.process(res, NOW);
-        assert_eq!(res.len(), 1);
+        assert_eq!(res.len(), 1); // Just an ACK.
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
 
@@ -3553,11 +3614,12 @@ mod tests {
         assert_eq!(client_0rtt.len(), 1);
 
         let (server_hs, _) = server.process(client_hs.into_iter().chain(client_0rtt), NOW);
-        assert_eq!(server_hs.len(), 1);
+        assert_eq!(server_hs.len(), 1); // Should produce ServerHello etc...
 
         let server_stream_id = server
             .events()
             .into_iter()
+            .inspect(|evt| eprintln!("Event: {:?}", evt))
             .find_map(|evt| match evt {
                 ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
                 _ => None,
