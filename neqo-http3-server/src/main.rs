@@ -6,7 +6,7 @@
 
 #![deny(warnings)]
 
-use neqo_common::now;
+use neqo_common::{now, qinfo};
 use neqo_crypto::init_db;
 use neqo_http3::{Http3Connection, Http3State};
 use neqo_transport::{Connection, Datagram};
@@ -20,6 +20,9 @@ use structopt::StructOpt;
 
 use mio::net::UdpSocket;
 use mio::{Events, Poll, PollOpt, Ready, Token};
+use mio_extras::timer::{Builder, Timeout};
+
+const TIMER_TOKEN: Token = Token(0xffff_ffff);
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-http3-server", about = "A basic HTTP3 server.")]
@@ -93,7 +96,7 @@ fn http_serve(
 fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
     for d in out_dgrams {
         let sent = socket
-            .send_to(&d[..], d.destination())
+            .send_to(d, d.destination())
             .expect("Error sending datagram");
         if sent != d.len() {
             eprintln!("Unable to send all {} bytes of datagram", d.len());
@@ -116,6 +119,9 @@ fn main() -> Result<(), io::Error> {
     }
 
     let mut sockets = Vec::new();
+
+    let mut timer = Builder::default().build::<SocketAddr>();
+    poll.register(&timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
 
     for (i, host) in hosts.iter().enumerate() {
         let socket = match UdpSocket::bind(&host) {
@@ -155,7 +161,7 @@ fn main() -> Result<(), io::Error> {
     }
 
     let buf = &mut [0u8; 2048];
-    let mut connections: HashMap<SocketAddr, Http3Connection> = HashMap::new();
+    let mut connections: HashMap<SocketAddr, (Http3Connection, Option<Timeout>)> = HashMap::new();
 
     let mut events = Events::with_capacity(1024);
 
@@ -164,7 +170,15 @@ fn main() -> Result<(), io::Error> {
         let mut in_dgrams = HashMap::new();
         let mut out_dgrams = Vec::new();
         for event in &events {
-            if let Some(socket) = sockets.get(event.token().0) {
+            if event.token() == TIMER_TOKEN {
+                while let Some(remote_addr) = timer.poll() {
+                    qinfo!("Timer expired for {:?}", remote_addr);
+                    // Adds an entry to in_dgrams but doesn't add any
+                    // packets. This will cause the Connection to be
+                    // process()ed.
+                    in_dgrams.entry(remote_addr).or_insert_with(Vec::new);
+                }
+            } else if let Some(socket) = sockets.get(event.token().0) {
                 let local_addr = hosts[event.token().0];
 
                 if !event.readiness().is_readable() {
@@ -198,29 +212,41 @@ fn main() -> Result<(), io::Error> {
 
         // Process each connections' packets
         for (remote_addr, mut dgrams) in in_dgrams {
-            let server = connections.entry(remote_addr).or_insert_with(|| {
+            let (server, svr_timeout) = connections.entry(remote_addr).or_insert_with(|| {
                 println!("New connection from {:?}", remote_addr);
-                Http3Connection::new(
-                    Connection::new_server(&[args.key.clone()], &[args.alpn.clone()])
-                        .expect("must succeed"),
-                    args.max_table_size,
-                    args.max_blocked_streams,
-                    Some(Box::new(http_serve)),
+                (
+                    Http3Connection::new(
+                        Connection::new_server(&[args.key.clone()], &[args.alpn.clone()])
+                            .expect("must succeed"),
+                        args.max_table_size,
+                        args.max_blocked_streams,
+                        Some(Box::new(http_serve)),
+                    ),
+                    None,
                 )
             });
 
-            // TODO use timer to set socket.set_read_timeout.
             server.process_input(dgrams.drain(..), now());
             if let Http3State::Closed(e) = server.state() {
-                eprintln!("Closed connection from {:?}: {:?}", remote_addr, e);
+                println!("Closed connection from {:?}: {:?}", remote_addr, e);
+                if let Some(svr_timeout) = svr_timeout {
+                    timer.cancel_timeout(svr_timeout);
+                }
                 connections.remove(&remote_addr);
                 continue;
             }
 
             server.process_http3(now());
-            let (conn_out_dgrams, _timer) = server.process_output(now());
-            // TODO: each connection might want a different timer, how's that
-            // gonna work?
+
+            let (conn_out_dgrams, maybe_timeout) = server.process_output(now());
+            *svr_timeout = maybe_timeout.map(|timeout| {
+                if let Some(svr_timeout) = svr_timeout {
+                    timer.cancel_timeout(svr_timeout);
+                }
+                qinfo!("Setting timeout of {:?} for {:?}", timeout, remote_addr);
+                timer.set_timeout(timeout, remote_addr)
+            });
+
             out_dgrams.extend(conn_out_dgrams);
         }
 
