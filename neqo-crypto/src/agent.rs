@@ -6,28 +6,30 @@
 
 use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{Record, RecordList};
+use crate::assert_initialized;
 pub use crate::cert::CertificateChain;
 use crate::constants::*;
-use crate::convert::{to_c_uint, to_prtime};
+use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
-use crate::initialized;
 use crate::p11;
 use crate::prio;
 use crate::result;
 use crate::secrets::SecretHolder;
 use crate::ssl;
-use crate::ssl::{PRBool, PRTime};
+use crate::ssl::PRBool;
+use crate::time::{Interval, Time, PRTime};
 
 use neqo_common::{qdebug, qinfo, qwarn};
 use std::cell::RefCell;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::ffi::CString;
 use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_uint, c_void};
 use std::ptr::{null, null_mut, NonNull};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HandshakeState {
@@ -239,7 +241,7 @@ impl SecretAgent {
     // between them.  ssl::PRFileDesc is left as an opaque type, as the
     // ssl::SSL_* APIs only need an opaque type.
     fn create_fd(&mut self) -> Res<()> {
-        assert!(initialized());
+        assert_initialized();
 
         let label = CString::new("sslwrapper").expect("cstring failed");
         let id = unsafe { prio::PR_GetUniqueIdentity(label.as_ptr()) };
@@ -542,8 +544,8 @@ impl SecretAgent {
     // is complete and how many bytes were written to @output, respectively.
     // If the state is HandshakeState::AuthenticationPending, then ONLY call this
     // function if you want to proceed, because this will mark the certificate as OK.
-    pub fn handshake(&mut self, now: u64, input: &[u8]) -> Res<Vec<u8>> {
-        *self.now = to_prtime(now)?;
+    pub fn handshake(&mut self, now: Instant, input: &[u8]) -> Res<Vec<u8>> {
+        *self.now = Time::from(now).try_into()?;
         self.set_raw(false)?;
 
         let rv = {
@@ -608,8 +610,8 @@ impl SecretAgent {
     //
     // Ideally, this only includes records from the current epoch.
     // If you send data from multiple epochs, you might end up being sad.
-    pub fn handshake_raw(&mut self, now: u64, input: Option<Record>) -> Res<RecordList> {
-        *self.now = to_prtime(now)?;
+    pub fn handshake_raw(&mut self, now: Instant, input: Option<Record>) -> Res<RecordList> {
+        *self.now = Time::from(now).try_into()?;
         let mut records = self.setup_raw()?;
 
         // Fire off any authentication we might need to complete.
@@ -852,15 +854,15 @@ impl Server {
     /// Initialize anti-replay.  Failure to call this function results in all
     /// early data being rejected by a server.
     pub fn init_anti_replay(
-        now: u64,
-        window: std::time::Duration,
+        now: Instant,
+        window: Duration,
         k: usize,
         bits: usize,
     ) -> Res<()> {
         let rv = unsafe {
             ssl::SSL_InitAntiReplay(
-                to_prtime(now)?,
-                to_prtime(window.as_nanos())?,
+                Time::from(now).try_into()?,
+                Interval::from(window).try_into()?,
                 to_c_uint(k)?,
                 to_c_uint(bits)?,
             )
@@ -891,8 +893,8 @@ impl Server {
     /// Send a session ticket to the client.
     /// This adds |extra| application-specific content into that ticket.
     /// The records that are sent are captured and returned.
-    pub fn send_ticket(&mut self, now: u64, extra: &[u8]) -> Res<RecordList> {
-        *self.agent.now = to_prtime(now)?;
+    pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<RecordList> {
+        *self.agent.now = Time::from(now).try_into()?;
         let records = self.setup_raw()?;
 
         let rv =

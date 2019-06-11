@@ -1,19 +1,31 @@
 #![allow(dead_code)]
 
 use neqo_common::qinfo;
+use neqo_common::once::OnceResult;
 use neqo_crypto::*;
 use std::mem;
-use std::time::Duration;
-
-// Time in nanoseconds since epoch; we need enough to avoid underflow.
-pub const NOW: u64 = 32_000_000;
+use std::time::{Duration, Instant};
 
 // This needs to be > 2ms to avoid it being rounded to zero.
 // NSS operates in milliseconds and halves any value it is provided.
 pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 
+static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
+
+fn base_time() -> Instant {
+    *unsafe {
+        BASE_TIME.call_once(|| Instant::now())
+    }
+}
+
+/// The current time for the test.  Which is in the future,
+/// because 0-RTT tests need to run at least ANTI_REPLAY_WINDOW in the past.
+pub fn now() -> Instant {
+    base_time().checked_add(ANTI_REPLAY_WINDOW).unwrap()
+}
+
 pub fn forward_records(
-    now: u64,
+    now: Instant,
     agent: &mut SecretAgent,
     records_in: RecordList,
 ) -> Res<RecordList> {
@@ -32,7 +44,7 @@ pub fn forward_records(
     Ok(records_out)
 }
 
-fn handshake(now: u64, client: &mut SecretAgent, server: &mut SecretAgent) {
+fn handshake(now: Instant, client: &mut SecretAgent, server: &mut SecretAgent) {
     let mut a = client;
     let mut b = server;
     let mut records = a.handshake_raw(now, None).unwrap();
@@ -58,7 +70,7 @@ fn handshake(now: u64, client: &mut SecretAgent, server: &mut SecretAgent) {
     }
 }
 
-pub fn connect_at(now: u64, client: &mut SecretAgent, server: &mut SecretAgent) {
+pub fn connect_at(now: Instant, client: &mut SecretAgent, server: &mut SecretAgent) {
     handshake(now, client, server);
     qinfo!("client: {:?}", client.state());
     qinfo!("server: {:?}", server.state());
@@ -67,11 +79,11 @@ pub fn connect_at(now: u64, client: &mut SecretAgent, server: &mut SecretAgent) 
 }
 
 pub fn connect(client: &mut SecretAgent, server: &mut SecretAgent) {
-    connect_at(NOW, client, server);
+    connect_at(now(), client, server);
 }
 
 pub fn connect_fail(client: &mut SecretAgent, server: &mut SecretAgent) {
-    handshake(NOW, client, server);
+    handshake(now(), client, server);
     assert!(!client.state().connected());
     assert!(!server.state().connected());
 }
@@ -107,10 +119,8 @@ impl ZeroRttChecker for PermissiveZeroRttChecker {
 pub fn resumption_setup(mode: Resumption) -> Vec<u8> {
     init_db("./db");
     // We need to pretend that initialization was in the past.
-    // That way, the anti-replay filter is cleared when we try to connect at |NOW|.
-    let start_time = NOW
-        .checked_sub(ANTI_REPLAY_WINDOW.as_nanos() as u64)
-        .unwrap();
+    // That way, the anti-replay filter is cleared when we try to connect at now().
+    let start_time = base_time();
     Server::init_anti_replay(start_time, ANTI_REPLAY_WINDOW, 1, 3)
         .expect("anti-replay setup successful");
 
@@ -134,11 +144,11 @@ pub fn resumption_setup(mode: Resumption) -> Vec<u8> {
     assert!(!server.info().unwrap().early_data_accepted());
 
     let server_records = server
-        .send_ticket(NOW, ZERO_RTT_TOKEN_DATA)
+        .send_ticket(now(), ZERO_RTT_TOKEN_DATA)
         .expect("ticket sent");
     assert_eq!(server_records.len(), 1);
     let client_records = client
-        .handshake_raw(NOW, server_records.into_iter().next())
+        .handshake_raw(now(), server_records.into_iter().next())
         .expect("records ingested");
     assert_eq!(client_records.len(), 0);
 

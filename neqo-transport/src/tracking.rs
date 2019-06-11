@@ -209,7 +209,7 @@ impl RecvdPackets {
         if pn < self.min_tracked {
             return true;
         }
-        // TODO(mt) binary search
+        // TODO(mt) consider a binary search or early exit.
         for range in &self.ranges {
             if range.contains(pn) {
                 return true;

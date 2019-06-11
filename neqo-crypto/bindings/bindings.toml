@@ -213,3 +213,7 @@ enums = [
     "PRSockOption",
     "PRTransmitFileFlags",
 ]
+
+[nspr_time]
+types = ["PRTime"]
+functions = ["PR_Now"]

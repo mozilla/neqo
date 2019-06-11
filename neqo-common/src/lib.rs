@@ -9,6 +9,7 @@
 mod codec;
 mod incrdecoder;
 pub mod log;
+pub mod once;
 
 pub use self::codec::{Decoder, Encoder};
 pub use self::incrdecoder::{IncrementalDecoder, IncrementalDecoderResult};

@@ -34,7 +34,7 @@ pub enum Error {
         desc: String,
     },
     OverrunError,
-    TimeTooFarFuture,
+    TimeTravelError,
     UnsupportedCipher,
     UnsupportedVersion,
 }
@@ -52,6 +52,13 @@ impl std::error::Error for Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "Error: {:?}", self)
+    }
+}
+
+// TryFromIntError is only ever used in time.rs for time conversion.
+impl From<std::num::TryFromIntError> for Error {
+    fn from(_: std::num::TryFromIntError) -> Error {
+        Error::TimeTravelError
     }
 }
 
