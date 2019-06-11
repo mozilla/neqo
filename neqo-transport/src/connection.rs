@@ -66,7 +66,7 @@ pub enum Role {
 }
 
 impl Role {
-    pub fn peer(&self) -> Self {
+    pub fn peer(self) -> Self {
         match self {
             Role::Client => Role::Server,
             Role::Server => Role::Client,
@@ -729,7 +729,9 @@ impl Connection {
         agent.disable_end_of_early_data();
         match agent {
             Agent::Client(c) => c.enable_0rtt(),
-            Agent::Server(s) => s.enable_0rtt(0xffffffff, TpZeroRttChecker::new(tphandler.clone())),
+            Agent::Server(s) => {
+                s.enable_0rtt(0xffff_ffff, TpZeroRttChecker::wrap(tphandler.clone()))
+            }
         }
         .expect("Could not enable 0-RTT");
         agent

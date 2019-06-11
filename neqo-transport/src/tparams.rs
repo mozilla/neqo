@@ -339,7 +339,7 @@ pub struct TpZeroRttChecker {
 }
 
 impl TpZeroRttChecker {
-    pub fn new(handler: Rc<RefCell<TransportParametersHandler>>) -> Box<dyn ZeroRttChecker> {
+    pub fn wrap(handler: Rc<RefCell<TransportParametersHandler>>) -> Box<dyn ZeroRttChecker> {
         Box::new(TpZeroRttChecker { handler })
     }
 }
@@ -347,7 +347,7 @@ impl TpZeroRttChecker {
 impl ZeroRttChecker for TpZeroRttChecker {
     fn check(&self, token: &[u8]) -> ZeroRttCheckResult {
         // Reject 0-RTT if there is no token.
-        if token.len() == 0 {
+        if token.is_empty() {
             qdebug!("0-RTT: no token, no 0-RTT");
             return ZeroRttCheckResult::Reject;
         }

@@ -275,7 +275,7 @@ impl FrameGenerator for RecvdPackets {
             .iter()
             .filter(|r| r.ack_needed())
             .take(MAX_ACKS_PER_FRAME)
-            .map(|r| r.clone())
+            .cloned()
             .collect();
         let mut iter = ranges.iter();
 
