@@ -217,7 +217,7 @@ fn main() -> Result<(), io::Error> {
                 continue;
             }
 
-            server.process_http3();
+            server.process_http3(now());
             let (conn_out_dgrams, _timer) = server.process_output(now());
             // TODO: each connection might want a different timer, how's that
             // gonna work?

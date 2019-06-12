@@ -49,8 +49,8 @@ const CID_LENGTH: usize = 8;
 
 const TIME_THRESHOLD: f64 = 9.0 / 8.0;
 const PACKET_THRESHOLD: u64 = 3;
-// TODO granularity
-const GRANULARITY: Duration = Duration::from_millis(1);
+
+const GRANULARITY: Duration = Duration::from_millis(20);
 const INITIAL_RTT: Duration = Duration::from_millis(100);
 
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
@@ -2555,7 +2555,7 @@ impl RttVals {
     }
 
     fn pto(&self) -> Duration {
-        self.smoothed_rtt.unwrap_or_else(|| self.latest_rtt)
+        self.smoothed_rtt.unwrap_or(self.latest_rtt)
             + max(4 * self.rttvar, GRANULARITY)
             + self.max_ack_delay
     }
@@ -2840,7 +2840,7 @@ impl LossRecovery {
             let packet_space = self.space(*space);
 
             if let Some(new_loss_time) = packet_space.loss_time {
-                if loss_time.is_none() || Some(new_loss_time) < loss_time {
+                if loss_time.map(|i| new_loss_time < i).unwrap_or(true) {
                     loss_time = Some(new_loss_time);
                     pn_space = *space;
                 }
