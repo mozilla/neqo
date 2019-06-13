@@ -20,13 +20,9 @@ impl<T> OnceResult<T> {
     }
 
     pub fn call_once<F: FnOnce() -> T>(&mut self, f: F) -> &T {
-        // Using a pointer to access `v` allows us up dupe the borrow checker.
-        let ptr: *mut Option<T> = &mut self.v;
+        let v = &mut self.v;
         self.once.call_once(|| {
-            let r = f();
-            unsafe {
-                ptr.write(Some(r));
-            }
+            *v = Some(f());
         });
         self.v.as_ref().unwrap()
     }
