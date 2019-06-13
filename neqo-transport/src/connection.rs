@@ -993,7 +993,7 @@ impl Connection {
     pub fn process_output(&mut self, cur_time: Instant) -> (Vec<Datagram>, Option<Duration>) {
         match &self.state {
             State::Closing { error, timeout, .. } => {
-                if *timeout < cur_time {
+                if *timeout > cur_time {
                     (self.output(cur_time), None)
                 } else {
                     // Close timeout expired, move to Closed

@@ -11,3 +11,5 @@ neqo-common = { version="0.1", path="./../neqo-common" }
 neqo-http3 = { version = "0.1", path = "./../neqo-http3" }
 structopt = "0.2.15"
 mio = "0.6.17"
+mio-extras = "2.0.5"
+log = "0.4.0"
