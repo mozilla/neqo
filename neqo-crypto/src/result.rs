@@ -56,8 +56,8 @@ fn result_helper(rv: ssl::SECStatus, allow_blocked: bool) -> Res<bool> {
 mod tests {
     use super::{result, result_or_blocked};
     use crate::err::{Error, NSPRErrorCodes, PRErrorCode, PR_SetError, SSLErrorCodes};
-    use crate::init_db;
     use crate::ssl;
+    use test_fixture::fixture_init;
 
     fn set_error_code(code: PRErrorCode) {
         unsafe { PR_SetError(code, 0) };
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn is_err() {
         // This code doesn't work without initializing NSS first.
-        init_db("./db");
+        fixture_init();
 
         set_error_code(SSLErrorCodes::SSL_ERROR_BAD_MAC_READ);
         let r = result(ssl::SECFailure);
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn is_err_zero_code() {
         // This code doesn't work without initializing NSS first.
-        init_db("./db");
+        fixture_init();
 
         set_error_code(0);
         let r = result(ssl::SECFailure);
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn blocked_as_error() {
         // This code doesn't work without initializing NSS first.
-        init_db("./db");
+        fixture_init();
 
         set_error_code(NSPRErrorCodes::PR_WOULD_BLOCK_ERROR);
         let r = result(ssl::SECFailure);

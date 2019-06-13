@@ -4,22 +4,23 @@ use neqo_crypto::*;
 
 mod handshake;
 use crate::handshake::*;
+use test_fixture::{fixture_init, now};
 
 #[test]
 fn make_client() {
-    init_db("./db");
+    fixture_init();
     let _c = Client::new("server").expect("should create client");
 }
 
 #[test]
 fn make_server() {
-    init_db("./db");
+    fixture_init();
     let _s = Server::new(&["key"]).expect("should create server");
 }
 
 #[test]
 fn basic() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     println!("client {:p}", &client);
     let mut server = Server::new(&["key"]).expect("should create server");
@@ -62,7 +63,7 @@ fn basic() {
 
 #[test]
 fn raw() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     println!("client {:?}", client);
     let mut server = Server::new(&["key"]).expect("should create server");
@@ -120,7 +121,7 @@ fn raw() {
 
 #[test]
 fn chacha_client() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     client
@@ -141,7 +142,7 @@ fn chacha_client() {
 
 #[test]
 fn p256_server() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     server
@@ -156,7 +157,7 @@ fn p256_server() {
 
 #[test]
 fn alpn() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     client.set_alpn(&["alpn"]).expect("should set ALPN");
     let mut server = Server::new(&["key"]).expect("should create server");
@@ -171,7 +172,7 @@ fn alpn() {
 
 #[test]
 fn alpn_multi() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     client
         .set_alpn(&["dummy", "alpn"])
@@ -190,7 +191,7 @@ fn alpn_multi() {
 
 #[test]
 fn alpn_server_pref() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     client
         .set_alpn(&["dummy", "alpn"])
@@ -209,7 +210,7 @@ fn alpn_server_pref() {
 
 #[test]
 fn alpn_no_protocol() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     client.set_alpn(&["a"]).expect("should set ALPN");
     let mut server = Server::new(&["key"]).expect("should create server");
@@ -222,7 +223,7 @@ fn alpn_no_protocol() {
 
 #[test]
 fn alpn_client_only() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     client.set_alpn(&["alpn"]).expect("should set ALPN");
     let mut server = Server::new(&["key"]).expect("should create server");
@@ -235,7 +236,7 @@ fn alpn_client_only() {
 
 #[test]
 fn alpn_server_only() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     server.set_alpn(&["alpn"]).expect("should set ALPN");

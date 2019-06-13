@@ -959,32 +959,7 @@ impl Http3Events {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_common::once::OnceResult;
-    use neqo_crypto::{init_db, AntiReplay};
-    use std::net::SocketAddr;
-
-    fn loopback() -> SocketAddr {
-        "127.0.0.1:443".parse().unwrap()
-    }
-    // TODO(mt) move these time functions into a test support crate.
-    // This needs to be > 2ms to avoid it being rounded to zero.
-    // NSS operates in milliseconds and halves any value it is provided.
-    pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
-
-    fn earlier() -> Instant {
-        static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
-        *unsafe { BASE_TIME.call_once(|| Instant::now()) }
-    }
-
-    /// The current time for the test.  Which is in the future,
-    /// because 0-RTT tests need to run at least ANTI_REPLAY_WINDOW in the past.
-    pub fn now() -> Instant {
-        earlier().checked_add(ANTI_REPLAY_WINDOW).unwrap()
-    }
-
-    fn anti_replay() -> AntiReplay {
-        AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
-    }
+    use test_fixture::*;
 
     fn assert_closed(hconn: &Http3Connection, expected: Error) {
         match hconn.state() {
@@ -1001,26 +976,24 @@ mod tests {
         // side sends and also to simulate an incorrectly behaving http3
         // server/client.
 
-        init_db("./../neqo-transport/db");
         let mut hconn;
         let mut neqo_trans_conn;
         if client {
             hconn = Http3Connection::new(
-                Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap(),
+                default_client(),
                 100,
                 100,
                 None,
             );
-            neqo_trans_conn = Connection::new_server(&["key"], &["alpn"], &anti_replay()).unwrap();
+            neqo_trans_conn = default_server();
         } else {
             hconn = Http3Connection::new(
-                Connection::new_server(&["key"], &["alpn"], &anti_replay()).unwrap(),
+                default_server(),
                 100,
                 100,
                 None,
             );
-            neqo_trans_conn =
-                Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+            neqo_trans_conn = default_client();
         }
         if client {
             assert_eq!(hconn.state(), Http3State::Initializing);

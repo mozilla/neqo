@@ -65,11 +65,11 @@ impl From<std::num::TryFromIntError> for Error {
 #[cfg(test)]
 mod tests {
     use crate::err::{NSPRErrorCodes, SECErrorCodes, SSLErrorCodes};
-    use crate::init_db;
+    use test_fixture::fixture_init;
 
     #[test]
     fn error_code() {
-        init_db("./db");
+        fixture_init();
         assert_eq!(15 - 0x3000, SSLErrorCodes::SSL_ERROR_BAD_MAC_READ);
         assert_eq!(166 - 0x2000, SECErrorCodes::SEC_ERROR_LIBPKIX_INTERNAL);
         assert_eq!(-5998, NSPRErrorCodes::PR_WOULD_BLOCK_ERROR);

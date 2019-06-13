@@ -3,7 +3,7 @@
 use neqo_crypto::constants::*;
 use neqo_crypto::hkdf;
 use neqo_crypto::hp;
-use neqo_crypto::init_db;
+use test_fixture::fixture_init;
 
 fn make_hp(cipher: Cipher) -> hp::HpKey {
     let ikm = hkdf::import_key(TLS_VERSION_1_3, cipher, &[0; 16]).expect("import IKM");
@@ -13,7 +13,7 @@ fn make_hp(cipher: Cipher) -> hp::HpKey {
 
 #[test]
 fn aes128() {
-    init_db("./db");
+    fixture_init();
     let mask = make_hp(TLS_AES_128_GCM_SHA256)
         .mask(&[0; 16])
         .expect("should produce a mask");
@@ -26,7 +26,7 @@ fn aes128() {
 
 #[test]
 fn aes256() {
-    init_db("./db");
+    fixture_init();
     let mask = make_hp(TLS_AES_256_GCM_SHA384)
         .mask(&[0; 16])
         .expect("should produce a mask");
@@ -40,7 +40,7 @@ fn aes256() {
 #[cfg(feature = "chacha")]
 #[test]
 fn chacha20_ctr() {
-    init_db("./db");
+    fixture_init();
     let mask = make_hp(TLS_CHACHA20_POLY1305_SHA256)
         .mask(&[0; 16])
         .expect("should produce a mask");

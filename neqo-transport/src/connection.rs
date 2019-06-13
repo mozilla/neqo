@@ -3088,49 +3088,11 @@ impl ::std::fmt::Display for LossRecovery {
 }
 
 #[cfg(test)]
-#[allow(unused_variables)]
 mod tests {
     use super::*;
     use crate::frame::StreamType;
-    use neqo_common::once::OnceResult;
-    use neqo_crypto::{init_db, AntiReplay};
     use std::time::Duration;
-
-    fn loopback() -> SocketAddr {
-        "127.0.0.1:443".parse().unwrap()
-    }
-
-    // TODO(mt) move these time functions into a test support crate.
-    // This needs to be > 2ms to avoid it being rounded to zero.
-    // NSS operates in milliseconds and halves any value it is provided.
-    pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
-
-    fn earlier() -> Instant {
-        static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
-        *unsafe { BASE_TIME.call_once(|| Instant::now()) }
-    }
-
-    /// The current time for the test.  Which is in the future,
-    /// because 0-RTT tests need to run at least ANTI_REPLAY_WINDOW in the past.
-    pub fn now() -> Instant {
-        earlier().checked_add(ANTI_REPLAY_WINDOW).unwrap()
-    }
-
-    fn anti_replay() -> AntiReplay {
-        AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
-    }
-
-    const DEFAULT_ALPN: &[&str] = &["alpn"];
-
-    fn default_client() -> Connection {
-        Connection::new_client("example.com", DEFAULT_ALPN, loopback(), loopback())
-            .expect("create a default client")
-    }
-
-    fn default_server() -> Connection {
-        Connection::new_server(&["key"], DEFAULT_ALPN, &anti_replay())
-            .expect("create a default server")
-    }
+    use test_fixture::*;
 
     #[test]
     fn test_stream_id_methods() {
@@ -3169,8 +3131,6 @@ mod tests {
 
     #[test]
     fn test_conn_stream_create() {
-        init_db("./db");
-
         let mut client = default_client();
         let (res, _) = client.process(vec![], now());
         let mut server = default_server();
@@ -3193,7 +3153,6 @@ mod tests {
 
     #[test]
     fn test_conn_handshake() {
-        init_db("./db");
         qdebug!("---- client: generate CH");
         let mut client = default_client();
         let (res, _) = client.process(Vec::new(), now());
@@ -3229,8 +3188,6 @@ mod tests {
     #[test]
     // tests stream send/recv after connection is established.
     fn test_conn_stream() {
-        init_db("./db");
-
         let mut client = default_client();
         let mut server = default_server();
 
@@ -3345,7 +3302,7 @@ mod tests {
 
     #[test]
     fn test_no_alpn() {
-        init_db("./db");
+        fixture_init();
         let mut client =
             Connection::new_client("example.com", &["bad-alpn"], loopback(), loopback()).unwrap();
         let mut server = default_server();
@@ -3744,7 +3701,6 @@ mod tests {
 
     #[test]
     fn test_dup_server_flight1() {
-        init_db("./db");
         qdebug!("---- client: generate CH");
         let mut client = default_client();
         let (res, _) = client.process(Vec::new(), now());
@@ -3787,7 +3743,6 @@ mod tests {
 
     #[test]
     fn resume() {
-        init_db("./db");
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -3805,8 +3760,6 @@ mod tests {
 
     #[test]
     fn zero_rtt_negotiate() {
-        init_db("./db");
-
         // Note that the two servers in this test will get different anti-replay filters.
         // That's OK because we aren't testing anti-replay.
         let mut client = default_client();
@@ -3826,8 +3779,6 @@ mod tests {
 
     #[test]
     fn zero_rtt_send_recv() {
-        init_db("./db");
-
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);

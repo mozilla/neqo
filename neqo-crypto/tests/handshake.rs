@@ -1,26 +1,10 @@
 #![allow(dead_code)]
 
-use neqo_common::once::OnceResult;
 use neqo_common::qinfo;
 use neqo_crypto::*;
 use std::mem;
-use std::time::{Duration, Instant};
-
-// This needs to be > 2ms to avoid it being rounded to zero.
-// NSS operates in milliseconds and halves any value it is provided.
-pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
-
-fn earlier() -> Instant {
-    static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
-    *unsafe { BASE_TIME.call_once(|| Instant::now()) }
-}
-
-/// The current time for the test.  Which is in the future,
-/// because 0-RTT tests need to run at least ANTI_REPLAY_WINDOW in the past.
-pub fn now() -> Instant {
-    earlier().checked_add(ANTI_REPLAY_WINDOW).unwrap()
-}
-// TODO(mt) move these functions into a supporting crate.
+use std::time::Instant;
+use test_fixture::{anti_replay, fixture_init, now};
 
 pub fn forward_records(
     now: Instant,
@@ -122,11 +106,7 @@ fn zero_rtt_setup(
     if let Resumption::WithZeroRtt = mode {
         client.enable_0rtt().expect("should enable 0-RTT on client");
 
-        // We need to establish this first connection at least one ANTI_REPLAY_WINDOW
-        // before connections established at now() will be created.
-        // That way, the anti-replay filter is cleared when we try to connect again.
-        let anti_replay = AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3)
-            .expect("should create anti-replay context");
+        let anti_replay = anti_replay();
         server
             .enable_0rtt(
                 &anti_replay,
@@ -141,7 +121,7 @@ fn zero_rtt_setup(
 }
 
 pub fn resumption_setup(mode: Resumption) -> (Option<AntiReplay>, Vec<u8>) {
-    init_db("./db");
+    fixture_init();
 
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");

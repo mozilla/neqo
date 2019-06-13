@@ -3,6 +3,7 @@
 use neqo_crypto::*;
 use std::cell::RefCell;
 use std::rc::Rc;
+use test_fixture::fixture_init;
 
 mod handshake;
 use crate::handshake::*;
@@ -13,7 +14,7 @@ impl ExtensionHandler for NoopExtensionHandler {}
 // This test just handshakes.  It doesn't really do anything about capturing the
 #[test]
 fn noop_extension_handler() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
 
@@ -71,7 +72,7 @@ impl ExtensionHandler for SimpleExtensionHandler {
 
 #[test]
 fn simple_extension() {
-    init_db("./db");
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
 

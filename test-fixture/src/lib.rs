@@ -8,12 +8,18 @@
 
 use neqo_common::once::OnceResult;
 use neqo_crypto::{AntiReplay, init_db};
-use std::net::{IpAddr, Ipv6Addr};
+use neqo_transport::Connection;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
+/// The path for the database used in tests.
+pub const NSS_DB_PATH: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 
-pub fn init() {
-    init_db(concat!(env!("CARGO_MANIFEST_DIR"), "/db"));
+/// Initialize the test fixture.  Only call this if you aren't also calling a
+/// fixture function that depends on setup.  Other functions in the fixture
+/// that depend on this setup call the function for you.
+pub fn fixture_init() {
+    init_db(NSS_DB_PATH);
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.
@@ -33,18 +39,32 @@ pub fn now() -> Instant {
 
 // Create a default anti-replay context.
 pub fn anti_replay() -> AntiReplay {
-    AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
+    fixture_init();
+    AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3)
+        .expect("setup anti-replay")
 }
 
-pub const DEFAULT_KEYS: &[&str] = &["key"];
-pub const DEFAULT_ALPN: &[&str] = &["alpn"];
+pub const DEFAULT_SERVER_NAME: &'static str = "example.com";
+pub const DEFAULT_KEYS: &'static [&'static str] = &["key"];
+pub const DEFAULT_ALPN: &'static [&'static str] = &["alpn"];
 
-fn loopback() -> SocketAddr {
+/// Create a default socket address.
+pub fn loopback() -> SocketAddr {
+    // These could be const functions, but they aren't...
     let localhost_v6 = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
     SocketAddr::new(localhost_v6, 443)
 }
 
+/// Create a transport client with default configuration.
 pub fn default_client() -> Connection {
-    Connection::new_client()
+    fixture_init();
+    Connection::new_client(DEFAULT_SERVER_NAME, DEFAULT_ALPN, loopback(), loopback())
+            .expect("create a default client")
 }
 
+/// Create a transport server with default configuration.
+pub fn default_server() -> Connection {
+    fixture_init();
+    Connection::new_server(DEFAULT_KEYS, DEFAULT_ALPN, &anti_replay())
+        .expect("create a default server")
+}

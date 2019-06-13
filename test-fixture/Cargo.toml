@@ -7,4 +7,5 @@ edition = "2018"
 [dependencies]
 neqo-common = { path = "../neqo-common" }
 neqo-crypto = { path = "../neqo-crypto" }
+neqo-transport = { path = "../neqo-transport" }
 log = "0.4.0"

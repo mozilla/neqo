@@ -144,6 +144,7 @@ pub fn assert_initialized() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_fixture::NSS_DB_PATH;
 
     #[cfg(nss_nodb)]
     #[test]
@@ -158,7 +159,7 @@ mod tests {
     #[cfg(not(nss_nodb))]
     #[test]
     fn init_withdb() {
-        init_db("./db");
+        init_db(NSS_DB_PATH);
         assert_initialized();
         unsafe {
             assert!(nss::NSS_IsInitialized() != 0);
