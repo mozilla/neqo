@@ -123,9 +123,9 @@ pub struct PacketNumberDecoder {
     expected: u64,
 }
 impl PacketNumberDecoder {
-    pub fn new(largest_acknowledged: u64) -> PacketNumberDecoder {
+    pub fn new(largest_acknowledged: Option<u64>) -> PacketNumberDecoder {
         PacketNumberDecoder {
-            expected: largest_acknowledged + 1,
+            expected: largest_acknowledged.map(|x| x + 1).unwrap_or(0),
         }
     }
 
@@ -573,7 +573,7 @@ mod tests {
 
     fn test_decrypt_packet(f: &TestFixture, packet: Vec<u8>) -> Res<(PacketHdr, Vec<u8>)> {
         let mut phdr = decode_packet_hdr(f, &packet)?;
-        let body = decrypt_packet(f, PacketNumberDecoder::new(0), &mut phdr, &packet)?;
+        let body = decrypt_packet(f, PacketNumberDecoder::new(Some(0)), &mut phdr, &packet)?;
         Ok((phdr, body))
     }
 
