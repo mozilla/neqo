@@ -13,7 +13,7 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 /// The path for the database used in tests.
-pub const NSS_DB_PATH: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
+pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 
 /// Initialize the test fixture.  Only call this if you aren't also calling a
 /// fixture function that depends on setup.  Other functions in the fixture
@@ -28,7 +28,7 @@ pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 
 fn earlier() -> Instant {
     static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
-    *unsafe { BASE_TIME.call_once(|| Instant::now()) }
+    *unsafe { BASE_TIME.call_once(Instant::now) }
 }
 
 /// The current time for the test.  Which is in the future,
@@ -43,9 +43,9 @@ pub fn anti_replay() -> AntiReplay {
     AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
 }
 
-pub const DEFAULT_SERVER_NAME: &'static str = "example.com";
-pub const DEFAULT_KEYS: &'static [&'static str] = &["key"];
-pub const DEFAULT_ALPN: &'static [&'static str] = &["alpn"];
+pub const DEFAULT_SERVER_NAME: & str = "example.com";
+pub const DEFAULT_KEYS: &[&str] = &["key"];
+pub const DEFAULT_ALPN: &[&str] = &["alpn"];
 
 /// Create a default socket address.
 pub fn loopback() -> SocketAddr {
