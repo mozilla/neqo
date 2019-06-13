@@ -219,8 +219,12 @@ fn main() -> Result<(), io::Error> {
                 println!("New connection from {:?}", remote_addr);
                 (
                     Http3Connection::new(
-                        Connection::new_server(&[args.key.clone()], &[args.alpn.clone()], &anti_replay)
-                            .expect("must succeed"),
+                        Connection::new_server(
+                            &[args.key.clone()],
+                            &[args.alpn.clone()],
+                            &anti_replay,
+                        )
+                        .expect("must succeed"),
                         args.max_table_size,
                         args.max_blocked_streams,
                         Some(Box::new(http_serve)),
