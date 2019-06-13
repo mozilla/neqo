@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use neqo_common::qinfo;
 use neqo_common::once::OnceResult;
+use neqo_common::qinfo;
 use neqo_crypto::*;
 use std::mem;
 use std::time::{Duration, Instant};
@@ -13,9 +13,7 @@ pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
 
 fn base_time() -> Instant {
-    *unsafe {
-        BASE_TIME.call_once(|| Instant::now())
-    }
+    *unsafe { BASE_TIME.call_once(|| Instant::now()) }
 }
 
 /// The current time for the test.  Which is in the future,

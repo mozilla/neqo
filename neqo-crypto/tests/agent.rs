@@ -29,7 +29,9 @@ fn basic() {
     assert!(bytes.len() > 0);
     assert_eq!(*client.state(), HandshakeState::InProgress);
 
-    let bytes = server.handshake(now(), &bytes[..]).expect("read CH, send SH");
+    let bytes = server
+        .handshake(now(), &bytes[..])
+        .expect("read CH, send SH");
     assert!(bytes.len() > 0);
     assert_eq!(*server.state(), HandshakeState::InProgress);
 

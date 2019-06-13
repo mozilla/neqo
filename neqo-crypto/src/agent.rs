@@ -18,7 +18,7 @@ use crate::result;
 use crate::secrets::SecretHolder;
 use crate::ssl;
 use crate::ssl::PRBool;
-use crate::time::{Interval, Time, PRTime};
+use crate::time::{Interval, PRTime, Time};
 
 use neqo_common::{qdebug, qinfo, qwarn};
 use std::cell::RefCell;
@@ -853,12 +853,7 @@ impl Server {
 
     /// Initialize anti-replay.  Failure to call this function results in all
     /// early data being rejected by a server.
-    pub fn init_anti_replay(
-        now: Instant,
-        window: Duration,
-        k: usize,
-        bits: usize,
-    ) -> Res<()> {
+    pub fn init_anti_replay(now: Instant, window: Duration, k: usize, bits: usize) -> Res<()> {
         let rv = unsafe {
             ssl::SSL_InitAntiReplay(
                 Time::from(now).try_into()?,

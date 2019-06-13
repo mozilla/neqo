@@ -972,15 +972,15 @@ impl Connection {
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&self, now: Instant) -> Option<Duration> {
         let time = match (self.loss_recovery.get_timer(), self.acks.ack_time()) {
-                    (Some(t_lr), Some(t_ack)) => Some(min(t_lr, t_ack)),
-                    (Some(t), _) | (_, Some(t)) => Some(t),
-                    _ => None,
+            (Some(t_lr), Some(t_ack)) => Some(min(t_lr, t_ack)),
+            (Some(t), _) | (_, Some(t)) => Some(t),
+            _ => None,
         };
         match time {
-                    // TODO(agrover,mt) - need to analyze and fix #47
-                    // rather than just clamping to zero here.
-                    Some(t) => Some(max(now, t).duration_since(now)),
-                    _ => None,
+            // TODO(agrover,mt) - need to analyze and fix #47
+            // rather than just clamping to zero here.
+            Some(t) => Some(max(now, t).duration_since(now)),
+            _ => None,
         }
     }
 
@@ -3090,9 +3090,9 @@ impl ::std::fmt::Display for LossRecovery {
 mod tests {
     use super::*;
     use crate::frame::StreamType;
+    use neqo_common::once::OnceResult;
     use neqo_crypto::init_db;
     use std::time::Duration;
-    use neqo_common::once::OnceResult;
 
     fn loopback() -> SocketAddr {
         "127.0.0.1:443".parse().unwrap()
@@ -3538,7 +3538,10 @@ mod tests {
         let start = now();
 
         lr_module.on_packet_sent(PNSpace::ApplicationData, 0, true, true, Vec::new(), start);
-        assert_eq!(lr_module.get_timer(), Some(start + Duration::from_millis(200)));
+        assert_eq!(
+            lr_module.get_timer(),
+            Some(start + Duration::from_millis(200))
+        );
         lr_module.on_packet_sent(
             PNSpace::ApplicationData,
             1,

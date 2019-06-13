@@ -334,9 +334,7 @@ pub struct AckTracker {
 
 impl AckTracker {
     pub fn ack_time(&self) -> Option<Instant> {
-        let mut iter = self.spaces
-            .iter()
-            .filter_map(|x| x.ack_time());
+        let mut iter = self.spaces.iter().filter_map(|x| x.ack_time());
         match iter.next() {
             Some(v) => Some(iter.fold(v, min)),
             _ => None,
@@ -372,8 +370,8 @@ impl IndexMut<PNSpace> for AckTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
     use neqo_common::once::OnceResult;
+    use std::collections::HashSet;
 
     fn now() -> Instant {
         static mut NOW_ONCE: OnceResult<Instant> = OnceResult::new();

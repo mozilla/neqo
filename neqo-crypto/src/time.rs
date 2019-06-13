@@ -28,23 +28,26 @@ impl TimeZero {
     /// To avoid that, we make sure that this sets the base time using the first value
     /// it sees if it is in the past.  If it is not, then use `Instant::now()` instead.
     pub fn baseline(t: Instant) -> TimeZero {
-            let now = Instant::now();
-            let prnow = unsafe { PR_Now() };
+        let now = Instant::now();
+        let prnow = unsafe { PR_Now() };
 
-            if now <= t {
-                // `t` is in the future, just use `now`.
-                TimeZero { instant: now, prtime: prnow }
-            } else {
-                let elapsed = Interval::from(now.duration_since(now));
-                // An error from these unwrap functions would require
-                // ridiculously long application running time.
-                let prelapsed: PRTime = elapsed.try_into().unwrap();
-                TimeZero {
-                    instant: t,
-                    prtime: prnow.checked_sub(prelapsed).unwrap(),
-                }
+        if now <= t {
+            // `t` is in the future, just use `now`.
+            TimeZero {
+                instant: now,
+                prtime: prnow,
+            }
+        } else {
+            let elapsed = Interval::from(now.duration_since(now));
+            // An error from these unwrap functions would require
+            // ridiculously long application running time.
+            let prelapsed: PRTime = elapsed.try_into().unwrap();
+            TimeZero {
+                instant: t,
+                prtime: prnow.checked_sub(prelapsed).unwrap(),
             }
         }
+    }
 }
 
 static mut BASE_TIME: OnceResult<TimeZero> = OnceResult::new();
