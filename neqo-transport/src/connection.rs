@@ -27,7 +27,7 @@ use crate::frame::{
     StreamType, TxMode,
 };
 use crate::nss::{
-    Agent, Cipher, Client, Epoch, HandshakeState, Record, RecordList, Server, SymKey,
+    Agent, AntiReplay, Cipher, Client, Epoch, HandshakeState, Record, RecordList, Server, SymKey,
     TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
 };
 use crate::packet::{
@@ -686,6 +686,7 @@ impl Connection {
         let mut c = Connection::new(
             Role::Client,
             Client::new(server_name)?.into(),
+            None,
             protocols,
             Some(Path {
                 local: local_addr,
@@ -706,10 +707,12 @@ impl Connection {
     >(
         certs: CI,
         protocols: PI,
+        anti_replay: &AntiReplay,
     ) -> Res<Connection> {
         Ok(Connection::new(
             Role::Server,
             Server::new(certs)?.into(),
+            Some(anti_replay),
             protocols,
             None,
         ))
@@ -719,25 +722,22 @@ impl Connection {
         agent: &mut Agent,
         protocols: I,
         tphandler: Rc<RefCell<TransportParametersHandler>>,
-    ) {
-        agent
-            .set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)
-            .expect("Could not enable TLS 1.3");
-        agent
-            .enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])
-            .expect("Could not set ciphers");
-        agent.set_alpn(protocols).expect("Could not set ALPN");
+        anti_replay: Option<&AntiReplay>,
+    ) -> Res<()> {
+        agent.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
+        agent.enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])?;
+        agent.set_alpn(protocols)?;
         agent.disable_end_of_early_data();
         match agent {
-            Agent::Client(c) => c.enable_0rtt(),
-            Agent::Server(s) => {
-                s.enable_0rtt(0xffff_ffff, TpZeroRttChecker::wrap(tphandler.clone()))
-            }
+            Agent::Client(c) => c.enable_0rtt()?,
+            Agent::Server(s) => s.enable_0rtt(
+                anti_replay.unwrap(),
+                0xffff_ffff,
+                TpZeroRttChecker::wrap(tphandler.clone()),
+            )?,
         }
-        .expect("Could not enable 0-RTT");
-        agent
-            .extension_handler(0xffa5, tphandler)
-            .expect("Could not set extension handler");
+        agent.extension_handler(0xffa5, tphandler)?;
+        Ok(())
     }
 
     fn set_tp_defaults(tps: &mut TransportParameters) {
@@ -759,12 +759,14 @@ impl Connection {
     fn new<A: ToString, I: IntoIterator<Item = A>>(
         r: Role,
         mut agent: Agent,
+        anti_replay: Option<&AntiReplay>,
         protocols: I,
         paths: Option<Path>,
     ) -> Connection {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Connection::set_tp_defaults(&mut tphandler.borrow_mut().local);
-        Connection::configure_agent(&mut agent, protocols, tphandler.clone());
+        Connection::configure_agent(&mut agent, protocols, tphandler.clone(), anti_replay)
+            .expect("TLS should be configured successfully");
 
         Connection {
             version: QUIC_VERSION,
@@ -3091,16 +3093,43 @@ mod tests {
     use super::*;
     use crate::frame::StreamType;
     use neqo_common::once::OnceResult;
-    use neqo_crypto::init_db;
+    use neqo_crypto::{init_db, AntiReplay};
     use std::time::Duration;
 
     fn loopback() -> SocketAddr {
         "127.0.0.1:443".parse().unwrap()
     }
 
-    fn now() -> Instant {
-        static mut NOW_ONCE: OnceResult<Instant> = OnceResult::new();
-        *unsafe { NOW_ONCE.call_once(|| Instant::now()) }
+    // TODO(mt) move these time functions into a test support crate.
+    // This needs to be > 2ms to avoid it being rounded to zero.
+    // NSS operates in milliseconds and halves any value it is provided.
+    pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
+
+    fn earlier() -> Instant {
+        static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
+        *unsafe { BASE_TIME.call_once(|| Instant::now()) }
+    }
+
+    /// The current time for the test.  Which is in the future,
+    /// because 0-RTT tests need to run at least ANTI_REPLAY_WINDOW in the past.
+    pub fn now() -> Instant {
+        earlier().checked_add(ANTI_REPLAY_WINDOW).unwrap()
+    }
+
+    fn anti_replay() -> AntiReplay {
+        AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
+    }
+
+    const DEFAULT_ALPN: &[&str] = &["alpn"];
+
+    fn default_client() -> Connection {
+        Connection::new_client("example.com", DEFAULT_ALPN, loopback(), loopback())
+            .expect("create a default client")
+    }
+
+    fn default_server() -> Connection {
+        Connection::new_server(&["key"], DEFAULT_ALPN, &anti_replay())
+            .expect("create a default server")
     }
 
     #[test]
@@ -3142,10 +3171,9 @@ mod tests {
     fn test_conn_stream_create() {
         init_db("./db");
 
-        let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut client = default_client();
         let (res, _) = client.process(vec![], now());
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut server = default_server();
         let (res, _) = server.process(res, now());
 
         let (res, _) = client.process(res, now());
@@ -3167,15 +3195,14 @@ mod tests {
     fn test_conn_handshake() {
         init_db("./db");
         qdebug!("---- client: generate CH");
-        let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut client = default_client();
         let (res, _) = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
         assert_eq!(res.first().unwrap().len(), 1200);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut server = default_server();
         let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
@@ -3204,9 +3231,8 @@ mod tests {
     fn test_conn_stream() {
         init_db("./db");
 
-        let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut client = default_client();
+        let mut server = default_server();
 
         qdebug!("---- client");
         let (res, _) = client.process(Vec::new(), now());
@@ -3321,8 +3347,8 @@ mod tests {
     fn test_no_alpn() {
         init_db("./db");
         let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut server = Connection::new_server(&["key"], &["different-alpn"]).unwrap();
+            Connection::new_client("example.com", &["bad-alpn"], loopback(), loopback()).unwrap();
+        let mut server = default_server();
 
         handshake(&mut client, &mut server);
         // TODO (mt): errors are immediate, which means that we never send CONNECTION_CLOSE
@@ -3720,15 +3746,14 @@ mod tests {
     fn test_dup_server_flight1() {
         init_db("./db");
         qdebug!("---- client: generate CH");
-        let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut client = default_client();
         let (res, _) = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
         assert_eq!(res.first().unwrap().len(), 1200);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut server = default_server();
         let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
@@ -3763,45 +3788,37 @@ mod tests {
     #[test]
     fn resume() {
         init_db("./db");
-        let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut client = default_client();
+        let mut server = default_server();
         connect(&mut client, &mut server);
 
         let token = exchange_ticket(&mut client, &mut server);
-        let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut client = default_client();
         client
             .set_resumption_token(&token[..])
             .expect("should set token");
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut server = default_server();
         connect(&mut client, &mut server);
         assert!(client.tls.info().unwrap().resumed());
         assert!(server.tls.info().unwrap().resumed());
     }
 
-    const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
-
     #[test]
     fn zero_rtt_negotiate() {
         init_db("./db");
 
-        let start_time = now().checked_sub(ANTI_REPLAY_WINDOW).unwrap();
-        Server::init_anti_replay(start_time, ANTI_REPLAY_WINDOW, 1, 3)
-            .expect("anti-replay setup successful");
-
-        let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        // Note that the two servers in this test will get different anti-replay filters.
+        // That's OK because we aren't testing anti-replay.
+        let mut client = default_client();
+        let mut server = default_server();
         connect(&mut client, &mut server);
 
         let token = exchange_ticket(&mut client, &mut server);
-        let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut client = default_client();
         client
             .set_resumption_token(&token[..])
             .expect("should set token");
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut server = default_server();
         connect(&mut client, &mut server);
         assert!(client.tls.info().unwrap().early_data_accepted());
         assert!(server.tls.info().unwrap().early_data_accepted());
@@ -3811,22 +3828,16 @@ mod tests {
     fn zero_rtt_send_recv() {
         init_db("./db");
 
-        let start_time = now().checked_sub(ANTI_REPLAY_WINDOW).unwrap();
-        Server::init_anti_replay(start_time, ANTI_REPLAY_WINDOW, 1, 3)
-            .expect("anti-replay setup successful");
-
-        let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut client = default_client();
+        let mut server = default_server();
         connect(&mut client, &mut server);
 
         let token = exchange_ticket(&mut client, &mut server);
-        let mut client =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
+        let mut client = default_client();
         client
             .set_resumption_token(&token[..])
             .expect("should set token");
-        let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut server = default_server();
 
         // Send ClientHello.
         let (client_hs, _) = client.process(Vec::new(), now());

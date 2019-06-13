@@ -22,6 +22,7 @@ pub mod ext;
 pub mod hkdf;
 pub mod hp;
 mod prio;
+mod replay;
 mod result;
 mod secrets;
 mod ssl;
@@ -35,6 +36,7 @@ pub use self::constants::*;
 pub use self::err::{Error, Res, SSLErrorCodes};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
 pub use self::p11::SymKey;
+pub use self::replay::AntiReplay;
 pub use self::secrets::SecretDirection;
 
 use neqo_common::once::OnceResult;

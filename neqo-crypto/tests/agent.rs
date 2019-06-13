@@ -248,7 +248,7 @@ fn alpn_server_only() {
 
 #[test]
 fn resume() {
-    let token = resumption_setup(Resumption::WithoutZeroRtt);
+    let (_, token) = resumption_setup(Resumption::WithoutZeroRtt);
 
     let mut client = Client::new("server.example").expect("should create second client");
     let mut server = Server::new(&["key"]).expect("should create second server");
@@ -264,7 +264,7 @@ fn resume() {
 
 #[test]
 fn zero_rtt() {
-    let token = resumption_setup(Resumption::WithZeroRtt);
+    let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt);
 
     // Finally, 0-RTT should succeed.
     let mut client = Client::new("server.example").expect("should create client");
@@ -274,7 +274,11 @@ fn zero_rtt() {
         .expect("should accept token");
     client.enable_0rtt().expect("should enable 0-RTT");
     server
-        .enable_0rtt(0xffffffff, PermissiveZeroRttChecker::new())
+        .enable_0rtt(
+            anti_replay.as_ref().unwrap(),
+            0xffffffff,
+            PermissiveZeroRttChecker::new(),
+        )
         .expect("should enable 0-RTT");
 
     connect(&mut client, &mut server);
@@ -284,7 +288,7 @@ fn zero_rtt() {
 
 #[test]
 fn zero_rtt_no_eoed() {
-    let token = resumption_setup(Resumption::WithZeroRtt);
+    let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt);
 
     // Finally, 0-RTT should succeed.
     let mut client = Client::new("server.example").expect("should create client");
@@ -295,7 +299,11 @@ fn zero_rtt_no_eoed() {
     client.enable_0rtt().expect("should enable 0-RTT");
     client.disable_end_of_early_data();
     server
-        .enable_0rtt(0xffffffff, PermissiveZeroRttChecker::new())
+        .enable_0rtt(
+            anti_replay.as_ref().unwrap(),
+            0xffffffff,
+            PermissiveZeroRttChecker::new(),
+        )
         .expect("should enable 0-RTT");
     server.disable_end_of_early_data();
 
@@ -315,7 +323,7 @@ impl ZeroRttChecker for RejectZeroRtt {
 
 #[test]
 fn reject_zero_rtt() {
-    let token = resumption_setup(Resumption::WithZeroRtt);
+    let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt);
 
     // Finally, 0-RTT should succeed.
     let mut client = Client::new("server.example").expect("should create client");
@@ -325,7 +333,11 @@ fn reject_zero_rtt() {
         .expect("should accept token");
     client.enable_0rtt().expect("should enable 0-RTT");
     server
-        .enable_0rtt(0xffffffff, Box::new(RejectZeroRtt {}))
+        .enable_0rtt(
+            anti_replay.as_ref().unwrap(),
+            0xffffffff,
+            Box::new(RejectZeroRtt {}),
+        )
         .expect("should enable 0-RTT");
 
     connect(&mut client, &mut server);

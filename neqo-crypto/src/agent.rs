@@ -14,11 +14,12 @@ use crate::err::{Error, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
 use crate::p11;
 use crate::prio;
+use crate::replay::AntiReplay;
 use crate::result;
 use crate::secrets::SecretHolder;
 use crate::ssl;
 use crate::ssl::PRBool;
-use crate::time::{Interval, PRTime, Time};
+use crate::time::{PRTime, Time};
 
 use neqo_common::{qdebug, qinfo, qwarn};
 use std::cell::RefCell;
@@ -29,7 +30,7 @@ use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_uint, c_void};
 use std::ptr::{null, null_mut, NonNull};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum HandshakeState {
@@ -296,6 +297,7 @@ impl SecretAgent {
         }
     }
 
+    // TODO(mt) move to time.rs.
     unsafe extern "C" fn time_func(arg: *mut c_void) -> PRTime {
         let p = arg as *mut PRTime as *const PRTime;
         *p.as_ref().unwrap()
@@ -321,6 +323,7 @@ impl SecretAgent {
         };
         result::result(rv)?;
 
+        // TODO(mt) move to time.rs so we can remove PRTime definition from nss_ssl bindings.
         let rv = unsafe {
             ssl::SSL_SetTimeFunc(
                 self.fd,
@@ -851,24 +854,11 @@ impl Server {
         }
     }
 
-    /// Initialize anti-replay.  Failure to call this function results in all
-    /// early data being rejected by a server.
-    pub fn init_anti_replay(now: Instant, window: Duration, k: usize, bits: usize) -> Res<()> {
-        let rv = unsafe {
-            ssl::SSL_InitAntiReplay(
-                Time::from(now).try_into()?,
-                Interval::from(window).try_into()?,
-                to_c_uint(k)?,
-                to_c_uint(bits)?,
-            )
-        };
-        result::result(rv)
-    }
-
     /// Enable 0-RTT.  This shadows the function of the same name that can be accessed
     /// via the Deref implementation on Server.
     pub fn enable_0rtt(
         &mut self,
+        anti_replay: &AntiReplay,
         max_early_data: u32,
         checker: Box<dyn ZeroRttChecker>,
     ) -> Res<()> {
@@ -882,6 +872,7 @@ impl Server {
         result::result(rv)?;
         self.zero_rtt_check = Some(check_state);
         self.agent.enable_0rtt()?;
+        anti_replay.config_socket(self.fd)?;
         Ok(())
     }
 

@@ -4,7 +4,6 @@
 [nss_ssl]
 types = [
     "PRCList",
-    "PRTime",
     "PRUint16",
     "PRUint64",
     "PRUint8",

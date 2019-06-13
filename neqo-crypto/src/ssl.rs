@@ -76,12 +76,6 @@ experimental_api!(SSL_HelloRetryRequestCallback(
     cb: SSLHelloRetryRequestCallback,
     arg: *mut c_void,
 ));
-experimental_api!(SSL_InitAntiReplay(
-    now: PRTime,
-    window: PRTime,
-    k: c_uint,
-    bits: c_uint,
-));
 experimental_api!(SSL_RecordLayerWriteCallback(
     fd: *mut PRFileDesc,
     cb: SSLRecordWriteCallback,

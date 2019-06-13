@@ -8,7 +8,7 @@ macro_rules! experimental_api {
     ( $n:ident ( $( $a:ident : $t:ty ),* $(,)? ) ) => {
         #[allow(non_snake_case)]
         #[allow(clippy::too_many_arguments)]
-        pub unsafe fn $n ( $( $a : $t ),* ) -> crate::ssl::SECStatus {
+        pub(crate) unsafe fn $n ( $( $a : $t ),* ) -> crate::ssl::SECStatus {
             const EXP_FUNCTION: &str = stringify!($n);
             let n = ::std::ffi::CString::new(EXP_FUNCTION).unwrap();
             let f = crate::ssl::SSL_GetExperimentalAPI(n.as_ptr());

@@ -10,17 +10,17 @@ use std::time::{Duration, Instant};
 // NSS operates in milliseconds and halves any value it is provided.
 pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 
-static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
-
-fn base_time() -> Instant {
+fn earlier() -> Instant {
+    static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
     *unsafe { BASE_TIME.call_once(|| Instant::now()) }
 }
 
 /// The current time for the test.  Which is in the future,
 /// because 0-RTT tests need to run at least ANTI_REPLAY_WINDOW in the past.
 pub fn now() -> Instant {
-    base_time().checked_add(ANTI_REPLAY_WINDOW).unwrap()
+    earlier().checked_add(ANTI_REPLAY_WINDOW).unwrap()
 }
+// TODO(mt) move these functions into a supporting crate.
 
 pub fn forward_records(
     now: Instant,
@@ -114,25 +114,38 @@ impl ZeroRttChecker for PermissiveZeroRttChecker {
     }
 }
 
-pub fn resumption_setup(mode: Resumption) -> Vec<u8> {
-    init_db("./db");
-    // We need to pretend that initialization was in the past.
-    // That way, the anti-replay filter is cleared when we try to connect at now().
-    let start_time = base_time();
-    Server::init_anti_replay(start_time, ANTI_REPLAY_WINDOW, 1, 3)
-        .expect("anti-replay setup successful");
-
-    let mut client = Client::new("server.example").expect("should create client");
-    let mut server = Server::new(&["key"]).expect("should create server");
+fn zero_rtt_setup(
+    mode: Resumption,
+    client: &mut Client,
+    server: &mut Server,
+) -> Option<AntiReplay> {
     if let Resumption::WithZeroRtt = mode {
-        client.enable_0rtt().expect("should enable 0-RTT");
+        client.enable_0rtt().expect("should enable 0-RTT on client");
+
+        // We need to establish this first connection at least one ANTI_REPLAY_WINDOW
+        // before connections established at now() will be created.
+        // That way, the anti-replay filter is cleared when we try to connect again.
+        let anti_replay = AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3)
+            .expect("should create anti-replay context");
         server
             .enable_0rtt(
+                &anti_replay,
                 0xffffffff,
                 Box::new(PermissiveZeroRttChecker { resuming: false }),
             )
-            .expect("should enable 0-RTT");
+            .expect("should enable 0-RTT on server");
+        Some(anti_replay)
+    } else {
+        None
     }
+}
+
+pub fn resumption_setup(mode: Resumption) -> (Option<AntiReplay>, Vec<u8>) {
+    init_db("./db");
+
+    let mut client = Client::new("server.example").expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    let anti_replay = zero_rtt_setup(mode, &mut client, &mut server);
 
     connect(&mut client, &mut server);
 
@@ -150,5 +163,8 @@ pub fn resumption_setup(mode: Resumption) -> Vec<u8> {
         .expect("records ingested");
     assert_eq!(client_records.len(), 0);
 
-    client.resumption_token().expect("token is present").clone()
+    // `client` is about to go out of scope,
+    // but we only need to keep the resumption token, so clone it.
+    let token = client.resumption_token().expect("token is present").clone();
+    (anti_replay, token)
 }

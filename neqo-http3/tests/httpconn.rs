@@ -6,17 +6,36 @@
 
 #![allow(unused_assignments)]
 
-use neqo_common::now;
+use neqo_common::once::OnceResult;
+use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Connection, Http3State};
 use neqo_transport::{Connection, Datagram};
 
 use std::net::SocketAddr;
-use std::time::Duration;
-
-use neqo_crypto::init_db;
+use std::time::{Duration, Instant};
 
 fn loopback() -> SocketAddr {
     "127.0.0.1:443".parse().unwrap()
+}
+
+// TODO(mt) move these time functions into a test support crate.
+// This needs to be > 2ms to avoid it being rounded to zero.
+// NSS operates in milliseconds and halves any value it is provided.
+pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
+
+fn earlier() -> Instant {
+    static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
+    *unsafe { BASE_TIME.call_once(|| Instant::now()) }
+}
+
+/// The current time for the test.  Which is in the future,
+/// because 0-RTT tests need to run at least ANTI_REPLAY_WINDOW in the past.
+pub fn now() -> Instant {
+    earlier().checked_add(ANTI_REPLAY_WINDOW).unwrap()
+}
+
+fn anti_replay() -> AntiReplay {
+    AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
 }
 
 fn new_stream_callback(
@@ -58,7 +77,7 @@ fn connect() -> (
         None,
     );
     let mut hconn_s = Http3Connection::new(
-        Connection::new_server(&["key"], &["alpn"]).unwrap(),
+        Connection::new_server(&["key"], &["alpn"], &anti_replay()).unwrap(),
         100,
         100,
         Some(Box::new(new_stream_callback)),

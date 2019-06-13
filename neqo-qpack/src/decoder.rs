@@ -797,21 +797,42 @@ fn read_prefixed_encoded_int_with_connection_wrap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_common::now;
-    use neqo_crypto::init_db;
+    use neqo_common::once::OnceResult;
+    use neqo_crypto::{init_db, AntiReplay};
     use neqo_transport::frame::StreamType;
     use neqo_transport::ConnectionEvent;
     use std::net::SocketAddr;
+    use std::time::{Duration, Instant};
 
     fn loopback() -> SocketAddr {
         "127.0.0.1:443".parse().unwrap()
+    }
+
+    // TODO(mt) move these time functions into a test support crate.
+    // This needs to be > 2ms to avoid it being rounded to zero.
+    // NSS operates in milliseconds and halves any value it is provided.
+    pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
+
+    fn earlier() -> Instant {
+        static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
+        *unsafe { BASE_TIME.call_once(|| Instant::now()) }
+    }
+
+    /// The current time for the test.  Which is in the future,
+    /// because 0-RTT tests need to run at least ANTI_REPLAY_WINDOW in the past.
+    pub fn now() -> Instant {
+        earlier().checked_add(ANTI_REPLAY_WINDOW).unwrap()
+    }
+
+    fn anti_replay() -> AntiReplay {
+        AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
     }
 
     fn connect() -> (QPackDecoder, Connection, Connection, u64, u64) {
         init_db("./../neqo-transport/db");
         let mut conn_c =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut conn_s = Connection::new_server(&["key"], &["alpn"], &anti_replay()).unwrap();
         let mut r = conn_c.process(vec![], now());
         r = conn_s.process(r.0, now());
         r = conn_c.process(r.0, now());

@@ -64,6 +64,7 @@ pub(crate) fn init() {
     let _ = get_base();
 }
 
+/// Time wraps Instant and provides conversion functions into PRTime.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Time {
     t: Instant,
@@ -137,6 +138,7 @@ impl Into<Instant> for Time {
     }
 }
 
+/// Interval wraps Duration and provides conversion functions into PRTime.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Interval {
     d: Duration,
