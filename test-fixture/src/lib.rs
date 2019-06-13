@@ -43,7 +43,7 @@ pub fn anti_replay() -> AntiReplay {
     AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
 }
 
-pub const DEFAULT_SERVER_NAME: & str = "example.com";
+pub const DEFAULT_SERVER_NAME: &str = "example.com";
 pub const DEFAULT_KEYS: &[&str] = &["key"];
 pub const DEFAULT_ALPN: &[&str] = &["alpn"];
 
