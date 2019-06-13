@@ -14,7 +14,7 @@ pub mod once;
 pub use self::codec::{Decoder, Encoder};
 pub use self::incrdecoder::{IncrementalDecoder, IncrementalDecoderResult};
 
-use std::time::SystemTime;
+use std::time::Instant;
 
 // Cribbed from the |matches| crate, for simplicity.
 #[macro_export]
@@ -27,11 +27,8 @@ macro_rules! matches {
     }
 }
 
-pub fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64
+pub fn now() -> Instant {
+    Instant::now()
 }
 
 pub fn hex(buf: &[u8]) -> String {

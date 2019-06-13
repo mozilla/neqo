@@ -145,7 +145,7 @@ impl Handler for H9Handler {
                     self.rbytes += sz;
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
-                        client.close(0, 0, "kthxbye!");
+                        client.close(now(), 0, "kthxbye!");
                         self.rsfin = true;
                         return false;
                     }
@@ -262,7 +262,7 @@ fn process_loop_h3(
 impl H3Handler {
     fn handle(&mut self) -> bool {
         let mut data = vec![0; 4000];
-        self.h3.process_http3();
+        self.h3.process_http3(now());
         for event in self.h3.events() {
             match event {
                 Http3Event::HeaderReady { stream_id } => {
@@ -282,7 +282,7 @@ impl H3Handler {
 
                     let (_sz, fin) = self
                         .h3
-                        .read_data(stream_id, &mut data)
+                        .read_data(now(), stream_id, &mut data)
                         .expect("Read should succeed");
                     println!(
                         "READ[{}]: {}",
@@ -291,7 +291,7 @@ impl H3Handler {
                     );
                     if fin {
                         println!("<FIN[{}]>", stream_id);
-                        self.h3.close(0, "kthxbye!");
+                        self.h3.close(now(), 0, "kthxbye!");
                         return false;
                     }
                 }
@@ -425,7 +425,7 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
 fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), String> {
     let mut hc = H3Handler {
         streams: HashSet::new(),
-        h3: Http3Connection::new(client, 128, 128),
+        h3: Http3Connection::new(client, 128, 128, None),
         host: String::from(peer.host),
         path: String::from("/"),
     };

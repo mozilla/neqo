@@ -8,8 +8,10 @@ use crate::connection::Connection;
 use crate::frame::{AckRange, Frame, FrameGenerator, FrameGeneratorToken, TxMode};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::constants::Epoch;
+use std::cmp::min;
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
+use std::time::{Duration, Instant};
 
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -108,7 +110,7 @@ impl ::std::fmt::Display for PacketRange {
 }
 
 /// The ACK delay we use.
-pub const ACK_DELAY: u64 = 20_000_000; // 20ms
+pub const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
 const MAX_TRACKED_RANGES: usize = 100;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
@@ -119,9 +121,9 @@ pub struct RecvdPackets {
     /// The packet number of the lowest number packet that we are tracking.
     min_tracked: u64,
     /// The time we got the largest acknowledged.
-    largest_pn_time: u64,
+    largest_pn_time: Option<Instant>,
     // The time that we should be sending an ACK.
-    ack_time: Option<u64>,
+    ack_time: Option<Instant>,
 }
 
 impl RecvdPackets {
@@ -131,18 +133,18 @@ impl RecvdPackets {
             space,
             ranges: VecDeque::new(),
             min_tracked: 0,
-            largest_pn_time: 0,
+            largest_pn_time: None,
             ack_time: None,
         }
     }
 
     /// Get the time at which the next ACK should be sent.
-    pub fn ack_time(&self) -> Option<u64> {
+    pub fn ack_time(&self) -> Option<Instant> {
         self.ack_time
     }
 
     /// Returns true if an ACK frame should be sent now.
-    pub fn ack_now(&self, now: u64) -> bool {
+    pub fn ack_now(&self, now: Instant) -> bool {
         match self.ack_time {
             Some(t) => t <= now,
             _ => false,
@@ -173,12 +175,12 @@ impl RecvdPackets {
     }
 
     /// Add the packet to the tracked set.
-    pub fn set_received(&mut self, now: u64, pn: u64, ack_eliciting: bool) {
+    pub fn set_received(&mut self, now: Instant, pn: u64, ack_eliciting: bool) {
         let i = self.add(pn);
 
         // The new addition was the largest, so update the time we use for calculating ACK delay.
         if i == 0 && pn == self.ranges[0].largest {
-            self.largest_pn_time = now;
+            self.largest_pn_time = Some(now);
         }
 
         // Limit the number of ranges that are tracked to MAX_TRACKED_RANGES.
@@ -261,7 +263,7 @@ impl FrameGenerator for RecvdPackets {
     fn generate(
         &mut self,
         _conn: &mut Connection,
-        now: u64,
+        now: Instant,
         epoch: Epoch,
         _tx_mode: TxMode,
         _remaining: usize,
@@ -299,11 +301,13 @@ impl FrameGenerator for RecvdPackets {
         // We've sent an ACK, clear the timer.
         self.ack_time = None;
 
+        let ack_delay = now.duration_since(self.largest_pn_time.unwrap());
+        // We use the default exponent so
+        // ack_delay is in multiples of 8 microseconds.
+        let ack_delay = (ack_delay.as_micros() / 8) as u64;
         let ack = Frame::Ack {
             largest_acknowledged: first.largest,
-            // We use the default exponent so
-            // ack_delay is in multiples of 8 microseconds.
-            ack_delay: (now - self.largest_pn_time) / 8_000,
+            ack_delay,
             first_ack_range: first.len() - 1,
             ack_ranges,
         };
@@ -329,15 +333,13 @@ pub struct AckTracker {
 }
 
 impl AckTracker {
-    pub fn ack_time(&self) -> Option<u64> {
-        match self
-            .spaces
+    pub fn ack_time(&self) -> Option<Instant> {
+        let mut iter = self.spaces
             .iter()
-            .filter_map(|x| x.ack_time())
-            .fold(::std::u64::MAX, ::std::cmp::min)
-        {
-            ::std::u64::MAX => None,
-            v => Some(v),
+            .filter_map(|x| x.ack_time());
+        match iter.next() {
+            Some(v) => Some(iter.fold(v, min)),
+            _ => None,
         }
     }
 }
@@ -371,15 +373,19 @@ impl IndexMut<PNSpace> for AckTracker {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    use neqo_common::once::OnceResult;
 
-    const NOW: u64 = 3_000_000;
+    fn now() -> Instant {
+        static mut NOW_ONCE: OnceResult<Instant> = OnceResult::new();
+        *unsafe { NOW_ONCE.call_once(|| Instant::now()) }
+    }
 
     fn test_ack_range(pns: &[u64], nranges: usize) {
         let mut rp = RecvdPackets::new(PNSpace::Initial); // Any space will do.
         let mut packets = HashSet::new();
 
         for pn in pns {
-            rp.set_received(NOW, *pn, true);
+            rp.set_received(now(), *pn, true);
             packets.insert(*pn);
         }
 
@@ -434,7 +440,7 @@ mod tests {
 
         // This will add one too many disjoint ranges.
         for i in 0..=MAX_TRACKED_RANGES {
-            rp.set_received(NOW, (i * 2) as u64, true);
+            rp.set_received(now(), (i * 2) as u64, true);
         }
 
         assert_eq!(rp.ranges.len(), MAX_TRACKED_RANGES);
@@ -451,18 +457,18 @@ mod tests {
         // Only application data packets are delayed.
         let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
         assert!(rp.ack_time().is_none());
-        assert!(!rp.ack_now(NOW));
+        assert!(!rp.ack_now(now()));
 
         // One packet won't cause an ACK to be needed.
-        rp.set_received(NOW, 0, true);
-        assert_eq!(Some(NOW + ACK_DELAY), rp.ack_time());
-        assert!(!rp.ack_now(NOW));
-        assert!(rp.ack_now(NOW + ACK_DELAY));
+        rp.set_received(now(), 0, true);
+        assert_eq!(Some(now() + ACK_DELAY), rp.ack_time());
+        assert!(!rp.ack_now(now()));
+        assert!(rp.ack_now(now() + ACK_DELAY));
 
         // A second packet will move the ACK time to now.
-        rp.set_received(NOW, 1, true);
-        assert_eq!(Some(NOW), rp.ack_time());
-        assert!(rp.ack_now(NOW));
+        rp.set_received(now(), 1, true);
+        assert_eq!(Some(now()), rp.ack_time());
+        assert!(rp.ack_now(now()));
     }
 
     #[test]
@@ -470,12 +476,12 @@ mod tests {
         for space in &[PNSpace::Initial, PNSpace::Handshake] {
             let mut rp = RecvdPackets::new(*space);
             assert!(rp.ack_time().is_none());
-            assert!(!rp.ack_now(NOW));
+            assert!(!rp.ack_now(now()));
 
             // Any packet will be acknowledged straight away.
-            rp.set_received(NOW, 0, true);
-            assert_eq!(Some(NOW), rp.ack_time());
-            assert!(rp.ack_now(NOW));
+            rp.set_received(now(), 0, true);
+            assert_eq!(Some(now()), rp.ack_time());
+            assert!(rp.ack_now(now()));
         }
     }
 
@@ -483,16 +489,16 @@ mod tests {
     fn aggregate_ack_time() {
         let mut tracker = AckTracker::default();
         // This packet won't trigger an ACK.
-        tracker[PNSpace::Handshake].set_received(NOW, 0, false);
+        tracker[PNSpace::Handshake].set_received(now(), 0, false);
         assert_eq!(None, tracker.ack_time());
 
         // This should be delayed.
-        tracker[PNSpace::ApplicationData].set_received(NOW, 0, true);
-        assert_eq!(Some(NOW + ACK_DELAY), tracker.ack_time());
+        tracker[PNSpace::ApplicationData].set_received(now(), 0, true);
+        assert_eq!(Some(now() + ACK_DELAY), tracker.ack_time());
 
         // This should move the time forward.
-        const LATER: u64 = NOW + (ACK_DELAY / 2);
-        tracker[PNSpace::Initial].set_received(LATER, 0, true);
-        assert_eq!(Some(LATER), tracker.ack_time());
+        let later = now() + ACK_DELAY.checked_div(2).unwrap();
+        tracker[PNSpace::Initial].set_received(later, 0, true);
+        assert_eq!(Some(later), tracker.ack_time());
     }
 }

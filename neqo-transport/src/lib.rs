@@ -56,6 +56,7 @@ pub enum Error {
     VersionNegotiation,
     InvalidResumptionToken,
     WrongRole,
+    InvalidInput,
 }
 
 impl Error {
@@ -89,7 +90,8 @@ impl Error {
             | Error::AckedUnsentPacket
             | Error::VersionNegotiation
             | Error::WrongRole
-            | Error::InvalidResumptionToken => 1,
+            | Error::InvalidResumptionToken
+            | Error::InvalidInput => 1,
         }
     }
 }

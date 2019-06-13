@@ -13,6 +13,7 @@ use std::mem;
 use std::net::SocketAddr;
 use std::ops::{AddAssign, Deref, DerefMut};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::aead::Aead;
@@ -51,9 +52,9 @@ const CID_LENGTH: usize = 8;
 
 const TIME_THRESHOLD: f64 = 9.0 / 8.0;
 const PACKET_THRESHOLD: u64 = 3;
-// TODO granularity
-const GRANULARITY: u64 = 1000; // 1ms in microseconds
-const INITIAL_RTT: u64 = 100_000; // 100ms in microseconds
+
+const GRANULARITY: Duration = Duration::from_millis(20);
+const INITIAL_RTT: Duration = Duration::from_millis(100);
 
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
@@ -90,7 +91,7 @@ pub enum State {
         error: ConnectionError,
         frame_type: FrameType,
         msg: String,
-        timeout: u64,
+        timeout: Instant,
     },
     Closed(ConnectionError),
 }
@@ -108,15 +109,15 @@ enum ZeroRttState {
 pub struct StreamId(u64);
 
 impl StreamId {
-    fn is_bidi(self) -> bool {
+    pub fn is_bidi(self) -> bool {
         self.0 & 0x02 == 0
     }
 
-    fn is_uni(self) -> bool {
+    pub fn is_uni(self) -> bool {
         !self.is_bidi()
     }
 
-    fn stream_type(self) -> StreamType {
+    pub fn stream_type(self) -> StreamType {
         if self.is_bidi() {
             StreamType::BiDi
         } else {
@@ -124,15 +125,15 @@ impl StreamId {
         }
     }
 
-    fn is_client_initiated(self) -> bool {
+    pub fn is_client_initiated(self) -> bool {
         self.0 & 0x01 == 0
     }
 
-    fn is_server_initiated(self) -> bool {
+    pub fn is_server_initiated(self) -> bool {
         !self.is_client_initiated()
     }
 
-    fn role(self) -> Role {
+    pub fn role(self) -> Role {
         if self.is_client_initiated() {
             Role::Client
         } else {
@@ -140,7 +141,7 @@ impl StreamId {
         }
     }
 
-    fn is_self_initiated(self, my_role: Role) -> bool {
+    pub fn is_self_initiated(self, my_role: Role) -> bool {
         match my_role {
             Role::Client if self.is_client_initiated() => true,
             Role::Server if self.is_server_initiated() => true,
@@ -148,19 +149,19 @@ impl StreamId {
         }
     }
 
-    fn is_peer_initiated(self, my_role: Role) -> bool {
+    pub fn is_peer_initiated(self, my_role: Role) -> bool {
         !self.is_self_initiated(my_role)
     }
 
-    fn is_send_only(self, my_role: Role) -> bool {
+    pub fn is_send_only(self, my_role: Role) -> bool {
         self.is_uni() && self.is_self_initiated(my_role)
     }
 
-    fn is_recv_only(self, my_role: Role) -> bool {
+    pub fn is_recv_only(self, my_role: Role) -> bool {
         self.is_uni() && self.is_peer_initiated(my_role)
     }
 
-    fn as_u64(self) -> u64 {
+    pub fn as_u64(self) -> u64 {
         self.0
     }
 }
@@ -642,7 +643,7 @@ pub struct Connection {
     pub(crate) acks: AckTracker,
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
     generators: Vec<Box<FrameGenerator>>,
-    deadline: u64,
+    idle_timeout: Option<Instant>,
     local_max_stream_idx_uni: StreamIndex,
     local_max_stream_idx_bidi: StreamIndex,
     local_next_stream_idx_uni: StreamIndex,
@@ -792,7 +793,7 @@ impl Connection {
             crypto_states: [None, None, None, None],
             tx_pns: [0; 3],
             acks: AckTracker::default(),
-            deadline: 0,
+            idle_timeout: None,
             local_max_stream_idx_bidi: StreamIndex::new(LOCAL_STREAM_LIMIT_BIDI),
             local_max_stream_idx_uni: StreamIndex::new(LOCAL_STREAM_LIMIT_UNI),
             local_next_stream_idx_uni: StreamIndex::new(0),
@@ -876,7 +877,7 @@ impl Connection {
         Ok(())
     }
 
-    pub fn send_ticket(&mut self, now: u64, extra: &[u8]) -> Res<()> {
+    pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
         let tps = mem::replace(&mut self.tps, Default::default());
         let res = match self.tls {
             Agent::Server(ref mut s) => {
@@ -913,7 +914,12 @@ impl Connection {
 
     // This function wraps a call to another function and sets the connection state
     // properly if that call fails.
-    fn capture_error<T>(&mut self, cur_time: u64, frame_type: FrameType, res: Res<T>) -> Res<T> {
+    fn capture_error<T>(
+        &mut self,
+        cur_time: Instant,
+        frame_type: FrameType,
+        res: Res<T>,
+    ) -> Res<T> {
         if let Err(v) = &res {
             #[cfg(debug_assertions)]
             let msg = format!("{:?}", v);
@@ -931,13 +937,13 @@ impl Connection {
 
     /// For use with process().  Errors there can be ignored, but this needs to
     /// ensure that the state is updated.
-    fn absorb_error(&mut self, cur_time: u64, res: Res<()>) {
+    fn absorb_error(&mut self, cur_time: Instant, res: Res<()>) {
         let _ = self.capture_error(cur_time, 0, res);
     }
 
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
-    pub fn process_input<I>(&mut self, in_dgrams: I, cur_time: u64)
+    pub fn process_input<I>(&mut self, in_dgrams: I, cur_time: Instant)
     where
         I: IntoIterator<Item = Datagram>,
     {
@@ -948,43 +954,66 @@ impl Connection {
 
         self.cleanup_streams();
 
-        if cur_time >= self.deadline {
-            // Timer expired.
-            if let State::Init = self.state {
-                let res = self.client_start(cur_time);
-                self.absorb_error(cur_time, res);
+        if let Some(idle_timeout) = self.idle_timeout {
+            if cur_time >= idle_timeout {
+                // Timer expired. Reconnect?
+                // TODO(agrover@mozilla.com) reinitialize many members of
+                // struct Connection
+                self.state = State::Init;
             }
+        }
+
+        if self.state == State::Init {
+            let res = self.client_start(cur_time);
+            self.absorb_error(cur_time, res);
+        }
+    }
+
+    /// Get the time that we next need to be called back, relative to `now`.
+    fn next_delay(&self, now: Instant) -> Option<Duration> {
+        let time = match (self.loss_recovery.get_timer(), self.acks.ack_time()) {
+                    (Some(t_lr), Some(t_ack)) => Some(min(t_lr, t_ack)),
+                    (Some(t), _) | (_, Some(t)) => Some(t),
+                    _ => None,
+        };
+        match time {
+                    // TODO(agrover,mt) - need to analyze and fix #47
+                    // rather than just clamping to zero here.
+                    Some(t) => Some(max(now, t).duration_since(now)),
+                    _ => None,
         }
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken
     /// by the application.
-    pub fn process_output(&mut self, cur_time: u64) -> (Vec<Datagram>, u64) {
+    /// Returns datagrams to send, and how long to wait before calling again
+    /// even if no incoming packets.
+    pub fn process_output(&mut self, cur_time: Instant) -> (Vec<Datagram>, Option<Duration>) {
         match &self.state {
             State::Closing { error, timeout, .. } => {
                 if *timeout < cur_time {
-                    (self.output(cur_time), 0)
+                    (self.output(cur_time), None)
                 } else {
                     // Close timeout expired, move to Closed
                     let st = State::Closed(error.clone());
                     self.set_state(st);
-                    (Vec::new(), 0)
+                    (Vec::new(), None)
                 }
             }
-            State::Closed(..) => (Vec::new(), 0),
+            State::Closed(..) => (Vec::new(), None),
             _ => {
                 self.check_loss_detection_timeout(cur_time);
-                let mut delay = self.loss_recovery.get_timer();
-                if let Some(t) = self.acks.ack_time() {
-                    delay = min(delay, t);
-                }
-                (self.output(cur_time), delay)
+                (self.output(cur_time), self.next_delay(cur_time))
             }
         }
     }
 
     /// Process input and generate output.
-    pub fn process<I>(&mut self, in_dgrams: I, cur_time: u64) -> (Vec<Datagram>, u64)
+    pub fn process<I>(
+        &mut self,
+        in_dgrams: I,
+        cur_time: Instant,
+    ) -> (Vec<Datagram>, Option<Duration>)
     where
         I: IntoIterator<Item = Datagram>,
     {
@@ -996,7 +1025,7 @@ impl Connection {
         self.valid_cids.contains(cid) || self.paths.iter().any(|p| p.local_cids.contains(cid))
     }
 
-    fn input(&mut self, d: Datagram, cur_time: u64) -> Res<()> {
+    fn input(&mut self, d: Datagram, cur_time: Instant) -> Res<()> {
         let mut slc = &d[..];
 
         qinfo!([self] "input {}", hex( &**d));
@@ -1178,7 +1207,7 @@ impl Connection {
     }
 
     // Return whether the packet had ack-eliciting frames.
-    fn input_packet(&mut self, epoch: Epoch, mut d: Decoder, cur_time: u64) -> Res<(bool)> {
+    fn input_packet(&mut self, epoch: Epoch, mut d: Decoder, cur_time: Instant) -> Res<(bool)> {
         let mut ack_eliciting = false;
 
         // Handle each frame in the packet
@@ -1215,7 +1244,7 @@ impl Connection {
         Datagram::new(local, remote, packet)
     }
 
-    fn output(&mut self, cur_time: u64) -> Vec<Datagram> {
+    fn output(&mut self, cur_time: Instant) -> Vec<Datagram> {
         if let Some((vn_hdr, remote, local)) = self.send_vn.take() {
             return vec![self.output_vn(vn_hdr, remote, local)];
         }
@@ -1247,7 +1276,7 @@ impl Connection {
 
     // Iterate through all the generators, inserting as many frames as will
     // fit.
-    fn output_path(&mut self, path: &Path, cur_time: u64) -> Res<Vec<Datagram>> {
+    fn output_path(&mut self, path: &Path, cur_time: Instant) -> Res<Vec<Datagram>> {
         let mut out_packets = Vec::new();
 
         let mut initial_only = false;
@@ -1405,7 +1434,7 @@ impl Connection {
         Ok(out_dgrams)
     }
 
-    fn client_start(&mut self, now: u64) -> Res<()> {
+    fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self] "client_start");
         self.handshake(now, 0, None)?;
         self.set_state(State::WaitInitial);
@@ -1416,13 +1445,13 @@ impl Connection {
         Ok(())
     }
 
-    fn get_closing_period_time(&self, cur_time: u64) -> u64 {
+    fn get_closing_period_time(&self, cur_time: Instant) -> Instant {
         // Spec says close time should be at least PTO times 3.
         cur_time + (self.loss_recovery.rtt_vals.pto() * 3)
     }
 
     /// Close the connection.
-    pub fn close<S: Into<String>>(&mut self, cur_time: u64, error: AppError, msg: S) {
+    pub fn close<S: Into<String>>(&mut self, cur_time: Instant, error: AppError, msg: S) {
         self.set_state(State::Closing {
             error: ConnectionError::Application(error),
             frame_type: 0,
@@ -1456,7 +1485,7 @@ impl Connection {
         mem::replace(&mut self.tps, swapped);
     }
 
-    fn handshake(&mut self, now: u64, epoch: u16, data: Option<&[u8]>) -> Res<()> {
+    fn handshake(&mut self, now: Instant, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         qdebug!("Handshake epoch={} data={:0x?}", epoch, data);
         let mut rec: Option<Record> = None;
 
@@ -1504,7 +1533,7 @@ impl Connection {
         Ok(())
     }
 
-    fn input_frame(&mut self, epoch: Epoch, frame: Frame, cur_time: u64) -> Res<()> {
+    fn input_frame(&mut self, epoch: Epoch, frame: Frame, cur_time: Instant) -> Res<()> {
         match frame {
             Frame::Padding => {
                 // Ignore
@@ -1682,7 +1711,7 @@ impl Connection {
         ack_delay: u64,
         first_ack_range: u64,
         ack_ranges: Vec<AckRange>,
-        cur_time: u64,
+        cur_time: Instant,
     ) -> Res<()> {
         qinfo!(
             [self]
@@ -1699,7 +1728,7 @@ impl Connection {
             PNSpace::from(epoch),
             largest_acknowledged,
             acked_ranges,
-            ack_delay,
+            Duration::from_millis(ack_delay),
             cur_time,
         );
         for acked in &mut acked_packets {
@@ -2097,6 +2126,20 @@ impl Connection {
         stream.send(data)
     }
 
+    /// Bytes of available send stream credit, based upon current stream and
+    /// connection-level flow control values.
+    pub fn stream_credit_avail_send(&self, stream_id: u64) -> Res<u64> {
+        let stream = self
+            .send_streams
+            .get(&stream_id.into())
+            .ok_or_else(|| Error::InvalidStreamId)?;
+
+        Ok(min(
+            stream.credit_avail(),
+            self.flow_mgr.borrow().conn_credit_avail(),
+        ))
+    }
+
     /// Close the stream. Enqueued data will be sent.
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
         let stream = self
@@ -2148,7 +2191,7 @@ impl Connection {
         self.events.borrow_mut().events().into_iter().collect()
     }
 
-    fn check_loss_detection_timeout(&mut self, cur_time: u64) {
+    fn check_loss_detection_timeout(&mut self, cur_time: Instant) {
         qdebug!([self] "check_loss_detection_timeout");
         let (mut lost_packets, retransmit_unacked_crypto, send_one_or_two_packets) =
             self.loss_recovery.on_loss_detection_timeout(cur_time);
@@ -2236,7 +2279,7 @@ impl FrameGenerator for CryptoGenerator {
     fn generate(
         &mut self,
         conn: &mut Connection,
-        _now: u64,
+        _now: Instant,
         epoch: u16,
         mode: TxMode,
         remaining: usize,
@@ -2302,7 +2345,7 @@ impl FrameGenerator for CloseGenerator {
     fn generate(
         &mut self,
         c: &mut Connection,
-        _now: u64,
+        _now: Instant,
         _e: Epoch,
         _mode: TxMode,
         _remaining: usize,
@@ -2358,7 +2401,7 @@ impl FrameGenerator for StreamGenerator {
     fn generate(
         &mut self,
         conn: &mut Connection,
-        _now: u64,
+        _now: Instant,
         epoch: u16,
         mode: TxMode,
         remaining: usize,
@@ -2558,7 +2601,7 @@ impl FrameGenerator for FlowControlGenerator {
     fn generate(
         &mut self,
         conn: &mut Connection,
-        _now: u64,
+        _now: Instant,
         _epoch: u16,
         _mode: TxMode,
         remaining: usize,
@@ -2590,7 +2633,7 @@ pub struct SentPacket {
     //in_flight: bool, // TODO needed only for cc
     is_crypto_packet: bool,
     //size: u64, // TODO needed only for cc
-    time_sent: u64,
+    time_sent: Instant,
     tokens: Vec<Box<FrameGeneratorToken>>, // a list of tokens.
 }
 
@@ -2610,74 +2653,91 @@ impl SentPacket {
 
 #[derive(Debug, Default)]
 struct RttVals {
-    latest_rtt: u64,
-    smoothed_rtt: u64,
-    rttvar: u64,
-    min_rtt: u64,
-    max_ack_delay: u64,
+    latest_rtt: Duration,
+    smoothed_rtt: Option<Duration>,
+    rttvar: Duration,
+    min_rtt: Duration,
+    max_ack_delay: Duration,
 }
 
 impl RttVals {
-    fn update_rtt(&mut self, latest_rtt: u64, mut ack_delay: u64) {
+    fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: Duration) {
         self.latest_rtt = latest_rtt;
         // min_rtt ignores ack delay.
         self.min_rtt = min(self.min_rtt, self.latest_rtt);
         // Limit ack_delay by max_ack_delay
-        ack_delay = min(ack_delay, self.max_ack_delay);
+        let ack_delay = min(ack_delay, self.max_ack_delay);
         // Adjust for ack delay if it's plausible.
         if self.latest_rtt - self.min_rtt > ack_delay {
             self.latest_rtt -= ack_delay;
         }
         // Based on {{?RFC6298}}.
-        if self.smoothed_rtt == 0 {
-            self.smoothed_rtt = self.latest_rtt;
-            self.rttvar = self.latest_rtt / 2;
-        } else {
-            let rttvar_sample = if self.smoothed_rtt > self.latest_rtt {
-                self.smoothed_rtt - self.latest_rtt
-            } else {
-                self.latest_rtt - self.smoothed_rtt
-            };
-            self.rttvar =
-                (3.0 / 4.0 * (self.rttvar as f64) + 1.0 / 4.0 * (rttvar_sample as f64)) as u64;
-            self.smoothed_rtt = (7.0 / 8.0 * (self.smoothed_rtt as f64)
-                + 1.0 / 8.0 * (self.latest_rtt as f64)) as u64;
+        match self.smoothed_rtt {
+            None => {
+                self.smoothed_rtt = Some(self.latest_rtt);
+                self.rttvar = self.latest_rtt / 2;
+            }
+            Some(smoothed_rtt) => {
+                let rttvar_sample = if smoothed_rtt > self.latest_rtt {
+                    smoothed_rtt - self.latest_rtt
+                } else {
+                    self.latest_rtt - smoothed_rtt
+                };
+
+                self.rttvar = Duration::from_micros(
+                    (3.0 / 4.0 * (self.rttvar.as_micros() as f64)
+                        + 1.0 / 4.0 * (rttvar_sample.as_micros() as f64))
+                        as u64,
+                );
+                self.smoothed_rtt = Some(Duration::from_micros(
+                    (7.0 / 8.0 * (smoothed_rtt.as_micros() as f64)
+                        + 1.0 / 8.0 * (self.latest_rtt.as_micros() as f64))
+                        as u64,
+                ));
+            }
         }
     }
 
-    fn pto(&self) -> u64 {
-        self.smoothed_rtt + max(4 * self.rttvar, GRANULARITY) + self.max_ack_delay
+    fn pto(&self) -> Duration {
+        self.smoothed_rtt.unwrap_or(self.latest_rtt)
+            + max(4 * self.rttvar, GRANULARITY)
+            + self.max_ack_delay
     }
 
-    fn timer_for_crypto_retransmission(&mut self, crypto_count: u32) -> u64 {
-        let mut timeout = if self.smoothed_rtt == 0 {
-            2 * INITIAL_RTT
-        } else {
-            2 * self.smoothed_rtt
+    fn timer_for_crypto_retransmission(&mut self, crypto_count: u32) -> Duration {
+        let timeout = match self.smoothed_rtt {
+            Some(smoothed_rtt) => 2 * smoothed_rtt,
+            None => 2 * INITIAL_RTT,
         };
 
-        timeout = max(timeout, GRANULARITY);
-        timeout * 2u64.pow(crypto_count)
+        let timeout = max(timeout, GRANULARITY);
+        timeout * 2u32.pow(crypto_count)
     }
 }
 
 #[derive(Debug, Default)]
 struct LossRecoverySpace {
-    largest_acked: u64,
-    loss_time: u64,
+    largest_acked: Option<u64>,
+    loss_time: Option<Instant>,
     sent_packets: HashMap<u64, SentPacket>,
 }
 
 impl LossRecoverySpace {
-    pub fn largest_acknowledged(&self) -> u64 {
+    pub fn largest_acknowledged(&self) -> Option<u64> {
         self.largest_acked
     }
 
     // Update the largest acknowledged and return the packet that this corresponds to.
-    fn update_largest_acked(&mut self, largest_acked: u64) -> Option<&SentPacket> {
-        if largest_acked > self.largest_acked {
-            self.largest_acked = largest_acked;
-        }
+    fn update_largest_acked(&mut self, new_largest_acked: u64) -> Option<&SentPacket> {
+        let largest_acked = if let Some(curr_largest_acked) = self.largest_acked {
+            max(curr_largest_acked, new_largest_acked)
+        } else {
+            new_largest_acked
+        };
+        self.largest_acked = Some(largest_acked);
+
+        // TODO(agrover@mozilla.com): Should this really return Some even if
+        // largest_acked hasn't been updated?
         self.sent_packets.get(&largest_acked)
     }
 
@@ -2699,10 +2759,10 @@ impl LossRecoverySpace {
     /// Remove all tracked packets from the space.
     /// This is called when 0-RTT packets are dropped at a client.
     fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
-        // The largest acknowledged or loss_time should still be zero.
+        // The largest acknowledged or loss_time should still be unset.
         // The client should not have received any ACK frames when it drops 0-RTT.
-        assert_eq!(self.largest_acked, 0);
-        assert_eq!(self.loss_time, 0);
+        assert!(self.largest_acked.is_none());
+        assert!(self.loss_time.is_none());
         std::mem::replace(&mut self.sent_packets, Default::default())
             .into_iter()
             .map(|(_, v)| v)
@@ -2711,11 +2771,11 @@ impl LossRecoverySpace {
 
 #[derive(Debug, Default)]
 struct LossRecovery {
-    loss_detection_timer: u64,
+    loss_detection_timer: Option<Instant>,
     crypto_count: u32,
     pto_count: u32,
-    time_of_last_sent_ack_eliciting_packet: u64,
-    time_of_last_sent_crypto_packet: u64,
+    time_of_last_sent_ack_eliciting_packet: Option<Instant>,
+    time_of_last_sent_crypto_packet: Option<Instant>,
     rtt_vals: RttVals,
     packet_spaces: [LossRecoverySpace; 3],
 }
@@ -2724,8 +2784,8 @@ impl LossRecovery {
     fn new() -> LossRecovery {
         LossRecovery {
             rtt_vals: RttVals {
-                min_rtt: u64::max_value(),
-                max_ack_delay: 25_000, // 25ms in microseconds
+                min_rtt: Duration::from_secs(u64::max_value()),
+                max_ack_delay: Duration::from_millis(25),
                 ..RttVals::default()
             },
 
@@ -2751,9 +2811,8 @@ impl LossRecovery {
         ack_eliciting: bool,
         is_crypto_packet: bool,
         tokens: Vec<Box<FrameGeneratorToken>>,
-        cur_time_nanos: u64,
+        cur_time: Instant,
     ) {
-        let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
         qdebug!([self] "packet {} sent.", packet_number);
         self.space_mut(pn_space).sent_packets.insert(
             packet_number,
@@ -2765,10 +2824,10 @@ impl LossRecovery {
             },
         );
         if is_crypto_packet {
-            self.time_of_last_sent_crypto_packet = cur_time;
+            self.time_of_last_sent_crypto_packet = Some(cur_time);
         }
         if ack_eliciting {
-            self.time_of_last_sent_ack_eliciting_packet = cur_time;
+            self.time_of_last_sent_ack_eliciting_packet = Some(cur_time);
             // TODO implement cc
             //     cc.on_packet_sent(sent_bytes)
         }
@@ -2782,18 +2841,17 @@ impl LossRecovery {
         pn_space: PNSpace,
         largest_acked: u64,
         acked_ranges: Vec<(u64, u64)>,
-        ack_delay: u64,
-        cur_time_nanos: u64,
+        ack_delay: Duration,
+        cur_time: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>) {
-        let cur_time = cur_time_nanos / 1000; //TODO currently LossRecovery does everything in microseconds.
         qdebug!([self] "ack received - largest_acked={}.", largest_acked);
 
-        let last_sent = self.space_mut(pn_space).update_largest_acked(largest_acked);
+        let new_largest = self.space_mut(pn_space).update_largest_acked(largest_acked);
         // If the largest acknowledged is newly acked and
         // ack-eliciting, update the RTT.
-        if let Some(sent) = last_sent {
-            if sent.ack_eliciting {
-                let latest_rtt = cur_time - sent.time_sent;
+        if let Some(new_largest) = new_largest {
+            if new_largest.ack_eliciting {
+                let latest_rtt = cur_time - new_largest.time_sent;
                 self.rtt_vals.update_rtt(latest_rtt, ack_delay);
             }
         }
@@ -2815,48 +2873,48 @@ impl LossRecovery {
         (acked_packets, lost_packets)
     }
 
-    fn detect_lost_packets(&mut self, pn_space: PNSpace, cur_time: u64) -> Vec<SentPacket> {
-        self.space_mut(pn_space).loss_time = 0;
+    fn detect_lost_packets(&mut self, pn_space: PNSpace, cur_time: Instant) -> Vec<SentPacket> {
+        self.space_mut(pn_space).loss_time = None;
 
-        let loss_delay = (TIME_THRESHOLD
-            * (max(self.rtt_vals.latest_rtt, self.rtt_vals.smoothed_rtt) as f64))
-            as u64;
-
-        // Packets sent before this time are deemed lost.
-        // (cur_time < loss_delay, can happen in test)
-        let lost_send_time = if cur_time < loss_delay {
-            0
-        } else {
-            cur_time - loss_delay
-        };
-
-        // Packets with packet numbers before this are deemed lost.
-        let lost_pn = self
-            .space_mut(pn_space)
-            .largest_acked
-            .saturating_sub(PACKET_THRESHOLD);
-
-        qdebug!(
-            [self]
-            "detect lost packets - time={}, pn={}",
-            lost_send_time,
-            lost_pn
+        let loss_delay = Duration::from_micros(
+            (TIME_THRESHOLD
+                * (max(
+                    match self.rtt_vals.smoothed_rtt {
+                        None => self.rtt_vals.latest_rtt,
+                        Some(smoothed_rtt) => max(self.rtt_vals.latest_rtt, smoothed_rtt),
+                    },
+                    GRANULARITY,
+                ))
+                .as_micros() as f64) as u64,
         );
 
+        let loss_deadline = cur_time - loss_delay;
+        qdebug!([self]
+            "detect lost packets = cur_time {:?} loss delay {:?} loss_deadline {:?}",
+            cur_time, loss_delay, loss_deadline
+        );
+
+        // Packets with packet numbers before this are deemed lost.
         let packet_space = self.space_mut(pn_space);
 
         let mut lost = Vec::new();
         for (pn, packet) in &packet_space.sent_packets {
-            // Mark packet as lost, or set time when it should be marked.
-            if *pn <= packet_space.largest_acked {
-                if packet.time_sent <= lost_send_time || *pn <= lost_pn {
+            if Some(*pn) <= packet_space.largest_acked {
+                // Packets with packet numbers more than PACKET_THRESHOLD
+                // before largest acked are deemed lost.
+                if packet.time_sent <= loss_deadline
+                    || Some(*pn + PACKET_THRESHOLD) <= packet_space.largest_acked
+                {
                     qdebug!("lost={}", pn);
                     lost.push(*pn);
-                } else if packet_space.loss_time == 0 {
-                    packet_space.loss_time = packet.time_sent + loss_delay;
+                } else if packet_space.loss_time.is_none() {
+                    // Update loss_time when previously there was none
+                    packet_space.loss_time = Some(packet.time_sent + loss_delay);
                 } else {
+                    // Update loss_time when there was an existing value. Take
+                    // the lower.
                     packet_space.loss_time =
-                        min(packet_space.loss_time, packet.time_sent + loss_delay);
+                        min(packet_space.loss_time, Some(packet.time_sent + loss_delay));
                 }
             }
         }
@@ -2911,47 +2969,51 @@ impl LossRecovery {
         );
 
         if !has_ack_eliciting_out && !has_crypto_out {
-            self.loss_detection_timer = 0;
+            self.loss_detection_timer = None;
             return;
         }
 
         let (loss_time, _) = self.get_earliest_loss_time();
 
-        if loss_time != 0 {
+        if loss_time.is_some() {
             self.loss_detection_timer = loss_time;
         } else if has_crypto_out {
-            self.loss_detection_timer = self.time_of_last_sent_crypto_packet
-                + self
+            self.loss_detection_timer = self.time_of_last_sent_crypto_packet.map(|i| {
+                i + self
                     .rtt_vals
-                    .timer_for_crypto_retransmission(self.crypto_count);
+                    .timer_for_crypto_retransmission(self.crypto_count)
+            });
         } else {
             // Calculate PTO duration
-            let timeout = self.rtt_vals.pto() * 2u64.pow(self.pto_count);
-            self.loss_detection_timer = self.time_of_last_sent_ack_eliciting_packet + timeout;
+            let timeout = self.rtt_vals.pto() * 2u32.pow(self.pto_count);
+            self.loss_detection_timer = self
+                .time_of_last_sent_ack_eliciting_packet
+                .map(|i| i + timeout);
         }
-        qdebug!([self] "loss_detection_timer={}", self.loss_detection_timer);
+        qdebug!([self] "loss_detection_timer={:?}", self.loss_detection_timer);
     }
 
-    #[allow(clippy::if_same_then_else)]
-    fn get_earliest_loss_time(&self) -> (u64, PNSpace) {
+    fn get_earliest_loss_time(&self) -> (Option<Instant>, PNSpace) {
         let mut loss_time = self.packet_spaces[PNSpace::Initial as usize].loss_time;
         let mut pn_space = PNSpace::Initial;
         for space in &[PNSpace::Handshake, PNSpace::ApplicationData] {
-            let packet_space = &self.packet_spaces[*space as usize];
+            let packet_space = self.space(*space);
 
-            if loss_time == 0 {
-                loss_time = packet_space.loss_time;
-                pn_space = *space;
-            } else if packet_space.loss_time != 0 && packet_space.loss_time < loss_time {
-                loss_time = packet_space.loss_time;
-                pn_space = *space;
+            if let Some(new_loss_time) = packet_space.loss_time {
+                if loss_time.map(|i| new_loss_time < i).unwrap_or(true) {
+                    loss_time = Some(new_loss_time);
+                    pn_space = *space;
+                }
             }
         }
+
         (loss_time, pn_space)
     }
 
-    pub fn get_timer(&self) -> u64 {
-        self.loss_detection_timer * 1000
+    /// This is when we'd like to be called back, so we can see if losses have
+    /// occurred.
+    pub fn get_timer(&self) -> Option<Instant> {
+        self.loss_detection_timer
     }
 
     //  The 3 return values for this function: (Vec<SentPacket>, bool, bool).
@@ -2960,14 +3022,17 @@ impl LossRecovery {
     //  3) PTO, one or two packets should be transmitted.
     pub fn on_loss_detection_timeout(
         &mut self,
-        cur_time_nanos: u64,
+        cur_time: Instant,
     ) -> (Vec<SentPacket>, bool, bool) {
-        let cur_time = cur_time_nanos / 1000; //TODO(dragana) currently LossRecovery does everything in microseconds.
         let mut lost_packets = Vec::new();
         //TODO(dragana) enable retransmit_unacked_crypto and send_one_or_two_packets when functionanlity to send not-lost packet is there.
         //let mut retransmit_unacked_crypto = false;
         //let mut send_one_or_two_packets = false;
-        if cur_time < self.loss_detection_timer {
+        if self
+            .loss_detection_timer
+            .map(|timer| cur_time < timer)
+            .unwrap_or(false)
+        {
             return (
                 lost_packets, false, false
                 //retransmit_unacked_crypto,
@@ -2976,7 +3041,7 @@ impl LossRecovery {
         }
 
         let (loss_time, pn_space) = self.get_earliest_loss_time();
-        if loss_time != 0 {
+        if loss_time.is_some() {
             // Time threshold loss Detection
             lost_packets = self.detect_lost_packets(pn_space, cur_time);
         } else {
@@ -3027,12 +3092,16 @@ mod tests {
     use crate::frame::StreamType;
     use neqo_crypto::init_db;
     use std::time::Duration;
+    use neqo_common::once::OnceResult;
 
     fn loopback() -> SocketAddr {
         "127.0.0.1:443".parse().unwrap()
     }
 
-    const NOW: u64 = 123_456_789; // needs to be larger than the anti-replay window.
+    fn now() -> Instant {
+        static mut NOW_ONCE: OnceResult<Instant> = OnceResult::new();
+        *unsafe { NOW_ONCE.call_once(|| Instant::now()) }
+    }
 
     #[test]
     fn test_stream_id_methods() {
@@ -3075,18 +3144,18 @@ mod tests {
 
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let (res, _) = client.process(vec![], NOW);
+        let (res, _) = client.process(vec![], now());
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
-        let (res, _) = server.process(res, NOW);
+        let (res, _) = server.process(res, now());
 
-        let (res, _) = client.process(res, NOW);
+        let (res, _) = client.process(res, now());
         // client now in State::Connected
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 4);
 
-        let (res, _) = server.process(res, NOW);
+        let (res, _) = server.process(res, now());
         // server now in State::Connected
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 3);
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 7);
@@ -3100,29 +3169,29 @@ mod tests {
         qdebug!("---- client: generate CH");
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let (res, _) = client.process(Vec::new(), NOW);
+        let (res, _) = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
         assert_eq!(res.first().unwrap().len(), 1200);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
-        let (res, _) = server.process(res, NOW);
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: SH..FIN -> FIN");
-        let (res, _) = client.process(res, NOW);
+        let (res, _) = client.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: FIN -> ACKS");
-        let (res, _) = server.process(res, NOW);
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: ACKS -> 0");
-        let (res, _) = client.process(res, NOW);
+        let (res, _) = client.process(res, now());
         assert!(res.is_empty());
         qdebug!("Output={:0x?}", res);
 
@@ -3140,20 +3209,20 @@ mod tests {
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
 
         qdebug!("---- client");
-        let (res, _) = client.process(Vec::new(), NOW);
+        let (res, _) = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // -->> Initial[0]: CRYPTO[CH]
 
         qdebug!("---- server");
-        let (res, _) = server.process(res, NOW);
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
         // <<-- Initial[0]: CRYPTO[SH] ACK[0]
         // <<-- Handshake[0]: CRYPTO[EE, CERT, CV, FIN]
 
         qdebug!("---- client");
-        let (res, _) = client.process(res, NOW);
+        let (res, _) = client.process(res, now());
         assert_eq!(res.len(), 1);
         assert_eq!(*client.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -3161,7 +3230,7 @@ mod tests {
         // -->> Handshake[0]: CRYPTO[FIN], ACK[0]
 
         qdebug!("---- server");
-        let (res, _) = server.process(res, NOW);
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -3184,11 +3253,11 @@ mod tests {
         client
             .stream_send(client_stream_id2, &vec![7; 50])
             .unwrap_err();
-        let (res, _) = client.process(res, NOW);
+        let (res, _) = client.process(res, now());
         assert_eq!(res.len(), 4);
 
         qdebug!("---- server");
-        let (res, _) = server.process(res, NOW);
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1); // Just an ACK.
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
@@ -3226,7 +3295,7 @@ mod tests {
             _ => false,
         };
         while !is_done(a) {
-            let (r, _) = a.process(records, NOW);
+            let (r, _) = a.process(records, now());
             records = r;
             b = mem::replace(&mut a, b);
         }
@@ -3266,14 +3335,14 @@ mod tests {
 
     fn assert_values(
         lr: &LossRecovery,
-        latest_rtt: u64,
-        smoothed_rtt: u64,
-        rttvar: u64,
-        min_rtt: u64,
-        loss_time: [u64; 3],
+        latest_rtt: Duration,
+        smoothed_rtt: Duration,
+        rttvar: Duration,
+        min_rtt: Duration,
+        loss_time: [Option<Instant>; 3],
     ) {
         println!(
-            "{} {} {} {} {} {} {}",
+            "{:?} {:?} {:?} {:?} {:?} {:?} {:?}",
             lr.rtt_vals.latest_rtt,
             lr.rtt_vals.smoothed_rtt,
             lr.rtt_vals.rttvar,
@@ -3283,7 +3352,7 @@ mod tests {
             lr.space(PNSpace::ApplicationData).loss_time,
         );
         assert_eq!(lr.rtt_vals.latest_rtt, latest_rtt);
-        assert_eq!(lr.rtt_vals.smoothed_rtt, smoothed_rtt);
+        assert_eq!(lr.rtt_vals.smoothed_rtt, Some(smoothed_rtt));
         assert_eq!(lr.rtt_vals.rttvar, rttvar);
         assert_eq!(lr.rtt_vals.min_rtt, min_rtt);
         assert_eq!(lr.space(PNSpace::Initial).loss_time, loss_time[0]);
@@ -3295,14 +3364,16 @@ mod tests {
     fn test_loss_recovery1() {
         let mut lr_module = LossRecovery::new();
 
-        lr_module.on_packet_sent(PNSpace::ApplicationData, 0, true, false, Vec::new(), 0);
+        let start = now();
+
+        lr_module.on_packet_sent(PNSpace::ApplicationData, 0, true, false, Vec::new(), start);
         lr_module.on_packet_sent(
             PNSpace::ApplicationData,
             1,
             true,
             false,
             Vec::new(),
-            10_000_000,
+            start + Duration::from_millis(10),
         );
 
         lr_module.on_packet_sent(
@@ -3311,7 +3382,7 @@ mod tests {
             true,
             false,
             Vec::new(),
-            20_000_000,
+            start + Duration::from_millis(20),
         );
 
         lr_module.on_packet_sent(
@@ -3320,7 +3391,7 @@ mod tests {
             true,
             false,
             Vec::new(),
-            30_000_000,
+            start + Duration::from_millis(30),
         );
         lr_module.on_packet_sent(
             PNSpace::ApplicationData,
@@ -3328,7 +3399,7 @@ mod tests {
             true,
             false,
             Vec::new(),
-            40_000_000,
+            start + Duration::from_millis(40),
         );
         lr_module.on_packet_sent(
             PNSpace::ApplicationData,
@@ -3336,81 +3407,171 @@ mod tests {
             true,
             false,
             Vec::new(),
-            50_000_000,
+            start + Duration::from_millis(50),
         );
 
         // Calculating rtt for the first ack
-        lr_module.on_ack_received(PNSpace::ApplicationData, 0, Vec::new(), 2000, 50_000_000);
-        assert_values(&lr_module, 50_000, 50_000, 25_000, 50_000, [0, 0, 0]);
+        lr_module.on_ack_received(
+            PNSpace::ApplicationData,
+            0,
+            Vec::new(),
+            Duration::from_micros(2000),
+            start + Duration::from_millis(50),
+        );
+        assert_values(
+            &lr_module,
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+            Duration::from_millis(25),
+            Duration::from_millis(50),
+            [None, None, None],
+        );
 
         // Calculating rtt for further acks
-        lr_module.on_ack_received(PNSpace::ApplicationData, 1, vec![(1, 0)], 2000, 60_000_000);
-        assert_values(&lr_module, 50_000, 50_000, 18_750, 50_000, [0, 0, 0]);
+        lr_module.on_ack_received(
+            PNSpace::ApplicationData,
+            1,
+            vec![(1, 0)],
+            Duration::from_micros(2000),
+            start + Duration::from_millis(60),
+        );
+        assert_values(
+            &lr_module,
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+            Duration::from_micros(18_750),
+            Duration::from_millis(50),
+            [None, None, None],
+        );
 
         // Calculating rtt for further acks
-        lr_module.on_ack_received(PNSpace::ApplicationData, 2, vec![(2, 0)], 2000, 70_000_000);
-        assert_values(&lr_module, 50_000, 50_000, 14_062, 50_000, [0, 0, 0]);
+        lr_module.on_ack_received(
+            PNSpace::ApplicationData,
+            2,
+            vec![(2, 0)],
+            Duration::from_micros(2000),
+            start + Duration::from_millis(70),
+        );
+        assert_values(
+            &lr_module,
+            Duration::from_millis(50),
+            Duration::from_millis(50),
+            Duration::from_micros(14_062),
+            Duration::from_millis(50),
+            [None, None, None],
+        );
 
         // Calculating rtt for further acks; test min_rtt
-        lr_module.on_ack_received(PNSpace::ApplicationData, 3, vec![(3, 0)], 2000, 75_000_000);
-        assert_values(&lr_module, 45_000, 49_375, 11_796, 45_000, [0, 0, 0]);
+        lr_module.on_ack_received(
+            PNSpace::ApplicationData,
+            3,
+            vec![(3, 0)],
+            Duration::from_micros(2000),
+            start + Duration::from_millis(75),
+        );
+        assert_values(
+            &lr_module,
+            Duration::from_micros(45_000),
+            Duration::from_micros(49_375),
+            Duration::from_micros(11_796),
+            Duration::from_micros(45_000),
+            [None, None, None],
+        );
 
         // Calculating rtt for further acks; test ack_delay
-        lr_module.on_ack_received(PNSpace::ApplicationData, 4, vec![(4, 0)], 2000, 95_000_000);
-        assert_values(&lr_module, 53_000, 49828, 9_753, 45_000, [0, 0, 0]);
+        lr_module.on_ack_received(
+            PNSpace::ApplicationData,
+            4,
+            vec![(4, 0)],
+            Duration::from_micros(2000),
+            start + Duration::from_millis(95),
+        );
+        assert_values(
+            &lr_module,
+            Duration::from_micros(53_000),
+            Duration::from_micros(49828),
+            Duration::from_micros(9_753),
+            Duration::from_micros(45_000),
+            [None, None, None],
+        );
 
         // Calculating rtt for further acks; test max_ack_delay
         lr_module.on_ack_received(
             PNSpace::ApplicationData,
             5,
             vec![(5, 0)],
-            28000,
-            150_000_000,
+            Duration::from_millis(28000),
+            start + Duration::from_millis(150),
         );
-        assert_values(&lr_module, 75000, 52974, 13607, 45000, [0, 0, 0]);
+        assert_values(
+            &lr_module,
+            Duration::from_micros(75000),
+            Duration::from_micros(52974),
+            Duration::from_micros(13607),
+            Duration::from_micros(45000),
+            [None, None, None],
+        );
 
         // Calculating rtt for further acks; test acking already acked packet
         lr_module.on_ack_received(
             PNSpace::ApplicationData,
             5,
             vec![(5, 0)],
-            28000,
-            160_000_000,
+            Duration::from_millis(28000),
+            start + Duration::from_millis(160),
         );
-        assert_values(&lr_module, 75000, 52974, 13607, 45000, [0, 0, 0]);
+        assert_values(
+            &lr_module,
+            Duration::from_micros(75000),
+            Duration::from_micros(52974),
+            Duration::from_micros(13607),
+            Duration::from_micros(45000),
+            [None, None, None],
+        );
     }
 
     // Test crypto timeout.
     #[test]
     fn test_loss_recovery2() {
         let mut lr_module = LossRecovery::new();
-        lr_module.on_packet_sent(PNSpace::ApplicationData, 0, true, true, Vec::new(), 0);
-        assert_eq!(lr_module.get_timer(), 200_000_000);
+
+        let start = now();
+
+        lr_module.on_packet_sent(PNSpace::ApplicationData, 0, true, true, Vec::new(), start);
+        assert_eq!(lr_module.get_timer(), Some(start + Duration::from_millis(200)));
         lr_module.on_packet_sent(
             PNSpace::ApplicationData,
             1,
             true,
             false,
             Vec::new(),
-            10_000_000,
+            start + Duration::from_millis(10),
         );
-        assert_eq!(lr_module.get_timer(), 200_000_000);
+        // Last crypto packet sent at time "start", so timeout at
+        // start+10millis should be 190.
+        assert_eq!(
+            lr_module.get_timer(),
+            Some(start + Duration::from_millis(200))
+        );
         lr_module.on_packet_sent(
             PNSpace::ApplicationData,
             2,
             true,
             false,
             Vec::new(),
-            20_000_000,
+            start + Duration::from_millis(20),
         );
-        assert_eq!(lr_module.get_timer(), 200_000_000);
+        assert_eq!(
+            lr_module.get_timer(),
+            Some(start + Duration::from_millis(200))
+        );
         lr_module.on_packet_sent(
             PNSpace::ApplicationData,
             3,
             true,
             false,
             Vec::new(),
-            30_000_000,
+            start + Duration::from_millis(30),
         );
         lr_module.on_packet_sent(
             PNSpace::ApplicationData,
@@ -3418,7 +3579,7 @@ mod tests {
             true,
             false,
             Vec::new(),
-            40_000_000,
+            start + Duration::from_millis(40),
         );
         lr_module.on_packet_sent(
             PNSpace::ApplicationData,
@@ -3426,7 +3587,7 @@ mod tests {
             true,
             false,
             Vec::new(),
-            50_000_000,
+            start + Duration::from_millis(50),
         );
 
         lr_module.on_packet_sent(
@@ -3435,55 +3596,121 @@ mod tests {
             true,
             false,
             Vec::new(),
-            60_000_000,
+            start + Duration::from_millis(60),
         );
 
         // This is a PTO for crypto packet.
-        assert_eq!(lr_module.get_timer(), 200_000_000);
+        assert_eq!(
+            lr_module.get_timer(),
+            Some(start + Duration::from_millis(200))
+        );
 
         // Receive an ack for packet 0.
-        lr_module.on_ack_received(PNSpace::ApplicationData, 0, vec![(0, 0)], 2000, 100_000_000);
-        assert_values(&lr_module, 100_000, 100_000, 50_000, 100_000, [0, 0, 0]);
-        assert_eq!(lr_module.get_timer(), 385_000_000);
+        lr_module.on_ack_received(
+            PNSpace::ApplicationData,
+            0,
+            vec![(0, 0)],
+            Duration::from_micros(2000),
+            start + Duration::from_millis(100),
+        );
+        assert_values(
+            &lr_module,
+            Duration::from_micros(100_000),
+            Duration::from_micros(100_000),
+            Duration::from_micros(50_000),
+            Duration::from_micros(100_000),
+            [None, None, None],
+        );
+        assert_eq!(
+            lr_module.get_timer(),
+            Some(start + Duration::from_millis(385))
+        );
 
         // Receive an ack with a gap. acks 0 and 2.
         lr_module.on_ack_received(
             PNSpace::ApplicationData,
             2,
             vec![(0, 0), (2, 2)],
-            2000,
-            105_000_000,
+            Duration::from_micros(2000),
+            start + Duration::from_millis(105),
         );
-        assert_values(&lr_module, 85_000, 98_125, 41_250, 85_000, [0, 0, 120_390]);
-        assert_eq!(lr_module.get_timer(), 120_390_000);
+        assert_values(
+            &lr_module,
+            Duration::from_micros(85_000),
+            Duration::from_micros(98_125),
+            Duration::from_micros(41_250),
+            Duration::from_micros(85_000),
+            [None, None, Some(start + Duration::from_micros(120_390))],
+        );
+        assert_eq!(
+            lr_module.get_timer(),
+            Some(start + Duration::from_micros(120_390))
+        );
 
-        // Timer expires, packet 1 is lost. packet 1 is lost
-        lr_module.on_loss_detection_timeout(120_390_000);
-        assert_values(&lr_module, 85_000, 98_125, 41_250, 85_000, [0, 0, 0]);
-        assert_eq!(lr_module.get_timer(), 348_125_000);
+        // Timer expires, packet 1 is lost.
+        lr_module.on_loss_detection_timeout(start + Duration::from_micros(120_390));
+        assert_values(
+            &lr_module,
+            Duration::from_micros(85_000),
+            Duration::from_micros(98_125),
+            Duration::from_micros(41_250),
+            Duration::from_micros(85_000),
+            [None, None, None],
+        );
+        assert_eq!(
+            lr_module.get_timer(),
+            Some(start + Duration::from_nanos(348_125_000))
+        );
 
         // dupacks loss detection. ackes 0, 2 and 6, markes packet 3 as lost.
         lr_module.on_ack_received(
             PNSpace::ApplicationData,
             6,
             vec![(0, 0), (2, 2), (6, 6)],
-            2000,
-            130_000_000,
+            Duration::from_micros(2000),
+            start + Duration::from_nanos(130_000_000),
         );
-        assert_values(&lr_module, 70_000, 94_609, 37_968, 70_000, [0, 0, 146_435]);
-        assert_eq!(lr_module.get_timer(), 146_435_000);
+        assert_values(
+            &lr_module,
+            Duration::from_micros(70_000),
+            Duration::from_micros(94_609),
+            Duration::from_micros(37_968),
+            Duration::from_micros(70_000),
+            [None, None, Some(start + Duration::from_micros(146_435))],
+        );
+        assert_eq!(
+            lr_module.get_timer(),
+            Some(start + Duration::from_nanos(146_435_000))
+        );
 
         // Timer expires, packet 4 is lost.
-        lr_module.on_loss_detection_timeout(146_500_000);
-        assert_values(&lr_module, 70_000, 94_609, 37_968, 70_000, [0, 0, 156_435]);
-        assert_eq!(lr_module.get_timer(), 156_435_000);
+        lr_module.on_loss_detection_timeout(start + Duration::from_nanos(146_500_000));
+        assert_values(
+            &lr_module,
+            Duration::from_micros(70_000),
+            Duration::from_micros(94_609),
+            Duration::from_micros(37_968),
+            Duration::from_micros(70_000),
+            [None, None, Some(start + Duration::from_micros(156_435))],
+        );
+        assert_eq!(
+            lr_module.get_timer(),
+            Some(start + Duration::from_nanos(156_435_000))
+        );
 
         // Timer expires, packet 5 is lost.
-        lr_module.on_loss_detection_timeout(156_500_000);
-        assert_values(&lr_module, 70_000, 94_609, 37_968, 70_000, [0, 0, 0]);
+        lr_module.on_loss_detection_timeout(start + Duration::from_nanos(156_500_000));
+        assert_values(
+            &lr_module,
+            Duration::from_micros(70_000),
+            Duration::from_micros(94_609),
+            Duration::from_micros(37_968),
+            Duration::from_micros(70_000),
+            [None, None, None],
+        );
 
         // there is no more outstanding data - timer is set to 0.
-        assert_eq!(lr_module.get_timer(), 0);
+        assert_eq!(lr_module.get_timer(), None);
     }
 
     #[test]
@@ -3492,19 +3719,19 @@ mod tests {
         qdebug!("---- client: generate CH");
         let mut client =
             Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let (res, _) = client.process(Vec::new(), NOW);
+        let (res, _) = client.process(Vec::new(), now());
         assert_eq!(res.len(), 1);
         assert_eq!(res.first().unwrap().len(), 1200);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
-        let (res, _) = server.process(res, NOW);
+        let (res, _) = server.process(res, now());
         assert_eq!(res.len(), 1);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: SH..FIN -> FIN");
-        let (res2, _) = client.process(res.clone(), NOW);
+        let (res2, _) = client.process(res.clone(), now());
         assert_eq!(res2.len(), 1);
         qdebug!("Output={:0x?}", res);
 
@@ -3512,7 +3739,7 @@ mod tests {
         assert_eq!(0, client.stats().dups_rx);
 
         qdebug!("---- Dup, ignored");
-        let (res2, _) = client.process(res.clone(), NOW);
+        let (res2, _) = client.process(res.clone(), now());
         assert_eq!(res2.len(), 0);
         qdebug!("Output={:0x?}", res);
 
@@ -3522,10 +3749,10 @@ mod tests {
     }
 
     fn exchange_ticket(client: &mut Connection, server: &mut Connection) -> Vec<u8> {
-        server.send_ticket(NOW, &[]).expect("can send ticket");
-        let (dgrams, _timer) = server.process_output(NOW);
+        server.send_ticket(now(), &[]).expect("can send ticket");
+        let (dgrams, _timer) = server.process_output(now());
         assert_eq!(dgrams.len(), 1);
-        client.process_input(dgrams, NOW);
+        client.process_input(dgrams, now());
         assert_eq!(*client.state(), State::Connected);
         client.resumption_token().expect("should have token")
     }
@@ -3556,9 +3783,7 @@ mod tests {
     fn zero_rtt_negotiate() {
         init_db("./db");
 
-        let start_time = NOW
-            .checked_sub(ANTI_REPLAY_WINDOW.as_nanos() as u64)
-            .unwrap();
+        let start_time = now().checked_sub(ANTI_REPLAY_WINDOW).unwrap();
         Server::init_anti_replay(start_time, ANTI_REPLAY_WINDOW, 1, 3)
             .expect("anti-replay setup successful");
 
@@ -3583,9 +3808,7 @@ mod tests {
     fn zero_rtt_send_recv() {
         init_db("./db");
 
-        let start_time = NOW
-            .checked_sub(ANTI_REPLAY_WINDOW.as_nanos() as u64)
-            .unwrap();
+        let start_time = now().checked_sub(ANTI_REPLAY_WINDOW).unwrap();
         Server::init_anti_replay(start_time, ANTI_REPLAY_WINDOW, 1, 3)
             .expect("anti-replay setup successful");
 
@@ -3603,7 +3826,7 @@ mod tests {
         let mut server = Connection::new_server(&["key"], &["alpn"]).unwrap();
 
         // Send ClientHello.
-        let (client_hs, _) = client.process(Vec::new(), NOW);
+        let (client_hs, _) = client.process(Vec::new(), now());
         assert_eq!(client_hs.len(), 1);
 
         // Now send a 0-RTT packet.
@@ -3612,10 +3835,10 @@ mod tests {
         client
             .stream_send(client_stream_id, &vec![1, 2, 3])
             .unwrap();
-        let (client_0rtt, _) = client.process(Vec::new(), NOW);
+        let (client_0rtt, _) = client.process(Vec::new(), now());
         assert_eq!(client_0rtt.len(), 1);
 
-        let (server_hs, _) = server.process(client_hs.into_iter().chain(client_0rtt), NOW);
+        let (server_hs, _) = server.process(client_hs.into_iter().chain(client_0rtt), now());
         assert_eq!(server_hs.len(), 1); // Should produce ServerHello etc...
 
         let server_stream_id = server
@@ -3629,5 +3852,4 @@ mod tests {
             .expect("should have received a new stream event");
         assert_eq!(client_stream_id, server_stream_id);
     }
-
 }

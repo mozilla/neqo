@@ -9,6 +9,7 @@ use crate::nss::Epoch;
 use crate::{Connection, ConnectionError, Error, Res};
 use neqo_common::{qdebug, Decoder, Encoder};
 use std::fmt::{self, Debug};
+use std::time::Instant;
 
 pub type FrameType = u64;
 
@@ -579,7 +580,7 @@ pub trait FrameGenerator {
     fn generate(
         &mut self,
         conn: &mut Connection,
-        now: u64,
+        now: Instant,
         epoch: Epoch,
         tx_mode: TxMode,
         remaining: usize,

@@ -189,7 +189,7 @@ struct PostConnectHandler {
 impl Handler for PostConnectHandler {
     fn handle(&mut self, client: &mut Http3Connection) -> bool {
         let mut data = vec![0; 4000];
-        client.process_http3();
+        client.process_http3(now());
         for event in client.events() {
             match event {
                 Http3Event::HeaderReady { stream_id } => {
@@ -208,7 +208,7 @@ impl Handler for PostConnectHandler {
                     }
 
                     let (_sz, fin) = client
-                        .read_data(stream_id, &mut data)
+                        .read_data(now(), stream_id, &mut data)
                         .expect("Read should succeed");
                     println!(
                         "READ[{}]: {}",
@@ -217,7 +217,7 @@ impl Handler for PostConnectHandler {
                     );
                     if fin {
                         println!("<FIN[{}]>", stream_id);
-                        client.close(0, "kthxbye!");
+                        client.close(now(), 0, "kthxbye!");
                         return false;
                     }
                 }
@@ -240,6 +240,7 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         .expect("must succeed"),
         args.max_table_size,
         args.max_blocked_streams,
+        None,
     );
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
@@ -340,7 +341,7 @@ mod old {
                         );
                         if fin {
                             println!("<FIN[{}]>", stream_id);
-                            client.close(0, 0, "kthxbye!");
+                            client.close(now(), 0, "kthxbye!");
                             return false;
                         }
                     }

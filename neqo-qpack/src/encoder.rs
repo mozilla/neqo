@@ -530,6 +530,7 @@ impl ::std::fmt::Display for QPackEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_common::now;
     use neqo_crypto::init_db;
     use neqo_transport::frame::StreamType;
     use neqo_transport::ConnectionEvent;
@@ -537,10 +538,6 @@ mod tests {
 
     fn loopback() -> SocketAddr {
         "127.0.0.1:443".parse().unwrap()
-    }
-
-    fn now() -> u64 {
-        0
     }
 
     fn connect(huffman: bool) -> (QPackEncoder, Connection, Connection, u64, u64) {

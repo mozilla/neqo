@@ -28,8 +28,6 @@ pub struct RequestStreamServer {
     stream_id: u64,
     frame_reader: HFrameReader,
     request_headers: Option<Vec<(String, String)>>,
-    response_headers: Vec<(String, String)>,
-    data: Vec<u8>,
     response_buf: Option<Vec<u8>>,
     fin: bool,
 }
@@ -41,55 +39,53 @@ impl RequestStreamServer {
             stream_id,
             frame_reader: HFrameReader::new(),
             request_headers: None,
-            response_headers: Vec::new(),
-            data: Vec::new(),
             response_buf: None,
             fin: false,
         }
     }
 
-    pub fn get_request_headers(&self) -> Vec<(String, String)> {
+    pub fn get_request_headers(&self) -> &[(String, String)] {
         if let Some(h) = &self.request_headers {
-            h.to_vec()
+            h
         } else {
-            Vec::new()
+            &[]
         }
     }
-    pub fn set_response(&mut self, headers: &[(String, String)], data: String) {
-        self.response_headers.extend_from_slice(headers);
-        self.data = data.into_bytes(); // TODO(mt) this looks like a stub
-        self.state = RequestStreamServerState::SendingResponse;
-    }
 
-    fn encode_response(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
+    pub fn set_response(
+        &mut self,
+        headers: &[(String, String)],
+        data: Vec<u8>,
+        encoder: &mut QPackEncoder,
+    ) {
         qdebug!([self] "Encoding headers");
-        let encoded_headers = encoder.encode_header_block(&self.response_headers, stream_id);
-        let f = HFrame::Headers {
+        let encoded_headers = encoder.encode_header_block(&headers, self.stream_id);
+        let hframe = HFrame::Headers {
             len: encoded_headers.len() as u64,
         };
         let mut d = Encoder::default();
-        f.encode(&mut d);
-        d.encode(&encoded_headers[..]);
-        if !self.data.is_empty() {
+        hframe.encode(&mut d);
+        d.encode(&encoded_headers);
+        if !data.is_empty() {
+            qdebug!([self] "Encoding data");
             let d_frame = HFrame::Data {
-                len: self.data.len() as u64,
+                len: data.len() as u64,
             };
             d_frame.encode(&mut d);
-            d.encode(&self.data[..]);
+            d.encode(&data);
         }
         self.response_buf = Some(d.into());
+
+        self.state = RequestStreamServerState::SendingResponse;
     }
 
-    pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
+    pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
             String::new()
         };
         if self.state == RequestStreamServerState::SendingResponse {
-            if self.response_buf.is_none() {
-                self.encode_response(encoder, self.stream_id);
-            }
             if let Some(d) = &mut self.response_buf {
                 let sent = conn.stream_send(self.stream_id, &d[..])?;
                 qdebug!([label] "{} bytes sent", sent);

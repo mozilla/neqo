@@ -8,7 +8,7 @@
 
 use neqo_common::now;
 use neqo_crypto::init_db;
-use neqo_http3::{Http3Connection, Http3State, RequestStreamServer};
+use neqo_http3::{Http3Connection, Http3State};
 use neqo_transport::{Connection, Datagram};
 use std::collections::HashMap;
 use std::io;
@@ -59,44 +59,35 @@ impl Args {
     }
 }
 
-fn http_serve(cr: &mut RequestStreamServer, _error: bool) {
+fn http_serve(
+    request_headers: &[(String, String)],
+    _error: bool,
+) -> (Vec<(String, String)>, Vec<u8>) {
     println!("Serve a request");
 
-    let request_headers = cr.get_request_headers();
     println!("Headers: {:?}", request_headers);
 
-    let mut resp = String::new();
+    let path_hdr = request_headers.iter().find(|(k, _)| k == ":path");
 
-    for header in request_headers {
-        if header.0 == ":path" {
-            println!("path {}", header.1);
-            let length;
-            match header.1.trim_matches(|p| p == '/').parse::<u32>() {
-                Ok(v) => {
-                    length = v;
-                }
-                Err(_) => {
-                    length = 0;
-                }
-            };
+    let default_ret = b"Hello World".to_vec();
 
-            if length == 0 {
-                resp.push_str("Hello World");
-            } else {
-                for _i in 0..length {
-                    resp.push('a');
-                }
+    let response = match path_hdr {
+        Some((_, path)) if !path.is_empty() => {
+            match path.trim_matches(|p| p == '/').parse::<usize>() {
+                Ok(v) => vec![b'a'; v],
+                Err(_) => default_ret,
             }
         }
-    }
+        _ => default_ret,
+    };
 
-    cr.set_response(
-        &[
+    (
+        vec![
             (String::from(":status"), String::from("200")),
-            (String::from("content-length"), resp.len().to_string()),
+            (String::from("content-length"), response.len().to_string()),
         ],
-        resp,
-    );
+        response,
+    )
 }
 
 fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
@@ -209,14 +200,13 @@ fn main() -> Result<(), io::Error> {
         for (remote_addr, mut dgrams) in in_dgrams {
             let server = connections.entry(remote_addr).or_insert_with(|| {
                 println!("New connection from {:?}", remote_addr);
-                let mut srv = Http3Connection::new(
+                Http3Connection::new(
                     Connection::new_server(&[args.key.clone()], &[args.alpn.clone()])
                         .expect("must succeed"),
                     args.max_table_size,
                     args.max_blocked_streams,
-                );
-                srv.set_new_stream_callback(http_serve);
-                srv
+                    Some(Box::new(http_serve)),
+                )
             });
 
             // TODO use timer to set socket.set_read_timeout.
@@ -227,7 +217,7 @@ fn main() -> Result<(), io::Error> {
                 continue;
             }
 
-            server.process_http3();
+            server.process_http3(now());
             let (conn_out_dgrams, _timer) = server.process_output(now());
             // TODO: each connection might want a different timer, how's that
             // gonna work?
