@@ -979,20 +979,10 @@ mod tests {
         let mut hconn;
         let mut neqo_trans_conn;
         if client {
-            hconn = Http3Connection::new(
-                default_client(),
-                100,
-                100,
-                None,
-            );
+            hconn = Http3Connection::new(default_client(), 100, 100, None);
             neqo_trans_conn = default_server();
         } else {
-            hconn = Http3Connection::new(
-                default_server(),
-                100,
-                100,
-                None,
-            );
+            hconn = Http3Connection::new(default_server(), 100, 100, None);
             neqo_trans_conn = default_client();
         }
         if client {

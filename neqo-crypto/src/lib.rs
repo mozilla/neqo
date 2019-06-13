@@ -46,8 +46,7 @@ use std::path::{Path, PathBuf};
 use std::ptr::null;
 
 mod nss {
-    #![allow(non_upper_case_globals)]
-    #![allow(clippy::const_static_lifetime)]
+    #![allow(clippy::const_static_lifetime, non_upper_case_globals)]
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 
@@ -75,8 +74,8 @@ impl Drop for NssLoaded {
 
 static mut INITIALIZED: OnceResult<NssLoaded> = OnceResult::new();
 
-unsafe fn already_initialized() -> bool {
-    nss::NSS_IsInitialized() != 0
+fn already_initialized() -> bool {
+    unsafe { nss::NSS_IsInitialized() != 0 }
 }
 
 /// Initialize NSS.  This only executes the initialization routines once, so if there is any chance that
@@ -138,31 +137,5 @@ pub fn assert_initialized() {
         INITIALIZED.call_once(|| {
             panic!("NSS not initialized with init or init_db");
         });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use test_fixture::NSS_DB_PATH;
-
-    #[cfg(nss_nodb)]
-    #[test]
-    fn init_nodb() {
-        init();
-        unsafe {
-            assert_initialized();
-            assert!(nss::NSS_IsInitialized() != 0);
-        }
-    }
-
-    #[cfg(not(nss_nodb))]
-    #[test]
-    fn init_withdb() {
-        init_db(NSS_DB_PATH);
-        assert_initialized();
-        unsafe {
-            assert!(nss::NSS_IsInitialized() != 0);
-        }
     }
 }

@@ -7,7 +7,7 @@
 #![deny(warnings)]
 
 use neqo_common::once::OnceResult;
-use neqo_crypto::{AntiReplay, init_db};
+use neqo_crypto::{init_db, AntiReplay};
 use neqo_transport::Connection;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
@@ -40,8 +40,7 @@ pub fn now() -> Instant {
 // Create a default anti-replay context.
 pub fn anti_replay() -> AntiReplay {
     fixture_init();
-    AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3)
-        .expect("setup anti-replay")
+    AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
 }
 
 pub const DEFAULT_SERVER_NAME: &'static str = "example.com";
@@ -59,7 +58,7 @@ pub fn loopback() -> SocketAddr {
 pub fn default_client() -> Connection {
     fixture_init();
     Connection::new_client(DEFAULT_SERVER_NAME, DEFAULT_ALPN, loopback(), loopback())
-            .expect("create a default client")
+        .expect("create a default client")
 }
 
 /// Create a transport server with default configuration.

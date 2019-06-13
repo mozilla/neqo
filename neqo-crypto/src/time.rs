@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 include!(concat!(env!("OUT_DIR"), "/nspr_time.rs"));
 
 /// This struct holds the zero time used for converting between Instant and PRTime.
+#[derive(Debug)]
 struct TimeZero {
     instant: Instant,
     prtime: PRTime,
@@ -98,7 +99,7 @@ impl TryFrom<PRTime> for Time {
     fn try_from(prtime: PRTime) -> Res<Time> {
         let base = get_base();
         if let Some(delta) = prtime.checked_sub(base.prtime) {
-            if delta.is_positive() {
+            if !delta.is_negative() {
                 let d = Duration::from_nanos(delta as u64);
                 if let Some(t) = base.instant.checked_add(d) {
                     Ok(Time { t })
@@ -181,6 +182,9 @@ mod test {
     fn convert_stable() {
         let now = Time::from(Instant::now());
         let pr: PRTime = now.clone().try_into().expect("should convert successfully");
+        println!("now {:?}", now);
+        println!("pr {:?}", pr);
+        println!("Time::try_from(pr) {:?}", Time::try_from(pr));
         let t2 = Time::try_from(pr).expect("should convert back too");
         assert_eq!(t2, now);
     }

@@ -41,12 +41,7 @@ fn connect() -> (
     Http3Connection,
     (Vec<Datagram>, Option<Duration>),
 ) {
-    let mut hconn_c = Http3Connection::new(
-        default_client(),
-        100,
-        100,
-        None,
-    );
+    let mut hconn_c = Http3Connection::new(default_client(), 100, 100, None);
     let mut hconn_s = Http3Connection::new(
         default_server(),
         100,

@@ -3092,7 +3092,33 @@ mod tests {
     use super::*;
     use crate::frame::StreamType;
     use std::time::Duration;
-    use test_fixture::*;
+    use test_fixture::{self, fixture_init, loopback, now};
+
+    // This is fabulous: because test_fixture uses the public API for Connection,
+    // it gets a different type to the ones that are referenced via super::*.
+    // Thus, this code can't use default_client() and default_server() from
+    // test_fixture because they produce different types.
+    //
+    // These are a direct copy of those functions.
+    pub fn default_client() -> Connection {
+        fixture_init();
+        Connection::new_client(
+            test_fixture::DEFAULT_SERVER_NAME,
+            test_fixture::DEFAULT_ALPN,
+            loopback(),
+            loopback(),
+        )
+        .expect("create a default client")
+    }
+    pub fn default_server() -> Connection {
+        fixture_init();
+        Connection::new_server(
+            test_fixture::DEFAULT_KEYS,
+            test_fixture::DEFAULT_ALPN,
+            &test_fixture::anti_replay(),
+        )
+        .expect("create a default server")
+    }
 
     #[test]
     fn test_stream_id_methods() {
@@ -3143,7 +3169,7 @@ mod tests {
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 4);
 
-        let (res, _) = server.process(res, now());
+        let _ = server.process(res, now());
         // server now in State::Connected
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 3);
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 7);
