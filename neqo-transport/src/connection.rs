@@ -39,7 +39,7 @@ use crate::send_stream::{SendStream, TxBuffer};
 use crate::stats::Stats;
 use crate::tparams::consts as tp_const;
 use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
-use crate::tracking::{AckTracker, PNSpace, RecvdPackets};
+use crate::tracking::{AckGenerator, AckTracker, PNSpace};
 use crate::{AppError, ConnectionError, Error, Res};
 
 #[derive(Debug, Default)]
@@ -788,6 +788,7 @@ impl Connection {
                 CryptoStream::default(),
             ],
             generators: vec![
+                Box::new(AckGenerator {}),
                 Box::new(CryptoGenerator {}),
                 Box::new(FlowControlGenerator {}),
                 Box::new(StreamGenerator {}),
@@ -1290,18 +1291,6 @@ impl Connection {
                 if cs.tx.is_none() {
                     continue;
                 }
-            }
-
-            // Always send an ACK if there is one to send.
-            if self.acks[space].ack_now(now) {
-                let mut recvd = mem::replace(&mut self.acks[space], RecvdPackets::new(space));
-                if let Some((frame, token)) =
-                    recvd.generate(self, now, epoch, TxMode::Normal, self.pmtu - encoder.len())
-                {
-                    frame.marshal(&mut encoder);
-                    tokens.push(token.unwrap());
-                }
-                mem::replace(&mut self.acks[space], recvd);
             }
 
             let mut ack_eliciting = false;

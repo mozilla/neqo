@@ -114,6 +114,22 @@ pub const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
 const MAX_TRACKED_RANGES: usize = 100;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
+/// A structure that tracks what was included in an ACK.
+struct AckToken {
+    space: PNSpace,
+    ranges: Vec<PacketRange>,
+}
+
+impl FrameGeneratorToken for AckToken {
+    fn acked(&mut self, conn: &mut Connection) {
+        conn.acks[self.space].acknowledged(&self.ranges);
+    }
+
+    fn lost(&mut self, _conn: &mut Connection) {}
+}
+
+/// A structure that tracks what packets have been received,
+/// and what needs acknowledgement for a packet number space.
 #[derive(Debug)]
 pub struct RecvdPackets {
     space: PNSpace,
@@ -144,7 +160,7 @@ impl RecvdPackets {
     }
 
     /// Returns true if an ACK frame should be sent now.
-    pub fn ack_now(&self, now: Instant) -> bool {
+    fn ack_now(&self, now: Instant) -> bool {
         match self.ack_time {
             Some(t) => t <= now,
             _ => false,
@@ -234,22 +250,7 @@ impl RecvdPackets {
             cur.acknowledged(&ack);
         }
     }
-}
 
-struct AckToken {
-    space: PNSpace,
-    ranges: Vec<PacketRange>,
-}
-
-impl FrameGeneratorToken for AckToken {
-    fn acked(&mut self, conn: &mut Connection) {
-        conn.acks[self.space].acknowledged(&self.ranges);
-    }
-
-    fn lost(&mut self, _conn: &mut Connection) {}
-}
-
-impl FrameGenerator for RecvdPackets {
     /// Generate an ACK frame.
     ///
     /// Unlike other frame generators this doesn't modify the underlying instance
@@ -262,13 +263,12 @@ impl FrameGenerator for RecvdPackets {
     /// but they still need to be tracked so that duplicates can be detected.
     fn generate(
         &mut self,
-        _conn: &mut Connection,
         now: Instant,
-        epoch: Epoch,
-        _tx_mode: TxMode,
-        _remaining: usize,
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
-        assert_eq!(self.space, PNSpace::from(epoch));
+        // Check that we aren't delaying ACKs.
+        if !self.ack_now(now) {
+            return None;
+        }
 
         // Limit the number of ACK ranges we send so that we'll always
         // have space for data in packets.
@@ -298,7 +298,7 @@ impl FrameGenerator for RecvdPackets {
             last = range.smallest;
         }
 
-        // We've sent an ACK, clear the timer.
+        // We've sent an ACK, reset the timer.
         self.ack_time = None;
 
         let ack_delay = now.duration_since(self.largest_pn_time.unwrap());
@@ -364,6 +364,22 @@ impl Index<PNSpace> for AckTracker {
 impl IndexMut<PNSpace> for AckTracker {
     fn index_mut(&mut self, space: PNSpace) -> &mut Self::Output {
         &mut self.spaces[space as usize]
+    }
+}
+
+pub struct AckGenerator {}
+
+impl FrameGenerator for AckGenerator {
+    /// This just acts as a router for RecvdPackets.
+    fn generate(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+        epoch: Epoch,
+        _tx_mode: TxMode,
+        _remaining: usize,
+    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+        conn.acks[PNSpace::from(epoch)].generate(now)
     }
 }
 
