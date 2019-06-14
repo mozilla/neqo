@@ -34,7 +34,7 @@ fn handshake(now: Instant, client: &mut SecretAgent, server: &mut SecretAgent) {
         HandshakeState::Complete(_) | HandshakeState::Failed(_) => true,
         _ => false,
     };
-    while !is_done(a) || !is_done(b) {
+    while !is_done(b) {
         records = match forward_records(now, &mut b, records) {
             Ok(r) => r,
             _ => {
