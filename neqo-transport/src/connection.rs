@@ -880,7 +880,7 @@ impl Connection {
     }
 
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
-        let tps = mem::replace(&mut self.tps, Default::default());
+        let tps = &self.tps;
         let res = match self.tls {
             Agent::Server(ref mut s) => {
                 let mut enc = Encoder::default();
@@ -895,7 +895,6 @@ impl Connection {
             }
             Agent::Client(_) => Err(Error::WrongRole),
         };
-        self.tps = tps;
         res
     }
 
