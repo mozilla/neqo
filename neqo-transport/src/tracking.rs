@@ -261,10 +261,7 @@ impl RecvdPackets {
     ///
     /// We don't send ranges that have been acknowledged,
     /// but they still need to be tracked so that duplicates can be detected.
-    fn generate(
-        &mut self,
-        now: Instant,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+    fn generate(&mut self, now: Instant) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
         // Check that we aren't delaying ACKs.
         if !self.ack_now(now) {
             return None;

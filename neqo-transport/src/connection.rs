@@ -856,7 +856,14 @@ impl Connection {
     }
 
     /// Enable resumption, using a token previously provided.
-    pub fn set_resumption_token(&mut self, token: &[u8]) -> Res<()> {
+    /// This can only be called once and only on the client.
+    /// After calling the function, it should be possible to attempt 0-RTT
+    /// if the token supports that.
+    pub fn set_resumption_token(&mut self, now: Instant, token: &[u8]) -> Res<()> {
+        if self.state != State::Init {
+            qerror!([self] "set token in state {:?}", self.state);
+            return Err(Error::ConnectionState);
+        }
         qinfo!([self] "resumption token {}", hex(token));
         let mut dec = Decoder::from(token);
         let tp_slice = match dec.decode_vvec() {
@@ -876,8 +883,9 @@ impl Connection {
 
         self.tps.borrow_mut().remote_0rtt = Some(tp);
         self.set_initial_limits();
-
-        Ok(())
+        // Start up TLS, which has the effect of setting up all the necessary
+        // state for 0-RTT.  This only stages the CRYPTO frames.
+        self.client_start(now)
     }
 
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
@@ -3059,6 +3067,7 @@ impl ::std::fmt::Display for LossRecovery {
 mod tests {
     use super::*;
     use crate::frame::StreamType;
+    use std::convert::TryFrom;
     use std::time::Duration;
     use test_fixture::{self, fixture_init, loopback, now};
 
@@ -3744,7 +3753,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server);
         let mut client = default_client();
         client
-            .set_resumption_token(&token[..])
+            .set_resumption_token(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -3763,7 +3772,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server);
         let mut client = default_client();
         client
-            .set_resumption_token(&token[..])
+            .set_resumption_token(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -3780,7 +3789,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server);
         let mut client = default_client();
         client
-            .set_resumption_token(&token[..])
+            .set_resumption_token(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
 
@@ -3803,12 +3812,117 @@ mod tests {
         let server_stream_id = server
             .events()
             .into_iter()
-            .inspect(|evt| eprintln!("Event: {:?}", evt))
             .find_map(|evt| match evt {
                 ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
                 _ => None,
             })
             .expect("should have received a new stream event");
         assert_eq!(client_stream_id, server_stream_id);
+    }
+
+    #[test]
+    fn zero_rtt_send_coalesce() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let token = exchange_ticket(&mut client, &mut server);
+        let mut client = default_client();
+        client
+            .set_resumption_token(now(), &token[..])
+            .expect("should set token");
+        let mut server = default_server();
+
+        // Write 0-RTT before generating any packets.
+        // This should result in a datagram that coalesces Initial and 0-RTT.
+        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        client
+            .stream_send(client_stream_id, &vec![1, 2, 3])
+            .unwrap();
+        let (client_0rtt, _) = client.process(Vec::new(), now());
+        assert_eq!(client_0rtt.len(), 1);
+
+        // Do a simple decode of the datagram.
+        let mut dec = Decoder::from(&client_0rtt[0][..]);
+        let initial_type = dec.decode_byte().unwrap(); // Initial
+        assert_eq!(initial_type & 0b11110000, 0b11000000);
+        let version = dec.decode_uint(4).unwrap();
+        assert_eq!(version, QUIC_VERSION.into());
+        let dcil_scil = dec.decode_byte().unwrap();
+        println!("DCIL/SCIL {}", dcil_scil);
+        let dcil = (dcil_scil >> 4) + 3;
+        assert!(dcil >= 8);
+        let scil = match dcil_scil & 0xf {
+            0 => 0,
+            v => v + 3,
+        };
+        dec.skip(usize::try_from(dcil + scil).unwrap());
+        let token_len = dec.decode_varint().unwrap();
+        dec.skip(usize::try_from(token_len).unwrap());
+        let initial_len = dec.decode_varint().unwrap();
+        dec.skip(usize::try_from(initial_len).unwrap());
+        let zrtt_type = dec.decode_byte().unwrap();
+        assert_eq!(zrtt_type & 0b11110000, 0b11010000);
+
+        let (server_hs, _) = server.process(client_0rtt, now());
+        assert_eq!(server_hs.len(), 1); // Should produce ServerHello etc...
+
+        let server_stream_id = server
+            .events()
+            .into_iter()
+            .find_map(|evt| match evt {
+                ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
+                _ => None,
+            })
+            .expect("should have received a new stream event");
+        assert_eq!(client_stream_id, server_stream_id);
+    }
+
+    #[test]
+    fn zero_rtt_send_reject() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let token = exchange_ticket(&mut client, &mut server);
+        let mut client = default_client();
+        client
+            .set_resumption_token(now(), &token[..])
+            .expect("should set token");
+        // Using a freshly initialized anti-replay context
+        // should result in the server rejecting 0-RTT.
+        let ar = AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3)
+            .expect("setup anti-replay");
+        let mut server =
+            Connection::new_server(test_fixture::DEFAULT_KEYS, test_fixture::DEFAULT_ALPN, &ar)
+                .unwrap();
+
+        // Send ClientHello.
+        let (client_hs, _) = client.process(Vec::new(), now());
+        assert_eq!(client_hs.len(), 1);
+
+        // Write some data on the client.
+        let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        let msg = &[1, 2, 3];
+        client.stream_send(stream_id, msg).unwrap();
+        let (client_0rtt, _) = client.process(Vec::new(), now());
+        assert_eq!(client_0rtt.len(), 1);
+
+        let (server_hs, _) = server.process(client_hs.into_iter().chain(client_0rtt), now());
+        assert_eq!(server_hs.len(), 1); // Should produce ServerHello etc...
+
+        // The server shouldn't receive that 0-RTT data.
+        let recvd_stream_evt = |e| matches!(e, ConnectionEvent::NewStream { .. });
+        assert!(!server.events().into_iter().any(recvd_stream_evt));
+
+        // Client should get a rejection.
+        let _ = client.process(server_hs, now());
+        let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
+        assert!(client.events().into_iter().any(recvd_0rtt_reject));
+
+        // ...and the client stream should be gone.
+        let res = client.stream_send(stream_id, msg);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
     }
 }

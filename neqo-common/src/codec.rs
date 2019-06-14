@@ -22,14 +22,15 @@ impl<'a> Decoder<'a> {
         Decoder { buf, offset: 0 }
     }
 
-    /// Reset the offset.  Equivalent to `seek(0)`, except that it can't fail.
-    pub fn reset(&mut self) {
-        self.offset = 0;
-    }
-
     /// Get the number of bytes remaining until the end.
     pub fn remaining(&self) -> usize {
         self.buf.len() - self.offset
+    }
+
+    /// Skip n bytes.  Panics if `n > self.remaining()`.
+    pub fn skip(&mut self, n: usize) {
+        assert!(n <= self.remaining());
+        self.offset += n;
     }
 
     /// Decodes (reads) a single byte.
