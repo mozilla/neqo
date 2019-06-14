@@ -270,11 +270,11 @@ impl Http3Connection {
 
     // This function takes the provided result and check for an error.
     // An error results in closing the connection.
-    fn check_result<T>(&mut self, cur_time: Instant, res: Res<T>) -> bool {
+    fn check_result<T>(&mut self, now: Instant, res: Res<T>) -> bool {
         match &res {
             Err(e) => {
                 qinfo!([self] "Connection error: {}.", e);
-                self.close(cur_time, e.code(), format!("{}", e));
+                self.close(now, e.code(), format!("{}", e));
                 true
             }
             _ => false,
@@ -285,13 +285,13 @@ impl Http3Connection {
         self.conn.role()
     }
 
-    pub fn check_state_change(&mut self, cur_time: Instant) {
+    pub fn check_state_change(&mut self, now: Instant) {
         match self.state {
             Http3State::Initializing => {
                 if self.conn.state().clone() == State::Connected {
                     self.state = Http3State::Connected;
                     let res = self.initialize_http3_connection();
-                    self.check_result(cur_time, res);
+                    self.check_result(now, res);
                 }
             }
             Http3State::Closing(err) => {
@@ -303,55 +303,51 @@ impl Http3Connection {
         }
     }
 
-    pub fn process<I>(
-        &mut self,
-        in_dgrams: I,
-        cur_time: Instant,
-    ) -> (Vec<Datagram>, Option<Duration>)
+    pub fn process<I>(&mut self, in_dgrams: I, now: Instant) -> (Vec<Datagram>, Option<Duration>)
     where
         I: IntoIterator<Item = Datagram>,
     {
         qdebug!([self] "Process.");
-        self.process_input(in_dgrams, cur_time);
-        self.process_http3(cur_time);
-        self.process_output(cur_time)
+        self.process_input(in_dgrams, now);
+        self.process_http3(now);
+        self.process_output(now)
     }
 
-    pub fn process_input<I>(&mut self, in_dgrams: I, cur_time: Instant)
+    pub fn process_input<I>(&mut self, in_dgrams: I, now: Instant)
     where
         I: IntoIterator<Item = Datagram>,
     {
         qdebug!([self] "Process input.");
-        self.conn.process_input(in_dgrams, cur_time);
-        self.check_state_change(cur_time);
+        self.conn.process_input(in_dgrams, now);
+        self.check_state_change(now);
     }
 
     pub fn conn(&mut self) -> &mut Connection {
         &mut self.conn
     }
 
-    pub fn process_http3(&mut self, cur_time: Instant) {
+    pub fn process_http3(&mut self, now: Instant) {
         qdebug!([self] "Process http3 internal.");
         match self.state {
             Http3State::Connected | Http3State::GoingAway => {
                 let res = self.check_connection_events();
-                if self.check_result(cur_time, res) {
+                if self.check_result(now, res) {
                     return;
                 }
                 let res = self.process_reading();
-                if self.check_result(cur_time, res) {
+                if self.check_result(now, res) {
                     return;
                 }
                 let res = self.process_sending();
-                self.check_result(cur_time, res);
+                self.check_result(now, res);
             }
             _ => {}
         }
     }
 
-    pub fn process_output(&mut self, cur_time: Instant) -> (Vec<Datagram>, Option<Duration>) {
+    pub fn process_output(&mut self, now: Instant) -> (Vec<Datagram>, Option<Duration>) {
         qdebug!([self] "Process output.");
-        self.conn.process_output(cur_time)
+        self.conn.process_output(now)
     }
 
     // If this return an error the connection must be closed.
@@ -696,7 +692,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn close<S: Into<String>>(&mut self, cur_time: Instant, error: AppError, msg: S) {
+    pub fn close<S: Into<String>>(&mut self, now: Instant, error: AppError, msg: S) {
         qdebug!([self] "Closed.");
         self.state = Http3State::Closing(error);
         if (!self.request_streams_client.is_empty() || !self.request_streams_server.is_empty())
@@ -706,7 +702,7 @@ impl Http3Connection {
         }
         self.request_streams_client.clear();
         self.request_streams_server.clear();
-        self.conn.close(cur_time, error, msg);
+        self.conn.close(now, error, msg);
     }
 
     pub fn fetch(
@@ -865,7 +861,7 @@ impl Http3Connection {
 
     pub fn read_data(
         &mut self,
-        cur_time: Instant,
+        now: Instant,
         stream_id: u64,
         buf: &mut [u8],
     ) -> Result<(usize, bool), Http3Error> {
@@ -887,7 +883,7 @@ impl Http3Connection {
                     Ok((amount, fin))
                 }
                 Err(e) => {
-                    self.close(cur_time, e.code(), "");
+                    self.close(now, e.code(), "");
                     return Err(Http3Error::ConnectionError);
                 }
             }

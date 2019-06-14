@@ -915,12 +915,7 @@ impl Connection {
 
     // This function wraps a call to another function and sets the connection state
     // properly if that call fails.
-    fn capture_error<T>(
-        &mut self,
-        cur_time: Instant,
-        frame_type: FrameType,
-        res: Res<T>,
-    ) -> Res<T> {
+    fn capture_error<T>(&mut self, now: Instant, frame_type: FrameType, res: Res<T>) -> Res<T> {
         if let Err(v) = &res {
             #[cfg(debug_assertions)]
             let msg = format!("{:?}", v);
@@ -930,7 +925,7 @@ impl Connection {
                 error: ConnectionError::Transport(v.clone()),
                 frame_type,
                 msg,
-                timeout: self.get_closing_period_time(cur_time),
+                timeout: self.get_closing_period_time(now),
             });
         }
         res
@@ -938,25 +933,25 @@ impl Connection {
 
     /// For use with process().  Errors there can be ignored, but this needs to
     /// ensure that the state is updated.
-    fn absorb_error(&mut self, cur_time: Instant, res: Res<()>) {
-        let _ = self.capture_error(cur_time, 0, res);
+    fn absorb_error(&mut self, now: Instant, res: Res<()>) {
+        let _ = self.capture_error(now, 0, res);
     }
 
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
-    pub fn process_input<I>(&mut self, in_dgrams: I, cur_time: Instant)
+    pub fn process_input<I>(&mut self, in_dgrams: I, now: Instant)
     where
         I: IntoIterator<Item = Datagram>,
     {
         for dgram in in_dgrams {
-            let res = self.input(dgram, cur_time);
-            self.absorb_error(cur_time, res);
+            let res = self.input(dgram, now);
+            self.absorb_error(now, res);
         }
 
         self.cleanup_streams();
 
         if let Some(idle_timeout) = self.idle_timeout {
-            if cur_time >= idle_timeout {
+            if now >= idle_timeout {
                 // Timer expired. Reconnect?
                 // TODO(agrover@mozilla.com) reinitialize many members of
                 // struct Connection
@@ -965,8 +960,8 @@ impl Connection {
         }
 
         if self.state == State::Init {
-            let res = self.client_start(cur_time);
-            self.absorb_error(cur_time, res);
+            let res = self.client_start(now);
+            self.absorb_error(now, res);
         }
     }
 
@@ -989,11 +984,11 @@ impl Connection {
     /// by the application.
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
-    pub fn process_output(&mut self, cur_time: Instant) -> (Vec<Datagram>, Option<Duration>) {
+    pub fn process_output(&mut self, now: Instant) -> (Vec<Datagram>, Option<Duration>) {
         match &self.state {
             State::Closing { error, timeout, .. } => {
-                if *timeout > cur_time {
-                    (self.output(cur_time), None)
+                if *timeout > now {
+                    (self.output(now), None)
                 } else {
                     // Close timeout expired, move to Closed
                     let st = State::Closed(error.clone());
@@ -1003,30 +998,26 @@ impl Connection {
             }
             State::Closed(..) => (Vec::new(), None),
             _ => {
-                self.check_loss_detection_timeout(cur_time);
-                (self.output(cur_time), self.next_delay(cur_time))
+                self.check_loss_detection_timeout(now);
+                (self.output(now), self.next_delay(now))
             }
         }
     }
 
     /// Process input and generate output.
-    pub fn process<I>(
-        &mut self,
-        in_dgrams: I,
-        cur_time: Instant,
-    ) -> (Vec<Datagram>, Option<Duration>)
+    pub fn process<I>(&mut self, in_dgrams: I, now: Instant) -> (Vec<Datagram>, Option<Duration>)
     where
         I: IntoIterator<Item = Datagram>,
     {
-        self.process_input(in_dgrams, cur_time);
-        self.process_output(cur_time)
+        self.process_input(in_dgrams, now);
+        self.process_output(now)
     }
 
     fn is_valid_cid(&self, cid: &ConnectionId) -> bool {
         self.valid_cids.contains(cid) || self.paths.iter().any(|p| p.local_cids.contains(cid))
     }
 
-    fn input(&mut self, d: Datagram, cur_time: Instant) -> Res<()> {
+    fn input(&mut self, d: Datagram, now: Instant) -> Res<()> {
         let mut slc = &d[..];
 
         qinfo!([self] "input {}", hex( &**d));
@@ -1158,14 +1149,14 @@ impl Connection {
 
             // TODO(ekr@rtfm.com): Filter for valid for this epoch.
 
-            let ack_eliciting = self.input_packet(hdr.epoch, Decoder::from(&body[..]), cur_time)?;
+            let ack_eliciting = self.input_packet(hdr.epoch, Decoder::from(&body[..]), now)?;
             let space = PNSpace::from(hdr.epoch);
             if self.acks[space].is_duplicate(hdr.pn) {
                 qdebug!([self] "Received duplicate packet epoch={} pn={}", hdr.epoch, hdr.pn);
                 self.stats.dups_rx += 1;
                 continue;
             }
-            self.acks[space].set_received(cur_time, hdr.pn, ack_eliciting);
+            self.acks[space].set_received(now, hdr.pn, ack_eliciting);
 
             if matches!(self.state, State::WaitInitial) {
                 if self.role == Role::Server {
@@ -1208,7 +1199,7 @@ impl Connection {
     }
 
     // Return whether the packet had ack-eliciting frames.
-    fn input_packet(&mut self, epoch: Epoch, mut d: Decoder, cur_time: Instant) -> Res<(bool)> {
+    fn input_packet(&mut self, epoch: Epoch, mut d: Decoder, now: Instant) -> Res<(bool)> {
         let mut ack_eliciting = false;
 
         // Handle each frame in the packet
@@ -1216,8 +1207,8 @@ impl Connection {
             let f = decode_frame(&mut d)?;
             ack_eliciting |= f.ack_eliciting();
             let t = f.get_type();
-            let res = self.input_frame(epoch, f, cur_time);
-            self.capture_error(cur_time, t, res)?;
+            let res = self.input_frame(epoch, f, now);
+            self.capture_error(now, t, res)?;
         }
 
         Ok(ack_eliciting)
@@ -1245,7 +1236,7 @@ impl Connection {
         Datagram::new(local, remote, packet)
     }
 
-    fn output(&mut self, cur_time: Instant) -> Vec<Datagram> {
+    fn output(&mut self, now: Instant) -> Vec<Datagram> {
         if let Some((vn_hdr, remote, local)) = self.send_vn.take() {
             return vec![self.output_vn(vn_hdr, remote, local)];
         }
@@ -1255,7 +1246,7 @@ impl Connection {
         let mut out_dgrams = Vec::new();
         let mut errors = Vec::new();
         for p in &paths {
-            match self.output_path(&p, cur_time) {
+            match self.output_path(&p, now) {
                 Ok(ref mut dgrams) => out_dgrams.append(dgrams),
                 Err(e) => errors.push(e),
             };
@@ -1267,9 +1258,9 @@ impl Connection {
             _ => false,
         };
         if !closing && !errors.is_empty() {
-            self.absorb_error(cur_time, Err(errors.pop().unwrap()));
+            self.absorb_error(now, Err(errors.pop().unwrap()));
             // We just closed, so run this again to produce CONNECTION_CLOSE.
-            self.output(cur_time)
+            self.output(now)
         } else {
             out_dgrams // TODO(ekr@rtfm.com): When to call back next.
         }
@@ -1277,7 +1268,7 @@ impl Connection {
 
     // Iterate through all the generators, inserting as many frames as will
     // fit.
-    fn output_path(&mut self, path: &Path, cur_time: Instant) -> Res<Vec<Datagram>> {
+    fn output_path(&mut self, path: &Path, now: Instant) -> Res<Vec<Datagram>> {
         let mut out_packets = Vec::new();
 
         let mut initial_only = false;
@@ -1302,15 +1293,11 @@ impl Connection {
             }
 
             // Always send an ACK if there is one to send.
-            if self.acks[space].ack_now(cur_time) {
+            if self.acks[space].ack_now(now) {
                 let mut recvd = mem::replace(&mut self.acks[space], RecvdPackets::new(space));
-                if let Some((frame, token)) = recvd.generate(
-                    self,
-                    cur_time,
-                    epoch,
-                    TxMode::Normal,
-                    self.pmtu - encoder.len(),
-                ) {
+                if let Some((frame, token)) =
+                    recvd.generate(self, now, epoch, TxMode::Normal, self.pmtu - encoder.len())
+                {
                     frame.marshal(&mut encoder);
                     tokens.push(token.unwrap());
                 }
@@ -1324,13 +1311,9 @@ impl Connection {
             let mut generators = mem::replace(&mut self.generators, Vec::new());
             for generator in &mut generators {
                 // TODO(ekr@rtfm.com): Fix TxMode
-                while let Some((frame, token)) = generator.generate(
-                    self,
-                    cur_time,
-                    epoch,
-                    TxMode::Normal,
-                    self.pmtu - encoder.len(),
-                ) {
+                while let Some((frame, token)) =
+                    generator.generate(self, now, epoch, TxMode::Normal, self.pmtu - encoder.len())
+                {
                     ack_eliciting = ack_eliciting || frame.ack_eliciting();
                     is_crypto_packet = match frame {
                         Frame::Crypto { .. } => true,
@@ -1394,7 +1377,7 @@ impl Connection {
                     ack_eliciting,
                     is_crypto,
                     tokens,
-                    cur_time,
+                    now,
                 );
 
                 // Failure to have the state here is an internal error.
@@ -1446,18 +1429,18 @@ impl Connection {
         Ok(())
     }
 
-    fn get_closing_period_time(&self, cur_time: Instant) -> Instant {
+    fn get_closing_period_time(&self, now: Instant) -> Instant {
         // Spec says close time should be at least PTO times 3.
-        cur_time + (self.loss_recovery.rtt_vals.pto() * 3)
+        now + (self.loss_recovery.rtt_vals.pto() * 3)
     }
 
     /// Close the connection.
-    pub fn close<S: Into<String>>(&mut self, cur_time: Instant, error: AppError, msg: S) {
+    pub fn close<S: Into<String>>(&mut self, now: Instant, error: AppError, msg: S) {
         self.set_state(State::Closing {
             error: ConnectionError::Application(error),
             frame_type: 0,
             msg: msg.into(),
-            timeout: self.get_closing_period_time(cur_time),
+            timeout: self.get_closing_period_time(now),
         });
     }
 
@@ -1534,7 +1517,7 @@ impl Connection {
         Ok(())
     }
 
-    fn input_frame(&mut self, epoch: Epoch, frame: Frame, cur_time: Instant) -> Res<()> {
+    fn input_frame(&mut self, epoch: Epoch, frame: Frame, now: Instant) -> Res<()> {
         match frame {
             Frame::Padding => {
                 // Ignore
@@ -1554,7 +1537,7 @@ impl Connection {
                     ack_delay,
                     first_ack_range,
                     ack_ranges,
-                    cur_time,
+                    now,
                 )?;
             }
             Frame::ResetStream {
@@ -1592,7 +1575,7 @@ impl Connection {
                     let mut buf = Vec::new();
                     let read = rx.read_to_end(&mut buf)?;
                     qdebug!("Read {} bytes", read);
-                    self.handshake(cur_time, epoch, Some(&buf))?;
+                    self.handshake(now, epoch, Some(&buf))?;
                 }
             }
             Frame::NewToken { token } => self.token = Some(token),
@@ -1712,7 +1695,7 @@ impl Connection {
         ack_delay: u64,
         first_ack_range: u64,
         ack_ranges: Vec<AckRange>,
-        cur_time: Instant,
+        now: Instant,
     ) -> Res<()> {
         qinfo!(
             [self]
@@ -1730,7 +1713,7 @@ impl Connection {
             largest_acknowledged,
             acked_ranges,
             Duration::from_millis(ack_delay),
-            cur_time,
+            now,
         );
         for acked in &mut acked_packets {
             acked.mark_acked(self);
@@ -2192,10 +2175,10 @@ impl Connection {
         self.events.borrow_mut().events().into_iter().collect()
     }
 
-    fn check_loss_detection_timeout(&mut self, cur_time: Instant) {
+    fn check_loss_detection_timeout(&mut self, now: Instant) {
         qdebug!([self] "check_loss_detection_timeout");
         let (mut lost_packets, retransmit_unacked_crypto, send_one_or_two_packets) =
-            self.loss_recovery.on_loss_detection_timeout(cur_time);
+            self.loss_recovery.on_loss_detection_timeout(now);
         if !lost_packets.is_empty() {
             qdebug!([self] "check_loss_detection_timeout loss detected.");
             for lost in lost_packets.iter_mut() {
@@ -2812,23 +2795,23 @@ impl LossRecovery {
         ack_eliciting: bool,
         is_crypto_packet: bool,
         tokens: Vec<Box<FrameGeneratorToken>>,
-        cur_time: Instant,
+        now: Instant,
     ) {
         qdebug!([self] "packet {} sent.", packet_number);
         self.space_mut(pn_space).sent_packets.insert(
             packet_number,
             SentPacket {
-                time_sent: cur_time,
+                time_sent: now,
                 ack_eliciting,
                 is_crypto_packet,
                 tokens,
             },
         );
         if is_crypto_packet {
-            self.time_of_last_sent_crypto_packet = Some(cur_time);
+            self.time_of_last_sent_crypto_packet = Some(now);
         }
         if ack_eliciting {
-            self.time_of_last_sent_ack_eliciting_packet = Some(cur_time);
+            self.time_of_last_sent_ack_eliciting_packet = Some(now);
             // TODO implement cc
             //     cc.on_packet_sent(sent_bytes)
         }
@@ -2843,7 +2826,7 @@ impl LossRecovery {
         largest_acked: u64,
         acked_ranges: Vec<(u64, u64)>,
         ack_delay: Duration,
-        cur_time: Instant,
+        now: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>) {
         qdebug!([self] "ack received - largest_acked={}.", largest_acked);
 
@@ -2852,7 +2835,7 @@ impl LossRecovery {
         // ack-eliciting, update the RTT.
         if let Some(new_largest) = new_largest {
             if new_largest.ack_eliciting {
-                let latest_rtt = cur_time - new_largest.time_sent;
+                let latest_rtt = now - new_largest.time_sent;
                 self.rtt_vals.update_rtt(latest_rtt, ack_delay);
             }
         }
@@ -2864,7 +2847,7 @@ impl LossRecovery {
             return (acked_packets, Vec::new());
         }
 
-        let lost_packets = self.detect_lost_packets(pn_space, cur_time);
+        let lost_packets = self.detect_lost_packets(pn_space, now);
 
         self.crypto_count = 0;
         self.pto_count = 0;
@@ -2874,7 +2857,7 @@ impl LossRecovery {
         (acked_packets, lost_packets)
     }
 
-    fn detect_lost_packets(&mut self, pn_space: PNSpace, cur_time: Instant) -> Vec<SentPacket> {
+    fn detect_lost_packets(&mut self, pn_space: PNSpace, now: Instant) -> Vec<SentPacket> {
         self.space_mut(pn_space).loss_time = None;
 
         let loss_delay = Duration::from_micros(
@@ -2889,10 +2872,10 @@ impl LossRecovery {
                 .as_micros() as f64) as u64,
         );
 
-        let loss_deadline = cur_time - loss_delay;
+        let loss_deadline = now - loss_delay;
         qdebug!([self]
-            "detect lost packets = cur_time {:?} loss delay {:?} loss_deadline {:?}",
-            cur_time, loss_delay, loss_deadline
+            "detect lost packets = now {:?} loss delay {:?} loss_deadline {:?}",
+            now, loss_delay, loss_deadline
         );
 
         // Packets with packet numbers before this are deemed lost.
@@ -3021,17 +3004,14 @@ impl LossRecovery {
     //  1) A list of detected lost packets
     //  2) Crypto timer expired, crypto data should be retransmitted,
     //  3) PTO, one or two packets should be transmitted.
-    pub fn on_loss_detection_timeout(
-        &mut self,
-        cur_time: Instant,
-    ) -> (Vec<SentPacket>, bool, bool) {
+    pub fn on_loss_detection_timeout(&mut self, now: Instant) -> (Vec<SentPacket>, bool, bool) {
         let mut lost_packets = Vec::new();
         //TODO(dragana) enable retransmit_unacked_crypto and send_one_or_two_packets when functionanlity to send not-lost packet is there.
         //let mut retransmit_unacked_crypto = false;
         //let mut send_one_or_two_packets = false;
         if self
             .loss_detection_timer
-            .map(|timer| cur_time < timer)
+            .map(|timer| now < timer)
             .unwrap_or(false)
         {
             return (
@@ -3044,7 +3024,7 @@ impl LossRecovery {
         let (loss_time, pn_space) = self.get_earliest_loss_time();
         if loss_time.is_some() {
             // Time threshold loss Detection
-            lost_packets = self.detect_lost_packets(pn_space, cur_time);
+            lost_packets = self.detect_lost_packets(pn_space, now);
         } else {
             let has_crypto_out = self
                 .space(PNSpace::Initial)
@@ -3059,13 +3039,13 @@ impl LossRecovery {
                 // Crypto retransmission timeout.
                 //retransmit_unacked_crypto = true;
                 //for now just call detect_lost_packets;
-                lost_packets = self.detect_lost_packets(pn_space, cur_time);
+                lost_packets = self.detect_lost_packets(pn_space, now);
                 self.crypto_count += 1;
             } else {
                 // PTO
                 //send_one_or_two_packets = true;
                 //for now just call detect_lost_packets;
-                lost_packets = self.detect_lost_packets(pn_space, cur_time);
+                lost_packets = self.detect_lost_packets(pn_space, now);
                 self.pto_count += 1;
             }
         }
