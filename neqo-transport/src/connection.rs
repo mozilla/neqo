@@ -1437,7 +1437,7 @@ impl Connection {
     fn buffer_crypto_records(&mut self, records: RecordList) {
         for r in records {
             assert_eq!(r.ct, 22);
-            qdebug!([self] "Inserting message {:?}", r);
+            qdebug!([self] "Adding CRYPTO data {:?}", r);
             self.crypto_streams[r.epoch as usize].tx.send(&r.data);
         }
     }
