@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# This is a pre-commit hook that validates code formatting.
+#
+# Install this by running the script with an argument of "install",
+# which installs a symlink to .git/hooks/precommit:
+# $ ln -s ../../hooks/pre-commit .git/hooks/pre-commit
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)"
+
+# Some sanity checking.
+hash rustfmt || exit 1
+[[ -n "$root" ]] || exit 1
+
+# Installation.
+if [[ "$1" == "install" ]]; then
+    hook="$root"/.git/hooks/pre-commit
+    if [[ ! -e "$hook" ]]; then
+        ln -s ../../hooks/pre-commit "$hook"
+        echo "Installed git pre-commit hook at $hook"
+    else
+        echo "Hook already installed"
+    fi
+    exit
+fi
+
+# Check rustfmt.
+err=0
+files=($(git diff --name-only --cached))
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' ERR EXIT
+for f in "${files[@]}"; do
+    if [[ "${f##*.}" == "rs" ]]; then
+        git show :"$f" > "$tmp"
+        if ! cat "$tmp" | rustfmt --check | diff -q "$tmp" - >/dev/null; then
+            [ "$err" -eq 0 ] && echo "Formatting errors found in:" 1>&2
+            echo "  $f" 1>&2
+            err=1
+        fi
+    fi
+done
+exit "$err"
