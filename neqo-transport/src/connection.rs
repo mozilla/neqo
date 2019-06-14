@@ -3274,7 +3274,7 @@ mod tests {
         while !is_done(a) {
             let (r, _) = a.process(records, now());
             records = r;
-            b = mem::replace(&mut a, b);
+            mem::swap(&mut a, &mut b);
         }
     }
 

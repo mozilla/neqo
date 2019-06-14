@@ -48,7 +48,7 @@ fn handshake(now: Instant, client: &mut SecretAgent, server: &mut SecretAgent) {
             b.authenticated();
             records = b.handshake_raw(now, None).unwrap();
         }
-        b = mem::replace(&mut a, b);
+        mem::swap(&mut a, &mut b);
     }
 }
 
