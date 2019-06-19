@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
-use std::ops::{AddAssign, Deref, DerefMut};
+use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -37,6 +37,7 @@ use crate::packet::{
 use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, TxBuffer};
 use crate::stats::Stats;
+use crate::stream_id::{StreamId, StreamIndex};
 use crate::tparams::consts as tp_const;
 use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
 use crate::tracking::{AckGenerator, AckTracker, PNSpace};
@@ -103,111 +104,6 @@ enum ZeroRttState {
     Sending,
     Accepted,
     Rejected,
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash)]
-pub struct StreamId(u64);
-
-impl StreamId {
-    pub fn is_bidi(self) -> bool {
-        self.0 & 0x02 == 0
-    }
-
-    pub fn is_uni(self) -> bool {
-        !self.is_bidi()
-    }
-
-    pub fn stream_type(self) -> StreamType {
-        if self.is_bidi() {
-            StreamType::BiDi
-        } else {
-            StreamType::UniDi
-        }
-    }
-
-    pub fn is_client_initiated(self) -> bool {
-        self.0 & 0x01 == 0
-    }
-
-    pub fn is_server_initiated(self) -> bool {
-        !self.is_client_initiated()
-    }
-
-    pub fn role(self) -> Role {
-        if self.is_client_initiated() {
-            Role::Client
-        } else {
-            Role::Server
-        }
-    }
-
-    pub fn is_self_initiated(self, my_role: Role) -> bool {
-        match my_role {
-            Role::Client if self.is_client_initiated() => true,
-            Role::Server if self.is_server_initiated() => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_peer_initiated(self, my_role: Role) -> bool {
-        !self.is_self_initiated(my_role)
-    }
-
-    pub fn is_send_only(self, my_role: Role) -> bool {
-        self.is_uni() && self.is_self_initiated(my_role)
-    }
-
-    pub fn is_recv_only(self, my_role: Role) -> bool {
-        self.is_uni() && self.is_peer_initiated(my_role)
-    }
-
-    pub fn as_u64(self) -> u64 {
-        self.0
-    }
-}
-
-impl From<u64> for StreamId {
-    fn from(val: u64) -> Self {
-        StreamId(val)
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash)]
-pub struct StreamIndex(u64);
-
-impl StreamIndex {
-    pub fn new(val: u64) -> StreamIndex {
-        StreamIndex(val)
-    }
-
-    pub fn to_stream_id(self, stream_type: StreamType, role: Role) -> StreamId {
-        let type_val = match stream_type {
-            StreamType::BiDi => 0,
-            StreamType::UniDi => 2,
-        };
-        let role_val = match role {
-            Role::Server => 1,
-            Role::Client => 0,
-        };
-
-        StreamId::from((self.0 << 2) + type_val + role_val)
-    }
-
-    pub fn as_u64(self) -> u64 {
-        self.0
-    }
-}
-
-impl From<StreamId> for StreamIndex {
-    fn from(val: StreamId) -> Self {
-        StreamIndex(val.as_u64() >> 2)
-    }
-}
-
-impl AddAssign<u64> for StreamIndex {
-    fn add_assign(&mut self, other: u64) {
-        *self = StreamIndex::new(self.as_u64() + other)
-    }
 }
 
 #[derive(Debug, PartialEq, Clone)]

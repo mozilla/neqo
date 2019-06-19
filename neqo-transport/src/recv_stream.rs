@@ -11,7 +11,8 @@ use std::mem;
 use std::ops::Bound::{Included, Unbounded};
 use std::rc::Rc;
 
-use crate::connection::{ConnectionEvents, FlowMgr, StreamId};
+use crate::connection::{ConnectionEvents, FlowMgr};
+use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
 use neqo_common::qtrace;
 

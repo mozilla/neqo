@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::StreamIndex;
 use crate::nss::Epoch;
+use crate::stream_id::StreamIndex;
 use crate::{Connection, ConnectionError, Error, Res};
 use neqo_common::{qdebug, Decoder, Encoder};
 use std::fmt::{self, Debug};
