@@ -11,6 +11,7 @@ use neqo_crypto;
 
 pub mod connection;
 mod dump;
+mod events;
 pub mod frame;
 mod nss;
 pub mod nss_stub;
@@ -23,7 +24,8 @@ mod stream_id;
 mod tparams;
 mod tracking;
 
-pub use self::connection::{Connection, ConnectionEvent, ConnectionEvents, Datagram, State};
+pub use self::connection::{Connection, Datagram, State};
+pub use self::events::{ConnectionEvent, ConnectionEvents};
 
 type TransportError = u16;
 

@@ -7,7 +7,7 @@
 #![allow(dead_code)]
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
@@ -22,9 +22,10 @@ use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
 
 use crate::dump::*;
+use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::frame::{
-    decode_frame, AckRange, CloseType, Frame, FrameGenerator, FrameGeneratorToken, FrameType,
-    StreamType, TxMode,
+    decode_frame, AckRange, Frame, FrameGenerator, FrameGeneratorToken, FrameType, StreamType,
+    TxMode,
 };
 use crate::nss::{
     Agent, AntiReplay, Cipher, Client, Epoch, HandshakeState, Record, RecordList, Server, SymKey,
@@ -141,113 +142,6 @@ impl Deref for Datagram {
 impl DerefMut for Datagram {
     fn deref_mut(&mut self) -> &mut Vec<u8> {
         &mut self.d
-    }
-}
-
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
-pub enum ConnectionEvent {
-    /// A new uni (read) or bidi stream has been opened by the peer.
-    NewStream {
-        stream_id: u64,
-        stream_type: StreamType,
-    },
-    /// Space available in the buffer for an application write to succeed.
-    SendStreamWritable { stream_id: u64 },
-    /// New bytes available for reading.
-    RecvStreamReadable { stream_id: u64 },
-    /// Peer reset the stream.
-    RecvStreamReset { stream_id: u64, app_error: AppError },
-    /// Peer has sent STOP_SENDING
-    SendStreamStopSending { stream_id: u64, app_error: AppError },
-    /// Peer has acked everything sent on the stream.
-    SendStreamComplete { stream_id: u64 },
-    /// Peer increased MAX_STREAMS
-    SendStreamCreatable { stream_type: StreamType },
-    /// Connection closed
-    ConnectionClosed {
-        close_type: CloseType,
-        error_code: u16,
-        frame_type: u64,
-        reason_phrase: String,
-    },
-    /// The server rejected 0-RTT.
-    /// This event invalidates all state in streams that has been created.
-    /// Any data written to streams needs to be written again.
-    ZeroRttRejected,
-}
-
-#[derive(Debug, Default)]
-pub struct ConnectionEvents {
-    events: BTreeSet<ConnectionEvent>,
-}
-
-impl ConnectionEvents {
-    pub fn new_stream(&mut self, stream_id: StreamId, stream_type: StreamType) {
-        self.events.insert(ConnectionEvent::NewStream {
-            stream_id: stream_id.as_u64(),
-            stream_type,
-        });
-    }
-
-    pub fn send_stream_writable(&mut self, stream_id: StreamId) {
-        self.events.insert(ConnectionEvent::SendStreamWritable {
-            stream_id: stream_id.as_u64(),
-        });
-    }
-
-    pub fn recv_stream_readable(&mut self, stream_id: StreamId) {
-        self.events.insert(ConnectionEvent::RecvStreamReadable {
-            stream_id: stream_id.as_u64(),
-        });
-    }
-
-    pub fn recv_stream_reset(&mut self, stream_id: StreamId, app_error: AppError) {
-        self.events.insert(ConnectionEvent::RecvStreamReset {
-            stream_id: stream_id.as_u64(),
-            app_error,
-        });
-    }
-
-    pub fn send_stream_stop_sending(&mut self, stream_id: StreamId, app_error: AppError) {
-        self.events.insert(ConnectionEvent::SendStreamStopSending {
-            stream_id: stream_id.as_u64(),
-            app_error,
-        });
-    }
-
-    pub fn send_stream_complete(&mut self, stream_id: StreamId) {
-        self.events.insert(ConnectionEvent::SendStreamComplete {
-            stream_id: stream_id.as_u64(),
-        });
-    }
-
-    pub fn send_stream_creatable(&mut self, stream_type: StreamType) {
-        self.events
-            .insert(ConnectionEvent::SendStreamCreatable { stream_type });
-    }
-
-    pub fn connection_closed(
-        &mut self,
-        close_type: CloseType,
-        error_code: u16,
-        frame_type: u64,
-        reason_phrase: &str,
-    ) {
-        self.events.insert(ConnectionEvent::ConnectionClosed {
-            close_type,
-            error_code,
-            frame_type,
-            reason_phrase: reason_phrase.to_owned(),
-        });
-    }
-
-    pub fn client_0rtt_rejected(&mut self) {
-        self.events.clear();
-        self.events.insert(ConnectionEvent::ZeroRttRejected);
-    }
-
-    pub fn events(&mut self) -> BTreeSet<ConnectionEvent> {
-        mem::replace(&mut self.events, BTreeSet::new())
     }
 }
 

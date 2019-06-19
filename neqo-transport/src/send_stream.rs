@@ -13,9 +13,10 @@ use std::rc::Rc;
 use neqo_common::{qerror, qinfo, qtrace, qwarn};
 use slice_deque::SliceDeque;
 
-use crate::connection::{ConnectionEvents, FlowMgr};
+use crate::connection::FlowMgr;
 use crate::frame::TxMode;
 use crate::stream_id::StreamId;
+use crate::ConnectionEvents;
 
 use crate::{AppError, Error, Res};
 
