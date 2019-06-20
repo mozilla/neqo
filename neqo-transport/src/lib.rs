@@ -16,6 +16,7 @@ pub mod frame;
 mod nss;
 pub mod nss_stub;
 pub mod packet;
+mod recovery;
 pub mod recv_stream;
 pub mod send_stream;
 pub mod server;
