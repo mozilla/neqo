@@ -6,10 +6,10 @@
 
 #![deny(warnings)]
 
-use neqo_common::{now, qinfo};
+use neqo_common::{now, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Connection, Http3State};
-use neqo_transport::{Connection, Datagram};
+use neqo_transport::Connection;
 use std::collections::HashMap;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};

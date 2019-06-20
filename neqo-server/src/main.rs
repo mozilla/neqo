@@ -6,9 +6,9 @@
 
 #![deny(warnings)]
 
-use neqo_common::now;
+use neqo_common::{now, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
+use neqo_transport::{Connection, ConnectionEvent, State};
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt;

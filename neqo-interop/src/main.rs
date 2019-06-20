@@ -6,12 +6,12 @@
 
 #![deny(warnings)]
 
-use neqo_common::now;
+use neqo_common::{now, Datagram};
 use neqo_crypto::init;
 //use neqo_transport::frame::StreamType;
 use neqo_http3::{Http3Connection, Http3Event};
 use neqo_transport::frame::StreamType;
-use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
+use neqo_transport::{Connection, ConnectionEvent, State};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 // use std::path::PathBuf;

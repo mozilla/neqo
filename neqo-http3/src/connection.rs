@@ -8,7 +8,8 @@ use crate::hframe::{HFrame, HFrameReader, HSettingType};
 use crate::request_stream_client::RequestStreamClient;
 use crate::request_stream_server::RequestStreamServer;
 use neqo_common::{
-    qdebug, qerror, qinfo, qwarn, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
+    qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
+    IncrementalDecoderResult,
 };
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
@@ -16,7 +17,7 @@ use neqo_transport::connection::Role;
 
 use neqo_transport::connection::Connection;
 use neqo_transport::frame::StreamType;
-use neqo_transport::{AppError, ConnectionEvent, Datagram, State};
+use neqo_transport::{AppError, ConnectionEvent, State};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::mem;

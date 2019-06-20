@@ -4,9 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{hex, qinfo, qtrace};
+use neqo_common::{hex, qinfo, qtrace, Datagram};
 
-use crate::connection::Datagram;
 use crate::packet::{
     decode_packet_hdr, encode_retry, ConnectionId, PacketDecoder, PacketHdr, PacketType,
 };

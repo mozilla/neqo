@@ -5,10 +5,10 @@
 // except according to those terms.
 
 #![deny(warnings)]
-use neqo_common::now;
+use neqo_common::{now, Datagram};
 use neqo_crypto::init_db;
 use neqo_http3::{Http3Connection, Http3Event, Http3State};
-use neqo_transport::{Connection, Datagram};
+use neqo_transport::Connection;
 use std::collections::HashSet;
 use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
@@ -297,9 +297,9 @@ mod old {
     use std::net::{SocketAddr, UdpSocket};
     use std::process::exit;
 
-    use neqo_common::now;
+    use neqo_common::{now, Datagram};
     use neqo_transport::frame::StreamType;
-    use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
+    use neqo_transport::{Connection, ConnectionEvent, State};
 
     use super::{emit_packets, Args};
 

@@ -6,8 +6,8 @@
 
 #![allow(unused_assignments)]
 
+use neqo_common::Datagram;
 use neqo_http3::{Http3Connection, Http3State};
-use neqo_transport::Datagram;
 use std::time::Duration;
 use test_fixture::*;
 

@@ -11,11 +11,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
-use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Decoder, Encoder};
+use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::agent::SecretAgentInfo;
 use neqo_crypto::hkdf;
@@ -100,44 +99,6 @@ enum ZeroRttState {
     Sending,
     Accepted,
     Rejected,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct Datagram {
-    src: SocketAddr,
-    dst: SocketAddr,
-    pub d: Vec<u8>,
-}
-
-impl Datagram {
-    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, d: V) -> Datagram {
-        Datagram {
-            src,
-            dst,
-            d: d.into(),
-        }
-    }
-
-    pub fn source(&self) -> &SocketAddr {
-        &self.src
-    }
-
-    pub fn destination(&self) -> &SocketAddr {
-        &self.dst
-    }
-}
-
-impl Deref for Datagram {
-    type Target = Vec<u8>;
-    fn deref(&self) -> &Self::Target {
-        &self.d
-    }
-}
-
-impl DerefMut for Datagram {
-    fn deref_mut(&mut self) -> &mut Vec<u8> {
-        &mut self.d
-    }
 }
 
 #[derive(Debug, Default)]
