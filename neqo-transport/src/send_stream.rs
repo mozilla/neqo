@@ -11,16 +11,17 @@ use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::mem;
 use std::rc::Rc;
+use std::time::Instant;
 
-use neqo_common::{qerror, qinfo, qtrace, qwarn};
+use neqo_common::{qerror, qinfo, qtrace, qwarn, Encoder};
 use slice_deque::SliceDeque;
 
 use crate::flow_mgr::FlowMgr;
 use crate::frame::TxMode;
+use crate::frame::{Frame, FrameGenerator, FrameGeneratorToken};
 use crate::stream_id::StreamId;
-use crate::ConnectionEvents;
-
 use crate::{AppError, Error, Res};
+use crate::{Connection, ConnectionEvents};
 
 const TX_STREAM_BUFFER: usize = 0xFFFF; // 64 KiB
 
@@ -690,6 +691,110 @@ impl SendStream {
             SendStreamState::ResetSent => qtrace!("already in ResetSent state"),
             SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
         };
+    }
+}
+
+/// Calculate the frame header size so we know how much data we can fit
+fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> usize {
+    let mut hdr_len = 1; // for frame type
+    hdr_len += Encoder::varint_len(stream_id.as_u64());
+    if offset > 0 {
+        hdr_len += Encoder::varint_len(offset);
+    }
+
+    // We always include a length field.
+    hdr_len + Encoder::varint_len(remaining as u64)
+}
+
+#[derive(Default)]
+pub(crate) struct StreamGenerator {}
+
+impl FrameGenerator for StreamGenerator {
+    fn generate(
+        &mut self,
+        conn: &mut Connection,
+        _now: Instant,
+        epoch: u16,
+        mode: TxMode,
+        remaining: usize,
+    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+        if epoch != 3 && epoch != 1 {
+            return None;
+        }
+
+        for (stream_id, stream) in &mut conn.send_streams {
+            let fin = stream.final_size();
+            if let Some((offset, data)) = stream.next_bytes(mode) {
+                qtrace!(
+                    "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
+                    stream_id.as_u64(),
+                    offset,
+                    offset + data.len() as u64,
+                    epoch,
+                    mode,
+                    remaining
+                );
+                let frame_hdr_len = stream_frame_hdr_len(*stream_id, offset, remaining);
+                let data_len = min(data.len(), remaining - frame_hdr_len);
+                let fin = match fin {
+                    None => false,
+                    Some(fin) => fin == offset + data_len as u64,
+                };
+                let frame = Frame::Stream {
+                    fin,
+                    stream_id: stream_id.as_u64(),
+                    offset,
+                    data: data[..data_len].to_vec(),
+                };
+                stream.mark_as_sent(offset, data_len, fin);
+                return Some((
+                    frame,
+                    Some(Box::new(StreamGeneratorToken {
+                        id: *stream_id,
+                        offset,
+                        length: data_len as u64,
+                        fin,
+                    })),
+                ));
+            }
+        }
+        None
+    }
+}
+
+struct StreamGeneratorToken {
+    id: StreamId,
+    offset: u64,
+    length: u64,
+    fin: bool,
+}
+
+impl FrameGeneratorToken for StreamGeneratorToken {
+    fn acked(&mut self, conn: &mut Connection) {
+        qinfo!(
+            [conn]
+            "Acked frame stream={} offset={} length={} fin={}",
+            self.id.as_u64(),
+            self.offset,
+            self.length,
+            self.fin
+        );
+        if let Some(ss) = conn.send_streams.get_mut(&self.id) {
+            ss.mark_as_acked(self.offset, self.length as usize, self.fin);
+        }
+    }
+    fn lost(&mut self, conn: &mut Connection) {
+        qinfo!(
+            [conn]
+            "Lost frame stream={} offset={} length={} fin={}",
+            self.id.as_u64(),
+            self.offset,
+            self.length,
+            self.fin
+        );
+        if let Some(ss) = conn.send_streams.get_mut(&self.id) {
+            ss.mark_as_lost(self.offset, self.length as usize, self.fin);
+        }
     }
 }
 
