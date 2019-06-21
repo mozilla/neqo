@@ -228,7 +228,6 @@ pub struct Connection {
     generators: Vec<Box<FrameGenerator>>,
     idle_timeout: Option<Instant>,
     indexes: StreamIndexes,
-    highest_stream: Option<u64>,
     connection_ids: HashMap<u64, (Vec<u8>, [u8; 16])>, // (sequence number, (connection id, reset token))
     send_streams: BTreeMap<StreamId, SendStream>,
     recv_streams: BTreeMap<StreamId, RecvStream>,
@@ -374,7 +373,6 @@ impl Connection {
             acks: AckTracker::default(),
             idle_timeout: None,
             indexes: StreamIndexes::new(),
-            highest_stream: None,
             connection_ids: HashMap::new(),
             send_streams: BTreeMap::new(),
             recv_streams: BTreeMap::new(),
