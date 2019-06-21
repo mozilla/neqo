@@ -24,7 +24,7 @@ use neqo_crypto::hp::{extract_hp, HpKey};
 
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
-use crate::flow_mgr::FlowMgr;
+use crate::flow_mgr::{FlowControlGenerator, FlowMgr};
 use crate::frame::{
     decode_frame, AckRange, Frame, FrameGenerator, FrameGeneratorToken, FrameType, StreamType,
     TxMode,
@@ -229,12 +229,12 @@ pub struct Connection {
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
     generators: Vec<Box<FrameGenerator>>,
     idle_timeout: Option<Instant>,
-    indexes: StreamIndexes,
+    pub(crate) indexes: StreamIndexes,
     connection_ids: HashMap<u64, (Vec<u8>, [u8; 16])>, // (sequence number, (connection id, reset token))
     pub(crate) send_streams: BTreeMap<StreamId, SendStream>,
-    recv_streams: BTreeMap<StreamId, RecvStream>,
+    pub(crate) recv_streams: BTreeMap<StreamId, RecvStream>,
     pmtu: usize,
-    flow_mgr: Rc<RefCell<FlowMgr>>,
+    pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
     events: Rc<RefCell<ConnectionEvents>>,
     token: Option<Vec<u8>>,
@@ -367,7 +367,7 @@ impl Connection {
             generators: vec![
                 Box::new(AckGenerator {}),
                 Box::new(CryptoGenerator {}),
-                Box::new(FlowControlGenerator {}),
+                Box::new(FlowControlGenerator::default()),
                 Box::new(StreamGenerator::default()),
             ],
             crypto_states: [None, None, None, None],
@@ -1931,147 +1931,6 @@ impl FrameGenerator for CloseGenerator {
         }
 
         None
-    }
-}
-
-struct FlowControlGeneratorToken(Frame);
-
-impl FrameGeneratorToken for FlowControlGeneratorToken {
-    fn acked(&mut self, conn: &mut Connection) {
-        if let Frame::ResetStream {
-            stream_id,
-            application_error_code,
-            final_size,
-        } = self.0
-        {
-            qinfo!(
-                [conn]
-                "Reset received stream={} err={} final_size={}",
-                stream_id,
-                application_error_code,
-                final_size
-            );
-            if let Some(ss) = conn.send_streams.get_mut(&stream_id.into()) {
-                ss.reset_acked()
-            }
-        }
-    }
-
-    fn lost(&mut self, conn: &mut Connection) {
-        match self.0 {
-            // Always resend ResetStream if lost
-            Frame::ResetStream {
-                stream_id,
-                application_error_code,
-                final_size,
-            } => {
-                qinfo!(
-                    [conn]
-                    "Reset lost stream={} err={} final_size={}",
-                    stream_id,
-                    application_error_code,
-                    final_size
-                );
-                if conn.send_streams.contains_key(&stream_id.into()) {
-                    conn.flow_mgr.borrow_mut().stream_reset(
-                        stream_id.into(),
-                        application_error_code,
-                        final_size,
-                    );
-                }
-            }
-            // Resend MaxStreams if lost (with updated value)
-            Frame::MaxStreams { stream_type, .. } => {
-                let local_max = match stream_type {
-                    StreamType::BiDi => &mut conn.indexes.local_max_stream_bidi,
-                    StreamType::UniDi => &mut conn.indexes.local_max_stream_uni,
-                };
-
-                conn.flow_mgr
-                    .borrow_mut()
-                    .max_streams(*local_max, stream_type)
-            }
-            // Only resend "*Blocked" frames if still blocked
-            Frame::DataBlocked { .. } => {
-                if conn.flow_mgr.borrow().conn_credit_avail() == 0 {
-                    conn.flow_mgr.borrow_mut().data_blocked()
-                }
-            }
-            Frame::StreamDataBlocked { stream_id, .. } => {
-                if let Some(ss) = conn.send_streams.get(&stream_id.into()) {
-                    if ss.credit_avail() == 0 {
-                        conn.flow_mgr
-                            .borrow_mut()
-                            .stream_data_blocked(stream_id.into(), ss.max_stream_data())
-                    }
-                }
-            }
-            Frame::StreamsBlocked { stream_type, .. } => match stream_type {
-                StreamType::UniDi => {
-                    if conn.indexes.peer_next_stream_uni >= conn.indexes.peer_max_stream_uni {
-                        conn.flow_mgr
-                            .borrow_mut()
-                            .streams_blocked(conn.indexes.peer_max_stream_uni, StreamType::UniDi);
-                    }
-                }
-                StreamType::BiDi => {
-                    if conn.indexes.peer_next_stream_bidi >= conn.indexes.peer_max_stream_bidi {
-                        conn.flow_mgr
-                            .borrow_mut()
-                            .streams_blocked(conn.indexes.peer_max_stream_bidi, StreamType::BiDi);
-                    }
-                }
-            },
-            // Resend StopSending
-            Frame::StopSending {
-                stream_id,
-                application_error_code,
-            } => conn
-                .flow_mgr
-                .borrow_mut()
-                .stop_sending(stream_id.into(), application_error_code),
-            // Resend MaxStreamData if not SizeKnown
-            // (maybe_send_flowc_update() checks this.)
-            Frame::MaxStreamData { stream_id, .. } => {
-                if let Some(rs) = conn.recv_streams.get_mut(&stream_id.into()) {
-                    rs.maybe_send_flowc_update()
-                }
-            }
-            Frame::PathResponse { .. } => qinfo!("Path Response lost, not re-sent"),
-            _ => qwarn!("Unexpected Flow frame {:?} lost, not re-sent", self.0),
-        }
-    }
-}
-
-struct FlowControlGenerator {}
-
-impl FrameGenerator for FlowControlGenerator {
-    fn generate(
-        &mut self,
-        conn: &mut Connection,
-        _now: Instant,
-        _epoch: u16,
-        _mode: TxMode,
-        remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
-        if let Some(frame) = conn.flow_mgr.borrow().peek() {
-            // A suboptimal way to figure out if the frame fits within remaining
-            // space.
-            let mut d = Encoder::default();
-            frame.marshal(&mut d);
-            if d.len() > remaining {
-                qtrace!("flowc frame doesn't fit in remaining");
-                return None;
-            }
-        } else {
-            return None;
-        }
-        // There is enough space we can add this frame to the packet.
-        let frame = conn.flow_mgr.borrow_mut().next().expect("just peeked this");
-        Some((
-            frame.clone(),
-            Some(Box::new(FlowControlGeneratorToken(frame))),
-        ))
     }
 }
 
