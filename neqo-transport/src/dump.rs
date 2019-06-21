@@ -4,11 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(dead_code)]
+// Enable just this file for logging to just see packets.
+// e.g. "RUST_LOG=neqo_transport::dump neqo-client ..."
+
 use crate::connection::Connection;
 use crate::frame::decode_frame;
 use crate::packet::PacketHdr;
 use neqo_common::{qdebug, Decoder};
+
 pub fn dump_packet(conn: &Connection, dir: &str, hdr: &PacketHdr, payload: &[u8]) {
     let mut s = String::from("");
     let mut d = Decoder::from(payload);

@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Tracking of received packets and generating acks thereof.
+
 use crate::connection::Connection;
 use crate::frame::{AckRange, Frame, FrameGenerator, FrameGeneratorToken, TxMode};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};

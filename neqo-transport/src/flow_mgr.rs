@@ -4,6 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Tracks possibly-redundant flow control signals from other code and converts
+// into flow control frames needing to be sent to the peer.
+
 use std::cmp::max;
 use std::collections::HashMap;
 use std::mem;

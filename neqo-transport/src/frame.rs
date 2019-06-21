@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Directly relating to QUIC frames.
+
 use crate::nss::Epoch;
 use crate::stream_id::StreamIndex;
 use crate::{Connection, ConnectionError, Error, Res};

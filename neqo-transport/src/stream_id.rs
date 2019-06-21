@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Stream ID and stream index handling.
+
 use std::ops::AddAssign;
 
 use crate::connection::{Role, LOCAL_STREAM_LIMIT_BIDI, LOCAL_STREAM_LIMIT_UNI};

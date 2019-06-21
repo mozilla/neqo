@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// The class implementing a QUIC connection.
+
 #![allow(dead_code)]
 use std::cell::RefCell;
 use std::cmp::{max, min};

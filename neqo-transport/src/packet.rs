@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Encoding and decoding packets off the wire.
+
 use derive_more::Deref;
 use rand::Rng;
 

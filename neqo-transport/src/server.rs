@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Implementing features specific to the server role.
+
 use neqo_common::{hex, qinfo, qtrace, Datagram};
 
 use crate::packet::{

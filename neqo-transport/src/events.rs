@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Collecting a list of events relevant to whoever is using the Connection.
+
 use std::collections::BTreeSet;
 use std::mem;
 

@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Transport parameters. See -transport section 7.3.
+
 #![allow(dead_code)]
 use crate::{Error, Res};
 use neqo_common::{hex, matches, qdebug, qinfo, qtrace, Decoder, Encoder};

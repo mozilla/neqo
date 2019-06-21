@@ -4,6 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Building a stream of ordered bytes to give the application from a series of
+// incoming STREAM frames.
+
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;

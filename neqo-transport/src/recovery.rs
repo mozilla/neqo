@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// Tracking of sent packets and detecting their loss.
+
 use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
