@@ -6,10 +6,9 @@
 
 use neqo_common::qinfo;
 use neqo_crypto::aead::Aead;
-use neqo_crypto::hkdf;
 use neqo_crypto::hp::{extract_hp, HpKey};
+use neqo_crypto::{hkdf, Cipher, Epoch, SymKey, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
-use crate::nss::{Cipher, Epoch, SymKey, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
 

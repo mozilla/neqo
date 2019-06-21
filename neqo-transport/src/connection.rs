@@ -17,7 +17,10 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
-use neqo_crypto::agent::SecretAgentInfo;
+use neqo_crypto::{
+    Agent, AntiReplay, Client, Epoch, HandshakeState, Record, RecordList, SecretAgentInfo, Server,
+    TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
+};
 
 use crate::crypto::{CryptoDxDirection, CryptoDxState, CryptoState, CryptoStream};
 use crate::dump::*;
@@ -26,10 +29,6 @@ use crate::flow_mgr::{FlowControlGenerator, FlowMgr};
 use crate::frame::{
     decode_frame, AckRange, Frame, FrameGenerator, FrameGeneratorToken, FrameType, StreamType,
     TxMode,
-};
-use crate::nss::{
-    Agent, AntiReplay, Client, Epoch, HandshakeState, Record, RecordList, Server,
-    TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
 };
 use crate::packet::{
     decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, CryptoCtx, PacketDecoder,

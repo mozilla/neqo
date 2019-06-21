@@ -10,8 +10,8 @@ use derive_more::Deref;
 use rand::Rng;
 
 use neqo_common::{hex, matches, qtrace, Decoder, Encoder};
+use neqo_crypto::Epoch;
 
-use crate::nss_stub::Epoch;
 use crate::{Error, Res};
 
 const PACKET_TYPE_INITIAL: u8 = 0x0;

@@ -15,8 +15,6 @@ mod dump;
 mod events;
 mod flow_mgr;
 mod frame;
-mod nss;
-pub mod nss_stub;
 mod packet;
 mod recovery;
 mod recv_stream;

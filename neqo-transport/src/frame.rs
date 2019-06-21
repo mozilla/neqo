@@ -6,12 +6,14 @@
 
 // Directly relating to QUIC frames.
 
-use crate::nss::Epoch;
-use crate::stream_id::StreamIndex;
-use crate::{Connection, ConnectionError, Error, Res};
-use neqo_common::{qdebug, Decoder, Encoder};
 use std::fmt::{self, Debug};
 use std::time::Instant;
+
+use neqo_common::{qdebug, Decoder, Encoder};
+use neqo_crypto::Epoch;
+
+use crate::stream_id::StreamIndex;
+use crate::{Connection, ConnectionError, Error, Res};
 
 pub type FrameType = u64;
 
