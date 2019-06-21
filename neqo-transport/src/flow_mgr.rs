@@ -38,10 +38,6 @@ pub struct FlowMgr {
 }
 
 impl FlowMgr {
-    pub fn new() -> FlowMgr {
-        FlowMgr::default()
-    }
-
     pub fn conn_credit_avail(&self) -> u64 {
         self.max_data - self.used_data
     }

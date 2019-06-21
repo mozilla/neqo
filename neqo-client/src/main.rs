@@ -298,8 +298,7 @@ mod old {
     use std::process::exit;
 
     use neqo_common::{now, Datagram};
-    use neqo_transport::frame::StreamType;
-    use neqo_transport::{Connection, ConnectionEvent, State};
+    use neqo_transport::{Connection, ConnectionEvent, State, StreamType};
 
     use super::{emit_packets, Args};
 
@@ -364,7 +363,7 @@ mod old {
         socket: &UdpSocket,
         client: &mut Connection,
         handler: &mut HandlerOld,
-    ) -> neqo_transport::connection::State {
+    ) -> State {
         let buf = &mut [0u8; 2048];
         let mut in_dgrams = Vec::new();
         loop {

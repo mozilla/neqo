@@ -8,10 +8,8 @@
 
 use neqo_common::{now, Datagram};
 use neqo_crypto::init;
-//use neqo_transport::frame::StreamType;
 use neqo_http3::{Http3Connection, Http3Event};
-use neqo_transport::frame::StreamType;
-use neqo_transport::{Connection, ConnectionEvent, State};
+use neqo_transport::{Connection, ConnectionEvent, State, StreamType};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 // use std::path::PathBuf;
@@ -57,7 +55,7 @@ fn process_loop(
     client: &mut Connection,
     handler: &mut Handler,
     timeout: &Duration,
-) -> Result<neqo_transport::connection::State, String> {
+) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     let start = Instant::now();
@@ -211,7 +209,7 @@ fn process_loop_h3(
     nctx: &NetworkCtx,
     handler: &mut H3Handler,
     timeout: &Duration,
-) -> Result<neqo_transport::connection::State, String> {
+) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     let start = Instant::now();

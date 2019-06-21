@@ -11,7 +11,7 @@ use crate::connection::Http3Events;
 use neqo_common::{qdebug, qerror, qinfo, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::connection::Connection;
+use neqo_transport::Connection;
 
 use crate::{Error, Res};
 use std::cell::RefCell;

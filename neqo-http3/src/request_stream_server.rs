@@ -9,7 +9,7 @@ use crate::{Error, Res};
 use neqo_common::{qdebug, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::connection::Connection;
+use neqo_transport::Connection;
 use std::mem;
 
 #[derive(PartialEq, Debug)]

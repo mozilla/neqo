@@ -9,25 +9,27 @@
 use neqo_common::qinfo;
 use neqo_crypto;
 
-pub mod connection;
+mod connection;
+mod crypto;
 mod dump;
 mod events;
 mod flow_mgr;
-pub mod frame;
+mod frame;
 mod nss;
 pub mod nss_stub;
-pub mod packet;
+mod packet;
 mod recovery;
-pub mod recv_stream;
-pub mod send_stream;
+mod recv_stream;
+mod send_stream;
 pub mod server;
-pub mod stats;
+mod stats;
 mod stream_id;
 mod tparams;
 mod tracking;
 
-pub use self::connection::{Connection, State};
+pub use self::connection::{Connection, Role, State};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
+pub use self::frame::StreamType;
 
 type TransportError = u16;
 

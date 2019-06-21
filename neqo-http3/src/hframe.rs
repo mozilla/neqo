@@ -501,7 +501,7 @@ impl HFrameReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_transport::frame::StreamType;
+    use neqo_transport::StreamType;
     use num_traits::Num;
     use test_fixture::*;
 

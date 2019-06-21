@@ -13,7 +13,7 @@ use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
 use neqo_common::qdebug;
-use neqo_transport::connection::Connection;
+use neqo_transport::Connection;
 use std::{mem, str};
 
 pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
@@ -797,8 +797,8 @@ fn read_prefixed_encoded_int_with_connection_wrap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_transport::frame::StreamType;
     use neqo_transport::ConnectionEvent;
+    use neqo_transport::StreamType;
     use test_fixture::*;
 
     fn connect() -> (QPackDecoder, Connection, Connection, u64, u64) {

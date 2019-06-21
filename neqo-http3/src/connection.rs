@@ -13,11 +13,9 @@ use neqo_common::{
 };
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
-use neqo_transport::connection::Role;
+use neqo_transport::Role;
 
-use neqo_transport::connection::Connection;
-use neqo_transport::frame::StreamType;
-use neqo_transport::{AppError, ConnectionEvent, State};
+use neqo_transport::{AppError, Connection, ConnectionEvent, State, StreamType};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::mem;

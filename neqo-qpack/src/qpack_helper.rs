@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use crate::{Error, Res};
-use neqo_transport::connection::Connection;
+use neqo_transport::Connection;
 
 pub trait ReadByte {
     fn read_byte(&mut self) -> Res<u8>;

@@ -12,7 +12,7 @@ use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
 use crate::{Error, Res};
 use neqo_common::{qdebug, qtrace};
-use neqo_transport::connection::Connection;
+use neqo_transport::Connection;
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
 
@@ -530,8 +530,8 @@ impl ::std::fmt::Display for QPackEncoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_transport::frame::StreamType;
     use neqo_transport::ConnectionEvent;
+    use neqo_transport::StreamType;
     use test_fixture::*;
 
     fn connect(huffman: bool) -> (QPackEncoder, Connection, Connection, u64, u64) {
