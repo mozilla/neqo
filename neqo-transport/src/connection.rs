@@ -17,11 +17,9 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
-use neqo_crypto::aead::Aead;
 use neqo_crypto::agent::SecretAgentInfo;
-use neqo_crypto::hkdf;
-use neqo_crypto::hp::{extract_hp, HpKey};
 
+use crate::crypto::{CryptoDxDirection, CryptoDxState, CryptoState, CryptoStream};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::{FlowControlGenerator, FlowMgr};
@@ -30,7 +28,7 @@ use crate::frame::{
     TxMode,
 };
 use crate::nss::{
-    Agent, AntiReplay, Cipher, Client, Epoch, HandshakeState, Record, RecordList, Server, SymKey,
+    Agent, AntiReplay, Client, Epoch, HandshakeState, Record, RecordList, Server,
     TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
 };
 use crate::packet::{
@@ -38,8 +36,8 @@ use crate::packet::{
     PacketHdr, PacketNumber, PacketNumberDecoder, PacketType,
 };
 use crate::recovery::LossRecovery;
-use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
-use crate::send_stream::{SendStream, StreamGenerator, TxBuffer};
+use crate::recv_stream::{RecvStream, RX_STREAM_DATA_WINDOW};
+use crate::send_stream::{SendStream, StreamGenerator};
 use crate::stats::Stats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::consts as tp_const;
@@ -102,85 +100,6 @@ enum ZeroRttState {
     Sending,
     Accepted,
     Rejected,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum CryptoDxDirection {
-    Read,
-    Write,
-}
-
-#[derive(Debug)]
-struct CryptoDxState {
-    direction: CryptoDxDirection,
-    epoch: Epoch,
-    aead: Aead,
-    hpkey: HpKey,
-}
-
-impl CryptoDxState {
-    fn new(
-        direction: CryptoDxDirection,
-        epoch: Epoch,
-        secret: &SymKey,
-        cipher: Cipher,
-    ) -> CryptoDxState {
-        qinfo!(
-            "Making {:?} {} CryptoDxState, cipher={}",
-            direction,
-            epoch,
-            cipher
-        );
-        CryptoDxState {
-            direction,
-            epoch,
-            aead: Aead::new(TLS_VERSION_1_3, cipher, secret, "quic ").unwrap(),
-            hpkey: extract_hp(TLS_VERSION_1_3, cipher, secret, "quic hp").unwrap(),
-        }
-    }
-
-    fn new_initial<S: Into<String>>(
-        direction: CryptoDxDirection,
-        label: S,
-        dcid: &[u8],
-    ) -> Option<CryptoDxState> {
-        let cipher = TLS_AES_128_GCM_SHA256;
-        const INITIAL_SALT: &[u8] = &[
-            0xef, 0x4f, 0xb0, 0xab, 0xb4, 0x74, 0x70, 0xc4, 0x1b, 0xef, 0xcf, 0x80, 0x31, 0x33,
-            0x4f, 0xae, 0x48, 0x5e, 0x09, 0xa0,
-        ];
-        let initial_secret = hkdf::extract(
-            TLS_VERSION_1_3,
-            cipher,
-            Some(
-                hkdf::import_key(TLS_VERSION_1_3, cipher, INITIAL_SALT)
-                    .as_ref()
-                    .unwrap(),
-            ),
-            hkdf::import_key(TLS_VERSION_1_3, cipher, dcid)
-                .as_ref()
-                .unwrap(),
-        )
-        .unwrap();
-
-        let secret =
-            hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label).unwrap();
-
-        Some(CryptoDxState::new(direction, 0, &secret, cipher))
-    }
-}
-
-#[derive(Debug)]
-struct CryptoState {
-    epoch: Epoch,
-    rx: Option<CryptoDxState>,
-    tx: Option<CryptoDxState>,
-}
-
-#[derive(Debug, Default)]
-struct CryptoStream {
-    tx: TxBuffer,
-    rx: RxStreamOrderer,
 }
 
 #[derive(Clone, Debug, PartialEq)]
