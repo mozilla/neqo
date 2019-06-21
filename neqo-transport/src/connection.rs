@@ -38,7 +38,7 @@ use crate::recovery::LossRecovery;
 use crate::recv_stream::{RecvStream, RxStreamOrderer, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, TxBuffer};
 use crate::stats::Stats;
-use crate::stream_id::{StreamId, StreamIndex};
+use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::consts as tp_const;
 use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
 use crate::tracking::{AckGenerator, AckTracker, PNSpace};
@@ -52,8 +52,8 @@ const NUM_EPOCHS: Epoch = 4;
 const MAX_AUTH_TAG: usize = 32;
 const CID_LENGTH: usize = 8;
 
-const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
-const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
+pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
+pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -364,32 +364,6 @@ impl Path {
 
     pub fn received_on(&self, d: &Datagram) -> bool {
         self.local == d.dst && self.remote == d.src
-    }
-}
-
-struct StreamIndexes {
-    pub local_max_stream_uni: StreamIndex,
-    pub local_max_stream_bidi: StreamIndex,
-    pub local_next_stream_uni: StreamIndex,
-    pub local_next_stream_bidi: StreamIndex,
-    pub peer_max_stream_uni: StreamIndex,
-    pub peer_max_stream_bidi: StreamIndex,
-    pub peer_next_stream_uni: StreamIndex,
-    pub peer_next_stream_bidi: StreamIndex,
-}
-
-impl StreamIndexes {
-    fn new() -> StreamIndexes {
-        StreamIndexes {
-            local_max_stream_bidi: StreamIndex::new(LOCAL_STREAM_LIMIT_BIDI),
-            local_max_stream_uni: StreamIndex::new(LOCAL_STREAM_LIMIT_UNI),
-            local_next_stream_uni: StreamIndex::new(0),
-            local_next_stream_bidi: StreamIndex::new(0),
-            peer_max_stream_bidi: StreamIndex::new(0),
-            peer_max_stream_uni: StreamIndex::new(0),
-            peer_next_stream_uni: StreamIndex::new(0),
-            peer_next_stream_bidi: StreamIndex::new(0),
-        }
     }
 }
 

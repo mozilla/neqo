@@ -6,8 +6,34 @@
 
 use std::ops::AddAssign;
 
-use crate::connection::Role;
+use crate::connection::{Role, LOCAL_STREAM_LIMIT_BIDI, LOCAL_STREAM_LIMIT_UNI};
 use crate::frame::StreamType;
+
+pub struct StreamIndexes {
+    pub local_max_stream_uni: StreamIndex,
+    pub local_max_stream_bidi: StreamIndex,
+    pub local_next_stream_uni: StreamIndex,
+    pub local_next_stream_bidi: StreamIndex,
+    pub peer_max_stream_uni: StreamIndex,
+    pub peer_max_stream_bidi: StreamIndex,
+    pub peer_next_stream_uni: StreamIndex,
+    pub peer_next_stream_bidi: StreamIndex,
+}
+
+impl StreamIndexes {
+    pub fn new() -> StreamIndexes {
+        StreamIndexes {
+            local_max_stream_bidi: StreamIndex::new(LOCAL_STREAM_LIMIT_BIDI),
+            local_max_stream_uni: StreamIndex::new(LOCAL_STREAM_LIMIT_UNI),
+            local_next_stream_uni: StreamIndex::new(0),
+            local_next_stream_bidi: StreamIndex::new(0),
+            peer_max_stream_bidi: StreamIndex::new(0),
+            peer_max_stream_uni: StreamIndex::new(0),
+            peer_next_stream_uni: StreamIndex::new(0),
+            peer_next_stream_bidi: StreamIndex::new(0),
+        }
+    }
+}
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash)]
 pub struct StreamId(u64);
