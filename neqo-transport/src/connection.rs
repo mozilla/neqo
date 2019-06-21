@@ -22,7 +22,7 @@ use neqo_crypto::{
     TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
 };
 
-use crate::crypto::{CryptoDxDirection, CryptoDxState, CryptoState, CryptoStream};
+use crate::crypto::{Crypto, CryptoDxDirection, CryptoDxState, CryptoGenerator, CryptoState};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::{FlowControlGenerator, FlowMgr};
@@ -140,8 +140,7 @@ pub struct Connection {
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     valid_cids: Vec<ConnectionId>,
     retry_token: Option<Vec<u8>>,
-    crypto_streams: [CryptoStream; 4],
-    crypto_states: [Option<CryptoState>; 4],
+    pub(crate) crypto: Crypto,
     tx_pns: [u64; 3],
     pub(crate) acks: AckTracker,
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
@@ -276,19 +275,13 @@ impl Connection {
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
             retry_token: None,
-            crypto_streams: [
-                CryptoStream::default(),
-                CryptoStream::default(), // Not used.
-                CryptoStream::default(),
-                CryptoStream::default(),
-            ],
             generators: vec![
                 Box::new(AckGenerator {}),
-                Box::new(CryptoGenerator {}),
+                Box::new(CryptoGenerator::default()),
                 Box::new(FlowControlGenerator::default()),
                 Box::new(StreamGenerator::default()),
             ],
-            crypto_states: [None, None, None, None],
+            crypto: Crypto::default(),
             tx_pns: [0; 3],
             acks: AckTracker::default(),
             idle_timeout: None,
@@ -931,7 +924,7 @@ impl Connection {
         for r in records {
             assert_eq!(r.ct, 22);
             qdebug!([self] "Adding CRYPTO data {:?}", r);
-            self.crypto_streams[r.epoch as usize].tx.send(&r.data);
+            self.crypto.streams[r.epoch as usize].tx.send(&r.data);
         }
     }
 
@@ -1051,7 +1044,7 @@ impl Connection {
                     offset,
                     &data
                 );
-                let rx = &mut self.crypto_streams[epoch as usize].rx;
+                let rx = &mut self.crypto.streams[epoch as usize].rx;
                 rx.inbound_frame(offset, data)?;
                 if rx.data_ready() {
                     let mut buf = Vec::new();
@@ -1269,7 +1262,7 @@ impl Connection {
             self.role,
             hex(dcid)
         );
-        assert!(self.crypto_states[0].is_none());
+        assert!(self.crypto.states[0].is_none());
 
         const CLIENT_INITIAL_LABEL: &str = "client in";
         const SERVER_INITIAL_LABEL: &str = "server in";
@@ -1278,7 +1271,7 @@ impl Connection {
             Role::Server => (SERVER_INITIAL_LABEL, CLIENT_INITIAL_LABEL),
         };
 
-        self.crypto_states[0] = Some(CryptoState {
+        self.crypto.states[0] = Some(CryptoState {
             epoch: 0,
             tx: CryptoDxState::new_initial(CryptoDxDirection::Write, write_label, dcid),
             rx: CryptoDxState::new_initial(CryptoDxDirection::Read, read_label, dcid),
@@ -1292,7 +1285,7 @@ impl Connection {
         #[cfg(not(debug_assertions))]
         let label = "";
 
-        let cs = &mut self.crypto_states[epoch as usize];
+        let cs = &mut self.crypto.states[epoch as usize];
         if cs.is_none() {
             qtrace!([label] "Build crypto state for epoch {}", epoch);
             assert!(epoch != 0); // This state is made directly.
@@ -1739,72 +1732,6 @@ impl std::fmt::Display for CryptoDxState {
 impl PacketDecoder for Connection {
     fn get_cid_len(&self) -> usize {
         CID_LENGTH
-    }
-}
-
-struct CryptoGenerator {}
-
-impl FrameGenerator for CryptoGenerator {
-    fn generate(
-        &mut self,
-        conn: &mut Connection,
-        _now: Instant,
-        epoch: u16,
-        mode: TxMode,
-        remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
-        let tx_stream = &mut conn.crypto_streams[epoch as usize].tx;
-        if let Some((offset, data)) = tx_stream.next_bytes(mode) {
-            let data_len = data.len();
-            assert!(data_len <= remaining);
-            let frame = Frame::Crypto {
-                offset,
-                data: data.to_vec(),
-            };
-            tx_stream.mark_as_sent(offset, data_len);
-
-            qdebug!(
-                [conn]
-                "Emitting crypto frame epoch={}, offset={}, len={}",
-                epoch,
-                offset,
-                data_len
-            );
-            Some((
-                frame,
-                Some(Box::new(CryptoGeneratorToken {
-                    epoch,
-                    offset,
-                    length: data_len as u64,
-                })),
-            ))
-        } else {
-            None
-        }
-    }
-}
-
-struct CryptoGeneratorToken {
-    epoch: u16,
-    offset: u64,
-    length: u64,
-}
-
-impl FrameGeneratorToken for CryptoGeneratorToken {
-    fn acked(&mut self, conn: &mut Connection) {
-        qinfo!(
-            [conn]
-            "Acked crypto frame epoch={} offset={} length={}",
-            self.epoch,
-            self.offset,
-            self.length
-        );
-        conn.crypto_streams[self.epoch as usize]
-            .tx
-            .mark_as_acked(self.offset, self.length as usize);
-    }
-    fn lost(&mut self, _conn: &mut Connection) {
-        // TODO(agrover@mozilla.com): @ekr: resend?
     }
 }
 

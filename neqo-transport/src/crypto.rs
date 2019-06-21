@@ -4,13 +4,23 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::qinfo;
+use std::time::Instant;
+
+use neqo_common::{qdebug, qinfo};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hp::{extract_hp, HpKey};
 use neqo_crypto::{hkdf, Cipher, Epoch, SymKey, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
+use crate::frame::{Frame, FrameGenerator, FrameGeneratorToken, TxMode};
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
+use crate::Connection;
+
+#[derive(Debug, Default)]
+pub(crate) struct Crypto {
+    pub(crate) streams: [CryptoStream; 4],
+    pub(crate) states: [Option<CryptoState>; 4],
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum CryptoDxDirection {
@@ -89,4 +99,71 @@ pub(crate) struct CryptoState {
 pub(crate) struct CryptoStream {
     pub(crate) tx: TxBuffer,
     pub(crate) rx: RxStreamOrderer,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CryptoGenerator {}
+
+impl FrameGenerator for CryptoGenerator {
+    fn generate(
+        &mut self,
+        conn: &mut Connection,
+        _now: Instant,
+        epoch: u16,
+        mode: TxMode,
+        remaining: usize,
+    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+        let tx_stream = &mut conn.crypto.streams[epoch as usize].tx;
+        if let Some((offset, data)) = tx_stream.next_bytes(mode) {
+            let data_len = data.len();
+            assert!(data_len <= remaining);
+            let frame = Frame::Crypto {
+                offset,
+                data: data.to_vec(),
+            };
+            tx_stream.mark_as_sent(offset, data_len);
+
+            qdebug!(
+                [conn]
+                "Emitting crypto frame epoch={}, offset={}, len={}",
+                epoch,
+                offset,
+                data_len
+            );
+            Some((
+                frame,
+                Some(Box::new(CryptoGeneratorToken {
+                    epoch,
+                    offset,
+                    length: data_len as u64,
+                })),
+            ))
+        } else {
+            None
+        }
+    }
+}
+
+struct CryptoGeneratorToken {
+    epoch: u16,
+    offset: u64,
+    length: u64,
+}
+
+impl FrameGeneratorToken for CryptoGeneratorToken {
+    fn acked(&mut self, conn: &mut Connection) {
+        qinfo!(
+            [conn]
+            "Acked crypto frame epoch={} offset={} length={}",
+            self.epoch,
+            self.offset,
+            self.length
+        );
+        conn.crypto.streams[self.epoch as usize]
+            .tx
+            .mark_as_acked(self.offset, self.length as usize);
+    }
+    fn lost(&mut self, _conn: &mut Connection) {
+        // TODO(agrover@mozilla.com): @ekr: resend?
+    }
 }
