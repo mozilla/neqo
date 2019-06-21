@@ -1674,16 +1674,17 @@ impl Connection {
         stream.send(data)
     }
 
-    /// Bytes of available send stream credit, based upon current stream and
-    /// connection-level flow control values.
-    pub fn stream_credit_avail_send(&self, stream_id: u64) -> Res<u64> {
+    /// Bytes that stream_send() is guaranteed to accept for sending.
+    /// i.e. that will not be blocked by flow credits or send buffer max
+    /// capacity.
+    pub fn stream_avail_send_space(&self, stream_id: u64) -> Res<u64> {
         let stream = self
             .send_streams
             .get(&stream_id.into())
             .ok_or_else(|| Error::InvalidStreamId)?;
 
         Ok(min(
-            stream.credit_avail(),
+            stream.avail(),
             self.flow_mgr.borrow().conn_credit_avail(),
         ))
     }

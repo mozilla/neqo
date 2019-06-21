@@ -344,6 +344,10 @@ impl TxBuffer {
         self.send_buf.len()
     }
 
+    fn avail(&self) -> usize {
+        TX_STREAM_BUFFER - self.buffered()
+    }
+
     fn highest_sent(&self) -> u64 {
         self.ranges.highest_offset()
     }
@@ -537,12 +541,21 @@ impl SendStream {
         self.state.final_size()
     }
 
+    /// Stream credit available
     pub fn credit_avail(&self) -> u64 {
-        if let Some(tx_buf) = self.state.tx_buf() {
-            self.max_stream_data - tx_buf.data_limit()
-        } else {
-            0
-        }
+        self.state
+            .tx_buf()
+            .map(|tx| self.max_stream_data - tx.data_limit())
+            .unwrap_or(0)
+    }
+
+    /// Bytes sendable on stream. Constrained by both stream credit available
+    /// and space in the tx buffer.
+    pub fn avail(&self) -> u64 {
+        self.state
+            .tx_buf()
+            .map(|tx| min(self.credit_avail(), tx.avail() as u64))
+            .unwrap_or(0)
     }
 
     pub fn max_stream_data(&self) -> u64 {
@@ -588,11 +601,13 @@ impl SendStream {
         let stream_credit_avail = self.credit_avail();
         let conn_credit_avail = self.flow_mgr.borrow().conn_credit_avail();
         let credit_avail = min(stream_credit_avail, conn_credit_avail);
-        let can_send_bytes = min(credit_avail, buf.len() as u64);
+        let buff_avail = self.state.tx_buf().map(|tx| tx.avail()).unwrap_or(0);
+        let space_avail = min(credit_avail, buff_avail as u64);
+        let can_send_bytes = min(space_avail, buf.len() as u64);
 
         if can_send_bytes != buf.len() as u64 {
-            // We had some bytes to send but were entirely or partially
-            // blocked by flow control.
+            // We had some bytes to send but may have been blocked by flow
+            // credits. If so, send data blocked frame(s) to peer.
             if stream_credit_avail < buf.len() as u64 {
                 self.flow_mgr
                     .borrow_mut()
