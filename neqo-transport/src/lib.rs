@@ -12,6 +12,7 @@ use neqo_crypto;
 pub mod connection;
 mod dump;
 mod events;
+mod flow_mgr;
 pub mod frame;
 mod nss;
 pub mod nss_stub;

@@ -11,7 +11,7 @@ use std::mem;
 use std::ops::Bound::{Included, Unbounded};
 use std::rc::Rc;
 
-use crate::connection::FlowMgr;
+use crate::flow_mgr::FlowMgr;
 use crate::stream_id::StreamId;
 use crate::ConnectionEvents;
 use crate::{AppError, Error, Res};
