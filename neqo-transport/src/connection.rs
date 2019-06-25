@@ -890,7 +890,7 @@ impl Connection {
 
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
         let tps = &self.tps;
-        let res = match self.tls {
+        match self.tls {
             Agent::Server(ref mut s) => {
                 let mut enc = Encoder::default();
                 enc.encode_vvec_with(|mut enc_inner| {
@@ -903,8 +903,7 @@ impl Connection {
                 Ok(())
             }
             Agent::Client(_) => Err(Error::WrongRole),
-        };
-        res
+        }
     }
 
     /// Get the current role.
