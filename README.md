@@ -1,4 +1,4 @@
-# Neqo
+# Neqo, an Implementation of QUIC written in Rust
 
 To run test http 0.9 programs (neqo-client and neqo-server):
 
