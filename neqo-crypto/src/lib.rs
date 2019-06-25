@@ -16,33 +16,37 @@ pub mod agent;
 mod agentio;
 mod cert;
 pub mod constants;
+mod convert;
 mod err;
 pub mod ext;
 pub mod hkdf;
 pub mod hp;
 mod prio;
+mod replay;
 mod result;
 mod secrets;
 mod ssl;
+pub mod time;
 
 pub use self::agent::{
     Agent, Client, HandshakeState, Record, RecordList, SecretAgent, SecretAgentInfo,
-    SecretAgentPreInfo, Server,
+    SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
 };
 pub use self::constants::*;
 pub use self::err::{Error, Res, SSLErrorCodes};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
 pub use self::p11::SymKey;
+pub use self::replay::AntiReplay;
 pub use self::secrets::SecretDirection;
+
+use neqo_common::once::OnceResult;
 
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use std::ptr::null;
-use std::sync::Once;
 
 mod nss {
-    #![allow(non_upper_case_globals)]
-    #![allow(clippy::const_static_lifetime)]
+    #![allow(clippy::const_static_lifetime, non_upper_case_globals)]
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 
@@ -52,16 +56,15 @@ fn result(code: nss::SECStatus) -> Res<()> {
 }
 
 enum NssLoaded {
-    NotLoaded,
-    LoadedExternally,
-    LoadedNoDb,
-    LoadedDb(Box<Path>),
+    External,
+    NoDb,
+    Db(Box<Path>),
 }
 
 impl Drop for NssLoaded {
     fn drop(&mut self) {
         match self {
-            NssLoaded::LoadedNoDb | NssLoaded::LoadedDb(_) => unsafe {
+            NssLoaded::NoDb | NssLoaded::Db(_) => unsafe {
                 result(nss::NSS_Shutdown()).expect("NSS Shutdown failed")
             },
             _ => {}
@@ -69,25 +72,20 @@ impl Drop for NssLoaded {
     }
 }
 
-static mut INITIALIZED: NssLoaded = NssLoaded::NotLoaded;
-static INIT_ONCE: Once = Once::new();
+static mut INITIALIZED: OnceResult<NssLoaded> = OnceResult::new();
 
-unsafe fn already_initialized() -> bool {
-    match nss::NSS_IsInitialized() {
-        0 => false,
-        _ => {
-            INITIALIZED = NssLoaded::LoadedExternally;
-            true
-        }
-    }
+fn already_initialized() -> bool {
+    unsafe { nss::NSS_IsInitialized() != 0 }
 }
 
 /// Initialize NSS.  This only executes the initialization routines once, so if there is any chance that
 pub fn init() {
+    // Set time zero.
+    time::init();
     unsafe {
-        INIT_ONCE.call_once(|| {
+        INITIALIZED.call_once(|| {
             if already_initialized() {
-                return;
+                return NssLoaded::External;
             }
 
             let st = nss::NSS_NoDB_Init(null());
@@ -95,16 +93,17 @@ pub fn init() {
             let st = nss::NSS_SetDomesticPolicy();
             result(st).expect("NSS_SetDomesticPolicy failed");
 
-            INITIALIZED = NssLoaded::LoadedNoDb;
+            NssLoaded::NoDb
         });
     }
 }
 
 pub fn init_db<P: Into<PathBuf>>(dir: P) {
+    time::init();
     unsafe {
-        INIT_ONCE.call_once(|| {
+        INITIALIZED.call_once(|| {
             if already_initialized() {
-                return;
+                return NssLoaded::External;
             }
 
             let path = dir.into();
@@ -127,43 +126,16 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
             let st = ssl::SSL_ConfigServerSessionIDCache(1024, 0, 0, dircstr.as_ptr());
             result(st).expect("SSL_ConfigServerSessionIDCache failed");
 
-            INITIALIZED = NssLoaded::LoadedDb(path.to_path_buf().into_boxed_path());
+            NssLoaded::Db(path.to_path_buf().into_boxed_path())
         });
     }
 }
 
-pub fn initialized() -> bool {
+/// Panic if NSS isn't initialized.
+pub fn assert_initialized() {
     unsafe {
-        match INITIALIZED {
-            NssLoaded::NotLoaded => false,
-            _ => true,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn init_nodb() {
-        init();
-        unsafe {
-            if let NssLoaded::NotLoaded = INITIALIZED {
-                panic!("not initialized");
-            }
-            assert!(nss::NSS_IsInitialized() != 0);
-        }
-    }
-
-    #[test]
-    fn init_withdb() {
-        init_db("./db");
-        unsafe {
-            if let NssLoaded::NotLoaded = INITIALIZED {
-                panic!("not initialized");
-            }
-            assert!(nss::NSS_IsInitialized() != 0);
-        }
+        INITIALIZED.call_once(|| {
+            panic!("NSS not initialized with init or init_db");
+        });
     }
 }

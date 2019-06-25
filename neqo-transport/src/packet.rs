@@ -56,7 +56,7 @@ impl PacketType {
 pub type Version = u32;
 pub type PacketNumber = u64;
 
-#[derive(Default, Deref, Debug, PartialEq, Clone)]
+#[derive(Default, Deref, PartialEq, Clone)]
 pub struct ConnectionId(pub Vec<u8>);
 
 impl ConnectionId {
@@ -65,6 +65,12 @@ impl ConnectionId {
         let mut v = vec![0; len];
         rand::thread_rng().fill(&mut v[..]);
         ConnectionId(v)
+    }
+}
+
+impl ::std::fmt::Debug for ConnectionId {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "CID {}", hex(&self.0))
     }
 }
 

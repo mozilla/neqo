@@ -7,7 +7,7 @@
 #![deny(warnings)]
 
 use neqo_common::{now, qinfo};
-use neqo_crypto::init_db;
+use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Connection, Http3State};
 use neqo_transport::{Connection, Datagram};
 use std::collections::HashMap;
@@ -15,6 +15,7 @@ use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
+use std::time::{Duration, Instant};
 
 use structopt::StructOpt;
 
@@ -109,6 +110,8 @@ fn main() -> Result<(), io::Error> {
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
+    let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+        .expect("unable to setup anti-replay");
 
     let poll = Poll::new()?;
 
@@ -216,8 +219,12 @@ fn main() -> Result<(), io::Error> {
                 println!("New connection from {:?}", remote_addr);
                 (
                     Http3Connection::new(
-                        Connection::new_server(&[args.key.clone()], &[args.alpn.clone()])
-                            .expect("must succeed"),
+                        Connection::new_server(
+                            &[args.key.clone()],
+                            &[args.alpn.clone()],
+                            &anti_replay,
+                        )
+                        .expect("must succeed"),
                         args.max_table_size,
                         args.max_blocked_streams,
                         Some(Box::new(http_serve)),

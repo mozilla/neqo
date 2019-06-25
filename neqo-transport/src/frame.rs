@@ -5,9 +5,11 @@
 // except according to those terms.
 
 use crate::connection::StreamIndex;
-use crate::tracking::PacketRange;
-use crate::{ConnectionError, Error, Res};
+use crate::nss::Epoch;
+use crate::{Connection, ConnectionError, Error, Res};
 use neqo_common::{qdebug, Decoder, Encoder};
+use std::fmt::{self, Debug};
+use std::time::Instant;
 
 pub type FrameType = u64;
 
@@ -93,8 +95,8 @@ impl From<&ConnectionError> for CloseType {
 
 #[derive(PartialEq, Debug, Default, Clone)]
 pub struct AckRange {
-    gap: u64,
-    range: u64,
+    pub(crate) gap: u64,
+    pub(crate) range: u64,
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -328,34 +330,6 @@ impl Frame {
                 enc.encode_vvec(reason_phrase);
             }
         }
-    }
-
-    pub fn encode_ack_frame(ranges: &[PacketRange], d: &mut Encoder) {
-        if ranges.is_empty() {
-            return;
-        }
-
-        let mut ack_ranges = Vec::new();
-        let mut last = ranges[0].smallest();
-
-        for r in &ranges[1..] {
-            ack_ranges.push(AckRange {
-                // the difference must be at least 2 (because 0-length gaps,
-                // (difference 1) are illegal.
-                gap: last - r.largest - 2,
-                range: r.length - 1,
-            });
-            last = r.smallest();
-        }
-
-        let f = Frame::Ack {
-            largest_acknowledged: ranges[0].largest,
-            ack_delay: 0,
-            first_ack_range: ranges[0].length - 1,
-            ack_ranges,
-        };
-
-        f.marshal(d)
     }
 
     pub fn ack_eliciting(&self) -> bool {
@@ -593,6 +567,40 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
             })
         }
         _ => Err(Error::UnknownFrameType),
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum TxMode {
+    Normal,
+    Pto,
+}
+
+pub trait FrameGenerator {
+    fn generate(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+        epoch: Epoch,
+        tx_mode: TxMode,
+        remaining: usize,
+    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)>;
+}
+
+impl Debug for FrameGenerator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("<FrameGenerator Function>")
+    }
+}
+
+pub trait FrameGeneratorToken {
+    fn acked(&mut self, conn: &mut Connection);
+    fn lost(&mut self, conn: &mut Connection);
+}
+
+impl Debug for FrameGeneratorToken {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("<FrameGenerator Token>")
     }
 }
 
@@ -870,19 +878,18 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_ack_frame() {
-        let packets = vec![
-            PacketRange {
-                largest: 7,
-                length: 3,
-            },
-            PacketRange {
-                largest: 3,
-                length: 4,
-            },
-        ];
+    fn encode_ack_frame() {
+        let ack_frame = Frame::Ack {
+            largest_acknowledged: 7,
+            ack_delay: 12_000,
+            first_ack_range: 2, // [7], 6, 5
+            ack_ranges: vec![AckRange {
+                gap: 0,   // 4
+                range: 1, // 3, 2
+            }],
+        };
         let mut enc = Encoder::default();
-        Frame::encode_ack_frame(&packets, &mut enc);
+        ack_frame.marshal(&mut enc);
         println!("Encoded ACK={}", hex(&enc[..]));
 
         let f = decode_frame(&mut enc.as_decoder()).unwrap();
@@ -894,11 +901,11 @@ mod tests {
                 ack_ranges,
             } => {
                 assert_eq!(largest_acknowledged, 7);
-                assert_eq!(ack_delay, 0);
+                assert_eq!(ack_delay, 12_000);
                 assert_eq!(first_ack_range, 2);
                 assert_eq!(ack_ranges.len(), 1);
                 assert_eq!(ack_ranges[0].gap, 0);
-                assert_eq!(ack_ranges[0].range, 3);
+                assert_eq!(ack_ranges[0].range, 1);
             }
             _ => {}
         }

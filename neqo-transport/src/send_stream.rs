@@ -13,8 +13,8 @@ use std::rc::Rc;
 use neqo_common::{qerror, qinfo, qtrace, qwarn};
 use slice_deque::SliceDeque;
 
-use crate::connection::{ConnectionEvents, FlowMgr, StreamId, TxMode};
-
+use crate::connection::{ConnectionEvents, FlowMgr, StreamId};
+use crate::frame::TxMode;
 use crate::{AppError, Error, Res};
 
 const TX_STREAM_BUFFER: usize = 0xFFFF; // 64 KiB

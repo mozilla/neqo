@@ -7,13 +7,14 @@
 #![deny(warnings)]
 
 use neqo_common::now;
-use neqo_crypto::init_db;
+use neqo_crypto::{init_db, AntiReplay};
 use neqo_transport::{Connection, ConnectionEvent, Datagram, State};
 use regex::Regex;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use structopt::StructOpt;
 
 #[derive(Debug, StructOpt)]
@@ -127,6 +128,8 @@ fn main() {
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
+    let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+        .expect("unable to setup anti-replay");
 
     // TODO(mt): listen on both v4 and v6.
     let socket = UdpSocket::bind(args.bind()).expect("Unable to bind UDP socket");
@@ -150,7 +153,8 @@ fn main() {
 
         let mut server = connections.entry(remote_addr).or_insert_with(|| {
             println!("New connection from {:?}", remote_addr);
-            Connection::new_server(args.key.clone(), args.alpn.clone()).expect("must succeed")
+            Connection::new_server(args.key.clone(), args.alpn.clone(), &anti_replay)
+                .expect("can't create connection")
         });
 
         // TODO use timer to set socket.set_read_timeout.

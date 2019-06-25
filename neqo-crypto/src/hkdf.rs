@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::constants::*;
+use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
 use crate::p11::{
     PK11Origin, PK11SymKey, PK11_GetInternalSlot, PK11_ImportSymKey, SECItem, SECItemType, Slot,
@@ -50,7 +51,7 @@ pub fn import_key(version: Version, cipher: Cipher, buf: &[u8]) -> Res<SymKey> {
     let mut item = SECItem {
         type_: SECItemType::siBuffer,
         data: buf.as_ptr() as *mut c_uchar,
-        len: buf.len() as c_uint,
+        len: to_c_uint(buf.len())?,
     };
     let slot_ptr = unsafe { PK11_GetInternalSlot() };
     let slot = match NonNull::new(slot_ptr) {
@@ -113,9 +114,9 @@ pub fn expand_label<S: Into<String>>(
             cipher,
             **prk,
             handshake_hash.as_ptr(),
-            handshake_hash.len() as c_uint,
+            to_c_uint(handshake_hash.len())?,
             l.as_ptr() as *const c_char,
-            l.len() as c_uint,
+            to_c_uint(l.len())?,
             &mut secret,
         )
     };

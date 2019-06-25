@@ -12,10 +12,13 @@ types = [
     "SSLExtensionHandler",
     "SSLExtensionType",
     "SSLExtensionWriter",
+    "SSLHelloRetryRequestAction",
+    "SSLHelloRetryRequestCallback",
     "SSLProtocolVariant",
+    "SSLRecordWriteCallback",
     "SSLResumptionTokenCallback",
     "SSLSecretCallback",
-    "SSLRecordWriteCallback",
+    "SSLTimeFunc",
 ]
 functions = [
     "SSL_AlertSentCallback",
@@ -47,6 +50,7 @@ enums = [
     "SSLContentType",
     "SSLExtensionType",
     "SSLHandshakeType",
+    "SSLHelloRetryRequestAction",
     "SSLKEAType",
     "SSLMACAlgorithm",
     "SSLNamedGroup",
@@ -208,3 +212,7 @@ enums = [
     "PRSockOption",
     "PRTransmitFileFlags",
 ]
+
+[nspr_time]
+types = ["PRTime"]
+functions = ["PR_Now"]

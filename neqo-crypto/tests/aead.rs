@@ -2,7 +2,8 @@
 
 use neqo_crypto::aead::Aead;
 use neqo_crypto::constants::*;
-use neqo_crypto::{hkdf, init_db};
+use neqo_crypto::hkdf;
+use test_fixture::fixture_init;
 
 const AAD: &[u8] = &[
     0xc1, 0xff, 0x00, 0x00, 0x12, 0x05, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x00, 0x40,
@@ -19,7 +20,7 @@ const PLAINTEXT: &[u8] = &[
 ];
 
 fn make_aead(cipher: Cipher) -> Aead {
-    init_db("./db");
+    fixture_init();
 
     let secret = hkdf::import_key(
         TLS_VERSION_1_3,

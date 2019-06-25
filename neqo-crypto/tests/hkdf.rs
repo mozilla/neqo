@@ -1,8 +1,8 @@
 #![deny(warnings)]
 
 use neqo_crypto::constants::*;
-use neqo_crypto::hkdf;
-use neqo_crypto::{init_db, SymKey};
+use neqo_crypto::{hkdf, SymKey};
+use test_fixture::fixture_init;
 
 const SALT: &[u8] = &[
     0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
@@ -40,7 +40,7 @@ fn import_keys(cipher: Cipher) -> (SymKey, SymKey) {
 }
 
 fn extract(cipher: Cipher, expected: &[u8]) {
-    init_db("./db");
+    fixture_init();
     let (salt, ikm) = import_keys(cipher);
     let prk = hkdf::extract(TLS_VERSION_1_3, cipher, Some(&salt), &ikm)
         .expect("HKDF Extract should work");
@@ -73,7 +73,7 @@ fn extract_sha384() {
 }
 
 fn derive_secret(cipher: Cipher, expected: &[u8]) {
-    init_db("./db");
+    fixture_init();
 
     // Here we only use the salt as the PRK.
     let (prk, _) = import_keys(cipher);
@@ -108,7 +108,7 @@ fn derive_secret_sha384() {
 }
 
 fn expand_label(cipher: Cipher, expected: &[u8]) {
-    init_db("./db");
+    fixture_init();
 
     let l = cipher_hash_len(cipher);
     let (prk, _) = import_keys(cipher);

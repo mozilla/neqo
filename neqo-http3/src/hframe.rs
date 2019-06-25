@@ -501,15 +501,9 @@ impl HFrameReader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_common::now;
-    use neqo_crypto::init_db;
     use neqo_transport::frame::StreamType;
     use num_traits::Num;
-    use std::net::SocketAddr;
-
-    fn loopback() -> SocketAddr {
-        "127.0.0.1:443".parse().unwrap()
-    }
+    use test_fixture::*;
 
     #[allow(clippy::many_single_char_names)]
     fn enc_dec(f: &HFrame, st: &str, remaining: usize) {
@@ -521,10 +515,8 @@ mod tests {
         let d2 = Encoder::from_hex(st);
         assert_eq!(&d[..], &d2[..d.len()]);
 
-        init_db("./../neqo-transport/db");
-        let mut conn_c =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut conn_c = default_client();
+        let mut conn_s = default_server();
         let mut r = conn_c.process(vec![], now());
         r = conn_s.process(r.0, now());
         r = conn_c.process(r.0, now());
@@ -675,10 +667,8 @@ mod tests {
     // Test SETTINGS
     #[test]
     fn test_frame_reading_with_stream_settings1() {
-        init_db("./../neqo-transport/db");
-        let mut conn_c =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut conn_c = default_client();
+        let mut conn_s = default_server();
         let mut r = conn_c.process(vec![], now());
         r = conn_s.process(r.0, now());
         r = conn_c.process(r.0, now());
@@ -741,10 +731,8 @@ mod tests {
     // Test SETTINGS with larger varints
     #[test]
     fn test_frame_reading_with_stream_settings2() {
-        init_db("./../neqo-transport/db");
-        let mut conn_c =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut conn_c = default_client();
+        let mut conn_s = default_server();
         let mut r = conn_c.process(vec![], now());
         r = conn_s.process(r.0, now());
         r = conn_c.process(r.0, now());
@@ -821,10 +809,8 @@ mod tests {
     // Test PUSH_PROMISE
     #[test]
     fn test_frame_reading_with_stream_push_promise() {
-        init_db("./../neqo-transport/db");
-        let mut conn_c =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut conn_c = default_client();
+        let mut conn_s = default_server();
         let mut r = conn_c.process(vec![], now());
         r = conn_s.process(r.0, now());
         r = conn_c.process(r.0, now());
@@ -883,10 +869,8 @@ mod tests {
     // Test DATA
     #[test]
     fn test_frame_reading_with_stream_data() {
-        init_db("./../neqo-transport/db");
-        let mut conn_c =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut conn_c = default_client();
+        let mut conn_s = default_server();
         let mut r = conn_c.process(vec![], now());
         r = conn_s.process(r.0, now());
         r = conn_c.process(r.0, now());
@@ -929,10 +913,8 @@ mod tests {
     // Test an unknow frame
     #[test]
     fn test_unknown_frame() {
-        init_db("./../neqo-transport/db");
-        let mut conn_c =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut conn_c = default_client();
+        let mut conn_s = default_server();
         let mut r = conn_c.process(vec![], now());
         r = conn_s.process(r.0, now());
         r = conn_c.process(r.0, now());

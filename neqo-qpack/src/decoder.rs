@@ -797,21 +797,13 @@ fn read_prefixed_encoded_int_with_connection_wrap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_common::now;
-    use neqo_crypto::init_db;
     use neqo_transport::frame::StreamType;
     use neqo_transport::ConnectionEvent;
-    use std::net::SocketAddr;
-
-    fn loopback() -> SocketAddr {
-        "127.0.0.1:443".parse().unwrap()
-    }
+    use test_fixture::*;
 
     fn connect() -> (QPackDecoder, Connection, Connection, u64, u64) {
-        init_db("./../neqo-transport/db");
-        let mut conn_c =
-            Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap();
-        let mut conn_s = Connection::new_server(&["key"], &["alpn"]).unwrap();
+        let mut conn_c = default_client();
+        let mut conn_s = default_server();
         let mut r = conn_c.process(vec![], now());
         r = conn_s.process(r.0, now());
         r = conn_c.process(r.0, now());

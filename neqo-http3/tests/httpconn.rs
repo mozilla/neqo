@@ -6,18 +6,10 @@
 
 #![allow(unused_assignments)]
 
-use neqo_common::now;
 use neqo_http3::{Http3Connection, Http3State};
-use neqo_transport::{Connection, Datagram};
-
-use std::net::SocketAddr;
+use neqo_transport::Datagram;
 use std::time::Duration;
-
-use neqo_crypto::init_db;
-
-fn loopback() -> SocketAddr {
-    "127.0.0.1:443".parse().unwrap()
-}
+use test_fixture::*;
 
 fn new_stream_callback(
     request_headers: &[(String, String)],
@@ -49,16 +41,9 @@ fn connect() -> (
     Http3Connection,
     (Vec<Datagram>, Option<Duration>),
 ) {
-    init_db("../neqo-transport/db");
-
-    let mut hconn_c = Http3Connection::new(
-        Connection::new_client("example.com", &["alpn"], loopback(), loopback()).unwrap(),
-        100,
-        100,
-        None,
-    );
+    let mut hconn_c = Http3Connection::new(default_client(), 100, 100, None);
     let mut hconn_s = Http3Connection::new(
-        Connection::new_server(&["key"], &["alpn"]).unwrap(),
+        default_server(),
         100,
         100,
         Some(Box::new(new_stream_callback)),

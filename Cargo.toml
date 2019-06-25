@@ -9,4 +9,5 @@ members = [
   "neqo-server",
   "neqo-transport",
   "neqo-interop",
+  "test-fixture",
 ]

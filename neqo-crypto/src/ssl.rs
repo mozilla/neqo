@@ -62,13 +62,18 @@ impl Opt {
             Opt::Locking => !enabled,
             _ => enabled,
         };
-        v as PRIntn
+        PRIntn::from(v)
     }
 }
 
-experimental_api!(SSL_SetResumptionTokenCallback(
+experimental_api!(SSL_GetCurrentEpoch(
     fd: *mut PRFileDesc,
-    cb: SSLResumptionTokenCallback,
+    read_epoch: *mut u16,
+    write_epoch: *mut u16,
+));
+experimental_api!(SSL_HelloRetryRequestCallback(
+    fd: *mut PRFileDesc,
+    cb: SSLHelloRetryRequestCallback,
     arg: *mut c_void,
 ));
 experimental_api!(SSL_RecordLayerWriteCallback(
@@ -83,15 +88,26 @@ experimental_api!(SSL_RecordLayerData(
     data: *const u8,
     len: c_uint,
 ));
+experimental_api!(SSL_SendSessionTicket(
+    fd: *mut PRFileDesc,
+    extra: *const u8,
+    len: c_uint,
+));
+experimental_api!(SSL_SetMaxEarlyDataSize(fd: *mut PRFileDesc, size: u32));
 experimental_api!(SSL_SetResumptionToken(
     fd: *mut PRFileDesc,
     token: *const u8,
     len: c_uint,
 ));
-experimental_api!(SSL_SendSessionTicket(
+experimental_api!(SSL_SetResumptionTokenCallback(
     fd: *mut PRFileDesc,
-    extra: *const u8,
-    len: c_uint,
+    cb: SSLResumptionTokenCallback,
+    arg: *mut c_void,
+));
+experimental_api!(SSL_SetTimeFunc(
+    fd: *mut PRFileDesc,
+    cb: SSLTimeFunc,
+    arg: *mut c_void,
 ));
 
 #[cfg(test)]

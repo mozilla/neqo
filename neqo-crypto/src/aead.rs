@@ -7,6 +7,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::constants::*;
+use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
 use crate::p11::{PK11SymKey, SymKey};
 use crate::result;
@@ -105,12 +106,12 @@ impl Aead {
                 *self.ctx.deref(),
                 count,
                 aad.as_ptr(),
-                aad.len() as c_uint,
+                to_c_uint(aad.len())?,
                 input.as_ptr(),
-                input.len() as c_uint,
+                to_c_uint(input.len())?,
                 output.as_mut_ptr(),
                 &mut l,
-                output.len() as c_uint,
+                to_c_uint(output.len())?,
             )
         };
         result::result(rv)?;
@@ -130,12 +131,12 @@ impl Aead {
                 *self.ctx.deref(),
                 count,
                 aad.as_ptr(),
-                aad.len() as c_uint,
+                to_c_uint(aad.len())?,
                 input.as_ptr(),
-                input.len() as c_uint,
+                to_c_uint(input.len())?,
                 output.as_mut_ptr(),
                 &mut l,
-                output.len() as c_uint,
+                to_c_uint(output.len())?,
             )
         };
         result::result(rv)?;
