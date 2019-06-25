@@ -1,1 +1,17 @@
 pull_request_rules:
+  - name: automatic merge on CI success and review
+    conditions:
+      - "#approved-reviews-by>=1"
+      - status-success=ci/circleci
+      - base=master
+      - label!=work-in-progress
+    actions:
+      merge:
+        method: merge
+        strict: smart
+  - name: remove outdated reviews
+    conditions:
+      - base=master
+    actions:
+      dismiss_reviews:
+        approved: true
