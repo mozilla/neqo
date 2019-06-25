@@ -1056,14 +1056,14 @@ impl Connection {
                         qwarn!("received Retry, but no token, dropping it");
                         return Ok(());
                     }
-                    {
-                        let path = self.paths.iter_mut().find(|p| p.remote_cid == *odcid);
-                        if path.is_none() {
+                    match self.paths.iter_mut().find(|p| p.remote_cid == *odcid) {
+                        None => {
                             qwarn!("received Retry, but not for us, dropping it");
                             return Ok(());
                         }
-                        path.unwrap().remote_cid =
-                            hdr.scid.as_ref().expect("no SCID on Retry").clone();
+                        Some(path) => {
+                            path.remote_cid = hdr.scid.expect("Retry pkt must have SCID");
+                        }
                     }
                     self.retry_token = Some(token.clone());
                     return Ok(());
