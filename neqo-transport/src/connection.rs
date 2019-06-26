@@ -31,8 +31,8 @@ use crate::frame::{
     TxMode,
 };
 use crate::packet::{
-    decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, CryptoCtx, PacketDecoder,
-    PacketHdr, PacketNumber, PacketNumberDecoder, PacketType,
+    decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, PacketDecoder, PacketHdr,
+    PacketNumberDecoder, PacketType,
 };
 use crate::recovery::LossRecovery;
 use crate::recv_stream::{RecvStream, RX_STREAM_DATA_WINDOW};
@@ -49,7 +49,6 @@ struct Packet(Vec<u8>);
 
 pub const QUIC_VERSION: u32 = 0xff00_0014;
 const NUM_EPOCHS: Epoch = 4;
-const MAX_AUTH_TAG: usize = 32;
 const CID_LENGTH: usize = 8;
 
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
@@ -1681,51 +1680,6 @@ impl Connection {
 impl ::std::fmt::Display for Connection {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "{:?} {:p}", self.role, self as *const Connection)
-    }
-}
-
-impl CryptoCtx for CryptoDxState {
-    fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
-        let mask = self.hpkey.mask(sample)?;
-        qdebug!("HP sample={} mask={}", hex(sample), hex(&mask));
-        Ok(mask)
-    }
-
-    fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-        qinfo!(
-            [self]
-            "aead_decrypt pn={} hdr={} body={}",
-            pn,
-            hex(hdr),
-            hex(body)
-        );
-        let mut out = vec![0; body.len()];
-        let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
-        Ok(res.to_vec())
-    }
-
-    fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-        qdebug!(
-            [self]
-            "aead_encrypt pn={} hdr={} body={}",
-            pn,
-            hex(hdr),
-            hex(body)
-        );
-
-        let size = body.len() + MAX_AUTH_TAG;
-        let mut out = vec![0; size];
-        let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
-
-        qdebug!([self] "aead_encrypt ct={}", hex(res),);
-
-        Ok(res.to_vec())
-    }
-}
-
-impl std::fmt::Display for CryptoDxState {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "epoch {} {:?}", self.epoch, self.direction)
     }
 }
 

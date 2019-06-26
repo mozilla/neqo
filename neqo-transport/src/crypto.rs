@@ -6,15 +6,18 @@
 
 use std::time::Instant;
 
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{hex, qdebug, qinfo};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hp::{extract_hp, HpKey};
 use neqo_crypto::{hkdf, Cipher, Epoch, SymKey, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
 use crate::frame::{Frame, FrameGenerator, FrameGeneratorToken, TxMode};
+use crate::packet::{CryptoCtx, PacketNumber};
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
-use crate::Connection;
+use crate::{Connection, Res};
+
+const MAX_AUTH_TAG: usize = 32;
 
 #[derive(Debug, Default)]
 pub(crate) struct Crypto {
@@ -85,6 +88,51 @@ impl CryptoDxState {
             hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label).unwrap();
 
         Some(CryptoDxState::new(direction, 0, &secret, cipher))
+    }
+}
+
+impl CryptoCtx for CryptoDxState {
+    fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
+        let mask = self.hpkey.mask(sample)?;
+        qdebug!("HP sample={} mask={}", hex(sample), hex(&mask));
+        Ok(mask)
+    }
+
+    fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+        qinfo!(
+            [self]
+            "aead_decrypt pn={} hdr={} body={}",
+            pn,
+            hex(hdr),
+            hex(body)
+        );
+        let mut out = vec![0; body.len()];
+        let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
+        Ok(res.to_vec())
+    }
+
+    fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+        qdebug!(
+            [self]
+            "aead_encrypt pn={} hdr={} body={}",
+            pn,
+            hex(hdr),
+            hex(body)
+        );
+
+        let size = body.len() + MAX_AUTH_TAG;
+        let mut out = vec![0; size];
+        let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
+
+        qdebug!([self] "aead_encrypt ct={}", hex(res),);
+
+        Ok(res.to_vec())
+    }
+}
+
+impl std::fmt::Display for CryptoDxState {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "epoch {} {:?}", self.epoch, self.direction)
     }
 }
 
