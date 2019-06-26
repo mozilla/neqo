@@ -94,6 +94,38 @@ impl Error {
         }
     }
 
+    pub fn from_code(error: u16) -> Error {
+        match error {
+            0 => Error::NoError,
+            1 => Error::WrongSettingsDirection,
+            2 => Error::PushRefused,
+            3 => Error::InternalError,
+            4 => Error::PushAlreadyInCache,
+            5 => Error::RequestCancelled,
+            6 => Error::IncompleteRequest,
+            7 => Error::ConnectError,
+            8 => Error::ExcessiveLoad,
+            9 => Error::VersionFallback,
+            10 => Error::WrongStream,
+            11 => Error::LimitExceeded,
+            12 => Error::DuplicatePush,
+            13 => Error::UnknownStreamType,
+            14 => Error::WrongStreamCount,
+            15 => Error::ClosedCriticalStream,
+            16 => Error::WrongStreamDirection,
+            17 => Error::EarlyResponse,
+            18 => Error::MissingSettings,
+            19 => Error::UnexpectedFrame,
+            20 => Error::RequestRejected,
+            0xff => Error::GeneralProtocolError,
+            0x100...0x1ff => Error::MalformedFrame((error - 0x100) as u64),
+            0x200 => Error::QpackError(neqo_qpack::Error::DecompressionFailed),
+            0x201 => Error::QpackError(neqo_qpack::Error::EncoderStreamError),
+            0x202 => Error::QpackError(neqo_qpack::Error::DecoderStreamError),
+            _ => Error::InternalError,
+        }
+    }
+
     pub fn is_stream_error(&self) -> bool {
         // TODO(mt): check that these are OK.  They all look fatal to me.
         *self == Error::UnexpectedFrame
@@ -127,21 +159,5 @@ impl ::std::error::Error for Error {
 impl ::std::fmt::Display for Error {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "HTTP/3 error: {:?}", self)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Ord)]
-pub enum Http3Error {
-    InvalidStreamId,
-    TransportError,
-    AlreadyClosed,
-    DataNotReady,
-    ConnectionError,
-    NetReset,
-}
-
-impl ::std::fmt::Display for Http3Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "HTTP/3 app error: {:?}", self)
     }
 }

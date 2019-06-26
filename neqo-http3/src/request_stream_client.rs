@@ -8,7 +8,7 @@ use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEAD
 
 use crate::connection::Http3Events;
 
-use neqo_common::{qdebug, qerror, qinfo, Encoder};
+use neqo_common::{qdebug, qinfo, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
@@ -324,6 +324,12 @@ impl RequestStreamClient {
         Ok(())
     }
 
+    pub fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
+        self.state = RequestStreamClientState::WaitingForResponseHeaders;
+        conn.stream_close_send(self.stream_id)?;
+        Ok(())
+    }
+
     pub fn done(&self) -> bool {
         self.state == RequestStreamClientState::Closed
     }
@@ -346,26 +352,21 @@ impl RequestStreamClient {
                 } else {
                     *remaining_data_len
                 };
-                match conn.stream_recv(self.stream_id, &mut buf[..to_read]) {
-                    Ok((amount, fin)) => {
-                        assert!(amount <= to_read);
-                        *remaining_data_len -= amount;
+                let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[..to_read])?;
+                assert!(amount <= to_read);
+                *remaining_data_len -= amount;
 
-                        if fin {
-                            if *remaining_data_len > 0 {
-                                return Err(Error::MalformedFrame(H3_FRAME_TYPE_DATA));
-                            }
-                            self.state = RequestStreamClientState::Closed;
-                        } else if *remaining_data_len == 0 {
-                            self.state = RequestStreamClientState::WaitingForData;
-                        }
-                        Ok((amount, fin))
+                if fin {
+                    if *remaining_data_len > 0 {
+                        return Err(Error::MalformedFrame(H3_FRAME_TYPE_DATA));
                     }
-                    Err(_) => {
-                        qerror!("unexpected error.");
-                        Err(Error::InternalError)
+                    self.state = RequestStreamClientState::Closed;
+                } else {
+                    if *remaining_data_len == 0 {
+                        self.state = RequestStreamClientState::WaitingForData;
                     }
                 }
+                Ok((amount, fin))
             }
             _ => Ok((0, false)),
         }
