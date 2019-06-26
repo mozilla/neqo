@@ -361,11 +361,10 @@ impl RequestStreamClient {
                         return Err(Error::MalformedFrame(H3_FRAME_TYPE_DATA));
                     }
                     self.state = RequestStreamClientState::Closed;
-                } else {
-                    if *remaining_data_len == 0 {
-                        self.state = RequestStreamClientState::WaitingForData;
-                    }
+                } else if *remaining_data_len == 0 {
+                    self.state = RequestStreamClientState::WaitingForData;
                 }
+
                 Ok((amount, fin))
             }
             _ => Ok((0, false)),
