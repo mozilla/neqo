@@ -13,8 +13,10 @@ use std::mem;
 use std::rc::Rc;
 use std::time::Instant;
 
-use neqo_common::{qerror, qinfo, qtrace, qwarn, Encoder};
 use slice_deque::SliceDeque;
+use smallvec::SmallVec;
+
+use neqo_common::{qerror, qinfo, qtrace, qwarn, Encoder};
 
 use crate::flow_mgr::FlowMgr;
 use crate::frame::TxMode;
@@ -167,7 +169,7 @@ impl RangeTracker {
             .map(|(len, _)| *len);
 
         if let Some(len_from_zero) = acked_range_from_zero {
-            let mut to_remove = Vec::new();
+            let mut to_remove = SmallVec::<[_; 8]>::new();
 
             let mut new_len_from_zero = len_from_zero;
 
@@ -215,7 +217,7 @@ impl RangeTracker {
         let len = len as u64;
         let end_off = off + len;
 
-        let mut to_remove = Vec::new();
+        let mut to_remove = SmallVec::<[_; 8]>::new();
         let mut to_add = None;
 
         // Walk backwards through possibly affected existing ranges
