@@ -19,7 +19,6 @@ use crate::Connection;
 const GRANULARITY: Duration = Duration::from_millis(20);
 const INITIAL_RTT: Duration = Duration::from_millis(100);
 
-const TIME_THRESHOLD: f64 = 9.0 / 8.0;
 const PACKET_THRESHOLD: u64 = 3;
 
 #[derive(Debug)]
@@ -268,17 +267,14 @@ impl LossRecovery {
     fn detect_lost_packets(&mut self, pn_space: PNSpace, now: Instant) -> Vec<SentPacket> {
         self.space_mut(pn_space).loss_time = None;
 
-        let loss_delay = Duration::from_micros(
-            (TIME_THRESHOLD
-                * (max(
-                    match self.rtt_vals.smoothed_rtt {
-                        None => self.rtt_vals.latest_rtt,
-                        Some(smoothed_rtt) => max(self.rtt_vals.latest_rtt, smoothed_rtt),
-                    },
-                    GRANULARITY,
-                ))
-                .as_micros() as f64) as u64,
-        );
+        // kTimeThreshold = 9/8
+        // loss_delay = kTimeThreshold * max(latest_rtt, smoothed_rtt)
+        // loss_delay = max(loss_delay, kGranularity)
+        let rtt = match self.rtt_vals.smoothed_rtt {
+            None => self.rtt_vals.latest_rtt,
+            Some(smoothed_rtt) => max(self.rtt_vals.latest_rtt, smoothed_rtt),
+        };
+        let loss_delay = max(rtt * 9 / 8, GRANULARITY);
 
         let loss_deadline = now - loss_delay;
         qdebug!([self]
@@ -478,9 +474,7 @@ impl ::std::fmt::Display for LossRecovery {
 mod tests {
     use super::*;
     use std::convert::TryInto;
-    use std::thread_local;
     use std::time::{Duration, Instant};
-    use test_fixture::now;
 
     fn assert_rtts(
         lr: &LossRecovery,
@@ -501,6 +495,7 @@ mod tests {
         assert_eq!(lr.rtt_vals.rttvar, rttvar, "RTT variance");
         assert_eq!(lr.rtt_vals.min_rtt, min_rtt, "min RTT");
     }
+
     fn assert_loss_times(
         lr: &LossRecovery,
         initial: Option<Instant>,
@@ -529,7 +524,7 @@ mod tests {
             "AppData loss time"
         );
     }
-    fn assert_no_loss(lr: &LossRecovery) {
+    fn assert_no_loss_times(lr: &LossRecovery) {
         assert_loss_times(lr, None, None, None);
     }
 
@@ -540,13 +535,12 @@ mod tests {
         };
     }
 
-    const PACING: Duration = ms!(10);
+    // In most of the tests below, packets are sent at a fixed cadence, with PACING between each.
+    const PACING: Duration = ms!(7);
     fn pn_time(pn: u64) -> Instant {
-        thread_local! {
-            static START: Instant = Instant::now();
-        }
-        START.with(|s| *s + (PACING * pn.try_into().unwrap()))
+        ::test_fixture::now() + (PACING * pn.try_into().unwrap())
     }
+
     fn pace(lr: &mut LossRecovery, count: u64) {
         for pn in 0..count {
             lr.on_packet_sent(
@@ -560,16 +554,16 @@ mod tests {
         }
     }
 
-    const ACK_DELAY: Duration = ms!(20);
-    /// Acknowledge all packets up to PN.
-    fn ack(lr: &mut LossRecovery, pn: u64, delay: Duration) {
+    const ACK_DELAY: Duration = ms!(24);
+    /// Acknowledge PN with the identified delay.
+    fn ack(lr: &mut LossRecovery, pn: u64, delay: Duration) -> (Vec<SentPacket>, Vec<SentPacket>) {
         lr.on_ack_received(
             PNSpace::ApplicationData,
             pn,
-            vec![(pn, 0)],
+            vec![(pn, pn)],
             ACK_DELAY,
             pn_time(pn) + delay,
-        );
+        )
     }
 
     #[test]
@@ -579,17 +573,20 @@ mod tests {
         let rtt = ms!(100);
         ack(&mut lr, 0, rtt);
         assert_rtts(&lr, rtt, rtt, rtt / 2, rtt);
-        assert_no_loss(&lr);
+        assert_no_loss_times(&lr);
     }
 
+    /// An INITIAL_RTT for using with setup_lr().
     const INITIAL_RTT: Duration = ms!(80);
     const INITIAL_RTTVAR: Duration = ms!(40);
+
+    /// Send `n` packets (using PACING), then acknowledge the first.
     fn setup_lr(n: u64) -> LossRecovery {
         let mut lr = LossRecovery::new();
         pace(&mut lr, n);
         ack(&mut lr, 0, INITIAL_RTT);
         assert_rtts(&lr, INITIAL_RTT, INITIAL_RTT, INITIAL_RTTVAR, INITIAL_RTT);
-        assert_no_loss(&lr);
+        assert_no_loss_times(&lr);
         lr
     }
 
@@ -606,7 +603,7 @@ mod tests {
             INITIAL_RTTVAR * 3 / 4,
             INITIAL_RTT,
         );
-        assert_no_loss(&lr);
+        assert_no_loss_times(&lr);
     }
 
     // The ack delay is ignored when it would cause a sample to be less than min_rtt.
@@ -625,7 +622,7 @@ mod tests {
             expected_rttvar,
             INITIAL_RTT,
         );
-        assert_no_loss(&lr);
+        assert_no_loss_times(&lr);
     }
 
     // A lower observed RTT is used as min_rtt (and ack delay is ignored).
@@ -638,7 +635,7 @@ mod tests {
         let expected_rtt = INITIAL_RTT - (delta / 8);
         let expected_rttvar = (INITIAL_RTTVAR * 3 + delta) / 4;
         assert_rtts(&lr, reduced_rtt, expected_rtt, expected_rttvar, reduced_rtt);
-        assert_no_loss(&lr);
+        assert_no_loss_times(&lr);
     }
 
     // Acknowledging something again has no effect.
@@ -647,7 +644,7 @@ mod tests {
         let mut lr = setup_lr(1);
         let check = |lr: &LossRecovery| {
             assert_rtts(&lr, INITIAL_RTT, INITIAL_RTT, INITIAL_RTTVAR, INITIAL_RTT);
-            assert_no_loss(&lr);
+            assert_no_loss_times(&lr);
         };
         check(&lr);
 
@@ -672,206 +669,95 @@ mod tests {
         assert_eq!(lr.get_timer(), Some(pn_time(1) + (super::INITIAL_RTT * 2)));
     }
 
-    // Test crypto timeout.
     #[test]
-    fn test_loss_recovery2() {
-        let mut lr_module = LossRecovery::new();
+    fn crypto_timeout() {
+        let mut lr = LossRecovery::new();
+        lr.on_packet_sent(PNSpace::Initial, 0, true, true, vec![], pn_time(0));
+        let crypto_time = lr.get_timer().expect("should have crypto timer");
 
-        let start = now();
+        let (lost, _send_crypto, send_pto) = lr.on_loss_detection_timeout(crypto_time);
+        assert!(lost.is_empty());
+        // assert!(send_crypto);   //TODO(dragana) fix this when fixing on_loss_detection_timeout
+        assert!(!send_pto);
+    }
 
-        // Send a packet containing a CRYPTO frame.
-        lr_module.on_packet_sent(PNSpace::ApplicationData, 0, true, true, Vec::new(), start);
-        assert_eq!(
-            lr_module.get_timer(),
-            Some(start + Duration::from_millis(200))
+    // Test time loss detection as part of handling a regular ACK.
+    #[test]
+    fn time_loss_detection_gap() {
+        let mut lr = LossRecovery::new();
+        // Create a single packet gap, and have pn 0 time out.
+        // This can't use the default pacing, which is too tight.
+        // So send two packets with 1/4 RTT between them.  Acknowledge pn 1 after 1 RTT.
+        // pn 0 should then be marked lost because it is then outstanding for 5RTT/4
+        // the loss time for packets is 9RTT/8.
+        lr.on_packet_sent(
+            PNSpace::ApplicationData,
+            0,
+            true,
+            false,
+            Vec::new(),
+            pn_time(0),
         );
-        lr_module.on_packet_sent(
+        lr.on_packet_sent(
             PNSpace::ApplicationData,
             1,
             true,
             false,
             Vec::new(),
-            start + Duration::from_millis(10),
+            pn_time(0) + INITIAL_RTT / 4,
         );
-        // Last crypto packet sent at time "start", so timeout at
-        // start+10millis should be 190.
-        assert_eq!(
-            lr_module.get_timer(),
-            Some(start + Duration::from_millis(200))
-        );
-        lr_module.on_packet_sent(
+        let (_, lost) = lr.on_ack_received(
             PNSpace::ApplicationData,
-            2,
-            true,
-            false,
-            Vec::new(),
-            start + Duration::from_millis(20),
+            1,
+            vec![(1, 1)],
+            ACK_DELAY,
+            pn_time(0) + (INITIAL_RTT * 5 / 4),
         );
-        assert_eq!(
-            lr_module.get_timer(),
-            Some(start + Duration::from_millis(200))
-        );
-        lr_module.on_packet_sent(
-            PNSpace::ApplicationData,
-            3,
-            true,
-            false,
-            Vec::new(),
-            start + Duration::from_millis(30),
-        );
-        lr_module.on_packet_sent(
-            PNSpace::ApplicationData,
-            4,
-            true,
-            false,
-            Vec::new(),
-            start + Duration::from_millis(40),
-        );
-        lr_module.on_packet_sent(
-            PNSpace::ApplicationData,
-            5,
-            true,
-            false,
-            Vec::new(),
-            start + Duration::from_millis(50),
-        );
-
-        lr_module.on_packet_sent(
-            PNSpace::ApplicationData,
-            6,
-            true,
-            false,
-            Vec::new(),
-            start + Duration::from_millis(60),
-        );
-
-        // This is a PTO for crypto packet.
-        assert_eq!(
-            lr_module.get_timer(),
-            Some(start + Duration::from_millis(200))
-        );
-
-        // Receive an ack for packet 0.
-        lr_module.on_ack_received(
-            PNSpace::ApplicationData,
-            0,
-            vec![(0, 0)],
-            Duration::from_micros(2000),
-            start + Duration::from_millis(100),
-        );
-        assert_rtts(
-            &lr_module,
-            Duration::from_micros(100_000),
-            Duration::from_micros(100_000),
-            Duration::from_micros(50_000),
-            Duration::from_micros(100_000),
-        );
-        assert_no_loss(&lr_module);
-        assert_eq!(
-            lr_module.get_timer(),
-            Some(start + Duration::from_millis(385))
-        );
-
-        // Receive an ack with a gap. acks 0 and 2.
-        lr_module.on_ack_received(
-            PNSpace::ApplicationData,
-            2,
-            vec![(0, 0), (2, 2)],
-            Duration::from_micros(2000),
-            start + Duration::from_millis(105),
-        );
-        assert_rtts(
-            &lr_module,
-            Duration::from_micros(85_000),
-            Duration::from_micros(98_125),
-            Duration::from_micros(41_250),
-            Duration::from_micros(85_000),
-        );
-        assert_loss_times(
-            &lr_module,
-            None,
-            None,
-            Some(start + Duration::from_micros(120_390)),
-        );
-        assert_eq!(
-            lr_module.get_timer(),
-            Some(start + Duration::from_micros(120_390))
-        );
-
-        // Timer expires, packet 1 is lost.
-        lr_module.on_loss_detection_timeout(start + Duration::from_micros(120_390));
-        assert_rtts(
-            &lr_module,
-            Duration::from_micros(85_000),
-            Duration::from_micros(98_125),
-            Duration::from_micros(41_250),
-            Duration::from_micros(85_000),
-        );
-        assert_no_loss(&lr_module);
-        assert_eq!(
-            lr_module.get_timer(),
-            Some(start + Duration::from_nanos(348_125_000))
-        );
-
-        // dupacks loss detection. ackes 0, 2 and 6, markes packet 3 as lost.
-        lr_module.on_ack_received(
-            PNSpace::ApplicationData,
-            6,
-            vec![(0, 0), (2, 2), (6, 6)],
-            Duration::from_micros(2000),
-            start + Duration::from_nanos(130_000_000),
-        );
-        assert_rtts(
-            &lr_module,
-            Duration::from_micros(70_000),
-            Duration::from_nanos(94_609_375),
-            Duration::from_nanos(37_968_750),
-            Duration::from_micros(70_000),
-        );
-        assert_loss_times(
-            &lr_module,
-            None,
-            None,
-            Some(start + Duration::from_micros(146_435)),
-        );
-        assert_eq!(
-            lr_module.get_timer(),
-            Some(start + Duration::from_nanos(146_435_000))
-        );
-
-        // Timer expires, packet 4 is lost.
-        lr_module.on_loss_detection_timeout(start + Duration::from_nanos(146_500_000));
-        assert_rtts(
-            &lr_module,
-            Duration::from_micros(70_000),
-            Duration::from_nanos(94_609_375),
-            Duration::from_nanos(37_968_750),
-            Duration::from_micros(70_000),
-        );
-        assert_loss_times(
-            &lr_module,
-            None,
-            None,
-            Some(start + Duration::from_micros(156_435)),
-        );
-        assert_eq!(
-            lr_module.get_timer(),
-            Some(start + Duration::from_nanos(156_435_000))
-        );
-
-        // Timer expires, packet 5 is lost.
-        lr_module.on_loss_detection_timeout(start + Duration::from_nanos(156_500_000));
-        assert_rtts(
-            &lr_module,
-            Duration::from_micros(70_000),
-            Duration::from_nanos(94_609_375),
-            Duration::from_nanos(37_968_750),
-            Duration::from_micros(70_000),
-        );
-        assert_no_loss(&lr_module);
-
-        // there is no more outstanding data - timer is set to 0.
-        assert_eq!(lr_module.get_timer(), None);
+        assert_eq!(lost.len(), 1);
+        assert_no_loss_times(&lr);
     }
 
+    // Test time loss detection as part of an explicit timeout.
+    #[test]
+    fn time_loss_detection_timeout() {
+        let mut lr = setup_lr(3);
+        // Create a small gap so that pn 1 can be regarded as lost.
+        // Make sure to provide this before the loss timer for pn 1 expires.
+        // This relies on having `PACING < INITIAL_RTT/8`.  We want to keep the RTT constant,
+        // but we also want to ensure that acknowledging pn 2 doesn't cause pn 1 to be lost.
+        // Because pn 1 was sent at `pn_time(2) - PACING` and
+        // `pn_time(2) - PACING + (INITIAL_RTT * 9 /8)` needs to be in the future.
+        assert!(PACING < (INITIAL_RTT / 8));
+        let (_, lost) = lr.on_ack_received(
+            PNSpace::ApplicationData,
+            2,
+            vec![(2, 2)],
+            ACK_DELAY,
+            pn_time(2) + INITIAL_RTT,
+        );
+        assert!(lost.is_empty());
+        let pn1_loss_time = pn_time(1) + (INITIAL_RTT * 9 / 8);
+        assert_loss_times(&lr, None, None, Some(pn1_loss_time));
+
+        // After time elapses, pn 1 is marked lost.
+        assert_eq!(lr.get_timer(), Some(pn1_loss_time));
+        let (lost, ..) = lr.on_loss_detection_timeout(pn1_loss_time);
+        assert_eq!(lost.len(), 1);
+        assert_no_loss_times(&lr);
+    }
+
+    #[test]
+    fn big_gap_loss() {
+        let mut lr = setup_lr(5); // This sends packets 0-4 and acknowledges pn 0.
+                                  // Acknowledge just 2-4, which will cause pn 1 to be marked as lost.
+        assert_eq!(super::PACKET_THRESHOLD, 3);
+        let (_, lost) = lr.on_ack_received(
+            PNSpace::ApplicationData,
+            4,
+            vec![(4, 2)],
+            ACK_DELAY,
+            pn_time(4),
+        );
+        assert_eq!(lost.len(), 1);
+    }
 }
