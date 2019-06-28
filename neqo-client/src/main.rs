@@ -5,7 +5,7 @@
 // except according to those terms.
 
 #![deny(warnings)]
-use neqo_common::{now, Datagram};
+use neqo_common::Datagram;
 use neqo_crypto::init_db;
 use neqo_http3::{Http3Connection, Http3Event, Http3State};
 use neqo_transport::Connection;
@@ -16,6 +16,7 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 use std::string::ParseError;
+use std::time::Instant;
 use structopt::StructOpt;
 use url::Url;
 
@@ -141,7 +142,7 @@ fn process_loop(
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
     loop {
-        client.process_input(in_dgrams.drain(..), now());
+        client.process_input(in_dgrams.drain(..), Instant::now());
 
         if let Http3State::Closed(..) = client.state() {
             return client.state();
@@ -149,7 +150,7 @@ fn process_loop(
 
         let exiting = !handler.handle(client);
 
-        let (out_dgrams, _timer) = client.process_output(now());
+        let (out_dgrams, _timer) = client.process_output(Instant::now());
         emit_packets(&socket, &out_dgrams);
 
         if exiting {
@@ -189,7 +190,7 @@ struct PostConnectHandler {
 impl Handler for PostConnectHandler {
     fn handle(&mut self, client: &mut Http3Connection) -> bool {
         let mut data = vec![0; 4000];
-        client.process_http3(now());
+        client.process_http3(Instant::now());
         for event in client.events() {
             match event {
                 Http3Event::HeaderReady { stream_id } => {
@@ -208,7 +209,7 @@ impl Handler for PostConnectHandler {
                     }
 
                     let (_sz, fin) = client
-                        .read_data(now(), stream_id, &mut data)
+                        .read_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
                     println!(
                         "READ[{}]: {}",
@@ -217,7 +218,7 @@ impl Handler for PostConnectHandler {
                     );
                     if fin {
                         println!("<FIN[{}]>", stream_id);
-                        client.close(now(), 0, "kthxbye!");
+                        client.close(Instant::now(), 0, "kthxbye!");
                         return false;
                     }
                 }
@@ -296,8 +297,9 @@ mod old {
     use std::collections::HashSet;
     use std::net::{SocketAddr, UdpSocket};
     use std::process::exit;
+    use std::time::Instant;
 
-    use neqo_common::{now, Datagram};
+    use neqo_common::Datagram;
     use neqo_transport::{Connection, ConnectionEvent, State, StreamType};
 
     use super::{emit_packets, Args};
@@ -340,7 +342,7 @@ mod old {
                         );
                         if fin {
                             println!("<FIN[{}]>", stream_id);
-                            client.close(now(), 0, "kthxbye!");
+                            client.close(Instant::now(), 0, "kthxbye!");
                             return false;
                         }
                     }
@@ -367,7 +369,7 @@ mod old {
         let buf = &mut [0u8; 2048];
         let mut in_dgrams = Vec::new();
         loop {
-            client.process_input(in_dgrams.drain(..), now());
+            client.process_input(in_dgrams.drain(..), Instant::now());
 
             if let State::Closed(..) = client.state() {
                 return client.state().clone();
@@ -375,7 +377,7 @@ mod old {
 
             let exiting = !handler.handle(client);
 
-            let (out_dgrams, _timer) = client.process_output(now());
+            let (out_dgrams, _timer) = client.process_output(Instant::now());
             emit_packets(&socket, &out_dgrams);
 
             if exiting {

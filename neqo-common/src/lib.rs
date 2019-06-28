@@ -16,8 +16,6 @@ pub use self::codec::{Decoder, Encoder};
 pub use self::datagram::Datagram;
 pub use self::incrdecoder::{IncrementalDecoder, IncrementalDecoderResult};
 
-use std::time::Instant;
-
 // Cribbed from the |matches| crate, for simplicity.
 #[macro_export]
 macro_rules! matches {
@@ -27,10 +25,6 @@ macro_rules! matches {
             _ => false
         }
     }
-}
-
-pub fn now() -> Instant {
-    Instant::now()
 }
 
 pub fn hex(buf: &[u8]) -> String {

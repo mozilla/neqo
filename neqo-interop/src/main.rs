@@ -6,7 +6,7 @@
 
 #![deny(warnings)]
 
-use neqo_common::{now, Datagram};
+use neqo_common::Datagram;
 use neqo_crypto::init;
 use neqo_http3::{Http3Connection, Http3Event};
 use neqo_transport::{Connection, ConnectionEvent, State, StreamType};
@@ -50,25 +50,45 @@ fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
     }
 }
 
+struct Timer {
+    end: Instant,
+}
+impl Timer {
+    pub fn new(timeout: Duration) -> Timer {
+        Timer {
+            end: Instant::now() + timeout,
+        }
+    }
+
+    pub fn check(&self) -> Result<Duration, String> {
+        let now = Instant::now();
+        if now > self.end {
+            Err(String::from("Timed out"))
+        } else {
+            Ok(self.end - now)
+        }
+    }
+}
+
 fn process_loop(
     nctx: &NetworkCtx,
     client: &mut Connection,
     handler: &mut Handler,
-    timeout: &Duration,
+    timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
-    let start = Instant::now();
+    let timer = Timer::new(timeout);
 
     loop {
-        client.process_input(in_dgrams.drain(..), now());
+        client.process_input(in_dgrams.drain(..), Instant::now());
 
         if let State::Closed(..) = client.state() {
             return Ok(client.state().clone());
         }
 
         let exiting = !handler.handle(client);
-        let (mut out_dgrams, _timer) = client.process_output(now());
+        let (mut out_dgrams, _timer) = client.process_output(Instant::now());
         handler.rewrite_out(&mut out_dgrams);
         emit_packets(&nctx.socket, &out_dgrams);
 
@@ -76,12 +96,10 @@ fn process_loop(
             return Ok(client.state().clone());
         }
 
-        let spent = Instant::now() - start;
-        if spent > *timeout {
-            return Err(String::from("Timed out"));
-        }
+        let time_remaining = timer.check()?;
+
         nctx.socket
-            .set_read_timeout(Some(*timeout - spent))
+            .set_read_timeout(Some(time_remaining))
             .expect("Read timeout");
         let sz = match nctx.socket.recv(&mut buf[..]) {
             Ok(sz) => sz,
@@ -143,7 +161,7 @@ impl Handler for H9Handler {
                     self.rbytes += sz;
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
-                        client.close(now(), 0, "kthxbye!");
+                        client.close(Instant::now(), 0, "kthxbye!");
                         self.rsfin = true;
                         return false;
                     }
@@ -208,33 +226,32 @@ struct H3Handler {
 fn process_loop_h3(
     nctx: &NetworkCtx,
     handler: &mut H3Handler,
-    timeout: &Duration,
+    timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
     let mut in_dgrams = Vec::new();
-    let start = Instant::now();
+    let timer = Timer::new(timeout);
 
     loop {
-        handler.h3.process_input(in_dgrams.drain(..), now());
+        handler
+            .h3
+            .process_input(in_dgrams.drain(..), Instant::now());
 
         if let State::Closed(..) = handler.h3.conn().state() {
             return Ok(handler.h3.conn().state().clone());
         }
 
         let exiting = !handler.handle();
-        let (out_dgrams, _timer) = handler.h3.conn().process_output(now());
+        let (out_dgrams, _timer) = handler.h3.conn().process_output(Instant::now());
         emit_packets(&nctx.socket, &out_dgrams);
 
         if exiting {
             return Ok(handler.h3.conn().state().clone());
         }
 
-        let spent = Instant::now() - start;
-        if spent > *timeout {
-            return Err(String::from("Timed out"));
-        }
+        let remaining_time = timer.check()?;
         nctx.socket
-            .set_read_timeout(Some(*timeout - spent))
+            .set_read_timeout(Some(remaining_time))
             .expect("Read timeout");
         let sz = match nctx.socket.recv(&mut buf[..]) {
             Ok(sz) => sz,
@@ -260,7 +277,7 @@ fn process_loop_h3(
 impl H3Handler {
     fn handle(&mut self) -> bool {
         let mut data = vec![0; 4000];
-        self.h3.process_http3(now());
+        self.h3.process_http3(Instant::now());
         for event in self.h3.events() {
             match event {
                 Http3Event::HeaderReady { stream_id } => {
@@ -280,7 +297,7 @@ impl H3Handler {
 
                     let (_sz, fin) = self
                         .h3
-                        .read_data(now(), stream_id, &mut data)
+                        .read_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
                     println!(
                         "READ[{}]: {}",
@@ -289,7 +306,7 @@ impl H3Handler {
                     );
                     if fin {
                         println!("<FIN[{}]>", stream_id);
-                        self.h3.close(now(), 0, "kthxbye!");
+                        self.h3.close(Instant::now(), 0, "kthxbye!");
                         return false;
                     }
                 }
@@ -383,7 +400,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connecti
             .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
-    let res = process_loop(nctx, &mut client, &mut h, &Duration::new(5, 0));
+    let res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));
 
     let st = match res {
         Ok(st) => st,
@@ -406,7 +423,7 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
         .unwrap();
     let mut hc = H9Handler::default();
     hc.streams.insert(client_stream_id);
-    let res = process_loop(nctx, client, &mut hc, &Duration::new(5, 0));
+    let res = process_loop(nctx, client, &mut hc, Duration::new(5, 0));
 
     if let Err(e) = res {
         return Err(format!("ERROR: {}", e));
@@ -434,7 +451,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         .unwrap();
 
     hc.streams.insert(client_stream_id);
-    if let Err(e) = process_loop_h3(nctx, &mut hc, &Duration::new(5, 0)) {
+    if let Err(e) = process_loop_h3(nctx, &mut hc, Duration::new(5, 0)) {
         return Err(format!("ERROR: {}", e));
     }
 
@@ -463,7 +480,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
             .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = VnHandler {};
-    let _res = process_loop(nctx, &mut client, &mut h, &Duration::new(5, 0));
+    let _res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));
 
     Ok(client)
 }

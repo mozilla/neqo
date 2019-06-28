@@ -6,7 +6,7 @@
 
 #![deny(warnings)]
 
-use neqo_common::{now, Datagram};
+use neqo_common::Datagram;
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_transport::{Connection, ConnectionEvent, State};
 use regex::Regex;
@@ -158,7 +158,7 @@ fn main() {
         });
 
         // TODO use timer to set socket.set_read_timeout.
-        server.process_input(in_dgrams.drain(..), now());
+        server.process_input(in_dgrams.drain(..), Instant::now());
         if let State::Closed(e) = server.state() {
             eprintln!("Closed connection from {:?}: {:?}", remote_addr, e);
             connections.remove(&remote_addr);
@@ -180,7 +180,7 @@ fn main() {
             http_serve(&mut server, stream_id);
         }
 
-        let (out_dgrams, _timer) = server.process_output(now());
+        let (out_dgrams, _timer) = server.process_output(Instant::now());
         emit_packets(&socket, &out_dgrams);
     }
 }

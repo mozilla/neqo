@@ -6,7 +6,7 @@
 
 #![deny(warnings)]
 
-use neqo_common::{now, qinfo, Datagram};
+use neqo_common::{qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Connection, Http3State};
 use neqo_transport::Connection;
@@ -233,7 +233,7 @@ fn main() -> Result<(), io::Error> {
                 )
             });
 
-            server.process_input(dgrams.drain(..), now());
+            server.process_input(dgrams.drain(..), Instant::now());
             if let Http3State::Closed(e) = server.state() {
                 println!("Closed connection from {:?}: {:?}", remote_addr, e);
                 if let Some(svr_timeout) = svr_timeout {
@@ -243,9 +243,9 @@ fn main() -> Result<(), io::Error> {
                 continue;
             }
 
-            server.process_http3(now());
+            server.process_http3(Instant::now());
 
-            let (conn_out_dgrams, maybe_timeout) = server.process_output(now());
+            let (conn_out_dgrams, maybe_timeout) = server.process_output(Instant::now());
             *svr_timeout = maybe_timeout.map(|timeout| {
                 if let Some(svr_timeout) = svr_timeout {
                     timer.cancel_timeout(svr_timeout);
