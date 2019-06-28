@@ -79,16 +79,8 @@ impl RttVals {
                     self.latest_rtt - smoothed_rtt
                 };
 
-                self.rttvar = Duration::from_micros(
-                    (3.0 / 4.0 * (self.rttvar.as_micros() as f64)
-                        + 1.0 / 4.0 * (rttvar_sample.as_micros() as f64))
-                        as u64,
-                );
-                self.smoothed_rtt = Some(Duration::from_micros(
-                    (7.0 / 8.0 * (smoothed_rtt.as_micros() as f64)
-                        + 1.0 / 8.0 * (self.latest_rtt.as_micros() as f64))
-                        as u64,
-                ));
+                self.rttvar = (self.rttvar * 3 / 4) + (rttvar_sample / 4);
+                self.smoothed_rtt = Some((smoothed_rtt * 7 / 8) + (self.latest_rtt / 8));
             }
         }
     }
@@ -611,7 +603,7 @@ mod tests {
             &lr_module,
             Duration::from_millis(50),
             Duration::from_millis(50),
-            Duration::from_micros(14_062),
+            Duration::from_nanos(14_062_500),
             Duration::from_millis(50),
             [None, None, None],
         );
@@ -628,7 +620,7 @@ mod tests {
             &lr_module,
             Duration::from_micros(45_000),
             Duration::from_micros(49_375),
-            Duration::from_micros(11_796),
+            Duration::from_nanos(11_796_875),
             Duration::from_micros(45_000),
             [None, None, None],
         );
@@ -644,8 +636,8 @@ mod tests {
         assert_values(
             &lr_module,
             Duration::from_micros(53_000),
-            Duration::from_micros(49828),
-            Duration::from_micros(9_753),
+            Duration::from_nanos(49_828_125),
+            Duration::from_nanos(9_753_906),
             Duration::from_micros(45_000),
             [None, None, None],
         );
@@ -661,8 +653,8 @@ mod tests {
         assert_values(
             &lr_module,
             Duration::from_micros(75000),
-            Duration::from_micros(52974),
-            Duration::from_micros(13607),
+            Duration::from_nanos(52_974_609),
+            Duration::from_nanos(13_608_397),
             Duration::from_micros(45000),
             [None, None, None],
         );
@@ -678,8 +670,8 @@ mod tests {
         assert_values(
             &lr_module,
             Duration::from_micros(75000),
-            Duration::from_micros(52974),
-            Duration::from_micros(13607),
+            Duration::from_nanos(52_974_609),
+            Duration::from_nanos(13_608_397),
             Duration::from_micros(45000),
             [None, None, None],
         );
@@ -831,8 +823,8 @@ mod tests {
         assert_values(
             &lr_module,
             Duration::from_micros(70_000),
-            Duration::from_micros(94_609),
-            Duration::from_micros(37_968),
+            Duration::from_nanos(94_609_375),
+            Duration::from_nanos(37_968_750),
             Duration::from_micros(70_000),
             [None, None, Some(start + Duration::from_micros(146_435))],
         );
@@ -846,8 +838,8 @@ mod tests {
         assert_values(
             &lr_module,
             Duration::from_micros(70_000),
-            Duration::from_micros(94_609),
-            Duration::from_micros(37_968),
+            Duration::from_nanos(94_609_375),
+            Duration::from_nanos(37_968_750),
             Duration::from_micros(70_000),
             [None, None, Some(start + Duration::from_micros(156_435))],
         );
@@ -861,8 +853,8 @@ mod tests {
         assert_values(
             &lr_module,
             Duration::from_micros(70_000),
-            Duration::from_micros(94_609),
-            Duration::from_micros(37_968),
+            Duration::from_nanos(94_609_375),
+            Duration::from_nanos(37_968_750),
             Duration::from_micros(70_000),
             [None, None, None],
         );
