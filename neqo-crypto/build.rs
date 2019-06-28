@@ -81,9 +81,7 @@ fn nss_dir() -> PathBuf {
                 Command::new("hg")
                     .args(&[
                         "clone",
-                        "-r", // TODO(mt) use the real repo when these patches land
-                        "c92be7ed922a0781973ccc69356d797cb1507b6f",
-                        "https://hg.mozilla.org/projects/nss-try",
+                        "https://hg.mozilla.org/projects/nss",
                         dir.to_str().unwrap(),
                     ])
                     .status()
