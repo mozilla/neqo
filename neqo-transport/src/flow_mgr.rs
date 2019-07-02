@@ -13,6 +13,7 @@ use std::mem;
 use std::time::Instant;
 
 use neqo_common::{qinfo, qtrace, qwarn, Encoder};
+use neqo_crypto::Epoch;
 
 use crate::frame::{Frame, FrameGenerator, FrameGeneratorToken, StreamType, TxMode};
 use crate::stream_id::{StreamId, StreamIndex};
@@ -185,10 +186,14 @@ impl FrameGenerator for FlowControlGenerator {
         &mut self,
         conn: &mut Connection,
         _now: Instant,
-        _epoch: u16,
+        epoch: Epoch,
         _mode: TxMode,
         remaining: usize,
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+        if epoch != 3 {
+            return None;
+        }
+
         if let Some(frame) = conn.flow_mgr.borrow().peek() {
             // A suboptimal way to figure out if the frame fits within remaining
             // space.

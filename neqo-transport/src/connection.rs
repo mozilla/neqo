@@ -1696,10 +1696,14 @@ impl FrameGenerator for CloseGenerator {
         &mut self,
         c: &mut Connection,
         _now: Instant,
-        _e: Epoch,
+        epoch: Epoch,
         _mode: TxMode,
         _remaining: usize,
     ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+        if epoch != 3 {
+            return None;
+        }
+
         if let State::Closing {
             error: cerr,
             frame_type,
