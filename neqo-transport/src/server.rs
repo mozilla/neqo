@@ -6,16 +6,17 @@
 
 // Implementing features specific to the server role.
 
-use neqo_common::{hex, qinfo, qtrace, Datagram};
+use neqo_common::{hex, qtrace, Datagram};
 
+use crate::QUIC_VERSION;
 use crate::packet::{
-    decode_packet_hdr, encode_retry, ConnectionId, PacketDecoder, PacketHdr, PacketType,
+    encode_retry, ConnectionId, PacketDecoder, PacketHdr, PacketType, Version,
 };
 use crate::{Error, Res};
 
 #[derive(Debug, Default)]
 pub struct Server {
-    version: crate::packet::Version,
+    version: Version,
     cidlen: usize,
 }
 
@@ -27,6 +28,10 @@ pub enum RetryResult {
 const FIXED_TOKEN: &[u8] = &[1, 2, 3];
 
 impl Server {
+    pub fn new(cidlen: usize) -> Server {
+        Server { version: QUIC_VERSION,  cidlen }
+    }
+
     fn token_is_ok(&self, token: &[u8]) -> bool {
         token == &FIXED_TOKEN[..]
     }
@@ -39,12 +44,10 @@ impl Server {
         ConnectionId::generate(self.cidlen)
     }
 
-    pub fn check_retry(&self, received: Datagram) -> Res<RetryResult> {
-        qinfo!("Generating a Retry packet");
+    pub fn check_retry(&self, hdr: &PacketHdr, received: Datagram) -> Res<RetryResult> {
         qtrace!("Received packet: {}", hex(&received[..]));
 
-        let hdr = decode_packet_hdr(self, &received[..])?;
-        if let PacketType::Initial(token) = hdr.tipe {
+        if let PacketType::Initial(token) = &hdr.tipe {
             if self.token_is_ok(&token) {
                 return Ok(RetryResult::Ok);
             }
@@ -58,7 +61,7 @@ impl Server {
         let hdr = PacketHdr::new(
             0, // tbyte (unused on encode)
             PacketType::Retry {
-                odcid: hdr.dcid,
+                odcid: hdr.dcid.clone(),
                 token: self.generate_token(),
             },
             Some(self.version),
@@ -72,7 +75,7 @@ impl Server {
         Ok(RetryResult::SendRetry(dgram))
     }
 
-    // pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> (Option<Datagram>, Option<Duration>) {
+    // pub fn process_input(&mut self, dgram: Datagram, now: Instant) -> (Option<Datagram>, Option<Duration>) {
     //     let hdr = match decode_packet_hdr(self, &received[..]) {
     //         Ok(h) => h,
     //         Err(e) => {
@@ -80,6 +83,11 @@ impl Server {
     //             return (None, self.next_timer())
     //         }
     //     };
+    //     let retry = self.check_retry(&hdr, dgram)
+    //     if let RetryResult::SendRetry(dgram) = retry {
+    //         return (Some(dgram), self.next_timer());
+    //     }
+    //     (None, None) // TODO(mt)
     // }
 }
 
