@@ -470,11 +470,7 @@ impl Handler for VnHandler {
     fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
         let mut payload = d[..].to_vec();
         payload[1] = 0x1a;
-        Some(Datagram::new(
-            d.source().clone(),
-            d.destination().clone(),
-            payload,
-        ))
+        Some(Datagram::new(*d.source(), *d.destination(), payload))
     }
 }
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {

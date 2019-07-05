@@ -739,7 +739,7 @@ impl Connection {
             // Try to make our own crypo state and if we can't, skip this epoch.
             match self.crypto.obtain_crypto_state(self.role, epoch) {
                 Ok(cs) => {
-                    if !cs.tx.is_some() {
+                    if cs.tx.is_none() {
                         continue;
                     }
                 }
@@ -822,7 +822,7 @@ impl Connection {
             out_bytes.append(&mut packet);
         }
 
-        if out_bytes.len() == 0 {
+        if out_bytes.is_empty() {
             return Ok(None);
         }
 
