@@ -535,12 +535,7 @@ mod tests {
     use test_fixture::*;
 
     fn connect(huffman: bool) -> (QPackEncoder, Connection, Connection, u64, u64) {
-        let mut conn_c = default_client();
-        let mut conn_s = default_server();
-        let (d, _) = conn_c.process(None, now());
-        let (d, _) = conn_s.process(d, now());
-        let (d, _) = conn_c.process(d, now());
-        conn_s.process(d, now());
+        let (mut conn_c, mut conn_s) = test_fixture::connect();
 
         // create a stream
         let recv_stream_id = conn_s.stream_create(StreamType::UniDi).unwrap();
