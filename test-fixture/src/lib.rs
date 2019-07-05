@@ -6,9 +6,11 @@
 
 #![deny(warnings)]
 
+use neqo_common::matches;
 use neqo_common::once::OnceResult;
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_transport::Connection;
+use neqo_transport::{Connection, State};
+use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
@@ -66,4 +68,25 @@ pub fn default_server() -> Connection {
     fixture_init();
     Connection::new_server(DEFAULT_KEYS, DEFAULT_ALPN, &anti_replay())
         .expect("create a default server")
+}
+
+pub fn handshake(client: &mut Connection, server: &mut Connection) {
+    let mut a = client;
+    let mut b = server;
+    let mut datagram = None;
+    let is_done = |c: &Connection| matches!(c.state(), State::Connected | State::Closing { .. } | State::Closed(..));
+    while !is_done(a) {
+        let (d, _) = a.process(datagram, now());
+        datagram = d;
+        mem::swap(&mut a, &mut b);
+    }
+}
+
+pub fn connect() -> (Connection, Connection) {
+    let mut client = default_client();
+    let mut server = default_server();
+    handshake(&mut client, &mut server);
+    assert_eq!(*client.state(), State::Connected);
+    assert_eq!(*server.state(), State::Connected);
+    (client, server)
 }

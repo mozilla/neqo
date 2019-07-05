@@ -138,7 +138,7 @@ pub struct Connection {
     pub(crate) acks: AckTracker,
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
     generators: Vec<Box<FrameGenerator>>,
-    idle_timeout: Option<Instant>,
+    idle_timeout: Option<Instant>, // TODO(#38)
     pub(crate) indexes: StreamIndexes,
     connection_ids: HashMap<u64, (Vec<u8>, [u8; 16])>, // (sequence number, (connection id, reset token))
     pub(crate) send_streams: SendStreams,
@@ -398,32 +398,10 @@ impl Connection {
 
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
-    pub fn process_input<I>(&mut self, in_dgrams: I, now: Instant)
-    where
-        I: IntoIterator<Item = Datagram>,
-    {
-        for dgram in in_dgrams {
-            let res = self.input(dgram, now);
-            self.absorb_error(now, res);
-        }
-
+    pub fn process_input(&mut self, dgram: Datagram, now: Instant) {
+        let res = self.input(dgram, now);
+        self.absorb_error(now, res);
         self.cleanup_streams();
-
-        self.check_loss_detection_timeout(now);
-
-        if let Some(idle_timeout) = self.idle_timeout {
-            if now >= idle_timeout {
-                // Timer expired. Reconnect?
-                // TODO(agrover@mozilla.com) reinitialize many members of
-                // struct Connection
-                self.state = State::Init;
-            }
-        }
-
-        if self.state == State::Init {
-            let res = self.client_start(now);
-            self.absorb_error(now, res);
-        }
     }
 
     /// Get the time that we next need to be called back, relative to `now`.
@@ -445,8 +423,13 @@ impl Connection {
     /// by the application.
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
-    pub fn process_output(&mut self, now: Instant) -> (Vec<Datagram>, Option<Duration>) {
+    pub fn process_output(&mut self, now: Instant) -> (Option<Datagram>, Option<Duration>) {
         match &self.state {
+            State::Init => {
+                let res = self.client_start(now);
+                self.absorb_error(now, res);
+                (self.output(now), self.next_delay(now))
+            }
             State::Closing { error, timeout, .. } => {
                 if *timeout > now {
                     (self.output(now), None)
@@ -454,20 +437,26 @@ impl Connection {
                     // Close timeout expired, move to Closed
                     let st = State::Closed(error.clone());
                     self.set_state(st);
-                    (Vec::new(), None)
+                    (None, None)
                 }
             }
-            State::Closed(..) => (Vec::new(), None),
-            _ => (self.output(now), self.next_delay(now)),
+            State::Closed(..) => (None, None),
+            _ => {
+                self.check_loss_detection_timeout(now);
+                (self.output(now), self.next_delay(now))
+            }
         }
     }
 
     /// Process input and generate output.
-    pub fn process<I>(&mut self, in_dgrams: I, now: Instant) -> (Vec<Datagram>, Option<Duration>)
-    where
-        I: IntoIterator<Item = Datagram>,
-    {
-        self.process_input(in_dgrams, now);
+    pub fn process(
+        &mut self,
+        dgram: Option<Datagram>,
+        now: Instant,
+    ) -> (Option<Datagram>, Option<Duration>) {
+        if let Some(d) = dgram {
+            self.process_input(d, now);
+        }
         self.process_output(now)
     }
 
@@ -698,41 +687,46 @@ impl Connection {
         Datagram::new(local, remote, packet)
     }
 
-    fn output(&mut self, now: Instant) -> Vec<Datagram> {
+    fn output(&mut self, now: Instant) -> Option<Datagram> {
         if let Some((vn_hdr, remote, local)) = self.send_vn.take() {
-            return vec![self.output_vn(vn_hdr, remote, local)];
+            return Some(self.output_vn(vn_hdr, remote, local));
         }
 
+        let mut out = None;
         // Can't call a method on self while iterating over self.paths
-        let paths = mem::replace(&mut self.paths, None);
-        let mut out_dgrams = Vec::new();
-        let mut errors = Vec::new();
+        let paths = mem::replace(&mut self.paths, Default::default());
         for p in &paths {
             match self.output_path(&p, now) {
-                Ok(ref mut dgrams) => out_dgrams.append(dgrams),
-                Err(e) => errors.push(e),
+                Ok(Some(dgram)) => {
+                    out = Some(dgram);
+                    break;
+                }
+                Err(e) => {
+                    if !matches!(self.state, State::Closing{..}) {
+                        // An error here causes us to transition to closing.
+                        self.absorb_error(now, Err(e));
+                        // Rerun to give a chance to send a CONNECTION_CLOSE.
+                        out = match self.output_path(&p, now) {
+                            Ok(x) => x,
+                            Err(e) => {
+                                qwarn!([self] "two output_path errors in a row: {:?}", e);
+                                None
+                            }
+                        };
+                        break;
+                    }
+                }
+                _ => (),
             };
         }
         self.paths = paths;
-
-        let closing = match self.state {
-            State::Closing { .. } => true,
-            _ => false,
-        };
-        if !closing && !errors.is_empty() {
-            self.absorb_error(now, Err(errors.pop().unwrap()));
-            // We just closed, so run this again to produce CONNECTION_CLOSE.
-            self.output(now)
-        } else {
-            out_dgrams // TODO(ekr@rtfm.com): When to call back next.
-        }
+        out
     }
 
     // Iterate through all the generators, inserting as many frames as will
     // fit.
-    fn output_path(&mut self, path: &Path, now: Instant) -> Res<Vec<Datagram>> {
-        let mut out_packets = Vec::new();
-
+    fn output_path(&mut self, path: &Path, now: Instant) -> Res<Option<Datagram>> {
+        let mut out_bytes = Vec::new();
         let mut initial_only = false;
 
         // Frames for different epochs must go in different packets, but then these
@@ -740,18 +734,16 @@ impl Connection {
         for epoch in 0..NUM_EPOCHS {
             let space = PNSpace::from(epoch);
             let mut encoder = Encoder::default();
-            let mut ds = Vec::new();
             let mut tokens = Vec::new();
 
             // Try to make our own crypo state and if we can't, skip this epoch.
-            {
-                let cs = match self.crypto.obtain_crypto_state(self.role, epoch) {
-                    Ok(c) => c,
-                    _ => continue,
-                };
-                if cs.tx.is_none() {
-                    continue;
+            match self.crypto.obtain_crypto_state(self.role, epoch) {
+                Ok(cs) => {
+                    if !cs.tx.is_some() {
+                        continue;
+                    }
                 }
+                _ => continue,
             }
 
             let mut ack_eliciting = false;
@@ -764,110 +756,82 @@ impl Connection {
                 while let Some((frame, token)) =
                     generator.generate(self, now, epoch, TxMode::Normal, self.pmtu - encoder.len())
                 {
-                    ack_eliciting = ack_eliciting || frame.ack_eliciting();
-                    is_crypto_packet = match frame {
-                        Frame::Crypto { .. } => true,
-                        _ => is_crypto_packet,
-                    };
+                    ack_eliciting |= frame.ack_eliciting();
+                    is_crypto_packet |= matches!(frame, Frame::Crypto { .. });
                     frame.marshal(&mut encoder);
                     if let Some(t) = token {
                         tokens.push(t);
                     }
                     assert!(encoder.len() <= self.pmtu);
                     if encoder.len() == self.pmtu {
-                        // Filled this packet, get another one.
-                        ds.push((encoder, ack_eliciting, is_crypto_packet, tokens));
-                        encoder = Encoder::default();
-                        tokens = Vec::new();
-                        ack_eliciting = false;
-                        is_crypto_packet = false;
+                        // No more space for frames.
+                        break;
                     }
                 }
             }
             self.generators = generators;
 
-            if encoder.len() > 0 {
-                ds.push((encoder, ack_eliciting, is_crypto_packet, tokens))
+            if encoder.len() == 0 {
+                continue;
             }
 
-            for (encoded, ack_eliciting, is_crypto, tokens) in ds {
-                qdebug!([self] "Need to send a packet");
+            qdebug!([self] "Need to send a packet");
+            initial_only = epoch == 0;
+            let hdr = PacketHdr::new(
+                0,
+                match epoch {
+                    0 => {
+                        let token = match &self.retry_token {
+                            Some(v) => v.clone(),
+                            _ => Vec::new(),
+                        };
+                        PacketType::Initial(token)
+                    }
+                    1 => {
+                        assert!(self.zero_rtt_state != ZeroRttState::Rejected);
+                        self.zero_rtt_state = ZeroRttState::Sending;
+                        PacketType::ZeroRTT
+                    }
+                    2 => PacketType::Handshake,
+                    3 => PacketType::Short,
+                    _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
+                },
+                Some(self.version),
+                path.remote_cid.clone(),
+                path.local_cids.first().cloned(),
+                self.loss_recovery.next_pn(space),
+                epoch,
+            );
+            self.stats.packets_tx += 1;
+            self.loss_recovery.on_packet_sent(
+                space,
+                hdr.pn,
+                ack_eliciting,
+                is_crypto_packet,
+                tokens,
+                now,
+            );
 
-                initial_only = epoch == 0;
-                let hdr = PacketHdr::new(
-                    0,
-                    match epoch {
-                        0 => {
-                            let token = match &self.retry_token {
-                                Some(v) => v.clone(),
-                                _ => Vec::new(),
-                            };
-                            PacketType::Initial(token)
-                        }
-                        1 => {
-                            assert!(self.zero_rtt_state != ZeroRttState::Rejected);
-                            self.zero_rtt_state = ZeroRttState::Sending;
-                            PacketType::ZeroRTT
-                        }
-                        2 => PacketType::Handshake,
-                        3 => PacketType::Short,
-                        _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
-                    },
-                    Some(self.version),
-                    path.remote_cid.clone(),
-                    path.local_cids.first().cloned(),
-                    self.loss_recovery.next_pn(space),
-                    epoch,
-                );
-                self.stats.packets_tx += 1;
-                self.loss_recovery.on_packet_sent(
-                    space,
-                    hdr.pn,
-                    ack_eliciting,
-                    is_crypto,
-                    tokens,
-                    now,
-                );
-
-                // Failure to have the state here is an internal error.
-                let cs = self
-                    .crypto
-                    .obtain_crypto_state(self.role, hdr.epoch)
-                    .unwrap();
-                let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &encoded);
-                dump_packet(self, "tx", &hdr, &encoded);
-                out_packets.push(packet);
-            }
+            let cs = self
+                .crypto
+                .obtain_crypto_state(self.role, hdr.epoch)
+                .unwrap();
+            let tx = cs.tx.as_ref().unwrap();
+            let mut packet = encode_packet(tx, &hdr, &encoder);
+            dump_packet(self, "tx", &hdr, &encoder);
+            out_bytes.append(&mut packet);
         }
 
-        // Put packets in UDP datagrams
-        let mut out_dgrams = out_packets
-            .into_iter()
-            .inspect(|p| qdebug!([self] "packet {}", hex(p)))
-            .fold(Vec::new(), |mut vec: Vec<Datagram>, packet| {
-                let new_dgram: bool = vec
-                    .last()
-                    .map(|dgram| dgram.len() + packet.len() > self.pmtu)
-                    .unwrap_or(true);
-                if new_dgram {
-                    vec.push(Datagram::new(path.local, path.remote, packet));
-                } else {
-                    vec.last_mut().unwrap().d.extend(packet);
-                }
-                vec
-            });
+        if out_bytes.len() == 0 {
+            return Ok(None);
+        }
 
         // Pad Initial packets sent by the client to 1200 bytes.
-        if self.role == Role::Client && initial_only && !out_dgrams.is_empty() {
+        if self.role == Role::Client && initial_only {
             qdebug!([self] "pad Initial to 1200");
-            out_dgrams.last_mut().unwrap().resize(1200, 0);
+            out_bytes.resize(1200, 0);
         }
-
-        out_dgrams
-            .iter()
-            .for_each(|dgram| qdebug!([self] "Datagram length: {}", dgram.len()));
-
-        Ok(out_dgrams)
+        Ok(Some(Datagram::new(path.local, path.remote, out_bytes)))
     }
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
@@ -1759,7 +1723,7 @@ mod tests {
     #[test]
     fn test_conn_stream_create() {
         let mut client = default_client();
-        let (res, _) = client.process(vec![], now());
+        let (res, _) = client.process(None, now());
         let mut server = default_server();
         let (res, _) = server.process(res, now());
 
@@ -1782,30 +1746,30 @@ mod tests {
     fn test_conn_handshake() {
         qdebug!("---- client: generate CH");
         let mut client = default_client();
-        let (res, _) = client.process(Vec::new(), now());
-        assert_eq!(res.len(), 1);
-        assert_eq!(res.first().unwrap().len(), 1200);
+        let (res, _) = client.process(None, now());
+        assert!(res.is_some());
+        assert_eq!(res.as_ref().unwrap().len(), 1200);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = default_server();
         let (res, _) = server.process(res, now());
-        assert_eq!(res.len(), 1);
+        assert!(res.is_some());
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: SH..FIN -> FIN");
         let (res, _) = client.process(res, now());
-        assert_eq!(res.len(), 1);
+        assert!(res.is_some());
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: FIN -> ACKS");
         let (res, _) = server.process(res, now());
-        assert_eq!(res.len(), 1);
+        assert!(res.is_some());
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: ACKS -> 0");
         let (res, _) = client.process(res, now());
-        assert!(res.is_empty());
+        assert!(res.is_none());
         qdebug!("Output={:0x?}", res);
 
         assert_eq!(*client.state(), State::Connected);
@@ -1819,21 +1783,21 @@ mod tests {
         let mut server = default_server();
 
         qdebug!("---- client");
-        let (res, _) = client.process(Vec::new(), now());
-        assert_eq!(res.len(), 1);
+        let (res, _) = client.process(None, now());
+        assert!(res.is_some());
         qdebug!("Output={:0x?}", res);
         // -->> Initial[0]: CRYPTO[CH]
 
         qdebug!("---- server");
         let (res, _) = server.process(res, now());
-        assert_eq!(res.len(), 1);
+        assert!(res.is_some());
         qdebug!("Output={:0x?}", res);
         // <<-- Initial[0]: CRYPTO[SH] ACK[0]
         // <<-- Handshake[0]: CRYPTO[EE, CERT, CV, FIN]
 
         qdebug!("---- client");
         let (res, _) = client.process(res, now());
-        assert_eq!(res.len(), 1);
+        assert!(res.is_some());
         assert_eq!(*client.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
         // -->> Initial[1]: ACK[0]
@@ -1841,7 +1805,7 @@ mod tests {
 
         qdebug!("---- server");
         let (res, _) = server.process(res, now());
-        assert_eq!(res.len(), 1);
+        assert!(res.is_some());
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
         // ACKs
@@ -1863,12 +1827,22 @@ mod tests {
         client
             .stream_send(client_stream_id2, &vec![7; 50])
             .unwrap_err();
-        let (res, _) = client.process(res, now());
-        assert_eq!(res.len(), 4);
+        // Sending this much takes a few datagrams.
+        let mut datagrams = vec![];
+        let (mut res, _) = client.process(res, now());
+        while let Some(d) = res {
+            datagrams.push(d);
+            res = client.process(None, now()).0;
+        }
+        assert_eq!(datagrams.len(), 4);
 
         qdebug!("---- server");
-        let (res, _) = server.process(res, now());
-        assert_eq!(res.len(), 1); // Just an ACK.
+        let mut expect_ack = false;
+        for d in datagrams {
+            let (res, _) = server.process(Some(d), now());
+            assert_eq!(res.is_some(), expect_ack); // ACK every second.
+            expect_ack = !expect_ack;
+        }
         assert_eq!(*server.state(), State::Connected);
         qdebug!("Output={:0x?}", res);
 
@@ -1898,15 +1872,15 @@ mod tests {
     fn handshake(client: &mut Connection, server: &mut Connection) {
         let mut a = client;
         let mut b = server;
-        let mut records = Vec::new();
+        let mut datagram = None;
         let is_done = |c: &mut Connection| match c.state() {
             // TODO(mt): Finish on Closed and not Closing.
             State::Connected | State::Closing { .. } | State::Closed(..) => true,
             _ => false,
         };
         while !is_done(a) {
-            let (r, _) = a.process(records, now());
-            records = r;
+            let (d, _) = a.process(datagram, now());
+            datagram = d;
             mem::swap(&mut a, &mut b);
         }
     }
@@ -1945,20 +1919,20 @@ mod tests {
     fn test_dup_server_flight1() {
         qdebug!("---- client: generate CH");
         let mut client = default_client();
-        let (res, _) = client.process(Vec::new(), now());
-        assert_eq!(res.len(), 1);
-        assert_eq!(res.first().unwrap().len(), 1200);
+        let (res, _) = client.process(None, now());
+        assert!(res.is_some());
+        assert_eq!(res.as_ref().unwrap().len(), 1200);
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = default_server();
         let (res, _) = server.process(res, now());
-        assert_eq!(res.len(), 1);
+        assert!(res.is_some());
         qdebug!("Output={:0x?}", res);
 
         qdebug!("---- client: SH..FIN -> FIN");
         let (res2, _) = client.process(res.clone(), now());
-        assert_eq!(res2.len(), 1);
+        assert!(res2.is_some());
         qdebug!("Output={:0x?}", res);
 
         assert_eq!(2, client.stats().packets_rx);
@@ -1966,7 +1940,7 @@ mod tests {
 
         qdebug!("---- Dup, ignored");
         let (res2, _) = client.process(res.clone(), now());
-        assert_eq!(res2.len(), 0);
+        assert!(res2.is_none());
         qdebug!("Output={:0x?}", res);
 
         // Four packets total received, two of them are dups
@@ -1976,9 +1950,9 @@ mod tests {
 
     fn exchange_ticket(client: &mut Connection, server: &mut Connection) -> Vec<u8> {
         server.send_ticket(now(), &[]).expect("can send ticket");
-        let (dgrams, _timer) = server.process_output(now());
-        assert_eq!(dgrams.len(), 1);
-        client.process_input(dgrams, now());
+        let (dgram, _timer) = server.process_output(now());
+        assert!(dgram.is_some());
+        client.process_input(dgram.unwrap(), now());
         assert_eq!(*client.state(), State::Connected);
         client.resumption_token().expect("should have token")
     }
@@ -2033,19 +2007,21 @@ mod tests {
         let mut server = default_server();
 
         // Send ClientHello.
-        let (client_hs, _) = client.process(Vec::new(), now());
-        assert_eq!(client_hs.len(), 1);
+        let (client_hs, _) = client.process(None, now());
+        assert!(client_hs.is_some());
 
         // Now send a 0-RTT packet.
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
         client
             .stream_send(client_stream_id, &vec![1, 2, 3])
             .unwrap();
-        let (client_0rtt, _) = client.process(Vec::new(), now());
-        assert_eq!(client_0rtt.len(), 1);
+        let (client_0rtt, _) = client.process(None, now());
+        assert!(client_0rtt.is_some());
 
-        let (server_hs, _) = server.process(client_hs.into_iter().chain(client_0rtt), now());
-        assert_eq!(server_hs.len(), 1); // Should produce ServerHello etc...
+        let (server_hs, _) = server.process(client_hs, now());
+        assert!(server_hs.is_some()); // ServerHello, etc...
+        let (server_process_0rtt, _) = server.process(client_0rtt, now());
+        assert!(server_process_0rtt.is_none());
 
         let server_stream_id = server
             .events()
@@ -2056,6 +2032,22 @@ mod tests {
             })
             .expect("should have received a new stream event");
         assert_eq!(client_stream_id, server_stream_id);
+    }
+
+    // Do a simple decode of the datagram to verify that it is coalesced.
+    fn assert_coalesced_0rtt(payload: &[u8]) {
+        let mut dec = Decoder::from(payload);
+        let initial_type = dec.decode_byte().unwrap(); // Initial
+        assert_eq!(initial_type & 0b11110000, 0b11000000);
+        let version = dec.decode_uint(4).unwrap();
+        assert_eq!(version, QUIC_VERSION.into());
+        dec.skip_vec(1); // DCID
+        dec.skip_vec(1); // SCID
+        dec.skip_vvec();
+        let initial_len = dec.decode_varint().unwrap();
+        dec.skip(usize::try_from(initial_len).unwrap());
+        let zrtt_type = dec.decode_byte().unwrap();
+        assert_eq!(zrtt_type & 0b11110000, 0b11010000);
     }
 
     #[test]
@@ -2077,25 +2069,13 @@ mod tests {
         client
             .stream_send(client_stream_id, &vec![1, 2, 3])
             .unwrap();
-        let (client_0rtt, _) = client.process(Vec::new(), now());
-        assert_eq!(client_0rtt.len(), 1);
+        let (client_0rtt, _) = client.process(None, now());
+        assert!(client_0rtt.is_some());
 
-        // Do a simple decode of the datagram.
-        let mut dec = Decoder::from(&client_0rtt[0][..]);
-        let initial_type = dec.decode_byte().unwrap(); // Initial
-        assert_eq!(initial_type & 0b11110000, 0b11000000);
-        let version = dec.decode_uint(4).unwrap();
-        assert_eq!(version, QUIC_VERSION.into());
-        dec.skip_vec(1); // DCID
-        dec.skip_vec(1); // SCID
-        dec.skip_vvec();
-        let initial_len = dec.decode_varint().unwrap();
-        dec.skip(usize::try_from(initial_len).unwrap());
-        let zrtt_type = dec.decode_byte().unwrap();
-        assert_eq!(zrtt_type & 0b11110000, 0b11010000);
+        assert_coalesced_0rtt(&client_0rtt.as_ref().unwrap()[..]);
 
         let (server_hs, _) = server.process(client_0rtt, now());
-        assert_eq!(server_hs.len(), 1); // Should produce ServerHello etc...
+        assert!(server_hs.is_some()); // Should produce ServerHello etc...
 
         let server_stream_id = server
             .events()
@@ -2106,6 +2086,12 @@ mod tests {
             })
             .expect("should have received a new stream event");
         assert_eq!(client_stream_id, server_stream_id);
+    }
+
+    #[test]
+    fn zero_rtt_before_resumption_token() {
+        let mut client = default_client();
+        assert!(client.stream_create(StreamType::BiDi).is_err());
     }
 
     #[test]
@@ -2128,18 +2114,20 @@ mod tests {
                 .unwrap();
 
         // Send ClientHello.
-        let (client_hs, _) = client.process(Vec::new(), now());
-        assert_eq!(client_hs.len(), 1);
+        let (client_hs, _) = client.process(None, now());
+        assert!(client_hs.is_some());
 
         // Write some data on the client.
         let stream_id = client.stream_create(StreamType::UniDi).unwrap();
         let msg = &[1, 2, 3];
         client.stream_send(stream_id, msg).unwrap();
-        let (client_0rtt, _) = client.process(Vec::new(), now());
-        assert_eq!(client_0rtt.len(), 1);
+        let (client_0rtt, _) = client.process(None, now());
+        assert!(client_0rtt.is_some());
 
-        let (server_hs, _) = server.process(client_hs.into_iter().chain(client_0rtt), now());
-        assert_eq!(server_hs.len(), 1); // Should produce ServerHello etc...
+        let (server_hs, _) = server.process(client_hs, now());
+        assert!(server_hs.is_some()); // Should produce ServerHello etc...
+        let (server_ignored, _) = server.process(client_0rtt, now());
+        assert!(server_ignored.is_none());
 
         // The server shouldn't receive that 0-RTT data.
         let recvd_stream_evt = |e| matches!(e, ConnectionEvent::NewStream { .. });
@@ -2180,11 +2168,11 @@ mod tests {
         let dgram = Datagram::new(loopback(), loopback(), packet);
 
         // "send" it
-        let (ret_dgram, _) = server.process(vec![dgram], now());
+        let (ret_dgram, _) = server.process(Some(dgram), now());
 
         // We should have received a VN packet.
-        assert_eq!(ret_dgram.len(), 1);
-        let ret_pkt = &ret_dgram[0];
+        assert!(ret_dgram.is_some());
+        let ret_pkt = ret_dgram.unwrap();
         let ret_hdr = decode_packet_hdr(&server, &*ret_pkt).unwrap();
         assert!(match &ret_hdr.tipe {
             PacketType::VN(vns) if vns.len() == 2 => true,

@@ -214,7 +214,7 @@ fn main() -> Result<(), io::Error> {
         }
 
         // Process each connections' packets
-        for (remote_addr, mut dgrams) in in_dgrams {
+        for (remote_addr, dgrams) in in_dgrams {
             let (server, svr_timeout) = connections.entry(remote_addr).or_insert_with(|| {
                 println!("New connection from {:?}", remote_addr);
                 (
@@ -233,7 +233,9 @@ fn main() -> Result<(), io::Error> {
                 )
             });
 
-            server.process_input(dgrams.drain(..), Instant::now());
+            for dgram in dgrams {
+                server.process_input(dgram, Instant::now());
+            }
             if let Http3State::Closed(e) = server.state() {
                 println!("Closed connection from {:?}: {:?}", remote_addr, e);
                 if let Some(svr_timeout) = svr_timeout {

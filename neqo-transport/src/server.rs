@@ -71,6 +71,16 @@ impl Server {
         let dgram = Datagram::new(*received.destination(), *received.source(), retry);
         Ok(RetryResult::SendRetry(dgram))
     }
+
+    // pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> (Option<Datagram>, Option<Duration>) {
+    //     let hdr = match decode_packet_hdr(self, &received[..]) {
+    //         Ok(h) => h,
+    //         Err(e) => {
+    //             qtrace!([self] "Discarding {:?}", received);
+    //             return (None, self.next_timer())
+    //         }
+    //     };
+    // }
 }
 
 impl PacketDecoder for Server {
