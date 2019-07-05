@@ -11,6 +11,7 @@ mod datagram;
 mod incrdecoder;
 pub mod log;
 pub mod once;
+pub mod timer;
 
 pub use self::codec::{Decoder, Encoder};
 pub use self::datagram::Datagram;

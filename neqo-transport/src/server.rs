@@ -4,21 +4,30 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// Implementing features specific to the server role.
+// This file implements a server that can handle multiple connections.
 
 use neqo_common::{hex, qtrace, Datagram};
 
+<<<<<<< HEAD
 use crate::QUIC_VERSION;
+=======
+use crate::connection::{Connection, QUIC_VERSION};
+>>>>>>> Basic timer wheel
 use crate::packet::{
     encode_retry, ConnectionId, PacketDecoder, PacketHdr, PacketType, Version,
 };
 use crate::{Error, Res};
 
+<<<<<<< HEAD
 #[derive(Debug, Default)]
 pub struct Server {
     version: Version,
     cidlen: usize,
 }
+=======
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+>>>>>>> Basic timer wheel
 
 pub enum RetryResult {
     Ok,
@@ -27,9 +36,20 @@ pub enum RetryResult {
 
 const FIXED_TOKEN: &[u8] = &[1, 2, 3];
 
+#[derive(Debug, Default)]
+pub struct Server {
+    version: crate::packet::Version,
+    connections: HashMap<ConnectionId, Rc<Connection>>,
+    cidlen: usize,
+}
+
 impl Server {
-    pub fn new(cidlen: usize) -> Server {
-        Server { version: QUIC_VERSION,  cidlen }
+    pub fn new() -> Server {
+        Server {
+            version: QUIC_VERSION,
+            connections: Default::Default(),
+            cidlen: 8,
+        }
     }
 
     fn token_is_ok(&self, token: &[u8]) -> bool {
@@ -75,20 +95,31 @@ impl Server {
         Ok(RetryResult::SendRetry(dgram))
     }
 
-    // pub fn process_input(&mut self, dgram: Datagram, now: Instant) -> (Option<Datagram>, Option<Duration>) {
-    //     let hdr = match decode_packet_hdr(self, &received[..]) {
-    //         Ok(h) => h,
-    //         Err(e) => {
-    //             qtrace!([self] "Discarding {:?}", received);
-    //             return (None, self.next_timer())
-    //         }
-    //     };
-    //     let retry = self.check_retry(&hdr, dgram)
-    //     if let RetryResult::SendRetry(dgram) = retry {
-    //         return (Some(dgram), self.next_timer());
-    //     }
-    //     (None, None) // TODO(mt)
-    // }
+    /// Iterate through the pending timers and any that fire prior to
+    fn process_next_output(now: Instant) -> Option<Datagram> {}
+
+    fn next_timer(now: Instant) -> Option<Duration> {}
+
+    pub fn process(
+        &mut self,
+        dgram: Option<Datagram>,
+        now: Instant,
+    ) -> (Option<Datagram>, Option<Duration>) {
+        if dgram.is_none() {
+            return (self.process_next_output(now), self.next_timer(now));
+        }
+
+        let hdr = match decode_packet_hdr(self, &received[..]) {
+            Ok(h) => h,
+            Err(e) => {
+                qtrace!([self] "Discarding {:?}", received);
+                return (self.process_next_output(now), self.next_timer(now));
+            }
+        };
+        if let Some(c) = self.connections.get_mut(hdr.dcid) {
+            let (out, time) = c.process(dgram, now);
+        }
+    }
 }
 
 impl PacketDecoder for Server {
