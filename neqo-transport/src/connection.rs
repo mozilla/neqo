@@ -1655,7 +1655,7 @@ impl Connection {
         match self.loss_recovery.check_loss_timer(now) {
             LossRecoveryMode::None => {}
             LossRecoveryMode::LostPackets(mut packets) => {
-                qinfo!([self] "LD: loss_detection: lost packets: {}", packets.len());
+                qinfo!([self] "lost packets: {}", packets.len());
                 for lost in packets.iter_mut() {
                     lost.mark_lost(self);
                 }
@@ -1663,7 +1663,7 @@ impl Connection {
             LossRecoveryMode::CryptoTimerExpired => {
                 qinfo!(
                     [self]
-                    "LD: check_loss_detection_timeout - retransmit_unacked_crypto"
+                    "check_loss_detection_timeout - retransmit_unacked_crypto"
                 );
                 // TODO
                 // if (has unacknowledged crypto data):
@@ -1680,7 +1680,7 @@ impl Connection {
             LossRecoveryMode::PTO => {
                 qinfo!(
                     [self]
-                    "LD: check_loss_detection_timeout -send_one_or_two_packets"
+                    "check_loss_detection_timeout -send_one_or_two_packets"
                 );
                 // TODO
                 // SendOneOrTwoPackets()
