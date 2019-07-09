@@ -108,15 +108,15 @@ impl Path {
     // Used to create a path when receiving a packet.
     pub fn new(d: &Datagram, peer_cid: ConnectionId) -> Path {
         Path {
-            local: d.dst,
-            remote: d.src,
+            local: d.destination(),
+            remote: d.source(),
             local_cids: Vec::new(),
             remote_cid: peer_cid,
         }
     }
 
     pub fn received_on(&self, d: &Datagram) -> bool {
-        self.local == d.dst && self.remote == d.src
+        self.local == d.destination() && self.remote == d.source()
     }
 }
 
@@ -545,7 +545,7 @@ impl Connection {
                         self.version,
                     );
                     qwarn!([self] "Sending VN on next output");
-                    self.send_vn = Some((hdr, d.src, d.dst));
+                    self.send_vn = Some((hdr, d.source(), d.destination()));
                     return Ok(());
                 }
             }

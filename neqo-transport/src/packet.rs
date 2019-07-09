@@ -58,7 +58,7 @@ impl PacketType {
 pub type Version = u32;
 pub type PacketNumber = u64;
 
-#[derive(Default, Deref, PartialEq, Clone)]
+#[derive(Clone, Default, Deref, Eq, Hash, PartialEq)]
 pub struct ConnectionId(pub Vec<u8>);
 
 impl ConnectionId {

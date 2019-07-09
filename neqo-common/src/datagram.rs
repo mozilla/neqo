@@ -9,9 +9,9 @@ use std::ops::{Deref, DerefMut};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Datagram {
-    pub src: SocketAddr,
-    pub dst: SocketAddr,
-    pub d: Vec<u8>,
+    src: SocketAddr,
+    dst: SocketAddr,
+    d: Vec<u8>,
 }
 
 impl Datagram {
@@ -23,12 +23,12 @@ impl Datagram {
         }
     }
 
-    pub fn source(&self) -> &SocketAddr {
-        &self.src
+    pub fn source(&self) -> SocketAddr {
+        self.src
     }
 
-    pub fn destination(&self) -> &SocketAddr {
-        &self.dst
+    pub fn destination(&self) -> SocketAddr {
+        self.dst
     }
 }
 
