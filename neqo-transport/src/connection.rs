@@ -140,7 +140,6 @@ pub struct Connection {
     valid_cids: Vec<ConnectionId>,
     retry_token: Option<Vec<u8>>,
     pub(crate) crypto: Crypto,
-    tx_pns: [u64; 3],
     pub(crate) acks: AckTracker,
     // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
     generators: Vec<Box<FrameGenerator>>,
@@ -281,7 +280,6 @@ impl Connection {
                 Box::new(StreamGenerator::default()),
             ],
             crypto: Crypto::default(),
-            tx_pns: [0; 3],
             acks: AckTracker::default(),
             idle_timeout: None,
             indexes: StreamIndexes::new(),
@@ -837,10 +835,9 @@ impl Connection {
                     Some(self.version),
                     path.remote_cid.clone(),
                     path.local_cids.first().cloned(),
-                    self.tx_pns[space as usize], // TODO(mt) EnumMap or Index
+                    self.loss_recovery.next_pn(space),
                     epoch,
                 );
-                self.tx_pns[space as usize] += 1;
                 self.stats.packets_tx += 1;
                 self.loss_recovery.on_packet_sent(
                     space,

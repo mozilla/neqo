@@ -112,6 +112,7 @@ pub(crate) enum LossRecoveryMode {
 
 #[derive(Debug, Default)]
 pub(crate) struct LossRecoverySpace {
+    tx_pn: u64,
     largest_acked: Option<u64>,
     sent_packets: BTreeMap<u64, SentPacket>,
 }
@@ -212,6 +213,12 @@ impl LossRecovery {
 
             ..LossRecovery::default()
         }
+    }
+
+    pub fn next_pn(&mut self, pn_space: PNSpace) -> u64 {
+        let val = self.spaces[pn_space].tx_pn;
+        self.spaces[pn_space].tx_pn += 1;
+        val
     }
 
     pub fn largest_acknowledged(&self, pn_space: PNSpace) -> Option<u64> {
