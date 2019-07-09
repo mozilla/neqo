@@ -130,11 +130,12 @@ fn build_nss(dir: PathBuf) {
         }
         _ => (),
     }
-    Command::new(get_bash())
+    let status = Command::new(get_bash())
         .args(build_nss)
         .current_dir(dir)
         .status()
-        .expect("NSS build failed");
+        .expect("couldn't start NSS build");
+    assert!(status.success(), "NSS build failed");
 }
 
 fn static_link(nsstarget: &PathBuf) {
