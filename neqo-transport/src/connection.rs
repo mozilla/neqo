@@ -34,7 +34,7 @@ use crate::packet::{
     decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, PacketDecoder, PacketHdr,
     PacketNumberDecoder, PacketType,
 };
-use crate::recovery::LossRecovery;
+use crate::recovery::{LossRecovery, LossRecoveryMode};
 use crate::recv_stream::{RecvStream, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, StreamGenerator};
 use crate::stats::Stats;
@@ -437,6 +437,8 @@ impl Connection {
 
         self.cleanup_streams();
 
+        self.check_loss_detection_timeout(now);
+
         if let Some(idle_timeout) = self.idle_timeout {
             if now >= idle_timeout {
                 // Timer expired. Reconnect?
@@ -459,12 +461,10 @@ impl Connection {
             (Some(t), _) | (_, Some(t)) => Some(t),
             _ => None,
         };
-        match time {
-            // TODO(agrover,mt) - need to analyze and fix #47
-            // rather than just clamping to zero here.
-            Some(t) => Some(max(now, t).duration_since(now)),
-            _ => None,
-        }
+
+        // TODO(agrover, mt) - need to analyze and fix #47
+        // rather than just clamping to zero here.
+        time.map(|t| max(now, t).duration_since(now))
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken
@@ -484,10 +484,7 @@ impl Connection {
                 }
             }
             State::Closed(..) => (Vec::new(), None),
-            _ => {
-                self.check_loss_detection_timeout(now);
-                (self.output(now), self.next_delay(now))
-            }
+            _ => (self.output(now), self.next_delay(now)),
         }
     }
 
@@ -1653,26 +1650,41 @@ impl Connection {
     }
 
     fn check_loss_detection_timeout(&mut self, now: Instant) {
-        qdebug!([self] "check_loss_detection_timeout");
-        let (mut lost_packets, retransmit_unacked_crypto, send_one_or_two_packets) =
-            self.loss_recovery.on_loss_detection_timeout(now);
-        if !lost_packets.is_empty() {
-            qdebug!([self] "check_loss_detection_timeout loss detected.");
-            for lost in lost_packets.iter_mut() {
-                lost.mark_lost(self);
+        qdebug!([self] "check_loss_timeouts");
+
+        match self.loss_recovery.check_loss_timer(now) {
+            LossRecoveryMode::None => {}
+            LossRecoveryMode::LostPackets(mut packets) => {
+                qinfo!([self] "lost packets: {}", packets.len());
+                for lost in packets.iter_mut() {
+                    lost.mark_lost(self);
+                }
             }
-        } else if retransmit_unacked_crypto {
-            qdebug!(
-                [self]
-                "check_loss_detection_timeout - retransmit_unacked_crypto"
-            );
-        // TODO
-        } else if send_one_or_two_packets {
-            qdebug!(
-                [self]
-                "check_loss_detection_timeout -send_one_or_two_packets"
-            );
-            // TODO
+            LossRecoveryMode::CryptoTimerExpired => {
+                qinfo!(
+                    [self]
+                    "check_loss_detection_timeout - retransmit_unacked_crypto"
+                );
+                // TODO
+                // if (has unacknowledged crypto data):
+                //   RetransmitUnackedCryptoData()
+                // else if (endpoint is client without 1-RTT keys):
+                //   // Client sends an anti-deadlock packet: Initial is padded
+                //   // to earn more anti-amplification credit,
+                //   // a Handshake packet proves address ownership.
+                //   if (has Handshake keys):
+                //      SendOneHandshakePacket()
+                //    else:
+                //      SendOnePaddedInitialPacket()
+            }
+            LossRecoveryMode::PTO => {
+                qinfo!(
+                    [self]
+                    "check_loss_detection_timeout -send_one_or_two_packets"
+                );
+                // TODO
+                // SendOneOrTwoPackets()
+            }
         }
     }
 }
