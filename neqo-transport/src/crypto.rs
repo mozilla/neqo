@@ -4,25 +4,140 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Instant;
 
-use neqo_common::{hex, qdebug, qinfo};
+use neqo_common::{hex, qdebug, qinfo, qtrace};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hp::{extract_hp, HpKey};
-use neqo_crypto::{hkdf, Cipher, Epoch, SymKey, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
+use neqo_crypto::{
+    hkdf, Agent, AntiReplay, Cipher, Epoch, SymKey, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
+    TLS_VERSION_1_3,
+};
 
+use crate::connection::Role;
 use crate::frame::{Frame, FrameGenerator, FrameGeneratorToken, TxMode};
 use crate::packet::{CryptoCtx, PacketNumber};
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
-use crate::{Connection, Res};
+use crate::tparams::{TpZeroRttChecker, TransportParametersHandler};
+use crate::{Connection, Error, Res};
 
 const MAX_AUTH_TAG: usize = 32;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct Crypto {
+    pub(crate) tls: Agent,
     pub(crate) streams: [CryptoStream; 4],
     pub(crate) states: [Option<CryptoState>; 4],
+}
+
+impl Crypto {
+    pub fn new<A: ToString, I: IntoIterator<Item = A>>(
+        mut agent: Agent,
+        protocols: I,
+        tphandler: Rc<RefCell<TransportParametersHandler>>,
+        anti_replay: Option<&AntiReplay>,
+    ) -> Res<Crypto> {
+        agent.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
+        agent.enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])?;
+        agent.set_alpn(protocols)?;
+        agent.disable_end_of_early_data();
+        match &mut agent {
+            Agent::Client(c) => c.enable_0rtt()?,
+            Agent::Server(s) => s.enable_0rtt(
+                anti_replay.unwrap(),
+                0xffff_ffff,
+                TpZeroRttChecker::wrap(tphandler.clone()),
+            )?,
+        }
+        agent.extension_handler(0xffa5, tphandler)?;
+        Ok(Crypto {
+            tls: agent,
+            streams: Default::default(),
+            states: Default::default(),
+        })
+    }
+
+    // Create the initial crypto state.
+    pub fn create_initial_state(&mut self, role: Role, dcid: &[u8]) -> CryptoState {
+        qinfo!(
+            [self]
+            "Creating initial cipher state role={:?} dcid={}",
+            role,
+            hex(dcid)
+        );
+
+        const CLIENT_INITIAL_LABEL: &str = "client in";
+        const SERVER_INITIAL_LABEL: &str = "server in";
+        let (write_label, read_label) = match role {
+            Role::Client => (CLIENT_INITIAL_LABEL, SERVER_INITIAL_LABEL),
+            Role::Server => (SERVER_INITIAL_LABEL, CLIENT_INITIAL_LABEL),
+        };
+
+        CryptoState {
+            epoch: 0,
+            tx: CryptoDxState::new_initial(CryptoDxDirection::Write, write_label, dcid),
+            rx: CryptoDxState::new_initial(CryptoDxDirection::Read, read_label, dcid),
+        }
+    }
+
+    // Get a crypto state, making it if necessary, otherwise return an error.
+    pub fn obtain_crypto_state(&mut self, role: Role, epoch: Epoch) -> Res<&mut CryptoState> {
+        #[cfg(debug_assertions)]
+        let label = format!("{:?}", self);
+        #[cfg(not(debug_assertions))]
+        let label = "";
+
+        let cs = &mut self.states[epoch as usize];
+        if cs.is_none() {
+            qtrace!([label] "Build crypto state for epoch {}", epoch);
+            assert!(epoch != 0); // This state is made directly.
+
+            let cipher = match (epoch, self.tls.info()) {
+                (1, _) => self.tls.preinfo()?.early_data_cipher(),
+                (_, None) => self.tls.preinfo()?.cipher_suite(),
+                (_, Some(info)) => Some(info.cipher_suite()),
+            };
+            if cipher.is_none() {
+                qdebug!([label] "cipher info not available yet");
+                return Err(Error::KeysNotFound);
+            }
+            let cipher = cipher.unwrap();
+
+            let rx = self
+                .tls
+                .read_secret(epoch)
+                .map(|rs| CryptoDxState::new(CryptoDxDirection::Read, epoch, rs, cipher));
+            let tx = self
+                .tls
+                .write_secret(epoch)
+                .map(|ws| CryptoDxState::new(CryptoDxDirection::Write, epoch, ws, cipher));
+
+            // Validate the key setup.
+            match (&rx, &tx, role, epoch) {
+                (None, Some(_), Role::Client, 1)
+                | (Some(_), None, Role::Server, 1)
+                | (Some(_), Some(_), _, _) => {}
+                (None, None, _, _) => {
+                    qdebug!([label] "Keying material not available for epoch {}", epoch);
+                    return Err(Error::KeysNotFound);
+                }
+                _ => panic!("bad configuration of keys"),
+            }
+
+            *cs = Some(CryptoState { epoch, rx, tx });
+        }
+
+        Ok(cs.as_mut().unwrap())
+    }
+}
+
+impl ::std::fmt::Display for Crypto {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Crypto")
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
