@@ -13,11 +13,13 @@ use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 
-use neqo_common::{qdebug, qinfo, qtrace};
+use neqo_common::{qdebug, qinfo};
 
-use crate::frame::FrameGeneratorToken;
+use crate::crypto::CryptoGeneratorToken;
+use crate::flow_mgr::FlowControlGeneratorToken;
+use crate::send_stream::StreamGeneratorToken;
+use crate::tracking::AckToken;
 use crate::tracking::PNSpace;
-use crate::Connection;
 
 const GRANULARITY: Duration = Duration::from_millis(20);
 // Defined in -recovery 6.2 as 500ms but using lower value until we have RTT
@@ -27,27 +29,21 @@ const INITIAL_RTT: Duration = Duration::from_millis(100);
 const PACKET_THRESHOLD: u64 = 3;
 
 #[derive(Debug)]
+pub(crate) enum TokenType {
+    Ack(AckToken),
+    Stream(StreamGeneratorToken),
+    Crypto(CryptoGeneratorToken),
+    Flow(FlowControlGeneratorToken),
+}
+
+#[derive(Debug)]
 pub struct SentPacket {
     ack_eliciting: bool,
     //in_flight: bool, // TODO needed only for cc
     is_crypto_packet: bool,
     //size: u64, // TODO needed only for cc
     time_sent: Instant,
-    tokens: Vec<Box<FrameGeneratorToken>>, // a list of tokens.
-}
-
-impl SentPacket {
-    pub fn mark_acked(&mut self, conn: &mut Connection) {
-        for token in self.tokens.iter_mut() {
-            token.acked(conn);
-        }
-    }
-
-    pub fn mark_lost(&mut self, conn: &mut Connection) {
-        for token in self.tokens.iter_mut() {
-            token.lost(conn);
-        }
-    }
+    pub(crate) tokens: Vec<TokenType>,
 }
 
 #[derive(Debug, Default)]
@@ -102,10 +98,10 @@ impl RttVals {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum LossRecoveryMode {
     None,
-    LostPackets(Vec<SentPacket>),
+    LostPackets,
     CryptoTimerExpired,
     PTO,
 }
@@ -221,6 +217,14 @@ impl LossRecovery {
         val
     }
 
+    pub(crate) fn increment_crypto_count(&mut self) {
+        self.crypto_count += 1;
+    }
+
+    pub(crate) fn increment_pto_count(&mut self) {
+        self.pto_count += 1;
+    }
+
     pub fn largest_acknowledged(&self, pn_space: PNSpace) -> Option<u64> {
         self.spaces[pn_space].largest_acked
     }
@@ -239,7 +243,7 @@ impl LossRecovery {
         packet_number: u64,
         ack_eliciting: bool,
         is_crypto_packet: bool,
-        tokens: Vec<Box<FrameGeneratorToken>>,
+        tokens: Vec<TokenType>,
         now: Instant,
     ) {
         qdebug!([self] "packet {:?}-{} sent.", pn_space, packet_number);
@@ -320,7 +324,11 @@ impl LossRecovery {
         max(rtt * 9 / 8, GRANULARITY)
     }
 
-    fn detect_lost_packets(&mut self, pn_space: PNSpace, now: Instant) -> Vec<SentPacket> {
+    pub(crate) fn detect_lost_packets(
+        &mut self,
+        pn_space: PNSpace,
+        now: Instant,
+    ) -> Vec<SentPacket> {
         self.enable_timed_loss_detection = false;
         let loss_delay = self.loss_delay();
 
@@ -379,7 +387,7 @@ impl LossRecovery {
         lost_packets
     }
 
-    fn get_loss_detection_timer(&self) -> (LossRecoveryMode, Option<Instant>) {
+    pub(crate) fn get_timer(&mut self) -> (LossRecoveryMode, Option<Instant>) {
         qdebug!([self] "get_loss_detection_timer.");
 
         let mut has_crypto_out = false;
@@ -426,7 +434,7 @@ impl LossRecovery {
         // finally probe timeout (PTO).
 
         let (mode, maybe_timer) = if let Some((_, earliest_time)) = self.get_earliest_loss_time() {
-            (LossRecoveryMode::LostPackets(vec![]), Some(earliest_time))
+            (LossRecoveryMode::LostPackets, Some(earliest_time))
         } else if has_crypto_out {
             assert!(self.time_of_last_sent_crypto_packet.is_some());
             (
@@ -452,7 +460,7 @@ impl LossRecovery {
     }
 
     /// Find when the earliest sent packet should be considered lost.
-    fn get_earliest_loss_time(&self) -> Option<(PNSpace, Instant)> {
+    pub(crate) fn get_earliest_loss_time(&self) -> Option<(PNSpace, Instant)> {
         if !self.enable_timed_loss_detection {
             return None;
         }
@@ -471,51 +479,6 @@ impl LossRecovery {
             .min_by_key(|&(_, time)| time)
             .map(|(spc, val)| (spc, val + self.loss_delay()))
     }
-
-    /// This is when we'd like to be called back, so we can see if losses have
-    /// occurred.
-    pub fn get_timer(&self) -> Option<Instant> {
-        let (mode, timer) = self.get_loss_detection_timer();
-        qtrace!([self] "get_timer mode {:?} timer {:?}", mode, timer);
-        timer
-    }
-
-    /// If timer was active and expired, figure out what to do.
-    pub fn check_loss_timer(&mut self, now: Instant) -> LossRecoveryMode {
-        let (mode, timer) = self.get_loss_detection_timer();
-
-        if Some(now) < timer {
-            // Timer, but hasn't expired.
-            return LossRecoveryMode::None;
-        }
-
-        match mode {
-            LossRecoveryMode::None => {
-                assert_eq!(timer, None);
-                LossRecoveryMode::None
-            }
-            LossRecoveryMode::LostPackets(_) => {
-                // Time threshold loss detection
-                let (pn_space, _) = self
-                    .get_earliest_loss_time()
-                    .expect("must be sent packets if in LostPackets mode");
-                LossRecoveryMode::LostPackets(self.detect_lost_packets(pn_space, now))
-            }
-            LossRecoveryMode::CryptoTimerExpired => {
-                // Crypto retransmission timeout.
-                // Retransmit crypto data if no packets were lost
-                // and there are still crypto packets in flight.
-                self.crypto_count += 1;
-                LossRecoveryMode::CryptoTimerExpired
-            }
-            LossRecoveryMode::PTO => {
-                // PTO
-                //send_one_or_two_packets = true;
-                self.pto_count += 1;
-                LossRecoveryMode::PTO
-            }
-        }
-    }
 }
 
 impl ::std::fmt::Display for LossRecovery {
@@ -528,7 +491,6 @@ impl ::std::fmt::Display for LossRecovery {
 mod tests {
     use super::*;
     use std::convert::TryInto;
-    use std::mem::discriminant;
     use std::time::{Duration, Instant};
 
     fn assert_rtts(
@@ -720,26 +682,31 @@ mod tests {
     fn crypto_timer() {
         let mut lr = LossRecovery::new();
         lr.on_packet_sent(PNSpace::ApplicationData, 0, true, true, vec![], pn_time(0));
-        assert_eq!(lr.get_timer(), Some(pn_time(0) + (super::INITIAL_RTT * 2)));
+        assert_eq!(
+            lr.get_timer().1,
+            Some(pn_time(0) + (super::INITIAL_RTT * 2))
+        );
         // Sending another crypto packet pushes the timer out.
         lr.on_packet_sent(PNSpace::ApplicationData, 1, true, true, vec![], pn_time(1));
-        assert_eq!(lr.get_timer(), Some(pn_time(1) + (super::INITIAL_RTT * 2)));
+        assert_eq!(
+            lr.get_timer().1,
+            Some(pn_time(1) + (super::INITIAL_RTT * 2))
+        );
         // Sending non-crypto packets doesn't move it.
         lr.on_packet_sent(PNSpace::ApplicationData, 2, true, false, vec![], pn_time(2));
-        assert_eq!(lr.get_timer(), Some(pn_time(1) + (super::INITIAL_RTT * 2)));
+        assert_eq!(
+            lr.get_timer().1,
+            Some(pn_time(1) + (super::INITIAL_RTT * 2))
+        );
     }
 
     #[test]
     fn crypto_timeout() {
         let mut lr = LossRecovery::new();
         lr.on_packet_sent(PNSpace::Initial, 0, true, true, vec![], pn_time(0));
-        let crypto_time = lr.get_timer().expect("should have crypto timer");
-
-        let mode = lr.check_loss_timer(crypto_time);
-        assert_eq!(
-            discriminant(&mode),
-            discriminant(&LossRecoveryMode::CryptoTimerExpired)
-        );
+        let (mode, crypto_time) = lr.get_timer();
+        assert!(crypto_time.is_some());
+        assert_eq!(mode, LossRecoveryMode::CryptoTimerExpired);
     }
 
     // Test time loss detection as part of handling a regular ACK.
@@ -801,10 +768,15 @@ mod tests {
         assert_sent_times(&lr, None, None, Some(pn1_sent_time));
 
         // After time elapses, pn 1 is marked lost.
-        assert_eq!(lr.get_timer(), Some(pn1_sent_time + (INITIAL_RTT * 9 / 8)));
-        let mode = lr.check_loss_timer(pn1_sent_time + (INITIAL_RTT * 9 / 8));
+        let (mode, timer) = lr.get_timer();
+        let pn1_lost_time = pn1_sent_time + (INITIAL_RTT * 9 / 8);
+        assert_eq!(timer, Some(pn1_lost_time));
         match mode {
-            LossRecoveryMode::LostPackets(lost) => assert_eq!(lost.len(), 1),
+            LossRecoveryMode::LostPackets => {
+                let packets = lr.detect_lost_packets(PNSpace::ApplicationData, pn1_lost_time);
+
+                assert_eq!(packets.len(), 1)
+            }
             _ => assert!(false),
         }
         assert_no_sent_times(&lr);

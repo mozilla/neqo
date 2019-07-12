@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::BTreeMap;
+use std::collections::{btree_map::IterMut, BTreeMap};
 use std::mem;
 use std::rc::Rc;
 use std::time::Instant;
@@ -20,7 +20,8 @@ use neqo_common::{qerror, qinfo, qtrace, qwarn, Encoder};
 
 use crate::flow_mgr::FlowMgr;
 use crate::frame::TxMode;
-use crate::frame::{Frame, FrameGenerator, FrameGeneratorToken};
+use crate::frame::{Frame, FrameGenerator};
+use crate::recovery::TokenType;
 use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
 use crate::{Connection, ConnectionEvents};
@@ -696,6 +697,67 @@ impl SendStream {
     }
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct SendStreams(BTreeMap<StreamId, SendStream>);
+
+impl SendStreams {
+    pub(crate) fn get(&self, id: StreamId) -> Res<&SendStream> {
+        self.0.get(&id).ok_or_else(|| Error::InvalidStreamId)
+    }
+
+    pub(crate) fn get_mut(&mut self, id: StreamId) -> Res<&mut SendStream> {
+        self.0.get_mut(&id).ok_or_else(|| Error::InvalidStreamId)
+    }
+
+    pub(crate) fn insert(&mut self, id: StreamId, stream: SendStream) {
+        self.0.insert(id, stream);
+    }
+
+    pub(crate) fn acked(&mut self, token: StreamGeneratorToken) {
+        if let Some(ss) = self.0.get_mut(&token.id) {
+            ss.mark_as_acked(token.offset, token.length as usize, token.fin);
+        }
+    }
+
+    pub(crate) fn reset_acked(&mut self, id: StreamId) {
+        if let Some(ss) = self.0.get_mut(&id) {
+            ss.reset_acked()
+        }
+    }
+
+    pub(crate) fn lost(&mut self, token: StreamGeneratorToken) {
+        if let Some(ss) = self.0.get_mut(&token.id) {
+            ss.mark_as_lost(token.offset, token.length as usize, token.fin);
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.0.clear()
+    }
+
+    pub(crate) fn clear_terminal(&mut self) {
+        let send_to_remove: SmallVec<[_; 8]> = self
+            .0
+            .iter()
+            .filter(|(_, stream)| stream.is_terminal())
+            .map(|(id, _)| *id)
+            .collect();
+
+        for id in send_to_remove {
+            self.0.remove(&id);
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a mut SendStreams {
+    type Item = (&'a StreamId, &'a mut SendStream);
+    type IntoIter = IterMut<'a, StreamId, SendStream>;
+
+    fn into_iter(self) -> IterMut<'a, StreamId, SendStream> {
+        self.0.iter_mut()
+    }
+}
+
 /// Calculate the frame header size so we know how much data we can fit
 fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> usize {
     let mut hdr_len = 1; // for frame type
@@ -719,7 +781,7 @@ impl FrameGenerator for StreamGenerator {
         epoch: u16,
         mode: TxMode,
         remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+    ) -> Option<(Frame, Option<TokenType>)> {
         if epoch != 3 && epoch != 1 {
             return None;
         }
@@ -751,7 +813,7 @@ impl FrameGenerator for StreamGenerator {
                 stream.mark_as_sent(offset, data_len, fin);
                 return Some((
                     frame,
-                    Some(Box::new(StreamGeneratorToken {
+                    Some(TokenType::Stream(StreamGeneratorToken {
                         id: *stream_id,
                         offset,
                         length: data_len as u64,
@@ -764,40 +826,12 @@ impl FrameGenerator for StreamGenerator {
     }
 }
 
-struct StreamGeneratorToken {
-    id: StreamId,
+#[derive(Debug)]
+pub(crate) struct StreamGeneratorToken {
+    pub(crate) id: StreamId,
     offset: u64,
     length: u64,
     fin: bool,
-}
-
-impl FrameGeneratorToken for StreamGeneratorToken {
-    fn acked(&mut self, conn: &mut Connection) {
-        qinfo!(
-            [conn]
-            "Acked frame stream={} offset={} length={} fin={}",
-            self.id.as_u64(),
-            self.offset,
-            self.length,
-            self.fin
-        );
-        if let Some(ss) = conn.send_streams.get_mut(&self.id) {
-            ss.mark_as_acked(self.offset, self.length as usize, self.fin);
-        }
-    }
-    fn lost(&mut self, conn: &mut Connection) {
-        qinfo!(
-            [conn]
-            "Lost frame stream={} offset={} length={} fin={}",
-            self.id.as_u64(),
-            self.offset,
-            self.length,
-            self.fin
-        );
-        if let Some(ss) = conn.send_streams.get_mut(&self.id) {
-            ss.mark_as_lost(self.offset, self.length as usize, self.fin);
-        }
-    }
 }
 
 #[cfg(test)]

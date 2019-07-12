@@ -6,14 +6,17 @@
 
 // Tracking of received packets and generating acks thereof.
 
-use crate::connection::Connection;
-use crate::frame::{AckRange, Frame, FrameGenerator, FrameGeneratorToken, TxMode};
-use neqo_common::{qdebug, qinfo, qtrace, qwarn};
-use neqo_crypto::constants::Epoch;
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
 use std::time::{Duration, Instant};
+
+use neqo_common::{qdebug, qinfo, qtrace, qwarn};
+use neqo_crypto::constants::Epoch;
+
+use crate::connection::Connection;
+use crate::frame::{AckRange, Frame, FrameGenerator, TxMode};
+use crate::recovery::TokenType;
 
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -117,17 +120,10 @@ const MAX_TRACKED_RANGES: usize = 100;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
 /// A structure that tracks what was included in an ACK.
-struct AckToken {
+#[derive(Debug)]
+pub(crate) struct AckToken {
     space: PNSpace,
     ranges: Vec<PacketRange>,
-}
-
-impl FrameGeneratorToken for AckToken {
-    fn acked(&mut self, conn: &mut Connection) {
-        conn.acks[self.space].acknowledged(&self.ranges);
-    }
-
-    fn lost(&mut self, _conn: &mut Connection) {}
 }
 
 /// A structure that tracks what packets have been received,
@@ -263,7 +259,7 @@ impl RecvdPackets {
     ///
     /// We don't send ranges that have been acknowledged,
     /// but they still need to be tracked so that duplicates can be detected.
-    fn generate(&mut self, now: Instant) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+    fn generate(&mut self, now: Instant) -> Option<(Frame, Option<TokenType>)> {
         // Check that we aren't delaying ACKs.
         if !self.ack_now(now) {
             return None;
@@ -312,7 +308,7 @@ impl RecvdPackets {
         };
         Some((
             ack,
-            Some(Box::new(AckToken {
+            Some(TokenType::Ack(AckToken {
                 space: self.space,
                 ranges,
             })),
@@ -339,6 +335,10 @@ impl AckTracker {
             _ => None,
         }
     }
+
+    pub(crate) fn acked(&mut self, token: AckToken) {
+        self.spaces[token.space as usize].acknowledged(&token.ranges);
+    }
 }
 
 impl Default for AckTracker {
@@ -355,6 +355,7 @@ impl Default for AckTracker {
 
 impl Index<PNSpace> for AckTracker {
     type Output = RecvdPackets;
+
     fn index(&self, space: PNSpace) -> &Self::Output {
         &self.spaces[space as usize]
     }
@@ -366,7 +367,7 @@ impl IndexMut<PNSpace> for AckTracker {
     }
 }
 
-pub struct AckGenerator {}
+pub(crate) struct AckGenerator {}
 
 impl FrameGenerator for AckGenerator {
     /// This just acts as a router for RecvdPackets.
@@ -377,7 +378,7 @@ impl FrameGenerator for AckGenerator {
         epoch: Epoch,
         _tx_mode: TxMode,
         _remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+    ) -> Option<(Frame, Option<TokenType>)> {
         conn.acks[PNSpace::from(epoch)].generate(now)
     }
 }
