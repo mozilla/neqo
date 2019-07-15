@@ -933,16 +933,20 @@ impl Connection {
             });
         }
 
-        let mut m = self.crypto.tls.handshake_raw(now, rec);
+        let m = {
+            let m = self.crypto.tls.handshake_raw(now, rec);
 
-        if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
-            // TODO(ekr@rtfm.com): IMPORTANT: This overrides
-            // authentication and so is fantastically dangerous.
-            // Fix before shipping.
-            qwarn!([self] "marking connection as authenticated without checking");
-            self.crypto.tls.authenticated();
-            m = self.crypto.tls.handshake_raw(now, None);
-        }
+            if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
+                // TODO(ekr@rtfm.com): IMPORTANT: This overrides
+                // authentication and so is fantastically dangerous.
+                // Fix before shipping.
+                qwarn!([self] "marking connection as authenticated without checking");
+                self.crypto.tls.authenticated();
+                self.crypto.tls.handshake_raw(now, None)
+            } else {
+                m
+            }
+        };
         match m {
             Err(e) => {
                 qwarn!([self] "Handshake failed");
