@@ -935,7 +935,7 @@ impl Connection {
 
         let mut m = self.crypto.tls.handshake_raw(now, rec);
 
-        if matches!(m, Ok(_)) && *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
+        if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
             // TODO(ekr@rtfm.com): IMPORTANT: This overrides
             // authentication and so is fantastically dangerous.
             // Fix before shipping.
