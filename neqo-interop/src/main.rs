@@ -470,7 +470,7 @@ impl Handler for VnHandler {
     }
 
     fn rewrite_out(&mut self, dgrams: &mut Vec<Datagram>) {
-        if dgrams.len() == 0 {
+        if dgrams.is_empty() {
             return;
         }
         assert!(dgrams.len() == 1);
@@ -660,9 +660,9 @@ fn main() {
             }
         }
         let mut letter_str = String::from("");
-        for l in vec!['V', 'H', 'D', 'C', 'R', 'Z', 'S', '3'] {
-            if all_letters.contains(&l) {
-                letter_str.push(l);
+        for l in &['V', 'H', 'D', 'C', 'R', 'Z', 'S', '3'] {
+            if all_letters.contains(l) {
+                letter_str.push(*l);
             }
         }
         println!("{}: {} -> {:?}", child.0.label, letter_str, res);
