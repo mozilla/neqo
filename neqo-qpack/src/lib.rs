@@ -47,7 +47,7 @@ impl Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
         match self {
             Error::TransportError(e) => Some(e),
             _ => None,
