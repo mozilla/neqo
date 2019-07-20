@@ -962,9 +962,9 @@ impl Connection {
             qinfo!([self] "TLS handshake completed");
 
             if self.crypto.tls.info().map(SecretAgentInfo::alpn).is_none() {
+                qwarn!([self] "No ALPN. Closing connection.");
                 // 120 = no_application_protocol
-                let err = Error::CryptoAlert(120);
-                return Err(err);
+                return Err(Error::CryptoAlert(120));
             }
 
             self.set_state(State::Connected);
