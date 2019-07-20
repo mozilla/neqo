@@ -1115,9 +1115,9 @@ impl Connection {
             }
             Frame::NewConnectionId {
                 sequence_number,
-                retire_prior: _,
                 connection_id,
                 stateless_reset_token,
+                ..
             } => {
                 self.connection_ids
                     .insert(sequence_number, (connection_id, stateless_reset_token));
