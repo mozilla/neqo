@@ -87,7 +87,7 @@ impl Crypto {
     // Get a crypto state, making it if necessary, otherwise return an error.
     pub fn obtain_crypto_state(&mut self, role: Role, epoch: Epoch) -> Res<&mut CryptoState> {
         #[cfg(debug_assertions)]
-        let label = format!("{:?}", self);
+        let label = format!("{}", self);
         #[cfg(not(debug_assertions))]
         let label = "";
 
