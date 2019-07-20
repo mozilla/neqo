@@ -9,7 +9,7 @@
 #![allow(dead_code)]
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
@@ -25,17 +25,14 @@ use crate::crypto::{Crypto, CryptoGenerator};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::{FlowControlGenerator, FlowMgr};
-use crate::frame::{
-    decode_frame, AckRange, Frame, FrameGenerator, FrameGeneratorToken, FrameType, StreamType,
-    TxMode,
-};
+use crate::frame::{decode_frame, AckRange, Frame, FrameGenerator, FrameType, StreamType, TxMode};
 use crate::packet::{
     decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, PacketDecoder, PacketHdr,
     PacketNumberDecoder, PacketType,
 };
-use crate::recovery::{LossRecovery, LossRecoveryMode};
-use crate::recv_stream::{RecvStream, RX_STREAM_DATA_WINDOW};
-use crate::send_stream::{SendStream, StreamGenerator};
+use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, TokenType};
+use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
+use crate::send_stream::{SendStream, SendStreams, StreamGenerator};
 use crate::stats::Stats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::consts as tp_const;
@@ -144,11 +141,12 @@ pub struct Connection {
     idle_timeout: Option<Instant>,
     pub(crate) indexes: StreamIndexes,
     connection_ids: HashMap<u64, (Vec<u8>, [u8; 16])>, // (sequence number, (connection id, reset token))
-    pub(crate) send_streams: BTreeMap<StreamId, SendStream>,
-    pub(crate) recv_streams: BTreeMap<StreamId, RecvStream>,
+    pub(crate) send_streams: SendStreams,
+    pub(crate) recv_streams: RecvStreams,
     pmtu: usize,
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
+    loss_recovery_state: LossRecoveryState,
     events: Rc<RefCell<ConnectionEvents>>,
     token: Option<Vec<u8>>,
     send_vn: Option<(PacketHdr, SocketAddr, SocketAddr)>,
@@ -259,11 +257,12 @@ impl Connection {
             idle_timeout: None,
             indexes: StreamIndexes::new(),
             connection_ids: HashMap::new(),
-            send_streams: BTreeMap::new(),
-            recv_streams: BTreeMap::new(),
+            send_streams: SendStreams::default(),
+            recv_streams: RecvStreams::default(),
             pmtu: 1280,
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             loss_recovery: LossRecovery::new(),
+            loss_recovery_state: LossRecoveryState::default(),
             events: Rc::new(RefCell::new(ConnectionEvents::default())),
             token: None,
             send_vn: None,
@@ -428,8 +427,10 @@ impl Connection {
     }
 
     /// Get the time that we next need to be called back, relative to `now`.
-    fn next_delay(&self, now: Instant) -> Option<Duration> {
-        let time = match (self.loss_recovery.get_timer(), self.acks.ack_time()) {
+    fn next_delay(&mut self, now: Instant) -> Option<Duration> {
+        self.loss_recovery_state = self.loss_recovery.get_timer();
+
+        let time = match (self.loss_recovery_state.callback_time, self.acks.ack_time()) {
             (Some(t_lr), Some(t_ack)) => Some(min(t_lr, t_ack)),
             (Some(t), _) | (_, Some(t)) => Some(t),
             _ => None,
@@ -1163,18 +1164,39 @@ impl Connection {
 
         let acked_ranges =
             Frame::decode_ack_frame(largest_acknowledged, first_ack_range, ack_ranges)?;
-        let (mut acked_packets, mut lost_packets) = self.loss_recovery.on_ack_received(
+        let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             PNSpace::from(epoch),
             largest_acknowledged,
             acked_ranges,
             Duration::from_millis(ack_delay),
             now,
         );
-        for acked in &mut acked_packets {
-            acked.mark_acked(self);
+        for acked in acked_packets {
+            for token in acked.tokens {
+                match token {
+                    TokenType::Ack(at) => self.acks.acked(at),
+                    TokenType::Stream(st) => self.send_streams.acked(st),
+                    TokenType::Crypto(ct) => self.crypto.acked(ct),
+                    TokenType::Flow(ft) => {
+                        self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
+                    }
+                }
+            }
         }
-        for lost in &mut lost_packets {
-            lost.mark_lost(self);
+        for lost in lost_packets {
+            for token in lost.tokens {
+                match token {
+                    TokenType::Ack(_) => {}
+                    TokenType::Stream(st) => self.send_streams.lost(st),
+                    TokenType::Crypto(ct) => self.crypto.lost(ct),
+                    TokenType::Flow(ft) => self.flow_mgr.borrow_mut().lost(
+                        ft,
+                        &mut self.send_streams,
+                        &mut self.recv_streams,
+                        &mut self.indexes,
+                    ),
+                }
+            }
         }
 
         Ok(())
@@ -1189,8 +1211,20 @@ impl Connection {
         // Tell 0-RTT packets that they were "lost".
         // TODO(mt) remove these from "bytes in flight" when we
         // have a congestion controller.
-        for mut dropped in self.loss_recovery.drop_0rtt() {
-            dropped.mark_lost(self);
+        for dropped in self.loss_recovery.drop_0rtt() {
+            for token in dropped.tokens {
+                match token {
+                    TokenType::Ack(_) => {}
+                    TokenType::Stream(st) => self.send_streams.lost(st),
+                    TokenType::Crypto(ct) => self.crypto.lost(ct),
+                    TokenType::Flow(ft) => self.flow_mgr.borrow_mut().lost(
+                        ft,
+                        &mut self.send_streams,
+                        &mut self.recv_streams,
+                        &mut self.indexes,
+                    ),
+                }
+            }
         }
         self.send_streams.clear();
         self.recv_streams.clear();
@@ -1270,16 +1304,7 @@ impl Connection {
                 .max_streams(self.indexes.local_max_stream_uni, StreamType::UniDi)
         }
 
-        let send_to_remove = self
-            .send_streams
-            .iter()
-            .filter(|(_, stream)| stream.is_terminal())
-            .map(|(id, _)| *id)
-            .collect::<Vec<_>>();
-
-        for id in send_to_remove {
-            self.send_streams.remove(&id);
-        }
+        self.send_streams.clear_terminal();
     }
 
     /// Get or make a stream, and implicitly open additional streams as
@@ -1373,7 +1398,7 @@ impl Connection {
         }
 
         Ok((
-            self.send_streams.get_mut(&stream_id),
+            self.send_streams.get_mut(stream_id).ok(),
             self.recv_streams.get_mut(&stream_id),
         ))
     }
@@ -1486,48 +1511,28 @@ impl Connection {
     /// Returns how many bytes were successfully sent. Could be less
     /// than total, based on receiver credit space available, etc.
     pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
-        let stream = self
-            .send_streams
-            .get_mut(&stream_id.into())
-            .ok_or_else(|| Error::InvalidStreamId)?;
-
-        stream.send(data)
+        self.send_streams.get_mut(stream_id.into())?.send(data)
     }
 
     /// Bytes that stream_send() is guaranteed to accept for sending.
     /// i.e. that will not be blocked by flow credits or send buffer max
     /// capacity.
     pub fn stream_avail_send_space(&self, stream_id: u64) -> Res<u64> {
-        let stream = self
-            .send_streams
-            .get(&stream_id.into())
-            .ok_or_else(|| Error::InvalidStreamId)?;
-
         Ok(min(
-            stream.avail(),
+            self.send_streams.get(stream_id.into())?.avail(),
             self.flow_mgr.borrow().conn_credit_avail(),
         ))
     }
 
     /// Close the stream. Enqueued data will be sent.
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
-        let stream = self
-            .send_streams
-            .get_mut(&stream_id.into())
-            .ok_or_else(|| Error::InvalidStreamId)?;
-
-        stream.close();
+        self.send_streams.get_mut(stream_id.into())?.close();
         Ok(())
     }
 
     /// Abandon transmission of in-flight and future stream data.
     pub fn stream_reset_send(&mut self, stream_id: u64, err: AppError) -> Res<()> {
-        let stream = self
-            .send_streams
-            .get_mut(&stream_id.into())
-            .ok_or_else(|| Error::InvalidStreamId)?;
-
-        stream.reset(err);
+        self.send_streams.get_mut(stream_id.into())?.reset(err);
         Ok(())
     }
 
@@ -1555,20 +1560,49 @@ impl Connection {
     }
 
     /// Get events that indicate state changes on the connection.
-    pub fn events(&mut self) -> Vec<ConnectionEvent> {
-        // Turn it into a vec for simplicity's sake
-        self.events.borrow_mut().events().into_iter().collect()
+    pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
+        self.events.borrow_mut().events().into_iter()
     }
 
     fn check_loss_detection_timeout(&mut self, now: Instant) {
         qdebug!([self] "check_loss_timeouts");
 
-        match self.loss_recovery.check_loss_timer(now) {
-            LossRecoveryMode::None => {}
-            LossRecoveryMode::LostPackets(mut packets) => {
-                qinfo!([self] "lost packets: {}", packets.len());
-                for lost in packets.iter_mut() {
-                    lost.mark_lost(self);
+        if matches!(self.loss_recovery_state.mode, LossRecoveryMode::None) {
+            // LR not the active timer
+            return;
+        }
+
+        if self.loss_recovery_state.callback_time > Some(now) {
+            // LR timer, but hasn't expired.
+            return;
+        }
+
+        // Timer expired and LR was active timer.
+        match &mut self.loss_recovery_state.mode {
+            LossRecoveryMode::None => unreachable!(),
+            LossRecoveryMode::LostPackets => {
+                // Time threshold loss detection
+                let (pn_space, _) = self
+                    .loss_recovery
+                    .get_earliest_loss_time()
+                    .expect("must be sent packets if in LostPackets mode");
+                let packets = self.loss_recovery.detect_lost_packets(pn_space, now);
+
+                qinfo!("lost packets: {}", packets.len());
+                for lost in packets {
+                    for token in lost.tokens {
+                        match token {
+                            TokenType::Ack(_) => {} // Do nothing
+                            TokenType::Stream(st) => self.send_streams.lost(st),
+                            TokenType::Crypto(ct) => self.crypto.lost(ct),
+                            TokenType::Flow(ft) => self.flow_mgr.borrow_mut().lost(
+                                ft,
+                                &mut self.send_streams,
+                                &mut self.recv_streams,
+                                &mut self.indexes,
+                            ),
+                        }
+                    }
                 }
             }
             LossRecoveryMode::CryptoTimerExpired => {
@@ -1576,6 +1610,7 @@ impl Connection {
                     [self]
                     "check_loss_detection_timeout - retransmit_unacked_crypto"
                 );
+                self.loss_recovery.increment_crypto_count();
                 // TODO
                 // if (has unacknowledged crypto data):
                 //   RetransmitUnackedCryptoData()
@@ -1593,6 +1628,7 @@ impl Connection {
                     [self]
                     "check_loss_detection_timeout -send_one_or_two_packets"
                 );
+                self.loss_recovery.increment_pto_count();
                 // TODO
                 // SendOneOrTwoPackets()
             }
@@ -1622,7 +1658,7 @@ impl FrameGenerator for CloseGenerator {
         epoch: Epoch,
         _mode: TxMode,
         _remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+    ) -> Option<(Frame, Option<TokenType>)> {
         if epoch != 3 {
             return None;
         }

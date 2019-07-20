@@ -17,8 +17,9 @@ use neqo_crypto::{
 };
 
 use crate::connection::Role;
-use crate::frame::{Frame, FrameGenerator, FrameGeneratorToken, TxMode};
+use crate::frame::{Frame, FrameGenerator, TxMode};
 use crate::packet::{CryptoCtx, PacketNumber};
+use crate::recovery::TokenType;
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
 use crate::tparams::{TpZeroRttChecker, TransportParametersHandler};
@@ -132,6 +133,22 @@ impl Crypto {
 
         Ok(cs.as_mut().unwrap())
     }
+
+    pub fn acked(&mut self, token: CryptoGeneratorToken) {
+        qinfo!(
+            "Acked crypto frame epoch={} offset={} length={}",
+            token.epoch,
+            token.offset,
+            token.length
+        );
+        self.streams[token.epoch as usize]
+            .tx
+            .mark_as_acked(token.offset, token.length as usize);
+    }
+
+    pub fn lost(&mut self, _token: CryptoGeneratorToken) {
+        // TODO(agrover@mozilla.com): @ekr: resend?
+    }
 }
 
 impl ::std::fmt::Display for Crypto {
@@ -155,7 +172,7 @@ pub(crate) struct CryptoDxState {
 }
 
 impl CryptoDxState {
-    pub(crate) fn new(
+    pub fn new(
         direction: CryptoDxDirection,
         epoch: Epoch,
         secret: &SymKey,
@@ -175,7 +192,7 @@ impl CryptoDxState {
         }
     }
 
-    pub(crate) fn new_initial<S: Into<String>>(
+    pub fn new_initial<S: Into<String>>(
         direction: CryptoDxDirection,
         label: S,
         dcid: &[u8],
@@ -275,7 +292,7 @@ impl FrameGenerator for CryptoGenerator {
         epoch: u16,
         mode: TxMode,
         remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)> {
+    ) -> Option<(Frame, Option<TokenType>)> {
         let tx_stream = &mut conn.crypto.streams[epoch as usize].tx;
         if let Some((offset, data)) = tx_stream.next_bytes(mode) {
             let data_len = data.len();
@@ -295,7 +312,7 @@ impl FrameGenerator for CryptoGenerator {
             );
             Some((
                 frame,
-                Some(Box::new(CryptoGeneratorToken {
+                Some(TokenType::Crypto(CryptoGeneratorToken {
                     epoch,
                     offset,
                     length: data_len as u64,
@@ -307,26 +324,9 @@ impl FrameGenerator for CryptoGenerator {
     }
 }
 
-struct CryptoGeneratorToken {
+#[derive(Debug)]
+pub(crate) struct CryptoGeneratorToken {
     epoch: u16,
     offset: u64,
     length: u64,
-}
-
-impl FrameGeneratorToken for CryptoGeneratorToken {
-    fn acked(&mut self, conn: &mut Connection) {
-        qinfo!(
-            [conn]
-            "Acked crypto frame epoch={} offset={} length={}",
-            self.epoch,
-            self.offset,
-            self.length
-        );
-        conn.crypto.streams[self.epoch as usize]
-            .tx
-            .mark_as_acked(self.offset, self.length as usize);
-    }
-    fn lost(&mut self, _conn: &mut Connection) {
-        // TODO(agrover@mozilla.com): @ekr: resend?
-    }
 }
