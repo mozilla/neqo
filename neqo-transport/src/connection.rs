@@ -19,10 +19,9 @@ use std::time::{Duration, Instant};
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
 use neqo_crypto::{
     Agent, AntiReplay, Client, Epoch, HandshakeState, Record, RecordList, SecretAgentInfo, Server,
-    TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
 };
 
-use crate::crypto::{Crypto, CryptoDxDirection, CryptoDxState, CryptoGenerator, CryptoState};
+use crate::crypto::{Crypto, CryptoGenerator};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::{FlowControlGenerator, FlowMgr};
@@ -40,7 +39,7 @@ use crate::send_stream::{SendStream, StreamGenerator};
 use crate::stats::Stats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::consts as tp_const;
-use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
+use crate::tparams::{TransportParameters, TransportParametersHandler};
 use crate::tracking::{AckGenerator, AckTracker, PNSpace};
 use crate::{AppError, ConnectionError, Error, Res};
 
@@ -128,7 +127,6 @@ pub struct Connection {
     version: crate::packet::Version,
     role: Role,
     state: State,
-    tls: Agent,
     tps: Rc<RefCell<TransportParametersHandler>>,
     /// What we are doing with 0-RTT.
     zero_rtt_state: ZeroRttState,
@@ -187,7 +185,7 @@ impl Connection {
                 remote_cid: dcid.clone(),
             }),
         );
-        c.create_initial_crypto_state(&dcid);
+        c.crypto.states[0] = Some(c.crypto.create_initial_state(Role::Client, &dcid));
         Ok(c)
     }
 
@@ -210,28 +208,6 @@ impl Connection {
         ))
     }
 
-    fn configure_agent<A: ToString, I: IntoIterator<Item = A>>(
-        agent: &mut Agent,
-        protocols: I,
-        tphandler: Rc<RefCell<TransportParametersHandler>>,
-        anti_replay: Option<&AntiReplay>,
-    ) -> Res<()> {
-        agent.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
-        agent.enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])?;
-        agent.set_alpn(protocols)?;
-        agent.disable_end_of_early_data();
-        match agent {
-            Agent::Client(c) => c.enable_0rtt()?,
-            Agent::Server(s) => s.enable_0rtt(
-                anti_replay.unwrap(),
-                0xffff_ffff,
-                TpZeroRttChecker::wrap(tphandler.clone()),
-            )?,
-        }
-        agent.extension_handler(0xffa5, tphandler)?;
-        Ok(())
-    }
-
     fn set_tp_defaults(tps: &mut TransportParameters) {
         tps.set_integer(
             tp_const::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
@@ -250,14 +226,14 @@ impl Connection {
 
     fn new<A: ToString, I: IntoIterator<Item = A>>(
         r: Role,
-        mut agent: Agent,
+        agent: Agent,
         anti_replay: Option<&AntiReplay>,
         protocols: I,
         paths: Option<Path>,
     ) -> Connection {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Connection::set_tp_defaults(&mut tphandler.borrow_mut().local);
-        Connection::configure_agent(&mut agent, protocols, tphandler.clone(), anti_replay)
+        let crypto = Crypto::new(agent, protocols, tphandler.clone(), anti_replay)
             .expect("TLS should be configured successfully");
 
         Connection {
@@ -267,7 +243,6 @@ impl Connection {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
             },
-            tls: agent,
             paths,
             valid_cids: Vec::new(),
             tps: tphandler,
@@ -279,7 +254,7 @@ impl Connection {
                 Box::new(FlowControlGenerator::default()),
                 Box::new(StreamGenerator::default()),
             ],
-            crypto: Crypto::default(),
+            crypto,
             acks: AckTracker::default(),
             idle_timeout: None,
             indexes: StreamIndexes::new(),
@@ -300,7 +275,7 @@ impl Connection {
     /// Set ALPN preferences. Strings that appear earlier in the list are given
     /// higher preference.
     pub fn set_alpn<A: ToString, I: IntoIterator<Item = A>>(&mut self, protocols: I) -> Res<()> {
-        self.tls.set_alpn(protocols)?;
+        self.crypto.tls.set_alpn(protocols)?;
         Ok(())
     }
 
@@ -309,7 +284,7 @@ impl Connection {
         if self.state != State::Connected {
             return None;
         }
-        match self.tls {
+        match self.crypto.tls {
             Agent::Client(ref c) => match c.resumption_token() {
                 Some(ref t) => {
                     qtrace!("TLS token {}", hex(&t));
@@ -353,7 +328,7 @@ impl Connection {
 
         let tok = dec.decode_remainder();
         qtrace!([self] "  TLS token {}", hex(&tok));
-        match self.tls {
+        match self.crypto.tls {
             Agent::Client(ref mut c) => c.set_resumption_token(&tok)?,
             Agent::Server(_) => return Err(Error::WrongRole),
         }
@@ -367,7 +342,7 @@ impl Connection {
 
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
         let tps = &self.tps;
-        match self.tls {
+        match self.crypto.tls {
             Agent::Server(ref mut s) => {
                 let mut enc = Encoder::default();
                 enc.encode_vvec_with(|mut enc_inner| {
@@ -574,7 +549,8 @@ impl Connection {
                             qwarn!([self] "Peer DCID is too short");
                             return Ok(());
                         }
-                        self.create_initial_crypto_state(&hdr.dcid);
+                        self.crypto.states[0] =
+                            Some(self.crypto.create_initial_state(self.role, &hdr.dcid));
                     }
                 }
                 State::Handshaking | State::Connected => {
@@ -603,7 +579,7 @@ impl Connection {
             let largest_acknowledged = self
                 .loss_recovery
                 .largest_acknowledged(PNSpace::from(hdr.epoch));
-            let res = match self.obtain_crypto_state(hdr.epoch) {
+            let res = match self.crypto.obtain_crypto_state(self.role, hdr.epoch) {
                 Ok(cs) => match cs.rx.as_ref() {
                     Some(rx) => {
                         let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
@@ -652,7 +628,7 @@ impl Connection {
 
                     // SecretAgentPreinfo::early_data() always returns false for a server,
                     // but a non-zero maximum tells us if we are accepting 0-RTT.
-                    self.zero_rtt_state = if self.tls.preinfo()?.max_early_data() > 0 {
+                    self.zero_rtt_state = if self.crypto.tls.preinfo()?.max_early_data() > 0 {
                         ZeroRttState::Accepted
                     } else {
                         ZeroRttState::Rejected
@@ -704,6 +680,7 @@ impl Connection {
         qinfo!("Sending VN Packet instead of normal output");
         let hdr = PacketHdr::new(
             0,
+            // Actual version we support and a greased value.
             PacketType::VN(vec![QUIC_VERSION, 0x4a4a_4a4a]),
             Some(0),
             recvd_hdr.scid.unwrap().clone(),
@@ -711,7 +688,10 @@ impl Connection {
             0, // unused
             0, // unused
         );
-        let cs = self.obtain_crypto_state(0).unwrap();
+
+        // Do not save any state when generating VN pkt, so cs is not
+        // retained.
+        let cs = self.crypto.create_initial_state(self.role, &recvd_hdr.dcid);
         let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &[]);
         self.stats.packets_tx += 1;
         Datagram::new(local, remote, packet)
@@ -764,7 +744,7 @@ impl Connection {
 
             // Try to make our own crypo state and if we can't, skip this epoch.
             {
-                let cs = match self.obtain_crypto_state(epoch) {
+                let cs = match self.crypto.obtain_crypto_state(self.role, epoch) {
                     Ok(c) => c,
                     _ => continue,
                 };
@@ -849,7 +829,10 @@ impl Connection {
                 );
 
                 // Failure to have the state here is an internal error.
-                let cs = self.obtain_crypto_state(hdr.epoch).unwrap();
+                let cs = self
+                    .crypto
+                    .obtain_crypto_state(self.role, hdr.epoch)
+                    .unwrap();
                 let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &encoded);
                 dump_packet(self, "tx", &hdr, &encoded);
                 out_packets.push(packet);
@@ -890,7 +873,7 @@ impl Connection {
         qinfo!([self] "client_start");
         self.handshake(now, 0, None)?;
         self.set_state(State::WaitInitial);
-        if self.tls.preinfo()?.early_data() {
+        if self.crypto.tls.preinfo()?.early_data() {
             qdebug!([self] "Enabling 0-RTT");
             self.zero_rtt_state = ZeroRttState::Enabled;
         }
@@ -950,30 +933,34 @@ impl Connection {
             });
         }
 
-        let mut m = self.tls.handshake_raw(now, rec);
+        let m = {
+            let m = self.crypto.tls.handshake_raw(now, rec);
 
-        if matches!(m, Ok(_)) && *self.tls.state() == HandshakeState::AuthenticationPending {
-            // TODO(ekr@rtfm.com): IMPORTANT: This overrides
-            // authentication and so is fantastically dangerous.
-            // Fix before shipping.
-            qwarn!([self] "marking connection as authenticated without checking");
-            self.tls.authenticated();
-            m = self.tls.handshake_raw(now, None);
-        }
+            if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
+                // TODO(ekr@rtfm.com): IMPORTANT: This overrides
+                // authentication and so is fantastically dangerous.
+                // Fix before shipping.
+                qwarn!([self] "marking connection as authenticated without checking");
+                self.crypto.tls.authenticated();
+                self.crypto.tls.handshake_raw(now, None)
+            } else {
+                m
+            }
+        };
         match m {
             Err(e) => {
                 qwarn!([self] "Handshake failed");
-                return Err(match self.tls.alert() {
+                return Err(match self.crypto.tls.alert() {
                     Some(a) => Error::CryptoAlert(*a),
                     _ => Error::CryptoError(e),
                 });
             }
             Ok(msgs) => self.buffer_crypto_records(msgs),
         }
-        if self.tls.state().connected() {
+        if self.crypto.tls.state().connected() {
             qinfo!([self] "TLS handshake completed");
 
-            if self.tls.info().map(SecretAgentInfo::alpn).is_none() {
+            if self.crypto.tls.info().map(SecretAgentInfo::alpn).is_none() {
                 // 120 = no_application_protocol
                 let err = Error::CryptoAlert(120);
                 return Err(err);
@@ -1221,12 +1208,13 @@ impl Connection {
                         assert_eq!(1, self.valid_cids.len());
                         self.valid_cids.clear();
                     } else {
-                        self.zero_rtt_state = if self.tls.info().unwrap().early_data_accepted() {
-                            ZeroRttState::Accepted
-                        } else {
-                            self.client_0rtt_rejected();
-                            ZeroRttState::Rejected
-                        }
+                        self.zero_rtt_state =
+                            if self.crypto.tls.info().unwrap().early_data_accepted() {
+                                ZeroRttState::Accepted
+                            } else {
+                                self.client_0rtt_rejected();
+                                ZeroRttState::Rejected
+                            }
                     }
                 }
                 State::Closing { .. } => {
@@ -1245,80 +1233,6 @@ impl Connection {
                 _ => {}
             }
         }
-    }
-
-    // Create the initial crypto state.
-    fn create_initial_crypto_state(&mut self, dcid: &[u8]) {
-        qinfo!(
-            [self]
-            "Creating initial cipher state role={:?} dcid={}",
-            self.role,
-            hex(dcid)
-        );
-        assert!(self.crypto.states[0].is_none());
-
-        const CLIENT_INITIAL_LABEL: &str = "client in";
-        const SERVER_INITIAL_LABEL: &str = "server in";
-        let (write_label, read_label) = match self.role {
-            Role::Client => (CLIENT_INITIAL_LABEL, SERVER_INITIAL_LABEL),
-            Role::Server => (SERVER_INITIAL_LABEL, CLIENT_INITIAL_LABEL),
-        };
-
-        self.crypto.states[0] = Some(CryptoState {
-            epoch: 0,
-            tx: CryptoDxState::new_initial(CryptoDxDirection::Write, write_label, dcid),
-            rx: CryptoDxState::new_initial(CryptoDxDirection::Read, read_label, dcid),
-        });
-    }
-
-    // Get a crypto state, making it if necessary, otherwise return an error.
-    fn obtain_crypto_state(&mut self, epoch: Epoch) -> Res<&mut CryptoState> {
-        #[cfg(debug_assertions)]
-        let label = format!("{:?}", self);
-        #[cfg(not(debug_assertions))]
-        let label = "";
-
-        let cs = &mut self.crypto.states[epoch as usize];
-        if cs.is_none() {
-            qtrace!([label] "Build crypto state for epoch {}", epoch);
-            assert!(epoch != 0); // This state is made directly.
-
-            let cipher = match (epoch, self.tls.info()) {
-                (1, _) => self.tls.preinfo()?.early_data_cipher(),
-                (_, None) => self.tls.preinfo()?.cipher_suite(),
-                (_, Some(info)) => Some(info.cipher_suite()),
-            };
-            if cipher.is_none() {
-                qdebug!([label] "cipher info not available yet");
-                return Err(Error::KeysNotFound);
-            }
-            let cipher = cipher.unwrap();
-
-            let rx = self
-                .tls
-                .read_secret(epoch)
-                .map(|rs| CryptoDxState::new(CryptoDxDirection::Read, epoch, rs, cipher));
-            let tx = self
-                .tls
-                .write_secret(epoch)
-                .map(|ws| CryptoDxState::new(CryptoDxDirection::Write, epoch, ws, cipher));
-
-            // Validate the key setup.
-            match (&rx, &tx, self.role, epoch) {
-                (None, Some(_), Role::Client, 1)
-                | (Some(_), None, Role::Server, 1)
-                | (Some(_), Some(_), _, _) => {}
-                (None, None, _, _) => {
-                    qdebug!([label] "Keying material not available for epoch {}", epoch);
-                    return Err(Error::KeysNotFound);
-                }
-                _ => panic!("bad configuration of keys"),
-            }
-
-            *cs = Some(CryptoState { epoch, rx, tx });
-        }
-
-        Ok(cs.as_mut().unwrap())
     }
 
     fn cleanup_streams(&mut self) {
@@ -2054,8 +1968,8 @@ mod tests {
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
-        assert!(client.tls.info().unwrap().resumed());
-        assert!(server.tls.info().unwrap().resumed());
+        assert!(client.crypto.tls.info().unwrap().resumed());
+        assert!(server.crypto.tls.info().unwrap().resumed());
     }
 
     #[test]
@@ -2073,8 +1987,8 @@ mod tests {
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
-        assert!(client.tls.info().unwrap().early_data_accepted());
-        assert!(server.tls.info().unwrap().early_data_accepted());
+        assert!(client.crypto.tls.info().unwrap().early_data_accepted());
+        assert!(server.crypto.tls.info().unwrap().early_data_accepted());
     }
 
     #[test]
@@ -2221,5 +2135,41 @@ mod tests {
         let res = client.stream_send(stream_id, msg);
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
+    }
+
+    #[test]
+    fn test_vn() {
+        let mut server = default_server();
+
+        // Make a packet with a bad version
+        let hdr = PacketHdr::new(
+            0,
+            PacketType::Initial(vec![]),
+            Some(0xbad),
+            ConnectionId::generate(8),
+            Some(ConnectionId::generate(8)),
+            0, // pn
+            0, // epoch
+        );
+        let agent = Client::new(test_fixture::DEFAULT_SERVER_NAME)
+            .unwrap()
+            .into();
+        let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
+        let mut crypto = Crypto::new(agent, test_fixture::DEFAULT_ALPN, tphandler, None).unwrap();
+        let cs = crypto.create_initial_state(Role::Client, &hdr.dcid);
+        let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &vec![0; 16]);
+        let dgram = Datagram::new(loopback(), loopback(), packet);
+
+        // "send" it
+        let (ret_dgram, _) = server.process(vec![dgram], now());
+
+        // We should have received a VN packet.
+        assert_eq!(ret_dgram.len(), 1);
+        let ret_pkt = &ret_dgram[0];
+        let ret_hdr = decode_packet_hdr(&server, &*ret_pkt).unwrap();
+        assert!(match &ret_hdr.tipe {
+            PacketType::VN(vns) if vns.len() == 2 => true,
+            _ => false,
+        });
     }
 }
