@@ -15,7 +15,7 @@ use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::Role;
 
-use neqo_transport::{AppError, Connection, ConnectionEvent, State, StreamType};
+use neqo_transport::{AppError, CloseError, Connection, ConnectionEvent, State, StreamType};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::mem;
@@ -157,8 +157,8 @@ pub enum Http3State {
     Initializing,
     Connected,
     GoingAway,
-    Closing(AppError),
-    Closed(AppError),
+    Closing(CloseError),
+    Closed(CloseError),
 }
 
 pub struct Http3Connection {
@@ -297,10 +297,7 @@ impl Http3Connection {
             Http3State::Connected => {
                 if let State::Closing { error, .. } = self.conn.state().clone() {
                     self.events.borrow_mut().connection_closing();
-                    self.state = Http3State::Closing(match error.app_code() {
-                        Some(c) => c,
-                        None => 0,
-                    });
+                    self.state = Http3State::Closing((&error).into());
                 }
             }
             _ => {}
@@ -566,7 +563,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_connection_closed(&mut self, error_code: u16) -> Res<()> {
+    fn handle_connection_closed(&mut self, error_code: CloseError) -> Res<()> {
         self.events.borrow_mut().connection_closed(error_code);
         self.state = Http3State::Closed(error_code);
         Ok(())
@@ -702,7 +699,7 @@ impl Http3Connection {
 
     pub fn close<S: Into<String>>(&mut self, now: Instant, error: AppError, msg: S) {
         qdebug!([self] "Closed.");
-        self.state = Http3State::Closing(error);
+        self.state = Http3State::Closing(CloseError::Application(error));
         if (!self.request_streams_client.is_empty() || !self.request_streams_server.is_empty())
             && (error == 0)
         {
@@ -985,7 +982,7 @@ pub enum Http3Event {
     ConnectionClosing,
     // Connection change state to Closed.
     ConnectionClosed {
-        error_code: AppError,
+        error_code: CloseError,
     },
 }
 
@@ -1027,7 +1024,7 @@ impl Http3Events {
         self.events.insert(Http3Event::ConnectionClosing);
     }
 
-    pub fn connection_closed(&mut self, error_code: u16) {
+    pub fn connection_closed(&mut self, error_code: CloseError) {
         self.events.clear();
         self.events
             .insert(Http3Event::ConnectionClosed { error_code });
@@ -1045,7 +1042,9 @@ mod tests {
 
     fn assert_closed(hconn: &Http3Connection, expected: Error) {
         match hconn.state() {
-            Http3State::Closing(err) | Http3State::Closed(err) => assert_eq!(err, expected.code()),
+            Http3State::Closing(err) | Http3State::Closed(err) => {
+                assert_eq!(err, CloseError::Application(expected.code()))
+            }
             _ => panic!("Wrong state {:?}", hconn.state()),
         };
     }

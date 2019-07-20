@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 use std::mem;
 
-use crate::frame::{CloseType, StreamType};
+use crate::frame::{CloseError, StreamType};
 use crate::stream_id::StreamId;
 use crate::AppError;
 
@@ -26,7 +26,7 @@ pub enum ConnectionEvent {
     RecvStreamReadable { stream_id: u64 },
     /// Peer reset the stream.
     RecvStreamReset { stream_id: u64, app_error: AppError },
-    /// Peer has sent STOP_SENDING
+    /// Peer has sent STOP_SENDIconnectioNG
     SendStreamStopSending { stream_id: u64, app_error: AppError },
     /// Peer has acked everything sent on the stream.
     SendStreamComplete { stream_id: u64 },
@@ -34,8 +34,7 @@ pub enum ConnectionEvent {
     SendStreamCreatable { stream_type: StreamType },
     /// Connection closed
     ConnectionClosed {
-        close_type: CloseType,
-        error_code: u16,
+        error_code: CloseError,
         frame_type: u64,
         reason_phrase: String,
     },
@@ -97,13 +96,11 @@ impl ConnectionEvents {
 
     pub fn connection_closed(
         &mut self,
-        close_type: CloseType,
-        error_code: u16,
+        error_code: CloseError,
         frame_type: u64,
         reason_phrase: &str,
     ) {
         self.events.insert(ConnectionEvent::ConnectionClosed {
-            close_type,
             error_code,
             frame_type,
             reason_phrase: reason_phrase.to_owned(),

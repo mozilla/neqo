@@ -40,14 +40,14 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn code(&self) -> u16 {
+    pub fn code(&self) -> neqo_transport::AppError {
         // TODO(mt): use real codes once QPACK defines some.
         3
     }
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn::std::error::Error + 'static)> {
         match self {
             Error::TransportError(e) => Some(e),
             _ => None,

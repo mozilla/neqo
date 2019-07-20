@@ -29,8 +29,28 @@ impl<'a> Decoder<'a> {
 
     /// Skip n bytes.  Panics if `n > self.remaining()`.
     pub fn skip(&mut self, n: usize) {
-        assert!(n <= self.remaining());
+        assert!(self.remaining() >= n);
         self.offset += n;
+    }
+
+    /// Skip a vector.  Panics if there isn't enough space.
+    /// Only use this for tests because we panic rather than reporting a result.
+    pub fn skip_vec(&mut self, n: usize) {
+        let len = match self.decode_uint(n) {
+            Some(l) => l,
+            None => panic!("can't decode length"),
+        };
+        self.skip(usize::try_from(len).unwrap());
+    }
+
+    /// Skip a variable length vector.  Panics if there isn't enough space.
+    /// Only use this for tests because we panic rather than reporting a result.
+    pub fn skip_vvec(&mut self) {
+        let len = match self.decode_varint() {
+            Some(l) => l,
+            None => panic!("can't decode length"),
+        };
+        self.skip(usize::try_from(len).unwrap());
     }
 
     /// Decodes (reads) a single byte.
@@ -410,6 +430,69 @@ mod tests {
         let enc = Encoder::from_hex("405500");
         let mut dec = enc.as_decoder();
         assert!(dec.decode_vvec().is_none());
+    }
+
+    #[test]
+    fn skip() {
+        let enc = Encoder::from_hex("ffff");
+        let mut dec = enc.as_decoder();
+        dec.skip(1);
+        assert_eq!(dec.remaining(), 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn skip_too_much() {
+        let enc = Encoder::from_hex("ff");
+        let mut dec = enc.as_decoder();
+        dec.skip(2);
+    }
+
+    #[test]
+    fn skip_vec() {
+        let enc = Encoder::from_hex("012345");
+        let mut dec = enc.as_decoder();
+        dec.skip_vec(1);
+        assert_eq!(dec.remaining(), 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn skip_vec_too_much() {
+        let enc = Encoder::from_hex("ff1234");
+        let mut dec = enc.as_decoder();
+        dec.skip_vec(1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn skip_vec_short_length() {
+        let enc = Encoder::from_hex("ff");
+        let mut dec = enc.as_decoder();
+        dec.skip_vec(4);
+    }
+    #[test]
+    fn skip_vvec() {
+        let enc = Encoder::from_hex("012345");
+        let mut dec = enc.as_decoder();
+        dec.skip_vvec();
+        assert_eq!(dec.remaining(), 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn skip_vvec_too_much() {
+        let enc = Encoder::from_hex("0f1234");
+        let mut dec = enc.as_decoder();
+        dec.skip_vvec();
+    }
+
+    #[test]
+    #[should_panic]
+    fn skip_vvec_short_length() {
+        let enc = Encoder::from_hex("ff");
+        let mut dec = enc.as_decoder();
+        dec.skip_vvec();
     }
 
     #[test]
