@@ -15,9 +15,9 @@ use smallvec::SmallVec;
 
 use neqo_common::{qdebug, qinfo};
 
-use crate::crypto::CryptoGeneratorToken;
-use crate::flow_mgr::FlowControlGeneratorToken;
-use crate::send_stream::StreamGeneratorToken;
+use crate::crypto::CryptoRecoveryToken;
+use crate::flow_mgr::FlowControlRecoveryToken;
+use crate::send_stream::StreamRecoveryToken;
 use crate::tracking::AckToken;
 use crate::tracking::PNSpace;
 
@@ -29,11 +29,11 @@ const INITIAL_RTT: Duration = Duration::from_millis(100);
 const PACKET_THRESHOLD: u64 = 3;
 
 #[derive(Debug)]
-pub(crate) enum TokenType {
+pub(crate) enum RecoveryToken {
     Ack(AckToken),
-    Stream(StreamGeneratorToken),
-    Crypto(CryptoGeneratorToken),
-    Flow(FlowControlGeneratorToken),
+    Stream(StreamRecoveryToken),
+    Crypto(CryptoRecoveryToken),
+    Flow(FlowControlRecoveryToken),
 }
 
 #[derive(Debug)]
@@ -43,7 +43,7 @@ pub struct SentPacket {
     is_crypto_packet: bool,
     //size: u64, // TODO needed only for cc
     time_sent: Instant,
-    pub(crate) tokens: Vec<TokenType>,
+    pub(crate) tokens: Vec<RecoveryToken>,
 }
 
 #[derive(Debug, Default)]
@@ -267,7 +267,7 @@ impl LossRecovery {
         packet_number: u64,
         ack_eliciting: bool,
         is_crypto_packet: bool,
-        tokens: Vec<TokenType>,
+        tokens: Vec<RecoveryToken>,
         now: Instant,
     ) {
         qdebug!([self] "packet {:?}-{} sent.", pn_space, packet_number);

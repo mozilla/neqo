@@ -11,7 +11,6 @@ use std::cmp::{max, min};
 use std::collections::{hash_map::IterMut, BTreeMap, HashMap};
 use std::mem;
 use std::rc::Rc;
-use std::time::Instant;
 
 use slice_deque::SliceDeque;
 use smallvec::SmallVec;
@@ -19,12 +18,11 @@ use smallvec::SmallVec;
 use neqo_common::{qerror, qinfo, qtrace, qwarn, Encoder};
 
 use crate::flow_mgr::FlowMgr;
-use crate::frame::TxMode;
-use crate::frame::{Frame, FrameGenerator};
-use crate::recovery::TokenType;
+use crate::frame::{Frame, TxMode};
+use crate::recovery::RecoveryToken;
 use crate::stream_id::StreamId;
+use crate::ConnectionEvents;
 use crate::{AppError, Error, Res};
-use crate::{Connection, ConnectionEvents};
 
 const TX_STREAM_BUFFER: usize = 0xFFFF; // 64 KiB
 
@@ -713,7 +711,7 @@ impl SendStreams {
         self.0.insert(id, stream);
     }
 
-    pub fn acked(&mut self, token: StreamGeneratorToken) {
+    pub fn acked(&mut self, token: StreamRecoveryToken) {
         if let Some(ss) = self.0.get_mut(&token.id) {
             ss.mark_as_acked(token.offset, token.length as usize, token.fin);
         }
@@ -725,7 +723,7 @@ impl SendStreams {
         }
     }
 
-    pub fn lost(&mut self, token: StreamGeneratorToken) {
+    pub fn lost(&mut self, token: StreamRecoveryToken) {
         if let Some(ss) = self.0.get_mut(&token.id) {
             ss.mark_as_lost(token.offset, token.length as usize, token.fin);
         }
@@ -738,46 +736,18 @@ impl SendStreams {
     pub fn clear_terminal(&mut self) {
         self.0.retain(|_, stream| !stream.is_terminal())
     }
-}
 
-impl<'a> IntoIterator for &'a mut SendStreams {
-    type Item = (&'a StreamId, &'a mut SendStream);
-    type IntoIter = IterMut<'a, StreamId, SendStream>;
-
-    fn into_iter(self) -> IterMut<'a, StreamId, SendStream> {
-        self.0.iter_mut()
-    }
-}
-
-/// Calculate the frame header size so we know how much data we can fit
-fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> usize {
-    let mut hdr_len = 1; // for frame type
-    hdr_len += Encoder::varint_len(stream_id.as_u64());
-    if offset > 0 {
-        hdr_len += Encoder::varint_len(offset);
-    }
-
-    // We always include a length field.
-    hdr_len + Encoder::varint_len(remaining as u64)
-}
-
-#[derive(Default)]
-pub(crate) struct StreamGenerator {}
-
-impl FrameGenerator for StreamGenerator {
-    fn generate(
+    pub(crate) fn get_frame(
         &mut self,
-        conn: &mut Connection,
-        _now: Instant,
         epoch: u16,
         mode: TxMode,
         remaining: usize,
-    ) -> Option<(Frame, Option<TokenType>)> {
+    ) -> Option<(Frame, Option<RecoveryToken>)> {
         if epoch != 3 && epoch != 1 {
             return None;
         }
 
-        for (stream_id, stream) in &mut conn.send_streams {
+        for (stream_id, stream) in self {
             let fin = stream.final_size();
             if let Some((offset, data)) = stream.next_bytes(mode) {
                 qtrace!(
@@ -804,7 +774,7 @@ impl FrameGenerator for StreamGenerator {
                 stream.mark_as_sent(offset, data_len, fin);
                 return Some((
                     frame,
-                    Some(TokenType::Stream(StreamGeneratorToken {
+                    Some(RecoveryToken::Stream(StreamRecoveryToken {
                         id: *stream_id,
                         offset,
                         length: data_len as u64,
@@ -817,8 +787,29 @@ impl FrameGenerator for StreamGenerator {
     }
 }
 
+impl<'a> IntoIterator for &'a mut SendStreams {
+    type Item = (&'a StreamId, &'a mut SendStream);
+    type IntoIter = IterMut<'a, StreamId, SendStream>;
+
+    fn into_iter(self) -> IterMut<'a, StreamId, SendStream> {
+        self.0.iter_mut()
+    }
+}
+
+/// Calculate the frame header size so we know how much data we can fit
+fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> usize {
+    let mut hdr_len = 1; // for frame type
+    hdr_len += Encoder::varint_len(stream_id.as_u64());
+    if offset > 0 {
+        hdr_len += Encoder::varint_len(offset);
+    }
+
+    // We always include a length field.
+    hdr_len + Encoder::varint_len(remaining as u64)
+}
+
 #[derive(Debug)]
-pub(crate) struct StreamGeneratorToken {
+pub(crate) struct StreamRecoveryToken {
     pub(crate) id: StreamId,
     offset: u64,
     length: u64,

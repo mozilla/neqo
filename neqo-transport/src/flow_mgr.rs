@@ -10,19 +10,18 @@
 use std::cmp::max;
 use std::collections::HashMap;
 use std::mem;
-use std::time::Instant;
 
 use neqo_common::{qinfo, qtrace, qwarn, Encoder};
 use neqo_crypto::Epoch;
 
-use crate::frame::{Frame, FrameGenerator, StreamType, TxMode};
-use crate::recovery::TokenType;
+use crate::frame::{Frame, StreamType};
+use crate::recovery::RecoveryToken;
 use crate::recv_stream::RecvStreams;
 use crate::send_stream::SendStreams;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
-use crate::{AppError, Connection};
+use crate::AppError;
 
-pub type FlowControlGeneratorToken = Frame;
+pub type FlowControlRecoveryToken = Frame;
 
 #[derive(Debug, Default)]
 pub struct FlowMgr {
@@ -161,7 +160,7 @@ impl FlowMgr {
 
     pub(crate) fn acked(
         &mut self,
-        token: FlowControlGeneratorToken,
+        token: FlowControlRecoveryToken,
         send_streams: &mut SendStreams,
     ) {
         if let Frame::ResetStream {
@@ -182,7 +181,7 @@ impl FlowMgr {
 
     pub(crate) fn lost(
         &mut self,
-        token: FlowControlGeneratorToken,
+        token: FlowControlRecoveryToken,
         send_streams: &mut SendStreams,
         recv_streams: &mut RecvStreams,
         indexes: &mut StreamIndexes,
@@ -254,6 +253,32 @@ impl FlowMgr {
             _ => qwarn!("Unexpected Flow frame {:?} lost, not re-sent", token),
         }
     }
+
+    pub(crate) fn get_frame(
+        &mut self,
+        epoch: Epoch,
+        remaining: usize,
+    ) -> Option<(Frame, Option<RecoveryToken>)> {
+        if epoch != 3 {
+            return None;
+        }
+
+        if let Some(frame) = self.peek() {
+            // A suboptimal way to figure out if the frame fits within remaining
+            // space.
+            let mut d = Encoder::default();
+            frame.marshal(&mut d);
+            if d.len() > remaining {
+                qtrace!("flowc frame doesn't fit in remaining");
+                return None;
+            }
+        } else {
+            return None;
+        }
+        // There is enough space we can add this frame to the packet.
+        let frame = self.next().expect("just peeked this");
+        Some((frame.clone(), Some(RecoveryToken::Flow(frame))))
+    }
 }
 
 impl Iterator for FlowMgr {
@@ -276,39 +301,5 @@ impl Iterator for FlowMgr {
         }
 
         None
-    }
-}
-
-#[derive(Default)]
-pub(crate) struct FlowControlGenerator {}
-
-impl FrameGenerator for FlowControlGenerator {
-    fn generate(
-        &mut self,
-        conn: &mut Connection,
-        _now: Instant,
-        epoch: Epoch,
-        _mode: TxMode,
-        remaining: usize,
-    ) -> Option<(Frame, Option<TokenType>)> {
-        if epoch != 3 {
-            return None;
-        }
-
-        if let Some(frame) = conn.flow_mgr.borrow().peek() {
-            // A suboptimal way to figure out if the frame fits within remaining
-            // space.
-            let mut d = Encoder::default();
-            frame.marshal(&mut d);
-            if d.len() > remaining {
-                qtrace!("flowc frame doesn't fit in remaining");
-                return None;
-            }
-        } else {
-            return None;
-        }
-        // There is enough space we can add this frame to the packet.
-        let frame = conn.flow_mgr.borrow_mut().next().expect("just peeked this");
-        Some((frame.clone(), Some(TokenType::Flow(frame))))
     }
 }
