@@ -259,11 +259,11 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
 
     // Get the type byte
     p.tbyte = d!(d.decode_byte());
-    if p.tbyte & 0x40 == 0 {
-        return Err(Error::InvalidPacket);
-    }
-
     if (p.tbyte & 0x80) == 0 {
+        if p.tbyte & 0x40 == 0 {
+            return Err(Error::InvalidPacket);
+        }
+
         // Short Header.
         p.tipe = PacketType::Short;
         let cid = d!(d.decode(dec.get_cid_len()));
@@ -289,6 +289,10 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
         // because we won't need them.
         return Ok(p);
     } else {
+        if p.tbyte & 0x40 == 0 {
+            return Err(Error::InvalidPacket);
+        }
+
         p.tipe = match (p.tbyte >> 4) & 0x3 {
             // TODO(ekr@rtfm.com): Check the 0 bits.
             PACKET_TYPE_INITIAL => {

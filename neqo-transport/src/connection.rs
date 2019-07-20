@@ -484,8 +484,8 @@ impl Connection {
         while !slc.is_empty() {
             let mut hdr = match decode_packet_hdr(self, slc) {
                 Ok(h) => h,
-                _ => {
-                    qinfo!([self] "Received indecipherable packet header {}", hex(slc));
+                Err(e) => {
+                    qinfo!([self] "Received indecipherable packet header {} {}", hex(slc), e);
                     return Ok(()); // Drop the remainder of the datagram.
                 }
             };

@@ -9,7 +9,7 @@
 use neqo_common::Datagram;
 use neqo_crypto::init;
 use neqo_http3::{Http3Connection, Http3Event};
-use neqo_transport::{Connection, ConnectionEvent, State, StreamType, ConnectionError, Error};
+use neqo_transport::{Connection, ConnectionError, ConnectionEvent, Error, State, StreamType};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 // use std::path::PathBuf;
@@ -471,7 +471,7 @@ impl Handler for VnHandler {
 
     fn rewrite_out(&mut self, dgrams: &mut Vec<Datagram>) {
         if dgrams.len() == 0 {
-            return
+            return;
         }
         assert!(dgrams.len() == 1);
         dgrams[0].d[1] = 0x1a;
@@ -505,15 +505,14 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         let res = test_vn(&nctx, peer);
         return match res {
             Err(e) => (test, format!("ERROR: {}", e)),
-            Ok(client) => {
-                match client.state() {
-                    State::Closing { error: ConnectionError::Transport(Error::VersionNegotiation), .. } => {
-                        (test, String::from("OK"))
-                    },
-                    _ => (test, format!("ERROR: Wrong state {:?}", client.state()))
-                }
-            }
-        }
+            Ok(client) => match client.state() {
+                State::Closing {
+                    error: ConnectionError::Transport(Error::VersionNegotiation),
+                    ..
+                } => (test, String::from("OK")),
+                _ => (test, format!("ERROR: Wrong state {:?}", client.state())),
+            },
+        };
     }
 
     let mut client = match test_connect(&nctx, test, peer) {
@@ -661,7 +660,7 @@ fn main() {
             }
         }
         let mut letter_str = String::from("");
-        for l in vec!['V','H','D','C','R','Z','S', '3'] {
+        for l in vec!['V', 'H', 'D', 'C', 'R', 'Z', 'S', '3'] {
             if all_letters.contains(&l) {
                 letter_str.push(l);
             }
