@@ -635,12 +635,12 @@ impl Connection {
                         ZeroRttState::Rejected
                     };
                 } else {
+                    qdebug!([self] "Changing to use Server CID={}", hdr.scid.as_ref().unwrap());
                     let p = self
                         .paths
                         .iter_mut()
                         .find(|p| p.received_on(&d))
                         .expect("should have a path for sending Initial");
-                    // Start using the server's CID.
                     p.remote_cid = hdr.scid.unwrap();
                 }
                 self.set_state(State::Handshaking);

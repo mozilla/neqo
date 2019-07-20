@@ -76,6 +76,12 @@ impl ::std::fmt::Debug for ConnectionId {
     }
 }
 
+impl ::std::fmt::Display for ConnectionId {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "{}", hex(&self.0))
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct PacketHdr {
     pub tbyte: u8,
