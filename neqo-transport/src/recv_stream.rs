@@ -24,6 +24,8 @@ use neqo_common::qtrace;
 
 pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
 
+pub(crate) type RecvStreams = BTreeMap<StreamId, RecvStream>;
+
 /// Holds data not yet read by application. Orders and dedupes data ranges
 /// from incoming STREAM frames.
 #[derive(Debug, Default, PartialEq)]

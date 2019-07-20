@@ -12,6 +12,7 @@ use std::time::Instant;
 use neqo_common::{qdebug, Decoder, Encoder};
 use neqo_crypto::Epoch;
 
+use crate::recovery::TokenType;
 use crate::stream_id::StreamIndex;
 use crate::{AppError, TransportError};
 use crate::{Connection, ConnectionError, Error, Res};
@@ -591,7 +592,7 @@ pub enum TxMode {
     Pto,
 }
 
-pub trait FrameGenerator {
+pub(crate) trait FrameGenerator {
     fn generate(
         &mut self,
         conn: &mut Connection,
@@ -599,23 +600,12 @@ pub trait FrameGenerator {
         epoch: Epoch,
         tx_mode: TxMode,
         remaining: usize,
-    ) -> Option<(Frame, Option<Box<FrameGeneratorToken>>)>;
+    ) -> Option<(Frame, Option<TokenType>)>;
 }
 
 impl Debug for FrameGenerator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("<FrameGenerator Function>")
-    }
-}
-
-pub trait FrameGeneratorToken {
-    fn acked(&mut self, conn: &mut Connection);
-    fn lost(&mut self, conn: &mut Connection);
-}
-
-impl Debug for FrameGeneratorToken {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("<FrameGenerator Token>")
     }
 }
 
