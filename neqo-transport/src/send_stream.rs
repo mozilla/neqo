@@ -701,41 +701,41 @@ impl SendStream {
 pub(crate) struct SendStreams(HashMap<StreamId, SendStream>);
 
 impl SendStreams {
-    pub(crate) fn get(&self, id: StreamId) -> Res<&SendStream> {
+    pub fn get(&self, id: StreamId) -> Res<&SendStream> {
         self.0.get(&id).ok_or_else(|| Error::InvalidStreamId)
     }
 
-    pub(crate) fn get_mut(&mut self, id: StreamId) -> Res<&mut SendStream> {
+    pub fn get_mut(&mut self, id: StreamId) -> Res<&mut SendStream> {
         self.0.get_mut(&id).ok_or_else(|| Error::InvalidStreamId)
     }
 
-    pub(crate) fn insert(&mut self, id: StreamId, stream: SendStream) {
+    pub fn insert(&mut self, id: StreamId, stream: SendStream) {
         self.0.insert(id, stream);
     }
 
-    pub(crate) fn acked(&mut self, token: StreamGeneratorToken) {
+    pub fn acked(&mut self, token: StreamGeneratorToken) {
         if let Some(ss) = self.0.get_mut(&token.id) {
             ss.mark_as_acked(token.offset, token.length as usize, token.fin);
         }
     }
 
-    pub(crate) fn reset_acked(&mut self, id: StreamId) {
+    pub fn reset_acked(&mut self, id: StreamId) {
         if let Some(ss) = self.0.get_mut(&id) {
             ss.reset_acked()
         }
     }
 
-    pub(crate) fn lost(&mut self, token: StreamGeneratorToken) {
+    pub fn lost(&mut self, token: StreamGeneratorToken) {
         if let Some(ss) = self.0.get_mut(&token.id) {
             ss.mark_as_lost(token.offset, token.length as usize, token.fin);
         }
     }
 
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.0.clear()
     }
 
-    pub(crate) fn clear_terminal(&mut self) {
+    pub fn clear_terminal(&mut self) {
         self.0.retain(|_, stream| !stream.is_terminal())
     }
 }

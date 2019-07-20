@@ -241,11 +241,11 @@ impl LossRecovery {
         val
     }
 
-    pub(crate) fn increment_crypto_count(&mut self) {
+    pub fn increment_crypto_count(&mut self) {
         self.crypto_count += 1;
     }
 
-    pub(crate) fn increment_pto_count(&mut self) {
+    pub fn increment_pto_count(&mut self) {
         self.pto_count += 1;
     }
 
@@ -348,11 +348,7 @@ impl LossRecovery {
         max(rtt * 9 / 8, GRANULARITY)
     }
 
-    pub(crate) fn detect_lost_packets(
-        &mut self,
-        pn_space: PNSpace,
-        now: Instant,
-    ) -> Vec<SentPacket> {
+    pub fn detect_lost_packets(&mut self, pn_space: PNSpace, now: Instant) -> Vec<SentPacket> {
         self.enable_timed_loss_detection = false;
         let loss_delay = self.loss_delay();
 
@@ -411,7 +407,7 @@ impl LossRecovery {
         lost_packets
     }
 
-    pub(crate) fn get_timer(&mut self) -> LossRecoveryState {
+    pub fn get_timer(&mut self) -> LossRecoveryState {
         qdebug!([self] "get_loss_detection_timer.");
 
         let mut has_crypto_out = false;
@@ -484,7 +480,7 @@ impl LossRecovery {
     }
 
     /// Find when the earliest sent packet should be considered lost.
-    pub(crate) fn get_earliest_loss_time(&self) -> Option<(PNSpace, Instant)> {
+    pub fn get_earliest_loss_time(&self) -> Option<(PNSpace, Instant)> {
         if !self.enable_timed_loss_detection {
             return None;
         }

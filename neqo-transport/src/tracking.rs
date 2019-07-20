@@ -121,7 +121,7 @@ const MAX_ACKS_PER_FRAME: usize = 32;
 
 /// A structure that tracks what was included in an ACK.
 #[derive(Debug)]
-pub(crate) struct AckToken {
+pub struct AckToken {
     space: PNSpace,
     ranges: Vec<PacketRange>,
 }
@@ -336,7 +336,7 @@ impl AckTracker {
         }
     }
 
-    pub(crate) fn acked(&mut self, token: AckToken) {
+    pub fn acked(&mut self, token: AckToken) {
         self.spaces[token.space as usize].acknowledged(&token.ranges);
     }
 }

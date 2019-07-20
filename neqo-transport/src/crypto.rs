@@ -134,7 +134,7 @@ impl Crypto {
         Ok(cs.as_mut().unwrap())
     }
 
-    pub(crate) fn acked(&mut self, token: CryptoGeneratorToken) {
+    pub fn acked(&mut self, token: CryptoGeneratorToken) {
         qinfo!(
             "Acked crypto frame epoch={} offset={} length={}",
             token.epoch,
@@ -146,7 +146,7 @@ impl Crypto {
             .mark_as_acked(token.offset, token.length as usize);
     }
 
-    pub(crate) fn lost(&mut self, _token: CryptoGeneratorToken) {
+    pub fn lost(&mut self, _token: CryptoGeneratorToken) {
         // TODO(agrover@mozilla.com): @ekr: resend?
     }
 }
@@ -172,7 +172,7 @@ pub(crate) struct CryptoDxState {
 }
 
 impl CryptoDxState {
-    pub(crate) fn new(
+    pub fn new(
         direction: CryptoDxDirection,
         epoch: Epoch,
         secret: &SymKey,
@@ -192,7 +192,7 @@ impl CryptoDxState {
         }
     }
 
-    pub(crate) fn new_initial<S: Into<String>>(
+    pub fn new_initial<S: Into<String>>(
         direction: CryptoDxDirection,
         label: S,
         dcid: &[u8],

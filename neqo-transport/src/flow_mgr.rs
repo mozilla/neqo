@@ -151,11 +151,11 @@ impl FlowMgr {
         }
     }
 
-    pub(crate) fn need_close_frame(&self) -> bool {
+    pub fn need_close_frame(&self) -> bool {
         self.need_close_frame
     }
 
-    pub(crate) fn set_need_close_frame(&mut self, new: bool) {
+    pub fn set_need_close_frame(&mut self, new: bool) {
         self.need_close_frame = new
     }
 
