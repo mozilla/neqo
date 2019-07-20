@@ -1115,6 +1115,7 @@ impl Connection {
             }
             Frame::NewConnectionId {
                 sequence_number,
+                retire_prior: _,
                 connection_id,
                 stateless_reset_token,
             } => {

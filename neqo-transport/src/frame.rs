@@ -170,6 +170,7 @@ pub enum Frame {
     },
     NewConnectionId {
         sequence_number: u64,
+        retire_prior: u64,
         connection_id: Vec<u8>,
         stateless_reset_token: [u8; 16],
     },
@@ -316,10 +317,12 @@ impl Frame {
             }
             Frame::NewConnectionId {
                 sequence_number,
+                retire_prior,
                 connection_id,
                 stateless_reset_token,
             } => {
                 enc.encode_varint(*sequence_number);
+                enc.encode_varint(*retire_prior);
                 enc.encode_uint(1, connection_id.len() as u64);
                 enc.encode(connection_id);
                 enc.encode(stateless_reset_token);
@@ -542,6 +545,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
         }
         FRAME_TYPE_NEW_CONNECTION_ID => {
             let s = dv!(dec);
+            let retire_prior = dv!(dec);
             let cid = d!(dec.decode_vec(1)).to_vec(); // TODO(mt) unnecessary copy
             let srt = d!(dec.decode(16));
             let mut srtv: [u8; 16] = [0; 16];
@@ -549,6 +553,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
 
             Ok(Frame::NewConnectionId {
                 sequence_number: s,
+                retire_prior,
                 connection_id: cid,
                 stateless_reset_token: srtv,
             })
@@ -808,11 +813,12 @@ mod tests {
     fn test_new_connection_id() {
         let f = Frame::NewConnectionId {
             sequence_number: 0x1234,
+            retire_prior: 0,
             connection_id: vec![0x01, 0x02],
             stateless_reset_token: [9; 16],
         };
 
-        enc_dec(&f, "18523402010209090909090909090909090909090909");
+        enc_dec(&f, "1852340002010209090909090909090909090909090909");
     }
 
     #[test]
