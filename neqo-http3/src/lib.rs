@@ -90,11 +90,11 @@ impl Error {
             | Error::NotEnoughData
             | Error::Unexpected
             | Error::TransportError(..) => 3,
-            Error::QpackError(e) => e.code() as neqo_transport::AppError,
+            Error::QpackError(e) => e.code(),
         }
     }
 
-    pub fn from_code(error: u16) -> Error {
+    pub fn from_code(error: neqo_transport::AppError) -> Error {
         match error {
             0 => Error::NoError,
             1 => Error::WrongSettingsDirection,
@@ -118,7 +118,7 @@ impl Error {
             19 => Error::UnexpectedFrame,
             20 => Error::RequestRejected,
             0xff => Error::GeneralProtocolError,
-            0x100...0x1ff => Error::MalformedFrame(u64::from(error - 0x100)),
+            0x100...0x1ff => Error::MalformedFrame(error - 0x100),
             0x200 => Error::QpackError(neqo_qpack::Error::DecompressionFailed),
             0x201 => Error::QpackError(neqo_qpack::Error::EncoderStreamError),
             0x202 => Error::QpackError(neqo_qpack::Error::DecoderStreamError),

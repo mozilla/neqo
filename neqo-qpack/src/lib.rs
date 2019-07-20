@@ -40,7 +40,7 @@ pub enum Error {
 }
 
 impl Error {
-    pub fn code(&self) -> u16 {
+    pub fn code(&self) -> neqo_transport::AppError {
         // TODO(mt): use real codes once QPACK defines some.
         3
     }

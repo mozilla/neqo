@@ -27,9 +27,12 @@ mod tracking;
 
 pub use self::connection::{Connection, Role, State};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
+pub use self::frame::CloseError;
 pub use self::frame::StreamType;
 
-type TransportError = u16;
+pub const QUIC_VERSION: u32 = 0xff00_0016;
+
+type TransportError = u64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
@@ -62,6 +65,7 @@ pub enum Error {
     InvalidResumptionToken,
     WrongRole,
     InvalidInput,
+    PeerError(TransportError),
 }
 
 impl Error {
@@ -78,7 +82,8 @@ impl Error {
             Error::TransportParameterError => 8,
             Error::ProtocolViolation => 10,
             Error::InvalidMigration => 12,
-            Error::CryptoAlert(a) => 0x100 + u16::from(*a),
+            Error::CryptoAlert(a) => 0x100 + u64::from(*a),
+            Error::PeerError(a) => *a,
             // TODO(ekr@rtfm.com): Map these errors.
             Error::CryptoError(_)
             | Error::NoMoreData
@@ -123,7 +128,7 @@ impl ::std::fmt::Display for Error {
     }
 }
 
-pub type AppError = u16;
+pub type AppError = u64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConnectionError {
@@ -136,6 +141,15 @@ impl ConnectionError {
         match self {
             ConnectionError::Application(e) => Some(*e),
             _ => None,
+        }
+    }
+}
+
+impl From<&CloseError> for ConnectionError {
+    fn from(err: &CloseError) -> Self {
+        match err {
+            CloseError::Transport(c) => ConnectionError::Transport(Error::PeerError(*c)),
+            CloseError::Application(c) => ConnectionError::Application(*c),
         }
     }
 }

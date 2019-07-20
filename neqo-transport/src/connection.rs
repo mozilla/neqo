@@ -38,12 +38,12 @@ use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::consts as tp_const;
 use crate::tparams::{TransportParameters, TransportParametersHandler};
 use crate::tracking::{AckGenerator, AckTracker, PNSpace};
+use crate::QUIC_VERSION;
 use crate::{AppError, ConnectionError, Error, Res};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
 
-pub const QUIC_VERSION: u32 = 0xff00_0014;
 const NUM_EPOCHS: Epoch = 4;
 const CID_LENGTH: usize = 8;
 
@@ -1105,6 +1105,7 @@ impl Connection {
                 sequence_number,
                 connection_id,
                 stateless_reset_token,
+                ..
             } => {
                 self.connection_ids
                     .insert(sequence_number, (connection_id, stateless_reset_token));
@@ -1119,25 +1120,20 @@ impl Connection {
                 qwarn!([self] "Received Path Response");
             }
             Frame::ConnectionClose {
-                close_type,
                 error_code,
                 frame_type,
                 reason_phrase,
             } => {
                 let reason_phrase = String::from_utf8_lossy(&reason_phrase);
                 qinfo!([self]
-                       "ConnectionClose received. Closing. Close type: {:?} Error code: {} frame type {:x} reason {}",
-                       close_type,
+                       "ConnectionClose received. Error code: {:?} frame type {:x} reason {}",
                        error_code,
                        frame_type,
                        reason_phrase);
-                self.events.borrow_mut().connection_closed(
-                    close_type,
-                    error_code,
-                    frame_type,
-                    &reason_phrase,
-                );
-                self.set_state(State::Closed(ConnectionError::Application(error_code)));
+                self.events
+                    .borrow_mut()
+                    .connection_closed(error_code, frame_type, &reason_phrase);
+                self.set_state(State::Closed((&error_code).into()));
             }
         };
 
@@ -1674,11 +1670,7 @@ impl FrameGenerator for CloseGenerator {
                 c.flow_mgr.borrow_mut().set_need_close_frame(false);
                 return Some((
                     Frame::ConnectionClose {
-                        close_type: cerr.into(),
-                        error_code: match cerr {
-                            ConnectionError::Application(e) => *e,
-                            ConnectionError::Transport(e) => e.code(),
-                        },
+                        error_code: cerr.into(),
                         frame_type: *frame_type,
                         reason_phrase: Vec::from(reason.clone()),
                     },
@@ -2045,7 +2037,6 @@ mod tests {
         assert_eq!(client_hs.len(), 1);
 
         // Now send a 0-RTT packet.
-        // TODO(mt) work out how to coalesce this with the ClientHello.
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
         client
             .stream_send(client_stream_id, &vec![1, 2, 3])
@@ -2095,17 +2086,9 @@ mod tests {
         assert_eq!(initial_type & 0b11110000, 0b11000000);
         let version = dec.decode_uint(4).unwrap();
         assert_eq!(version, QUIC_VERSION.into());
-        let dcil_scil = dec.decode_byte().unwrap();
-        println!("DCIL/SCIL {}", dcil_scil);
-        let dcil = (dcil_scil >> 4) + 3;
-        assert!(dcil >= 8);
-        let scil = match dcil_scil & 0xf {
-            0 => 0,
-            v => v + 3,
-        };
-        dec.skip(usize::try_from(dcil + scil).unwrap());
-        let token_len = dec.decode_varint().unwrap();
-        dec.skip(usize::try_from(token_len).unwrap());
+        dec.skip_vec(1); // DCID
+        dec.skip_vec(1); // SCID
+        dec.skip_vvec();
         let initial_len = dec.decode_varint().unwrap();
         dec.skip(usize::try_from(initial_len).unwrap());
         let zrtt_type = dec.decode_byte().unwrap();

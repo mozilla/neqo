@@ -155,28 +155,6 @@ impl PacketNumberDecoder {
     }
 }
 
-fn encode_cidl_half(l: usize) -> u8 {
-    match l {
-        0 => 0,
-        4...18 => (l - 3) as u8,
-        _ => panic!("Illegal CID length"),
-    }
-}
-fn encode_cidl(d: usize, s: usize) -> u8 {
-    (encode_cidl_half(d) << 4) | encode_cidl_half(s)
-}
-
-fn decode_cidl_half(l: u8) -> usize {
-    match l {
-        0 => 0,
-        _ => (l + 3) as usize,
-    }
-}
-
-fn decode_cidl(l: u8) -> (usize, usize) {
-    (decode_cidl_half(l >> 4), decode_cidl_half(l & 0xf))
-}
-
 fn encode_pnl(l: usize) -> u8 {
     assert!(l <= 4);
     (l - 1) as u8
@@ -212,28 +190,28 @@ fn decode_pnl(u: u8) -> usize {
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   |                         Version (32)                          |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |DCIL(4)|SCIL(4)|
+  | DCID Len (8)  |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |               Destination Connection ID (0/32..144)         ...
+  |               Destination Connection ID (0..160)            ...
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |                 Source Connection ID (0/32..144)            ...
+  | SCID Len (8)  |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                 Source Connection ID (0..160)               ...
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
   Handshake
   +-+-+-+-+-+-+-+-+
-  |1|1| 0 |R R|P P|
+  |1|1| 2 |R R|P P|
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   |                         Version (32)                          |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |DCIL(4)|SCIL(4)|
+  | DCID Len (8)  |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |               Destination Connection ID (0/32..144)         ...
+  |               Destination Connection ID (0..160)            ...
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |                 Source Connection ID (0/32..144)            ...
+  | SCID Len (8)  |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |                         Token Length (i)                    ...
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |                            Token (*)                        ...
+  |                 Source Connection ID (0..160)               ...
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   |                           Length (i)                        ...
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -243,18 +221,24 @@ fn decode_pnl(u: u8) -> usize {
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
   Retry
+   0                   1                   2                   3
+   0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
   +-+-+-+-+-+-+-+-+
-  |1|1| 3 | ODCIL |
+  |1|1| 3 | Unused|
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   |                         Version (32)                          |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |DCIL(4)|SCIL(4)|
+  | DCID Len (8)  |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |               Destination Connection ID (0/32..144)         ...
+  |               Destination Connection ID (0..160)            ...
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |                 Source Connection ID (0/32..144)            ...
+  | SCID Len (8)  |
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |          Original Destination Connection ID (0/32..144)     ...
+  |                 Source Connection ID (0..160)               ...
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  | ODCID Len (8) |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |          Original Destination Connection ID (0..160)        ...
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   |                        Retry Token (*)                      ...
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -292,9 +276,8 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
 
     let version = d!(d.decode_uint(4)) as u32;
     p.version = Some(version);
-    let (dest_len, src_len) = decode_cidl(d!(d.decode_byte()));
-    p.dcid = ConnectionId(d!(d.decode(dest_len)).to_vec());
-    p.scid = Some(ConnectionId(d!(d.decode(src_len)).to_vec()));
+    p.dcid = ConnectionId(d!(d.decode_vec(1)).to_vec());
+    p.scid = Some(ConnectionId(d!(d.decode_vec(1)).to_vec()));
 
     if version == 0 {
         let mut vns = vec![];
@@ -321,8 +304,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
                 PacketType::Handshake
             }
             PACKET_TYPE_RETRY => {
-                let odcil = decode_cidl_half(p.tbyte & 0xf) as usize;
-                let odcid = ConnectionId(d!(d.decode(odcil)).to_vec()); // TODO(mt) unnecessary copy
+                let odcid = ConnectionId(d!(d.decode_vec(1)).to_vec()); // TODO(mt) unnecessary copy
                 let token = d.decode_remainder().to_vec(); // TODO(mt) unnecessary copy
                 p.tipe = PacketType::Retry { odcid, token };
                 return Ok(p);
@@ -407,12 +389,8 @@ fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
     rand::thread_rng().fill(&mut rand_byte);
     d.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | rand_byte[0]);
     d.encode_uint(4, 0u64); // version
-    d.encode_byte(encode_cidl(
-        hdr.dcid.len(),
-        hdr.scid.as_ref().unwrap().len(),
-    ));
-    d.encode(&*hdr.dcid);
-    d.encode(hdr.scid.as_ref().unwrap());
+    d.encode_vec(1, &hdr.dcid);
+    d.encode_vec(1, hdr.scid.as_ref().unwrap());
     for ver in vers {
         d.encode_uint(4, *ver);
     }
@@ -428,12 +406,8 @@ fn encode_packet_long(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u
         PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | hdr.tipe.code() << 4 | encode_pnl(pnl),
     );
     enc.encode_uint(4, hdr.version.unwrap());
-    enc.encode_byte(encode_cidl(
-        hdr.dcid.len(),
-        hdr.scid.as_ref().unwrap().len(),
-    ));
-    enc.encode(&*hdr.dcid);
-    enc.encode(&*hdr.scid.as_ref().unwrap());
+    enc.encode_vec(1, &*hdr.dcid);
+    enc.encode_vec(1, &*hdr.scid.as_ref().unwrap());
 
     if let PacketType::Initial(token) = &hdr.tipe {
         enc.encode_vvec(&token);
@@ -472,21 +446,19 @@ fn pn_length(_pn: PacketNumber) -> usize {
 }
 
 pub fn encode_retry(hdr: &PacketHdr) -> Vec<u8> {
+    let mut rand_byte: [u8; 1] = [0; 1];
+    rand::thread_rng().fill(&mut rand_byte);
     if let PacketType::Retry { odcid, token } = &hdr.tipe {
         let mut enc = Encoder::default();
         let b0 = PACKET_BIT_LONG
             | PACKET_BIT_FIXED_QUIC
-            | PACKET_TYPE_RETRY << 4
-            | encode_cidl_half(odcid.len());
+            | (PACKET_TYPE_RETRY << 4)
+            | (rand_byte[0] & 0xf);
         enc.encode_byte(b0);
         enc.encode_uint(4, hdr.version.unwrap());
-        enc.encode_byte(encode_cidl(
-            hdr.dcid.len(),
-            hdr.scid.as_ref().unwrap().len(),
-        ));
-        enc.encode(&hdr.dcid);
-        enc.encode(&hdr.scid.as_ref().unwrap());
-        enc.encode(odcid);
+        enc.encode_vec(1, &hdr.dcid);
+        enc.encode_vec(1, &hdr.scid.as_ref().unwrap());
+        enc.encode_vec(1, odcid);
         enc.encode(token);
         enc.into()
     } else {
