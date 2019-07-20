@@ -9,7 +9,7 @@
 use neqo_common::Datagram;
 use neqo_crypto::init;
 use neqo_http3::{Http3Connection, Http3Event};
-use neqo_transport::{Connection, ConnectionEvent, State, StreamType};
+use neqo_transport::{Connection, ConnectionEvent, State, StreamType, ConnectionError, Error};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 // use std::path::PathBuf;
@@ -507,7 +507,7 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
             Err(e) => (test, format!("ERROR: {}", e)),
             Ok(client) => {
                 match client.state() {
-                    State::Closing { .. } => {
+                    State::Closing { error: ConnectionError::Transport(Error::VersionNegotiation), .. } => {
                         (test, String::from("OK"))
                     },
                     _ => (test, format!("ERROR: Wrong state {:?}", client.state()))
