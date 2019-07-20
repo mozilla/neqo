@@ -76,8 +76,8 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     let mut datagram = None;
     let is_done = |c: &Connection| matches!(c.state(), State::Connected | State::Closing { .. } | State::Closed(..));
     while !is_done(a) {
-        let (d, _) = a.process(datagram, now());
-        datagram = d;
+        let d = a.process(datagram, now());
+        datagram = d.dgram();
         mem::swap(&mut a, &mut b);
     }
 }

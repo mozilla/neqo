@@ -85,8 +85,8 @@ fn process_loop(
         }
 
         let exiting = !handler.handle(client);
-        let (out_dgram, _timer) = client.process_output(Instant::now());
-        if let Some(dgram) = out_dgram {
+        let out_dgram = client.process_output(Instant::now());
+        if let Some(dgram) = out_dgram.dgram() {
             let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
             emit_datagram(&nctx.socket, dgram);
         }
@@ -237,8 +237,8 @@ fn process_loop_h3(
         }
 
         let exiting = !handler.handle();
-        let (out_dgram, _timer) = handler.h3.conn().process_output(Instant::now());
-        if let Some(dgram) = out_dgram {
+        let out_dgram = handler.h3.conn().process_output(Instant::now());
+        if let Some(dgram) = out_dgram.dgram() {
             emit_datagram(&nctx.socket, dgram);
         }
 

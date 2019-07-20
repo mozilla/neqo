@@ -120,6 +120,31 @@ impl Path {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+/// Type returned from process() and process_output(). Users are required to
+/// call these repeatedly until Callback is returned.
+pub enum Output {
+    None, // This should go away. There should ALWAYS be some timer we want.
+    Datagram(Datagram),
+    Callback(Duration),
+}
+
+impl Output {
+    pub fn dgram(self) -> Option<Datagram> {
+        match self {
+            Output::Datagram(dg) => Some(dg),
+            _ => None,
+        }
+    }
+
+    pub fn as_dgram_ref(&self) -> Option<&Datagram> {
+        match self {
+            Output::Datagram(dg) => Some(dg),
+            _ => None,
+        }
+    }
+}
+
 pub struct Connection {
     version: crate::packet::Version,
     role: Role,
@@ -423,37 +448,44 @@ impl Connection {
     /// by the application.
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
-    pub fn process_output(&mut self, now: Instant) -> (Option<Datagram>, Option<Duration>) {
-        match &self.state {
+    pub fn process_output(&mut self, now: Instant) -> Output {
+        let pkt = match &self.state {
             State::Init => {
                 let res = self.client_start(now);
                 self.absorb_error(now, res);
-                (self.output(now), self.next_delay(now))
+                self.output(now)
             }
             State::Closing { error, timeout, .. } => {
                 if *timeout > now {
-                    (self.output(now), None)
+                    self.output(now)
                 } else {
                     // Close timeout expired, move to Closed
                     let st = State::Closed(error.clone());
                     self.set_state(st);
-                    (None, None)
+                    None
                 }
             }
-            State::Closed(..) => (None, None),
+            State::Closed(..) => None,
             _ => {
                 self.check_loss_detection_timeout(now);
-                (self.output(now), self.next_delay(now))
+                self.output(now)
             }
+        };
+
+        match pkt {
+            Some(pkt) => Output::Datagram(pkt),
+            None => match self.state {
+                State::Closed(_) => Output::None,
+                _ => match self.next_delay(now) {
+                    Some(delay) => Output::Callback(delay),
+                    None => Output::None,
+                },
+            },
         }
     }
 
     /// Process input and generate output.
-    pub fn process(
-        &mut self,
-        dgram: Option<Datagram>,
-        now: Instant,
-    ) -> (Option<Datagram>, Option<Duration>) {
+    pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         if let Some(d) = dgram {
             self.process_input(d, now);
         }
@@ -1723,18 +1755,18 @@ mod tests {
     #[test]
     fn test_conn_stream_create() {
         let mut client = default_client();
-        let (res, _) = client.process(None, now());
+        let out = client.process(None, now());
         let mut server = default_server();
-        let (res, _) = server.process(res, now());
+        let out = server.process(out.dgram(), now());
 
-        let (res, _) = client.process(res, now());
+        let out = client.process(out.dgram(), now());
         // client now in State::Connected
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 4);
 
-        let _ = server.process(res, now());
+        let _ = server.process(out.dgram(), now());
         // server now in State::Connected
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 3);
         assert_eq!(server.stream_create(StreamType::UniDi).unwrap(), 7);
@@ -1746,31 +1778,31 @@ mod tests {
     fn test_conn_handshake() {
         qdebug!("---- client: generate CH");
         let mut client = default_client();
-        let (res, _) = client.process(None, now());
-        assert!(res.is_some());
-        assert_eq!(res.as_ref().unwrap().len(), 1200);
-        qdebug!("Output={:0x?}", res);
+        let out = client.process(None, now());
+        assert!(out.as_dgram_ref().is_some());
+        assert_eq!(out.as_dgram_ref().unwrap().len(), 1200);
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = default_server();
-        let (res, _) = server.process(res, now());
-        assert!(res.is_some());
-        qdebug!("Output={:0x?}", res);
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         qdebug!("---- client: SH..FIN -> FIN");
-        let (res, _) = client.process(res, now());
-        assert!(res.is_some());
-        qdebug!("Output={:0x?}", res);
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         qdebug!("---- server: FIN -> ACKS");
-        let (res, _) = server.process(res, now());
-        assert!(res.is_some());
-        qdebug!("Output={:0x?}", res);
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         qdebug!("---- client: ACKS -> 0");
-        let (res, _) = client.process(res, now());
-        assert!(res.is_none());
-        qdebug!("Output={:0x?}", res);
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         assert_eq!(*client.state(), State::Connected);
         assert_eq!(*server.state(), State::Connected);
@@ -1783,31 +1815,31 @@ mod tests {
         let mut server = default_server();
 
         qdebug!("---- client");
-        let (res, _) = client.process(None, now());
-        assert!(res.is_some());
-        qdebug!("Output={:0x?}", res);
+        let out = client.process(None, now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
         // -->> Initial[0]: CRYPTO[CH]
 
         qdebug!("---- server");
-        let (res, _) = server.process(res, now());
-        assert!(res.is_some());
-        qdebug!("Output={:0x?}", res);
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
         // <<-- Initial[0]: CRYPTO[SH] ACK[0]
         // <<-- Handshake[0]: CRYPTO[EE, CERT, CV, FIN]
 
         qdebug!("---- client");
-        let (res, _) = client.process(res, now());
-        assert!(res.is_some());
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
         assert_eq!(*client.state(), State::Connected);
-        qdebug!("Output={:0x?}", res);
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
         // -->> Initial[1]: ACK[0]
         // -->> Handshake[0]: CRYPTO[FIN], ACK[0]
 
         qdebug!("---- server");
-        let (res, _) = server.process(res, now());
-        assert!(res.is_some());
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
         assert_eq!(*server.state(), State::Connected);
-        qdebug!("Output={:0x?}", res);
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
         // ACKs
         // -->> nothing
 
@@ -1829,22 +1861,22 @@ mod tests {
             .unwrap_err();
         // Sending this much takes a few datagrams.
         let mut datagrams = vec![];
-        let (mut res, _) = client.process(res, now());
-        while let Some(d) = res {
+        let mut out = client.process(out.dgram(), now());
+        while let Some(d) = out.dgram() {
             datagrams.push(d);
-            res = client.process(None, now()).0;
+            out = client.process(None, now());
         }
         assert_eq!(datagrams.len(), 4);
 
         qdebug!("---- server");
         let mut expect_ack = false;
         for d in datagrams {
-            let (res, _) = server.process(Some(d), now());
-            assert_eq!(res.is_some(), expect_ack); // ACK every second.
+            let out = server.process(Some(d), now());
+            assert_eq!(out.as_dgram_ref().is_some(), expect_ack); // ACK every second.
+            qdebug!("Output={:0x?}", out.as_dgram_ref());
             expect_ack = !expect_ack;
         }
         assert_eq!(*server.state(), State::Connected);
-        qdebug!("Output={:0x?}", res);
 
         let mut buf = vec![0; 4000];
 
@@ -1879,8 +1911,8 @@ mod tests {
             _ => false,
         };
         while !is_done(a) {
-            let (d, _) = a.process(datagram, now());
-            datagram = d;
+            let d = a.process(datagram, now());
+            datagram = d.dgram();
             mem::swap(&mut a, &mut b);
         }
     }
@@ -1919,29 +1951,29 @@ mod tests {
     fn test_dup_server_flight1() {
         qdebug!("---- client: generate CH");
         let mut client = default_client();
-        let (res, _) = client.process(None, now());
-        assert!(res.is_some());
-        assert_eq!(res.as_ref().unwrap().len(), 1200);
-        qdebug!("Output={:0x?}", res);
+        let out = client.process(None, now());
+        assert!(out.as_dgram_ref().is_some());
+        assert_eq!(out.as_dgram_ref().unwrap().len(), 1200);
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = default_server();
-        let (res, _) = server.process(res, now());
-        assert!(res.is_some());
-        qdebug!("Output={:0x?}", res);
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         qdebug!("---- client: SH..FIN -> FIN");
-        let (res2, _) = client.process(res.clone(), now());
-        assert!(res2.is_some());
-        qdebug!("Output={:0x?}", res);
+        let out2 = client.process(Some(out.as_dgram_ref().unwrap().clone()), now());
+        assert!(out2.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out2.as_dgram_ref());
 
         assert_eq!(2, client.stats().packets_rx);
         assert_eq!(0, client.stats().dups_rx);
 
         qdebug!("---- Dup, ignored");
-        let (res2, _) = client.process(res.clone(), now());
-        assert!(res2.is_none());
-        qdebug!("Output={:0x?}", res);
+        let out2 = client.process(out.dgram().clone(), now());
+        assert!(out2.as_dgram_ref().is_none());
+        qdebug!("Output={:0x?}", out2.as_dgram_ref());
 
         // Four packets total received, two of them are dups
         assert_eq!(4, client.stats().packets_rx);
@@ -1950,9 +1982,9 @@ mod tests {
 
     fn exchange_ticket(client: &mut Connection, server: &mut Connection) -> Vec<u8> {
         server.send_ticket(now(), &[]).expect("can send ticket");
-        let (dgram, _timer) = server.process_output(now());
-        assert!(dgram.is_some());
-        client.process_input(dgram.unwrap(), now());
+        let out = server.process_output(now());
+        assert!(out.as_dgram_ref().is_some());
+        client.process_input(out.dgram().unwrap(), now());
         assert_eq!(*client.state(), State::Connected);
         client.resumption_token().expect("should have token")
     }
@@ -2007,21 +2039,21 @@ mod tests {
         let mut server = default_server();
 
         // Send ClientHello.
-        let (client_hs, _) = client.process(None, now());
-        assert!(client_hs.is_some());
+        let client_hs = client.process(None, now());
+        assert!(client_hs.as_dgram_ref().is_some());
 
         // Now send a 0-RTT packet.
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
         client
             .stream_send(client_stream_id, &vec![1, 2, 3])
             .unwrap();
-        let (client_0rtt, _) = client.process(None, now());
-        assert!(client_0rtt.is_some());
+        let client_0rtt = client.process(None, now());
+        assert!(client_0rtt.as_dgram_ref().is_some());
 
-        let (server_hs, _) = server.process(client_hs, now());
-        assert!(server_hs.is_some()); // ServerHello, etc...
-        let (server_process_0rtt, _) = server.process(client_0rtt, now());
-        assert!(server_process_0rtt.is_none());
+        let server_hs = server.process(client_hs.dgram(), now());
+        assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
+        let server_process_0rtt = server.process(client_0rtt.dgram(), now());
+        assert!(server_process_0rtt.as_dgram_ref().is_none());
 
         let server_stream_id = server
             .events()
@@ -2069,13 +2101,13 @@ mod tests {
         client
             .stream_send(client_stream_id, &vec![1, 2, 3])
             .unwrap();
-        let (client_0rtt, _) = client.process(None, now());
-        assert!(client_0rtt.is_some());
+        let client_0rtt = client.process(None, now());
+        assert!(client_0rtt.as_dgram_ref().is_some());
 
-        assert_coalesced_0rtt(&client_0rtt.as_ref().unwrap()[..]);
+        assert_coalesced_0rtt(&client_0rtt.as_dgram_ref().unwrap()[..]);
 
-        let (server_hs, _) = server.process(client_0rtt, now());
-        assert!(server_hs.is_some()); // Should produce ServerHello etc...
+        let server_hs = server.process(client_0rtt.dgram(), now());
+        assert!(server_hs.as_dgram_ref().is_some()); // Should produce ServerHello etc...
 
         let server_stream_id = server
             .events()
@@ -2114,27 +2146,27 @@ mod tests {
                 .unwrap();
 
         // Send ClientHello.
-        let (client_hs, _) = client.process(None, now());
-        assert!(client_hs.is_some());
+        let client_hs = client.process(None, now());
+        assert!(client_hs.as_dgram_ref().is_some());
 
         // Write some data on the client.
         let stream_id = client.stream_create(StreamType::UniDi).unwrap();
         let msg = &[1, 2, 3];
         client.stream_send(stream_id, msg).unwrap();
-        let (client_0rtt, _) = client.process(None, now());
-        assert!(client_0rtt.is_some());
+        let client_0rtt = client.process(None, now());
+        assert!(client_0rtt.as_dgram_ref().is_some());
 
-        let (server_hs, _) = server.process(client_hs, now());
-        assert!(server_hs.is_some()); // Should produce ServerHello etc...
-        let (server_ignored, _) = server.process(client_0rtt, now());
-        assert!(server_ignored.is_none());
+        let server_hs = server.process(client_hs.dgram(), now());
+        assert!(server_hs.as_dgram_ref().is_some()); // Should produce ServerHello etc...
+        let server_ignored = server.process(client_0rtt.dgram(), now());
+        assert!(server_ignored.as_dgram_ref().is_none());
 
         // The server shouldn't receive that 0-RTT data.
         let recvd_stream_evt = |e| matches!(e, ConnectionEvent::NewStream { .. });
         assert!(!server.events().into_iter().any(recvd_stream_evt));
 
         // Client should get a rejection.
-        let _ = client.process(server_hs, now());
+        let _ = client.process(server_hs.dgram(), now());
         let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
         assert!(client.events().into_iter().any(recvd_0rtt_reject));
 
@@ -2168,11 +2200,11 @@ mod tests {
         let dgram = Datagram::new(loopback(), loopback(), packet);
 
         // "send" it
-        let (ret_dgram, _) = server.process(Some(dgram), now());
+        let ret_dgram = server.process(Some(dgram), now());
 
         // We should have received a VN packet.
-        assert!(ret_dgram.is_some());
-        let ret_pkt = ret_dgram.unwrap();
+        assert!(ret_dgram.as_dgram_ref().is_some());
+        let ret_pkt = ret_dgram.dgram().unwrap();
         let ret_hdr = decode_packet_hdr(&server, &*ret_pkt).unwrap();
         assert!(match &ret_hdr.tipe {
             PacketType::VN(vns) if vns.len() == 2 => true,

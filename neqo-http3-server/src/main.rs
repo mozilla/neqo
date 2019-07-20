@@ -9,7 +9,7 @@
 use neqo_common::{qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Connection, Http3State};
-use neqo_transport::Connection;
+use neqo_transport::{Connection, Output};
 use std::collections::HashMap;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -247,16 +247,20 @@ fn main() -> Result<(), io::Error> {
 
             server.process_http3(Instant::now());
 
-            let (conn_out_dgrams, maybe_timeout) = server.process_output(Instant::now());
-            *svr_timeout = maybe_timeout.map(|timeout| {
-                if let Some(svr_timeout) = svr_timeout {
-                    timer.cancel_timeout(svr_timeout);
-                }
-                qinfo!("Setting timeout of {:?} for {:?}", timeout, remote_addr);
-                timer.set_timeout(timeout, remote_addr)
-            });
+            let conn_out = server.process_output(Instant::now());
 
-            out_dgrams.extend(conn_out_dgrams);
+            match conn_out {
+                Output::Datagram(dgram) => out_dgrams.push(dgram),
+                Output::Callback(new_timeout) => {
+                    if let Some(svr_timeout) = svr_timeout {
+                        timer.cancel_timeout(svr_timeout);
+                    }
+
+                    qinfo!("Setting timeout of {:?} for {:?}", new_timeout, remote_addr);
+                    *svr_timeout = Some(timer.set_timeout(new_timeout, remote_addr));
+                }
+                Output::None => eprintln!("Connection closed?"),
+            };
         }
 
         // TODO: this maybe isn't cool?

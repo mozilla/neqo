@@ -46,19 +46,19 @@ fn connect() -> (Http3Connection, Http3Connection, Option<Datagram>) {
 
     assert_eq!(hconn_c.state(), Http3State::Initializing);
     assert_eq!(hconn_s.state(), Http3State::Initializing);
-    let (d, _) = hconn_c.process(None, now()); // Initial
-    let (d, _) = hconn_s.process(d, now()); // Initial + Handshake
-    let (d, _) = hconn_c.process(d, now()); // Handshake
+    let out = hconn_c.process(None, now()); // Initial
+    let out = hconn_s.process(out.dgram(), now()); // Initial + Handshake
+    let out = hconn_c.process(out.dgram(), now()); // Handshake
     assert_eq!(hconn_c.state(), Http3State::Connected);
-    let (d, _) = hconn_s.process(d, now()); // Handshake
+    let out = hconn_s.process(out.dgram(), now()); // Handshake
     assert_eq!(hconn_s.state(), Http3State::Connected);
-    let (d, _) = hconn_c.process(d, now());
-    let (d, _) = hconn_s.process(d, now());
+    let out = hconn_c.process(out.dgram(), now());
+    let out = hconn_s.process(out.dgram(), now());
     // assert_eq!(hconn_s.settings_received, true);
-    let (d, _) = hconn_c.process(d, now());
+    let out = hconn_c.process(out.dgram(), now());
     // assert_eq!(hconn_c.settings_received, true);
 
-    (hconn_c, hconn_s, d)
+    (hconn_c, hconn_s, out.dgram())
 }
 
 #[test]
@@ -68,19 +68,19 @@ fn test_connect() {
 
 #[test]
 fn test_fetch() {
-    let (mut hconn_c, mut hconn_s, d) = connect();
+    let (mut hconn_c, mut hconn_s, dgram) = connect();
 
     eprintln!("-----client");
     let req = hconn_c
         .fetch("GET", "https", "something.com", "/", &[])
         .unwrap();
     assert_eq!(req, 0);
-    let (d, _) = hconn_c.process(d, now());
+    let out = hconn_c.process(dgram, now());
     eprintln!("-----server");
-    let (d, _) = hconn_s.process(d, now());
+    let out = hconn_s.process(out.dgram(), now());
 
     eprintln!("-----client");
-    let _ = hconn_c.process(d, now());
+    let _ = hconn_c.process(out.dgram(), now());
     // TODO: some kind of client API needed to read result of fetch
     // TODO: assert result is as expected e.g. (200 "abc")
     // assert!(false);

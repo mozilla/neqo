@@ -557,8 +557,8 @@ mod tests {
         encoder_instruction: &[u8],
     ) {
         encoder.send(&mut conn_c).unwrap();
-        let (d, _) = conn_c.process(None, now());
-        conn_s.process(d, now());
+        let out = conn_c.process(None, now());
+        conn_s.process(out.dgram(), now());
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {
@@ -774,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn test_header_block_encoder() {
+    fn test_header_block_encoder_non() {
         let test_cases: [TestElement; 6] = [
             // test a header with ref to static - encode_indexed
             TestElement {
@@ -1007,8 +1007,8 @@ mod tests {
 
         // receive an insert count increment.
         conn_s.stream_send(recv_stream_id, &[0x01]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         if let Err(_) = encoder.read_instructions(&mut conn_c, recv_stream_id) {
             assert!(false);
         } else {
@@ -1084,8 +1084,8 @@ mod tests {
 
         // receive an insert count increment.
         let _ = conn_s.stream_send(recv_stream_id, &[0x01]);
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         if let Err(_) = encoder.read_instructions(&mut conn_c, recv_stream_id) {
             assert!(false);
         } else {
@@ -1130,13 +1130,13 @@ mod tests {
         if wait == 0 {
             // receive a header_ack.
             let _ = conn_s.stream_send(recv_stream_id, &[0x81]);
-            let (d, _) = conn_s.process(None, now());
-            conn_c.process(d, now());
+            let out = conn_s.process(None, now());
+            conn_c.process(out.dgram(), now());
         } else {
             // reveice a stream canceled
             let _ = conn_s.stream_send(recv_stream_id, &[0x41]);
-            let (d, _) = conn_s.process(None, now());
-            conn_c.process(d, now());
+            let out = conn_s.process(None, now());
+            conn_c.process(out.dgram(), now());
         }
         if let Err(_) = encoder.read_instructions(&mut conn_c, recv_stream_id) {
             assert!(false);

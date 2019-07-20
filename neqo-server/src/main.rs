@@ -177,8 +177,8 @@ fn main() {
             http_serve(&mut server, stream_id);
         }
 
-        let (out, _timer) = server.process_output(Instant::now());
-        if let Some(dgram) = out {
+        let out = server.process_output(Instant::now());
+        if let Some(dgram) = out.dgram() {
             emit_datagram(&socket, dgram);
         }
     }

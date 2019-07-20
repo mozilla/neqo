@@ -517,10 +517,10 @@ mod tests {
 
         let mut conn_c = default_client();
         let mut conn_s = default_server();
-        let (d, _) = conn_c.process(None, now());
-        let (d, _) = conn_s.process(d, now());
-        let (d, _) = conn_c.process(d, now());
-        conn_s.process(d, now());
+        let out = conn_c.process(None, now());
+        let out = conn_s.process(out.dgram(), now());
+        let out = conn_c.process(out.dgram(), now());
+        conn_s.process(out.dgram(), now());
 
         // create a stream
         let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
@@ -538,8 +538,8 @@ mod tests {
             buf.push(v);
         }
         conn_s.stream_send(stream_id, &buf).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
 
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
@@ -676,33 +676,33 @@ mod tests {
 
         // Send and read settings frame 040406040804
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x6]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x8]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         if !fr.done() {
@@ -735,48 +735,48 @@ mod tests {
 
         // Read settings frame 400406064004084100
         conn_s.stream_send(stream_id, &[0x40]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x6]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x6]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x40]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x8]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x41]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x0]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         if !fr.done() {
@@ -808,25 +808,25 @@ mod tests {
 
         // Read pushpromise frame 05054101010203
         conn_s.stream_send(stream_id, &[0x5]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x5]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x41]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s
             .stream_send(stream_id, &[0x1, 0x1, 0x2, 0x3])
             .unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         // headers are still on the stream.
@@ -865,8 +865,8 @@ mod tests {
         conn_s
             .stream_send(stream_id, &[0x0, 0x3, 0x1, 0x2, 0x3])
             .unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         // payloead is still on the stream.
@@ -908,14 +908,14 @@ mod tests {
         let mut buf: Vec<_> = enc.into();
         buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
         conn_s.stream_send(stream_id, &buf).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         // now receive a CANCEL_PUSH fram to see that frame reader is ok.
         conn_s.stream_send(stream_id, &[0x03, 0x01, 0x05]).unwrap();
-        let (d, _) = conn_s.process(None, now());
-        conn_c.process(d, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         assert!(fr.done());

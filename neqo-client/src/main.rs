@@ -147,8 +147,8 @@ fn process_loop(
 
         let exiting = !handler.handle(client);
 
-        let (out_dgram, _timer) = client.process_output(Instant::now());
-        emit_datagram(&socket, out_dgram);
+        let out_dgram = client.process_output(Instant::now());
+        emit_datagram(&socket, out_dgram.dgram());
 
         if exiting {
             return client.state();
@@ -372,8 +372,8 @@ mod old {
 
             let exiting = !handler.handle(client);
 
-            let (out_dgram, _timer) = client.process_output(Instant::now());
-            emit_datagram(&socket, out_dgram);
+            let out_dgram = client.process_output(Instant::now());
+            emit_datagram(&socket, out_dgram.dgram());
 
             if exiting {
                 return client.state().clone();
