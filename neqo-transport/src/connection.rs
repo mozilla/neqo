@@ -30,7 +30,7 @@ use crate::packet::{
     decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, PacketDecoder, PacketHdr,
     PacketNumberDecoder, PacketType,
 };
-use crate::recovery::{LossRecovery, LossRecoveryMode, TokenType};
+use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, TokenType};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams, StreamGenerator};
 use crate::stats::Stats;
@@ -146,7 +146,7 @@ pub struct Connection {
     pmtu: usize,
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
-    loss_recovery_state: (LossRecoveryMode, Option<Instant>),
+    loss_recovery_state: LossRecoveryState,
     events: Rc<RefCell<ConnectionEvents>>,
     token: Option<Vec<u8>>,
     send_vn: Option<(PacketHdr, SocketAddr, SocketAddr)>,
@@ -262,7 +262,7 @@ impl Connection {
             pmtu: 1280,
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             loss_recovery: LossRecovery::new(),
-            loss_recovery_state: (LossRecoveryMode::None, None),
+            loss_recovery_state: LossRecoveryState::default(),
             events: Rc::new(RefCell::new(ConnectionEvents::default())),
             token: None,
             send_vn: None,
@@ -430,7 +430,7 @@ impl Connection {
     fn next_delay(&mut self, now: Instant) -> Option<Duration> {
         self.loss_recovery_state = self.loss_recovery.get_timer();
 
-        let time = match (self.loss_recovery_state.1, self.acks.ack_time()) {
+        let time = match (self.loss_recovery_state.callback_time, self.acks.ack_time()) {
             (Some(t_lr), Some(t_ack)) => Some(min(t_lr, t_ack)),
             (Some(t), _) | (_, Some(t)) => Some(t),
             _ => None,
@@ -1567,18 +1567,18 @@ impl Connection {
     fn check_loss_detection_timeout(&mut self, now: Instant) {
         qdebug!([self] "check_loss_timeouts");
 
-        if matches!(self.loss_recovery_state.0, LossRecoveryMode::None) {
+        if matches!(self.loss_recovery_state.mode, LossRecoveryMode::None) {
             // LR not the active timer
             return;
         }
 
-        if self.loss_recovery_state.1 > Some(now) {
+        if self.loss_recovery_state.callback_time > Some(now) {
             // LR timer, but hasn't expired.
             return;
         }
 
         // Timer expired and LR was active timer.
-        match &mut self.loss_recovery_state.0 {
+        match &mut self.loss_recovery_state.mode {
             LossRecoveryMode::None => unreachable!(),
             LossRecoveryMode::LostPackets => {
                 // Time threshold loss detection

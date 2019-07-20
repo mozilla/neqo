@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::{btree_map::IterMut, BTreeMap};
+use std::collections::{hash_map::IterMut, BTreeMap, HashMap};
 use std::mem;
 use std::rc::Rc;
 use std::time::Instant;
@@ -698,7 +698,7 @@ impl SendStream {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct SendStreams(BTreeMap<StreamId, SendStream>);
+pub(crate) struct SendStreams(HashMap<StreamId, SendStream>);
 
 impl SendStreams {
     pub(crate) fn get(&self, id: StreamId) -> Res<&SendStream> {
@@ -736,16 +736,7 @@ impl SendStreams {
     }
 
     pub(crate) fn clear_terminal(&mut self) {
-        let send_to_remove: SmallVec<[_; 8]> = self
-            .0
-            .iter()
-            .filter(|(_, stream)| stream.is_terminal())
-            .map(|(id, _)| *id)
-            .collect();
-
-        for id in send_to_remove {
-            self.0.remove(&id);
-        }
+        self.0.retain(|_, stream| !stream.is_terminal())
     }
 }
 

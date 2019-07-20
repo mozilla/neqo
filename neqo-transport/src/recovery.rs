@@ -98,6 +98,30 @@ impl RttVals {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct LossRecoveryState {
+    pub(crate) mode: LossRecoveryMode,
+    pub(crate) callback_time: Option<Instant>,
+}
+
+impl LossRecoveryState {
+    fn new(mode: LossRecoveryMode, callback_time: Option<Instant>) -> LossRecoveryState {
+        LossRecoveryState {
+            mode,
+            callback_time,
+        }
+    }
+}
+
+impl Default for LossRecoveryState {
+    fn default() -> LossRecoveryState {
+        LossRecoveryState {
+            mode: LossRecoveryMode::None,
+            callback_time: None,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) enum LossRecoveryMode {
     None,
@@ -387,7 +411,7 @@ impl LossRecovery {
         lost_packets
     }
 
-    pub(crate) fn get_timer(&mut self) -> (LossRecoveryMode, Option<Instant>) {
+    pub(crate) fn get_timer(&mut self) -> LossRecoveryState {
         qdebug!([self] "get_loss_detection_timer.");
 
         let mut has_crypto_out = false;
@@ -418,7 +442,7 @@ impl LossRecovery {
         );
 
         if !has_ack_eliciting_out && !has_crypto_out {
-            return (LossRecoveryMode::None, None);
+            return LossRecoveryState::new(LossRecoveryMode::None, None);
         }
 
         qinfo!([self]
@@ -456,7 +480,7 @@ impl LossRecovery {
         };
 
         qdebug!([self] "loss_detection_timer mode={:?} timer={:?}", mode, maybe_timer);
-        (mode, maybe_timer)
+        LossRecoveryState::new(mode, maybe_timer)
     }
 
     /// Find when the earliest sent packet should be considered lost.
@@ -683,19 +707,19 @@ mod tests {
         let mut lr = LossRecovery::new();
         lr.on_packet_sent(PNSpace::ApplicationData, 0, true, true, vec![], pn_time(0));
         assert_eq!(
-            lr.get_timer().1,
+            lr.get_timer().callback_time,
             Some(pn_time(0) + (super::INITIAL_RTT * 2))
         );
         // Sending another crypto packet pushes the timer out.
         lr.on_packet_sent(PNSpace::ApplicationData, 1, true, true, vec![], pn_time(1));
         assert_eq!(
-            lr.get_timer().1,
+            lr.get_timer().callback_time,
             Some(pn_time(1) + (super::INITIAL_RTT * 2))
         );
         // Sending non-crypto packets doesn't move it.
         lr.on_packet_sent(PNSpace::ApplicationData, 2, true, false, vec![], pn_time(2));
         assert_eq!(
-            lr.get_timer().1,
+            lr.get_timer().callback_time,
             Some(pn_time(1) + (super::INITIAL_RTT * 2))
         );
     }
@@ -704,9 +728,9 @@ mod tests {
     fn crypto_timeout() {
         let mut lr = LossRecovery::new();
         lr.on_packet_sent(PNSpace::Initial, 0, true, true, vec![], pn_time(0));
-        let (mode, crypto_time) = lr.get_timer();
-        assert!(crypto_time.is_some());
-        assert_eq!(mode, LossRecoveryMode::CryptoTimerExpired);
+        let lr_state = lr.get_timer();
+        assert!(lr_state.callback_time.is_some());
+        assert_eq!(lr_state.mode, LossRecoveryMode::CryptoTimerExpired);
     }
 
     // Test time loss detection as part of handling a regular ACK.
@@ -768,10 +792,10 @@ mod tests {
         assert_sent_times(&lr, None, None, Some(pn1_sent_time));
 
         // After time elapses, pn 1 is marked lost.
-        let (mode, timer) = lr.get_timer();
+        let lr_state = lr.get_timer();
         let pn1_lost_time = pn1_sent_time + (INITIAL_RTT * 9 / 8);
-        assert_eq!(timer, Some(pn1_lost_time));
-        match mode {
+        assert_eq!(lr_state.callback_time, Some(pn1_lost_time));
+        match lr_state.mode {
             LossRecoveryMode::LostPackets => {
                 let packets = lr.detect_lost_packets(PNSpace::ApplicationData, pn1_lost_time);
 
