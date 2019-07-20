@@ -378,14 +378,14 @@ impl Test {
         })
     }
 
-    /*    fn letters(&self) -> Vec<char> {
+    fn letters(&self) -> Vec<char> {
         match self {
             Test::Connect => vec!['H'],
             Test::H9 => vec!['D', 'C'],
-            Test::H3 => vec!['3'],
+            Test::H3 => vec!['3', 'C', 'D'],
             Test::VN => vec!['V'],
         }
-    }*/
+    }
 }
 
 struct NetworkCtx {
@@ -652,6 +652,20 @@ fn main() {
     // Now wait for them.
     for child in children {
         let res = child.1.join().unwrap();
-        println!("{} -> {:?}", child.0.label, res);
+        let mut all_letters = HashSet::new();
+        for r in &res {
+            for l in r.0.letters() {
+                if r.1 == "OK" {
+                    all_letters.insert(l);
+                }
+            }
+        }
+        let mut letter_str = String::from("");
+        for l in vec!['V','H','D','C','R','Z','S', '3'] {
+            if all_letters.contains(&l) {
+                letter_str.push(l);
+            }
+        }
+        println!("{}: {} -> {:?}", child.0.label, letter_str, res);
     }
 }
