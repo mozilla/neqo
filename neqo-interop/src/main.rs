@@ -282,16 +282,16 @@ impl H3Handler {
             match event {
                 Http3Event::HeaderReady { stream_id } => {
                     if !self.streams.contains(&stream_id) {
-                        println!("Data on unexpected stream: {}", stream_id);
+                        eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
 
                     let headers = self.h3.get_headers(stream_id);
-                    println!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                    eprintln!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
                 Http3Event::DataReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
-                        println!("Data on unexpected stream: {}", stream_id);
+                        eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
 
@@ -299,13 +299,13 @@ impl H3Handler {
                         .h3
                         .read_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
-                    println!(
+                    eprintln!(
                         "READ[{}]: {}",
                         stream_id,
                         String::from_utf8(data.clone()).unwrap()
                     );
                     if fin {
-                        println!("<FIN[{}]>", stream_id);
+                        eprintln!("<FIN[{}]>", stream_id);
                         self.h3.close(Instant::now(), 0, "kthxbye!");
                         return false;
                     }
@@ -560,7 +560,7 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
         }
     }
 
-    println!("Tests for {} complete {:?}", peer.label, results);
+    eprintln!("Tests for {} complete {:?}", peer.label, results);
     results
 }
 
