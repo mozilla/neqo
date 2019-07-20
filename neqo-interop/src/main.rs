@@ -470,6 +470,9 @@ impl Handler for VnHandler {
     }
 
     fn rewrite_out(&mut self, dgrams: &mut Vec<Datagram>) {
+        if dgrams.len() == 0 {
+            return
+        }
         assert!(dgrams.len() == 1);
         dgrams[0].d[1] = 0x1a;
     }
@@ -499,8 +502,18 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     };
 
     if let Test::VN = test {
-        let _res = test_vn(&nctx, peer);
-        unimplemented!();
+        let res = test_vn(&nctx, peer);
+        return match res {
+            Err(e) => (test, format!("ERROR: {}", e)),
+            Ok(client) => {
+                match client.state() {
+                    State::Closing { .. } => {
+                        (test, String::from("OK"))
+                    },
+                    _ => (test, format!("ERROR: Wrong state {:?}", client.state()))
+                }
+            }
+        }
     }
 
     let mut client = match test_connect(&nctx, test, peer) {
@@ -582,8 +595,8 @@ const PEERS: [Peer; 9] = [
     },
     Peer {
         label: "applequic",
-        host: "192.168.203.142",
-        port: 4433,
+        host: "31.133.129.48",
+        port: 8443,
     },
     Peer {
         label: "f5",
