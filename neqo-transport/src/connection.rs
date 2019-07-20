@@ -1130,7 +1130,7 @@ impl Connection {
                 self.events
                     .borrow_mut()
                     .connection_closed(error_code, frame_type, &reason_phrase);
-                self.set_state(State::Closed((&error_code).into()));
+                self.set_state(State::Closed(error_code.into()));
             }
         };
 
@@ -1667,7 +1667,7 @@ impl FrameGenerator for CloseGenerator {
                 c.flow_mgr.borrow_mut().set_need_close_frame(false);
                 return Some((
                     Frame::ConnectionClose {
-                        error_code: cerr.into(),
+                        error_code: cerr.clone().into(),
                         frame_type: *frame_type,
                         reason_phrase: Vec::from(reason.clone()),
                     },

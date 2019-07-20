@@ -100,11 +100,11 @@ impl CloseError {
     }
 }
 
-impl From<&ConnectionError> for CloseError {
-    fn from(err: &ConnectionError) -> Self {
+impl From<ConnectionError> for CloseError {
+    fn from(err: ConnectionError) -> Self {
         match err {
             ConnectionError::Transport(c) => CloseError::Transport(c.code()),
-            ConnectionError::Application(c) => CloseError::Application(*c),
+            ConnectionError::Application(c) => CloseError::Application(c),
         }
     }
 }

@@ -298,7 +298,7 @@ impl Http3Connection {
             Http3State::Connected => {
                 if let State::Closing { error, .. } = self.conn.state().clone() {
                     self.events.borrow_mut().connection_closing();
-                    self.state = Http3State::Closing((&error).into());
+                    self.state = Http3State::Closing(error.into());
                 }
             }
             _ => {}
