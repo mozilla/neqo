@@ -31,7 +31,7 @@ trap 'rm -f "$tmp"' ERR EXIT
 for f in "${files[@]}"; do
     if [[ "${f##*.}" == "rs" ]]; then
         git show :"$f" > "$tmp"
-        if ! cat "$tmp" | rustfmt --check | diff -q "$tmp" - >/dev/null; then
+        if ! cat "$tmp" | rustfmt | diff -q "$tmp" - >/dev/null; then
             [ "$err" -eq 0 ] && echo "Formatting errors found in:" 1>&2
             echo "  $f" 1>&2
             err=1
