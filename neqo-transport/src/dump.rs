@@ -24,9 +24,8 @@ pub fn dump_packet(conn: &Connection, dir: &str, hdr: &PacketHdr, payload: &[u8]
             }
         };
         if let Some(x) = f.dump() {
-            s.push_str(" ");
-            s.push_str(&x);
+            s.push_str(&format!("\n  {} {}", dir, &x));
         }
     }
-    qdebug!([conn] "{}: type={:?} pn={}: {}", dir, hdr.tipe, hdr.pn, s);
+    qdebug!([conn] "pn={} type={:?}{}", hdr.pn, hdr.tipe, s);
 }

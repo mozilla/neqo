@@ -16,6 +16,9 @@ pub use self::codec::{Decoder, Encoder};
 pub use self::datagram::Datagram;
 pub use self::incrdecoder::{IncrementalDecoder, IncrementalDecoderResult};
 
+#[macro_use]
+extern crate lazy_static;
+
 // Cribbed from the |matches| crate, for simplicity.
 #[macro_export]
 macro_rules! matches {
