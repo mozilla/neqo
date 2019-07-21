@@ -6,7 +6,7 @@
 
 #![deny(warnings)]
 
-use neqo_common::{qinfo, Datagram};
+use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Connection, Http3State};
 use neqo_transport::{Connection, Output};
@@ -247,20 +247,24 @@ fn main() -> Result<(), io::Error> {
 
             server.process_http3(Instant::now());
 
-            let conn_out = server.process_output(Instant::now());
+            loop {
+                match server.process_output(Instant::now()) {
+                    Output::Datagram(dgram) => out_dgrams.push(dgram),
+                    Output::Callback(new_timeout) => {
+                        if let Some(svr_timeout) = svr_timeout {
+                            timer.cancel_timeout(svr_timeout);
+                        }
 
-            match conn_out {
-                Output::Datagram(dgram) => out_dgrams.push(dgram),
-                Output::Callback(new_timeout) => {
-                    if let Some(svr_timeout) = svr_timeout {
-                        timer.cancel_timeout(svr_timeout);
+                        qinfo!("Setting timeout of {:?} for {:?}", new_timeout, remote_addr);
+                        *svr_timeout = Some(timer.set_timeout(new_timeout, remote_addr));
+                        break;
                     }
-
-                    qinfo!("Setting timeout of {:?} for {:?}", new_timeout, remote_addr);
-                    *svr_timeout = Some(timer.set_timeout(new_timeout, remote_addr));
-                }
-                Output::None => eprintln!("Connection closed?"),
-            };
+                    Output::None => {
+                        qdebug!("Output::None");
+                        break;
+                    }
+                };
+            }
         }
 
         // TODO: this maybe isn't cool?
