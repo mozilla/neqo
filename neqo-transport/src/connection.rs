@@ -612,7 +612,7 @@ impl Connection {
                     continue;
                 }
             };
-            dump_packet(self, "rx", &hdr, &body);
+            dump_packet(self, "<- RX", &hdr, &body);
 
             // TODO(ekr@rtfm.com): Have the server blow away the initial
             // crypto state if this fails? Otherwise, we will get a panic
@@ -868,7 +868,7 @@ impl Connection {
                 .unwrap();
             let tx = cs.tx.as_ref().unwrap();
             let mut packet = encode_packet(tx, &hdr, &encoder);
-            dump_packet(self, "tx", &hdr, &encoder);
+            dump_packet(self, "TX ->", &hdr, &encoder);
             out_bytes.append(&mut packet);
         }
 
