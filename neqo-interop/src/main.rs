@@ -623,6 +623,11 @@ const PEERS: &[Peer] = &[
         host: "test.privateoctopus.com",
         port: 4433,
     },
+    Peer {
+        label: "ats",
+        host: "quic.ogre.com",
+        port: 4433,
+    },
 ];
 
 const TESTS: [Test; 4] = [Test::Connect, Test::H9, Test::H3, Test::VN];
