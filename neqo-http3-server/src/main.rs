@@ -46,7 +46,7 @@ struct Args {
     /// Name of key from NSS database.
     key: String,
 
-    #[structopt(short = "a", long, default_value = "h3-20")]
+    #[structopt(short = "a", long, default_value = "h3-22")]
     /// ALPN labels to negotiate.
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.

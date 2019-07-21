@@ -97,6 +97,7 @@ pub enum HFrame {
     Priority {
         priorized_elem_type: PrioritizedElementType,
         elem_dependency_type: ElementDependencyType,
+        // TODO(mt) exclusive bit
         priority_elem_id: u64,
         elem_dependency_id: u64,
         weight: u8,

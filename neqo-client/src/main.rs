@@ -64,7 +64,7 @@ pub struct Args {
     #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
     db: PathBuf,
 
-    #[structopt(short = "a", long, default_value = "h3-20")]
+    #[structopt(short = "a", long, default_value = "h3-22")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP3 no matter what the ALPN says.
