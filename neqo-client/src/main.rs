@@ -87,6 +87,10 @@ pub struct Args {
     #[structopt(name = "use-old-http", short = "o", long)]
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
+
+    #[structopt(name = "omit-read-data", long)]
+    /// Do not print received data
+    omit_read_data: bool,
 }
 
 impl Args {
@@ -120,7 +124,7 @@ impl ToSocketAddrs for Args {
 }
 
 trait Handler {
-    fn handle(&mut self, client: &mut Http3Connection) -> bool;
+    fn handle(&mut self, args: &Args, client: &mut Http3Connection) -> bool;
 }
 
 fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) {
@@ -138,6 +142,7 @@ fn process_loop(
     socket: &UdpSocket,
     client: &mut Http3Connection,
     handler: &mut Handler,
+    args: &Args,
 ) -> neqo_http3::connection::Http3State {
     let buf = &mut [0u8; 2048];
     loop {
@@ -145,7 +150,7 @@ fn process_loop(
             return client.state();
         }
 
-        let exiting = !handler.handle(client);
+        let exiting = !handler.handle(args, client);
 
         let out_dgram = client.process_output(Instant::now());
         emit_datagram(&socket, out_dgram.dgram());
@@ -174,7 +179,7 @@ fn process_loop(
 
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
-    fn handle(&mut self, client: &mut Http3Connection) -> bool {
+    fn handle(&mut self, _args: &Args, client: &mut Http3Connection) -> bool {
         Http3State::Connected != client.state()
     }
 }
@@ -186,7 +191,7 @@ struct PostConnectHandler {
 
 // This is a bit fancier than actually needed.
 impl Handler for PostConnectHandler {
-    fn handle(&mut self, client: &mut Http3Connection) -> bool {
+    fn handle(&mut self, args: &Args, client: &mut Http3Connection) -> bool {
         let mut data = vec![0; 4000];
         client.process_http3(Instant::now());
         for event in client.events() {
@@ -206,14 +211,18 @@ impl Handler for PostConnectHandler {
                         return false;
                     }
 
-                    let (_sz, fin) = client
+                    let (sz, fin) = client
                         .read_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
-                    println!(
-                        "READ[{}]: {}",
-                        stream_id,
-                        String::from_utf8(data.clone()).unwrap()
-                    );
+                    if args.omit_read_data {
+                        println!("READ[{}]: {} bytes", stream_id, sz);
+                    } else {
+                        println!(
+                            "READ[{}]: {}",
+                            stream_id,
+                            String::from_utf8(data.clone()).unwrap()
+                        )
+                    }
                     if fin {
                         println!("<FIN[{}]>", stream_id);
                         client.close(Instant::now(), 0, "kthxbye!");
@@ -232,7 +241,7 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
     let mut client = Http3Connection::new(
         Connection::new_client(
             args.url.host_str().unwrap(),
-            args.alpn,
+            args.alpn.clone(),
             local_addr,
             remote_addr,
         )
@@ -243,7 +252,14 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
     );
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
-    process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h);
+    process_loop(
+        &local_addr,
+        &remote_addr,
+        &socket,
+        &mut client,
+        &mut h,
+        &args,
+    );
 
     let client_stream_id = client
         .fetch(
@@ -257,7 +273,14 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
 
     let mut h2 = PostConnectHandler::default();
     h2.streams.insert(client_stream_id);
-    process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h2);
+    process_loop(
+        &local_addr,
+        &remote_addr,
+        &socket,
+        &mut client,
+        &mut h2,
+        &args,
+    );
 }
 
 fn main() {
@@ -303,12 +326,12 @@ mod old {
     use super::{emit_datagram, Args};
 
     trait HandlerOld {
-        fn handle(&mut self, client: &mut Connection) -> bool;
+        fn handle(&mut self, args: &Args, client: &mut Connection) -> bool;
     }
 
     struct PreConnectHandlerOld {}
     impl HandlerOld for PreConnectHandlerOld {
-        fn handle(&mut self, client: &mut Connection) -> bool {
+        fn handle(&mut self, _args: &Args, client: &mut Connection) -> bool {
             State::Connected != *dbg!(client.state())
         }
     }
@@ -320,7 +343,7 @@ mod old {
 
     // This is a bit fancier than actually needed.
     impl HandlerOld for PostConnectHandlerOld {
-        fn handle(&mut self, client: &mut Connection) -> bool {
+        fn handle(&mut self, args: &Args, client: &mut Connection) -> bool {
             let mut data = vec![0; 4000];
             for event in client.events() {
                 match event {
@@ -330,14 +353,18 @@ mod old {
                             return false;
                         }
 
-                        let (_sz, fin) = client
+                        let (sz, fin) = client
                             .stream_recv(stream_id, &mut data)
                             .expect("Read should succeed");
-                        println!(
-                            "READ[{}]: {}",
-                            stream_id,
-                            String::from_utf8(data.clone()).unwrap()
-                        );
+                        if args.omit_read_data {
+                            println!("READ[{}]: {} bytes", stream_id, sz);
+                        } else {
+                            println!(
+                                "READ[{}]: {}",
+                                stream_id,
+                                String::from_utf8(data.clone()).unwrap()
+                            )
+                        }
                         if fin {
                             println!("<FIN[{}]>", stream_id);
                             client.close(Instant::now(), 0, "kthxbye!");
@@ -363,6 +390,7 @@ mod old {
         socket: &UdpSocket,
         client: &mut Connection,
         handler: &mut HandlerOld,
+        args: &Args,
     ) -> State {
         let buf = &mut [0u8; 2048];
         loop {
@@ -370,7 +398,7 @@ mod old {
                 return client.state().clone();
             }
 
-            let exiting = !handler.handle(client);
+            let exiting = !handler.handle(args, client);
 
             let out_dgram = client.process_output(Instant::now());
             emit_datagram(&socket, out_dgram.dgram());
@@ -417,7 +445,14 @@ mod old {
         .expect("must succeed");
         // Temporary here to help out the type inference engine
         let mut h = PreConnectHandlerOld {};
-        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h);
+        process_loop_old(
+            &local_addr,
+            &remote_addr,
+            &socket,
+            &mut client,
+            &mut h,
+            &args,
+        );
 
         let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
         let req: String = "GET /10\r\n".to_string();
@@ -426,6 +461,13 @@ mod old {
             .unwrap();
         let mut h2 = PostConnectHandlerOld::default();
         h2.streams.insert(client_stream_id);
-        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h2);
+        process_loop_old(
+            &local_addr,
+            &remote_addr,
+            &socket,
+            &mut client,
+            &mut h2,
+            &args,
+        );
     }
 }
