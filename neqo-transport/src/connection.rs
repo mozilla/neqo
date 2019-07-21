@@ -423,7 +423,7 @@ impl Connection {
 
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&mut self, now: Instant) -> Option<Duration> {
-        self.loss_recovery_state = self.loss_recovery.get_timer();
+        self.loss_recovery_state = self.loss_recovery.get_timer(&self.state);
 
         let time = match (self.loss_recovery_state.callback_time, self.acks.ack_time()) {
             (Some(t_lr), Some(t_ack)) => Some(min(t_lr, t_ack)),
@@ -772,7 +772,6 @@ impl Connection {
             }
 
             let mut ack_eliciting = false;
-            let mut is_crypto_packet = false;
             match &self.state {
                 State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
                     loop {
@@ -790,7 +789,6 @@ impl Connection {
                             })
                         {
                             ack_eliciting |= frame.ack_eliciting();
-                            is_crypto_packet |= matches!(frame, Frame::Crypto { .. });
                             frame.marshal(&mut encoder);
                             if let Some(t) = token {
                                 tokens.push(t);
@@ -861,14 +859,8 @@ impl Connection {
                 epoch,
             );
             self.stats.packets_tx += 1;
-            self.loss_recovery.on_packet_sent(
-                space,
-                hdr.pn,
-                ack_eliciting,
-                is_crypto_packet,
-                tokens,
-                now,
-            );
+            self.loss_recovery
+                .on_packet_sent(space, hdr.pn, ack_eliciting, tokens, now);
 
             let cs = self
                 .crypto
@@ -1620,12 +1612,12 @@ impl Connection {
                     }
                 }
             }
-            LossRecoveryMode::CryptoTimerExpired => {
+            LossRecoveryMode::PTO => {
                 qinfo!(
                     [self]
-                    "check_loss_detection_timeout - retransmit_unacked_crypto"
+                    "check_loss_detection_timeout -send_one_or_two_packets"
                 );
-                self.loss_recovery.increment_crypto_count();
+                self.loss_recovery.increment_pto_count();
                 // TODO
                 // if (has unacknowledged crypto data):
                 //   RetransmitUnackedCryptoData()
@@ -1637,13 +1629,6 @@ impl Connection {
                 //      SendOneHandshakePacket()
                 //    else:
                 //      SendOnePaddedInitialPacket()
-            }
-            LossRecoveryMode::PTO => {
-                qinfo!(
-                    [self]
-                    "check_loss_detection_timeout -send_one_or_two_packets"
-                );
-                self.loss_recovery.increment_pto_count();
                 // TODO
                 // SendOneOrTwoPackets()
             }
