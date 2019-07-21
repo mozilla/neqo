@@ -38,15 +38,15 @@ struct Args {
 
 trait Handler {
     fn handle(&mut self, client: &mut Connection) -> bool;
-    fn rewrite_out(&mut self, _dgrams: &mut Vec<Datagram>) {}
+    fn rewrite_out(&mut self, _dgram: &Datagram) -> Option<Datagram> {
+        None
+    }
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
-    for d in out_dgrams {
-        let sent = socket.send(&d[..]).expect("Error sending datagram");
-        if sent != d.len() {
-            eprintln!("Unable to send all {} bytes of datagram", d.len());
-        }
+fn emit_datagram(socket: &UdpSocket, d: Datagram) {
+    let sent = socket.send(&d[..]).expect("Error sending datagram");
+    if sent != d.len() {
+        eprintln!("Unable to send all {} bytes of datagram", d.len());
     }
 }
 
@@ -77,20 +77,19 @@ fn process_loop(
     timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
-    let mut in_dgrams = Vec::new();
     let timer = Timer::new(timeout);
 
     loop {
-        client.process_input(in_dgrams.drain(..), Instant::now());
-
         if let State::Closed(..) = client.state() {
             return Ok(client.state().clone());
         }
 
         let exiting = !handler.handle(client);
-        let (mut out_dgrams, _timer) = client.process_output(Instant::now());
-        handler.rewrite_out(&mut out_dgrams);
-        emit_packets(&nctx.socket, &out_dgrams);
+        let out_dgram = client.process_output(Instant::now());
+        if let Some(dgram) = out_dgram.dgram() {
+            let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
+            emit_datagram(&nctx.socket, dgram);
+        }
 
         if exiting {
             return Ok(client.state().clone());
@@ -116,7 +115,8 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]));
+            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
+            client.process_input(received, Instant::now());
         }
     }
 }
@@ -229,21 +229,18 @@ fn process_loop_h3(
     timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
-    let mut in_dgrams = Vec::new();
     let timer = Timer::new(timeout);
 
     loop {
-        handler
-            .h3
-            .process_input(in_dgrams.drain(..), Instant::now());
-
         if let State::Closed(..) = handler.h3.conn().state() {
             return Ok(handler.h3.conn().state().clone());
         }
 
         let exiting = !handler.handle();
-        let (out_dgrams, _timer) = handler.h3.conn().process_output(Instant::now());
-        emit_packets(&nctx.socket, &out_dgrams);
+        let out_dgram = handler.h3.conn().process_output(Instant::now());
+        if let Some(dgram) = out_dgram.dgram() {
+            emit_datagram(&nctx.socket, dgram);
+        }
 
         if exiting {
             return Ok(handler.h3.conn().state().clone());
@@ -268,7 +265,8 @@ fn process_loop_h3(
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]));
+            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
+            handler.h3.process_input(received, Instant::now());
         }
     }
 }
@@ -469,12 +467,10 @@ impl Handler for VnHandler {
         }
     }
 
-    fn rewrite_out(&mut self, dgrams: &mut Vec<Datagram>) {
-        if dgrams.is_empty() {
-            return;
-        }
-        assert!(dgrams.len() == 1);
-        dgrams[0].d[1] = 0x1a;
+    fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
+        let mut payload = d[..].to_vec();
+        payload[1] = 0x1a;
+        Some(Datagram::new(*d.source(), *d.destination(), payload))
     }
 }
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {

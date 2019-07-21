@@ -802,12 +802,7 @@ mod tests {
     use test_fixture::*;
 
     fn connect() -> (QPackDecoder, Connection, Connection, u64, u64) {
-        let mut conn_c = default_client();
-        let mut conn_s = default_server();
-        let mut r = conn_c.process(vec![], now());
-        r = conn_s.process(r.0, now());
-        r = conn_c.process(r.0, now());
-        conn_s.process(r.0, now());
+        let (mut conn_c, mut conn_s) = test_fixture::connect();
 
         // create a stream
         let recv_stream_id = conn_s.stream_create(StreamType::UniDi).unwrap();
@@ -836,8 +831,8 @@ mod tests {
         }
         // send an instruction
         let _ = conn_s.stream_send(recv_stream_id, instruction);
-        let mut r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         if let Err(e) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
             match err {
                 Some(expected_err) => {
@@ -855,8 +850,8 @@ mod tests {
         }
 
         decoder.send(&mut conn_c).unwrap();
-        r = conn_c.process(vec![], now());
-        conn_s.process(r.0, now());
+        let out = conn_c.process(None, now());
+        conn_s.process(out.dgram(), now());
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {
@@ -950,23 +945,23 @@ mod tests {
                 0x68, 0x04, 0x31, 0x32, 0x33, 0x34,
             ],
         );
-        let r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
             assert!(false)
         }
 
         // send the second instruction, a duplicate instruction.
         let _ = conn_s.stream_send(recv_stream_id, &[0x00]);
-        let mut r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
             assert!(false)
         }
 
         decoder.send(&mut conn_c).unwrap();
-        r = conn_c.process(vec![], now());
-        conn_s.process(r.0, now());
+        let out = conn_c.process(None, now());
+        conn_s.process(out.dgram(), now());
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {
@@ -1059,8 +1054,8 @@ mod tests {
             // send an instruction
             if t.encoder_inst.len() > 0 {
                 let _ = conn_s.stream_send(recv_stream_id, t.encoder_inst);
-                let r = conn_s.process(vec![], now());
-                conn_c.process(r.0, now());
+                let out = conn_s.process(None, now());
+                conn_c.process(out.dgram(), now());
                 if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
                     assert!(false);
                 }
@@ -1080,8 +1075,8 @@ mod tests {
 
         // test header acks and the insert count increment command
         decoder.send(&mut conn_c).unwrap();
-        let r = conn_c.process(vec![], now());
-        conn_s.process(r.0, now());
+        let out = conn_c.process(None, now());
+        conn_s.process(out.dgram(), now());
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {
@@ -1166,8 +1161,8 @@ mod tests {
             // send an instruction.
             if t.encoder_inst.len() > 0 {
                 let _ = conn_s.stream_send(recv_stream_id, t.encoder_inst);
-                let r = conn_s.process(vec![], now());
-                conn_c.process(r.0, now());
+                let out = conn_s.process(None, now());
+                conn_c.process(out.dgram(), now());
                 // read the instruction.
                 if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
                     assert!(false);
@@ -1188,8 +1183,8 @@ mod tests {
 
         // test header acks and the insert count increment command
         decoder.send(&mut conn_c).unwrap();
-        let r = conn_c.process(vec![], now());
-        conn_s.process(r.0, now());
+        let out = conn_c.process(None, now());
+        conn_s.process(out.dgram(), now());
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {

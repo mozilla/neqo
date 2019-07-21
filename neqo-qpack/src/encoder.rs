@@ -535,12 +535,7 @@ mod tests {
     use test_fixture::*;
 
     fn connect(huffman: bool) -> (QPackEncoder, Connection, Connection, u64, u64) {
-        let mut conn_c = default_client();
-        let mut conn_s = default_server();
-        let mut r = conn_c.process(vec![], now());
-        r = conn_s.process(r.0, now());
-        r = conn_c.process(r.0, now());
-        conn_s.process(r.0, now());
+        let (mut conn_c, mut conn_s) = test_fixture::connect();
 
         // create a stream
         let recv_stream_id = conn_s.stream_create(StreamType::UniDi).unwrap();
@@ -562,8 +557,8 @@ mod tests {
         encoder_instruction: &[u8],
     ) {
         encoder.send(&mut conn_c).unwrap();
-        let r = conn_c.process(vec![], now());
-        conn_s.process(r.0, now());
+        let out = conn_c.process(None, now());
+        conn_s.process(out.dgram(), now());
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {
@@ -779,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn test_header_block_encoder() {
+    fn test_header_block_encoder_non() {
         let test_cases: [TestElement; 6] = [
             // test a header with ref to static - encode_indexed
             TestElement {
@@ -1012,8 +1007,8 @@ mod tests {
 
         // receive an insert count increment.
         conn_s.stream_send(recv_stream_id, &[0x01]).unwrap();
-        let r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         if let Err(_) = encoder.read_instructions(&mut conn_c, recv_stream_id) {
             assert!(false);
         } else {
@@ -1089,8 +1084,8 @@ mod tests {
 
         // receive an insert count increment.
         let _ = conn_s.stream_send(recv_stream_id, &[0x01]);
-        let r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         if let Err(_) = encoder.read_instructions(&mut conn_c, recv_stream_id) {
             assert!(false);
         } else {
@@ -1135,13 +1130,13 @@ mod tests {
         if wait == 0 {
             // receive a header_ack.
             let _ = conn_s.stream_send(recv_stream_id, &[0x81]);
-            let r = conn_s.process(vec![], now());
-            conn_c.process(r.0, now());
+            let out = conn_s.process(None, now());
+            conn_c.process(out.dgram(), now());
         } else {
             // reveice a stream canceled
             let _ = conn_s.stream_send(recv_stream_id, &[0x41]);
-            let r = conn_s.process(vec![], now());
-            conn_c.process(r.0, now());
+            let out = conn_s.process(None, now());
+            conn_c.process(out.dgram(), now());
         }
         if let Err(_) = encoder.read_instructions(&mut conn_c, recv_stream_id) {
             assert!(false);

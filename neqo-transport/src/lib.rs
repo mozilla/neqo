@@ -25,7 +25,7 @@ mod stream_id;
 mod tparams;
 mod tracking;
 
-pub use self::connection::{Connection, Role, State};
+pub use self::connection::{Connection, Output, Role, State};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
