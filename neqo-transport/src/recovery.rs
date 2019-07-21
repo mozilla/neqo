@@ -422,7 +422,7 @@ impl LossRecovery {
             self.spaces[PNSpace::ApplicationData].sent_packets.len()
         );
 
-        // QUIC only has one timer, but it does triple duty because it falls
+        // QUIC only has one timer, but it does double duty because it falls
         // back to other uses if first use is not needed: first the loss
         // detection timer, and then the probe timeout (PTO).
 

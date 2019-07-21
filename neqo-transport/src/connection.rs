@@ -419,6 +419,7 @@ impl Connection {
         let res = self.input(dgram, now);
         self.absorb_error(now, res);
         self.cleanup_streams();
+        self.check_loss_detection_timeout(now);
     }
 
     /// Get the time that we next need to be called back, relative to `now`.
@@ -458,10 +459,7 @@ impl Connection {
                 }
             }
             State::Closed(..) => None,
-            _ => {
-                self.check_loss_detection_timeout(now);
-                self.output(now)
-            }
+            _ => self.output(now),
         };
 
         match pkt {
