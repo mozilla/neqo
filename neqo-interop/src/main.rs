@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::rc::Rc;
 // use std::path::PathBuf;
+use std::panic;
 use std::str::FromStr;
 use std::string::ParseError;
 use std::thread;
@@ -557,8 +558,6 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
 
     eprintln!("Running tests for {}", peer.label);
 
-    let mut children = Vec::new();
-
     for test in &TESTS {
         if !peer.test_enabled(&test) {
             continue;
@@ -571,19 +570,14 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
             continue;
         }
 
-        let child = thread::spawn(move || run_test(peer, test));
-        children.push((test, child));
-    }
-
-    for child in children {
-        match child.1.join() {
+        match panic::catch_unwind(move || run_test(peer, test)) {
             Ok(e) => {
-                eprintln!("Test complete {:?}, {:?}", child.0, e);
+                eprintln!("Test complete {:?}, {:?}", test, e);
                 results.push(e)
             }
             Err(_) => {
-                eprintln!("Thread crashed {:?}", child.0);
-                results.push((child.0, String::from("CRASHED")));
+                eprintln!("Thread crashed {:?}", test);
+                results.push((test, String::from("CRASHED")));
             }
         }
     }
