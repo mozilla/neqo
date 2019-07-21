@@ -14,9 +14,8 @@ use std::time::{Duration, Instant};
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::constants::Epoch;
 
-use crate::connection::Connection;
-use crate::frame::{AckRange, Frame, FrameGenerator, TxMode};
-use crate::recovery::TokenType;
+use crate::frame::{AckRange, Frame};
+use crate::recovery::RecoveryToken;
 
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -248,26 +247,57 @@ impl RecvdPackets {
             cur.acknowledged(&ack);
         }
     }
+}
+
+impl ::std::fmt::Display for RecvdPackets {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Recvd{:?}", self.space)
+    }
+}
+
+#[derive(Debug)]
+pub struct AckTracker {
+    spaces: [RecvdPackets; 3],
+}
+
+impl AckTracker {
+    pub fn ack_time(&self) -> Option<Instant> {
+        let mut iter = self.spaces.iter().filter_map(|x| x.ack_time());
+        match iter.next() {
+            Some(v) => Some(iter.fold(v, min)),
+            _ => None,
+        }
+    }
+
+    pub fn acked(&mut self, token: AckToken) {
+        self.spaces[token.space as usize].acknowledged(&token.ranges);
+    }
 
     /// Generate an ACK frame.
     ///
     /// Unlike other frame generators this doesn't modify the underlying instance
-    /// to track what has been sent.  This only clears the delayed ACK timer.
+    /// to track what has been sent. This only clears the delayed ACK timer.
     ///
     /// When sending ACKs, we want to always send the most recent ranges,
     /// even if they have been sent in other packets.
     ///
-    /// We don't send ranges that have been acknowledged,
-    /// but they still need to be tracked so that duplicates can be detected.
-    fn generate(&mut self, now: Instant) -> Option<(Frame, Option<TokenType>)> {
+    /// We don't send ranges that have been acknowledged, but they still need
+    /// to be tracked so that duplicates can be detected.
+    pub(crate) fn get_frame(
+        &mut self,
+        now: Instant,
+        epoch: Epoch,
+    ) -> Option<(Frame, Option<RecoveryToken>)> {
+        let space = &mut self[PNSpace::from(epoch)];
+
         // Check that we aren't delaying ACKs.
-        if !self.ack_now(now) {
+        if !space.ack_now(now) {
             return None;
         }
 
         // Limit the number of ACK ranges we send so that we'll always
         // have space for data in packets.
-        let ranges: Vec<PacketRange> = self
+        let ranges: Vec<PacketRange> = space
             .ranges
             .iter()
             .filter(|r| r.ack_needed())
@@ -294,9 +324,9 @@ impl RecvdPackets {
         }
 
         // We've sent an ACK, reset the timer.
-        self.ack_time = None;
+        space.ack_time = None;
 
-        let ack_delay = now.duration_since(self.largest_pn_time.unwrap());
+        let ack_delay = now.duration_since(space.largest_pn_time.unwrap());
         // We use the default exponent so
         // ack_delay is in multiples of 8 microseconds.
         let ack_delay = (ack_delay.as_micros() / 8) as u64;
@@ -308,36 +338,11 @@ impl RecvdPackets {
         };
         Some((
             ack,
-            Some(TokenType::Ack(AckToken {
-                space: self.space,
+            Some(RecoveryToken::Ack(AckToken {
+                space: PNSpace::from(epoch),
                 ranges,
             })),
         ))
-    }
-}
-
-impl ::std::fmt::Display for RecvdPackets {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Recvd{:?}", self.space)
-    }
-}
-
-#[derive(Debug)]
-pub struct AckTracker {
-    spaces: [RecvdPackets; 3],
-}
-
-impl AckTracker {
-    pub fn ack_time(&self) -> Option<Instant> {
-        let mut iter = self.spaces.iter().filter_map(|x| x.ack_time());
-        match iter.next() {
-            Some(v) => Some(iter.fold(v, min)),
-            _ => None,
-        }
-    }
-
-    pub fn acked(&mut self, token: AckToken) {
-        self.spaces[token.space as usize].acknowledged(&token.ranges);
     }
 }
 
@@ -364,22 +369,6 @@ impl Index<PNSpace> for AckTracker {
 impl IndexMut<PNSpace> for AckTracker {
     fn index_mut(&mut self, space: PNSpace) -> &mut Self::Output {
         &mut self.spaces[space as usize]
-    }
-}
-
-pub(crate) struct AckGenerator {}
-
-impl FrameGenerator for AckGenerator {
-    /// This just acts as a router for RecvdPackets.
-    fn generate(
-        &mut self,
-        conn: &mut Connection,
-        now: Instant,
-        epoch: Epoch,
-        _tx_mode: TxMode,
-        _remaining: usize,
-    ) -> Option<(Frame, Option<TokenType>)> {
-        conn.acks[PNSpace::from(epoch)].generate(now)
     }
 }
 

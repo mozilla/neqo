@@ -21,23 +21,23 @@ use neqo_crypto::{
     Agent, AntiReplay, Client, Epoch, HandshakeState, Record, RecordList, SecretAgentInfo, Server,
 };
 
-use crate::crypto::{Crypto, CryptoGenerator};
+use crate::crypto::Crypto;
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
-use crate::flow_mgr::{FlowControlGenerator, FlowMgr};
-use crate::frame::{decode_frame, AckRange, Frame, FrameGenerator, FrameType, StreamType, TxMode};
+use crate::flow_mgr::FlowMgr;
+use crate::frame::{decode_frame, AckRange, Frame, FrameType, StreamType, TxMode};
 use crate::packet::{
     decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, PacketDecoder, PacketHdr,
     PacketNumberDecoder, PacketType,
 };
-use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, TokenType};
+use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
-use crate::send_stream::{SendStream, SendStreams, StreamGenerator};
+use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::Stats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::consts as tp_const;
 use crate::tparams::{TransportParameters, TransportParametersHandler};
-use crate::tracking::{AckGenerator, AckTracker, PNSpace};
+use crate::tracking::{AckTracker, PNSpace};
 use crate::QUIC_VERSION;
 use crate::{AppError, ConnectionError, Error, Res};
 
@@ -161,8 +161,6 @@ pub struct Connection {
     retry_token: Option<Vec<u8>>,
     pub(crate) crypto: Crypto,
     pub(crate) acks: AckTracker,
-    // TODO(ekr@rtfm.com): Prioritized generators, rather than a vec
-    generators: Vec<Box<FrameGenerator>>,
     idle_timeout: Option<Instant>, // TODO(#38)
     pub(crate) indexes: StreamIndexes,
     connection_ids: HashMap<u64, (Vec<u8>, [u8; 16])>, // (sequence number, (connection id, reset token))
@@ -271,12 +269,6 @@ impl Connection {
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
             retry_token: None,
-            generators: vec![
-                Box::new(AckGenerator {}),
-                Box::new(CryptoGenerator::default()),
-                Box::new(FlowControlGenerator::default()),
-                Box::new(StreamGenerator::default()),
-            ],
             crypto,
             acks: AckTracker::default(),
             idle_timeout: None,
@@ -756,8 +748,8 @@ impl Connection {
         out
     }
 
-    // Iterate through all the generators, inserting as many frames as will
-    // fit.
+    /// Build a datagram, possibly from multiple packets (for different PN
+    /// spaces) and each containing 1+ frames.
     fn output_path(&mut self, path: &Path, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
         let mut initial_only = false;
@@ -781,28 +773,61 @@ impl Connection {
 
             let mut ack_eliciting = false;
             let mut is_crypto_packet = false;
-            // Copy generators out so that we can iterate over it and pass
-            // self to the functions.
-            let mut generators = mem::replace(&mut self.generators, Vec::new());
-            for generator in &mut generators {
-                // TODO(ekr@rtfm.com): Fix TxMode
-                while let Some((frame, token)) =
-                    generator.generate(self, now, epoch, TxMode::Normal, self.pmtu - encoder.len())
-                {
-                    ack_eliciting |= frame.ack_eliciting();
-                    is_crypto_packet |= matches!(frame, Frame::Crypto { .. });
-                    frame.marshal(&mut encoder);
-                    if let Some(t) = token {
-                        tokens.push(t);
-                    }
-                    assert!(encoder.len() <= self.pmtu);
-                    if encoder.len() == self.pmtu {
-                        // No more space for frames.
-                        break;
+            match &self.state {
+                State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
+                    loop {
+                        let remaining = self.pmtu - out_bytes.len() - encoder.len();
+
+                        // Check sources in turn for available frames
+                        if let Some((frame, token)) = self
+                            .acks
+                            .get_frame(now, epoch)
+                            .or_else(|| self.crypto.get_frame(epoch, TxMode::Normal, remaining))
+                            .or_else(|| self.flow_mgr.borrow_mut().get_frame(epoch, remaining))
+                            .or_else(|| {
+                                self.send_streams
+                                    .get_frame(epoch, TxMode::Normal, remaining)
+                            })
+                        {
+                            ack_eliciting |= frame.ack_eliciting();
+                            is_crypto_packet |= matches!(frame, Frame::Crypto { .. });
+                            frame.marshal(&mut encoder);
+                            if let Some(t) = token {
+                                tokens.push(t);
+                            }
+                            assert!(encoder.len() <= self.pmtu);
+                            if out_bytes.len() + encoder.len() == self.pmtu {
+                                // No more space for frames.
+                                break;
+                            }
+                        } else {
+                            // No more frames to send.
+                            break;
+                        }
                     }
                 }
+                State::Closing {
+                    error,
+                    frame_type,
+                    msg,
+                    ..
+                } => {
+                    if epoch != 3 {
+                        continue;
+                    }
+
+                    if self.flow_mgr.borrow().need_close_frame() {
+                        self.flow_mgr.borrow_mut().set_need_close_frame(false);
+                        let frame = Frame::ConnectionClose {
+                            error_code: error.clone().into(),
+                            frame_type: *frame_type,
+                            reason_phrase: Vec::from(msg.clone()),
+                        };
+                        frame.marshal(&mut encoder);
+                    }
+                }
+                State::Closed { .. } => unimplemented!(),
             }
-            self.generators = generators;
 
             if encoder.len() == 0 {
                 continue;
@@ -1167,10 +1192,10 @@ impl Connection {
         for acked in acked_packets {
             for token in acked.tokens {
                 match token {
-                    TokenType::Ack(at) => self.acks.acked(at),
-                    TokenType::Stream(st) => self.send_streams.acked(st),
-                    TokenType::Crypto(ct) => self.crypto.acked(ct),
-                    TokenType::Flow(ft) => {
+                    RecoveryToken::Ack(at) => self.acks.acked(at),
+                    RecoveryToken::Stream(st) => self.send_streams.acked(st),
+                    RecoveryToken::Crypto(ct) => self.crypto.acked(ct),
+                    RecoveryToken::Flow(ft) => {
                         self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
                     }
                 }
@@ -1179,10 +1204,10 @@ impl Connection {
         for lost in lost_packets {
             for token in lost.tokens {
                 match token {
-                    TokenType::Ack(_) => {}
-                    TokenType::Stream(st) => self.send_streams.lost(st),
-                    TokenType::Crypto(ct) => self.crypto.lost(ct),
-                    TokenType::Flow(ft) => self.flow_mgr.borrow_mut().lost(
+                    RecoveryToken::Ack(_) => {}
+                    RecoveryToken::Stream(st) => self.send_streams.lost(st),
+                    RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
+                    RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                         ft,
                         &mut self.send_streams,
                         &mut self.recv_streams,
@@ -1207,10 +1232,10 @@ impl Connection {
         for dropped in self.loss_recovery.drop_0rtt() {
             for token in dropped.tokens {
                 match token {
-                    TokenType::Ack(_) => {}
-                    TokenType::Stream(st) => self.send_streams.lost(st),
-                    TokenType::Crypto(ct) => self.crypto.lost(ct),
-                    TokenType::Flow(ft) => self.flow_mgr.borrow_mut().lost(
+                    RecoveryToken::Ack(_) => {}
+                    RecoveryToken::Stream(st) => self.send_streams.lost(st),
+                    RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
+                    RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                         ft,
                         &mut self.send_streams,
                         &mut self.recv_streams,
@@ -1247,15 +1272,12 @@ impl Connection {
                 State::Closing { .. } => {
                     self.send_streams.clear();
                     self.recv_streams.clear();
-                    self.generators.clear();
-                    self.generators.push(Box::new(CloseGenerator {}));
                     self.flow_mgr.borrow_mut().set_need_close_frame(true);
                 }
                 State::Closed(..) => {
                     // Equivalent to spec's "draining" state -- never send anything.
                     self.send_streams.clear();
                     self.recv_streams.clear();
-                    self.generators.clear();
                 }
                 _ => {}
             }
@@ -1585,10 +1607,10 @@ impl Connection {
                 for lost in packets {
                     for token in lost.tokens {
                         match token {
-                            TokenType::Ack(_) => {} // Do nothing
-                            TokenType::Stream(st) => self.send_streams.lost(st),
-                            TokenType::Crypto(ct) => self.crypto.lost(ct),
-                            TokenType::Flow(ft) => self.flow_mgr.borrow_mut().lost(
+                            RecoveryToken::Ack(_) => {} // Do nothing
+                            RecoveryToken::Stream(st) => self.send_streams.lost(st),
+                            RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
+                            RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                                 ft,
                                 &mut self.send_streams,
                                 &mut self.recv_streams,
@@ -1638,50 +1660,6 @@ impl ::std::fmt::Display for Connection {
 impl PacketDecoder for Connection {
     fn get_cid_len(&self) -> usize {
         CID_LENGTH
-    }
-}
-
-struct CloseGenerator {}
-
-impl FrameGenerator for CloseGenerator {
-    fn generate(
-        &mut self,
-        c: &mut Connection,
-        _now: Instant,
-        epoch: Epoch,
-        _mode: TxMode,
-        _remaining: usize,
-    ) -> Option<(Frame, Option<TokenType>)> {
-        if epoch != 3 {
-            return None;
-        }
-
-        if let State::Closing {
-            error: cerr,
-            frame_type,
-            msg: reason,
-            ..
-        } = c.state()
-        {
-            if c.flow_mgr.borrow().need_close_frame() {
-                c.flow_mgr.borrow_mut().set_need_close_frame(false);
-                return Some((
-                    Frame::ConnectionClose {
-                        error_code: cerr.clone().into(),
-                        frame_type: *frame_type,
-                        reason_phrase: Vec::from(reason.clone()),
-                    },
-                    None,
-                ));
-            }
-        } else {
-            qerror!(
-                "CloseGenerator.generate() called when in {:?}, not State::Closing",
-                c.state()
-            );
-        }
-
-        None
     }
 }
 

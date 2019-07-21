@@ -6,7 +6,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Instant;
 
 use neqo_common::{hex, qdebug, qinfo, qtrace};
 use neqo_crypto::aead::Aead;
@@ -17,13 +16,13 @@ use neqo_crypto::{
 };
 
 use crate::connection::Role;
-use crate::frame::{Frame, FrameGenerator, TxMode};
+use crate::frame::{Frame, TxMode};
 use crate::packet::{CryptoCtx, PacketNumber};
-use crate::recovery::TokenType;
+use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
 use crate::tparams::{TpZeroRttChecker, TransportParametersHandler};
-use crate::{Connection, Error, Res};
+use crate::{Error, Res};
 
 const MAX_AUTH_TAG: usize = 32;
 
@@ -134,7 +133,7 @@ impl Crypto {
         Ok(cs.as_mut().unwrap())
     }
 
-    pub fn acked(&mut self, token: CryptoGeneratorToken) {
+    pub fn acked(&mut self, token: CryptoRecoveryToken) {
         qinfo!(
             "Acked crypto frame epoch={} offset={} length={}",
             token.epoch,
@@ -146,8 +145,43 @@ impl Crypto {
             .mark_as_acked(token.offset, token.length as usize);
     }
 
-    pub fn lost(&mut self, _token: CryptoGeneratorToken) {
+    pub fn lost(&mut self, _token: CryptoRecoveryToken) {
         // TODO(agrover@mozilla.com): @ekr: resend?
+    }
+
+    pub fn get_frame(
+        &mut self,
+        epoch: u16,
+        mode: TxMode,
+        remaining: usize,
+    ) -> Option<(Frame, Option<RecoveryToken>)> {
+        let tx_stream = &mut self.streams[epoch as usize].tx;
+        if let Some((offset, data)) = tx_stream.next_bytes(mode) {
+            let data_len = data.len();
+            assert!(data_len <= remaining);
+            let frame = Frame::Crypto {
+                offset,
+                data: data.to_vec(),
+            };
+            tx_stream.mark_as_sent(offset, data_len);
+
+            qdebug!(
+                "Emitting crypto frame epoch={}, offset={}, len={}",
+                epoch,
+                offset,
+                data_len
+            );
+            Some((
+                frame,
+                Some(RecoveryToken::Crypto(CryptoRecoveryToken {
+                    epoch,
+                    offset,
+                    length: data_len as u64,
+                })),
+            ))
+        } else {
+            None
+        }
     }
 }
 
@@ -281,51 +315,8 @@ pub(crate) struct CryptoStream {
     pub(crate) rx: RxStreamOrderer,
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct CryptoGenerator {}
-
-impl FrameGenerator for CryptoGenerator {
-    fn generate(
-        &mut self,
-        conn: &mut Connection,
-        _now: Instant,
-        epoch: u16,
-        mode: TxMode,
-        remaining: usize,
-    ) -> Option<(Frame, Option<TokenType>)> {
-        let tx_stream = &mut conn.crypto.streams[epoch as usize].tx;
-        if let Some((offset, data)) = tx_stream.next_bytes(mode) {
-            let data_len = data.len();
-            assert!(data_len <= remaining);
-            let frame = Frame::Crypto {
-                offset,
-                data: data.to_vec(),
-            };
-            tx_stream.mark_as_sent(offset, data_len);
-
-            qdebug!(
-                [conn]
-                "Emitting crypto frame epoch={}, offset={}, len={}",
-                epoch,
-                offset,
-                data_len
-            );
-            Some((
-                frame,
-                Some(TokenType::Crypto(CryptoGeneratorToken {
-                    epoch,
-                    offset,
-                    length: data_len as u64,
-                })),
-            ))
-        } else {
-            None
-        }
-    }
-}
-
 #[derive(Debug)]
-pub(crate) struct CryptoGeneratorToken {
+pub(crate) struct CryptoRecoveryToken {
     epoch: u16,
     offset: u64,
     length: u64,
