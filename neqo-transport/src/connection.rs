@@ -496,6 +496,7 @@ impl Connection {
         self.valid_cids.contains(cid) || self.paths.iter().any(|p| p.local_cids.contains(cid))
     }
 
+    #[allow(clippy::cognitive_complexity)]
     fn input(&mut self, d: Datagram, now: Instant) -> Res<()> {
         let mut slc = &d[..];
 
