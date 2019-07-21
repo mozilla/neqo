@@ -112,14 +112,12 @@ fn http_serve(server: &mut Connection, stream: u64) {
     server.stream_close_send(stream).expect("Stream closed");
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
-    for d in out_dgrams {
-        let sent = socket
-            .send_to(&d[..], d.destination())
-            .expect("Error sending datagram");
-        if sent != d.len() {
-            eprintln!("Unable to send all {} bytes of datagram", d.len());
-        }
+fn emit_datagram(socket: &UdpSocket, d: Datagram) {
+    let sent = socket
+        .send_to(&d[..], d.destination())
+        .expect("Error sending datagram");
+    if sent != d.len() {
+        eprintln!("Unable to send all {} bytes of datagram", d.len());
     }
 }
 
@@ -139,16 +137,13 @@ fn main() {
     println!("Server waiting for connection on: {:?}", local_addr);
 
     let buf = &mut [0u8; 2048];
-    let mut in_dgrams = Vec::new();
     let mut connections: HashMap<SocketAddr, Connection> = HashMap::new();
     loop {
+        // TODO use timer to set socket.set_read_timeout.
         let (sz, remote_addr) = socket.recv_from(&mut buf[..]).expect("UDP error");
         if sz == buf.len() {
-            eprintln!("Might have received more than {} bytes", buf.len());
+            eprintln!("Discarding packet that might be truncated");
             continue;
-        }
-        if sz > 0 {
-            in_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
         }
 
         let mut server = connections.entry(remote_addr).or_insert_with(|| {
@@ -157,8 +152,10 @@ fn main() {
                 .expect("can't create connection")
         });
 
-        // TODO use timer to set socket.set_read_timeout.
-        server.process_input(in_dgrams.drain(..), Instant::now());
+        if sz > 0 {
+            let dgram = Datagram::new(remote_addr, local_addr, &buf[..sz]);
+            server.process_input(dgram, Instant::now());
+        }
         if let State::Closed(e) = server.state() {
             eprintln!("Closed connection from {:?}: {:?}", remote_addr, e);
             connections.remove(&remote_addr);
@@ -180,7 +177,9 @@ fn main() {
             http_serve(&mut server, stream_id);
         }
 
-        let (out_dgrams, _timer) = server.process_output(Instant::now());
-        emit_packets(&socket, &out_dgrams);
+        let out = server.process_output(Instant::now());
+        if let Some(dgram) = out.dgram() {
+            emit_datagram(&socket, dgram);
+        }
     }
 }

@@ -25,7 +25,7 @@ mod stream_id;
 mod tparams;
 mod tracking;
 
-pub use self::connection::{Connection, Role, State};
+pub use self::connection::{Connection, Output, Role, State};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
@@ -145,11 +145,11 @@ impl ConnectionError {
     }
 }
 
-impl From<&CloseError> for ConnectionError {
-    fn from(err: &CloseError) -> Self {
+impl From<CloseError> for ConnectionError {
+    fn from(err: CloseError) -> Self {
         match err {
-            CloseError::Transport(c) => ConnectionError::Transport(Error::PeerError(*c)),
-            CloseError::Application(c) => ConnectionError::Application(*c),
+            CloseError::Transport(c) => ConnectionError::Transport(Error::PeerError(c)),
+            CloseError::Application(c) => ConnectionError::Application(c),
         }
     }
 }

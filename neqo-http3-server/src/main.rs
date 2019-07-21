@@ -6,10 +6,10 @@
 
 #![deny(warnings)]
 
-use neqo_common::{qinfo, Datagram};
+use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Connection, Http3State};
-use neqo_transport::Connection;
+use neqo_transport::{Connection, Output};
 use std::collections::HashMap;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -46,7 +46,7 @@ struct Args {
     /// Name of key from NSS database.
     key: String,
 
-    #[structopt(short = "a", long, default_value = "h3-20")]
+    #[structopt(short = "a", long, default_value = "h3-22")]
     /// ALPN labels to negotiate.
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.
@@ -214,7 +214,7 @@ fn main() -> Result<(), io::Error> {
         }
 
         // Process each connections' packets
-        for (remote_addr, mut dgrams) in in_dgrams {
+        for (remote_addr, dgrams) in in_dgrams {
             let (server, svr_timeout) = connections.entry(remote_addr).or_insert_with(|| {
                 println!("New connection from {:?}", remote_addr);
                 (
@@ -233,7 +233,9 @@ fn main() -> Result<(), io::Error> {
                 )
             });
 
-            server.process_input(dgrams.drain(..), Instant::now());
+            for dgram in dgrams {
+                server.process_input(dgram, Instant::now());
+            }
             if let Http3State::Closed(e) = server.state() {
                 println!("Closed connection from {:?}: {:?}", remote_addr, e);
                 if let Some(svr_timeout) = svr_timeout {
@@ -245,16 +247,24 @@ fn main() -> Result<(), io::Error> {
 
             server.process_http3(Instant::now());
 
-            let (conn_out_dgrams, maybe_timeout) = server.process_output(Instant::now());
-            *svr_timeout = maybe_timeout.map(|timeout| {
-                if let Some(svr_timeout) = svr_timeout {
-                    timer.cancel_timeout(svr_timeout);
-                }
-                qinfo!("Setting timeout of {:?} for {:?}", timeout, remote_addr);
-                timer.set_timeout(timeout, remote_addr)
-            });
+            loop {
+                match server.process_output(Instant::now()) {
+                    Output::Datagram(dgram) => out_dgrams.push(dgram),
+                    Output::Callback(new_timeout) => {
+                        if let Some(svr_timeout) = svr_timeout {
+                            timer.cancel_timeout(svr_timeout);
+                        }
 
-            out_dgrams.extend(conn_out_dgrams);
+                        qinfo!("Setting timeout of {:?} for {:?}", new_timeout, remote_addr);
+                        *svr_timeout = Some(timer.set_timeout(new_timeout, remote_addr));
+                        break;
+                    }
+                    Output::None => {
+                        qdebug!("Output::None");
+                        break;
+                    }
+                };
+            }
         }
 
         // TODO: this maybe isn't cool?

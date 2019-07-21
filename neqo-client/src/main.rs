@@ -64,7 +64,7 @@ pub struct Args {
     #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
     db: PathBuf,
 
-    #[structopt(short = "a", long, default_value = "h3-20")]
+    #[structopt(short = "a", long, default_value = "h3-22")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP3 no matter what the ALPN says.
@@ -123,8 +123,8 @@ trait Handler {
     fn handle(&mut self, client: &mut Http3Connection) -> bool;
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
-    for d in out_dgrams {
+fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) {
+    if let Some(d) = d {
         let sent = socket.send(&d[..]).expect("Error sending datagram");
         if sent != d.len() {
             eprintln!("Unable to send all {} bytes of datagram", d.len());
@@ -140,18 +140,15 @@ fn process_loop(
     handler: &mut Handler,
 ) -> neqo_http3::connection::Http3State {
     let buf = &mut [0u8; 2048];
-    let mut in_dgrams = Vec::new();
     loop {
-        client.process_input(in_dgrams.drain(..), Instant::now());
-
         if let Http3State::Closed(..) = client.state() {
             return client.state();
         }
 
         let exiting = !handler.handle(client);
 
-        let (out_dgrams, _timer) = client.process_output(Instant::now());
-        emit_packets(&socket, &out_dgrams);
+        let out_dgram = client.process_output(Instant::now());
+        emit_datagram(&socket, out_dgram.dgram());
 
         if exiting {
             return client.state();
@@ -169,7 +166,8 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(*remote_addr, *local_addr, &buf[..sz]));
+            let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
+            client.process_input(d, Instant::now());
         }
     }
 }
@@ -302,7 +300,7 @@ mod old {
     use neqo_common::Datagram;
     use neqo_transport::{Connection, ConnectionEvent, State, StreamType};
 
-    use super::{emit_packets, Args};
+    use super::{emit_datagram, Args};
 
     trait HandlerOld {
         fn handle(&mut self, client: &mut Connection) -> bool;
@@ -367,18 +365,15 @@ mod old {
         handler: &mut HandlerOld,
     ) -> State {
         let buf = &mut [0u8; 2048];
-        let mut in_dgrams = Vec::new();
         loop {
-            client.process_input(in_dgrams.drain(..), Instant::now());
-
             if let State::Closed(..) = client.state() {
                 return client.state().clone();
             }
 
             let exiting = !handler.handle(client);
 
-            let (out_dgrams, _timer) = client.process_output(Instant::now());
-            emit_packets(&socket, &out_dgrams);
+            let out_dgram = client.process_output(Instant::now());
+            emit_datagram(&socket, out_dgram.dgram());
 
             if exiting {
                 return client.state().clone();
@@ -396,7 +391,8 @@ mod old {
                 continue;
             }
             if sz > 0 {
-                in_dgrams.push(Datagram::new(*remote_addr, *local_addr, &buf[..sz]));
+                let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
+                client.process_input(d, Instant::now());
             }
         }
     }

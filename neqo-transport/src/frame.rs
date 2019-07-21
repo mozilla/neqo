@@ -6,16 +6,11 @@
 
 // Directly relating to QUIC frames.
 
-use std::fmt::{self, Debug};
-use std::time::Instant;
-
 use neqo_common::{qdebug, Decoder, Encoder};
-use neqo_crypto::Epoch;
 
-use crate::recovery::TokenType;
 use crate::stream_id::StreamIndex;
 use crate::{AppError, TransportError};
-use crate::{Connection, ConnectionError, Error, Res};
+use crate::{ConnectionError, Error, Res};
 
 pub type FrameType = u64;
 
@@ -100,11 +95,11 @@ impl CloseError {
     }
 }
 
-impl From<&ConnectionError> for CloseError {
-    fn from(err: &ConnectionError) -> Self {
+impl From<ConnectionError> for CloseError {
+    fn from(err: ConnectionError) -> Self {
         match err {
             ConnectionError::Transport(c) => CloseError::Transport(c.code()),
-            ConnectionError::Application(c) => CloseError::Application(*c),
+            ConnectionError::Application(c) => CloseError::Application(c),
         }
     }
 }
@@ -590,23 +585,6 @@ pub enum TxMode {
     Normal,
     #[allow(dead_code)]
     Pto,
-}
-
-pub(crate) trait FrameGenerator {
-    fn generate(
-        &mut self,
-        conn: &mut Connection,
-        now: Instant,
-        epoch: Epoch,
-        tx_mode: TxMode,
-        remaining: usize,
-    ) -> Option<(Frame, Option<TokenType>)>;
-}
-
-impl Debug for FrameGenerator {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("<FrameGenerator Function>")
-    }
 }
 
 #[cfg(test)]

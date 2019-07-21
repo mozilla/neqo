@@ -76,6 +76,12 @@ impl ::std::fmt::Debug for ConnectionId {
     }
 }
 
+impl ::std::fmt::Display for ConnectionId {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "{}", hex(&self.0))
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct PacketHdr {
     pub tbyte: u8,
@@ -259,11 +265,11 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
 
     // Get the type byte
     p.tbyte = d!(d.decode_byte());
-    if p.tbyte & 0x40 == 0 {
-        return Err(Error::InvalidPacket);
-    }
-
     if (p.tbyte & 0x80) == 0 {
+        if p.tbyte & 0x40 == 0 {
+            return Err(Error::InvalidPacket);
+        }
+
         // Short Header.
         p.tipe = PacketType::Short;
         let cid = d!(d.decode(dec.get_cid_len()));
@@ -289,6 +295,10 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
         // because we won't need them.
         return Ok(p);
     } else {
+        if p.tbyte & 0x40 == 0 {
+            return Err(Error::InvalidPacket);
+        }
+
         p.tipe = match (p.tbyte >> 4) & 0x3 {
             // TODO(ekr@rtfm.com): Check the 0 bits.
             PACKET_TYPE_INITIAL => {
@@ -387,7 +397,7 @@ fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
     let mut d = Encoder::default();
     let mut rand_byte: [u8; 1] = [0; 1];
     rand::thread_rng().fill(&mut rand_byte);
-    d.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | rand_byte[0]);
+    d.encode_byte(PACKET_BIT_LONG | rand_byte[0]);
     d.encode_uint(4, 0u64); // version
     d.encode_vec(1, &hdr.dcid);
     d.encode_vec(1, hdr.scid.as_ref().unwrap());

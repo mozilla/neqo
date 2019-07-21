@@ -9,7 +9,7 @@
 use neqo_common::Datagram;
 use neqo_crypto::init;
 use neqo_http3::{Http3Connection, Http3Event};
-use neqo_transport::{Connection, ConnectionEvent, State, StreamType};
+use neqo_transport::{Connection, ConnectionError, ConnectionEvent, Error, State, StreamType};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 // use std::path::PathBuf;
@@ -38,15 +38,15 @@ struct Args {
 
 trait Handler {
     fn handle(&mut self, client: &mut Connection) -> bool;
-    fn rewrite_out(&mut self, _dgrams: &mut Vec<Datagram>) {}
+    fn rewrite_out(&mut self, _dgram: &Datagram) -> Option<Datagram> {
+        None
+    }
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
-    for d in out_dgrams {
-        let sent = socket.send(&d[..]).expect("Error sending datagram");
-        if sent != d.len() {
-            eprintln!("Unable to send all {} bytes of datagram", d.len());
-        }
+fn emit_datagram(socket: &UdpSocket, d: Datagram) {
+    let sent = socket.send(&d[..]).expect("Error sending datagram");
+    if sent != d.len() {
+        eprintln!("Unable to send all {} bytes of datagram", d.len());
     }
 }
 
@@ -77,20 +77,19 @@ fn process_loop(
     timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
-    let mut in_dgrams = Vec::new();
     let timer = Timer::new(timeout);
 
     loop {
-        client.process_input(in_dgrams.drain(..), Instant::now());
-
         if let State::Closed(..) = client.state() {
             return Ok(client.state().clone());
         }
 
         let exiting = !handler.handle(client);
-        let (mut out_dgrams, _timer) = client.process_output(Instant::now());
-        handler.rewrite_out(&mut out_dgrams);
-        emit_packets(&nctx.socket, &out_dgrams);
+        let out_dgram = client.process_output(Instant::now());
+        if let Some(dgram) = out_dgram.dgram() {
+            let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
+            emit_datagram(&nctx.socket, dgram);
+        }
 
         if exiting {
             return Ok(client.state().clone());
@@ -116,7 +115,8 @@ fn process_loop(
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]));
+            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
+            client.process_input(received, Instant::now());
         }
     }
 }
@@ -229,21 +229,18 @@ fn process_loop_h3(
     timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
-    let mut in_dgrams = Vec::new();
     let timer = Timer::new(timeout);
 
     loop {
-        handler
-            .h3
-            .process_input(in_dgrams.drain(..), Instant::now());
-
         if let State::Closed(..) = handler.h3.conn().state() {
             return Ok(handler.h3.conn().state().clone());
         }
 
         let exiting = !handler.handle();
-        let (out_dgrams, _timer) = handler.h3.conn().process_output(Instant::now());
-        emit_packets(&nctx.socket, &out_dgrams);
+        let out_dgram = handler.h3.conn().process_output(Instant::now());
+        if let Some(dgram) = out_dgram.dgram() {
+            emit_datagram(&nctx.socket, dgram);
+        }
 
         if exiting {
             return Ok(handler.h3.conn().state().clone());
@@ -268,7 +265,8 @@ fn process_loop_h3(
             continue;
         }
         if sz > 0 {
-            in_dgrams.push(Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]));
+            let received = Datagram::new(nctx.remote_addr, nctx.local_addr, &buf[..sz]);
+            handler.h3.process_input(received, Instant::now());
         }
     }
 }
@@ -282,16 +280,16 @@ impl H3Handler {
             match event {
                 Http3Event::HeaderReady { stream_id } => {
                     if !self.streams.contains(&stream_id) {
-                        println!("Data on unexpected stream: {}", stream_id);
+                        eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
 
                     let headers = self.h3.get_headers(stream_id);
-                    println!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                    eprintln!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
                 Http3Event::DataReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
-                        println!("Data on unexpected stream: {}", stream_id);
+                        eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
 
@@ -299,13 +297,13 @@ impl H3Handler {
                         .h3
                         .read_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
-                    println!(
+                    eprintln!(
                         "READ[{}]: {}",
                         stream_id,
                         String::from_utf8(data.clone()).unwrap()
                     );
                     if fin {
-                        println!("<FIN[{}]>", stream_id);
+                        eprintln!("<FIN[{}]>", stream_id);
                         self.h3.close(Instant::now(), 0, "kthxbye!");
                         return false;
                     }
@@ -364,8 +362,8 @@ enum Test {
 impl Test {
     fn alpn(&self) -> Vec<String> {
         match self {
-            Test::H3 => vec![String::from("h3-20")],
-            _ => vec![String::from("hq-20")],
+            Test::H3 => vec![String::from("h3-22")],
+            _ => vec![String::from("hq-22")],
         }
     }
 
@@ -378,14 +376,14 @@ impl Test {
         })
     }
 
-    /*    fn letters(&self) -> Vec<char> {
+    fn letters(&self) -> Vec<char> {
         match self {
             Test::Connect => vec!['H'],
             Test::H9 => vec!['D', 'C'],
-            Test::H3 => vec!['3'],
+            Test::H3 => vec!['3', 'C', 'D'],
             Test::VN => vec!['V'],
         }
-    }*/
+    }
 }
 
 struct NetworkCtx {
@@ -469,9 +467,10 @@ impl Handler for VnHandler {
         }
     }
 
-    fn rewrite_out(&mut self, dgrams: &mut Vec<Datagram>) {
-        assert!(dgrams.len() == 1);
-        dgrams[0].d[1] = 0x1a;
+    fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
+        let mut payload = d[..].to_vec();
+        payload[1] = 0x1a;
+        Some(Datagram::new(*d.source(), *d.destination(), payload))
     }
 }
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
@@ -499,8 +498,17 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     };
 
     if let Test::VN = test {
-        let _res = test_vn(&nctx, peer);
-        unimplemented!();
+        let res = test_vn(&nctx, peer);
+        return match res {
+            Err(e) => (test, format!("ERROR: {}", e)),
+            Ok(client) => match client.state() {
+                State::Closing {
+                    error: ConnectionError::Transport(Error::VersionNegotiation),
+                    ..
+                } => (test, String::from("OK")),
+                _ => (test, format!("ERROR: Wrong state {:?}", client.state())),
+            },
+        };
     }
 
     let mut client = match test_connect(&nctx, test, peer) {
@@ -560,7 +568,7 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
         }
     }
 
-    println!("Tests for {} complete {:?}", peer.label, results);
+    eprintln!("Tests for {} complete {:?}", peer.label, results);
     results
 }
 
@@ -582,12 +590,12 @@ const PEERS: [Peer; 9] = [
     },
     Peer {
         label: "applequic",
-        host: "192.168.203.142",
-        port: 4433,
+        host: "31.133.129.48",
+        port: 8443,
     },
     Peer {
         label: "f5",
-        host: "208.85.208.226",
+        host: "204.134.187.194",
         port: 4433,
     },
     Peer {
@@ -639,6 +647,20 @@ fn main() {
     // Now wait for them.
     for child in children {
         let res = child.1.join().unwrap();
-        println!("{} -> {:?}", child.0.label, res);
+        let mut all_letters = HashSet::new();
+        for r in &res {
+            for l in r.0.letters() {
+                if r.1 == "OK" {
+                    all_letters.insert(l);
+                }
+            }
+        }
+        let mut letter_str = String::from("");
+        for l in &['V', 'H', 'D', 'C', 'R', 'Z', 'S', '3'] {
+            if all_letters.contains(l) {
+                letter_str.push(*l);
+            }
+        }
+        println!("{}: {} -> {:?}", child.0.label, letter_str, res);
     }
 }

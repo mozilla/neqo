@@ -72,7 +72,7 @@ fn process_client_initial() {
     let pkt: Vec<u8> = Encoder::from_hex(INITIAL_PACKET).into();
     let dgram = Datagram::new(loopback(), loopback(), pkt);
     assert_eq!(*server.state(), State::WaitInitial);
-    let (out, _) = server.process(vec![dgram], now());
+    let out = server.process(Some(dgram), now());
     assert_eq!(*server.state(), State::Handshaking);
-    assert_eq!(out.len(), 1);
+    assert!(out.dgram().is_some());
 }

@@ -97,6 +97,7 @@ pub enum HFrame {
     Priority {
         priorized_elem_type: PrioritizedElementType,
         elem_dependency_type: ElementDependencyType,
+        // TODO(mt) exclusive bit
         priority_elem_id: u64,
         elem_dependency_id: u64,
         weight: u8,
@@ -517,10 +518,10 @@ mod tests {
 
         let mut conn_c = default_client();
         let mut conn_s = default_server();
-        let mut r = conn_c.process(vec![], now());
-        r = conn_s.process(r.0, now());
-        r = conn_c.process(r.0, now());
-        conn_s.process(r.0, now());
+        let out = conn_c.process(None, now());
+        let out = conn_s.process(out.dgram(), now());
+        let out = conn_c.process(out.dgram(), now());
+        conn_s.process(out.dgram(), now());
 
         // create a stream
         let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
@@ -538,8 +539,8 @@ mod tests {
             buf.push(v);
         }
         conn_s.stream_send(stream_id, &buf).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
 
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
@@ -661,18 +662,13 @@ mod tests {
 
     // We have 3 code paths in frame_reader:
     // 1) All frames except DATA, HEADERES and PUSH_PROMISE (here we test SETTING and SETTINGS with larger varints)
-    // 2) PUSH_PUROMISE and
+    // 2) PUSH_PROMISE and
     // 1) DATA and HEADERS frame (for this we will test DATA)
 
     // Test SETTINGS
     #[test]
     fn test_frame_reading_with_stream_settings1() {
-        let mut conn_c = default_client();
-        let mut conn_s = default_server();
-        let mut r = conn_c.process(vec![], now());
-        r = conn_s.process(r.0, now());
-        r = conn_c.process(r.0, now());
-        conn_s.process(r.0, now());
+        let (mut conn_c, mut conn_s) = connect();
 
         // create a stream
         let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
@@ -681,33 +677,33 @@ mod tests {
 
         // Send and read settings frame 040406040804
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x6]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x8]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         if !fr.done() {
@@ -731,12 +727,7 @@ mod tests {
     // Test SETTINGS with larger varints
     #[test]
     fn test_frame_reading_with_stream_settings2() {
-        let mut conn_c = default_client();
-        let mut conn_s = default_server();
-        let mut r = conn_c.process(vec![], now());
-        r = conn_s.process(r.0, now());
-        r = conn_c.process(r.0, now());
-        conn_s.process(r.0, now());
+        let (mut conn_c, mut conn_s) = connect();
 
         // create a stream
         let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
@@ -745,48 +736,48 @@ mod tests {
 
         // Read settings frame 400406064004084100
         conn_s.stream_send(stream_id, &[0x40]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x6]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x6]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x40]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x4]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x8]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x41]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x0]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         if !fr.done() {
@@ -809,12 +800,7 @@ mod tests {
     // Test PUSH_PROMISE
     #[test]
     fn test_frame_reading_with_stream_push_promise() {
-        let mut conn_c = default_client();
-        let mut conn_s = default_server();
-        let mut r = conn_c.process(vec![], now());
-        r = conn_s.process(r.0, now());
-        r = conn_c.process(r.0, now());
-        conn_s.process(r.0, now());
+        let (mut conn_c, mut conn_s) = connect();
 
         // create a stream
         let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
@@ -823,25 +809,25 @@ mod tests {
 
         // Read pushpromise frame 05054101010203
         conn_s.stream_send(stream_id, &[0x5]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x5]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s.stream_send(stream_id, &[0x41]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         conn_s
             .stream_send(stream_id, &[0x1, 0x1, 0x2, 0x3])
             .unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         // headers are still on the stream.
@@ -869,12 +855,7 @@ mod tests {
     // Test DATA
     #[test]
     fn test_frame_reading_with_stream_data() {
-        let mut conn_c = default_client();
-        let mut conn_s = default_server();
-        let mut r = conn_c.process(vec![], now());
-        r = conn_s.process(r.0, now());
-        r = conn_c.process(r.0, now());
-        conn_s.process(r.0, now());
+        let (mut conn_c, mut conn_s) = connect();
 
         // create a stream
         let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
@@ -885,8 +866,8 @@ mod tests {
         conn_s
             .stream_send(stream_id, &[0x0, 0x3, 0x1, 0x2, 0x3])
             .unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         // payloead is still on the stream.
@@ -910,43 +891,35 @@ mod tests {
         }
     }
 
-    // Test an unknow frame
+    // Test an unknown frame
     #[test]
     fn test_unknown_frame() {
-        let mut conn_c = default_client();
-        let mut conn_s = default_server();
-        let mut r = conn_c.process(vec![], now());
-        r = conn_s.process(r.0, now());
-        r = conn_c.process(r.0, now());
-        conn_s.process(r.0, now());
+        let (mut conn_c, mut conn_s) = connect();
 
         // create a stream
         let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
 
         let mut fr: HFrameReader = HFrameReader::new();
 
-        // Read an unknown frame
-        let mut buf: [u8; 1500] = [0; 1500];
-        // random type 1028
-        buf[0] = 0x44;
-        buf[1] = 0x04;
-        // length 1496
-        buf[2] = 0x45;
-        buf[3] = 0xd8;
+        // Construct an unknown frame.
+        const UNKNOWN_FRAME_LEN: usize = 832;
+        let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+        enc.encode_varint(1028u64); // Arbitrary type.
+        enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+        let mut buf: Vec<_> = enc.into();
+        buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
         conn_s.stream_send(stream_id, &buf).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         // now receive a CANCEL_PUSH fram to see that frame reader is ok.
         conn_s.stream_send(stream_id, &[0x03, 0x01, 0x05]).unwrap();
-        r = conn_s.process(vec![], now());
-        conn_c.process(r.0, now());
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
-        if !fr.done() {
-            assert!(false);
-        }
+        assert!(fr.done());
         let f1 = fr.get_frame();
         if let Ok(f) = f1 {
             if let HFrame::CancelPush { push_id } = f {
