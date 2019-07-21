@@ -572,7 +572,7 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
     results
 }
 
-const PEERS: [Peer; 9] = [
+const PEERS: &[Peer] = &[
     Peer {
         label: "quant",
         host: "quant.eggert.org",
@@ -618,6 +618,16 @@ const PEERS: [Peer; 9] = [
         host: "nghttp2.org",
         port: 4433,
     },
+    Peer {
+        label: "picoquic",
+        host: "test.privateoctopus.com",
+        port: 4433,
+    },
+    Peer {
+        label: "ats",
+        host: "quic.ogre.com",
+        port: 4433,
+    },
 ];
 
 const TESTS: [Test; 4] = [Test::Connect, Test::H9, Test::H3, Test::VN];
@@ -631,7 +641,7 @@ fn main() {
     let mut children = Vec::new();
 
     // Start all the children.
-    for peer in &PEERS {
+    for peer in PEERS {
         if !args.include.is_empty() && !args.include.contains(&String::from(peer.label)) {
             continue;
         }
