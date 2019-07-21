@@ -595,7 +595,7 @@ const PEERS: [Peer; 9] = [
     },
     Peer {
         label: "f5",
-        host: "208.85.208.226",
+        host: "204.134.187.194",
         port: 4433,
     },
     Peer {
