@@ -18,8 +18,8 @@ use neqo_common::{qdebug, qinfo};
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
 use crate::send_stream::StreamRecoveryToken;
-use crate::tracking::AckToken;
-use crate::tracking::PNSpace;
+use crate::tracking::{AckToken, PNSpace};
+use crate::State;
 
 const GRANULARITY: Duration = Duration::from_millis(20);
 // Defined in -recovery 6.2 as 500ms but using lower value until we have RTT
@@ -40,7 +40,6 @@ pub(crate) enum RecoveryToken {
 pub struct SentPacket {
     ack_eliciting: bool,
     //in_flight: bool, // TODO needed only for cc
-    is_crypto_packet: bool,
     //size: u64, // TODO needed only for cc
     time_sent: Instant,
     pub(crate) tokens: Vec<RecoveryToken>,
@@ -90,12 +89,6 @@ impl RttVals {
             + max(4 * self.rttvar, GRANULARITY)
             + self.max_ack_delay
     }
-
-    fn timer_for_crypto_retransmission(&self, crypto_count: u32) -> Duration {
-        let timeout = self.smoothed_rtt.unwrap_or(INITIAL_RTT) * 2;
-        let timeout = max(timeout, GRANULARITY);
-        timeout * 2u32.pow(crypto_count)
-    }
 }
 
 #[derive(Debug)]
@@ -126,7 +119,6 @@ impl Default for LossRecoveryState {
 pub(crate) enum LossRecoveryMode {
     None,
     LostPackets,
-    CryptoTimerExpired,
     PTO,
 }
 
@@ -211,10 +203,8 @@ impl LossRecoverySpaces {
 
 #[derive(Debug, Default)]
 pub(crate) struct LossRecovery {
-    crypto_count: u32,
     pto_count: u32,
     time_of_last_sent_ack_eliciting_packet: Option<Instant>,
-    time_of_last_sent_crypto_packet: Option<Instant>,
     rtt_vals: RttVals,
 
     enable_timed_loss_detection: bool,
@@ -241,10 +231,6 @@ impl LossRecovery {
         val
     }
 
-    pub fn increment_crypto_count(&mut self) {
-        self.crypto_count += 1;
-    }
-
     pub fn increment_pto_count(&mut self) {
         self.pto_count += 1;
     }
@@ -266,7 +252,6 @@ impl LossRecovery {
         pn_space: PNSpace,
         packet_number: u64,
         ack_eliciting: bool,
-        is_crypto_packet: bool,
         tokens: Vec<RecoveryToken>,
         now: Instant,
     ) {
@@ -276,13 +261,9 @@ impl LossRecovery {
             SentPacket {
                 time_sent: now,
                 ack_eliciting,
-                is_crypto_packet,
                 tokens,
             },
         );
-        if is_crypto_packet {
-            self.time_of_last_sent_crypto_packet = Some(now);
-        }
         if ack_eliciting {
             self.time_of_last_sent_ack_eliciting_packet = Some(now);
             // TODO implement cc
@@ -326,7 +307,6 @@ impl LossRecovery {
 
         let lost_packets = self.detect_lost_packets(pn_space, now);
 
-        self.crypto_count = 0;
         self.pto_count = 0;
 
         let acked_packets = acked_packets
@@ -407,37 +387,31 @@ impl LossRecovery {
         lost_packets
     }
 
-    pub fn get_timer(&mut self) -> LossRecoveryState {
+    pub fn get_timer(&mut self, conn_state: &State) -> LossRecoveryState {
         qdebug!([self] "get_loss_detection_timer.");
 
-        let mut has_crypto_out = false;
         let mut has_ack_eliciting_out = false;
         for sp in self
             .spaces
             .iter()
             .flat_map(|spc| self.spaces[*spc].sent_packets.values())
         {
-            if sp.is_crypto_packet {
-                has_crypto_out = true
-            }
-
             if sp.ack_eliciting {
                 has_ack_eliciting_out = true
             }
 
-            if has_crypto_out && has_ack_eliciting_out {
+            if has_ack_eliciting_out {
                 break;
             }
         }
 
         qdebug!(
             [self]
-            "has_ack_eliciting_out={} has_crypto_out={}",
+            "has_ack_eliciting_out={}",
             has_ack_eliciting_out,
-            has_crypto_out
         );
 
-        if !has_ack_eliciting_out && !has_crypto_out {
+        if !has_ack_eliciting_out && *conn_state == State::Connected {
             return LossRecoveryState::new(LossRecoveryMode::None, None);
         }
 
@@ -450,21 +424,10 @@ impl LossRecovery {
 
         // QUIC only has one timer, but it does triple duty because it falls
         // back to other uses if first use is not needed: first the loss
-        // detection timer, then the crypto retransmission timeout, and
-        // finally probe timeout (PTO).
+        // detection timer, and then the probe timeout (PTO).
 
         let (mode, maybe_timer) = if let Some((_, earliest_time)) = self.get_earliest_loss_time() {
             (LossRecoveryMode::LostPackets, Some(earliest_time))
-        } else if has_crypto_out {
-            assert!(self.time_of_last_sent_crypto_packet.is_some());
-            (
-                LossRecoveryMode::CryptoTimerExpired,
-                self.time_of_last_sent_crypto_packet.map(|i| {
-                    i + self
-                        .rtt_vals
-                        .timer_for_crypto_retransmission(self.crypto_count)
-                }),
-            )
         } else {
             // Calculate PTO duration
             let timeout = self.rtt_vals.pto() * 2u32.pow(self.pto_count);
@@ -585,14 +548,7 @@ mod tests {
 
     fn pace(lr: &mut LossRecovery, count: u64) {
         for pn in 0..count {
-            lr.on_packet_sent(
-                PNSpace::ApplicationData,
-                pn,
-                true,
-                false,
-                Vec::new(),
-                pn_time(pn),
-            );
+            lr.on_packet_sent(PNSpace::ApplicationData, pn, true, Vec::new(), pn_time(pn));
         }
     }
 
@@ -697,38 +653,6 @@ mod tests {
         check(&lr);
     }
 
-    // The crypto timer is set when sending crypto packets.
-    #[test]
-    fn crypto_timer() {
-        let mut lr = LossRecovery::new();
-        lr.on_packet_sent(PNSpace::ApplicationData, 0, true, true, vec![], pn_time(0));
-        assert_eq!(
-            lr.get_timer().callback_time,
-            Some(pn_time(0) + (super::INITIAL_RTT * 2))
-        );
-        // Sending another crypto packet pushes the timer out.
-        lr.on_packet_sent(PNSpace::ApplicationData, 1, true, true, vec![], pn_time(1));
-        assert_eq!(
-            lr.get_timer().callback_time,
-            Some(pn_time(1) + (super::INITIAL_RTT * 2))
-        );
-        // Sending non-crypto packets doesn't move it.
-        lr.on_packet_sent(PNSpace::ApplicationData, 2, true, false, vec![], pn_time(2));
-        assert_eq!(
-            lr.get_timer().callback_time,
-            Some(pn_time(1) + (super::INITIAL_RTT * 2))
-        );
-    }
-
-    #[test]
-    fn crypto_timeout() {
-        let mut lr = LossRecovery::new();
-        lr.on_packet_sent(PNSpace::Initial, 0, true, true, vec![], pn_time(0));
-        let lr_state = lr.get_timer();
-        assert!(lr_state.callback_time.is_some());
-        assert_eq!(lr_state.mode, LossRecoveryMode::CryptoTimerExpired);
-    }
-
     // Test time loss detection as part of handling a regular ACK.
     #[test]
     fn time_loss_detection_gap() {
@@ -738,19 +662,11 @@ mod tests {
         // So send two packets with 1/4 RTT between them.  Acknowledge pn 1 after 1 RTT.
         // pn 0 should then be marked lost because it is then outstanding for 5RTT/4
         // the loss time for packets is 9RTT/8.
-        lr.on_packet_sent(
-            PNSpace::ApplicationData,
-            0,
-            true,
-            false,
-            Vec::new(),
-            pn_time(0),
-        );
+        lr.on_packet_sent(PNSpace::ApplicationData, 0, true, Vec::new(), pn_time(0));
         lr.on_packet_sent(
             PNSpace::ApplicationData,
             1,
             true,
-            false,
             Vec::new(),
             pn_time(0) + INITIAL_RTT / 4,
         );
@@ -788,7 +704,7 @@ mod tests {
         assert_sent_times(&lr, None, None, Some(pn1_sent_time));
 
         // After time elapses, pn 1 is marked lost.
-        let lr_state = lr.get_timer();
+        let lr_state = lr.get_timer(&State::Connected);
         let pn1_lost_time = pn1_sent_time + (INITIAL_RTT * 9 / 8);
         assert_eq!(lr_state.callback_time, Some(pn1_lost_time));
         match lr_state.mode {
