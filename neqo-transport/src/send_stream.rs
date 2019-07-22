@@ -485,7 +485,15 @@ impl SendStream {
 
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
         if let Some(buf) = self.state.tx_buf_mut() {
-            buf.mark_as_sent(offset, len)
+            buf.mark_as_sent(offset, len);
+            if offset + len as u64 == self.max_stream_data {
+                self.flow_mgr
+                    .borrow_mut()
+                    .stream_data_blocked(self.stream_id, self.max_stream_data);
+            }
+            if self.flow_mgr.borrow().conn_credit_avail() == 0 {
+                self.flow_mgr.borrow_mut().data_blocked();
+            }
         };
 
         if fin {
@@ -608,19 +616,6 @@ impl SendStream {
         let buff_avail = self.state.tx_buf().map(|tx| tx.avail()).unwrap_or(0);
         let space_avail = min(credit_avail, buff_avail as u64);
         let can_send_bytes = min(space_avail, buf.len() as u64);
-
-        if can_send_bytes != buf.len() as u64 {
-            // We had some bytes to send but may have been blocked by flow
-            // credits. If so, send data blocked frame(s) to peer.
-            if stream_credit_avail < buf.len() as u64 {
-                self.flow_mgr
-                    .borrow_mut()
-                    .stream_data_blocked(self.stream_id, self.max_stream_data);
-            }
-            if conn_credit_avail < buf.len() as u64 {
-                self.flow_mgr.borrow_mut().data_blocked();
-            }
-        }
 
         if can_send_bytes == 0 {
             return Ok(0);
