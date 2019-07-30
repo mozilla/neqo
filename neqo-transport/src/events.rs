@@ -45,7 +45,7 @@ pub enum ConnectionEvent {
 }
 
 #[derive(Debug, Default)]
-pub struct ConnectionEvents {
+pub(crate) struct ConnectionEvents {
     events: BTreeSet<ConnectionEvent>,
 }
 

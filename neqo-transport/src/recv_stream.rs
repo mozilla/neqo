@@ -16,9 +16,9 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
+use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
 use crate::stream_id::StreamId;
-use crate::ConnectionEvents;
 use crate::{AppError, Error, Res};
 use neqo_common::qtrace;
 
@@ -336,7 +336,7 @@ impl RecvStreamState {
 
 /// Implement a QUIC receive stream.
 #[derive(Debug)]
-pub struct RecvStream {
+pub(crate) struct RecvStream {
     stream_id: StreamId,
     state: RecvStreamState,
     flow_mgr: Rc<RefCell<FlowMgr>>,

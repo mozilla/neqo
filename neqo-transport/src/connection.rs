@@ -52,6 +52,7 @@ pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
 
 #[derive(Debug, PartialEq, Copy, Clone)]
+/// Client or Server.
 pub enum Role {
     Client,
     Server,
@@ -73,6 +74,7 @@ impl ::std::fmt::Display for Role {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// The state of the Connection.
 pub enum State {
     Init,
     WaitInitial,
@@ -122,14 +124,19 @@ impl Path {
 
 #[derive(Clone, Debug, PartialEq)]
 /// Type returned from process() and process_output(). Users are required to
-/// call these repeatedly until Callback is returned.
+/// call these repeatedly until `Callback` or `None` is returned.
 pub enum Output {
-    None, // This should go away. There should ALWAYS be some timer we want.
+    /// Connection requires no action.
+    None,
+    /// Connection requires the datagram be sent.
     Datagram(Datagram),
+    /// Connection requires `process_input()` be called when the `Duration`
+    /// elapses.
     Callback(Duration),
 }
 
 impl Output {
+    /// Convert into an `Option<Datagram>`.
     pub fn dgram(self) -> Option<Datagram> {
         match self {
             Output::Datagram(dg) => Some(dg),
@@ -137,6 +144,7 @@ impl Output {
         }
     }
 
+    /// Get a reference to the Datagram, if any.
     pub fn as_dgram_ref(&self) -> Option<&Datagram> {
         match self {
             Output::Datagram(dg) => Some(dg),
@@ -145,6 +153,21 @@ impl Output {
     }
 }
 
+/// A QUIC Connection
+///
+/// First, create a new connection using `new_client()` or `new_server()`.
+///
+/// For the life of the connection, handle activity in the following manner:
+/// 1. Perform operations using the `stream_*()` methods.
+/// 1. Call `process_input()` when a datagram is received or the timer
+/// expires. Obtain information on connection state changes by checking
+/// `events()`.
+/// 1. Having completed handling current activity, repeatedly call
+/// `process_output()` for packets to send, until it returns `Output::Callback`
+/// or `Output::None`.
+///
+/// After the connection is closed (either by calling `close()` or by the
+/// remote) continue processing until `state()` returns `Closed`.
 pub struct Connection {
     version: crate::packet::Version,
     role: Role,
@@ -187,6 +210,7 @@ impl Debug for Connection {
 }
 
 impl Connection {
+    /// Create a new QUIC connection with Client role.
     pub fn new_client(
         server_name: impl AsRef<str>,
         protocols: &[impl AsRef<str>],
@@ -210,6 +234,7 @@ impl Connection {
         Ok(c)
     }
 
+    /// Create a new QUIC connection with Server role.
     pub fn new_server(
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
@@ -351,6 +376,7 @@ impl Connection {
         self.client_start(now)
     }
 
+    /// Send a TLS session ticket.
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
         let tps = &self.tps;
         match self.crypto.tls {
@@ -369,7 +395,7 @@ impl Connection {
         }
     }
 
-    /// Get the current role.
+    /// Get the role of the connection.
     pub fn role(&self) -> Role {
         self.role
     }
@@ -379,7 +405,7 @@ impl Connection {
         &self.state
     }
 
-    /// Get statistics
+    /// Get collected statistics.
     pub fn stats(&self) -> &Stats {
         &self.stats
     }

@@ -17,11 +17,11 @@ use smallvec::SmallVec;
 
 use neqo_common::{qerror, qinfo, qtrace, qwarn, Encoder};
 
+use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{Frame, TxMode};
 use crate::recovery::RecoveryToken;
 use crate::stream_id::StreamId;
-use crate::ConnectionEvents;
 use crate::{AppError, Error, Res};
 
 const TX_STREAM_BUFFER: usize = 0xFFFF; // 64 KiB
@@ -438,7 +438,7 @@ pub struct SendStream {
 }
 
 impl SendStream {
-    pub fn new(
+    pub(crate) fn new(
         stream_id: StreamId,
         max_stream_data: u64,
         flow_mgr: Rc<RefCell<FlowMgr>>,
