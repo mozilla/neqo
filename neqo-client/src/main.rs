@@ -244,6 +244,7 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
             args.alpn.clone(),
             local_addr,
             remote_addr,
+            false,
         )
         .expect("must succeed"),
         args.max_table_size,
@@ -441,6 +442,7 @@ mod old {
             vec!["http/0.9"],
             local_addr,
             remote_addr,
+            false,
         )
         .expect("must succeed");
         // Temporary here to help out the type inference engine

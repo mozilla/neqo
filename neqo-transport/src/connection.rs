@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
 use neqo_crypto::{
-    Agent, AntiReplay, Client, Epoch, HandshakeState, Record, RecordList, SecretAgentInfo, Server,
+    err, ssl, Agent, AntiReplay, Client, Epoch, HandshakeState, Record, RecordList,
+    SecretAgentInfo, Server,
 };
 
 use crate::crypto::Crypto;
@@ -171,6 +172,8 @@ pub struct Connection {
     loss_recovery: LossRecovery,
     loss_recovery_state: LossRecoveryState,
     events: Rc<RefCell<ConnectionEvents>>,
+    external_cert_verification: bool,
+    authentication_needed_notified: bool,
     token: Option<Vec<u8>>,
     send_vn: Option<(PacketHdr, SocketAddr, SocketAddr)>,
     send_retry: Option<PacketType>, // This will be PacketType::Retry.
@@ -192,11 +195,12 @@ impl Connection {
         protocols: PI,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
+        external_cert_verification: bool,
     ) -> Res<Connection> {
         let dcid = ConnectionId::generate(CID_LENGTH);
         let mut c = Connection::new(
             Role::Client,
-            Client::new(server_name)?.into(),
+            Client::new(server_name, external_cert_verification)?.into(),
             None,
             protocols,
             Some(Path {
@@ -205,6 +209,7 @@ impl Connection {
                 local_cids: vec![ConnectionId::generate(CID_LENGTH)],
                 remote_cid: dcid.clone(),
             }),
+            external_cert_verification,
         );
         c.crypto.states[0] = Some(c.crypto.create_initial_state(Role::Client, &dcid));
         Ok(c)
@@ -226,6 +231,7 @@ impl Connection {
             Some(anti_replay),
             protocols,
             None,
+            false,
         ))
     }
 
@@ -251,6 +257,7 @@ impl Connection {
         anti_replay: Option<&AntiReplay>,
         protocols: I,
         paths: Option<Path>,
+        external_cert_verification: bool,
     ) -> Connection {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Connection::set_tp_defaults(&mut tphandler.borrow_mut().local);
@@ -281,6 +288,8 @@ impl Connection {
             loss_recovery: LossRecovery::new(),
             loss_recovery_state: LossRecoveryState::default(),
             events: Rc::new(RefCell::new(ConnectionEvents::default())),
+            external_cert_verification,
+            authentication_needed_notified: false,
             token: None,
             send_vn: None,
             send_retry: None,
@@ -372,6 +381,36 @@ impl Connection {
             }
             Agent::Client(_) => Err(Error::WrongRole),
         }
+    }
+
+    pub fn get_sec_info(&self) -> Option<&SecretAgentInfo> {
+        self.crypto.tls.info()
+    }
+
+    pub fn peer_certificate(&self) -> *mut ssl::CERTCertificate {
+        self.crypto.tls.peer_certificate()
+    }
+
+    /// Get the peer's certificate chain.
+    pub fn peer_certificate_chain(&self) -> *mut ssl::CERTCertList {
+        self.crypto.tls.peer_certificate_chain_ssl()
+    }
+
+    /// Get the peer's stapled ocsp responses.
+    pub fn peer_stapled_ocsp_responses(&self) -> *const ssl::SECItemArray {
+        self.crypto.tls.peer_stapled_ocsp_responses()
+    }
+
+    /// Get the peer's signed cert timestamps.
+    pub fn peer_signed_cert_timestamp(&self) -> *const ssl::SECItem {
+        self.crypto.tls.peer_signed_cert_timestamp()
+    }
+
+    /// Call by application when the peer cert has been verified
+    pub fn authenticated(&mut self, error: err::PRErrorCode, now: Instant) {
+        self.crypto.tls.authenticated(error);
+        let res = self.handshake(now, 0, None);
+        self.absorb_error(now, res);
     }
 
     /// Get the current role.
@@ -746,11 +785,28 @@ impl Connection {
         out
     }
 
+    fn get_last_epoch(&mut self) -> u16 {
+        let mut last_epoch = 0;
+        for epoch in 0..NUM_EPOCHS {
+            match self.crypto.obtain_crypto_state(self.role, epoch) {
+                Ok(cs) => {
+                    if cs.tx.is_none() {
+                        continue;
+                    }
+                }
+                _ => continue,
+            }
+            last_epoch = epoch;
+        }
+        last_epoch
+    }
+
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
     fn output_path(&mut self, path: &Path, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
         let mut initial_only = false;
+        let last_epoch = self.get_last_epoch();
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -808,11 +864,7 @@ impl Connection {
                     msg,
                     ..
                 } => {
-                    if epoch != 3 {
-                        continue;
-                    }
-
-                    if self.flow_mgr.borrow().need_close_frame() {
+                    if self.flow_mgr.borrow().need_close_frame() && last_epoch == epoch {
                         self.flow_mgr.borrow_mut().set_need_close_frame(false);
                         let frame = Frame::ConnectionClose {
                             error_code: error.clone().into(),
@@ -950,12 +1002,20 @@ impl Connection {
             let m = self.crypto.tls.handshake_raw(now, rec);
 
             if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
-                // TODO(ekr@rtfm.com): IMPORTANT: This overrides
-                // authentication and so is fantastically dangerous.
-                // Fix before shipping.
-                qwarn!([self] "marking connection as authenticated without checking");
-                self.crypto.tls.authenticated();
-                self.crypto.tls.handshake_raw(now, None)
+                if self.external_cert_verification {
+                    if !self.authentication_needed_notified {
+                        self.events.borrow_mut().authentication_needed();
+                        self.authentication_needed_notified = true;
+                    }
+                    m
+                } else {
+                    // TODO(ekr@rtfm.com): IMPORTANT: This overrides
+                    // authentication and so is fantastically dangerous.
+                    // Fix before shipping.
+                    qwarn!([self] "marking connection as authenticated without checking");
+                    self.crypto.tls.authenticated(0);
+                    self.crypto.tls.handshake_raw(now, None)
+                }
             } else {
                 m
             }
@@ -1659,13 +1719,14 @@ mod tests {
     // test_fixture because they produce different types.
     //
     // These are a direct copy of those functions.
-    pub fn default_client() -> Connection {
+    pub fn default_client(external_cert_verification: bool) -> Connection {
         fixture_init();
         Connection::new_client(
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
             loopback(),
             loopback(),
+            external_cert_verification,
         )
         .expect("create a default client")
     }
@@ -1716,7 +1777,7 @@ mod tests {
 
     #[test]
     fn test_conn_stream_create() {
-        let mut client = default_client();
+        let mut client = default_client(false);
         let out = client.process(None, now());
         let mut server = default_server();
         let out = server.process(out.dgram(), now());
@@ -1739,7 +1800,7 @@ mod tests {
     #[test]
     fn test_conn_handshake() {
         qdebug!("---- client: generate CH");
-        let mut client = default_client();
+        let mut client = default_client(false);
         let out = client.process(None, now());
         assert!(out.as_dgram_ref().is_some());
         assert_eq!(out.as_dgram_ref().unwrap().len(), 1200);
@@ -1771,9 +1832,96 @@ mod tests {
     }
 
     #[test]
+    fn test_conn_handshake_external_authentication_succeeded() {
+        qdebug!("---- client: generate CH");
+        let mut client = default_client(true);
+        let out = client.process(None, now());
+        assert!(out.as_dgram_ref().is_some());
+        assert_eq!(out.as_dgram_ref().unwrap().len(), 1200);
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+        let mut server = default_server();
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        qdebug!("---- client: cert verification");
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+
+        let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+        assert!(client.events().into_iter().any(authentication_needed));
+        client.authenticated(0, now());
+
+        qdebug!("---- client: SH..FIN -> FIN");
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        qdebug!("---- server: FIN -> ACKS");
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        qdebug!("---- client: ACKS -> 0");
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        assert_eq!(*client.state(), State::Connected);
+        assert_eq!(*server.state(), State::Connected);
+    }
+
+    #[test]
+    fn test_conn_handshake_failed_external_authentication() {
+        qdebug!("---- client: generate CH");
+        let mut client = default_client(true);
+        let out = client.process(None, now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+        let mut server = default_server();
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        qdebug!("---- client: cert verification");
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+        assert!(client.events().into_iter().any(authentication_needed));
+        qdebug!("---- client: Alert(certificate_revoked)");
+        client.authenticated(-(0x2000) + 12, now());
+
+        qdebug!("---- client: -> Alert(certificate_revoked)");
+        let out = client.process(None, now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        qdebug!("---- server: Alert(certificate_revoked)");
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+        assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(44)));
+        assert_error(&server, ConnectionError::Transport(Error::PeerError(300)));
+    }
+
+    #[test]
     // tests stream send/recv after connection is established.
     fn test_conn_stream() {
-        let mut client = default_client();
+        let mut client = default_client(false);
         let mut server = default_server();
 
         qdebug!("---- client");
@@ -1899,7 +2047,8 @@ mod tests {
     fn test_no_alpn() {
         fixture_init();
         let mut client =
-            Connection::new_client("example.com", &["bad-alpn"], loopback(), loopback()).unwrap();
+            Connection::new_client("example.com", &["bad-alpn"], loopback(), loopback(), false)
+                .unwrap();
         let mut server = default_server();
 
         handshake(&mut client, &mut server);
@@ -1912,7 +2061,7 @@ mod tests {
     #[test]
     fn test_dup_server_flight1() {
         qdebug!("---- client: generate CH");
-        let mut client = default_client();
+        let mut client = default_client(false);
         let out = client.process(None, now());
         assert!(out.as_dgram_ref().is_some());
         assert_eq!(out.as_dgram_ref().unwrap().len(), 1200);
@@ -1953,12 +2102,12 @@ mod tests {
 
     #[test]
     fn resume() {
-        let mut client = default_client();
+        let mut client = default_client(false);
         let mut server = default_server();
         connect(&mut client, &mut server);
 
         let token = exchange_ticket(&mut client, &mut server);
-        let mut client = default_client();
+        let mut client = default_client(false);
         client
             .set_resumption_token(now(), &token[..])
             .expect("should set token");
@@ -1972,12 +2121,12 @@ mod tests {
     fn zero_rtt_negotiate() {
         // Note that the two servers in this test will get different anti-replay filters.
         // That's OK because we aren't testing anti-replay.
-        let mut client = default_client();
+        let mut client = default_client(false);
         let mut server = default_server();
         connect(&mut client, &mut server);
 
         let token = exchange_ticket(&mut client, &mut server);
-        let mut client = default_client();
+        let mut client = default_client(false);
         client
             .set_resumption_token(now(), &token[..])
             .expect("should set token");
@@ -1989,12 +2138,12 @@ mod tests {
 
     #[test]
     fn zero_rtt_send_recv() {
-        let mut client = default_client();
+        let mut client = default_client(false);
         let mut server = default_server();
         connect(&mut client, &mut server);
 
         let token = exchange_ticket(&mut client, &mut server);
-        let mut client = default_client();
+        let mut client = default_client(false);
         client
             .set_resumption_token(now(), &token[..])
             .expect("should set token");
@@ -2046,12 +2195,12 @@ mod tests {
 
     #[test]
     fn zero_rtt_send_coalesce() {
-        let mut client = default_client();
+        let mut client = default_client(false);
         let mut server = default_server();
         connect(&mut client, &mut server);
 
         let token = exchange_ticket(&mut client, &mut server);
-        let mut client = default_client();
+        let mut client = default_client(false);
         client
             .set_resumption_token(now(), &token[..])
             .expect("should set token");
@@ -2084,18 +2233,18 @@ mod tests {
 
     #[test]
     fn zero_rtt_before_resumption_token() {
-        let mut client = default_client();
+        let mut client = default_client(false);
         assert!(client.stream_create(StreamType::BiDi).is_err());
     }
 
     #[test]
     fn zero_rtt_send_reject() {
-        let mut client = default_client();
+        let mut client = default_client(false);
         let mut server = default_server();
         connect(&mut client, &mut server);
 
         let token = exchange_ticket(&mut client, &mut server);
-        let mut client = default_client();
+        let mut client = default_client(false);
         client
             .set_resumption_token(now(), &token[..])
             .expect("should set token");
@@ -2152,7 +2301,7 @@ mod tests {
             0, // pn
             0, // epoch
         );
-        let agent = Client::new(test_fixture::DEFAULT_SERVER_NAME)
+        let agent = Client::new(test_fixture::DEFAULT_SERVER_NAME, false)
             .unwrap()
             .into();
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));

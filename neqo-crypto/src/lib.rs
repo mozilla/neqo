@@ -17,7 +17,7 @@ mod agentio;
 mod cert;
 pub mod constants;
 mod convert;
-mod err;
+pub mod err;
 pub mod ext;
 pub mod hkdf;
 pub mod hp;
@@ -25,7 +25,7 @@ mod prio;
 mod replay;
 mod result;
 mod secrets;
-mod ssl;
+pub mod ssl;
 pub mod time;
 
 pub use self::agent::{

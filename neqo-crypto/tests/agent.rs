@@ -9,7 +9,7 @@ use test_fixture::{fixture_init, now};
 #[test]
 fn make_client() {
     fixture_init();
-    let _c = Client::new("server").expect("should create client");
+    let _c = Client::new("server", false).expect("should create client");
 }
 
 #[test]
@@ -21,7 +21,7 @@ fn make_server() {
 #[test]
 fn basic() {
     fixture_init();
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     println!("client {:p}", &client);
     let mut server = Server::new(&["key"]).expect("should create server");
     println!("server {:p}", &server);
@@ -40,8 +40,8 @@ fn basic() {
     assert_eq!(bytes.len(), 0);
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
-    client.authenticated();
-    assert_eq!(*client.state(), HandshakeState::Authenticated);
+    client.authenticated(0);
+    assert_eq!(*client.state(), HandshakeState::Authenticated(0));
 
     // Calling handshake() again indicates that we're happy with the cert.
     let bytes = client.handshake(now(), &[]).expect("send CF");
@@ -64,7 +64,7 @@ fn basic() {
 #[test]
 fn raw() {
     fixture_init();
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     println!("client {:?}", client);
     let mut server = Server::new(&["key"]).expect("should create server");
     println!("server {:?}", server);
@@ -98,8 +98,8 @@ fn raw() {
     assert_eq!(client_records.len(), 0);
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
-    client.authenticated();
-    assert_eq!(*client.state(), HandshakeState::Authenticated);
+    client.authenticated(0);
+    assert_eq!(*client.state(), HandshakeState::Authenticated(0));
 
     // Calling handshake() again indicates that we're happy with the cert.
     let client_records = client.handshake_raw(now(), None).expect("send CF");
@@ -111,18 +111,18 @@ fn raw() {
     assert!(server.state().connected());
 
     // The client should have one certificate for the server.
-    let mut certs = client.peer_certificate().unwrap();
+    let mut certs = client.peer_certificate_chain().unwrap();
     let cert_vec: Vec<&[u8]> = certs.collect();
     assert_eq!(1, cert_vec.len());
 
     // The server shouldn't have a client certificate.
-    assert!(server.peer_certificate().is_none());
+    assert!(server.peer_certificate_chain().is_none());
 }
 
 #[test]
 fn chacha_client() {
     fixture_init();
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     client
         .enable_ciphers(&[TLS_CHACHA20_POLY1305_SHA256])
@@ -143,7 +143,7 @@ fn chacha_client() {
 #[test]
 fn p256_server() {
     fixture_init();
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     server
         .set_groups(&[TLS_GRP_EC_SECP256R1])
@@ -158,7 +158,7 @@ fn p256_server() {
 #[test]
 fn alpn() {
     fixture_init();
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     client.set_alpn(&["alpn"]).expect("should set ALPN");
     let mut server = Server::new(&["key"]).expect("should create server");
     server.set_alpn(&["alpn"]).expect("should set ALPN");
@@ -173,7 +173,7 @@ fn alpn() {
 #[test]
 fn alpn_multi() {
     fixture_init();
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     client
         .set_alpn(&["dummy", "alpn"])
         .expect("should set ALPN");
@@ -192,7 +192,7 @@ fn alpn_multi() {
 #[test]
 fn alpn_server_pref() {
     fixture_init();
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     client
         .set_alpn(&["dummy", "alpn"])
         .expect("should set ALPN");
@@ -211,7 +211,7 @@ fn alpn_server_pref() {
 #[test]
 fn alpn_no_protocol() {
     fixture_init();
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     client.set_alpn(&["a"]).expect("should set ALPN");
     let mut server = Server::new(&["key"]).expect("should create server");
     server.set_alpn(&["b"]).expect("should set ALPN");
@@ -224,7 +224,7 @@ fn alpn_no_protocol() {
 #[test]
 fn alpn_client_only() {
     fixture_init();
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     client.set_alpn(&["alpn"]).expect("should set ALPN");
     let mut server = Server::new(&["key"]).expect("should create server");
 
@@ -237,7 +237,7 @@ fn alpn_client_only() {
 #[test]
 fn alpn_server_only() {
     fixture_init();
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     server.set_alpn(&["alpn"]).expect("should set ALPN");
 
@@ -251,7 +251,7 @@ fn alpn_server_only() {
 fn resume() {
     let (_, token) = resumption_setup(Resumption::WithoutZeroRtt);
 
-    let mut client = Client::new("server.example").expect("should create second client");
+    let mut client = Client::new("server.example", false).expect("should create second client");
     let mut server = Server::new(&["key"]).expect("should create second server");
 
     client
@@ -268,7 +268,7 @@ fn zero_rtt() {
     let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt);
 
     // Finally, 0-RTT should succeed.
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     client
         .set_resumption_token(&token[..])
@@ -292,7 +292,7 @@ fn zero_rtt_no_eoed() {
     let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt);
 
     // Finally, 0-RTT should succeed.
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     client
         .set_resumption_token(&token[..])
@@ -327,7 +327,7 @@ fn reject_zero_rtt() {
     let (anti_replay, token) = resumption_setup(Resumption::WithZeroRtt);
 
     // Finally, 0-RTT should succeed.
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     client
         .set_resumption_token(&token[..])

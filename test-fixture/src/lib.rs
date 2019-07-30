@@ -59,8 +59,14 @@ pub fn loopback() -> SocketAddr {
 /// Create a transport client with default configuration.
 pub fn default_client() -> Connection {
     fixture_init();
-    Connection::new_client(DEFAULT_SERVER_NAME, DEFAULT_ALPN, loopback(), loopback())
-        .expect("create a default client")
+    Connection::new_client(
+        DEFAULT_SERVER_NAME,
+        DEFAULT_ALPN,
+        loopback(),
+        loopback(),
+        false,
+    )
+    .expect("create a default client")
 }
 
 /// Create a transport server with default configuration.

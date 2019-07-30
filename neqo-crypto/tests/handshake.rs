@@ -45,7 +45,7 @@ fn handshake(now: Instant, client: &mut SecretAgent, server: &mut SecretAgent) {
         };
 
         if *b.state() == HandshakeState::AuthenticationPending {
-            b.authenticated();
+            b.authenticated(0);
             records = b.handshake_raw(now, None).unwrap();
         }
         mem::swap(&mut a, &mut b);
@@ -123,7 +123,7 @@ fn zero_rtt_setup(
 pub fn resumption_setup(mode: Resumption) -> (Option<AntiReplay>, Vec<u8>) {
     fixture_init();
 
-    let mut client = Client::new("server.example").expect("should create client");
+    let mut client = Client::new("server.example", false).expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     let anti_replay = zero_rtt_setup(mode, &mut client, &mut server);
 

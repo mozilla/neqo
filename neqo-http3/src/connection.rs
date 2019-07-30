@@ -11,6 +11,7 @@ use neqo_common::{
     qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
     IncrementalDecoderResult,
 };
+use neqo_crypto::{err, ssl, SecretAgentInfo};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{
@@ -226,6 +227,34 @@ impl Http3Connection {
         }
     }
 
+    pub fn get_sec_info(&self) -> Option<&SecretAgentInfo> {
+        self.conn.get_sec_info()
+    }
+
+    /// Get the peer's certificate.
+    pub fn peer_certificate(&self) -> *mut ssl::CERTCertificate {
+        self.conn.peer_certificate()
+    }
+
+    /// Get the peer's certificate chain.
+    pub fn peer_certificate_chain(&self) -> *mut ssl::CERTCertList {
+        self.conn.peer_certificate_chain()
+    }
+
+    /// Get the peer's stapled ocsp responses.
+    pub fn peer_stapled_ocsp_responses(&self) -> *const ssl::SECItemArray {
+        self.conn.peer_stapled_ocsp_responses()
+    }
+
+    /// Get the peer's signed cert timestamps.
+    pub fn peer_signed_cert_timestamp(&self) -> *const ssl::SECItem {
+        self.conn.peer_signed_cert_timestamp()
+    }
+
+    pub fn authenticated(&mut self, error: err::PRErrorCode, now: Instant) {
+        self.conn.authenticated(error, now);
+    }
+
     fn initialize_http3_connection(&mut self) -> Res<()> {
         qdebug!([self] "initialize_http3_connection");
         self.create_control_stream()?;
@@ -318,6 +347,12 @@ impl Http3Connection {
         qdebug!([self] "Process input.");
         self.conn.process_input(dgram, now);
         self.check_state_change(now);
+        if self.state == Http3State::Initializing {
+            let res = self.check_connection_events();
+            if self.check_result(now, res) {
+                return;
+            }
+        }
     }
 
     pub fn conn(&mut self) -> &mut Connection {
@@ -345,7 +380,9 @@ impl Http3Connection {
 
     pub fn process_output(&mut self, now: Instant) -> Output {
         qdebug!([self] "Process output.");
-        self.conn.process_output(now)
+        let out = self.conn.process_output(now);
+        self.check_state_change(now);
+        out
     }
 
     // If this return an error the connection must be closed.
@@ -420,6 +457,9 @@ impl Http3Connection {
                 }
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.handle_stream_creatable(stream_type)?
+                }
+                ConnectionEvent::AuthenticationNeeded => {
+                    self.events.borrow_mut().authentication_needed();
                 }
                 ConnectionEvent::ConnectionClosed { error_code, .. } => {
                     self.handle_connection_closed(error_code)?
@@ -852,6 +892,7 @@ impl Http3Connection {
                     | Http3Event::DataReadable { stream_id }
                     | Http3Event::NewPushStream { stream_id } => *stream_id < goaway_stream_id,
                     Http3Event::Reset { .. }
+                    | Http3Event::AuthenticationNeeded
                     | Http3Event::ConnectionConnected
                     | Http3Event::GoawayReceived
                     | Http3Event::ConnectionClosing
@@ -953,34 +994,25 @@ impl Http3Connection {
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub enum Http3Event {
     /// Space available in the buffer for an application write to succeed.
-    HeaderReady {
-        stream_id: u64,
-    },
+    HeaderReady { stream_id: u64 },
     /// New bytes available for reading.
-    DataReadable {
-        stream_id: u64,
-    },
+    DataReadable { stream_id: u64 },
     /// Peer reset the stream.
-    Reset {
-        stream_id: u64,
-        error: AppError,
-    },
+    Reset { stream_id: u64, error: AppError },
     /// A new push stream
-    NewPushStream {
-        stream_id: u64,
-    },
+    NewPushStream { stream_id: u64 },
     /// New stream can be created
     RequestsCreatable,
-    // Connection change state to Connected.
+    /// Cert authentication needed
+    AuthenticationNeeded,
+    /// Connection change state to Connected.
     ConnectionConnected,
-    // Client has received a GOAWAY frame
+    /// Client has received a GOAWAY frame
     GoawayReceived,
-    // Connection change state to Closing.
+    /// Connection change state to Closing.
     ConnectionClosing,
-    // Connection change state to Closed.
-    ConnectionClosed {
-        error_code: CloseError,
-    },
+    /// Connection change state to Closed.
+    ConnectionClosed { error_code: CloseError },
 }
 
 #[derive(Debug, Default)]
@@ -1007,6 +1039,10 @@ impl Http3Events {
 
     pub fn new_requests_creatable(&mut self) {
         self.events.insert(Http3Event::RequestsCreatable);
+    }
+
+    pub fn authentication_needed(&mut self) {
+        self.events.insert(Http3Event::AuthenticationNeeded);
     }
 
     pub fn connected(&mut self) {

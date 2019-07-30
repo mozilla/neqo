@@ -105,3 +105,29 @@ remap_enum! {
         TLS_EXT_RENEGOTIATION_INFO = ssl_renegotiation_info_xtn,
     }
 }
+
+remap_enum! {
+    SignatureScheme: u16 => ssl::SSLSignatureScheme {
+        TLS_SIG_NONE = ssl_sig_none,
+        TLS_SIG_RSA_PKCS1_SHA1 = ssl_sig_rsa_pkcs1_sha1,
+        TLS_SIG_RSA_PKCS1_SHA256 = ssl_sig_rsa_pkcs1_sha256,
+        TLS_SIG_RSA_PKCS1_SHA384 = ssl_sig_rsa_pkcs1_sha384,
+        TLS_SIG_RSA_PKCS1_SHA512 = ssl_sig_rsa_pkcs1_sha512,
+        TLS_SIG_ECDSA_SECP256R1_SHA256 = ssl_sig_ecdsa_secp256r1_sha256,
+        TLS_SIG_ECDSA_SECP384R1_SHA384 = ssl_sig_ecdsa_secp384r1_sha384,
+        TLS_SIG_ECDSA_SECP512R1_SHA512 = ssl_sig_ecdsa_secp521r1_sha512,
+        TLS_SIG_RSA_PSS_RSAE_SHA256 = ssl_sig_rsa_pss_rsae_sha256,
+        TLS_SIG_RSA_PSS_RSAE_SHA384 = ssl_sig_rsa_pss_rsae_sha384,
+        TLS_SIG_RSA_PSS_RSAE_SHA512 = ssl_sig_rsa_pss_rsae_sha512,
+        TLS_SIG_ED25519 = ssl_sig_ed25519,
+        TLS_SIG_ED448 = ssl_sig_ed448,
+        TLS_SIG_RSA_PSS_PSS_SHA256 = ssl_sig_rsa_pss_pss_sha256,
+        TLS_SIG_RSA_PSS_PSS_SHA384 = ssl_sig_rsa_pss_pss_sha384,
+        TLS_SIG_RSA_PSS_PSS_SHA512 = ssl_sig_rsa_pss_pss_sha512,
+        TLS_SIG_DSA_SHA1 = ssl_sig_dsa_sha1,
+        TLS_SIG_DSA_SHA256 = ssl_sig_dsa_sha256,
+        TLS_SIG_DSA_SHA384 = ssl_sig_dsa_sha384,
+        TLS_SIG_DSA_SHA512 = ssl_sig_dsa_sha512,
+        TLS_SIG_ECDSA_SHA1 = ssl_sig_ecdsa_sha1,
+    }
+}
