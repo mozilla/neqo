@@ -29,8 +29,11 @@ pub fn init() {
                 record.args()
             )
         });
-        builder.init();
-        ::log::log!(::log::Level::Info, "Logging initialized");
+        if let Err(e) = builder.try_init() {
+            ::log::log!(::log::Level::Info, "Logging initialization error {:?}", e);
+        } else {
+            ::log::log!(::log::Level::Info, "Logging initialized");
+        }
     });
 }
 
