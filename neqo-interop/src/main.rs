@@ -394,7 +394,7 @@ struct NetworkCtx {
 
 fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connection), String> {
     let mut client =
-        Connection::new_client(peer.host, test.alpn(), nctx.local_addr, nctx.remote_addr)
+        Connection::new_client(peer.host, &test.alpn(), nctx.local_addr, nctx.remote_addr)
             .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
@@ -475,7 +475,7 @@ impl Handler for VnHandler {
 }
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
     let mut client =
-        Connection::new_client(peer.host, vec!["hq-20"], nctx.local_addr, nctx.remote_addr)
+        Connection::new_client(peer.host, &["hq-20"], nctx.local_addr, nctx.remote_addr)
             .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = VnHandler {};

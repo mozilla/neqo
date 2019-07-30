@@ -187,16 +187,16 @@ impl Debug for Connection {
 }
 
 impl Connection {
-    pub fn new_client<S: ToString, PA: ToString, PI: IntoIterator<Item = PA>>(
-        server_name: S,
-        protocols: PI,
+    pub fn new_client(
+        server_name: impl AsRef<str>,
+        protocols: &[impl AsRef<str>],
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
     ) -> Res<Connection> {
         let dcid = ConnectionId::generate(CID_LENGTH);
         let mut c = Connection::new(
             Role::Client,
-            Client::new(server_name)?.into(),
+            Client::new(server_name.as_ref())?.into(),
             None,
             protocols,
             Some(Path {
@@ -210,14 +210,9 @@ impl Connection {
         Ok(c)
     }
 
-    pub fn new_server<
-        CS: ToString,
-        CI: IntoIterator<Item = CS>,
-        PA: ToString,
-        PI: IntoIterator<Item = PA>,
-    >(
-        certs: CI,
-        protocols: PI,
+    pub fn new_server(
+        certs: &[impl AsRef<str>],
+        protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
     ) -> Res<Connection> {
         Ok(Connection::new(
@@ -245,11 +240,11 @@ impl Connection {
         tps.set_empty(tp_const::DISABLE_MIGRATION);
     }
 
-    fn new<A: ToString, I: IntoIterator<Item = A>>(
+    fn new(
         r: Role,
         agent: Agent,
         anti_replay: Option<&AntiReplay>,
-        protocols: I,
+        protocols: &[impl AsRef<str>],
         paths: Option<Path>,
     ) -> Connection {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
@@ -290,7 +285,7 @@ impl Connection {
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
     /// higher preference.
-    pub fn set_alpn<A: ToString, I: IntoIterator<Item = A>>(&mut self, protocols: I) -> Res<()> {
+    pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
         self.crypto.tls.set_alpn(protocols)?;
         Ok(())
     }

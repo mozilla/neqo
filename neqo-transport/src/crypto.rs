@@ -34,9 +34,9 @@ pub(crate) struct Crypto {
 }
 
 impl Crypto {
-    pub fn new<A: ToString, I: IntoIterator<Item = A>>(
+    pub fn new(
         mut agent: Agent,
-        protocols: I,
+        protocols: &[impl AsRef<str>],
         tphandler: Rc<RefCell<TransportParametersHandler>>,
         anti_replay: Option<&AntiReplay>,
     ) -> Res<Crypto> {

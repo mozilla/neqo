@@ -404,10 +404,13 @@ impl SecretAgent {
     ///
     /// This asserts if no items are provided, or if any individual item is longer than
     /// 255 octets in length.
-    pub fn set_alpn<A: ToString, I: IntoIterator<Item = A>>(&mut self, protocols: I) -> Res<()> {
+    pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
         // Validate and set length.
         // Unfortunately, this means that we need to run the iterator twice.
-        let alpn: Vec<String> = protocols.into_iter().map(|v| v.to_string()).collect();
+        let alpn: Vec<String> = protocols
+            .into_iter()
+            .map(|v| v.as_ref().to_owned())
+            .collect();
         let mut encoded_len = alpn.len();
         for v in alpn.iter() {
             assert!(v.len() < 256);
@@ -783,11 +786,11 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new<A: ToString, I: IntoIterator<Item = A>>(certificates: I) -> Res<Self> {
+    pub fn new(certificates: &[impl AsRef<str>]) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
 
         for n in certificates {
-            let c = CString::new(n.to_string());
+            let c = CString::new(n.as_ref());
             if c.is_err() {
                 return Err(Error::CertificateLoading);
             }
