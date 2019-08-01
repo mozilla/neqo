@@ -117,6 +117,7 @@ enum RequestStreamClientState {
     WaitingForData,
     ReadingData { remaining_data_len: usize },
     //    ReadingTrailers,
+    ClosePending, // Close must first be read by application
     Closed,
 }
 
@@ -181,7 +182,7 @@ impl RequestStreamClient {
 
     fn recv_frame(&mut self, conn: &mut Connection) -> Res<()> {
         if self.frame_reader.receive(conn, self.stream_id)? {
-            self.state = RequestStreamClientState::Closed;
+            self.state = RequestStreamClientState::ClosePending;
         }
         Ok(())
     }
@@ -255,6 +256,10 @@ impl RequestStreamClient {
                 RequestStreamClientState::BlockedDecodingHeaders { .. } => break Ok(()),
                 RequestStreamClientState::WaitingForData => {
                     self.recv_frame(conn)?;
+                    if self.state == RequestStreamClientState::ClosePending {
+                        // Received 0 byte fin? Client must see this.
+                        self.conn_events.borrow_mut().data_readable(self.stream_id);
+                    }
                     if !self.frame_reader.done() {
                         break Ok(());
                     }
@@ -274,6 +279,9 @@ impl RequestStreamClient {
                     break Ok(());
                 }
                 //                RequestStreamClientState::ReadingTrailers => break Ok(()),
+                RequestStreamClientState::ClosePending => {
+                    panic!("Stream readable after being closed!");
+                }
                 RequestStreamClientState::Closed => {
                     panic!("Stream readable after being closed!");
                 }
@@ -366,6 +374,10 @@ impl RequestStreamClient {
                 }
 
                 Ok((amount, fin))
+            }
+            RequestStreamClientState::ClosePending => {
+                self.state = RequestStreamClientState::Closed;
+                Ok((0, true))
             }
             _ => Ok((0, false)),
         }
