@@ -918,9 +918,13 @@ impl Http3Connection {
                 Ok((amount, fin)) => {
                     if fin {
                         self.request_streams_client.remove(&stream_id);
-                    }
-                    if amount > 0 && !fin {
-                        self.streams_are_readable.insert(stream_id);
+                    } else if amount > 0 {
+                        // Directly call receive instead of adding to
+                        // streams_are_readable here. This allows the app to
+                        // pick up subsequent already-received data frames in
+                        // the stream even if no new packets arrive to cause
+                        // process_http3() to run.
+                        cs.receive(&mut self.conn, &mut self.qpack_decoder)?;
                     }
                     Ok((amount, fin))
                 }
