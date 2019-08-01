@@ -7,7 +7,7 @@
 use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{Record, RecordList};
 use crate::assert_initialized;
-pub use crate::cert::CertificateChain;
+pub use crate::cert::CertificateInfo;
 use crate::constants::*;
 use crate::convert::to_c_uint;
 use crate::err::{Error, PRErrorCode, Res};
@@ -218,7 +218,7 @@ pub struct SecretAgent {
 }
 
 impl SecretAgent {
-    fn new(external_cert_verification: bool) -> Res<SecretAgent> {
+    fn new() -> Res<SecretAgent> {
         let mut agent = SecretAgent {
             fd: null_mut(),
             secrets: Default::default(),
@@ -235,7 +235,7 @@ impl SecretAgent {
 
             no_eoed: false,
         };
-        agent.create_fd(external_cert_verification)?;
+        agent.create_fd()?;
         Ok(agent)
     }
 
@@ -246,11 +246,8 @@ impl SecretAgent {
     // minimal, but it means that the two forms need casts to translate
     // between them.  ssl::PRFileDesc is left as an opaque type, as the
     // ssl::SSL_* APIs only need an opaque type.
-    fn create_fd(&mut self, external_cert_verification: bool) -> Res<()> {
-        if !external_cert_verification {
-            assert_initialized();
-        }
-
+    fn create_fd(&mut self) -> Res<()> {
+        assert_initialized();
         let label = CString::new("sslwrapper").expect("cstring failed");
         let id = unsafe { prio::PR_GetUniqueIdentity(label.as_ptr()) };
 
@@ -499,29 +496,9 @@ impl SecretAgent {
         SecretAgentPreInfo::new(self.fd)
     }
 
-    /// Get the peer's certificate.
-    pub fn peer_certificate(&self) -> *mut ssl::CERTCertificate {
-        unsafe { ssl::SSL_PeerCertificate(self.fd) }
-    }
-
     /// Get the peer's certificate chain.
-    pub fn peer_certificate_chain(&self) -> Option<CertificateChain> {
-        CertificateChain::new(self.fd)
-    }
-
-    /// Get the peer's certificate chain.
-    pub fn peer_certificate_chain_ssl(&self) -> *mut ssl::CERTCertList {
-        unsafe { ssl::SSL_PeerCertificateChain(self.fd) }
-    }
-
-    /// Get the peer's stapled ocsp responses.
-    pub fn peer_stapled_ocsp_responses(&self) -> *const ssl::SECItemArray {
-        unsafe { ssl::SSL_PeerStapledOCSPResponses(self.fd) }
-    }
-
-    /// Get the peer's signed cert timestamps.
-    pub fn peer_signed_cert_timestamp(&self) -> *const ssl::SECItem {
-        unsafe { ssl::SSL_PeerSignedCertTimestamps(self.fd) }
+    pub fn peer_certificate(&self) -> Option<CertificateInfo> {
+        CertificateInfo::new(self.fd)
     }
 
     /// Return any fatal alert that the TLS stack might have sent.
@@ -701,8 +678,8 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new<S: ToString>(server_name: S, external_cert_verification: bool) -> Res<Self> {
-        let mut agent = SecretAgent::new(external_cert_verification)?;
+    pub fn new<S: ToString>(server_name: S) -> Res<Self> {
+        let mut agent = SecretAgent::new()?;
         let url = CString::new(server_name.to_string());
         if url.is_err() {
             return Err(Error::InternalError);
@@ -811,7 +788,7 @@ pub struct Server {
 
 impl Server {
     pub fn new<A: ToString, I: IntoIterator<Item = A>>(certificates: I) -> Res<Self> {
-        let mut agent = SecretAgent::new(false)?;
+        let mut agent = SecretAgent::new()?;
 
         for n in certificates {
             let c = CString::new(n.to_string());

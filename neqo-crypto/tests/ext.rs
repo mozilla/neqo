@@ -15,7 +15,7 @@ impl ExtensionHandler for NoopExtensionHandler {}
 #[test]
 fn noop_extension_handler() {
     fixture_init();
-    let mut client = Client::new("server.example", false).expect("should create client");
+    let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
 
     client
@@ -73,7 +73,7 @@ impl ExtensionHandler for SimpleExtensionHandler {
 #[test]
 fn simple_extension() {
     fixture_init();
-    let mut client = Client::new("server.example", false).expect("should create client");
+    let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
 
     let client_handler = Rc::new(RefCell::new(SimpleExtensionHandler::default()));

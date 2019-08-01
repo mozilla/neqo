@@ -11,7 +11,8 @@ use neqo_common::{
     qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
     IncrementalDecoderResult,
 };
-use neqo_crypto::{err, ssl, SecretAgentInfo};
+use neqo_crypto::agent::CertificateInfo;
+use neqo_crypto::{err, SecretAgentInfo};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{
@@ -232,23 +233,8 @@ impl Http3Connection {
     }
 
     /// Get the peer's certificate.
-    pub fn peer_certificate(&self) -> *mut ssl::CERTCertificate {
+    pub fn peer_certificate(&self) -> Option<CertificateInfo> {
         self.conn.peer_certificate()
-    }
-
-    /// Get the peer's certificate chain.
-    pub fn peer_certificate_chain(&self) -> *mut ssl::CERTCertList {
-        self.conn.peer_certificate_chain()
-    }
-
-    /// Get the peer's stapled ocsp responses.
-    pub fn peer_stapled_ocsp_responses(&self) -> *const ssl::SECItemArray {
-        self.conn.peer_stapled_ocsp_responses()
-    }
-
-    /// Get the peer's signed cert timestamps.
-    pub fn peer_signed_cert_timestamp(&self) -> *const ssl::SECItem {
-        self.conn.peer_signed_cert_timestamp()
     }
 
     pub fn authenticated(&mut self, error: err::PRErrorCode, now: Instant) {
@@ -1071,6 +1057,7 @@ impl Http3Events {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_common::matches;
     use test_fixture::*;
 
     fn assert_closed(hconn: &Http3Connection, expected: Error) {
@@ -1106,15 +1093,17 @@ mod tests {
             assert_eq!(*neqo_trans_conn.state(), State::WaitInitial);
             let out = neqo_trans_conn.process(out.dgram(), now());
             assert_eq!(*neqo_trans_conn.state(), State::Handshaking);
-            assert_eq!(hconn.state(), Http3State::Initializing);
             let out = hconn.process(out.dgram(), now());
-            let http_events = hconn.events();
-            for e in http_events {
-                match e {
-                    Http3Event::ConnectionConnected => assert!(true),
-                    _ => assert!(false),
-                }
-            }
+            let out = neqo_trans_conn.process(out.dgram(), now());
+            assert!(out.as_dgram_ref().is_none());
+
+            let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
+            assert!(hconn.events().into_iter().any(authentication_needed));
+            hconn.authenticated(0, now());
+
+            let out = hconn.process(out.dgram(), now());
+            let connected = |e| matches!(e, Http3Event::ConnectionConnected);
+            assert!(hconn.events().into_iter().any(connected));
             assert_eq!(hconn.state(), Http3State::Connected);
             neqo_trans_conn.process(out.dgram(), now());
         } else {
@@ -1122,6 +1111,14 @@ mod tests {
             let out = neqo_trans_conn.process(None, now());
             let out = hconn.process(out.dgram(), now());
             let out = neqo_trans_conn.process(out.dgram(), now());
+            let _ = hconn.process(out.dgram(), now());
+            let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+            assert!(neqo_trans_conn
+                .events()
+                .into_iter()
+                .any(authentication_needed));
+            neqo_trans_conn.authenticated(0, now());
+            let out = neqo_trans_conn.process(None, now());
             let out = hconn.process(out.dgram(), now());
             assert_eq!(hconn.state(), Http3State::Connected);
             neqo_trans_conn.process(out.dgram(), now());

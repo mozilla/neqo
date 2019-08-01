@@ -9,7 +9,7 @@
 use neqo_common::matches;
 use neqo_common::once::OnceResult;
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_transport::{Connection, State};
+use neqo_transport::{Connection, ConnectionEvent, State};
 use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
@@ -59,14 +59,8 @@ pub fn loopback() -> SocketAddr {
 /// Create a transport client with default configuration.
 pub fn default_client() -> Connection {
     fixture_init();
-    Connection::new_client(
-        DEFAULT_SERVER_NAME,
-        DEFAULT_ALPN,
-        loopback(),
-        loopback(),
-        false,
-    )
-    .expect("create a default client")
+    Connection::new_client(DEFAULT_SERVER_NAME, DEFAULT_ALPN, loopback(), loopback())
+        .expect("create a default client")
 }
 
 /// Create a transport server with default configuration.
@@ -81,9 +75,13 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     let mut b = server;
     let mut datagram = None;
     let is_done = |c: &Connection| matches!(c.state(), State::Connected | State::Closing { .. } | State::Closed(..));
-    while !is_done(a) {
+    let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+    while !is_done(a) || !is_done(b) {
         let d = a.process(datagram, now());
         datagram = d.dgram();
+        if a.events().any(authentication_needed) {
+            a.authenticated(0, now());
+        }
         mem::swap(&mut a, &mut b);
     }
 }

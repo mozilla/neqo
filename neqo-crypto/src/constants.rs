@@ -109,7 +109,6 @@ remap_enum! {
 remap_enum! {
     SignatureScheme: u16 => ssl::SSLSignatureScheme {
         TLS_SIG_NONE = ssl_sig_none,
-        TLS_SIG_RSA_PKCS1_SHA1 = ssl_sig_rsa_pkcs1_sha1,
         TLS_SIG_RSA_PKCS1_SHA256 = ssl_sig_rsa_pkcs1_sha256,
         TLS_SIG_RSA_PKCS1_SHA384 = ssl_sig_rsa_pkcs1_sha384,
         TLS_SIG_RSA_PKCS1_SHA512 = ssl_sig_rsa_pkcs1_sha512,
@@ -124,10 +123,5 @@ remap_enum! {
         TLS_SIG_RSA_PSS_PSS_SHA256 = ssl_sig_rsa_pss_pss_sha256,
         TLS_SIG_RSA_PSS_PSS_SHA384 = ssl_sig_rsa_pss_pss_sha384,
         TLS_SIG_RSA_PSS_PSS_SHA512 = ssl_sig_rsa_pss_pss_sha512,
-        TLS_SIG_DSA_SHA1 = ssl_sig_dsa_sha1,
-        TLS_SIG_DSA_SHA256 = ssl_sig_dsa_sha256,
-        TLS_SIG_DSA_SHA384 = ssl_sig_dsa_sha384,
-        TLS_SIG_DSA_SHA512 = ssl_sig_dsa_sha512,
-        TLS_SIG_ECDSA_SHA1 = ssl_sig_ecdsa_sha1,
     }
 }
