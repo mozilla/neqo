@@ -1453,13 +1453,7 @@ mod tests {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
 
         assert_eq!(
-            hconn.fetch(
-                &"GET".to_string(),
-                &"https".to_string(),
-                &"something.com".to_string(),
-                &"/".to_string(),
-                &Vec::<(String, String)>::new()
-            ),
+            hconn.fetch("GET", "https", "something.com", "/", &[]),
             Ok(0)
         );
 
@@ -1622,13 +1616,7 @@ mod tests {
     fn fetch() {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
-            .fetch(
-                &"GET".to_string(),
-                &"https".to_string(),
-                &"something.com".to_string(),
-                &"/".to_string(),
-                &Vec::<(String, String)>::new(),
-            )
+            .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
@@ -1744,13 +1732,7 @@ mod tests {
     fn test_incomplet_frame(res: &[u8], error: Error) {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
-            .fetch(
-                &"GET".to_string(),
-                &"https".to_string(),
-                &"something.com".to_string(),
-                &"/".to_string(),
-                &Vec::<(String, String)>::new(),
-            )
+            .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
@@ -1851,33 +1833,15 @@ mod tests {
         let (mut hconn, mut neqo_trans_conn, _control_stream) =
             connect_and_receive_control_stream(true);
         let request_stream_id_1 = hconn
-            .fetch(
-                &"GET".to_string(),
-                &"https".to_string(),
-                &"something.com".to_string(),
-                &"/".to_string(),
-                &Vec::<(String, String)>::new(),
-            )
+            .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id_1, 0);
         let request_stream_id_2 = hconn
-            .fetch(
-                &"GET".to_string(),
-                &"https".to_string(),
-                &"something.com".to_string(),
-                &"/".to_string(),
-                &Vec::<(String, String)>::new(),
-            )
+            .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id_2, 4);
         let request_stream_id_3 = hconn
-            .fetch(
-                &"GET".to_string(),
-                &"https".to_string(),
-                &"something.com".to_string(),
-                &"/".to_string(),
-                &Vec::<(String, String)>::new(),
-            )
+            .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id_3, 8);
 
@@ -1967,13 +1931,7 @@ mod tests {
     fn test_stream_fin_wo_data() {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
-            .fetch(
-                &"GET".to_string(),
-                &"https".to_string(),
-                &"something.com".to_string(),
-                &"/".to_string(),
-                &Vec::<(String, String)>::new(),
-            )
+            .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
