@@ -58,7 +58,7 @@ pub enum Role {
 }
 
 impl Role {
-    pub fn peer(self) -> Self {
+    pub fn remote(self) -> Self {
         match self {
             Role::Client => Role::Server,
             Role::Server => Role::Client,
@@ -106,12 +106,12 @@ struct Path {
 
 impl Path {
     // Used to create a path when receiving a packet.
-    pub fn new(d: &Datagram, peer_cid: ConnectionId) -> Path {
+    pub fn new(d: &Datagram, remote_cid: ConnectionId) -> Path {
         Path {
             local: d.dst,
             remote: d.src,
             local_cids: Vec::new(),
-            remote_cid: peer_cid,
+            remote_cid,
         }
     }
 
@@ -554,7 +554,7 @@ impl Connection {
                     qinfo!([self] "Received packet in WaitInitial");
                     if self.role == Role::Server {
                         if hdr.dcid.len() < 8 {
-                            qwarn!([self] "Peer DCID is too short");
+                            qwarn!([self] "Remote DCID is too short");
                             return Ok(());
                         }
                         self.crypto.states[0] =
@@ -917,9 +917,9 @@ impl Connection {
         {
             let tph = swapped.borrow();
             let tps = tph.remote();
-            self.indexes.peer_max_stream_bidi =
+            self.indexes.remote_max_stream_bidi =
                 StreamIndex::new(tps.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
-            self.indexes.peer_max_stream_uni =
+            self.indexes.remote_max_stream_uni =
                 StreamIndex::new(tps.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
             self.flow_mgr
                 .borrow_mut()
@@ -1068,13 +1068,13 @@ impl Connection {
                 stream_type,
                 maximum_streams,
             } => {
-                let peer_max = match stream_type {
-                    StreamType::BiDi => &mut self.indexes.peer_max_stream_bidi,
-                    StreamType::UniDi => &mut self.indexes.peer_max_stream_uni,
+                let remote_max = match stream_type {
+                    StreamType::BiDi => &mut self.indexes.remote_max_stream_bidi,
+                    StreamType::UniDi => &mut self.indexes.remote_max_stream_uni,
                 };
 
-                if maximum_streams > *peer_max {
-                    *peer_max = maximum_streams;
+                if maximum_streams > *remote_max {
+                    *remote_max = maximum_streams;
                     self.events.borrow_mut().send_stream_creatable(stream_type);
                 }
             }
@@ -1281,7 +1281,7 @@ impl Connection {
         let mut removed_uni = 0;
         for id in &recv_to_remove {
             self.recv_streams.remove(&id);
-            if id.is_peer_initiated(self.role()) {
+            if id.is_remote_initiated(self.role()) {
                 if id.is_bidi() {
                     removed_bidi += 1;
                 } else {
@@ -1290,7 +1290,7 @@ impl Connection {
             }
         }
 
-        // Send max_streams updates if we removed peer-initiated recv streams.
+        // Send max_streams updates if we removed remote-initiated recv streams.
         if removed_bidi > 0 {
             self.indexes.local_max_stream_bidi += removed_bidi;
             self.flow_mgr
@@ -1319,7 +1319,7 @@ impl Connection {
         }
 
         // May require creating new stream(s)
-        if stream_id.is_peer_initiated(self.role()) {
+        if stream_id.is_remote_initiated(self.role()) {
             let next_stream_idx = if stream_id.is_bidi() {
                 &mut self.indexes.local_next_stream_bidi
             } else {
@@ -1330,7 +1330,7 @@ impl Connection {
             if stream_idx >= *next_stream_idx {
                 let recv_initial_max_stream_data = if stream_id.is_bidi() {
                     if stream_idx > self.indexes.local_max_stream_bidi {
-                        qwarn!([self] "peer bidi stream create blocked, next={:?} max={:?}",
+                        qwarn!([self] "remote bidi stream create blocked, next={:?} max={:?}",
                                stream_idx,
                                self.indexes.local_max_stream_bidi);
                         return Err(Error::StreamLimitError);
@@ -1341,7 +1341,7 @@ impl Connection {
                         .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
                 } else {
                     if stream_idx > self.indexes.local_max_stream_uni {
-                        qwarn!([self] "peer uni stream create blocked, next={:?} max={:?}",
+                        qwarn!([self] "remote uni stream create blocked, next={:?} max={:?}",
                                stream_idx,
                                self.indexes.local_max_stream_uni);
                         return Err(Error::StreamLimitError);
@@ -1425,20 +1425,20 @@ impl Connection {
 
         Ok(match st {
             StreamType::UniDi => {
-                if self.indexes.peer_next_stream_uni >= self.indexes.peer_max_stream_uni {
+                if self.indexes.remote_next_stream_uni >= self.indexes.remote_max_stream_uni {
                     self.flow_mgr
                         .borrow_mut()
-                        .streams_blocked(self.indexes.peer_max_stream_uni, StreamType::UniDi);
+                        .streams_blocked(self.indexes.remote_max_stream_uni, StreamType::UniDi);
                     qwarn!([self] "local uni stream create blocked, next={:?} max={:?}",
-                           self.indexes.peer_next_stream_uni,
-                           self.indexes.peer_max_stream_uni);
+                           self.indexes.remote_next_stream_uni,
+                           self.indexes.remote_max_stream_uni);
                     return Err(Error::StreamLimitError);
                 }
                 let new_id = self
                     .indexes
-                    .peer_next_stream_uni
+                    .remote_next_stream_uni
                     .to_stream_id(StreamType::UniDi, self.role);
-                self.indexes.peer_next_stream_uni += 1;
+                self.indexes.remote_next_stream_uni += 1;
                 let initial_max_stream_data = self
                     .tps
                     .borrow()
@@ -1457,20 +1457,20 @@ impl Connection {
                 new_id.as_u64()
             }
             StreamType::BiDi => {
-                if self.indexes.peer_next_stream_bidi >= self.indexes.peer_max_stream_bidi {
+                if self.indexes.remote_next_stream_bidi >= self.indexes.remote_max_stream_bidi {
                     self.flow_mgr
                         .borrow_mut()
-                        .streams_blocked(self.indexes.peer_max_stream_bidi, StreamType::BiDi);
+                        .streams_blocked(self.indexes.remote_max_stream_bidi, StreamType::BiDi);
                     qwarn!([self] "local bidi stream create blocked, next={:?} max={:?}",
-                           self.indexes.peer_next_stream_bidi,
-                           self.indexes.peer_max_stream_bidi);
+                           self.indexes.remote_next_stream_bidi,
+                           self.indexes.remote_max_stream_bidi);
                     return Err(Error::StreamLimitError);
                 }
                 let new_id = self
                     .indexes
-                    .peer_next_stream_bidi
+                    .remote_next_stream_bidi
                     .to_stream_id(StreamType::BiDi, self.role);
-                self.indexes.peer_next_stream_bidi += 1;
+                self.indexes.remote_next_stream_bidi += 1;
                 let send_initial_max_stream_data = self
                     .tps
                     .borrow()
@@ -1684,8 +1684,8 @@ mod tests {
         assert_eq!(id1.role(), Role::Client);
         assert_eq!(id1.is_self_initiated(Role::Client), true);
         assert_eq!(id1.is_self_initiated(Role::Server), false);
-        assert_eq!(id1.is_peer_initiated(Role::Client), false);
-        assert_eq!(id1.is_peer_initiated(Role::Server), true);
+        assert_eq!(id1.is_remote_initiated(Role::Client), false);
+        assert_eq!(id1.is_remote_initiated(Role::Server), true);
         assert_eq!(id1.is_send_only(Role::Server), false);
         assert_eq!(id1.is_send_only(Role::Client), false);
         assert_eq!(id1.is_recv_only(Role::Server), false);
@@ -1700,8 +1700,8 @@ mod tests {
         assert_eq!(id2.role(), Role::Server);
         assert_eq!(id2.is_self_initiated(Role::Client), false);
         assert_eq!(id2.is_self_initiated(Role::Server), true);
-        assert_eq!(id2.is_peer_initiated(Role::Client), true);
-        assert_eq!(id2.is_peer_initiated(Role::Server), false);
+        assert_eq!(id2.is_remote_initiated(Role::Client), true);
+        assert_eq!(id2.is_remote_initiated(Role::Server), false);
         assert_eq!(id2.is_send_only(Role::Server), true);
         assert_eq!(id2.is_send_only(Role::Client), false);
         assert_eq!(id2.is_recv_only(Role::Server), false);
