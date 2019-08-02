@@ -677,9 +677,9 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new<S: ToString>(server_name: S) -> Res<Self> {
+    pub fn new(server_name: &str) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
-        let url = CString::new(server_name.to_string());
+        let url = CString::new(server_name);
         if url.is_err() {
             return Err(Error::InternalError);
         }
