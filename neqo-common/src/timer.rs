@@ -161,13 +161,13 @@ impl<T> Timer<T> {
     }
 
     /// Take the next item, unless there are no items with
-    /// a timeout in the past relative to `now`.
-    pub fn take_next(&mut self, now: Instant) -> Option<T> {
+    /// a timeout in the past relative to `until`.
+    pub fn take_next(&mut self, until: Instant) -> Option<T> {
         loop {
-            if !self.items[self.cursor].is_empty() && self.items[self.cursor][0].time <= now {
+            if !self.items[self.cursor].is_empty() && self.items[self.cursor][0].time <= until {
                 return Some(self.items[self.cursor].remove(0).item);
             }
-            if now > self.now + self.granularity {
+            if until > self.now + self.granularity {
                 self.tick();
             } else {
                 return None;

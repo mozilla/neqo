@@ -9,7 +9,10 @@
 use neqo_common::Datagram;
 use neqo_crypto::init;
 use neqo_http3::{Http3Connection, Http3Event};
-use neqo_transport::{Connection, ConnectionError, ConnectionEvent, Error, State, StreamType};
+use neqo_transport::{
+    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, State,
+    StreamType,
+};
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 // use std::path::PathBuf;
@@ -393,9 +396,14 @@ struct NetworkCtx {
 }
 
 fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connection), String> {
-    let mut client =
-        Connection::new_client(peer.host, test.alpn(), nctx.local_addr, nctx.remote_addr)
-            .expect("must succeed");
+    let mut client = Connection::new_client(
+        peer.host,
+        &test.alpn(),
+        FixedConnectionIdManager::new(0),
+        nctx.local_addr,
+        nctx.remote_addr,
+    )
+    .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     let res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));
@@ -474,9 +482,14 @@ impl Handler for VnHandler {
     }
 }
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
-    let mut client =
-        Connection::new_client(peer.host, vec!["hq-20"], nctx.local_addr, nctx.remote_addr)
-            .expect("must succeed");
+    let mut client = Connection::new_client(
+        peer.host,
+        &["hq-20"],
+        FixedConnectionIdManager::new(0),
+        nctx.local_addr,
+        nctx.remote_addr,
+    )
+    .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = VnHandler {};
     let _res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));

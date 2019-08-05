@@ -8,7 +8,7 @@
 use neqo_common::Datagram;
 use neqo_crypto::init_db;
 use neqo_http3::{Http3Connection, Http3Event, Http3State};
-use neqo_transport::Connection;
+use neqo_transport::{Connection, FixedConnectionIdManager};
 use std::collections::HashSet;
 use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
@@ -240,8 +240,9 @@ impl Handler for PostConnectHandler {
 fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: SocketAddr) {
     let mut client = Http3Connection::new(
         Connection::new_client(
-            args.url.host_str().unwrap(),
-            args.alpn.clone(),
+            args.url.host_str().as_ref().unwrap(),
+            &args.alpn,
+            FixedConnectionIdManager::new(0),
             local_addr,
             remote_addr,
         )
@@ -321,7 +322,9 @@ mod old {
     use std::time::Instant;
 
     use neqo_common::Datagram;
-    use neqo_transport::{Connection, ConnectionEvent, State, StreamType};
+    use neqo_transport::{
+        Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
+    };
 
     use super::{emit_datagram, Args};
 
@@ -438,7 +441,8 @@ mod old {
 
         let mut client = Connection::new_client(
             args.url.host_str().unwrap(),
-            vec!["http/0.9"],
+            &["http/0.9"],
+            FixedConnectionIdManager::new(0),
             local_addr,
             remote_addr,
         )

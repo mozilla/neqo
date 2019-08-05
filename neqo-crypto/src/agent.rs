@@ -404,33 +404,28 @@ impl SecretAgent {
     ///
     /// This asserts if no items are provided, or if any individual item is longer than
     /// 255 octets in length.
-    pub fn set_alpn<A: ToString, I: IntoIterator<Item = A>>(&mut self, protocols: I) -> Res<()> {
+    pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
         // Validate and set length.
         // Unfortunately, this means that we need to run the iterator twice.
-        let alpn: Vec<String> = protocols.into_iter().map(|v| v.to_string()).collect();
-        let mut encoded_len = alpn.len();
-        for v in alpn.iter() {
-            assert!(v.len() < 256);
-            encoded_len += v.len();
+        let mut encoded_len = protocols.len();
+        for v in protocols {
+            assert!(v.as_ref().len() < 256);
+            encoded_len += v.as_ref().len();
         }
 
         // Prepare to encode.
         let mut encoded = Vec::with_capacity(encoded_len);
-        let mut add = |v: String| {
+        let mut add = |v: &str| {
             encoded.push(v.len() as u8);
             encoded.extend_from_slice(v.as_bytes());
         };
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        let mut alpn_i = alpn.into_iter();
-        let best = alpn_i
-            .next()
-            .expect("at least one ALPN value needs to be provided");
-        for v in alpn_i {
-            add(v);
+        for v in protocols.iter().skip(1) {
+            add(v.as_ref());
         }
-        add(best);
+        add(protocols[0].as_ref());
         assert_eq!(encoded_len, encoded.len());
 
         // Now give the result to NSS.
@@ -674,7 +669,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new<S: ToString>(server_name: S) -> Res<Self> {
+    pub fn new(server_name: &str) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
         let url = CString::new(server_name.to_string());
         if url.is_err() {
@@ -783,11 +778,11 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new<A: ToString, I: IntoIterator<Item = A>>(certificates: I) -> Res<Self> {
+    pub fn new(certificates: &[impl AsRef<str>]) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
 
         for n in certificates {
-            let c = CString::new(n.to_string());
+            let c = CString::new(n.as_ref());
             if c.is_err() {
                 return Err(Error::CertificateLoading);
             }

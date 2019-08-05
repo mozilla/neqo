@@ -63,10 +63,17 @@ pub struct ConnectionId(pub Vec<u8>);
 
 impl ConnectionId {
     pub fn generate(len: usize) -> ConnectionId {
-        assert!(matches!(len, 4...18));
+        assert!(matches!(len, 0...20));
         let mut v = vec![0; len];
         rand::thread_rng().fill(&mut v[..]);
         ConnectionId(v)
+    }
+
+    pub fn generate_initial() -> ConnectionId {
+        let mut v = [0u8; 1];
+        rand::thread_rng().fill(&mut v[..]);
+        let len: usize = ::std::cmp::min(8, 5 + (v[0] & (v[0] >> 4))).into();
+        ConnectionId::generate(len)
     }
 }
 
@@ -80,6 +87,16 @@ impl ::std::fmt::Display for ConnectionId {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "{}", hex(&self.0))
     }
+}
+
+impl From<&[u8]> for ConnectionId {
+    fn from(buf: &[u8]) -> ConnectionId {
+        ConnectionId(Vec::from(buf))
+    }
+}
+
+pub trait ConnectionIdDecoder {
+    fn decode_cid(&self, _: &mut Decoder) -> Option<ConnectionId>;
 }
 
 #[derive(Default, Debug)]
@@ -121,10 +138,6 @@ impl PacketHdr {
     pub fn body_len(&self) -> usize {
         self.body_len
     }
-}
-
-pub trait PacketDecoder {
-    fn get_cid_len(&self) -> usize;
 }
 
 pub trait CryptoCtx {
@@ -250,7 +263,7 @@ fn decode_pnl(u: u8) -> usize {
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 
-pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
+pub fn decode_packet_hdr(cid_parser: &dyn ConnectionIdDecoder, pd: &[u8]) -> Res<PacketHdr> {
     macro_rules! d {
         ($d:expr) => {
             match $d {
@@ -272,7 +285,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
 
         // Short Header.
         p.tipe = PacketType::Short;
-        let cid = d!(d.decode(dec.get_cid_len()));
+        let cid = d!(cid_parser.decode_cid(&mut d));
         p.dcid = ConnectionId(cid.to_vec()); // TODO(mt) unnecessary copy
         p.hdr_len = pd.len() - d.remaining();
         p.body_len = d.remaining();
@@ -393,7 +406,7 @@ fn encode_packet_short(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<
     encrypt_packet(crypto, hdr, enc, body)
 }
 
-fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
+pub fn encode_packet_vn(hdr: &PacketHdr) -> Vec<u8> {
     let mut d = Encoder::default();
     let mut rand_byte: [u8; 1] = [0; 1];
     rand::thread_rng().fill(&mut rand_byte);
@@ -401,8 +414,12 @@ fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
     d.encode_uint(4, 0u64); // version
     d.encode_vec(1, &hdr.dcid);
     d.encode_vec(1, hdr.scid.as_ref().unwrap());
-    for ver in vers {
-        d.encode_uint(4, *ver);
+    if let PacketType::VN(vers) = &hdr.tipe {
+        for ver in vers {
+            d.encode_uint(4, *ver);
+        }
+    } else {
+        panic!("wrong packet type");
     }
     d.into()
 }
@@ -479,7 +496,7 @@ pub fn encode_retry(hdr: &PacketHdr) -> Vec<u8> {
 pub fn encode_packet(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     match &hdr.tipe {
         PacketType::Short => encode_packet_short(crypto, hdr, body),
-        PacketType::VN(vers) => encode_packet_vn(hdr, &vers),
+        PacketType::VN(_) => encode_packet_vn(hdr),
         PacketType::Retry { .. } => encode_retry(hdr),
         PacketType::Initial(..) | PacketType::ZeroRTT | PacketType::Handshake => {
             encode_packet_long(crypto, hdr, body)
@@ -538,9 +555,9 @@ mod tests {
         }
     }
 
-    impl PacketDecoder for TestFixture {
-        fn get_cid_len(&self) -> usize {
-            5
+    impl ConnectionIdDecoder for TestFixture {
+        fn decode_cid(&self, dec: &mut Decoder) -> Option<ConnectionId> {
+            dec.decode(5).map(|x| ConnectionId::from(x))
         }
     }
 

@@ -27,7 +27,7 @@ use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{decode_frame, AckRange, Frame, FrameType, StreamType, TxMode};
 use crate::packet::{
-    decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, PacketDecoder, PacketHdr,
+    decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, ConnectionIdDecoder, PacketHdr,
     PacketNumberDecoder, PacketType,
 };
 use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken};
@@ -45,7 +45,6 @@ use crate::{AppError, ConnectionError, Error, Res};
 struct Packet(Vec<u8>);
 
 const NUM_EPOCHS: Epoch = 4;
-const CID_LENGTH: usize = 8;
 
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
@@ -145,6 +144,36 @@ impl Output {
     }
 }
 
+pub trait ConnectionIdManager: ConnectionIdDecoder {
+    fn generate_cid(&mut self) -> ConnectionId;
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder;
+}
+/// Alias the common form for ConnectionIdManager.
+type CidMgr = Rc<RefCell<dyn ConnectionIdManager>>;
+
+/// An FixedConnectionIdManager produces random connection IDs of a fixed length.
+pub struct FixedConnectionIdManager {
+    len: usize,
+}
+impl FixedConnectionIdManager {
+    pub fn new(len: usize) -> Rc<RefCell<dyn ConnectionIdManager>> {
+        Rc::new(RefCell::new(FixedConnectionIdManager { len }))
+    }
+}
+impl ConnectionIdDecoder for FixedConnectionIdManager {
+    fn decode_cid(&self, dec: &mut Decoder) -> Option<ConnectionId> {
+        dec.decode(self.len).map(|x| ConnectionId::from(x))
+    }
+}
+impl ConnectionIdManager for FixedConnectionIdManager {
+    fn generate_cid(&mut self) -> ConnectionId {
+        ConnectionId::generate(self.len)
+    }
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
+}
+
 pub struct Connection {
     version: crate::packet::Version,
     role: Role,
@@ -152,6 +181,8 @@ pub struct Connection {
     tps: Rc<RefCell<TransportParametersHandler>>,
     /// What we are doing with 0-RTT.
     zero_rtt_state: ZeroRttState,
+    /// This object will generate connection IDs for the connection.
+    cid_manager: CidMgr,
     /// Network paths.  Right now, this tracks at most one path, so it uses `Option`.
     paths: Option<Path>,
     /// The connection IDs that we will accept.
@@ -187,22 +218,25 @@ impl Debug for Connection {
 }
 
 impl Connection {
-    pub fn new_client<S: ToString, PA: ToString, PI: IntoIterator<Item = PA>>(
-        server_name: S,
-        protocols: PI,
+    pub fn new_client(
+        server_name: &str,
+        protocols: &[impl AsRef<str>],
+        cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
     ) -> Res<Connection> {
-        let dcid = ConnectionId::generate(CID_LENGTH);
+        let dcid = ConnectionId::generate_initial();
+        let local_cids = vec![cid_manager.borrow_mut().generate_cid()];
         let mut c = Connection::new(
             Role::Client,
             Client::new(server_name)?.into(),
+            cid_manager,
             None,
             protocols,
             Some(Path {
                 local: local_addr,
                 remote: remote_addr,
-                local_cids: vec![ConnectionId::generate(CID_LENGTH)],
+                local_cids,
                 remote_cid: dcid.clone(),
             }),
         );
@@ -210,19 +244,16 @@ impl Connection {
         Ok(c)
     }
 
-    pub fn new_server<
-        CS: ToString,
-        CI: IntoIterator<Item = CS>,
-        PA: ToString,
-        PI: IntoIterator<Item = PA>,
-    >(
-        certs: CI,
-        protocols: PI,
+    pub fn new_server(
+        certs: &[impl AsRef<str>],
+        protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
+        cid_manager: CidMgr,
     ) -> Res<Connection> {
         Ok(Connection::new(
             Role::Server,
             Server::new(certs)?.into(),
+            cid_manager,
             Some(anti_replay),
             protocols,
             None,
@@ -245,11 +276,12 @@ impl Connection {
         tps.set_empty(tp_const::DISABLE_MIGRATION);
     }
 
-    fn new<A: ToString, I: IntoIterator<Item = A>>(
+    fn new(
         r: Role,
         agent: Agent,
+        cid_manager: CidMgr,
         anti_replay: Option<&AntiReplay>,
-        protocols: I,
+        protocols: &[impl AsRef<str>],
         paths: Option<Path>,
     ) -> Connection {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
@@ -264,6 +296,7 @@ impl Connection {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
             },
+            cid_manager,
             paths,
             valid_cids: Vec::new(),
             tps: tphandler,
@@ -290,7 +323,7 @@ impl Connection {
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
     /// higher preference.
-    pub fn set_alpn<A: ToString, I: IntoIterator<Item = A>>(&mut self, protocols: I) -> Res<()> {
+    pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
         self.crypto.tls.set_alpn(protocols)?;
         Ok(())
     }
@@ -419,6 +452,11 @@ impl Connection {
         let res = self.input(dgram, now);
         self.absorb_error(now, res);
         self.cleanup_streams();
+    }
+
+    /// Not sure that this is right.
+    /// Andy seemed to think that it was better than rolling this into process_output.
+    pub fn process_timer(&mut self, now: Instant) {
         self.check_loss_detection_timeout(now);
     }
 
@@ -494,7 +532,8 @@ impl Connection {
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
-            let mut hdr = match decode_packet_hdr(self, slc) {
+            let res = decode_packet_hdr(self.cid_manager.borrow().as_decoder(), slc);
+            let mut hdr = match res {
                 Ok(h) => h,
                 Err(e) => {
                     qinfo!([self] "Received indecipherable packet header {} {}", hex(slc), e);
@@ -636,7 +675,8 @@ impl Connection {
                     // Install a path.
                     assert!(self.paths.is_none());
                     let mut p = Path::new(&d, hdr.scid.unwrap());
-                    p.local_cids.push(ConnectionId::generate(CID_LENGTH));
+                    p.local_cids
+                        .push(self.cid_manager.borrow_mut().generate_cid());
                     self.paths = Some(p);
 
                     // SecretAgentPreinfo::early_data() always returns false for a server,
@@ -1640,12 +1680,6 @@ impl ::std::fmt::Display for Connection {
     }
 }
 
-impl PacketDecoder for Connection {
-    fn get_cid_len(&self) -> usize {
-        CID_LENGTH
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1664,6 +1698,7 @@ mod tests {
         Connection::new_client(
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
+            FixedConnectionIdManager::new(8),
             loopback(),
             loopback(),
         )
@@ -1675,6 +1710,7 @@ mod tests {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
+            FixedConnectionIdManager::new(8),
         )
         .expect("create a default server")
     }
@@ -1898,8 +1934,14 @@ mod tests {
     #[test]
     fn test_no_alpn() {
         fixture_init();
-        let mut client =
-            Connection::new_client("example.com", &["bad-alpn"], loopback(), loopback()).unwrap();
+        let mut client = Connection::new_client(
+            "example.com",
+            &["bad-alpn"],
+            FixedConnectionIdManager::new(9),
+            loopback(),
+            loopback(),
+        )
+        .unwrap();
         let mut server = default_server();
 
         handshake(&mut client, &mut server);
@@ -2103,9 +2145,13 @@ mod tests {
         // should result in the server rejecting 0-RTT.
         let ar = AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3)
             .expect("setup anti-replay");
-        let mut server =
-            Connection::new_server(test_fixture::DEFAULT_KEYS, test_fixture::DEFAULT_ALPN, &ar)
-                .unwrap();
+        let mut server = Connection::new_server(
+            test_fixture::DEFAULT_KEYS,
+            test_fixture::DEFAULT_ALPN,
+            &ar,
+            FixedConnectionIdManager::new(10),
+        )
+        .unwrap();
 
         // Send ClientHello.
         let client_hs = client.process(None, now());
@@ -2138,6 +2184,12 @@ mod tests {
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
     }
 
+    struct NullCidDecoder {}
+    impl ConnectionIdDecoder for NullCidDecoder {
+        fn decode_cid(&self, _: &mut Decoder) -> Option<ConnectionId> {
+            unreachable!()
+        }
+    }
     #[test]
     fn test_vn() {
         let mut server = default_server();
@@ -2167,7 +2219,8 @@ mod tests {
         // We should have received a VN packet.
         assert!(ret_dgram.as_dgram_ref().is_some());
         let ret_pkt = ret_dgram.dgram().unwrap();
-        let ret_hdr = decode_packet_hdr(&server, &*ret_pkt).unwrap();
+
+        let ret_hdr = decode_packet_hdr(&NullCidDecoder {}, &*ret_pkt).unwrap();
         assert!(match &ret_hdr.tipe {
             PacketType::VN(vns) if vns.len() == 2 => true,
             _ => false,
