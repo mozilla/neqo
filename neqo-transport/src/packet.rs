@@ -63,7 +63,7 @@ pub struct ConnectionId(pub Vec<u8>);
 
 impl ConnectionId {
     pub fn generate(len: usize) -> ConnectionId {
-        assert!(matches!(len, 0...20));
+        assert!(matches!(len, 0..=20));
         let mut v = vec![0; len];
         rand::thread_rng().fill(&mut v[..]);
         ConnectionId(v)
@@ -72,7 +72,7 @@ impl ConnectionId {
     pub fn generate_initial() -> ConnectionId {
         let mut v = [0u8; 1];
         rand::thread_rng().fill(&mut v[..]);
-        let len: usize = ::std::cmp::min(8, 5 + (v[0] & (v[0] >> 4))).into();
+        let len: usize = ::std::cmp::max(8, 5 + (v[0] & (v[0] >> 4))).into();
         ConnectionId::generate(len)
     }
 }
@@ -671,5 +671,15 @@ mod tests {
         assert_eq!(decoded.version, hdr.version);
         assert_eq!(decoded.dcid, hdr.dcid);
         assert_eq!(decoded.scid, hdr.scid);
+    }
+
+    #[test]
+    fn generate_initial_cid() {
+        for i in 0..100 {
+            let cid = ConnectionId::generate_initial();
+            if !matches!(cid.len(), 8..=20) {
+                panic!("connection ID {:?}", cid);
+            }
+        }
     }
 }

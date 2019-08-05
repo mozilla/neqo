@@ -76,19 +76,13 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new<CI, PI>(
+    pub fn new(
         now: Instant,
         cid_manager: CidMgr,
-        certs: CI,
-        protocols: PI,
+        certs: &[impl AsRef<str>],
+        protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
-    ) -> Server
-    where
-        CI: IntoIterator,
-        CI::Item: AsRef<str>,
-        PI: IntoIterator,
-        PI::Item: AsRef<str>,
-    {
+    ) -> Server {
         Server {
             version: QUIC_VERSION,
             certs: certs
