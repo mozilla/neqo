@@ -274,7 +274,7 @@ impl Http3Connection {
         match &res {
             Err(e) => {
                 qinfo!([self] "Connection error: {}.", e);
-                self.close(now, e.code(), format!("{}", e));
+                self.close(now, e.code(), &format!("{}", e));
                 true
             }
             _ => false,
@@ -694,7 +694,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn close<S: Into<String>>(&mut self, now: Instant, error: AppError, msg: S) {
+    pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
         qdebug!([self] "Closed.");
         self.state = Http3State::Closing(CloseError::Application(error));
         if (!self.request_streams_client.is_empty() || !self.request_streams_server.is_empty())
@@ -1726,7 +1726,7 @@ mod tests {
             assert!(false);
         }
 
-        hconn.close(now(), 0, String::from(""));
+        hconn.close(now(), 0, "");
     }
 
     fn test_incomplet_frame(res: &[u8], error: Error) {
@@ -1924,7 +1924,7 @@ mod tests {
 
         assert!(stream_reset);
         assert_eq!(hconn.state(), Http3State::GoingAway);
-        hconn.close(now(), 0, String::from(""));
+        hconn.close(now(), 0, "");
     }
 
     #[test]

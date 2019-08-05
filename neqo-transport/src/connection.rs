@@ -212,7 +212,7 @@ impl Debug for Connection {
 impl Connection {
     /// Create a new QUIC connection with Client role.
     pub fn new_client(
-        server_name: impl AsRef<str>,
+        server_name: &str,
         protocols: &[impl AsRef<str>],
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
@@ -920,7 +920,7 @@ impl Connection {
     }
 
     /// Close the connection.
-    pub fn close<S: Into<String>>(&mut self, now: Instant, error: AppError, msg: S) {
+    pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
         self.set_state(State::Closing {
             error: ConnectionError::Application(error),
             frame_type: 0,
