@@ -163,6 +163,7 @@ impl Server {
             return InitialResult::Drop;
         }
 
+        qinfo!([self] "Send retry for {:?}", hdr.dcid);
         InitialResult::Retry(encode_retry(&PacketHdr::new(
             0, // tbyte (unused on encode)
             PacketType::Retry {
@@ -183,6 +184,7 @@ impl Server {
         dgram: Option<Datagram>,
         now: Instant,
     ) -> Option<Datagram> {
+        qtrace!([self] "Process connection {:?}", c);
         let out = c.borrow_mut().process(dgram, now);
         if let Output::Callback(delay) = out {
             self.timers.add(now + delay, c.clone());
@@ -275,6 +277,7 @@ impl Server {
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
     fn process_next_output(&mut self, now: Instant) -> Option<Datagram> {
+        qtrace!([self] "No packet from primary connection, look at others");
         while let Some(c) = self.waiting.pop_front() {
             if let Some(d) = self.process_connection(c, None, now) {
                 return Some(d);
@@ -304,10 +307,19 @@ impl Server {
         };
         let out = out.or_else(|| self.process_next_output(now));
         match out {
-            Some(d) => Output::Datagram(d),
+            Some(d) => {
+                qtrace!([self] "Send packet: {:?}", d);
+                Output::Datagram(d)
+            }
             _ => match self.next_time(now) {
-                Some(delay) => Output::Callback(delay),
-                _ => Output::None,
+                Some(delay) => {
+                    qtrace!([self] "Wait: {:?}", delay);
+                    Output::Callback(delay)
+                }
+                _ => {
+                    qtrace!([self] "Go dormant");
+                    Output::None
+                }
             },
         }
     }

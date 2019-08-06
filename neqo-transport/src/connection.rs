@@ -203,8 +203,6 @@ pub struct Connection {
     loss_recovery_state: LossRecoveryState,
     events: Rc<RefCell<ConnectionEvents>>,
     token: Option<Vec<u8>>,
-    send_vn: Option<(PacketHdr, SocketAddr, SocketAddr)>,
-    send_retry: Option<PacketType>, // This will be PacketType::Retry.
     stats: Stats,
 }
 
@@ -315,8 +313,6 @@ impl Connection {
             loss_recovery_state: LossRecoveryState::default(),
             events: Rc::new(RefCell::new(ConnectionEvents::default())),
             token: None,
-            send_vn: None,
-            send_retry: None,
             stats: Stats::default(),
         }
     }
@@ -524,6 +520,34 @@ impl Connection {
         self.valid_cids.contains(cid) || self.paths.iter().any(|p| p.local_cids.contains(cid))
     }
 
+    fn handle_retry(
+        &mut self,
+        scid: &ConnectionId,
+        odcid: &ConnectionId,
+        token: &Vec<u8>,
+    ) -> Res<()> {
+        qinfo!([self] "received Retry");
+        if self.retry_token.is_some() {
+            qwarn!([self] "Dropping extra Retry");
+            return Ok(());
+        }
+        if token.is_empty() {
+            qwarn!([self] "Dropping Retry without a token");
+            return Ok(());
+        }
+        match self.paths.iter_mut().find(|p| p.remote_cid == *odcid) {
+            None => {
+                qwarn!([self] "Ignoring Retry with mismatched ODCID");
+                return Ok(());
+            }
+            Some(path) => {
+                path.remote_cid = scid.clone();
+            }
+        }
+        self.retry_token = Some(token.clone());
+        Ok(())
+    }
+
     #[allow(clippy::cognitive_complexity)]
     fn input(&mut self, d: Datagram, now: Instant) -> Res<()> {
         let mut slc = &d[..];
@@ -549,25 +573,7 @@ impl Connection {
                     return Err(Error::VersionNegotiation);
                 }
                 (PacketType::Retry { odcid, token }, State::WaitInitial, Role::Client) => {
-                    if self.retry_token.is_some() {
-                        qwarn!("received another Retry, dropping it");
-                        return Ok(());
-                    }
-                    if token.is_empty() {
-                        qwarn!("received Retry, but no token, dropping it");
-                        return Ok(());
-                    }
-                    match self.paths.iter_mut().find(|p| p.remote_cid == *odcid) {
-                        None => {
-                            qwarn!("received Retry, but not for us, dropping it");
-                            return Ok(());
-                        }
-                        Some(path) => {
-                            path.remote_cid = hdr.scid.expect("Retry pkt must have SCID");
-                        }
-                    }
-                    self.retry_token = Some(token.clone());
-                    return Ok(());
+                    return self.handle_retry(hdr.scid.as_ref().unwrap(), odcid, token);
                 }
                 (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {
                     qwarn!("dropping {:?}", hdr.tipe);
@@ -579,12 +585,10 @@ impl Connection {
             if let Some(version) = hdr.version {
                 if version != self.version {
                     qwarn!(
-                        "hdr version {:?} and self.version {} disagree",
-                        hdr.version,
+                        "Dropping packet from version {:x} (self.version={:x})",
+                        hdr.version.unwrap(),
                         self.version,
                     );
-                    qwarn!([self] "Sending VN on next output");
-                    self.send_vn = Some((hdr, d.source(), d.destination()));
                     return Ok(());
                 }
             }
@@ -751,10 +755,6 @@ impl Connection {
     }
 
     fn output(&mut self, now: Instant) -> Option<Datagram> {
-        if let Some((vn_hdr, remote, local)) = self.send_vn.take() {
-            return Some(self.output_vn(vn_hdr, remote, local));
-        }
-
         let mut out = None;
         // Can't call a method on self while iterating over self.paths
         let paths = mem::replace(&mut self.paths, Default::default());
@@ -2190,46 +2190,4 @@ mod tests {
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
     }
 
-    struct NullCidDecoder {}
-    impl ConnectionIdDecoder for NullCidDecoder {
-        fn decode_cid(&self, _: &mut Decoder) -> Option<ConnectionId> {
-            unreachable!()
-        }
-    }
-    #[test]
-    fn test_vn() {
-        let mut server = default_server();
-
-        // Make a packet with a bad version
-        let hdr = PacketHdr::new(
-            0,
-            PacketType::Initial(vec![]),
-            Some(0xbad),
-            ConnectionId::generate(8),
-            Some(ConnectionId::generate(8)),
-            0, // pn
-            0, // epoch
-        );
-        let agent = Client::new(test_fixture::DEFAULT_SERVER_NAME)
-            .unwrap()
-            .into();
-        let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
-        let mut crypto = Crypto::new(agent, test_fixture::DEFAULT_ALPN, tphandler, None).unwrap();
-        let cs = crypto.create_initial_state(Role::Client, &hdr.dcid);
-        let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &vec![0; 16]);
-        let dgram = Datagram::new(loopback(), loopback(), packet);
-
-        // "send" it
-        let ret_dgram = server.process(Some(dgram), now());
-
-        // We should have received a VN packet.
-        assert!(ret_dgram.as_dgram_ref().is_some());
-        let ret_pkt = ret_dgram.dgram().unwrap();
-
-        let ret_hdr = decode_packet_hdr(&NullCidDecoder {}, &*ret_pkt).unwrap();
-        assert!(match &ret_hdr.tipe {
-            PacketType::VN(vns) if vns.len() == 2 => true,
-            _ => false,
-        });
-    }
 }
