@@ -1298,6 +1298,7 @@ impl Connection {
                                 ZeroRttState::Rejected
                             }
                     }
+                    self.events.borrow_mut().connected();
                 }
                 State::Closing { .. } => {
                     self.send_streams.clear();
@@ -1609,6 +1610,11 @@ impl Connection {
         self.events.borrow_mut().events().into_iter()
     }
 
+    /// Return true if there are outstanding events.
+    pub fn has_events(&self) -> bool {
+        self.events.borrow().has_events()
+    }
+
     fn check_loss_detection_timeout(&mut self, now: Instant) {
         qdebug!([self] "check_loss_timeouts");
 
@@ -1698,7 +1704,7 @@ mod tests {
         Connection::new_client(
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
-            FixedConnectionIdManager::new(8),
+            FixedConnectionIdManager::new(3),
             loopback(),
             loopback(),
         )
@@ -1710,7 +1716,7 @@ mod tests {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
-            FixedConnectionIdManager::new(8),
+            FixedConnectionIdManager::new(5),
         )
         .expect("create a default server")
     }

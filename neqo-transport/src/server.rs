@@ -19,6 +19,7 @@ use crate::QUIC_VERSION;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -69,19 +70,33 @@ pub struct Server {
     anti_replay: AntiReplay,
     /// A connection ID manager.
     cid_manager: CidMgr,
+    /// All connections, keyed by ConnectionId.
     connections: ConnectionTableRef,
+    /// The connections that have new events.
+    active: Vec<StateRef>,
+    /// The set of connections that need immediate processing.
     waiting: VecDeque<StateRef>,
+    /// Outstanding timers for connections.
     timers: Timer<StateRef>,
+    /// Whether a Retry packet will be sent in response to new
+    /// Initial packets.
     require_retry: bool,
 }
 
 impl Server {
+    /// Construct a new server.
+    /// `now` is the time that the server is instantiated.
+    /// `cid_manager` is responsible for generating connection IDs and parsing them;
+    /// connection IDs produced by the manager cannot be zero-length.
+    /// `certs` is a list of the certificates that should be configured.
+    /// `protocols` is the preference list of ALPN values.
+    /// `anti_replay` is an anti-replay context.
     pub fn new(
         now: Instant,
-        cid_manager: CidMgr,
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
+        cid_manager: CidMgr,
     ) -> Server {
         Server {
             version: QUIC_VERSION,
@@ -96,6 +111,7 @@ impl Server {
             anti_replay,
             cid_manager,
             connections: Rc::new(RefCell::new(Default::default())),
+            active: Default::default(),
             waiting: Default::default(),
             timers: Timer::new(now, TIMER_GRANULARITY, TIMER_CAPACITY),
             require_retry: false,
@@ -122,7 +138,7 @@ impl Server {
 
     fn token_is_ok(&self, token: &[u8]) -> bool {
         if token.is_empty() {
-            self.require_retry
+            !self.require_retry
         } else {
             // TODO(mt) construct better tokens
             token == &FIXED_TOKEN[..]
@@ -173,10 +189,13 @@ impl Server {
         } else {
             self.waiting.push_back(c.clone());
         }
+        if c.borrow().has_events() {
+            self.active.push(c.clone());
+        }
         out.dgram()
     }
 
-    fn get_connection(&self, cid: &ConnectionId) -> Option<StateRef> {
+    fn connection(&self, cid: &ConnectionId) -> Option<StateRef> {
         if let Some(c) = self.connections.borrow().get(cid) {
             Some(c.clone())
         } else {
@@ -224,7 +243,7 @@ impl Server {
         };
 
         // Finding an existing connection. Should be the most common case.
-        if let Some(c) = self.get_connection(&hdr.dcid) {
+        if let Some(c) = self.connection(&hdr.dcid) {
             return self.process_connection(c, Some(dgram), now);
         }
 
@@ -253,14 +272,6 @@ impl Server {
         }
     }
 
-    fn next_time(&mut self, now: Instant) -> Option<Duration> {
-        if self.waiting.is_empty() {
-            self.timers.next_time().map(|x| x - now)
-        } else {
-            Some(Duration::new(0, 0))
-        }
-    }
-
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
     fn process_next_output(&mut self, now: Instant) -> Option<Datagram> {
@@ -277,20 +288,51 @@ impl Server {
         None
     }
 
-    pub fn process(
-        &mut self,
-        dgram: Option<Datagram>,
-        now: Instant,
-    ) -> (Option<Datagram>, Option<Duration>) {
-        let out = match dgram {
-            Some(d) => self.process_input(d, now),
-            None => None,
-        };
+    fn next_time(&mut self, now: Instant) -> Option<Duration> {
+        if self.waiting.is_empty() {
+            self.timers.next_time().map(|x| x - now)
+        } else {
+            Some(Duration::new(0, 0))
+        }
+    }
 
-        (
-            out.or_else(|| self.process_next_output(now)),
-            self.next_time(now),
-        )
+    pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        let out = if let Some(d) = dgram {
+            self.process_input(d, now)
+        } else {
+            None
+        };
+        let out = out.or_else(|| self.process_next_output(now));
+        match out {
+            Some(d) => Output::Datagram(d),
+            _ => match self.next_time(now) {
+                Some(delay) => Output::Callback(delay),
+                _ => Output::None,
+            },
+        }
+    }
+
+    /// This lists the connections that have received new events
+    /// as a result of calling `process()`.
+    pub fn active_connections(&mut self) -> Vec<ActiveConnectionRef> {
+        mem::replace(&mut self.active, Default::default())
+            .into_iter()
+            .map(|c| ActiveConnectionRef { c })
+            .collect()
+    }
+}
+
+pub struct ActiveConnectionRef {
+    c: StateRef,
+}
+
+impl ActiveConnectionRef {
+    pub fn borrow<'a>(&'a self) -> impl Deref<Target = Connection> + 'a {
+        std::cell::Ref::map(self.c.borrow(), |c| &c.c)
+    }
+
+    pub fn borrow_mut<'a>(&'a mut self) -> impl DerefMut<Target = Connection> + 'a {
+        std::cell::RefMut::map(self.c.borrow_mut(), |c| &mut c.c)
     }
 }
 
@@ -308,6 +350,7 @@ impl ConnectionIdDecoder for ServerConnectionIdManager {
 impl ConnectionIdManager for ServerConnectionIdManager {
     fn generate_cid(&mut self) -> ConnectionId {
         let cid = self.cid_manager.borrow_mut().generate_cid();
+        assert!(!cid.is_empty());
         let v = self
             .connections
             .borrow_mut()

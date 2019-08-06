@@ -29,6 +29,7 @@ pub fn fixture_init() {
 pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 
 fn earlier() -> Instant {
+    fixture_init();
     static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
     *unsafe { BASE_TIME.call_once(Instant::now) }
 }
@@ -41,7 +42,6 @@ pub fn now() -> Instant {
 
 // Create a default anti-replay context.
 pub fn anti_replay() -> AntiReplay {
-    fixture_init();
     AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
 }
 

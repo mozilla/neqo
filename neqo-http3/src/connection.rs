@@ -399,6 +399,7 @@ impl Http3Connection {
         for e in events {
             qdebug!([self] "check_connection_events - event {:?}.", e);
             match e {
+                ConnectionEvent::Connected => (),
                 ConnectionEvent::NewStream {
                     stream_id,
                     stream_type,
@@ -1092,8 +1093,10 @@ mod tests {
         }
 
         let events = neqo_trans_conn.events();
+        let mut connected = false;
         for e in events {
             match e {
+                ConnectionEvent::Connected => connected = true,
                 ConnectionEvent::NewStream {
                     stream_id,
                     stream_type,
@@ -1137,6 +1140,7 @@ mod tests {
                 _ => assert!(false, "unexpected event"),
             }
         }
+        assert!(connected);
         (hconn, neqo_trans_conn)
     }
 
