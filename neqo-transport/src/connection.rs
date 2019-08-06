@@ -527,6 +527,7 @@ impl Connection {
                             path.remote_cid = hdr.scid.expect("Retry pkt must have SCID");
                         }
                     }
+                    qinfo!("received valid Retry, but we don't do anything with these yet.");
                     self.retry_token = Some(token.clone());
                     return Ok(());
                 }
