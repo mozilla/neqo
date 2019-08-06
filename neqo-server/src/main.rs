@@ -152,7 +152,7 @@ fn main() {
                 &args.key,
                 &args.alpn,
                 &anti_replay,
-                FixedConnectionIdManager::new(10),
+                FixedConnectionIdManager::make(10),
             )
             .expect("can't create connection")
         });

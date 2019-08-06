@@ -100,14 +100,8 @@ impl Server {
     ) -> Server {
         Server {
             version: QUIC_VERSION,
-            certs: certs
-                .into_iter()
-                .map(|x| String::from(x.as_ref()))
-                .collect(),
-            protocols: protocols
-                .into_iter()
-                .map(|x| String::from(x.as_ref()))
-                .collect(),
+            certs: certs.iter().map(|x| String::from(x.as_ref())).collect(),
+            protocols: protocols.iter().map(|x| String::from(x.as_ref())).collect(),
             anti_replay,
             cid_manager,
             connections: Rc::new(RefCell::new(Default::default())),

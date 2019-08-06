@@ -156,13 +156,13 @@ pub struct FixedConnectionIdManager {
     len: usize,
 }
 impl FixedConnectionIdManager {
-    pub fn new(len: usize) -> Rc<RefCell<dyn ConnectionIdManager>> {
+    pub fn make(len: usize) -> Rc<RefCell<dyn ConnectionIdManager>> {
         Rc::new(RefCell::new(FixedConnectionIdManager { len }))
     }
 }
 impl ConnectionIdDecoder for FixedConnectionIdManager {
     fn decode_cid(&self, dec: &mut Decoder) -> Option<ConnectionId> {
-        dec.decode(self.len).map(|x| ConnectionId::from(x))
+        dec.decode(self.len).map(ConnectionId::from)
     }
 }
 impl ConnectionIdManager for FixedConnectionIdManager {
@@ -520,12 +520,7 @@ impl Connection {
         self.valid_cids.contains(cid) || self.paths.iter().any(|p| p.local_cids.contains(cid))
     }
 
-    fn handle_retry(
-        &mut self,
-        scid: &ConnectionId,
-        odcid: &ConnectionId,
-        token: &Vec<u8>,
-    ) -> Res<()> {
+    fn handle_retry(&mut self, scid: &ConnectionId, odcid: &ConnectionId, token: &[u8]) -> Res<()> {
         qinfo!([self] "received Retry");
         if self.retry_token.is_some() {
             qwarn!([self] "Dropping extra Retry");
@@ -544,7 +539,7 @@ impl Connection {
                 path.remote_cid = scid.clone();
             }
         }
-        self.retry_token = Some(token.clone());
+        self.retry_token = Some(token.to_vec());
         Ok(())
     }
 
@@ -1704,7 +1699,7 @@ mod tests {
         Connection::new_client(
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
-            FixedConnectionIdManager::new(3),
+            FixedConnectionIdManager::make(3),
             loopback(),
             loopback(),
         )
@@ -1716,7 +1711,7 @@ mod tests {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
-            FixedConnectionIdManager::new(5),
+            FixedConnectionIdManager::make(5),
         )
         .expect("create a default server")
     }
@@ -1943,7 +1938,7 @@ mod tests {
         let mut client = Connection::new_client(
             "example.com",
             &["bad-alpn"],
-            FixedConnectionIdManager::new(9),
+            FixedConnectionIdManager::make(9),
             loopback(),
             loopback(),
         )
@@ -2155,7 +2150,7 @@ mod tests {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &ar,
-            FixedConnectionIdManager::new(10),
+            FixedConnectionIdManager::make(10),
         )
         .unwrap();
 

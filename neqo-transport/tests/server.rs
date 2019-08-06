@@ -17,7 +17,7 @@ fn default_server() -> Server {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         test_fixture::anti_replay(),
-        FixedConnectionIdManager::new(7),
+        FixedConnectionIdManager::make(7),
     )
 }
 

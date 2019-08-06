@@ -399,7 +399,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connecti
     let mut client = Connection::new_client(
         peer.host,
         &test.alpn(),
-        FixedConnectionIdManager::new(0),
+        FixedConnectionIdManager::make(0),
         nctx.local_addr,
         nctx.remote_addr,
     )
@@ -485,7 +485,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
     let mut client = Connection::new_client(
         peer.host,
         &["hq-20"],
-        FixedConnectionIdManager::new(0),
+        FixedConnectionIdManager::make(0),
         nctx.local_addr,
         nctx.remote_addr,
     )

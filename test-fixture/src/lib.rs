@@ -62,7 +62,7 @@ pub fn default_client() -> Connection {
     Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
-        FixedConnectionIdManager::new(3),
+        FixedConnectionIdManager::make(3),
         loopback(),
         loopback(),
     )
@@ -76,7 +76,7 @@ pub fn default_server() -> Connection {
         DEFAULT_KEYS,
         DEFAULT_ALPN,
         &anti_replay(),
-        FixedConnectionIdManager::new(5),
+        FixedConnectionIdManager::make(5),
     )
     .expect("create a default server")
 }

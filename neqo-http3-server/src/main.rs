@@ -223,7 +223,7 @@ fn main() -> Result<(), io::Error> {
                             &[args.key.clone()],
                             &[args.alpn.clone()],
                             &anti_replay,
-                            FixedConnectionIdManager::new(10),
+                            FixedConnectionIdManager::make(10),
                         )
                         .expect("must succeed"),
                         args.max_table_size,

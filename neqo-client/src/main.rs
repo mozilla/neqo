@@ -242,7 +242,7 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         Connection::new_client(
             args.url.host_str().as_ref().unwrap(),
             &args.alpn,
-            FixedConnectionIdManager::new(0),
+            FixedConnectionIdManager::make(0),
             local_addr,
             remote_addr,
         )
@@ -442,7 +442,7 @@ mod old {
         let mut client = Connection::new_client(
             args.url.host_str().unwrap(),
             &["http/0.9"],
-            FixedConnectionIdManager::new(0),
+            FixedConnectionIdManager::make(0),
             local_addr,
             remote_addr,
         )
