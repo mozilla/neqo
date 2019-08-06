@@ -8,7 +8,7 @@
 
 #![allow(dead_code)]
 use std::cell::RefCell;
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::mem;
@@ -84,6 +84,28 @@ pub enum State {
         timeout: Instant,
     },
     Closed(ConnectionError),
+}
+
+// Implement Ord so that we can enforce monotonic state progression.
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if std::mem::discriminant(self) == std::mem::discriminant(other) {
+            return Some(Ordering::Equal);
+        }
+        Some(match (self, other) {
+            (State::Init, _) => Ordering::Less,
+            (_, State::Init) => Ordering::Greater,
+            (State::WaitInitial, _) => Ordering::Less,
+            (_, State::WaitInitial) => Ordering::Greater,
+            (State::Handshaking, _) => Ordering::Less,
+            (_, State::Handshaking) => Ordering::Greater,
+            (State::Connected, _) => Ordering::Less,
+            (_, State::Connected) => Ordering::Greater,
+            (State::Closing { .. }, _) => Ordering::Less,
+            (_, State::Closing { .. }) => Ordering::Greater,
+            (State::Closed(_), _) => unreachable!(),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -439,12 +461,16 @@ impl Connection {
             let msg = format!("{:?}", v);
             #[cfg(not(debug_assertions))]
             let msg = String::from("");
-            self.set_state(State::Closing {
-                error: ConnectionError::Transport(v.clone()),
-                frame_type,
-                msg,
-                timeout: self.get_closing_period_time(now),
-            });
+            if let State::Closed(err) | State::Closing { error: err, .. } = &self.state {
+                qwarn!([self] "Closing again after error {:?}", err);
+            } else {
+                self.set_state(State::Closing {
+                    error: ConnectionError::Transport(v.clone()),
+                    frame_type,
+                    msg,
+                    timeout: self.get_closing_period_time(now),
+                });
+            }
         }
         res
     }
@@ -526,6 +552,7 @@ impl Connection {
         if let Some(d) = dgram {
             self.process_input(d, now);
         }
+        self.process_timer(now);
         self.process_output(now)
     }
 
@@ -765,32 +792,6 @@ impl Connection {
         }
 
         Ok(ack_eliciting)
-    }
-
-    fn output_vn(
-        &mut self,
-        recvd_hdr: PacketHdr,
-        remote: SocketAddr,
-        local: SocketAddr,
-    ) -> Datagram {
-        qinfo!("Sending VN Packet instead of normal output");
-        let hdr = PacketHdr::new(
-            0,
-            // Actual version we support and a greased value.
-            PacketType::VN(vec![QUIC_VERSION, 0x4a4a_4a4a]),
-            Some(0),
-            recvd_hdr.scid.unwrap().clone(),
-            Some(recvd_hdr.dcid.clone()),
-            0, // unused
-            0, // unused
-        );
-
-        // Do not save any state when generating VN pkt, so cs is not
-        // retained.
-        let cs = self.crypto.create_initial_state(self.role, &recvd_hdr.dcid);
-        let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &[]);
-        self.stats.packets_tx += 1;
-        Datagram::new(local, remote, packet)
     }
 
     fn output(&mut self, now: Instant) -> Option<Datagram> {
@@ -1338,7 +1339,7 @@ impl Connection {
     }
 
     fn set_state(&mut self, state: State) {
-        if state != self.state {
+        if state > self.state {
             qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
             self.state = state;
             match &self.state {
@@ -1370,6 +1371,8 @@ impl Connection {
                 }
                 _ => {}
             }
+        } else {
+            assert_eq!(state, self.state);
         }
     }
 

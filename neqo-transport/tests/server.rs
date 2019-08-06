@@ -7,7 +7,10 @@
 #![deny(warnings)]
 
 use neqo_common::{Datagram, Decoder};
-use neqo_transport::{server::Server, Connection, FixedConnectionIdManager, State, QUIC_VERSION};
+use neqo_transport::{
+    server::Server, Connection, ConnectionError, Error, FixedConnectionIdManager, Output, State,
+    QUIC_VERSION,
+};
 use test_fixture::{self, default_client, now};
 
 // Different than the one in the fixture, which is a single connection.
@@ -117,6 +120,15 @@ fn version_negotiation() {
         found |= v == u64::from(QUIC_VERSION);
     }
     assert!(found, "valid version not found");
+
+    let res = client.process(Some(vn), now());
+    assert_eq!(res, Output::None);
+    match client.state() {
+        State::Closed(err) => {
+            assert_eq!(*err, ConnectionError::Transport(Error::VersionNegotiation))
+        }
+        _ => panic!("Invalid client state"),
+    }
 }
 
 #[test]
