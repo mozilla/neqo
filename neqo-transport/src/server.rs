@@ -91,13 +91,11 @@ impl RetryToken {
                 } else {
                     RetryTokenResult::Pass
                 }
+            } else if token[0..FIXED_TOKEN.len()] == FIXED_TOKEN[..] {
+                let cid = ConnectionId::from(&token[FIXED_TOKEN.len()..]);
+                RetryTokenResult::Valid(cid)
             } else {
-                if &token[0..FIXED_TOKEN.len()] == &FIXED_TOKEN[..] {
-                    let cid = ConnectionId::from(&token[FIXED_TOKEN.len()..]);
-                    RetryTokenResult::Valid(cid)
-                } else {
-                    RetryTokenResult::Invalid
-                }
+                RetryTokenResult::Invalid
             }
         } else {
             RetryTokenResult::Invalid

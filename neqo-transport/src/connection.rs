@@ -1018,7 +1018,7 @@ impl Connection {
             let tph = self.tps.borrow();
             let tp = tph.remote().get_bytes(tp_const::ORIGINAL_CONNECTION_ID);
             if let Some(odcid_tp) = tp {
-                if &odcid_tp[..] == &info.odcid[..] {
+                if odcid_tp[..] == info.odcid[..] {
                     Ok(())
                 } else {
                     Err(Error::InvalidRetry)
