@@ -9,6 +9,7 @@
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::{hash_map::IterMut, BTreeMap, HashMap};
+use std::convert::TryInto;
 use std::mem;
 use std::rc::Rc;
 
@@ -352,7 +353,7 @@ impl TxBuffer {
         TX_STREAM_BUFFER - self.buffered()
     }
 
-    fn highest_sent(&self) -> u64 {
+    pub fn highest_sent(&self) -> u64 {
         self.ranges.highest_offset()
     }
 }
@@ -537,15 +538,22 @@ impl SendStream {
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_lost(offset, len)
-        };
+        }
 
         if fin {
             if let SendStreamState::DataSent {
                 ref mut fin_sent, ..
             } = self.state
             {
-                *fin_sent = false
+                *fin_sent = false;
             }
+        }
+    }
+
+    pub fn retry(&mut self) {
+        if let Some(buf) = self.state.tx_buf_mut() {
+            let sent = buf.highest_sent();
+            self.mark_as_lost(0, sent.try_into().unwrap(), true);
         }
     }
 
@@ -730,6 +738,12 @@ impl SendStreams {
 
     pub fn clear_terminal(&mut self) {
         self.0.retain(|_, stream| !stream.is_terminal())
+    }
+
+    pub(crate) fn retry(&mut self) {
+        for (_, stream) in self {
+            stream.retry();
+        }
     }
 
     pub(crate) fn get_frame(

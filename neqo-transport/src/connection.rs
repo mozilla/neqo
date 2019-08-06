@@ -174,6 +174,11 @@ impl ConnectionIdManager for FixedConnectionIdManager {
     }
 }
 
+struct RetryInfo {
+    token: Vec<u8>,
+    odcid: ConnectionId,
+}
+
 pub struct Connection {
     version: crate::packet::Version,
     role: Role,
@@ -189,7 +194,7 @@ pub struct Connection {
     /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     valid_cids: Vec<ConnectionId>,
-    retry_token: Option<Vec<u8>>,
+    retry_info: Option<RetryInfo>,
     pub(crate) crypto: Crypto,
     pub(crate) acks: AckTracker,
     idle_timeout: Option<Instant>, // TODO(#38)
@@ -274,6 +279,14 @@ impl Connection {
         tps.set_empty(tp_const::DISABLE_MIGRATION);
     }
 
+    pub(crate) fn original_connection_id(&mut self, odcid: &ConnectionId) {
+        assert_eq!(self.role, Role::Server);
+        self.tps
+            .borrow_mut()
+            .local
+            .set_bytes(tp_const::ORIGINAL_CONNECTION_ID, odcid.to_vec());
+    }
+
     fn new(
         r: Role,
         agent: Agent,
@@ -299,7 +312,7 @@ impl Connection {
             valid_cids: Vec::new(),
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
-            retry_token: None,
+            retry_info: None,
             crypto,
             acks: AckTracker::default(),
             idle_timeout: None,
@@ -520,30 +533,62 @@ impl Connection {
         self.valid_cids.contains(cid) || self.paths.iter().any(|p| p.local_cids.contains(cid))
     }
 
+    fn is_valid_initial(&self, hdr: &PacketHdr) -> bool {
+        if let PacketType::Initial(token) = &hdr.tipe {
+            // Server checks the token, so if we have one,
+            // assume that the DCID is OK.
+            if hdr.dcid.len() < 8 {
+                if token.is_empty() {
+                    qinfo!([self] "Drop Initial with short DCID");
+                    false
+                } else {
+                    qinfo!([self] "Initial received with token, assuming OK");
+                    true
+                }
+            } else {
+                // This is the normal path. Don't log.
+                true
+            }
+        } else {
+            qdebug!([self] "Dropping non-Initial packet");
+            false
+        }
+    }
+
     fn handle_retry(&mut self, scid: &ConnectionId, odcid: &ConnectionId, token: &[u8]) -> Res<()> {
-        qinfo!([self] "received Retry");
-        if self.retry_token.is_some() {
-            qwarn!([self] "Dropping extra Retry");
+        qdebug!([self] "received Retry");
+        if self.retry_info.is_some() {
+            qinfo!([self] "Dropping extra Retry");
             return Ok(());
         }
         if token.is_empty() {
-            qwarn!([self] "Dropping Retry without a token");
+            qinfo!([self] "Dropping Retry without a token");
             return Ok(());
         }
         match self.paths.iter_mut().find(|p| p.remote_cid == *odcid) {
             None => {
-                qwarn!([self] "Ignoring Retry with mismatched ODCID");
+                qinfo!([self] "Ignoring Retry with mismatched ODCID");
                 return Ok(());
             }
             Some(path) => {
                 path.remote_cid = scid.clone();
             }
         }
-        self.retry_token = Some(token.to_vec());
+        qinfo!([self] "Valid Retry received, restarting with provided token");
+        self.retry_info = Some(RetryInfo {
+            token: token.to_vec(),
+            odcid: odcid.clone(),
+        });
+        // Reset the crypto streams and any 0-RTT.
+        self.crypto.retry();
+        self.send_streams.retry();
+
+        // Switching crypto state here might not happen eventually.
+        // https://github.com/quicwg/base-drafts/issues/2823
+        self.crypto.states[0] = Some(self.crypto.create_initial_state(self.role, scid));
         Ok(())
     }
 
-    #[allow(clippy::cognitive_complexity)]
     fn input(&mut self, d: Datagram, now: Instant) -> Res<()> {
         let mut slc = &d[..];
 
@@ -596,8 +641,7 @@ impl Connection {
                 State::WaitInitial => {
                     qinfo!([self] "Received packet in WaitInitial");
                     if self.role == Role::Server {
-                        if hdr.dcid.len() < 8 {
-                            qwarn!([self] "Peer DCID is too short");
+                        if !self.is_valid_initial(&hdr) {
                             return Ok(());
                         }
                         self.crypto.states[0] =
@@ -870,8 +914,8 @@ impl Connection {
                 0,
                 match epoch {
                     0 => {
-                        let token = match &self.retry_token {
-                            Some(v) => v.clone(),
+                        let token = match &self.retry_info {
+                            Some(v) => v.token.clone(),
                             _ => Vec::new(),
                         };
                         PacketType::Initial(token)
@@ -968,6 +1012,24 @@ impl Connection {
         mem::replace(&mut self.tps, swapped);
     }
 
+    fn validate_odcid(&self) -> Res<()> {
+        if let Some(info) = &self.retry_info {
+            let tph = self.tps.borrow();
+            let tp = tph.remote().get_bytes(tp_const::ORIGINAL_CONNECTION_ID);
+            if let Some(odcid_tp) = tp {
+                if &odcid_tp[..] == &info.odcid[..] {
+                    Ok(())
+                } else {
+                    Err(Error::InvalidRetry)
+                }
+            } else {
+                Err(Error::InvalidRetry)
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     fn handshake(&mut self, now: Instant, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         qdebug!("Handshake epoch={} data={:0x?}", epoch, data);
         let mut rec: Option<Record> = None;
@@ -1014,6 +1076,7 @@ impl Connection {
                 return Err(Error::CryptoAlert(120));
             }
 
+            self.validate_odcid()?;
             self.set_state(State::Connected);
             self.set_initial_limits();
         }

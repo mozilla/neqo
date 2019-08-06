@@ -53,7 +53,7 @@ fn single_client() {
 #[test]
 fn retry() {
     let mut server = default_server();
-    server.enable_retry(true);
+    server.require_retry(true);
     let mut client = default_client();
 
     let dgram = client.process(None, now()).dgram(); // Initial
@@ -71,6 +71,21 @@ fn retry() {
     let dgram = server.process(dgram, now()).dgram(); // (done)
     assert!(dgram.is_some());
     assert_server_connected(&mut server);
+}
+
+#[test]
+fn retry_0rtt() {
+    // TODO(mt) - attempt a retry with 0-RTT, and have 0-RTT work after the retry
+}
+
+#[test]
+fn retry_bad_token() {
+    // TODO(mt) - attempt a retry but get a bad token
+}
+
+#[test]
+fn retry_bad_odcid() {
+    // TODO(mt) - retry works, but the ODCID transport parameter is wrong
 }
 
 #[test]
@@ -102,4 +117,9 @@ fn version_negotiation() {
         found |= v == u64::from(QUIC_VERSION);
     }
     assert!(found, "valid version not found");
+}
+
+#[test]
+fn closed() {
+    // TODO(mt) fully close a server connection and it should be dropped
 }

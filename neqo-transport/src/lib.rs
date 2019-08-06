@@ -68,6 +68,7 @@ pub enum Error {
     WrongRole,
     InvalidInput,
     PeerError(TransportError),
+    InvalidRetry,
 }
 
 impl Error {
@@ -103,7 +104,8 @@ impl Error {
             | Error::VersionNegotiation
             | Error::WrongRole
             | Error::InvalidResumptionToken
-            | Error::InvalidInput => 1,
+            | Error::InvalidInput
+            | Error::InvalidRetry => 1,
         }
     }
 }

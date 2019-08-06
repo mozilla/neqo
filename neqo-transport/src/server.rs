@@ -60,6 +60,51 @@ impl DerefMut for ServerConnectionState {
     }
 }
 
+enum RetryTokenResult {
+    Pass,
+    Valid(ConnectionId),
+    Validate,
+    Invalid,
+}
+
+// TODO(mt) self-encrypt these
+#[derive(Default)]
+struct RetryToken {
+    require_retry: bool,
+}
+impl RetryToken {
+    pub fn generate_token(&mut self, dcid: &ConnectionId) -> Vec<u8> {
+        let mut token = Vec::from(FIXED_TOKEN);
+        token.extend_from_slice(dcid);
+        token
+    }
+
+    pub fn require_retry(&mut self, retry: bool) {
+        self.require_retry = retry;
+    }
+
+    pub fn validate(&self, hdr: &PacketHdr) -> RetryTokenResult {
+        if let PacketType::Initial(token) = &hdr.tipe {
+            if token.is_empty() {
+                if self.require_retry {
+                    RetryTokenResult::Validate
+                } else {
+                    RetryTokenResult::Pass
+                }
+            } else {
+                if &token[0..FIXED_TOKEN.len()] == &FIXED_TOKEN[..] {
+                    let cid = ConnectionId::from(&token[FIXED_TOKEN.len()..]);
+                    RetryTokenResult::Valid(cid)
+                } else {
+                    RetryTokenResult::Invalid
+                }
+            }
+        } else {
+            RetryTokenResult::Invalid
+        }
+    }
+}
+
 pub struct Server {
     /// The version this server supports (currently just one).
     version: Version,
@@ -80,7 +125,7 @@ pub struct Server {
     timers: Timer<StateRef>,
     /// Whether a Retry packet will be sent in response to new
     /// Initial packets.
-    require_retry: bool,
+    retry: RetryToken,
 }
 
 impl Server {
@@ -108,7 +153,7 @@ impl Server {
             active: Default::default(),
             waiting: Default::default(),
             timers: Timer::new(now, TIMER_GRANULARITY, TIMER_CAPACITY),
-            require_retry: false,
+            retry: Default::default(),
         }
     }
 
@@ -126,50 +171,8 @@ impl Server {
         Datagram::new(received.destination(), received.source(), vn)
     }
 
-    pub fn enable_retry(&mut self, require_retry: bool) {
-        self.require_retry = require_retry;
-    }
-
-    fn token_is_ok(&self, token: &[u8]) -> bool {
-        if token.is_empty() {
-            !self.require_retry
-        } else {
-            // TODO(mt) construct better tokens
-            token == &FIXED_TOKEN[..]
-        }
-    }
-
-    fn generate_token(&self) -> Vec<u8> {
-        // TODO(mt) construct better tokens
-        Vec::from(FIXED_TOKEN)
-    }
-
-    fn check_initial(&self, hdr: &PacketHdr) -> InitialResult {
-        if let PacketType::Initial(token) = &hdr.tipe {
-            if self.token_is_ok(token) {
-                return InitialResult::Accept;
-            }
-            if !token.is_empty() {
-                // This is a bad Initial, so ignore it.
-                return InitialResult::Drop;
-            }
-        } else {
-            return InitialResult::Drop;
-        }
-
-        qinfo!([self] "Send retry for {:?}", hdr.dcid);
-        InitialResult::Retry(encode_retry(&PacketHdr::new(
-            0, // tbyte (unused on encode)
-            PacketType::Retry {
-                odcid: hdr.dcid.clone(),
-                token: self.generate_token(),
-            },
-            Some(self.version),
-            hdr.scid.as_ref().unwrap().clone(),
-            Some(self.cid_manager.borrow_mut().generate_cid()),
-            0, // Packet number
-            0, // Epoch
-        )))
+    pub fn require_retry(&mut self, require_retry: bool) {
+        self.retry.require_retry(require_retry);
     }
 
     fn process_connection(
@@ -180,14 +183,17 @@ impl Server {
     ) -> Option<Datagram> {
         qtrace!([self] "Process connection {:?}", c);
         let out = c.borrow_mut().process(dgram, now);
-        if let Output::Callback(delay) = out {
-            self.timers.add(now + delay, c.clone());
-        } else {
-            self.waiting.push_back(c.clone());
+        match out {
+            Output::Datagram(_) => self.waiting.push_back(c.clone()),
+            Output::Callback(delay) => self.timers.add(now + delay, c.clone()),
+            _ => (),
         }
         if c.borrow().has_events() {
             self.active.push(c.clone());
         }
+        // if *c.borrow().state() == State::Closed {
+        //     self.connections.retain(|| true); // TODO(mt)
+        // }
         out.dgram()
     }
 
@@ -199,7 +205,43 @@ impl Server {
         }
     }
 
-    fn accept_connection(&mut self, dgram: Datagram, now: Instant) -> Option<Datagram> {
+    fn handle_initial(
+        &mut self,
+        hdr: PacketHdr,
+        dgram: Datagram,
+        now: Instant,
+    ) -> Option<Datagram> {
+        match self.retry.validate(&hdr) {
+            RetryTokenResult::Invalid => None,
+            RetryTokenResult::Pass => self.accept_connection(None, dgram, now),
+            RetryTokenResult::Valid(dcid) => self.accept_connection(Some(dcid), dgram, now),
+            RetryTokenResult::Validate => {
+                qinfo!([self] "Send retry for {:?}", hdr.dcid);
+                let token = self.retry.generate_token(&hdr.dcid);
+                let payload = encode_retry(&PacketHdr::new(
+                    0, // tbyte (unused on encode)
+                    PacketType::Retry {
+                        odcid: hdr.dcid.clone(),
+                        token,
+                    },
+                    Some(self.version),
+                    hdr.scid.as_ref().unwrap().clone(),
+                    Some(self.cid_manager.borrow_mut().generate_cid()),
+                    0, // Packet number
+                    0, // Epoch
+                ));
+                let retry = Datagram::new(dgram.destination(), dgram.source(), payload);
+                Some(retry)
+            }
+        }
+    }
+
+    fn accept_connection(
+        &mut self,
+        odcid: Option<ConnectionId>,
+        dgram: Datagram,
+        now: Instant,
+    ) -> Option<Datagram> {
         qinfo!([self] "Accept connection");
         // The internal connection ID manager that we use is not used directly.
         // Instead, wrap it so that we can save connection IDs.
@@ -214,7 +256,10 @@ impl Server {
             &self.anti_replay,
             cid_mgr.clone(),
         );
-        if let Ok(c) = sconn {
+        if let Ok(mut c) = sconn {
+            if let Some(odcid) = odcid {
+                c.original_connection_id(&odcid);
+            }
             let c = Rc::new(RefCell::new(ServerConnectionState { c }));
             cid_mgr.borrow_mut().c = Some(c.clone());
             self.process_connection(c, Some(dgram), now)
@@ -258,25 +303,19 @@ impl Server {
             return Some(self.create_vn(&hdr, dgram));
         }
 
-        match self.check_initial(&hdr) {
-            InitialResult::Accept => self.accept_connection(dgram, now),
-            InitialResult::Retry(payload) => {
-                let retry = Datagram::new(dgram.destination(), dgram.source(), payload);
-                Some(retry)
-            }
-            InitialResult::Drop => None,
-        }
+        self.handle_initial(hdr, dgram, now)
     }
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
     fn process_next_output(&mut self, now: Instant) -> Option<Datagram> {
-        qtrace!([self] "No packet from primary connection, look at others");
+        qtrace!([self] "No packet to send, look at waiting connections");
         while let Some(c) = self.waiting.pop_front() {
             if let Some(d) = self.process_connection(c, None, now) {
                 return Some(d);
             }
         }
+        qtrace!([self] "No packet to send still, run timers");
         while let Some(c) = self.timers.take_next(now) {
             if let Some(d) = self.process_connection(c, None, now) {
                 return Some(d);
