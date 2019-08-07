@@ -106,12 +106,14 @@ fn retry_0rtt() {
 
     let dgram = client.process(None, now()).dgram(); // Initial w/0-RTT
     assert!(dgram.is_some());
+    assertions::assert_coalesced_0rtt(dgram.as_ref().unwrap());
     let dgram = server.process(dgram, now()).dgram(); // Retry
     assert!(dgram.is_some());
+    assertions::assert_retry(dgram.as_ref().unwrap());
 
-    let dgram = client.process(dgram, now()).dgram(); // Initial
+    // After retry, there should be a token and still coalesced 0-RTT.
+    let dgram = client.process(dgram, now()).dgram();
     assert!(dgram.is_some());
-
     assertions::assert_coalesced_0rtt(dgram.as_ref().unwrap());
 
     let dgram = server.process(dgram, now()).dgram(); // Initial, HS
