@@ -830,7 +830,7 @@ impl Connection {
     /// spaces) and each containing 1+ frames.
     fn output_path(&mut self, path: &Path, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
-        let mut initial_only = false;
+        let mut needs_padding = false;
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -910,7 +910,8 @@ impl Connection {
             }
 
             qdebug!([self] "Need to send a packet");
-            initial_only = epoch == 0;
+            // Packets without Handshake or 1-RTT need to be padded.
+            needs_padding = epoch <= 1;
             let hdr = PacketHdr::new(
                 0,
                 match epoch {
@@ -955,7 +956,7 @@ impl Connection {
         }
 
         // Pad Initial packets sent by the client to 1200 bytes.
-        if self.role == Role::Client && initial_only {
+        if self.role == Role::Client && needs_padding {
             qdebug!([self] "pad Initial to 1200");
             out_bytes.resize(1200, 0);
         }
@@ -1751,8 +1752,7 @@ impl ::std::fmt::Display for Connection {
 mod tests {
     use super::*;
     use crate::frame::StreamType;
-    use std::convert::TryFrom;
-    use test_fixture::{self, fixture_init, loopback, now};
+    use test_fixture::{self, assertions, fixture_init, loopback, now};
 
     // This is fabulous: because test_fixture uses the public API for Connection,
     // it gets a different type to the ones that are referenced via super::*.
@@ -2137,22 +2137,6 @@ mod tests {
         assert_eq!(client_stream_id, server_stream_id);
     }
 
-    // Do a simple decode of the datagram to verify that it is coalesced.
-    fn assert_coalesced_0rtt(payload: &[u8]) {
-        let mut dec = Decoder::from(payload);
-        let initial_type = dec.decode_byte().unwrap(); // Initial
-        assert_eq!(initial_type & 0b11110000, 0b11000000);
-        let version = dec.decode_uint(4).unwrap();
-        assert_eq!(version, QUIC_VERSION.into());
-        dec.skip_vec(1); // DCID
-        dec.skip_vec(1); // SCID
-        dec.skip_vvec();
-        let initial_len = dec.decode_varint().unwrap();
-        dec.skip(usize::try_from(initial_len).unwrap());
-        let zrtt_type = dec.decode_byte().unwrap();
-        assert_eq!(zrtt_type & 0b11110000, 0b11010000);
-    }
-
     #[test]
     fn zero_rtt_send_coalesce() {
         let mut client = default_client();
@@ -2175,7 +2159,7 @@ mod tests {
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
 
-        assert_coalesced_0rtt(&client_0rtt.as_dgram_ref().unwrap()[..]);
+        assertions::assert_coalesced_0rtt(&client_0rtt.as_dgram_ref().unwrap()[..]);
 
         let server_hs = server.process(client_0rtt.dgram(), now());
         assert!(server_hs.as_dgram_ref().is_some()); // Should produce ServerHello etc...

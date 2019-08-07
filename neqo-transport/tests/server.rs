@@ -8,10 +8,10 @@
 
 use neqo_common::{Datagram, Decoder};
 use neqo_transport::{
-    server::Server, Connection, ConnectionError, Error, FixedConnectionIdManager, Output, State,
-    QUIC_VERSION,
+    server::ActiveConnectionRef, server::Server, Connection, ConnectionError, Error,
+    FixedConnectionIdManager, Output, State, StreamType, QUIC_VERSION,
 };
-use test_fixture::{self, default_client, now};
+use test_fixture::{self, assertions, default_client, now};
 
 // Different than the one in the fixture, which is a single connection.
 fn default_server() -> Server {
@@ -24,15 +24,15 @@ fn default_server() -> Server {
     )
 }
 
-fn assert_server_connected(server: &mut Server) {
+fn connected_server(server: &mut Server) -> ActiveConnectionRef {
     let server_connections = server.active_connections();
     assert_eq!(server_connections.len(), 1);
-    for s in server_connections {
-        assert_eq!(*s.borrow().state(), State::Connected);
-    }
+    assert_eq!(*server_connections[0].borrow().state(), State::Connected);
+    server_connections[0].clone()
 }
 
-fn connect(client: &mut Connection, server: &mut Server) {
+fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef {
+    server.require_retry(false);
     let dgram = client.process(None, now()).dgram(); // ClientHello
     assert!(dgram.is_some());
     let dgram = server.process(dgram, now()).dgram(); // ServerHello...
@@ -41,8 +41,8 @@ fn connect(client: &mut Connection, server: &mut Server) {
     assert!(dgram.is_some());
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram, now()).dgram();
-    assert!(dgram.is_some());
-    assert_server_connected(server);
+    assert!(dgram.is_some()); // ACK + NST
+    connected_server(server)
 }
 
 #[test]
@@ -64,6 +64,8 @@ fn retry() {
     let dgram = server.process(dgram, now()).dgram(); // Retry
     assert!(dgram.is_some());
 
+    assertions::assert_retry(&dgram.as_ref().unwrap());
+
     let dgram = client.process(dgram, now()).dgram(); // Initial w/token
     assert!(dgram.is_some());
     let dgram = server.process(dgram, now()).dgram(); // Initial, HS
@@ -72,13 +74,54 @@ fn retry() {
     assert!(dgram.is_some());
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram, now()).dgram(); // (done)
-    assert!(dgram.is_some());
-    assert_server_connected(&mut server);
+    assert!(dgram.is_some()); // Note that this packet will be dropped...
+    connected_server(&mut server);
 }
 
+// attempt a retry with 0-RTT, and have 0-RTT packets sent with the second ClientHello
 #[test]
 fn retry_0rtt() {
-    // TODO(mt) - attempt a retry with 0-RTT, and have 0-RTT work after the retry
+    let mut server = default_server();
+    let mut client = default_client();
+
+    let mut server_conn = connect(&mut client, &mut server);
+    server_conn
+        .borrow_mut()
+        .send_ticket(now(), &[])
+        .expect("ticket should go out");
+    let dgram = server.process(None, now()).dgram();
+    client.process_input(dgram.unwrap(), now()); // Consume ticket, ignore output.
+    let token = client.resumption_token().expect("should get token");
+    // Calling active_connections clears the set of active connections.
+    assert_eq!(server.active_connections().len(), 1);
+
+    server.require_retry(true);
+    let mut client = default_client();
+    client
+        .set_resumption_token(now(), &token)
+        .expect("should set token");
+
+    let client_stream = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(client_stream, &vec![1, 2, 3]).unwrap();
+
+    let dgram = client.process(None, now()).dgram(); // Initial w/0-RTT
+    assert!(dgram.is_some());
+    let dgram = server.process(dgram, now()).dgram(); // Retry
+    assert!(dgram.is_some());
+
+    let dgram = client.process(dgram, now()).dgram(); // Initial
+    assert!(dgram.is_some());
+
+    assertions::assert_coalesced_0rtt(dgram.as_ref().unwrap());
+
+    let dgram = server.process(dgram, now()).dgram(); // Initial, HS
+    assert!(dgram.is_some());
+    let dgram = client.process(dgram, now()).dgram(); // HS (done)
+    assert!(dgram.is_some());
+    assert_eq!(*client.state(), State::Connected);
+    let dgram = server.process(dgram, now()).dgram(); // (done)
+    assert!(dgram.is_some());
+    connected_server(&mut server);
 }
 
 #[test]

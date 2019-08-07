@@ -18,7 +18,7 @@ use crate::packet::{
 use crate::QUIC_VERSION;
 
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
@@ -67,11 +67,12 @@ enum RetryTokenResult {
     Invalid,
 }
 
-// TODO(mt) self-encrypt these
+// TODO(mt) self-encrypt tokens
 #[derive(Default)]
 struct RetryToken {
     require_retry: bool,
 }
+
 impl RetryToken {
     pub fn generate_token(&mut self, dcid: &ConnectionId) -> Vec<u8> {
         let mut token = Vec::from(FIXED_TOKEN);
@@ -116,7 +117,7 @@ pub struct Server {
     /// All connections, keyed by ConnectionId.
     connections: ConnectionTableRef,
     /// The connections that have new events.
-    active: Vec<StateRef>,
+    active: HashSet<ActiveConnectionRef>,
     /// The set of connections that need immediate processing.
     waiting: VecDeque<StateRef>,
     /// Outstanding timers for connections.
@@ -187,10 +188,11 @@ impl Server {
             _ => (),
         }
         if c.borrow().has_events() {
-            self.active.push(c.clone());
+            qtrace!([self] "Connection active: {:?}", c);
+            self.active.insert(ActiveConnectionRef { c: c.clone() });
         }
         // if *c.borrow().state() == State::Closed {
-        //     self.connections.retain(|| true); // TODO(mt)
+        //     self.connections.retain(|| ); // TODO(mt)
         // }
         out.dgram()
     }
@@ -360,11 +362,11 @@ impl Server {
     pub fn active_connections(&mut self) -> Vec<ActiveConnectionRef> {
         mem::replace(&mut self.active, Default::default())
             .into_iter()
-            .map(|c| ActiveConnectionRef { c })
             .collect()
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct ActiveConnectionRef {
     c: StateRef,
 }
@@ -378,6 +380,20 @@ impl ActiveConnectionRef {
         std::cell::RefMut::map(self.c.borrow_mut(), |c| &mut c.c)
     }
 }
+
+impl std::hash::Hash for ActiveConnectionRef {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let ptr: *const _ = self.c.as_ref();
+        ptr.hash(state)
+    }
+}
+
+impl PartialEq for ActiveConnectionRef {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.c, &other.c)
+    }
+}
+impl Eq for ActiveConnectionRef {}
 
 struct ServerConnectionIdManager {
     c: Option<StateRef>,

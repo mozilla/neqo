@@ -14,6 +14,8 @@ use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
+pub mod assertions;
+
 /// The path for the database used in tests.
 pub const NSS_DB_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/db");
 
