@@ -245,12 +245,9 @@ mod tests {
     #[test]
     fn test_decoder() {
         for e in TEST_CASES {
-            match Huffman::default().decode(e.res) {
-                Err(_) => assert!(false),
-                Ok(out) => {
-                    assert_eq!(out[..], *e.val);
-                }
-            }
+            let res = Huffman::default().decode(e.res);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap()[..], *e.val);
         }
     }
 }

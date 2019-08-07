@@ -110,7 +110,7 @@ fn zero_rtt_setup(
         server
             .enable_0rtt(
                 &anti_replay,
-                0xffffffff,
+                0xffff_ffff,
                 Box::new(PermissiveZeroRttChecker { resuming: false }),
             )
             .expect("should enable 0-RTT on server");

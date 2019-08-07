@@ -122,7 +122,7 @@ mod tests {
                 assert_eq!(code, -5998);
                 assert_eq!(desc, "The operation would have blocked");
             }
-            _ => assert!(false),
+            _ => panic!("bad error type"),
         }
     }
 
