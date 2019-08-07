@@ -1048,10 +1048,8 @@ mod tests {
             .is_ok());
 
         // send a header block
-        let buf = encoder.encode_header_block(
-            &[(String::from("content-length"), String::from("1234"))],
-            1,
-        );
+        let buf = encoder
+            .encode_header_block(&[(String::from("content-length"), String::from("1234"))], 1);
         assert_eq!(&buf[..], &[0x02, 0x00, 0x80]);
         test_sent_instructions(
             &mut encoder,

@@ -1815,17 +1815,13 @@ mod tests {
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
         client.stream_send(client_stream_id, &[6; 100]).unwrap();
         client.stream_send(client_stream_id, &[7; 40]).unwrap();
-        client
-            .stream_send(client_stream_id, &[8; 4000])
-            .unwrap();
+        client.stream_send(client_stream_id, &[8; 4000]).unwrap();
 
         // Send to another stream but some data after fin has been set
         let client_stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
         client.stream_send(client_stream_id2, &[6; 60]).unwrap();
         client.stream_close_send(client_stream_id2).unwrap();
-        client
-            .stream_send(client_stream_id2, &[7; 50])
-            .unwrap_err();
+        client.stream_send(client_stream_id2, &[7; 50]).unwrap_err();
         // Sending this much takes a few datagrams.
         let mut datagrams = vec![];
         let mut out = client.process(out.dgram(), now());
@@ -2011,9 +2007,7 @@ mod tests {
 
         // Now send a 0-RTT packet.
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-        client
-            .stream_send(client_stream_id, &[1, 2, 3])
-            .unwrap();
+        client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
 
@@ -2064,9 +2058,7 @@ mod tests {
         // Write 0-RTT before generating any packets.
         // This should result in a datagram that coalesces Initial and 0-RTT.
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-        client
-            .stream_send(client_stream_id, &[1, 2, 3])
-            .unwrap();
+        client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
 

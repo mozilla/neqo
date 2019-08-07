@@ -875,20 +875,20 @@ mod tests {
         println!("Encoded ACK={}", hex(&enc[..]));
 
         let f = decode_frame(&mut enc.as_decoder()).unwrap();
-        if let
-            Frame::Ack {
-                largest_acknowledged,
-                ack_delay,
-                first_ack_range,
-                ack_ranges,
-            } =f {
-                assert_eq!(largest_acknowledged, 7);
-                assert_eq!(ack_delay, 12_000);
-                assert_eq!(first_ack_range, 2);
-                assert_eq!(ack_ranges.len(), 1);
-                assert_eq!(ack_ranges[0].gap, 0);
-                assert_eq!(ack_ranges[0].range, 1);
-            }
+        if let Frame::Ack {
+            largest_acknowledged,
+            ack_delay,
+            first_ack_range,
+            ack_ranges,
+        } = f
+        {
+            assert_eq!(largest_acknowledged, 7);
+            assert_eq!(ack_delay, 12_000);
+            assert_eq!(first_ack_range, 2);
+            assert_eq!(ack_ranges.len(), 1);
+            assert_eq!(ack_ranges[0].gap, 0);
+            assert_eq!(ack_ranges[0].range, 1);
+        }
     }
 
     #[test]

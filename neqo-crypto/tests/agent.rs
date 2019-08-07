@@ -71,7 +71,7 @@ fn check_client_preinfo(client_preinfo: SecretAgentPreInfo) {
 }
 
 fn check_server_preinfo(server_preinfo: SecretAgentPreInfo) {
-        assert_eq!(server_preinfo.version(), Some(TLS_VERSION_1_3));
+    assert_eq!(server_preinfo.version(), Some(TLS_VERSION_1_3));
     assert_eq!(server_preinfo.cipher_suite(), Some(TLS_AES_128_GCM_SHA256));
     assert_eq!(server_preinfo.early_data(), false);
     assert_eq!(server_preinfo.early_data_cipher(), None);
