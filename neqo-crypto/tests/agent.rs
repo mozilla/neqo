@@ -277,7 +277,7 @@ fn zero_rtt() {
     server
         .enable_0rtt(
             anti_replay.as_ref().unwrap(),
-            0xffffffff,
+            0xffff_ffff,
             PermissiveZeroRttChecker::new(),
         )
         .expect("should enable 0-RTT");
@@ -302,7 +302,7 @@ fn zero_rtt_no_eoed() {
     server
         .enable_0rtt(
             anti_replay.as_ref().unwrap(),
-            0xffffffff,
+            0xffff_ffff,
             PermissiveZeroRttChecker::new(),
         )
         .expect("should enable 0-RTT");
@@ -336,7 +336,7 @@ fn reject_zero_rtt() {
     server
         .enable_0rtt(
             anti_replay.as_ref().unwrap(),
-            0xffffffff,
+            0xffff_ffff,
             Box::new(RejectZeroRtt {}),
         )
         .expect("should enable 0-RTT");

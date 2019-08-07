@@ -933,9 +933,7 @@ mod tests {
     fn test_duplicate() {
         let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
 
-        if let Err(_) = decoder.set_capacity(60) {
-            assert!(false);
-        }
+        assert!(decoder.set_capacity(60).is_ok());
 
         // send an instruction
         let _ = conn_s.stream_send(
@@ -947,16 +945,19 @@ mod tests {
         );
         let out = conn_s.process(None, now());
         conn_c.process(out.dgram(), now());
-        if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
-            assert!(false)
-        }
+        assert!(decoder
+            .read_instructions(&mut conn_c, recv_stream_id)
+            .is_ok());
 
         // send the second instruction, a duplicate instruction.
         let _ = conn_s.stream_send(recv_stream_id, &[0x00]);
         let out = conn_s.process(None, now());
         conn_c.process(out.dgram(), now());
-        if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
-            assert!(false)
+        if decoder
+            .read_instructions(&mut conn_c, recv_stream_id)
+            .is_err()
+        {
+            panic!("failed to read")
         }
 
         decoder.send(&mut conn_c).unwrap();
@@ -1045,10 +1046,7 @@ mod tests {
 
         let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
 
-        if let Err(_) = decoder.set_capacity(200) {
-            assert!(false);
-        }
-
+        assert!(decoder.set_capacity(200).is_ok());
         let mut i = 0;
         for t in &test_cases {
             // send an instruction
@@ -1056,9 +1054,9 @@ mod tests {
                 let _ = conn_s.stream_send(recv_stream_id, t.encoder_inst);
                 let out = conn_s.process(None, now());
                 conn_c.process(out.dgram(), now());
-                if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
-                    assert!(false);
-                }
+                assert!(decoder
+                    .read_instructions(&mut conn_c, recv_stream_id)
+                    .is_ok());
             }
 
             if let Ok(headers) = decoder.decode_header_block(t.header_block, i) {

@@ -171,7 +171,7 @@ mod tests {
         pub val: &'static [u8],
         pub res: &'static [u8],
     }
-    const TEST_CASES: &'static [TestElement] = &[
+    const TEST_CASES: &[TestElement] = &[
         TestElement {
             val: b"www.example.com",
             res: &[

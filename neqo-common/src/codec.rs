@@ -518,8 +518,8 @@ mod tests {
         let mut enc = Encoder::default();
         enc.encode_uint(2, 10u8); // 000a
         enc.encode_uint(1, 257u16); // 01
-        enc.encode_uint(3, 0xffffffu32); // ffffff
-        enc.encode_uint(8, 0xfedcba9876543210u64);
+        enc.encode_uint(3, 0xff_ffffu32); // ffffff
+        enc.encode_uint(8, 0xfedc_ba98_7654_3210u64);
         assert_eq!(enc, Encoder::from_hex("000a01fffffffedcba9876543210"));
     }
 

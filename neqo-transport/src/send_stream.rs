@@ -895,7 +895,7 @@ mod tests {
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
-        s.set_max_stream_data(1048576);
+        s.set_max_stream_data(1_048_576);
         let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
         assert_eq!(res, 3072);
 

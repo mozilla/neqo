@@ -2033,7 +2033,7 @@ mod tests {
     fn assert_coalesced_0rtt(payload: &[u8]) {
         let mut dec = Decoder::from(payload);
         let initial_type = dec.decode_byte().unwrap(); // Initial
-        assert_eq!(initial_type & 0b11110000, 0b11000000);
+        assert_eq!(initial_type & 0b1111_0000, 0b1100_0000);
         let version = dec.decode_uint(4).unwrap();
         assert_eq!(version, QUIC_VERSION.into());
         dec.skip_vec(1); // DCID
@@ -2042,7 +2042,7 @@ mod tests {
         let initial_len = dec.decode_varint().unwrap();
         dec.skip(usize::try_from(initial_len).unwrap());
         let zrtt_type = dec.decode_byte().unwrap();
-        assert_eq!(zrtt_type & 0b11110000, 0b11010000);
+        assert_eq!(zrtt_type & 0b1111_0000, 0b1101_0000);
     }
 
     #[test]
