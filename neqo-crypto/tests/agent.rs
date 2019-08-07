@@ -27,17 +27,17 @@ fn basic() {
     println!("server {:p}", &server);
 
     let bytes = client.handshake(now(), &[]).expect("send CH");
-    assert!(bytes.len() > 0);
+    assert!(!bytes.is_empty());
     assert_eq!(*client.state(), HandshakeState::InProgress);
 
     let bytes = server
         .handshake(now(), &bytes[..])
         .expect("read CH, send SH");
-    assert!(bytes.len() > 0);
+    assert!(!bytes.is_empty());
     assert_eq!(*server.state(), HandshakeState::InProgress);
 
     let bytes = client.handshake(now(), &bytes[..]).expect("send CF");
-    assert_eq!(bytes.len(), 0);
+    assert!(bytes.is_empty());
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
     client.authenticated();
@@ -45,7 +45,7 @@ fn basic() {
 
     // Calling handshake() again indicates that we're happy with the cert.
     let bytes = client.handshake(now(), &[]).expect("send CF");
-    assert!(bytes.len() > 0);
+    assert!(!bytes.is_empty());
     assert!(client.state().connected());
 
     let client_info = client.info().expect("got info");
@@ -53,12 +53,30 @@ fn basic() {
     assert_eq!(TLS_AES_128_GCM_SHA256, client_info.cipher_suite());
 
     let bytes = server.handshake(now(), &bytes[..]).expect("finish");
-    assert_eq!(bytes.len(), 0);
+    assert!(bytes.is_empty());
     assert!(server.state().connected());
 
     let server_info = server.info().expect("got info");
     assert_eq!(TLS_VERSION_1_3, server_info.version());
     assert_eq!(TLS_AES_128_GCM_SHA256, server_info.cipher_suite());
+}
+
+fn check_client_preinfo(client_preinfo: SecretAgentPreInfo) {
+    assert_eq!(client_preinfo.version(), None);
+    assert_eq!(client_preinfo.cipher_suite(), None);
+    assert_eq!(client_preinfo.early_data(), false);
+    assert_eq!(client_preinfo.early_data_cipher(), None);
+    assert_eq!(client_preinfo.max_early_data(), 0);
+    assert_eq!(client_preinfo.alpn(), None);
+}
+
+fn check_server_preinfo(server_preinfo: SecretAgentPreInfo) {
+        assert_eq!(server_preinfo.version(), Some(TLS_VERSION_1_3));
+    assert_eq!(server_preinfo.cipher_suite(), Some(TLS_AES_128_GCM_SHA256));
+    assert_eq!(server_preinfo.early_data(), false);
+    assert_eq!(server_preinfo.early_data_cipher(), None);
+    assert_eq!(server_preinfo.max_early_data(), 0);
+    assert_eq!(server_preinfo.alpn(), None);
 }
 
 #[test]
@@ -70,32 +88,20 @@ fn raw() {
     println!("server {:?}", server);
 
     let client_records = client.handshake_raw(now(), None).expect("send CH");
-    assert!(client_records.len() > 0);
+    assert!(!client_records.is_empty());
     assert_eq!(*client.state(), HandshakeState::InProgress);
 
-    let client_preinfo = client.preinfo().expect("get preinfo");
-    assert_eq!(client_preinfo.version(), None);
-    assert_eq!(client_preinfo.cipher_suite(), None);
-    assert_eq!(client_preinfo.early_data(), false);
-    assert_eq!(client_preinfo.early_data_cipher(), None);
-    assert_eq!(client_preinfo.max_early_data(), 0);
-    assert_eq!(client_preinfo.alpn(), None);
+    check_client_preinfo(client.preinfo().expect("get preinfo"));
 
     let server_records =
         forward_records(now(), &mut server, client_records).expect("read CH, send SH");
-    assert!(server_records.len() > 0);
+    assert!(!server_records.is_empty());
     assert_eq!(*server.state(), HandshakeState::InProgress);
 
-    let server_preinfo = server.preinfo().expect("get preinfo");
-    assert_eq!(server_preinfo.version(), Some(TLS_VERSION_1_3));
-    assert_eq!(server_preinfo.cipher_suite(), Some(TLS_AES_128_GCM_SHA256));
-    assert_eq!(server_preinfo.early_data(), false);
-    assert_eq!(server_preinfo.early_data_cipher(), None);
-    assert_eq!(server_preinfo.max_early_data(), 0);
-    assert_eq!(server_preinfo.alpn(), None);
+    check_server_preinfo(server.preinfo().expect("get preinfo"));
 
     let client_records = forward_records(now(), &mut client, server_records).expect("send CF");
-    assert_eq!(client_records.len(), 0);
+    assert!(client_records.is_empty());
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
     client.authenticated();
@@ -103,11 +109,11 @@ fn raw() {
 
     // Calling handshake() again indicates that we're happy with the cert.
     let client_records = client.handshake_raw(now(), None).expect("send CF");
-    assert!(client_records.len() > 0);
+    assert!(!client_records.is_empty());
     assert!(client.state().connected());
 
     let server_records = forward_records(now(), &mut server, client_records).expect("finish");
-    assert_eq!(server_records.len(), 0);
+    assert!(server_records.is_empty());
     assert!(server.state().connected());
 
     // The client should have one certificate for the server.
@@ -278,7 +284,7 @@ fn zero_rtt() {
         .enable_0rtt(
             anti_replay.as_ref().unwrap(),
             0xffff_ffff,
-            PermissiveZeroRttChecker::new(),
+            PermissiveZeroRttChecker::make(),
         )
         .expect("should enable 0-RTT");
 
@@ -303,7 +309,7 @@ fn zero_rtt_no_eoed() {
         .enable_0rtt(
             anti_replay.as_ref().unwrap(),
             0xffff_ffff,
-            PermissiveZeroRttChecker::new(),
+            PermissiveZeroRttChecker::make(),
         )
         .expect("should enable 0-RTT");
     server.disable_end_of_early_data();

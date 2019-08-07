@@ -880,30 +880,30 @@ mod tests {
 
         let mut s = SendStream::new(4.into(), 1024, flow_mgr.clone(), conn_events.clone());
 
-        let res = s.send(&vec![4; 100]).unwrap();
+        let res = s.send(&[4; 100]).unwrap();
         assert_eq!(res, 100);
         s.mark_as_sent(0, 50, false);
         assert_eq!(s.state.tx_buf().unwrap().data_limit(), 100);
 
         // Should hit stream flow control limit before filling up send buffer
-        let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
+        let res = s.send(&[4; TX_STREAM_BUFFER]).unwrap();
         assert_eq!(res, 1024 - 100);
 
         // should do nothing, max stream data already 1024
         s.set_max_stream_data(1024);
-        let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
+        let res = s.send(&[4; TX_STREAM_BUFFER]).unwrap();
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
         s.set_max_stream_data(1_048_576);
-        let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
+        let res = s.send(&[4; TX_STREAM_BUFFER]).unwrap();
         assert_eq!(res, 3072);
 
         // should now hit the tx buffer size
         flow_mgr
             .borrow_mut()
             .conn_increase_max_credit(TX_STREAM_BUFFER as u64);
-        let res = s.send(&vec![4; TX_STREAM_BUFFER + 100]).unwrap();
+        let res = s.send(&[4; TX_STREAM_BUFFER + 100]).unwrap();
         assert_eq!(res, TX_STREAM_BUFFER - 4096);
 
         // TODO(agrover@mozilla.com): test ooo acks somehow
@@ -913,7 +913,7 @@ mod tests {
     #[test]
     fn test_tx_buffer_acks() {
         let mut tx = TxBuffer::new();
-        assert_eq!(tx.send(&vec![4; 100]), 100);
+        assert_eq!(tx.send(&[4; 100]), 100);
         let res = tx.next_bytes(TxMode::Normal).unwrap();
         assert_eq!(res.0, 0);
         assert_eq!(res.1.len(), 100);

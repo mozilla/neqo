@@ -1049,7 +1049,7 @@ mod tests {
 
         // send a header block
         let buf = encoder.encode_header_block(
-            &vec![(String::from("content-length"), String::from("1234"))],
+            &[(String::from("content-length"), String::from("1234"))],
             1,
         );
         assert_eq!(&buf[..], &[0x02, 0x00, 0x80]);

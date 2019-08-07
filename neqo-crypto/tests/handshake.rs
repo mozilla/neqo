@@ -83,7 +83,7 @@ pub struct PermissiveZeroRttChecker {
     resuming: bool,
 }
 impl PermissiveZeroRttChecker {
-    pub fn new() -> Box<dyn ZeroRttChecker> {
+    pub fn make() -> Box<dyn ZeroRttChecker> {
         Box::new(PermissiveZeroRttChecker { resuming: true })
     }
 }

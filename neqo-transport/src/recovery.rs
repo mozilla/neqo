@@ -713,7 +713,7 @@ mod tests {
 
                 assert_eq!(packets.len(), 1)
             }
-            _ => assert!(false),
+            _ => panic!("unexpected mode"),
         }
         assert_no_sent_times(&lr);
     }
