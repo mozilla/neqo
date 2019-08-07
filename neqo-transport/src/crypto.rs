@@ -63,7 +63,7 @@ impl Crypto {
     // Create the initial crypto state.
     pub fn create_initial_state(&mut self, role: Role, dcid: &[u8]) -> CryptoState {
         qinfo!(
-            [self]
+            [self],
             "Creating initial cipher state role={:?} dcid={}",
             role,
             hex(dcid)
@@ -92,7 +92,7 @@ impl Crypto {
 
         let cs = &mut self.states[epoch as usize];
         if cs.is_none() {
-            qtrace!([label] "Build crypto state for epoch {}", epoch);
+            qtrace!([label], "Build crypto state for epoch {}", epoch);
             assert!(epoch != 0); // This state is made directly.
 
             let cipher = match (epoch, self.tls.info()) {
@@ -101,7 +101,7 @@ impl Crypto {
                 (_, Some(info)) => Some(info.cipher_suite()),
             };
             if cipher.is_none() {
-                qdebug!([label] "cipher info not available yet");
+                qdebug!([label], "cipher info not available yet");
                 return Err(Error::KeysNotFound);
             }
             let cipher = cipher.unwrap();
@@ -121,7 +121,7 @@ impl Crypto {
                 | (Some(_), None, Role::Server, 1)
                 | (Some(_), Some(_), _, _) => {}
                 (None, None, _, _) => {
-                    qdebug!([label] "Keying material not available for epoch {}", epoch);
+                    qdebug!([label], "Keying material not available for epoch {}", epoch);
                     return Err(Error::KeysNotFound);
                 }
                 _ => panic!("bad configuration of keys"),
@@ -266,7 +266,7 @@ impl CryptoCtx for CryptoDxState {
 
     fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         qinfo!(
-            [self]
+            [self],
             "aead_decrypt pn={} hdr={} body={}",
             pn,
             hex(hdr),
@@ -279,7 +279,7 @@ impl CryptoCtx for CryptoDxState {
 
     fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         qdebug!(
-            [self]
+            [self],
             "aead_encrypt pn={} hdr={} body={}",
             pn,
             hex(hdr),
@@ -290,7 +290,7 @@ impl CryptoCtx for CryptoDxState {
         let mut out = vec![0; size];
         let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
 
-        qdebug!([self] "aead_encrypt ct={}", hex(res),);
+        qdebug!([self], "aead_encrypt ct={}", hex(res),);
 
         Ok(res.to_vec())
     }

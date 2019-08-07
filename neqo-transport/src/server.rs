@@ -76,7 +76,7 @@ impl Server {
     //     let hdr = match decode_packet_hdr(self, &received[..]) {
     //         Ok(h) => h,
     //         Err(e) => {
-    //             qtrace!([self] "Discarding {:?}", received);
+    //             qtrace!([self], "Discarding {:?}", received);
     //             return (None, self.next_timer())
     //         }
     //     };

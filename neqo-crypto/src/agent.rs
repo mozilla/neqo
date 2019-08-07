@@ -78,7 +78,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
         }
         _ => None,
     };
-    qinfo!([format!("{:p}", fd)] "got ALPN {:?}", alpn);
+    qinfo!([format!("{:p}", fd)], "got ALPN {:?}", alpn);
     Ok(alpn)
 }
 
@@ -291,7 +291,11 @@ impl SecretAgent {
                     *st = Some(alert.description);
                 }
                 _ => {
-                    qwarn!([format!("{:p}", fd)] "duplicate alert {}", alert.description);
+                    qwarn!(
+                        [format!("{:p}", fd)],
+                        "duplicate alert {}",
+                        alert.description
+                    );
                 }
             }
         }
@@ -513,7 +517,7 @@ impl SecretAgent {
 
     fn capture_error<T>(&mut self, res: Res<T>) -> Res<T> {
         if let Err(e) = &res {
-            qwarn!([self] "error: {:?}", e);
+            qwarn!([self], "error: {:?}", e);
             self.state = HandshakeState::Failed(e.clone());
         }
         res
@@ -531,7 +535,7 @@ impl SecretAgent {
             let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
             HandshakeState::Complete(info)
         };
-        qinfo!([self] "state -> {:?}", self.state);
+        qinfo!([self], "state -> {:?}", self.state);
         Ok(())
     }
 
@@ -620,7 +624,7 @@ impl SecretAgent {
         // Fire off any authentication we might need to complete.
         if self.state == HandshakeState::Authenticated {
             let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
-            qdebug!([self] "SSL_AuthCertificateComplete: {:?}", rv);
+            qdebug!([self], "SSL_AuthCertificateComplete: {:?}", rv);
             // This should return SECSuccess, so don't use update_state().
             self.capture_error(result::result(rv))?;
         }

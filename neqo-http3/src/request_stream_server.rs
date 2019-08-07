@@ -58,7 +58,7 @@ impl RequestStreamServer {
         data: Vec<u8>,
         encoder: &mut QPackEncoder,
     ) {
-        qdebug!([self] "Encoding headers");
+        qdebug!([self], "Encoding headers");
         let encoded_headers = encoder.encode_header_block(&headers, self.stream_id);
         let hframe = HFrame::Headers {
             len: encoded_headers.len() as u64,
@@ -67,7 +67,7 @@ impl RequestStreamServer {
         hframe.encode(&mut d);
         d.encode(&encoded_headers);
         if !data.is_empty() {
-            qdebug!([self] "Encoding data");
+            qdebug!([self], "Encoding data");
             let d_frame = HFrame::Data {
                 len: data.len() as u64,
             };
@@ -88,12 +88,12 @@ impl RequestStreamServer {
         if self.state == RequestStreamServerState::SendingResponse {
             if let Some(d) = &mut self.response_buf {
                 let sent = conn.stream_send(self.stream_id, &d[..])?;
-                qdebug!([label] "{} bytes sent", sent);
+                qdebug!([label], "{} bytes sent", sent);
                 if sent == d.len() {
                     self.response_buf = None;
                     conn.stream_close_send(self.stream_id)?;
                     self.state = RequestStreamServerState::Closed;
-                    qdebug!([label] "done sending request");
+                    qdebug!([label], "done sending request");
                 } else {
                     let b = d.split_off(sent);
                     self.response_buf = Some(b);
@@ -116,7 +116,7 @@ impl RequestStreamServer {
         } else {
             String::new()
         };
-        qdebug!([label] "state={:?}: receiving data.", self.state);
+        qdebug!([label], "state={:?}: receiving data.", self.state);
         loop {
             match self.state {
                 RequestStreamServerState::WaitingForRequestHeaders => {
@@ -124,7 +124,7 @@ impl RequestStreamServer {
                     if !self.frame_reader.done() {
                         break Ok(());
                     }
-                    qdebug!([label] "received a frame");
+                    qdebug!([label], "received a frame");
                     match self.frame_reader.get_frame()? {
                         HFrame::Priority {
                             priorized_elem_type,
@@ -151,7 +151,7 @@ impl RequestStreamServer {
                 } => {
                     let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[*offset..])?;
                     qdebug!(
-                        [label]
+                        [label],
                         "state=ReadingHeaders: read {} bytes fin={}.",
                         amount,
                         fin
@@ -168,7 +168,7 @@ impl RequestStreamServer {
                     // we have read the headers.
                     self.request_headers = decoder.decode_header_block(buf, self.stream_id)?;
                     if self.request_headers.is_none() {
-                        qdebug!([label] "decoding header is blocked.");
+                        qdebug!([label], "decoding header is blocked.");
                         let mut tmp: Vec<u8> = Vec::new();
                         mem::swap(&mut tmp, buf);
                         self.state = RequestStreamServerState::BlockedDecodingHeaders { buf: tmp };

@@ -290,7 +290,12 @@ impl HFrameReader {
                 Ok((0, false)) => break Ok(false),
                 Ok((amount, false)) => Decoder::from(&buf[..amount]),
                 Err(e) => {
-                    qdebug!([conn] "Error reading data from stream {}: {:?}", stream_id, e);
+                    qdebug!(
+                        [conn],
+                        "Error reading data from stream {}: {:?}",
+                        stream_id,
+                        e
+                    );
                     break Err(e.into());
                 }
             };
@@ -367,7 +372,12 @@ impl HFrameReader {
                 HFrameReaderState::GetData => {
                     match progress {
                         IncrementalDecoderResult::Buffer(data) => {
-                            qtrace!([conn] "received frame {}: {}", self.hframe_type, hex(&data[..]));
+                            qtrace!(
+                                [conn],
+                                "received frame {}: {}",
+                                self.hframe_type,
+                                hex(&data[..])
+                            );
                             self.payload = data;
                             self.state = HFrameReaderState::Done;
                             break Ok(false);

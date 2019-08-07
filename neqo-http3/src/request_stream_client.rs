@@ -53,7 +53,7 @@ impl Request {
     }
 
     pub fn encode_request(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
-        qdebug!([self] "Encoding headers for {}/{}", self.host, self.path);
+        qdebug!([self], "Encoding headers for {}/{}", self.host, self.path);
         let encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
         let f = HFrame::Headers {
             len: encoded_headers.len() as u64,
@@ -165,12 +165,12 @@ impl RequestStreamClient {
             }
             if let Some(d) = &mut self.request.buf {
                 let sent = conn.stream_send(self.stream_id, &d[..])?;
-                qdebug!([label] "{} bytes sent", sent);
+                qdebug!([label], "{} bytes sent", sent);
                 if sent == d.len() {
                     self.request.buf = None;
                     conn.stream_close_send(self.stream_id)?;
                     self.state = RequestStreamClientState::WaitingForResponseHeaders;
-                    qdebug!([label] "done sending request");
+                    qdebug!([label], "done sending request");
                 } else {
                     let b = d.split_off(sent);
                     self.request.buf = Some(b);
@@ -194,7 +194,7 @@ impl RequestStreamClient {
             String::new()
         };
         loop {
-            qdebug!([label] "state={:?}.", self.state);
+            qdebug!([label], "state={:?}.", self.state);
             match self.state {
                 RequestStreamClientState::SendingRequest => {
                     /*TODO(dd.mozilla@gmail.com) if we get response while streaming data. We may also get a stop_sending...*/
@@ -207,7 +207,7 @@ impl RequestStreamClient {
                         break Ok(());
                     }
                     let f = self.frame_reader.get_frame()?;
-                    qdebug!([label] "A new frame has been received: {:?}", f);
+                    qdebug!([label], "A new frame has been received: {:?}", f);
                     match f {
                         //self.frame_reader.get_frame()? {
                         HFrame::Priority { .. } => break Err(Error::UnexpectedFrame),
@@ -224,7 +224,7 @@ impl RequestStreamClient {
                 } => {
                     let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[*offset..])?;
                     qdebug!(
-                        [label]
+                        [label],
                         "state=ReadingHeaders: read {} bytes fin={}.",
                         amount,
                         fin
@@ -244,7 +244,7 @@ impl RequestStreamClient {
                     // we have read the headers.
                     self.response.headers = decoder.decode_header_block(buf, self.stream_id)?;
                     if self.response.headers.is_none() {
-                        qdebug!([label] "decoding header is blocked.");
+                        qdebug!([label], "decoding header is blocked.");
                         let mut tmp: Vec<u8> = Vec::new();
                         mem::swap(&mut tmp, buf);
                         self.state = RequestStreamClientState::BlockedDecodingHeaders { buf: tmp };
@@ -263,7 +263,7 @@ impl RequestStreamClient {
                     if !self.frame_reader.done() {
                         break Ok(());
                     }
-                    qdebug!([label] "A new frame has been received.");
+                    qdebug!([label], "A new frame has been received.");
                     match self.frame_reader.get_frame()? {
                         HFrame::Data { len } => self.handle_data_frame(len)?,
                         HFrame::PushPromise { .. } => break Err(Error::UnexpectedFrame),

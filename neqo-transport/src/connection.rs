@@ -329,21 +329,21 @@ impl Connection {
     /// if the token supports that.
     pub fn set_resumption_token(&mut self, now: Instant, token: &[u8]) -> Res<()> {
         if self.state != State::Init {
-            qerror!([self] "set token in state {:?}", self.state);
+            qerror!([self], "set token in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
-        qinfo!([self] "resumption token {}", hex(token));
+        qinfo!([self], "resumption token {}", hex(token));
         let mut dec = Decoder::from(token);
         let tp_slice = match dec.decode_vvec() {
             Some(v) => v,
             _ => return Err(Error::InvalidResumptionToken),
         };
-        qtrace!([self] "  transport parameters {}", hex(&tp_slice));
+        qtrace!([self], "  transport parameters {}", hex(&tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
         let tp = TransportParameters::decode(&mut dec_tp)?;
 
         let tok = dec.decode_remainder();
-        qtrace!([self] "  TLS token {}", hex(&tok));
+        qtrace!([self], "  TLS token {}", hex(&tok));
         match self.crypto.tls {
             Agent::Client(ref mut c) => c.set_resumption_token(&tok)?,
             Agent::Server(_) => return Err(Error::WrongRole),
@@ -366,7 +366,7 @@ impl Connection {
                 });
                 enc.encode(extra);
                 let records = s.send_ticket(now, &enc)?;
-                qinfo!([self] "send session ticket {}", hex(&enc));
+                qinfo!([self], "send session ticket {}", hex(&enc));
                 self.buffer_crypto_records(records);
                 Ok(())
             }
@@ -490,14 +490,19 @@ impl Connection {
     fn input(&mut self, d: Datagram, now: Instant) -> Res<()> {
         let mut slc = &d[..];
 
-        qinfo!([self] "input {}", hex( &**d));
+        qinfo!([self], "input {}", hex(&**d));
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
             let mut hdr = match decode_packet_hdr(self, slc) {
                 Ok(h) => h,
                 Err(e) => {
-                    qinfo!([self] "Received indecipherable packet header {} {}", hex(slc), e);
+                    qinfo!(
+                        [self],
+                        "Received indecipherable packet header {} {}",
+                        hex(slc),
+                        e
+                    );
                     return Ok(()); // Drop the remainder of the datagram.
                 }
             };
@@ -545,7 +550,7 @@ impl Connection {
                         hdr.version,
                         self.version,
                     );
-                    qwarn!([self] "Sending VN on next output");
+                    qwarn!([self], "Sending VN on next output");
                     self.send_vn = Some((hdr, d.src, d.dst));
                     return Ok(());
                 }
@@ -553,14 +558,14 @@ impl Connection {
 
             match self.state {
                 State::Init => {
-                    qinfo!([self] "Received message while in Init state");
+                    qinfo!([self], "Received message while in Init state");
                     return Ok(());
                 }
                 State::WaitInitial => {
-                    qinfo!([self] "Received packet in WaitInitial");
+                    qinfo!([self], "Received packet in WaitInitial");
                     if self.role == Role::Server {
                         if hdr.dcid.len() < 8 {
-                            qwarn!([self] "Peer DCID is too short");
+                            qwarn!([self], "Peer DCID is too short");
                             return Ok(());
                         }
                         self.crypto.states[0] =
@@ -569,7 +574,7 @@ impl Connection {
                 }
                 State::Handshaking | State::Connected => {
                     if !self.is_valid_cid(&hdr.dcid) {
-                        qinfo!([self] "Ignoring packet with CID {:?}", hdr.dcid);
+                        qinfo!([self], "Ignoring packet with CID {:?}", hdr.dcid);
                         return Ok(());
                     }
                 }
@@ -585,7 +590,7 @@ impl Connection {
                 }
             }
 
-            qdebug!([self] "Received unverified packet {:?}", hdr);
+            qdebug!([self], "Received unverified packet {:?}", hdr);
 
             // Decryption failure, or not having keys is not fatal.
             // If the state isn't available, or we can't decrypt the packet, drop
@@ -623,7 +628,12 @@ impl Connection {
             let ack_eliciting = self.input_packet(hdr.epoch, Decoder::from(&body[..]), now)?;
             let space = PNSpace::from(hdr.epoch);
             if self.acks[space].is_duplicate(hdr.pn) {
-                qdebug!([self] "Received duplicate packet epoch={} pn={}", hdr.epoch, hdr.pn);
+                qdebug!(
+                    [self],
+                    "Received duplicate packet epoch={} pn={}",
+                    hdr.epoch,
+                    hdr.pn
+                );
                 self.stats.dups_rx += 1;
                 continue;
             }
@@ -648,7 +658,11 @@ impl Connection {
                         ZeroRttState::Rejected
                     };
                 } else {
-                    qdebug!([self] "Changing to use Server CID={}", hdr.scid.as_ref().unwrap());
+                    qdebug!(
+                        [self],
+                        "Changing to use Server CID={}",
+                        hdr.scid.as_ref().unwrap()
+                    );
                     let p = self
                         .paths
                         .iter_mut()
@@ -733,7 +747,7 @@ impl Connection {
                         out = match self.output_path(&p, now) {
                             Ok(x) => x,
                             Err(e) => {
-                                qwarn!([self] "two output_path errors in a row: {:?}", e);
+                                qwarn!([self], "two output_path errors in a row: {:?}", e);
                                 None
                             }
                         };
@@ -830,7 +844,7 @@ impl Connection {
                 continue;
             }
 
-            qdebug!([self] "Need to send a packet");
+            qdebug!([self], "Need to send a packet");
             initial_only = epoch == 0;
             let hdr = PacketHdr::new(
                 0,
@@ -877,18 +891,18 @@ impl Connection {
 
         // Pad Initial packets sent by the client to 1200 bytes.
         if self.role == Role::Client && initial_only {
-            qdebug!([self] "pad Initial to 1200");
+            qdebug!([self], "pad Initial to 1200");
             out_bytes.resize(1200, 0);
         }
         Ok(Some(Datagram::new(path.local, path.remote, out_bytes)))
     }
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
-        qinfo!([self] "client_start");
+        qinfo!([self], "client_start");
         self.handshake(now, 0, None)?;
         self.set_state(State::WaitInitial);
         if self.crypto.tls.preinfo()?.early_data() {
-            qdebug!([self] "Enabling 0-RTT");
+            qdebug!([self], "Enabling 0-RTT");
             self.zero_rtt_state = ZeroRttState::Enabled;
         }
         Ok(())
@@ -913,7 +927,7 @@ impl Connection {
     fn buffer_crypto_records(&mut self, records: RecordList) {
         for r in records {
             assert_eq!(r.ct, 22);
-            qdebug!([self] "Adding CRYPTO data {:?}", r);
+            qdebug!([self], "Adding CRYPTO data {:?}", r);
             self.crypto.streams[r.epoch as usize].tx.send(&r.data);
         }
     }
@@ -939,7 +953,7 @@ impl Connection {
         let mut rec: Option<Record> = None;
 
         if let Some(d) = data {
-            qdebug!([self] "Handshake received {:0x?} ", d);
+            qdebug!([self], "Handshake received {:0x?} ", d);
             rec = Some(Record {
                 ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
                 epoch,
@@ -954,7 +968,10 @@ impl Connection {
                 // TODO(ekr@rtfm.com): IMPORTANT: This overrides
                 // authentication and so is fantastically dangerous.
                 // Fix before shipping.
-                qwarn!([self] "marking connection as authenticated without checking");
+                qwarn!(
+                    [self],
+                    "marking connection as authenticated without checking"
+                );
                 self.crypto.tls.authenticated();
                 self.crypto.tls.handshake_raw(now, None)
             } else {
@@ -963,7 +980,7 @@ impl Connection {
         };
         match m {
             Err(e) => {
-                qwarn!([self] "Handshake failed");
+                qwarn!([self], "Handshake failed");
                 return Err(match self.crypto.tls.alert() {
                     Some(a) => Error::CryptoAlert(*a),
                     _ => Error::CryptoError(e),
@@ -972,10 +989,10 @@ impl Connection {
             Ok(msgs) => self.buffer_crypto_records(msgs),
         }
         if self.crypto.tls.state().connected() {
-            qinfo!([self] "TLS handshake completed");
+            qinfo!([self], "TLS handshake completed");
 
             if self.crypto.tls.info().map(SecretAgentInfo::alpn).is_none() {
-                qwarn!([self] "No ALPN. Closing connection.");
+                qwarn!([self], "No ALPN. Closing connection.");
                 // 120 = no_application_protocol
                 return Err(Error::CryptoAlert(120));
             }
@@ -1032,7 +1049,7 @@ impl Connection {
             }
             Frame::Crypto { offset, data } => {
                 qdebug!(
-                    [self]
+                    [self],
                     "Crypto frame on epoch={} offset={}, data={:0x?}",
                     epoch,
                     offset,
@@ -1086,7 +1103,11 @@ impl Connection {
             }
             Frame::DataBlocked { data_limit } => {
                 // Should never happen since we set data limit to 2^62-1
-                qwarn!([self] "Received DataBlocked with data limit {}", data_limit);
+                qwarn!(
+                    [self],
+                    "Received DataBlocked with data limit {}",
+                    data_limit
+                );
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
                 // TODO(agrover@mozilla.com): how should we be using
@@ -1130,7 +1151,7 @@ impl Connection {
             Frame::PathResponse { .. } => {
                 // Should never see this, we don't support migration atm and
                 // do not send path challenges
-                qwarn!([self] "Received Path Response");
+                qwarn!([self], "Received Path Response");
             }
             Frame::ConnectionClose {
                 error_code,
@@ -1138,11 +1159,13 @@ impl Connection {
                 reason_phrase,
             } => {
                 let reason_phrase = String::from_utf8_lossy(&reason_phrase);
-                qinfo!([self]
-                       "ConnectionClose received. Error code: {:?} frame type {:x} reason {}",
-                       error_code,
-                       frame_type,
-                       reason_phrase);
+                qinfo!(
+                    [self],
+                    "ConnectionClose received. Error code: {:?} frame type {:x} reason {}",
+                    error_code,
+                    frame_type,
+                    reason_phrase
+                );
                 self.events
                     .borrow_mut()
                     .connection_closed(error_code, frame_type, &reason_phrase);
@@ -1163,7 +1186,7 @@ impl Connection {
         now: Instant,
     ) -> Res<()> {
         qinfo!(
-            [self]
+            [self],
             "Rx ACK epoch={}, largest_acked={}, first_ack_range={}, ranges={:?}",
             epoch,
             largest_acknowledged,
@@ -1242,7 +1265,7 @@ impl Connection {
 
     fn set_state(&mut self, state: State) {
         if state != self.state {
-            qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
+            qinfo!([self], "State change from {:?} -> {:?}", self.state, state);
             self.state = state;
             match &self.state {
                 State::Connected => {
@@ -1336,9 +1359,12 @@ impl Connection {
             if stream_idx >= *next_stream_idx {
                 let recv_initial_max_stream_data = if stream_id.is_bidi() {
                     if stream_idx > self.indexes.local_max_stream_bidi {
-                        qwarn!([self] "peer bidi stream create blocked, next={:?} max={:?}",
-                               stream_idx,
-                               self.indexes.local_max_stream_bidi);
+                        qwarn!(
+                            [self],
+                            "peer bidi stream create blocked, next={:?} max={:?}",
+                            stream_idx,
+                            self.indexes.local_max_stream_bidi
+                        );
                         return Err(Error::StreamLimitError);
                     }
                     self.tps
@@ -1347,9 +1373,12 @@ impl Connection {
                         .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
                 } else {
                     if stream_idx > self.indexes.local_max_stream_uni {
-                        qwarn!([self] "peer uni stream create blocked, next={:?} max={:?}",
-                               stream_idx,
-                               self.indexes.local_max_stream_uni);
+                        qwarn!(
+                            [self],
+                            "peer uni stream create blocked, next={:?} max={:?}",
+                            stream_idx,
+                            self.indexes.local_max_stream_uni
+                        );
                         return Err(Error::StreamLimitError);
                     }
                     self.tps
@@ -1435,9 +1464,12 @@ impl Connection {
                     self.flow_mgr
                         .borrow_mut()
                         .streams_blocked(self.indexes.peer_max_stream_uni, StreamType::UniDi);
-                    qwarn!([self] "local uni stream create blocked, next={:?} max={:?}",
-                           self.indexes.peer_next_stream_uni,
-                           self.indexes.peer_max_stream_uni);
+                    qwarn!(
+                        [self],
+                        "local uni stream create blocked, next={:?} max={:?}",
+                        self.indexes.peer_next_stream_uni,
+                        self.indexes.peer_max_stream_uni
+                    );
                     return Err(Error::StreamLimitError);
                 }
                 let new_id = self
@@ -1467,9 +1499,12 @@ impl Connection {
                     self.flow_mgr
                         .borrow_mut()
                         .streams_blocked(self.indexes.peer_max_stream_bidi, StreamType::BiDi);
-                    qwarn!([self] "local bidi stream create blocked, next={:?} max={:?}",
-                           self.indexes.peer_next_stream_bidi,
-                           self.indexes.peer_max_stream_bidi);
+                    qwarn!(
+                        [self],
+                        "local bidi stream create blocked, next={:?} max={:?}",
+                        self.indexes.peer_next_stream_bidi,
+                        self.indexes.peer_max_stream_bidi
+                    );
                     return Err(Error::StreamLimitError);
                 }
                 let new_id = self
@@ -1571,7 +1606,7 @@ impl Connection {
     }
 
     fn check_loss_detection_timeout(&mut self, now: Instant) {
-        qdebug!([self] "check_loss_timeouts");
+        qdebug!([self], "check_loss_timeouts");
 
         if matches!(self.loss_recovery_state.mode, LossRecoveryMode::None) {
             // LR not the active timer
@@ -1613,7 +1648,7 @@ impl Connection {
             }
             LossRecoveryMode::PTO => {
                 qinfo!(
-                    [self]
+                    [self],
                     "check_loss_detection_timeout -send_one_or_two_packets"
                 );
                 self.loss_recovery.increment_pto_count();
