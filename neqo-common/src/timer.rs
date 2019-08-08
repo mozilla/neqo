@@ -20,27 +20,11 @@ impl<T> TimerItem<T> {
     }
 }
 
-// impl<T> PartialOrd for TimerItem<T> {
-//     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-//         Some(self.cmp(&other))
-//     }
-// }
-
-// impl<T> Ord for TimerItem<T> {
-//     fn cmp(&self, other: &Self) -> Ordering {
-//         self.time.cmp(&other.time)
-//     }
-// }
-
-// impl<T> PartialEq for TimerItem<T> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.time == other.time
-//     }
-// }
-
-// impl<T> Eq for TimerItem<T> {}
-
 /// A timer queue.
+/// This uses a classic timer wheel arrangement, with some characteristics that might be considered peculiar.
+/// Each slot in the wheel is sorted (complexity O(log(N) on insertion).
+/// Time is relative, the wheel has an origin time and it is unable to represent times that are more than
+/// `granularity * capacity` past that time.
 pub struct Timer<T> {
     items: Vec<Vec<TimerItem<T>>>,
     now: Instant,
@@ -138,23 +122,21 @@ impl<T> Timer<T> {
         };
         // start_index is just one of potentially many items with the same time.
         // Search backwards for a match, ...
-        for i in 0..=start_index {
-            let idx = start_index - i;
-            if self.items[bucket][idx].time != time {
+        for i in (0..=start_index).rev() {
+            if self.items[bucket][i].time != time {
                 break;
             }
-            if selector(&self.items[bucket][idx].item) {
-                return Some(self.items[bucket].remove(idx).item);
+            if selector(&self.items[bucket][i].item) {
+                return Some(self.items[bucket].remove(i).item);
             }
         }
         // ... then forwards.
-        for i in 1..(self.items[bucket].len() - start_index) {
-            let idx = start_index + i;
-            if self.items[bucket][idx].time != time {
+        for i in (start_index + 1)..self.items[bucket].len() {
+            if self.items[bucket][i].time != time {
                 break;
             }
-            if selector(&self.items[bucket][idx].item) {
-                return Some(self.items[bucket].remove(idx).item);
+            if selector(&self.items[bucket][i].item) {
+                return Some(self.items[bucket].remove(i).item);
             }
         }
         None
@@ -176,8 +158,7 @@ impl<T> Timer<T> {
     }
 
     /// Create an iterator that takes all items until the given time.
-    /// Note: Items might be removed even if the iterator is either leaked
-    ///   or not fully exhausted.
+    /// Note: Items might be removed even if the iterator is not fully exhausted.
     pub fn take_until(&mut self, until: Instant) -> impl Iterator<Item = T> {
         let get_item = move |x: TimerItem<T>| x.item;
         if until >= self.now + self.span() {
@@ -222,7 +203,8 @@ impl<T> Timer<T> {
         let tail = bucket.split_off(last_idx);
         buckets.push(mem::replace(bucket, tail));
         // This tomfoolery with the empty vector ensures that
-        // the returned type here matches the one above precisely.
+        // the returned type here matches the one above precisely
+        // without having to invoke the `either` crate.
         buckets.into_iter().chain(vec![]).flatten().map(get_item)
     }
 }
