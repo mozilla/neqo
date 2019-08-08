@@ -434,7 +434,7 @@ pub struct SendStream {
     max_stream_data: u64,
     state: SendStreamState,
     flow_mgr: Rc<RefCell<FlowMgr>>,
-    conn_events: Rc<RefCell<ConnectionEvents>>,
+    conn_events: ConnectionEvents,
 }
 
 impl SendStream {
@@ -442,10 +442,10 @@ impl SendStream {
         stream_id: StreamId,
         max_stream_data: u64,
         flow_mgr: Rc<RefCell<FlowMgr>>,
-        conn_events: Rc<RefCell<ConnectionEvents>>,
+        conn_events: ConnectionEvents,
     ) -> SendStream {
         if max_stream_data > 0 {
-            conn_events.borrow_mut().send_stream_writable(stream_id);
+            conn_events.send_stream_writable(stream_id);
         }
         SendStream {
             stream_id,
@@ -511,9 +511,7 @@ impl SendStream {
             SendStreamState::Send { ref mut send_buf } => {
                 send_buf.mark_as_acked(offset, len);
                 if send_buf.buffered() < TX_STREAM_BUFFER {
-                    self.conn_events
-                        .borrow_mut()
-                        .send_stream_writable(self.stream_id)
+                    self.conn_events.send_stream_writable(self.stream_id)
                 }
             }
             SendStreamState::DataSent {
@@ -523,9 +521,7 @@ impl SendStream {
             } => {
                 send_buf.mark_as_acked(offset, len);
                 if fin && send_buf.buffered() == 0 {
-                    self.conn_events
-                        .borrow_mut()
-                        .send_stream_complete(self.stream_id);
+                    self.conn_events.send_stream_complete(self.stream_id);
                     self.state
                         .transition(SendStreamState::DataRecvd { final_size });
                 }
@@ -876,7 +872,7 @@ mod tests {
     fn test_stream_tx() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         flow_mgr.borrow_mut().conn_increase_max_credit(4096);
-        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+        let conn_events = ConnectionEvents::default();
 
         let mut s = SendStream::new(4.into(), 1024, flow_mgr.clone(), conn_events.clone());
 
