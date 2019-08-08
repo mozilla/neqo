@@ -84,10 +84,12 @@ impl RttVals {
         }
     }
 
-    fn pto(&self) -> Duration {
+    fn rtt(&self) -> Duration {
         self.smoothed_rtt.unwrap_or(self.latest_rtt)
-            + max(4 * self.rttvar, GRANULARITY)
-            + self.max_ack_delay
+    }
+
+    fn pto(&self) -> Duration {
+        self.rtt() + max(4 * self.rttvar, GRANULARITY) + self.max_ack_delay
     }
 }
 
