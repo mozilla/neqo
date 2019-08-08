@@ -5,13 +5,13 @@
 // except according to those terms.
 
 use std::net::SocketAddr;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Datagram {
-    pub src: SocketAddr,
-    pub dst: SocketAddr,
-    pub d: Vec<u8>,
+    src: SocketAddr,
+    dst: SocketAddr,
+    d: Vec<u8>,
 }
 
 impl Datagram {
@@ -23,12 +23,12 @@ impl Datagram {
         }
     }
 
-    pub fn source(&self) -> &SocketAddr {
-        &self.src
+    pub fn source(&self) -> SocketAddr {
+        self.src
     }
 
-    pub fn destination(&self) -> &SocketAddr {
-        &self.dst
+    pub fn destination(&self) -> SocketAddr {
+        self.dst
     }
 }
 
@@ -36,11 +36,5 @@ impl Deref for Datagram {
     type Target = Vec<u8>;
     fn deref(&self) -> &Self::Target {
         &self.d
-    }
-}
-
-impl DerefMut for Datagram {
-    fn deref_mut(&mut self) -> &mut Vec<u8> {
-        &mut self.d
     }
 }
