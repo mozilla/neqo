@@ -574,6 +574,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cognitive_complexity)]
     fn test_stream_rx_dedupe() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         let conn_events = ConnectionEvents::default();

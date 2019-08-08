@@ -83,7 +83,7 @@ pub struct PermissiveZeroRttChecker {
     resuming: bool,
 }
 impl PermissiveZeroRttChecker {
-    pub fn new() -> Box<dyn ZeroRttChecker> {
+    pub fn make() -> Box<dyn ZeroRttChecker> {
         Box::new(PermissiveZeroRttChecker { resuming: true })
     }
 }
@@ -110,7 +110,7 @@ fn zero_rtt_setup(
         server
             .enable_0rtt(
                 &anti_replay,
-                0xffffffff,
+                0xffff_ffff,
                 Box::new(PermissiveZeroRttChecker { resuming: false }),
             )
             .expect("should enable 0-RTT on server");

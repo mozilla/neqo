@@ -8,7 +8,7 @@
 
 #![allow(dead_code)]
 use std::cell::RefCell;
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::mem;
@@ -89,6 +89,28 @@ pub enum State {
     Closed(ConnectionError),
 }
 
+// Implement Ord so that we can enforce monotonic state progression.
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if std::mem::discriminant(self) == std::mem::discriminant(other) {
+            return Some(Ordering::Equal);
+        }
+        Some(match (self, other) {
+            (State::Init, _) => Ordering::Less,
+            (_, State::Init) => Ordering::Greater,
+            (State::WaitInitial, _) => Ordering::Less,
+            (_, State::WaitInitial) => Ordering::Greater,
+            (State::Handshaking, _) => Ordering::Less,
+            (_, State::Handshaking) => Ordering::Greater,
+            (State::Connected, _) => Ordering::Less,
+            (_, State::Connected) => Ordering::Greater,
+            (State::Closing { .. }, _) => Ordering::Less,
+            (_, State::Closing { .. }) => Ordering::Greater,
+            (State::Closed(_), _) => unreachable!(),
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ZeroRttState {
     Init,
@@ -110,15 +132,15 @@ impl Path {
     // Used to create a path when receiving a packet.
     pub fn new(d: &Datagram, remote_cid: ConnectionId) -> Path {
         Path {
-            local: d.dst,
-            remote: d.src,
+            local: d.destination(),
+            remote: d.source(),
             local_cids: Vec::new(),
             remote_cid,
         }
     }
 
     pub fn received_on(&self, d: &Datagram) -> bool {
-        self.local == d.dst && self.remote == d.src
+        self.local == d.destination() && self.remote == d.source()
     }
 }
 
@@ -418,12 +440,16 @@ impl Connection {
             let msg = format!("{:?}", v);
             #[cfg(not(debug_assertions))]
             let msg = String::from("");
-            self.set_state(State::Closing {
-                error: ConnectionError::Transport(v.clone()),
-                frame_type,
-                msg,
-                timeout: self.get_closing_period_time(now),
-            });
+            if let State::Closed(err) | State::Closing { error: err, .. } = &self.state {
+                qwarn!([self] "Closing again after error {:?}", err);
+            } else {
+                self.set_state(State::Closing {
+                    error: ConnectionError::Transport(v.clone()),
+                    frame_type,
+                    msg,
+                    timeout: self.get_closing_period_time(now),
+                });
+            }
         }
         res
     }
@@ -567,7 +593,7 @@ impl Connection {
                         self.version,
                     );
                     qwarn!([self] "Sending VN on next output");
-                    self.send_vn = Some((hdr, d.src, d.dst));
+                    self.send_vn = Some((hdr, d.source(), d.destination()));
                     return Ok(());
                 }
             }
@@ -772,7 +798,7 @@ impl Connection {
     /// spaces) and each containing 1+ frames.
     fn output_path(&mut self, path: &Path, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
-        let mut initial_only = false;
+        let mut needs_padding = false;
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -852,7 +878,13 @@ impl Connection {
             }
 
             qdebug!([self] "Need to send a packet");
-            initial_only = epoch == 0;
+            match epoch {
+                // Packets containing Initial packets need padding.
+                0 => needs_padding = true,
+                1 => (),
+                // ...unless they include higher epochs.
+                _ => needs_padding = false,
+            }
             let hdr = PacketHdr::new(
                 0,
                 match epoch {
@@ -897,7 +929,7 @@ impl Connection {
         }
 
         // Pad Initial packets sent by the client to 1200 bytes.
-        if self.role == Role::Client && initial_only {
+        if self.role == Role::Client && needs_padding {
             qdebug!([self] "pad Initial to 1200");
             out_bytes.resize(1200, 0);
         }
@@ -1696,7 +1728,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stream_id_methods() {
+    fn bidi_stream_properties() {
         let id1 = StreamIndex::new(4).to_stream_id(StreamType::BiDi, Role::Client);
         assert_eq!(id1.is_bidi(), true);
         assert_eq!(id1.is_uni(), false);
@@ -1712,7 +1744,10 @@ mod tests {
         assert_eq!(id1.is_recv_only(Role::Server), false);
         assert_eq!(id1.is_recv_only(Role::Client), false);
         assert_eq!(id1.as_u64(), 16);
+    }
 
+    #[test]
+    fn uni_stream_properties() {
         let id2 = StreamIndex::new(8).to_stream_id(StreamType::UniDi, Role::Server);
         assert_eq!(id2.is_bidi(), false);
         assert_eq!(id2.is_uni(), true);
@@ -1787,6 +1822,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cognitive_complexity)]
     // tests stream send/recv after connection is established.
     fn test_conn_stream() {
         let mut client = default_client();
@@ -1824,19 +1860,15 @@ mod tests {
         qdebug!("---- client");
         // Send
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-        client.stream_send(client_stream_id, &vec![6; 100]).unwrap();
-        client.stream_send(client_stream_id, &vec![7; 40]).unwrap();
-        client
-            .stream_send(client_stream_id, &vec![8; 4000])
-            .unwrap();
+        client.stream_send(client_stream_id, &[6; 100]).unwrap();
+        client.stream_send(client_stream_id, &[7; 40]).unwrap();
+        client.stream_send(client_stream_id, &[8; 4000]).unwrap();
 
         // Send to another stream but some data after fin has been set
         let client_stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
-        client.stream_send(client_stream_id2, &vec![6; 60]).unwrap();
+        client.stream_send(client_stream_id2, &[6; 60]).unwrap();
         client.stream_close_send(client_stream_id2).unwrap();
-        client
-            .stream_send(client_stream_id2, &vec![7; 50])
-            .unwrap_err();
+        client.stream_send(client_stream_id2, &[7; 50]).unwrap_err();
         // Sending this much takes a few datagrams.
         let mut datagrams = vec![];
         let mut out = client.process(out.dgram(), now());
@@ -1858,7 +1890,7 @@ mod tests {
 
         let mut buf = vec![0; 4000];
 
-        let mut stream_ids = server.events().into_iter().filter_map(|evt| match evt {
+        let mut stream_ids = server.events().filter_map(|evt| match evt {
             ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
             _ => None,
         });
@@ -2022,11 +2054,11 @@ mod tests {
 
         // Now send a 0-RTT packet.
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-        client
-            .stream_send(client_stream_id, &vec![1, 2, 3])
-            .unwrap();
+        client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
+        // 0-RTT packets on their own shouldn't be padded to 1200.
+        assert!(client_0rtt.as_dgram_ref().unwrap().len() < 1200);
 
         let server_hs = server.process(client_hs.dgram(), now());
         assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
@@ -2035,7 +2067,6 @@ mod tests {
 
         let server_stream_id = server
             .events()
-            .into_iter()
             .find_map(|evt| match evt {
                 ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
                 _ => None,
@@ -2046,9 +2077,10 @@ mod tests {
 
     // Do a simple decode of the datagram to verify that it is coalesced.
     fn assert_coalesced_0rtt(payload: &[u8]) {
+        assert!(payload.len() >= 1200);
         let mut dec = Decoder::from(payload);
         let initial_type = dec.decode_byte().unwrap(); // Initial
-        assert_eq!(initial_type & 0b11110000, 0b11000000);
+        assert_eq!(initial_type & 0b1111_0000, 0b1100_0000);
         let version = dec.decode_uint(4).unwrap();
         assert_eq!(version, QUIC_VERSION.into());
         dec.skip_vec(1); // DCID
@@ -2057,7 +2089,7 @@ mod tests {
         let initial_len = dec.decode_varint().unwrap();
         dec.skip(usize::try_from(initial_len).unwrap());
         let zrtt_type = dec.decode_byte().unwrap();
-        assert_eq!(zrtt_type & 0b11110000, 0b11010000);
+        assert_eq!(zrtt_type & 0b1111_0000, 0b1101_0000);
     }
 
     #[test]
@@ -2076,9 +2108,7 @@ mod tests {
         // Write 0-RTT before generating any packets.
         // This should result in a datagram that coalesces Initial and 0-RTT.
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-        client
-            .stream_send(client_stream_id, &vec![1, 2, 3])
-            .unwrap();
+        client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
 
@@ -2089,7 +2119,6 @@ mod tests {
 
         let server_stream_id = server
             .events()
-            .into_iter()
             .find_map(|evt| match evt {
                 ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
                 _ => None,
@@ -2141,12 +2170,12 @@ mod tests {
 
         // The server shouldn't receive that 0-RTT data.
         let recvd_stream_evt = |e| matches!(e, ConnectionEvent::NewStream { .. });
-        assert!(!server.events().into_iter().any(recvd_stream_evt));
+        assert!(!server.events().any(recvd_stream_evt));
 
         // Client should get a rejection.
         let _ = client.process(server_hs.dgram(), now());
         let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
-        assert!(client.events().into_iter().any(recvd_0rtt_reject));
+        assert!(client.events().any(recvd_0rtt_reject));
 
         // ...and the client stream should be gone.
         let res = client.stream_send(stream_id, msg);
@@ -2174,7 +2203,7 @@ mod tests {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         let mut crypto = Crypto::new(agent, test_fixture::DEFAULT_ALPN, tphandler, None).unwrap();
         let cs = crypto.create_initial_state(Role::Client, &hdr.dcid);
-        let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &vec![0; 16]);
+        let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &[0; 16]);
         let dgram = Datagram::new(loopback(), loopback(), packet);
 
         // "send" it

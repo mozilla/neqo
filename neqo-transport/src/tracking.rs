@@ -380,7 +380,7 @@ mod tests {
 
     fn now() -> Instant {
         static mut NOW_ONCE: OnceResult<Instant> = OnceResult::new();
-        *unsafe { NOW_ONCE.call_once(|| Instant::now()) }
+        *unsafe { NOW_ONCE.call_once(Instant::now) }
     }
 
     fn test_ack_range(pns: &[u64], nranges: usize) {

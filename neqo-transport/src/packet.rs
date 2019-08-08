@@ -512,8 +512,8 @@ mod tests {
         fn aead_decrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
             let mut pt = body.to_vec();
 
-            for i in 0..pt.len() {
-                pt[i] ^= AEAD_MASK;
+            for i in &mut pt {
+                *i ^= AEAD_MASK;
             }
             let pt_len = pt.len() - AUTH_TAG_LEN;
             let at = TestFixture::auth_tag(hdr, &pt[0..pt_len]);
@@ -589,8 +589,8 @@ mod tests {
     #[test]
     fn test_short_packet_damaged() {
         let f = TestFixture {};
-        let mut hdr = default_hdr();
-        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY);
+        let hdr = default_hdr();
+        let mut packet = encode_packet(&f, &hdr, &TEST_BODY);
         let plen = packet.len();
         packet[plen - 1] ^= 0x7;
         assert!(test_decrypt_packet(&f, packet).is_err());
@@ -611,7 +611,7 @@ mod tests {
         let mut hdr = default_hdr();
         hdr.tipe = PacketType::Handshake;
         hdr.scid = Some(ConnectionId(vec![9, 8, 7, 6, 5, 4, 3, 2]));
-        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY);
+        let mut packet = encode_packet(&f, &hdr, &TEST_BODY);
         let plen = packet.len();
         packet[plen - 1] ^= 0x7;
         assert!(test_decrypt_packet(&f, packet).is_err());
@@ -633,7 +633,7 @@ mod tests {
         let mut hdr = default_hdr();
         hdr.tipe = PacketType::Initial(vec![0x0, 0x0, 0x0, 0x0]);
         hdr.scid = Some(ConnectionId(vec![9, 8, 7, 6, 5, 4, 3, 2]));
-        let mut packet = encode_packet(&f, &mut hdr, &TEST_BODY);
+        let mut packet = encode_packet(&f, &hdr, &TEST_BODY);
         let plen = packet.len();
         packet[plen - 1] ^= 0x7;
         assert!(test_decrypt_packet(&f, packet).is_err());
@@ -647,7 +647,7 @@ mod tests {
             token: vec![99, 88, 77, 66, 55, 44, 33],
         };
         hdr.scid = Some(ConnectionId(vec![1, 2, 3, 4, 5]));
-        let packet = encode_retry(&mut hdr);
+        let packet = encode_retry(&hdr);
         let f = TestFixture {};
         let decoded = decode_packet_hdr(&f, &packet).expect("should decode");
         assert_eq!(decoded.tipe, hdr.tipe);

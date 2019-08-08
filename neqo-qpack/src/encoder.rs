@@ -562,29 +562,25 @@ mod tests {
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {
-            match e {
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, false);
-                    assert_eq!(buf[..amount], encoder_instruction[..]);
-                    found_instruction = true;
-                }
-                _ => {}
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                let mut buf = [0u8; 100];
+                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
+                assert_eq!(fin, false);
+                assert_eq!(buf[..amount], encoder_instruction[..]);
+                found_instruction = true;
             }
         }
-        assert_eq!(found_instruction, encoder_instruction.len() != 0);
+        assert_eq!(found_instruction, !encoder_instruction.is_empty());
     }
 
     // test insert_with_name_ref which fails because there is not enough space in the table
     #[test]
     fn test_insert_with_name_ref_1() {
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
-        if let Err(e) = encoder.insert_with_name_ref(true, 4, vec![0x31, 0x32, 0x33, 0x34]) {
-            assert_eq!(Error::EncoderStreamError, e);
-        } else {
-            assert!(false);
-        }
+        let e = encoder
+            .insert_with_name_ref(true, 4, vec![0x31, 0x32, 0x33, 0x34])
+            .unwrap_err();
+        assert_eq!(Error::EncoderStreamError, e);
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -599,9 +595,7 @@ mod tests {
     #[test]
     fn test_insert_with_name_ref_2() {
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
-        if let Err(_) = encoder.set_max_capacity(200) {
-            assert!(false);
-        }
+        assert!(encoder.set_max_capacity(200).is_ok());
         // test the change capacity instruction.
         test_sent_instructions(
             &mut encoder,
@@ -612,11 +606,9 @@ mod tests {
             &[0x02, 0x3f, 0xa9, 0x01],
         );
 
-        if let Err(_) = encoder.insert_with_name_ref(true, 4, vec![0x31, 0x32, 0x33, 0x34]) {
-            assert!(false);
-        } else {
-            assert!(true);
-        }
+        assert!(encoder
+            .insert_with_name_ref(true, 4, vec![0x31, 0x32, 0x33, 0x34])
+            .is_ok());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -633,16 +625,13 @@ mod tests {
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
 
         // insert "content-length: 1234
-        if let Err(e) = encoder.insert_with_name_literal(
+        let res = encoder.insert_with_name_literal(
             vec![
                 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
             ],
             vec![0x31, 0x32, 0x33, 0x34],
-        ) {
-            assert_eq!(Error::EncoderStreamError, e);
-        } else {
-            assert!(false);
-        }
+        );
+        assert_eq!(Error::EncoderStreamError, res.unwrap_err());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -658,9 +647,7 @@ mod tests {
     fn test_insert_with_name_literal_2() {
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
 
-        if let Err(_) = encoder.set_max_capacity(200) {
-            assert!(false);
-        }
+        assert!(encoder.set_max_capacity(200).is_ok());
         // test the change capacity instruction.
         test_sent_instructions(
             &mut encoder,
@@ -672,16 +659,13 @@ mod tests {
         );
 
         // insert "content-length: 1234
-        if let Err(_) = encoder.insert_with_name_literal(
+        let res = encoder.insert_with_name_literal(
             vec![
                 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
             ],
             vec![0x31, 0x32, 0x33, 0x34],
-        ) {
-            assert!(false);
-        } else {
-            assert!(true);
-        }
+        );
+        assert!(res.is_ok());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -699,9 +683,7 @@ mod tests {
     fn test_change_capacity() {
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
 
-        if let Err(_) = encoder.set_max_capacity(200) {
-            assert!(false);
-        }
+        assert!(encoder.set_max_capacity(200).is_ok());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -716,9 +698,7 @@ mod tests {
     fn test_duplicate() {
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
 
-        if let Err(_) = encoder.set_max_capacity(200) {
-            assert!(false);
-        }
+        assert!(encoder.set_max_capacity(200).is_ok());
         // test the change capacity instruction.
         test_sent_instructions(
             &mut encoder,
@@ -730,16 +710,13 @@ mod tests {
         );
 
         // insert "content-length: 1234
-        if let Err(_) = encoder.insert_with_name_literal(
+        let res = encoder.insert_with_name_literal(
             vec![
                 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
             ],
             vec![0x31, 0x32, 0x33, 0x34],
-        ) {
-            assert!(false);
-        } else {
-            assert!(true);
-        }
+        );
+        assert!(res.is_ok());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -752,11 +729,7 @@ mod tests {
             ],
         );
 
-        if let Err(_) = encoder.duplicate(0) {
-            assert!(false);
-        } else {
-            assert!(true);
-        }
+        assert!(encoder.duplicate(0).is_ok());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -963,16 +936,13 @@ mod tests {
         );
 
         // insert "content-length: 1234
-        if let Err(_) = encoder.insert_with_name_literal(
+        let res = encoder.insert_with_name_literal(
             vec![
                 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
             ],
             vec![0x31, 0x32, 0x33, 0x34],
-        ) {
-            assert!(false);
-        } else {
-            assert!(true);
-        }
+        );
+        assert!(res.is_ok());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -986,16 +956,13 @@ mod tests {
         );
 
         // insert "content-length: 12345 which will fail because the ntry in the table cannot be evicted.
-        if let Err(_) = encoder.insert_with_name_literal(
+        let res = encoder.insert_with_name_literal(
             vec![
                 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
             ],
             vec![0x31, 0x32, 0x33, 0x34, 0x35],
-        ) {
-            assert!(true);
-        } else {
-            assert!(false);
-        }
+        );
+        assert!(res.is_err());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -1009,23 +976,18 @@ mod tests {
         conn_s.stream_send(recv_stream_id, &[0x01]).unwrap();
         let out = conn_s.process(None, now());
         conn_c.process(out.dgram(), now());
-        if let Err(_) = encoder.read_instructions(&mut conn_c, recv_stream_id) {
-            assert!(false);
-        } else {
-            assert!(true);
-        }
+        assert!(encoder
+            .read_instructions(&mut conn_c, recv_stream_id)
+            .is_ok());
 
         // insert "content-length: 12345 again it will succeed.
-        if let Err(_) = encoder.insert_with_name_literal(
+        let res = encoder.insert_with_name_literal(
             vec![
                 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
             ],
             vec![0x31, 0x32, 0x33, 0x34, 0x35],
-        ) {
-            assert!(false);
-        } else {
-            assert!(true);
-        }
+        );
+        assert!(res.is_ok());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -1046,9 +1008,7 @@ mod tests {
     fn test_insertion_blocked_on_waiting_forheader_ack_or_stream_cancel(wait: u8) {
         let (mut encoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect(false);
 
-        if let Err(_) = encoder.set_max_capacity(60) {
-            assert!(false);
-        }
+        assert!(encoder.set_max_capacity(60).is_ok());
         // test the change capacity instruction.
         test_sent_instructions(
             &mut encoder,
@@ -1060,16 +1020,13 @@ mod tests {
         );
 
         // insert "content-length: 1234
-        if let Err(_) = encoder.insert_with_name_literal(
+        let res = encoder.insert_with_name_literal(
             vec![
                 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
             ],
             vec![0x31, 0x32, 0x33, 0x34],
-        ) {
-            assert!(false);
-        } else {
-            assert!(true);
-        }
+        );
+        assert!(res.is_ok());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -1086,17 +1043,13 @@ mod tests {
         let _ = conn_s.stream_send(recv_stream_id, &[0x01]);
         let out = conn_s.process(None, now());
         conn_c.process(out.dgram(), now());
-        if let Err(_) = encoder.read_instructions(&mut conn_c, recv_stream_id) {
-            assert!(false);
-        } else {
-            assert!(true);
-        }
+        assert!(encoder
+            .read_instructions(&mut conn_c, recv_stream_id)
+            .is_ok());
 
         // send a header block
-        let buf = encoder.encode_header_block(
-            &vec![(String::from("content-length"), String::from("1234"))],
-            1,
-        );
+        let buf = encoder
+            .encode_header_block(&[(String::from("content-length"), String::from("1234"))], 1);
         assert_eq!(&buf[..], &[0x02, 0x00, 0x80]);
         test_sent_instructions(
             &mut encoder,
@@ -1108,16 +1061,13 @@ mod tests {
         );
 
         // insert "content-length: 12345 which will fail because the entry in the table cannot be evicted.
-        if let Err(_) = encoder.insert_with_name_literal(
+        let res = encoder.insert_with_name_literal(
             vec![
                 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
             ],
             vec![0x31, 0x32, 0x33, 0x34, 0x35],
-        ) {
-            assert!(true);
-        } else {
-            assert!(false);
-        }
+        );
+        assert!(res.is_err());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
@@ -1138,19 +1088,18 @@ mod tests {
             let out = conn_s.process(None, now());
             conn_c.process(out.dgram(), now());
         }
-        if let Err(_) = encoder.read_instructions(&mut conn_c, recv_stream_id) {
-            assert!(false);
-        }
+        assert!(encoder
+            .read_instructions(&mut conn_c, recv_stream_id)
+            .is_ok());
 
         // insert "content-length: 12345 again it will succeed.
-        if let Err(_) = encoder.insert_with_name_literal(
+        let res = encoder.insert_with_name_literal(
             vec![
                 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
             ],
             vec![0x31, 0x32, 0x33, 0x34, 0x35],
-        ) {
-            assert!(false);
-        }
+        );
+        assert!(res.is_ok());
         test_sent_instructions(
             &mut encoder,
             &mut conn_c,
