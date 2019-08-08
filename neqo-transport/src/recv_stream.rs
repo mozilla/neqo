@@ -16,9 +16,9 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
+use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
 use crate::stream_id::StreamId;
-use crate::ConnectionEvents;
 use crate::{AppError, Error, Res};
 use neqo_common::qtrace;
 

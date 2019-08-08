@@ -16,10 +16,10 @@ pub struct StreamIndexes {
     pub local_max_stream_bidi: StreamIndex,
     pub local_next_stream_uni: StreamIndex,
     pub local_next_stream_bidi: StreamIndex,
-    pub peer_max_stream_uni: StreamIndex,
-    pub peer_max_stream_bidi: StreamIndex,
-    pub peer_next_stream_uni: StreamIndex,
-    pub peer_next_stream_bidi: StreamIndex,
+    pub remote_max_stream_uni: StreamIndex,
+    pub remote_max_stream_bidi: StreamIndex,
+    pub remote_next_stream_uni: StreamIndex,
+    pub remote_next_stream_bidi: StreamIndex,
 }
 
 impl StreamIndexes {
@@ -29,10 +29,10 @@ impl StreamIndexes {
             local_max_stream_uni: StreamIndex::new(LOCAL_STREAM_LIMIT_UNI),
             local_next_stream_uni: StreamIndex::new(0),
             local_next_stream_bidi: StreamIndex::new(0),
-            peer_max_stream_bidi: StreamIndex::new(0),
-            peer_max_stream_uni: StreamIndex::new(0),
-            peer_next_stream_uni: StreamIndex::new(0),
-            peer_next_stream_bidi: StreamIndex::new(0),
+            remote_max_stream_bidi: StreamIndex::new(0),
+            remote_max_stream_uni: StreamIndex::new(0),
+            remote_next_stream_uni: StreamIndex::new(0),
+            remote_next_stream_bidi: StreamIndex::new(0),
         }
     }
 }
@@ -81,7 +81,7 @@ impl StreamId {
         }
     }
 
-    pub fn is_peer_initiated(self, my_role: Role) -> bool {
+    pub fn is_remote_initiated(self, my_role: Role) -> bool {
         !self.is_self_initiated(my_role)
     }
 
@@ -90,7 +90,7 @@ impl StreamId {
     }
 
     pub fn is_recv_only(self, my_role: Role) -> bool {
-        self.is_uni() && self.is_peer_initiated(my_role)
+        self.is_uni() && self.is_remote_initiated(my_role)
     }
 
     pub fn as_u64(self) -> u64 {

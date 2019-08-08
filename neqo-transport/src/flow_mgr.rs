@@ -5,7 +5,7 @@
 // except according to those terms.
 
 // Tracks possibly-redundant flow control signals from other code and converts
-// into flow control frames needing to be sent to the peer.
+// into flow control frames needing to be sent to the remote.
 
 use std::cmp::max;
 use std::collections::HashMap;
@@ -72,7 +72,7 @@ impl FlowMgr {
 
     // -- frames scoped on stream --
 
-    /// Indicate to receiving peer the stream is reset
+    /// Indicate to receiving remote the stream is reset
     pub fn stream_reset(
         &mut self,
         stream_id: StreamId,
@@ -88,7 +88,7 @@ impl FlowMgr {
             .insert((stream_id, mem::discriminant(&frame)), frame);
     }
 
-    /// Indicate to sending peer we are no longer interested in the stream
+    /// Indicate to sending remote we are no longer interested in the stream
     pub fn stop_sending(&mut self, stream_id: StreamId, application_error_code: AppError) {
         let frame = Frame::StopSending {
             stream_id: stream_id.as_u64(),
@@ -98,7 +98,7 @@ impl FlowMgr {
             .insert((stream_id, mem::discriminant(&frame)), frame);
     }
 
-    /// Update sending peer with more credits
+    /// Update sending remote with more credits
     pub fn max_stream_data(&mut self, stream_id: StreamId, maximum_stream_data: u64) {
         let frame = Frame::MaxStreamData {
             stream_id: stream_id.as_u64(),
@@ -108,7 +108,7 @@ impl FlowMgr {
             .insert((stream_id, mem::discriminant(&frame)), frame);
     }
 
-    /// Indicate to receiving peer we need more credits
+    /// Indicate to receiving remote we need more credits
     pub fn stream_data_blocked(&mut self, stream_id: StreamId, stream_data_limit: u64) {
         let frame = Frame::StreamDataBlocked {
             stream_id: stream_id.as_u64(),
@@ -227,13 +227,13 @@ impl FlowMgr {
             }
             Frame::StreamsBlocked { stream_type, .. } => match stream_type {
                 StreamType::UniDi => {
-                    if indexes.peer_next_stream_uni >= indexes.peer_max_stream_uni {
-                        self.streams_blocked(indexes.peer_max_stream_uni, StreamType::UniDi);
+                    if indexes.remote_next_stream_uni >= indexes.remote_max_stream_uni {
+                        self.streams_blocked(indexes.remote_max_stream_uni, StreamType::UniDi);
                     }
                 }
                 StreamType::BiDi => {
-                    if indexes.peer_next_stream_bidi >= indexes.peer_max_stream_bidi {
-                        self.streams_blocked(indexes.peer_max_stream_bidi, StreamType::BiDi);
+                    if indexes.remote_next_stream_bidi >= indexes.remote_max_stream_bidi {
+                        self.streams_blocked(indexes.remote_max_stream_bidi, StreamType::BiDi);
                     }
                 }
             },
