@@ -14,9 +14,7 @@ use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
 
 use crate::{Error, Res};
-use std::cell::RefCell;
 use std::mem;
-use std::rc::Rc;
 
 #[derive(Debug)]
 struct Request {
@@ -128,7 +126,7 @@ pub struct RequestStreamClient {
     request: Request,
     response: Response,
     frame_reader: HFrameReader,
-    conn_events: Rc<RefCell<Http3Events>>,
+    conn_events: Http3Events,
 }
 
 impl RequestStreamClient {
@@ -139,7 +137,7 @@ impl RequestStreamClient {
         host: &str,
         path: &str,
         headers: &[(String, String)],
-        conn_events: Rc<RefCell<Http3Events>>,
+        conn_events: Http3Events,
     ) -> RequestStreamClient {
         qinfo!("Create a request stream_id={}", stream_id);
         RequestStreamClient {
@@ -249,7 +247,7 @@ impl RequestStreamClient {
                         mem::swap(&mut tmp, buf);
                         self.state = RequestStreamClientState::BlockedDecodingHeaders { buf: tmp };
                     } else {
-                        self.conn_events.borrow_mut().header_ready(self.stream_id);
+                        self.conn_events.header_ready(self.stream_id);
                         self.state = RequestStreamClientState::WaitingForData;
                     }
                 }
@@ -258,7 +256,7 @@ impl RequestStreamClient {
                     self.recv_frame(conn)?;
                     if self.state == RequestStreamClientState::ClosePending {
                         // Received 0 byte fin? Client must see this.
-                        self.conn_events.borrow_mut().data_readable(self.stream_id);
+                        self.conn_events.data_readable(self.stream_id);
                     }
                     if !self.frame_reader.done() {
                         break Ok(());
@@ -275,7 +273,7 @@ impl RequestStreamClient {
                     };
                 }
                 RequestStreamClientState::ReadingData { .. } => {
-                    self.conn_events.borrow_mut().data_readable(self.stream_id);
+                    self.conn_events.data_readable(self.stream_id);
                     break Ok(());
                 }
                 //                RequestStreamClientState::ReadingTrailers => break Ok(()),
@@ -321,7 +319,7 @@ impl RequestStreamClient {
     pub fn unblock(&mut self, decoder: &mut QPackDecoder) -> Res<()> {
         if let RequestStreamClientState::BlockedDecodingHeaders { ref mut buf } = self.state {
             self.response.headers = decoder.decode_header_block(buf, self.stream_id)?;
-            self.conn_events.borrow_mut().header_ready(self.stream_id);
+            self.conn_events.header_ready(self.stream_id);
             self.state = RequestStreamClientState::WaitingForData;
             if self.response.headers.is_none() {
                 panic!("We must not be blocked again!");
