@@ -69,9 +69,11 @@ impl ConnectionId {
         ConnectionId(v)
     }
 
+    // Apply a wee bit of greasing here in picking a length between 8 and 20 bytes long.
     pub fn generate_initial() -> ConnectionId {
         let mut v = [0u8; 1];
         rand::thread_rng().fill(&mut v[..]);
+        // Bias selection toward picking 8 (>50% of the time).
         let len: usize = ::std::cmp::max(8, 5 + (v[0] & (v[0] >> 4))).into();
         ConnectionId::generate(len)
     }
@@ -96,7 +98,7 @@ impl From<&[u8]> for ConnectionId {
 }
 
 pub trait ConnectionIdDecoder {
-    fn decode_cid(&self, _: &mut Decoder) -> Option<ConnectionId>;
+    fn decode_cid(&self, dec: &mut Decoder) -> Option<ConnectionId>;
 }
 
 #[derive(Default, Debug)]
