@@ -799,6 +799,7 @@ mod tests {
     use super::*;
     use neqo_transport::ConnectionEvent;
     use neqo_transport::StreamType;
+    use std::convert::TryInto;
     use test_fixture::*;
 
     fn connect() -> (QPackDecoder, Connection, Connection, u64, u64) {
@@ -825,28 +826,17 @@ mod tests {
         let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
 
         if capacity > 0 {
-            if let Err(_) = decoder.set_capacity(capacity) {
-                assert!(false);
-            }
+            assert!(decoder.set_capacity(capacity).is_ok());
         }
         // send an instruction
         let _ = conn_s.stream_send(recv_stream_id, instruction);
         let out = conn_s.process(None, now());
         conn_c.process(out.dgram(), now());
-        if let Err(e) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
-            match err {
-                Some(expected_err) => {
-                    assert_eq!(expected_err, e);
-                }
-                None => assert!(false),
-            };
-        } else {
-            match err {
-                None => assert!(true),
-                Some(e) => {
-                    assert!(false);
-                }
-            };
+
+        let res = decoder.read_instructions(&mut conn_c, recv_stream_id);
+        assert_eq!(err.is_some(), res.is_err());
+        if let Some(expected_err) = err {
+            assert_eq!(expected_err, res.unwrap_err());
         }
 
         decoder.send(&mut conn_c).unwrap();
@@ -855,18 +845,15 @@ mod tests {
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {
-            match e {
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, false);
-                    assert_eq!(buf[..amount], decoder_instruction[..]);
-                    found_instruction = true;
-                }
-                _ => {}
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                let mut buf = [0u8; 100];
+                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
+                assert_eq!(fin, false);
+                assert_eq!(buf[..amount], decoder_instruction[..]);
+                found_instruction = true;
             }
         }
-        assert_eq!(found_instruction, decoder_instruction.len() != 0);
+        assert_eq!(found_instruction, !decoder_instruction.is_empty());
 
         if check_capacity > 0 {
             assert_eq!(decoder.capacity(), check_capacity);
@@ -933,9 +920,7 @@ mod tests {
     fn test_duplicate() {
         let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
 
-        if let Err(_) = decoder.set_capacity(60) {
-            assert!(false);
-        }
+        assert!(decoder.set_capacity(60).is_ok());
 
         // send an instruction
         let _ = conn_s.stream_send(
@@ -947,16 +932,19 @@ mod tests {
         );
         let out = conn_s.process(None, now());
         conn_c.process(out.dgram(), now());
-        if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
-            assert!(false)
-        }
+        assert!(decoder
+            .read_instructions(&mut conn_c, recv_stream_id)
+            .is_ok());
 
         // send the second instruction, a duplicate instruction.
         let _ = conn_s.stream_send(recv_stream_id, &[0x00]);
         let out = conn_s.process(None, now());
         conn_c.process(out.dgram(), now());
-        if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
-            assert!(false)
+        if decoder
+            .read_instructions(&mut conn_c, recv_stream_id)
+            .is_err()
+        {
+            panic!("failed to read")
         }
 
         decoder.send(&mut conn_c).unwrap();
@@ -965,15 +953,12 @@ mod tests {
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {
-            match e {
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, false);
-                    assert_eq!(buf[..amount], [0x03, 0x02]);
-                    found_instruction = true;
-                }
-                _ => {}
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                let mut buf = [0u8; 100];
+                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
+                assert_eq!(fin, false);
+                assert_eq!(buf[..amount], [0x03, 0x02]);
+                found_instruction = true;
             }
         }
         assert!(found_instruction);
@@ -1045,32 +1030,23 @@ mod tests {
 
         let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
 
-        if let Err(_) = decoder.set_capacity(200) {
-            assert!(false);
-        }
-
-        let mut i = 0;
-        for t in &test_cases {
+        assert!(decoder.set_capacity(200).is_ok());
+        for (i, t) in test_cases.iter().enumerate() {
             // send an instruction
-            if t.encoder_inst.len() > 0 {
+            if !t.encoder_inst.is_empty() {
                 let _ = conn_s.stream_send(recv_stream_id, t.encoder_inst);
                 let out = conn_s.process(None, now());
                 conn_c.process(out.dgram(), now());
-                if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
-                    assert!(false);
-                }
+                assert!(decoder
+                    .read_instructions(&mut conn_c, recv_stream_id)
+                    .is_ok());
             }
 
-            if let Ok(headers) = decoder.decode_header_block(t.header_block, i) {
-                if let Some(h) = headers {
-                    assert_eq!(h, t.headers);
-                } else {
-                    assert!(false);
-                }
-            } else {
-                assert!(false);
-            }
-            i += 1;
+            let headers = decoder
+                .decode_header_block(t.header_block, i.try_into().unwrap())
+                .unwrap();
+            let h = headers.unwrap();
+            assert_eq!(h, t.headers);
         }
 
         // test header acks and the insert count increment command
@@ -1080,15 +1056,12 @@ mod tests {
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {
-            match e {
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, false);
-                    assert_eq!(buf[..amount], [0x03, 0x82, 0x83, 0x84, 0x1]);
-                    found_instruction = true;
-                }
-                _ => {}
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                let mut buf = [0u8; 100];
+                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
+                assert_eq!(fin, false);
+                assert_eq!(buf[..amount], [0x03, 0x82, 0x83, 0x84, 0x1]);
+                found_instruction = true;
             }
         }
         assert!(found_instruction);
@@ -1152,33 +1125,24 @@ mod tests {
 
         let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
 
-        if let Err(_) = decoder.set_capacity(200) {
-            assert!(false);
-        }
+        assert!(decoder.set_capacity(200).is_ok());
 
-        let mut i = 0;
-        for t in &test_cases {
+        for (i, t) in test_cases.iter().enumerate() {
             // send an instruction.
-            if t.encoder_inst.len() > 0 {
+            if !t.encoder_inst.is_empty() {
                 let _ = conn_s.stream_send(recv_stream_id, t.encoder_inst);
                 let out = conn_s.process(None, now());
                 conn_c.process(out.dgram(), now());
                 // read the instruction.
-                if let Err(_) = decoder.read_instructions(&mut conn_c, recv_stream_id) {
-                    assert!(false);
-                }
+                assert!(decoder
+                    .read_instructions(&mut conn_c, recv_stream_id)
+                    .is_ok());
             }
 
-            if let Ok(headers) = decoder.decode_header_block(t.header_block, i) {
-                if let Some(h) = headers {
-                    assert_eq!(h, t.headers);
-                } else {
-                    assert!(false);
-                }
-            } else {
-                assert!(false);
-            }
-            i += 1;
+            let headers = decoder
+                .decode_header_block(t.header_block, i.try_into().unwrap())
+                .unwrap();
+            assert_eq!(headers.unwrap(), t.headers);
         }
 
         // test header acks and the insert count increment command
@@ -1188,15 +1152,12 @@ mod tests {
         let mut found_instruction = false;
         let events = conn_s.events();
         for e in events {
-            match e {
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, false);
-                    assert_eq!(buf[..amount], [0x03, 0x82, 0x83, 0x84, 0x1]);
-                    found_instruction = true;
-                }
-                _ => {}
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                let mut buf = [0u8; 100];
+                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
+                assert_eq!(fin, false);
+                assert_eq!(buf[..amount], [0x03, 0x82, 0x83, 0x84, 0x1]);
+                found_instruction = true;
             }
         }
         assert!(found_instruction);
