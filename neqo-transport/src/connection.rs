@@ -751,7 +751,7 @@ impl Connection {
     /// spaces) and each containing 1+ frames.
     fn output_path(&mut self, path: &Path, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
-        let mut initial_only = false;
+        let mut needs_padding = false;
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -831,7 +831,13 @@ impl Connection {
             }
 
             qdebug!([self] "Need to send a packet");
-            initial_only = epoch == 0;
+            match epoch {
+                // Packets containing Initial packets need padding.
+                0 => needs_padding = true,
+                1 => (),
+                // ...unless they include higher epochs.
+                _ => needs_padding = false,
+            }
             let hdr = PacketHdr::new(
                 0,
                 match epoch {
@@ -876,7 +882,7 @@ impl Connection {
         }
 
         // Pad Initial packets sent by the client to 1200 bytes.
-        if self.role == Role::Client && initial_only {
+        if self.role == Role::Client && needs_padding {
             qdebug!([self] "pad Initial to 1200");
             out_bytes.resize(1200, 0);
         }
@@ -2006,6 +2012,8 @@ mod tests {
             .unwrap();
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
+        // 0-RTT packets on their own shouldn't be padded to 1200.
+        assert!(client_0rtt.as_dgram_ref().unwrap().len() < 1200);
 
         let server_hs = server.process(client_hs.dgram(), now());
         assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
@@ -2025,6 +2033,7 @@ mod tests {
 
     // Do a simple decode of the datagram to verify that it is coalesced.
     fn assert_coalesced_0rtt(payload: &[u8]) {
+        assert!(payload.len() >= 1200);
         let mut dec = Decoder::from(payload);
         let initial_type = dec.decode_byte().unwrap(); // Initial
         assert_eq!(initial_type & 0b11110000, 0b11000000);
