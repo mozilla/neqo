@@ -176,7 +176,7 @@ pub struct Http3Connection {
     streams_are_readable: BTreeSet<u64>,
     streams_have_data_to_send: BTreeSet<u64>,
     // Client only
-    events: Rc<RefCell<Http3Events>>,
+    events: Http3Events,
     request_streams_client: HashMap<u64, RequestStreamClient>,
     // Server only
     #[allow(clippy::type_complexity)]
@@ -221,7 +221,7 @@ impl Http3Connection {
             settings_received: false,
             streams_are_readable: BTreeSet::new(),
             streams_have_data_to_send: BTreeSet::new(),
-            events: Rc::new(RefCell::new(Http3Events::default())),
+            events: Http3Events::default(),
             handler,
         }
     }
@@ -290,14 +290,14 @@ impl Http3Connection {
             Http3State::Initializing => {
                 if self.conn.state().clone() == State::Connected {
                     self.state = Http3State::Connected;
-                    self.events.borrow_mut().connected();
+                    self.events.connected();
                     let res = self.initialize_http3_connection();
                     self.check_result(now, res);
                 }
             }
             Http3State::Connected => {
                 if let State::Closing { error, .. } = self.conn.state().clone() {
-                    self.events.borrow_mut().connection_closing();
+                    self.events.connection_closing();
                     self.state = Http3State::Closing(error.into());
                 }
             }
@@ -541,7 +541,7 @@ impl Http3Connection {
     }
 
     fn handle_stream_reset(&mut self, stream_id: u64, app_err: AppError) -> Res<()> {
-        self.events.borrow_mut().reset(stream_id, app_err);
+        self.events.reset(stream_id, app_err);
         Ok(())
     }
 
@@ -555,13 +555,13 @@ impl Http3Connection {
 
     fn handle_stream_creatable(&mut self, stream_type: StreamType) -> Res<()> {
         if stream_type == StreamType::BiDi {
-            self.events.borrow_mut().new_requests_creatable();
+            self.events.new_requests_creatable();
         }
         Ok(())
     }
 
     fn handle_connection_closed(&mut self, error_code: CloseError) -> Res<()> {
-        self.events.borrow_mut().connection_closed(error_code);
+        self.events.connection_closed(error_code);
         self.state = Http3State::Closed(error_code);
         Ok(())
     }
@@ -830,11 +830,7 @@ impl Http3Connection {
                 .iter()
                 .filter(|(id, _)| **id >= goaway_stream_id)
                 .map(|(id, _)| *id)
-                .for_each(|id| {
-                    self.events
-                        .borrow_mut()
-                        .reset(id, Error::RequestRejected.code())
-                });
+                .for_each(|id| self.events.reset(id, Error::RequestRejected.code()));
 
             // Actually remove (i.e. don't retain) these streams
             self.request_streams_client
@@ -844,8 +840,7 @@ impl Http3Connection {
             // filtered events and then swapping with the original set.
             let updated_events = self
                 .events
-                .borrow()
-                .events
+                .events()
                 .iter()
                 .filter(|evt| match evt {
                     Http3Event::HeaderReady { stream_id }
@@ -860,9 +855,9 @@ impl Http3Connection {
                 })
                 .cloned()
                 .collect::<BTreeSet<_>>();
-            mem::replace(&mut self.events.borrow_mut().events, updated_events);
+            self.events.replace(updated_events);
 
-            self.events.borrow_mut().goaway_received();
+            self.events.goaway_received();
             if self.state == Http3State::Connected {
                 self.state = Http3State::GoingAway;
             }
@@ -944,7 +939,7 @@ impl Http3Connection {
 
     pub fn events(&mut self) -> Vec<Http3Event> {
         // Turn it into a vec for simplicity's sake
-        self.events.borrow_mut().events().into_iter().collect()
+        self.events.events().into_iter().collect()
     }
 
     // SERVER SIDE ONLY FUNCTIONS
@@ -987,52 +982,59 @@ pub enum Http3Event {
     },
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Http3Events {
-    events: BTreeSet<Http3Event>,
+    events: Rc<RefCell<BTreeSet<Http3Event>>>,
 }
 
 impl Http3Events {
-    pub fn header_ready(&mut self, stream_id: u64) {
-        self.events.insert(Http3Event::HeaderReady { stream_id });
+    pub fn header_ready(&self, stream_id: u64) {
+        self.insert(Http3Event::HeaderReady { stream_id });
     }
 
-    pub fn data_readable(&mut self, stream_id: u64) {
-        self.events.insert(Http3Event::DataReadable { stream_id });
+    pub fn data_readable(&self, stream_id: u64) {
+        self.insert(Http3Event::DataReadable { stream_id });
     }
 
-    pub fn reset(&mut self, stream_id: u64, error: AppError) {
-        self.events.insert(Http3Event::Reset { stream_id, error });
+    pub fn reset(&self, stream_id: u64, error: AppError) {
+        self.insert(Http3Event::Reset { stream_id, error });
     }
 
-    pub fn new_push_stream(&mut self, stream_id: u64) {
-        self.events.insert(Http3Event::NewPushStream { stream_id });
+    pub fn new_push_stream(&self, stream_id: u64) {
+        self.insert(Http3Event::NewPushStream { stream_id });
     }
 
-    pub fn new_requests_creatable(&mut self) {
-        self.events.insert(Http3Event::RequestsCreatable);
+    pub fn new_requests_creatable(&self) {
+        self.insert(Http3Event::RequestsCreatable);
     }
 
-    pub fn connected(&mut self) {
-        self.events.insert(Http3Event::ConnectionConnected);
+    pub fn connected(&self) {
+        self.insert(Http3Event::ConnectionConnected);
     }
 
-    pub fn goaway_received(&mut self) {
-        self.events.insert(Http3Event::GoawayReceived);
+    pub fn goaway_received(&self) {
+        self.insert(Http3Event::GoawayReceived);
     }
 
-    pub fn connection_closing(&mut self) {
-        self.events.insert(Http3Event::ConnectionClosing);
+    pub fn connection_closing(&self) {
+        self.insert(Http3Event::ConnectionClosing);
     }
 
-    pub fn connection_closed(&mut self, error_code: CloseError) {
-        self.events.clear();
-        self.events
-            .insert(Http3Event::ConnectionClosed { error_code });
+    pub fn connection_closed(&self, error_code: CloseError) {
+        self.events.borrow_mut().clear();
+        self.insert(Http3Event::ConnectionClosed { error_code });
     }
 
-    pub fn events(&mut self) -> BTreeSet<Http3Event> {
-        mem::replace(&mut self.events, BTreeSet::new())
+    pub fn events(&self) -> BTreeSet<Http3Event> {
+        self.replace(BTreeSet::new())
+    }
+
+    pub fn replace(&self, new_events: BTreeSet<Http3Event>) -> BTreeSet<Http3Event> {
+        self.events.replace(new_events)
+    }
+
+    fn insert(&self, event: Http3Event) {
+        self.events.borrow_mut().insert(event);
     }
 }
 
