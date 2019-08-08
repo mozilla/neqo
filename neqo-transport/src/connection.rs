@@ -8,7 +8,7 @@
 
 #![allow(dead_code)]
 use std::cell::RefCell;
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::mem;
@@ -85,6 +85,28 @@ pub enum State {
         timeout: Instant,
     },
     Closed(ConnectionError),
+}
+
+// Implement Ord so that we can enforce monotonic state progression.
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if std::mem::discriminant(self) == std::mem::discriminant(other) {
+            return Some(Ordering::Equal);
+        }
+        Some(match (self, other) {
+            (State::Init, _) => Ordering::Less,
+            (_, State::Init) => Ordering::Greater,
+            (State::WaitInitial, _) => Ordering::Less,
+            (_, State::WaitInitial) => Ordering::Greater,
+            (State::Handshaking, _) => Ordering::Less,
+            (_, State::Handshaking) => Ordering::Greater,
+            (State::Connected, _) => Ordering::Less,
+            (_, State::Connected) => Ordering::Greater,
+            (State::Closing { .. }, _) => Ordering::Less,
+            (_, State::Closing { .. }) => Ordering::Greater,
+            (State::Closed(_), _) => unreachable!(),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -397,12 +419,16 @@ impl Connection {
             let msg = format!("{:?}", v);
             #[cfg(not(debug_assertions))]
             let msg = String::from("");
-            self.set_state(State::Closing {
-                error: ConnectionError::Transport(v.clone()),
-                frame_type,
-                msg,
-                timeout: self.get_closing_period_time(now),
-            });
+            if let State::Closed(err) | State::Closing { error: err, .. } = &self.state {
+                qwarn!([self] "Closing again after error {:?}", err);
+            } else {
+                self.set_state(State::Closing {
+                    error: ConnectionError::Transport(v.clone()),
+                    frame_type,
+                    msg,
+                    timeout: self.get_closing_period_time(now),
+                });
+            }
         }
         res
     }
