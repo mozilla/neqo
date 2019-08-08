@@ -2095,7 +2095,7 @@ mod tests {
         hconn.process(out.dgram(), now());
 
         // Read first frame
-        match hconn.events().into_iter().skip(1).next().unwrap() {
+        match hconn.events().into_iter().nth(1).unwrap() {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
@@ -2116,15 +2116,9 @@ mod tests {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
-                match hconn.read_data(now(), stream_id, &mut buf) {
-                    Err(_e) => {
-                        assert!(false);
-                    }
-                    Ok((len, fin)) => {
-                        assert_eq!(&buf[..len], &[0x64, 0x65, 0x66]);
-                        assert_eq!(fin, true);
-                    }
-                }
+                let (len, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
+                assert_eq!(&buf[..len], &[0x64, 0x65, 0x66]);
+                assert_eq!(fin, true);
             }
             x => {
                 eprintln!("event {:?}", x);
