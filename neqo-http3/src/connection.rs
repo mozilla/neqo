@@ -228,8 +228,8 @@ impl Http3Connection {
         }
     }
 
-    pub fn get_sec_info(&self) -> Option<&SecretAgentInfo> {
-        self.conn.get_sec_info()
+    pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
+        self.conn.tls_info()
     }
 
     /// Get the peer's certificate.
@@ -335,9 +335,7 @@ impl Http3Connection {
         self.check_state_change(now);
         if self.state == Http3State::Initializing {
             let res = self.check_connection_events();
-            if self.check_result(now, res) {
-                return;
-            }
+            let _ = self.check_result(now, res);
         }
     }
 
@@ -1113,10 +1111,7 @@ mod tests {
             let out = neqo_trans_conn.process(out.dgram(), now());
             let _ = hconn.process(out.dgram(), now());
             let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
-            assert!(neqo_trans_conn
-                .events()
-                .into_iter()
-                .any(authentication_needed));
+            assert!(neqo_trans_conn.events().any(authentication_needed));
             neqo_trans_conn.authenticated(0, now());
             let out = neqo_trans_conn.process(None, now());
             let out = hconn.process(out.dgram(), now());

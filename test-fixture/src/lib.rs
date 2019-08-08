@@ -70,18 +70,26 @@ pub fn default_server() -> Connection {
         .expect("create a default server")
 }
 
+/// If state is AuthenticationNeeded call authenticated(). This funstion will consume
+/// all outstanding events on the connection.
+pub fn maybe_autenticate(conn: &mut Connection) -> bool {
+    let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+    if conn.events().any(authentication_needed) {
+        conn.authenticated(0, now());
+        return true;
+    }
+    false
+}
+
 pub fn handshake(client: &mut Connection, server: &mut Connection) {
     let mut a = client;
     let mut b = server;
     let mut datagram = None;
     let is_done = |c: &Connection| matches!(c.state(), State::Connected | State::Closing { .. } | State::Closed(..));
-    let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
     while !is_done(a) || !is_done(b) {
         let d = a.process(datagram, now());
         datagram = d.dgram();
-        if a.events().any(authentication_needed) {
-            a.authenticated(0, now());
-        }
+        let _ = maybe_autenticate(a);
         mem::swap(&mut a, &mut b);
     }
 }
