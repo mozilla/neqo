@@ -340,7 +340,7 @@ pub struct RecvStream {
     stream_id: StreamId,
     state: RecvStreamState,
     flow_mgr: Rc<RefCell<FlowMgr>>,
-    conn_events: Rc<RefCell<ConnectionEvents>>,
+    conn_events: ConnectionEvents,
 }
 
 impl RecvStream {
@@ -348,7 +348,7 @@ impl RecvStream {
         stream_id: StreamId,
         max_stream_data: u64,
         flow_mgr: Rc<RefCell<FlowMgr>>,
-        conn_events: Rc<RefCell<ConnectionEvents>>,
+        conn_events: ConnectionEvents,
     ) -> RecvStream {
         RecvStream {
             stream_id,
@@ -419,9 +419,7 @@ impl RecvStream {
         }
 
         if self.data_ready() || self.needs_to_inform_app_about_fin() {
-            self.conn_events
-                .borrow_mut()
-                .recv_stream_readable(self.stream_id)
+            self.conn_events.recv_stream_readable(self.stream_id)
         }
 
         Ok(())
@@ -431,7 +429,6 @@ impl RecvStream {
         match self.state {
             RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
                 self.conn_events
-                    .borrow_mut()
                     .recv_stream_reset(self.stream_id, application_error_code);
                 self.state.transition(RecvStreamState::ResetRecvd);
             }
@@ -527,7 +524,7 @@ mod tests {
     #[test]
     fn test_stream_rx() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+        let conn_events = ConnectionEvents::default();
 
         let mut s = RecvStream::new(567.into(), 1024, flow_mgr.clone(), conn_events.clone());
 
@@ -577,9 +574,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cognitive_complexity)]
     fn test_stream_rx_dedupe() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+        let conn_events = ConnectionEvents::default();
 
         let mut s = RecvStream::new(3.into(), 1024, flow_mgr.clone(), conn_events.clone());
 
@@ -668,7 +666,7 @@ mod tests {
     #[test]
     fn test_stream_flowc_update() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+        let conn_events = ConnectionEvents::default();
 
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 
@@ -704,7 +702,7 @@ mod tests {
     #[test]
     fn test_stream_max_stream_data() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+        let conn_events = ConnectionEvents::default();
 
         let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
 

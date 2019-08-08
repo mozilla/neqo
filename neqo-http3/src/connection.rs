@@ -176,7 +176,7 @@ pub struct Http3Connection {
     streams_are_readable: BTreeSet<u64>,
     streams_have_data_to_send: BTreeSet<u64>,
     // Client only
-    events: Rc<RefCell<Http3Events>>,
+    events: Http3Events,
     request_streams_client: HashMap<u64, RequestStreamClient>,
     // Server only
     #[allow(clippy::type_complexity)]
@@ -221,7 +221,7 @@ impl Http3Connection {
             settings_received: false,
             streams_are_readable: BTreeSet::new(),
             streams_have_data_to_send: BTreeSet::new(),
-            events: Rc::new(RefCell::new(Http3Events::default())),
+            events: Http3Events::default(),
             handler,
         }
     }
@@ -290,14 +290,14 @@ impl Http3Connection {
             Http3State::Initializing => {
                 if self.conn.state().clone() == State::Connected {
                     self.state = Http3State::Connected;
-                    self.events.borrow_mut().connected();
+                    self.events.connected();
                     let res = self.initialize_http3_connection();
                     self.check_result(now, res);
                 }
             }
             Http3State::Connected => {
                 if let State::Closing { error, .. } = self.conn.state().clone() {
-                    self.events.borrow_mut().connection_closing();
+                    self.events.connection_closing();
                     self.state = Http3State::Closing(error.into());
                 }
             }
@@ -542,7 +542,7 @@ impl Http3Connection {
     }
 
     fn handle_stream_reset(&mut self, stream_id: u64, app_err: AppError) -> Res<()> {
-        self.events.borrow_mut().reset(stream_id, app_err);
+        self.events.reset(stream_id, app_err);
         Ok(())
     }
 
@@ -556,13 +556,13 @@ impl Http3Connection {
 
     fn handle_stream_creatable(&mut self, stream_type: StreamType) -> Res<()> {
         if stream_type == StreamType::BiDi {
-            self.events.borrow_mut().new_requests_creatable();
+            self.events.new_requests_creatable();
         }
         Ok(())
     }
 
     fn handle_connection_closed(&mut self, error_code: CloseError) -> Res<()> {
-        self.events.borrow_mut().connection_closed(error_code);
+        self.events.connection_closed(error_code);
         self.state = Http3State::Closed(error_code);
         Ok(())
     }
@@ -831,11 +831,7 @@ impl Http3Connection {
                 .iter()
                 .filter(|(id, _)| **id >= goaway_stream_id)
                 .map(|(id, _)| *id)
-                .for_each(|id| {
-                    self.events
-                        .borrow_mut()
-                        .reset(id, Error::RequestRejected.code())
-                });
+                .for_each(|id| self.events.reset(id, Error::RequestRejected.code()));
 
             // Actually remove (i.e. don't retain) these streams
             self.request_streams_client
@@ -845,8 +841,7 @@ impl Http3Connection {
             // filtered events and then swapping with the original set.
             let updated_events = self
                 .events
-                .borrow()
-                .events
+                .events()
                 .iter()
                 .filter(|evt| match evt {
                     Http3Event::HeaderReady { stream_id }
@@ -861,9 +856,9 @@ impl Http3Connection {
                 })
                 .cloned()
                 .collect::<BTreeSet<_>>();
-            mem::replace(&mut self.events.borrow_mut().events, updated_events);
+            self.events.replace(updated_events);
 
-            self.events.borrow_mut().goaway_received();
+            self.events.goaway_received();
             if self.state == Http3State::Connected {
                 self.state = Http3State::GoingAway;
             }
@@ -919,9 +914,13 @@ impl Http3Connection {
                 Ok((amount, fin)) => {
                     if fin {
                         self.request_streams_client.remove(&stream_id);
-                    }
-                    if amount > 0 && !fin {
-                        self.streams_are_readable.insert(stream_id);
+                    } else if amount > 0 {
+                        // Directly call receive instead of adding to
+                        // streams_are_readable here. This allows the app to
+                        // pick up subsequent already-received data frames in
+                        // the stream even if no new packets arrive to cause
+                        // process_http3() to run.
+                        cs.receive(&mut self.conn, &mut self.qpack_decoder)?;
                     }
                     Ok((amount, fin))
                 }
@@ -941,7 +940,7 @@ impl Http3Connection {
 
     pub fn events(&mut self) -> Vec<Http3Event> {
         // Turn it into a vec for simplicity's sake
-        self.events.borrow_mut().events().into_iter().collect()
+        self.events.events().into_iter().collect()
     }
 
     // SERVER SIDE ONLY FUNCTIONS
@@ -984,52 +983,59 @@ pub enum Http3Event {
     },
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Http3Events {
-    events: BTreeSet<Http3Event>,
+    events: Rc<RefCell<BTreeSet<Http3Event>>>,
 }
 
 impl Http3Events {
-    pub fn header_ready(&mut self, stream_id: u64) {
-        self.events.insert(Http3Event::HeaderReady { stream_id });
+    pub fn header_ready(&self, stream_id: u64) {
+        self.insert(Http3Event::HeaderReady { stream_id });
     }
 
-    pub fn data_readable(&mut self, stream_id: u64) {
-        self.events.insert(Http3Event::DataReadable { stream_id });
+    pub fn data_readable(&self, stream_id: u64) {
+        self.insert(Http3Event::DataReadable { stream_id });
     }
 
-    pub fn reset(&mut self, stream_id: u64, error: AppError) {
-        self.events.insert(Http3Event::Reset { stream_id, error });
+    pub fn reset(&self, stream_id: u64, error: AppError) {
+        self.insert(Http3Event::Reset { stream_id, error });
     }
 
-    pub fn new_push_stream(&mut self, stream_id: u64) {
-        self.events.insert(Http3Event::NewPushStream { stream_id });
+    pub fn new_push_stream(&self, stream_id: u64) {
+        self.insert(Http3Event::NewPushStream { stream_id });
     }
 
-    pub fn new_requests_creatable(&mut self) {
-        self.events.insert(Http3Event::RequestsCreatable);
+    pub fn new_requests_creatable(&self) {
+        self.insert(Http3Event::RequestsCreatable);
     }
 
-    pub fn connected(&mut self) {
-        self.events.insert(Http3Event::ConnectionConnected);
+    pub fn connected(&self) {
+        self.insert(Http3Event::ConnectionConnected);
     }
 
-    pub fn goaway_received(&mut self) {
-        self.events.insert(Http3Event::GoawayReceived);
+    pub fn goaway_received(&self) {
+        self.insert(Http3Event::GoawayReceived);
     }
 
-    pub fn connection_closing(&mut self) {
-        self.events.insert(Http3Event::ConnectionClosing);
+    pub fn connection_closing(&self) {
+        self.insert(Http3Event::ConnectionClosing);
     }
 
-    pub fn connection_closed(&mut self, error_code: CloseError) {
-        self.events.clear();
-        self.events
-            .insert(Http3Event::ConnectionClosed { error_code });
+    pub fn connection_closed(&self, error_code: CloseError) {
+        self.events.borrow_mut().clear();
+        self.insert(Http3Event::ConnectionClosed { error_code });
     }
 
-    pub fn events(&mut self) -> BTreeSet<Http3Event> {
-        mem::replace(&mut self.events, BTreeSet::new())
+    pub fn events(&self) -> BTreeSet<Http3Event> {
+        self.replace(BTreeSet::new())
+    }
+
+    pub fn replace(&self, new_events: BTreeSet<Http3Event>) -> BTreeSet<Http3Event> {
+        self.events.replace(new_events)
+    }
+
+    fn insert(&self, event: Http3Event) {
+        self.events.borrow_mut().insert(event);
     }
 }
 
@@ -1048,6 +1054,7 @@ mod tests {
     }
 
     // Start a client/server and check setting frame.
+    #[allow(clippy::cognitive_complexity)]
     fn connect(client: bool) -> (Http3Connection, Connection) {
         // Create a client/server and connect it to a server/client.
         // We will have a http3 server/client on one side and a neqo_transport
@@ -1055,15 +1062,17 @@ mod tests {
         // side sends and also to simulate an incorrectly behaving http3
         // server/client.
 
-        let mut hconn;
-        let mut neqo_trans_conn;
-        if client {
-            hconn = Http3Connection::new(default_client(), 100, 100, None);
-            neqo_trans_conn = default_server();
+        let (mut hconn, mut neqo_trans_conn) = if client {
+            (
+                Http3Connection::new(default_client(), 100, 100, None),
+                default_server(),
+            )
         } else {
-            hconn = Http3Connection::new(default_server(), 100, 100, None);
-            neqo_trans_conn = default_client();
-        }
+            (
+                Http3Connection::new(default_server(), 100, 100, None),
+                default_client(),
+            )
+        };
         if client {
             assert_eq!(hconn.state(), Http3State::Initializing);
             let out = hconn.process(None, now());
@@ -1076,8 +1085,8 @@ mod tests {
             let http_events = hconn.events();
             for e in http_events {
                 match e {
-                    Http3Event::ConnectionConnected => assert!(true),
-                    _ => assert!(false),
+                    Http3Event::ConnectionConnected => (),
+                    _ => panic!("events other than connected found"),
                 }
             }
             assert_eq!(hconn.state(), Http3State::Connected);
@@ -1131,13 +1140,13 @@ mod tests {
                         assert_eq!(amount, 1);
                         assert_eq!(buf[..1], [0x3]);
                     } else {
-                        assert!(false, "unexpected event");
+                        panic!("unexpected event");
                     }
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
                     assert!((stream_id == 2) || (stream_id == 6) || (stream_id == 10));
                 }
-                _ => assert!(false, "unexpected event"),
+                _ => panic!("unexpected event"),
             }
         }
         assert!(connected);
@@ -1324,10 +1333,8 @@ mod tests {
 
         // create a stream with unknown type.
         let new_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        let _ = neqo_trans_conn.stream_send(
-            new_stream_id,
-            &vec![0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0],
-        );
+        let _ =
+            neqo_trans_conn.stream_send(new_stream_id, &[0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
         let out = neqo_trans_conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
         neqo_trans_conn.process(out.dgram(), now());
@@ -1336,16 +1343,14 @@ mod tests {
         let events = neqo_trans_conn.events();
         let mut stop_sending_event_found = false;
         for e in events {
-            match e {
-                ConnectionEvent::SendStreamStopSending {
-                    stream_id,
-                    app_error,
-                } => {
-                    stop_sending_event_found = true;
-                    assert_eq!(stream_id, new_stream_id);
-                    assert_eq!(app_error, Error::UnknownStreamType.code());
-                }
-                _ => {}
+            if let ConnectionEvent::SendStreamStopSending {
+                stream_id,
+                app_error,
+            } = e
+            {
+                stop_sending_event_found = true;
+                assert_eq!(stream_id, new_stream_id);
+                assert_eq!(app_error, Error::UnknownStreamType.code());
             }
         }
         assert!(stop_sending_event_found);
@@ -1360,10 +1365,8 @@ mod tests {
 
         // create a stream with unknown type.
         let new_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        let _ = neqo_trans_conn.stream_send(
-            new_stream_id,
-            &vec![0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0],
-        );
+        let _ =
+            neqo_trans_conn.stream_send(new_stream_id, &[0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
         let out = neqo_trans_conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
         neqo_trans_conn.process(out.dgram(), now());
@@ -1372,16 +1375,14 @@ mod tests {
         let events = neqo_trans_conn.events();
         let mut stop_sending_event_found = false;
         for e in events {
-            match e {
-                ConnectionEvent::SendStreamStopSending {
-                    stream_id,
-                    app_error,
-                } => {
-                    stop_sending_event_found = true;
-                    assert_eq!(stream_id, new_stream_id);
-                    assert_eq!(app_error, Error::UnknownStreamType.code());
-                }
-                _ => {}
+            if let ConnectionEvent::SendStreamStopSending {
+                stream_id,
+                app_error,
+            } = e
+            {
+                stop_sending_event_found = true;
+                assert_eq!(stream_id, new_stream_id);
+                assert_eq!(app_error, Error::UnknownStreamType.code());
             }
         }
         assert!(stop_sending_event_found);
@@ -1395,7 +1396,7 @@ mod tests {
 
         // create a push stream.
         let push_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        let _ = neqo_trans_conn.stream_send(push_stream_id, &vec![0x1]);
+        let _ = neqo_trans_conn.stream_send(push_stream_id, &[0x1]);
         let out = neqo_trans_conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
         neqo_trans_conn.process(out.dgram(), now());
@@ -1404,16 +1405,14 @@ mod tests {
         let events = neqo_trans_conn.events();
         let mut stop_sending_event_found = false;
         for e in events {
-            match e {
-                ConnectionEvent::SendStreamStopSending {
-                    stream_id,
-                    app_error,
-                } => {
-                    stop_sending_event_found = true;
-                    assert_eq!(stream_id, push_stream_id);
-                    assert_eq!(app_error, Error::PushRefused.code());
-                }
-                _ => {}
+            if let ConnectionEvent::SendStreamStopSending {
+                stream_id,
+                app_error,
+            } = e
+            {
+                stop_sending_event_found = true;
+                assert_eq!(stream_id, push_stream_id);
+                assert_eq!(app_error, Error::PushRefused.code());
             }
         }
         assert!(stop_sending_event_found);
@@ -1427,7 +1426,7 @@ mod tests {
 
         // create a push stream.
         let push_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        let _ = neqo_trans_conn.stream_send(push_stream_id, &vec![0x1]);
+        let _ = neqo_trans_conn.stream_send(push_stream_id, &[0x1]);
         let out = neqo_trans_conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
         neqo_trans_conn.process(out.dgram(), now());
@@ -1436,16 +1435,14 @@ mod tests {
         let events = neqo_trans_conn.events();
         let mut stop_sending_event_found = false;
         for e in events {
-            match e {
-                ConnectionEvent::SendStreamStopSending {
-                    stream_id,
-                    app_error,
-                } => {
-                    stop_sending_event_found = true;
-                    assert_eq!(stream_id, push_stream_id);
-                    assert_eq!(app_error, Error::WrongStreamDirection.code());
-                }
-                _ => {}
+            if let ConnectionEvent::SendStreamStopSending {
+                stream_id,
+                app_error,
+            } = e
+            {
+                stop_sending_event_found = true;
+                assert_eq!(stream_id, push_stream_id);
+                assert_eq!(app_error, Error::WrongStreamDirection.code());
             }
         }
         assert!(stop_sending_event_found);
@@ -1473,15 +1470,13 @@ mod tests {
         // find the new request/response stream and send frame v on it.
         let events = neqo_trans_conn.events();
         for e in events {
-            match e {
-                ConnectionEvent::NewStream {
-                    stream_id,
-                    stream_type,
-                } => {
-                    assert_eq!(stream_type, StreamType::BiDi);
-                    let _ = neqo_trans_conn.stream_send(stream_id, v);
-                }
-                _ => {}
+            if let ConnectionEvent::NewStream {
+                stream_id,
+                stream_type,
+            } = e
+            {
+                assert_eq!(stream_type, StreamType::BiDi);
+                let _ = neqo_trans_conn.stream_send(stream_id, v);
             }
         }
         // Generate packet with the above bad h3 input
@@ -1493,16 +1488,14 @@ mod tests {
 
         let mut stop_sending_event_found = false;
         for e in neqo_trans_conn.events() {
-            match e {
-                ConnectionEvent::SendStreamStopSending {
-                    stream_id,
-                    app_error,
-                } => {
-                    assert_eq!(stream_id, 0);
-                    stop_sending_event_found = true;
-                    assert_eq!(app_error, err.code());
-                }
-                _ => {}
+            if let ConnectionEvent::SendStreamStopSending {
+                stream_id,
+                app_error,
+            } = e
+            {
+                assert_eq!(stream_id, 0);
+                stop_sending_event_found = true;
+                assert_eq!(app_error, err.code());
             }
         }
         assert!(stop_sending_event_found);
@@ -1512,15 +1505,9 @@ mod tests {
         hconn.conn.process(out.dgram(), now());
         let mut reset_event_found = false;
         for e in hconn.conn.events() {
-            match e {
-                ConnectionEvent::RecvStreamReset {
-                    stream_id: _,
-                    app_error,
-                } => {
-                    reset_event_found = true;
-                    assert_eq!(app_error, err.code());
-                }
-                _ => {}
+            if let ConnectionEvent::RecvStreamReset { app_error, .. } = e {
+                reset_event_found = true;
+                assert_eq!(app_error, err.code());
             }
         }
         assert!(reset_event_found);
@@ -1529,30 +1516,27 @@ mod tests {
 
     #[test]
     fn test_cancel_push_frame_on_request_stream() {
-        test_wrong_frame_on_request_stream(&vec![0x3, 0x1, 0x5], Error::WrongStream);
+        test_wrong_frame_on_request_stream(&[0x3, 0x1, 0x5], Error::WrongStream);
     }
 
     #[test]
     fn test_settings_frame_on_request_stream() {
-        test_wrong_frame_on_request_stream(&vec![0x4, 0x4, 0x6, 0x4, 0x8, 0x4], Error::WrongStream);
+        test_wrong_frame_on_request_stream(&[0x4, 0x4, 0x6, 0x4, 0x8, 0x4], Error::WrongStream);
     }
 
     #[test]
     fn test_goaway_frame_on_request_stream() {
-        test_wrong_frame_on_request_stream(&vec![0x7, 0x1, 0x5], Error::WrongStream);
+        test_wrong_frame_on_request_stream(&[0x7, 0x1, 0x5], Error::WrongStream);
     }
 
     #[test]
     fn test_max_push_id_frame_on_request_stream() {
-        test_wrong_frame_on_request_stream(&vec![0xd, 0x1, 0x5], Error::WrongStream);
+        test_wrong_frame_on_request_stream(&[0xd, 0x1, 0x5], Error::WrongStream);
     }
 
     #[test]
     fn test_priority_frame_on_client_on_request_stream() {
-        test_wrong_frame_on_request_stream(
-            &vec![0x2, 0x4, 0xf, 0x2, 0x1, 0x3],
-            Error::UnexpectedFrame,
-        );
+        test_wrong_frame_on_request_stream(&[0x2, 0x4, 0xf, 0x2, 0x1, 0x3], Error::UnexpectedFrame);
     }
 
     // Test reading of a slowly streamed frame. bytes are received one by one
@@ -1623,6 +1607,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cognitive_complexity)]
     fn fetch() {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
@@ -1724,25 +1709,21 @@ mod tests {
                     assert_eq!(amount, 3);
                     assert_eq!(buf[..3], [0x64, 0x65, 0x66]);
                 }
-                _ => {
-                    assert! {false}
-                }
+                _ => panic!("unexpected event"),
             }
         }
 
         // after this stream will be removed from hcoon. We will check this by trying to read
         // from the stream and that should fail.
         let mut buf = [0u8; 100];
-        if let Err(e) = hconn.read_data(now(), request_stream_id, &mut buf) {
-            assert_eq!(
-                e,
-                Error::TransportError(neqo_transport::Error::InvalidStreamId)
-            );
-        } else {
-            assert!(false);
-        }
+        let res = hconn.read_data(now(), request_stream_id, &mut buf);
+        assert!(res.is_err());
+        assert_eq!(
+            res.unwrap_err(),
+            Error::TransportError(neqo_transport::Error::InvalidStreamId)
+        );
 
-        hconn.close(now(), 0, String::from(""));
+        hconn.close(now(), 0, "");
     }
 
     fn test_incomplet_frame(res: &[u8], error: Error) {
@@ -1798,18 +1779,12 @@ mod tests {
 
         let http_events = hconn.events();
         for e in http_events {
-            match e {
-                Http3Event::DataReadable { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    match hconn.read_data(now(), stream_id, &mut buf) {
-                        Err(e) => {
-                            assert_eq!(e, Error::MalformedFrame(H3_FRAME_TYPE_DATA));
-                        }
-                        Ok(_) => assert!(false),
-                    }
-                }
-                _ => {}
+            if let Http3Event::DataReadable { stream_id } = e {
+                assert_eq!(stream_id, request_stream_id);
+                let mut buf = [0u8; 100];
+                let res = hconn.read_data(now(), stream_id, &mut buf);
+                assert!(res.is_err());
+                assert_eq!(res.unwrap_err(), Error::MalformedFrame(H3_FRAME_TYPE_DATA));
             }
         }
         assert_closed(&hconn, error);
@@ -1929,7 +1904,7 @@ mod tests {
 
         let mut stream_reset = false;
         let mut http_events = hconn.events();
-        while http_events.len() > 0 {
+        while !http_events.is_empty() {
             for e in http_events {
                 match e {
                     Http3Event::HeaderReady { stream_id } => {
@@ -2027,21 +2002,13 @@ mod tests {
         // Recv some good data wo fin
         let http_events = hconn.events();
         for e in http_events {
-            match e {
-                Http3Event::DataReadable { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    match hconn.read_data(now(), stream_id, &mut buf) {
-                        Err(_e) => {
-                            assert!(false);
-                        }
-                        Ok((len, fin)) => {
-                            assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
-                            assert_eq!(fin, false);
-                        }
-                    }
-                }
-                _ => {}
+            if let Http3Event::DataReadable { stream_id } = e {
+                assert_eq!(stream_id, request_stream_id);
+                let mut buf = [0u8; 100];
+                let res = hconn.read_data(now(), stream_id, &mut buf);
+                let (len, fin) = res.expect("should have data");
+                assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
+                assert_eq!(fin, false);
             }
         }
 
@@ -2051,21 +2018,116 @@ mod tests {
         hconn.process(out.dgram(), now());
 
         // fin wo data should generate DataReadable
+        let e = hconn.events().into_iter().next().unwrap();
+        if let Http3Event::DataReadable { stream_id } = e {
+            assert_eq!(stream_id, request_stream_id);
+            let mut buf = [0u8; 100];
+            let res = hconn.read_data(now(), stream_id, &mut buf);
+            let (len, fin) = res.expect("should read");
+            assert_eq!(0, len);
+            assert_eq!(fin, true);
+        } else {
+            panic!("wrong event type");
+        }
+
+        // Stream should now be closed and gone
+        let mut buf = [0u8; 100];
+        assert_eq!(
+            hconn.read_data(now(), 0, &mut buf),
+            Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId
+            ))
+        );
+    }
+
+    #[test]
+    fn test_multiple_data_frames() {
+        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let request_stream_id = hconn
+            .fetch(
+                &"GET".to_string(),
+                &"https".to_string(),
+                &"something.com".to_string(),
+                &"/".to_string(),
+                &Vec::<(String, String)>::new(),
+            )
+            .unwrap();
+        assert_eq!(request_stream_id, 0);
+
+        let out = hconn.process(None, now());
+        neqo_trans_conn.process(out.dgram(), now());
+
+        // find the new request/response stream and send frame v on it.
+        let events = neqo_trans_conn.events();
+        for e in events {
+            match e {
+                ConnectionEvent::NewStream {
+                    stream_id,
+                    stream_type,
+                } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    assert_eq!(stream_type, StreamType::BiDi);
+                }
+                ConnectionEvent::RecvStreamReadable { stream_id } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    let mut buf = [0u8; 100];
+                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, true);
+                    assert_eq!(amount, 18);
+                    assert_eq!(
+                        buf[..18],
+                        [
+                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
+                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
+                        ]
+                    );
+
+                    // Send two data frames with fin
+                    let data = &[
+                        // headers
+                        0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
+                        // 2 complete data frames
+                        0x0, 0x3, 0x61, 0x62, 0x63, 0x0, 0x3, 0x64, 0x65, 0x66,
+                    ];
+                    let _ = neqo_trans_conn.stream_send(stream_id, data);
+                    neqo_trans_conn.stream_close_send(0).unwrap();
+                }
+                _ => {}
+            }
+        }
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
+
+        // Read first frame
+        match hconn.events().into_iter().nth(1).unwrap() {
+            Http3Event::DataReadable { stream_id } => {
+                assert_eq!(stream_id, request_stream_id);
+                let mut buf = [0u8; 100];
+                let (len, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
+                assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
+                assert_eq!(fin, false);
+            }
+            x => {
+                eprintln!("event {:?}", x);
+                panic!()
+            }
+        }
+
+        // Second frame isn't read in first read_data(), but it generates
+        // another DataReadable event so that another read_data() will happen to
+        // pick it up.
         match hconn.events().into_iter().next().unwrap() {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
-                match hconn.read_data(now(), stream_id, &mut buf) {
-                    Err(_e) => {
-                        assert!(false);
-                    }
-                    Ok((len, fin)) => {
-                        assert_eq!(0, len);
-                        assert_eq!(fin, true);
-                    }
-                }
+                let (len, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
+                assert_eq!(&buf[..len], &[0x64, 0x65, 0x66]);
+                assert_eq!(fin, true);
             }
-            _ => {}
+            x => {
+                eprintln!("event {:?}", x);
+                panic!()
+            }
         }
 
         // Stream should now be closed and gone

@@ -181,7 +181,7 @@ mod test {
     #[test]
     fn convert_stable() {
         let now = Time::from(Instant::now());
-        let pr: PRTime = now.clone().try_into().expect("should convert successfully");
+        let pr: PRTime = now.try_into().expect("should convert successfully");
         println!("now {:?}", now);
         println!("pr {:?}", pr);
         println!("Time::try_from(pr) {:?}", Time::try_from(pr));

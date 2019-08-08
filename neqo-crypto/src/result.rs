@@ -85,7 +85,7 @@ mod tests {
                     "SSL received a record with an incorrect Message Authentication Code."
                 );
             }
-            _ => assert!(false),
+            _ => unreachable!(),
         }
     }
 
@@ -104,7 +104,7 @@ mod tests {
                 // Note that we don't test |desc| here because that comes from
                 // strerror(0), which is platform-dependent.
             }
-            _ => assert!(false),
+            _ => unreachable!(),
         }
     }
 
@@ -122,7 +122,7 @@ mod tests {
                 assert_eq!(code, -5998);
                 assert_eq!(desc, "The operation would have blocked");
             }
-            _ => assert!(false),
+            _ => panic!("bad error type"),
         }
     }
 

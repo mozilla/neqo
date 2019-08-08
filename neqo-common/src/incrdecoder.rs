@@ -307,7 +307,7 @@ mod tests {
             "01" => 1,
             "0123" => 0x123,
             "012345" => 0x12345,
-            "ffffffffffffffff" => 0xffffffffffffffff,
+            "ffffffffffffffff" => 0xffff_ffff_ffff_ffff,
         ] {
             c.run(IncrementalDecoder::decode_uint(c.b.len() / 2));
         }
