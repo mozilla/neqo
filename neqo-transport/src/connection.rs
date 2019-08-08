@@ -220,7 +220,7 @@ impl Connection {
         let dcid = ConnectionId::generate(CID_LENGTH);
         let mut c = Connection::new(
             Role::Client,
-            Client::new(server_name.as_ref())?.into(),
+            Client::new(server_name)?.into(),
             None,
             protocols,
             Some(Path {
