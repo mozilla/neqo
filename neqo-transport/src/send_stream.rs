@@ -438,7 +438,7 @@ pub struct SendStream {
 }
 
 impl SendStream {
-    pub(crate) fn new(
+    pub fn new(
         stream_id: StreamId,
         max_stream_data: u64,
         flow_mgr: Rc<RefCell<FlowMgr>>,

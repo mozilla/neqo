@@ -336,7 +336,7 @@ impl RecvStreamState {
 
 /// Implement a QUIC receive stream.
 #[derive(Debug)]
-pub(crate) struct RecvStream {
+pub struct RecvStream {
     stream_id: StreamId,
     state: RecvStreamState,
     flow_mgr: Rc<RefCell<FlowMgr>>,
