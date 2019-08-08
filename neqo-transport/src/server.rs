@@ -68,7 +68,7 @@ impl Server {
             0, // Epoch
         );
         let retry = encode_retry(&hdr);
-        let dgram = Datagram::new(*received.destination(), *received.source(), retry);
+        let dgram = Datagram::new(received.destination(), received.source(), retry);
         Ok(RetryResult::SendRetry(dgram))
     }
 

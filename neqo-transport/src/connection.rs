@@ -108,15 +108,15 @@ impl Path {
     // Used to create a path when receiving a packet.
     pub fn new(d: &Datagram, peer_cid: ConnectionId) -> Path {
         Path {
-            local: d.dst,
-            remote: d.src,
+            local: d.destination(),
+            remote: d.source(),
             local_cids: Vec::new(),
             remote_cid: peer_cid,
         }
     }
 
     pub fn received_on(&self, d: &Datagram) -> bool {
-        self.local == d.dst && self.remote == d.src
+        self.local == d.destination() && self.remote == d.source()
     }
 }
 
@@ -170,7 +170,7 @@ pub struct Connection {
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
     loss_recovery_state: LossRecoveryState,
-    events: Rc<RefCell<ConnectionEvents>>,
+    events: ConnectionEvents,
     token: Option<Vec<u8>>,
     send_vn: Option<(PacketHdr, SocketAddr, SocketAddr)>,
     send_retry: Option<PacketType>, // This will be PacketType::Retry.
@@ -280,7 +280,7 @@ impl Connection {
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             loss_recovery: LossRecovery::new(),
             loss_recovery_state: LossRecoveryState::default(),
-            events: Rc::new(RefCell::new(ConnectionEvents::default())),
+            events: ConnectionEvents::default(),
             token: None,
             send_vn: None,
             send_retry: None,
@@ -546,7 +546,7 @@ impl Connection {
                         self.version,
                     );
                     qwarn!([self] "Sending VN on next output");
-                    self.send_vn = Some((hdr, d.src, d.dst));
+                    self.send_vn = Some((hdr, d.source(), d.destination()));
                     return Ok(());
                 }
             }
@@ -1030,7 +1030,6 @@ impl Connection {
                 application_error_code,
             } => {
                 self.events
-                    .borrow_mut()
                     .send_stream_stop_sending(stream_id.into(), application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(stream_id.into())? {
                     ss.reset(application_error_code);
@@ -1087,7 +1086,7 @@ impl Connection {
 
                 if maximum_streams > *peer_max {
                     *peer_max = maximum_streams;
-                    self.events.borrow_mut().send_stream_creatable(stream_type);
+                    self.events.send_stream_creatable(stream_type);
                 }
             }
             Frame::DataBlocked { data_limit } => {
@@ -1150,7 +1149,6 @@ impl Connection {
                        frame_type,
                        reason_phrase);
                 self.events
-                    .borrow_mut()
                     .connection_closed(error_code, frame_type, &reason_phrase);
                 self.set_state(State::Closed(error_code.into()));
             }
@@ -1243,7 +1241,7 @@ impl Connection {
         }
         self.send_streams.clear();
         self.recv_streams.clear();
-        self.events.borrow_mut().client_0rtt_rejected();
+        self.events.client_0rtt_rejected();
     }
 
     fn set_state(&mut self, state: State) {
@@ -1378,9 +1376,7 @@ impl Connection {
                     );
 
                     if next_stream_id.is_uni() {
-                        self.events
-                            .borrow_mut()
-                            .new_stream(next_stream_id, StreamType::UniDi);
+                        self.events.new_stream(next_stream_id, StreamType::UniDi);
                     } else {
                         let send_initial_max_stream_data = self
                             .tps
@@ -1396,9 +1392,7 @@ impl Connection {
                                 self.events.clone(),
                             ),
                         );
-                        self.events
-                            .borrow_mut()
-                            .new_stream(next_stream_id, StreamType::BiDi);
+                        self.events.new_stream(next_stream_id, StreamType::BiDi);
                     }
 
                     *next_stream_idx += 1;
@@ -1573,7 +1567,7 @@ impl Connection {
 
     /// Get events that indicate state changes on the connection.
     pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
-        self.events.borrow_mut().events().into_iter()
+        self.events.events().into_iter()
     }
 
     fn check_loss_detection_timeout(&mut self, now: Instant) {
