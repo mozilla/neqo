@@ -1310,16 +1310,19 @@ impl Connection {
                                 ZeroRttState::Rejected
                             }
                     }
+                    self.events.connection_connected();
                 }
-                State::Closing { .. } => {
+                State::Closing { error, .. } => {
                     self.send_streams.clear();
                     self.recv_streams.clear();
                     self.flow_mgr.borrow_mut().set_need_close_frame(true);
+                    self.events.connection_closing(error.clone().into());
                 }
-                State::Closed(..) => {
+                State::Closed(error) => {
                     // Equivalent to spec's "draining" state -- never send anything.
                     self.send_streams.clear();
                     self.recv_streams.clear();
+                    self.events.connection_closed(error.clone().into(), 0, "");
                 }
                 _ => {}
             }

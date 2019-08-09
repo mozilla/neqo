@@ -33,6 +33,10 @@ pub enum ConnectionEvent {
     SendStreamComplete { stream_id: u64 },
     /// Peer increased MAX_STREAMS
     SendStreamCreatable { stream_type: StreamType },
+    /// Connection connected
+    ConnectionConnected,
+    /// Connection closing
+    ConnectionClosing { error_code: CloseError },
     /// Connection closed
     ConnectionClosed {
         error_code: CloseError,
@@ -92,6 +96,14 @@ impl ConnectionEvents {
 
     pub fn send_stream_creatable(&self, stream_type: StreamType) {
         self.insert(ConnectionEvent::SendStreamCreatable { stream_type });
+    }
+
+    pub fn connection_connected(&self) {
+        self.insert(ConnectionEvent::ConnectionConnected);
+    }
+
+    pub fn connection_closing(&self, error_code: CloseError) {
+        self.insert(ConnectionEvent::ConnectionClosing { error_code });
     }
 
     pub fn connection_closed(&self, error_code: CloseError, frame_type: u64, reason_phrase: &str) {
