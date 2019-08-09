@@ -187,6 +187,19 @@ impl ::std::fmt::Display for Http3Connection {
     }
 }
 
+macro_rules! transaction {
+    ($t:expr) => {
+        match $t {
+            Some(t) => t,
+            _ => {
+                return Err(Error::TransportError(
+                    neqo_transport::Error::InvalidStreamId,
+                ))
+            }
+        }
+    };
+}
+
 impl Http3Connection {
     #[allow(clippy::type_complexity)]
     pub fn new(
@@ -706,79 +719,6 @@ impl Http3Connection {
         }
     }
 
-    pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
-        qdebug!([self] "Closed.");
-        self.state = Http3State::Closing(CloseError::Application(error));
-        if (!self.transactions_client.is_empty() || !self.transactions_server.is_empty())
-            && (error == 0)
-        {
-            qwarn!("close() called when streams still active");
-        }
-        self.transactions_client.clear();
-        self.transactions_server.clear();
-        self.conn.close(now, error, msg);
-    }
-
-    pub fn fetch(
-        &mut self,
-        method: &str,
-        scheme: &str,
-        host: &str,
-        path: &str,
-        headers: &[(String, String)],
-    ) -> Res<u64> {
-        qdebug!(
-            [self]
-            "Fetch method={}, scheme={}, host={}, path={}",
-            method,
-            scheme,
-            host,
-            path
-        );
-        let id = self.conn.stream_create(StreamType::BiDi)?;
-        self.transactions_client.insert(
-            id,
-            TransactionClient::new(id, method, scheme, host, path, headers, self.events.clone()),
-        );
-        self.streams_have_data_to_send.insert(id);
-        Ok(id)
-    }
-
-    pub fn stream_reset(&mut self, stream_id: u64, error: AppError) -> Res<()> {
-        qdebug!([self] "reset_stream {}.", stream_id);
-        match &mut self.transactions_client.remove(&stream_id) {
-            Some(cs) => {
-                if cs.has_data_to_send() {
-                    self.conn.stream_reset_send(stream_id, error)?;
-                    Ok(())
-                } else {
-                    self.conn.stream_stop_sending(stream_id, error)?;
-                    Ok(())
-                }
-            }
-            None => Err(Error::TransportError(
-                neqo_transport::Error::InvalidStreamId,
-            )),
-        }
-    }
-
-    pub fn stream_close_send(&mut self, now: Instant, stream_id: u64) -> Res<()> {
-        qdebug!([self] "close_stream {}.", stream_id);
-        if let Some(cs) = &mut self.transactions_client.get_mut(&stream_id) {
-            match cs.close_send(&mut self.conn) {
-                Ok(()) => Ok(()),
-                Err(_) => {
-                    self.close(now, Error::InternalError.code(), "");
-                    Ok(())
-                }
-            }
-        } else {
-            return Err(Error::TransportError(
-                neqo_transport::Error::InvalidStreamId,
-            ));
-        }
-    }
-
     fn handle_control_frame(&mut self) -> Res<()> {
         if self.control_stream_remote.fin {
             return Err(Error::ClosedCriticalStream);
@@ -887,71 +827,116 @@ impl Http3Connection {
         Ok(())
     }
 
+    // API
+
     pub fn state(&self) -> Http3State {
         self.state.clone()
     }
 
-    // API
-    pub fn get_headers(&mut self, stream_id: u64) -> Res<Option<Vec<(String, String)>>> {
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
-            format!("{}", self)
-        } else {
-            String::new()
-        };
-        if let Some(cs) = &mut self.transactions_client.get_mut(&stream_id) {
-            qdebug!([label] "get_header from stream {}.", stream_id);
-            Ok(cs.get_header())
-        } else {
-            Err(Error::TransportError(
-                neqo_transport::Error::InvalidStreamId,
-            ))
+    /// Close http3 connection.
+    pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
+        qdebug!([self] "Closed.");
+        self.state = Http3State::Closing(CloseError::Application(error));
+        if (!self.transactions_client.is_empty() || !self.transactions_server.is_empty())
+            && (error == 0)
+        {
+            qwarn!("close() called when streams still active");
         }
-    }
-
-    pub fn read_data(
-        &mut self,
-        now: Instant,
-        stream_id: u64,
-        buf: &mut [u8],
-    ) -> Res<(usize, bool)> {
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
-            format!("{}", self)
-        } else {
-            String::new()
-        };
-        if let Some(cs) = &mut self.transactions_client.get_mut(&stream_id) {
-            qdebug!([label] "read_data from stream {}.", stream_id);
-            match cs.read_data(&mut self.conn, buf) {
-                Ok((amount, fin)) => {
-                    if fin {
-                        self.transactions_client.remove(&stream_id);
-                    } else if amount > 0 {
-                        // Directly call receive instead of adding to
-                        // streams_are_readable here. This allows the app to
-                        // pick up subsequent already-received data frames in
-                        // the stream even if no new packets arrive to cause
-                        // process_http3() to run.
-                        cs.receive(&mut self.conn, &mut self.qpack_decoder)?;
-                    }
-                    Ok((amount, fin))
-                }
-                Err(e) => {
-                    if e == Error::MalformedFrame(H3_FRAME_TYPE_DATA) {
-                        self.close(now, e.code(), "");
-                    }
-                    return Err(e);
-                }
-            }
-        } else {
-            return Err(Error::TransportError(
-                neqo_transport::Error::InvalidStreamId,
-            ));
-        }
+        self.transactions_client.clear();
+        self.transactions_server.clear();
+        self.conn.close(now, error, msg);
     }
 
     pub fn events(&mut self) -> Vec<Http3Event> {
         // Turn it into a vec for simplicity's sake
         self.events.events().into_iter().collect()
+    }
+
+    pub fn fetch(
+        &mut self,
+        method: &str,
+        scheme: &str,
+        host: &str,
+        path: &str,
+        headers: &[(String, String)],
+    ) -> Res<u64> {
+        qdebug!(
+            [self]
+            "Fetch method={}, scheme={}, host={}, path={}",
+            method,
+            scheme,
+            host,
+            path
+        );
+        let id = self.conn.stream_create(StreamType::BiDi)?;
+        self.transactions_client.insert(
+            id,
+            TransactionClient::new(id, method, scheme, host, path, headers, self.events.clone()),
+        );
+        self.streams_have_data_to_send.insert(id);
+        Ok(id)
+    }
+
+    pub fn get_response_headers(&mut self, stream_id: u64) -> Res<Option<Vec<(String, String)>>> {
+        qdebug!([self] "get_header from stream {}.", stream_id);
+        let cs = transaction!(self.transactions_client.get_mut(&stream_id));
+        Ok(cs.get_header())
+    }
+
+    pub fn read_response_data(
+        &mut self,
+        now: Instant,
+        stream_id: u64,
+        buf: &mut [u8],
+    ) -> Res<(usize, bool)> {
+        qdebug!([self] "read_data from stream {}.", stream_id);
+        let cs = transaction!(self.transactions_client.get_mut(&stream_id));
+
+        match cs.read_data(&mut self.conn, buf) {
+            Ok((amount, fin)) => {
+                if fin {
+                    self.transactions_client.remove(&stream_id);
+                } else if amount > 0 {
+                    // Directly call receive instead of adding to
+                    // streams_are_readable here. This allows the app to
+                    // pick up subsequent already-received data frames in
+                    // the stream even if no new packets arrive to cause
+                    // process_http3() to run.
+                    cs.receive(&mut self.conn, &mut self.qpack_decoder)?;
+                }
+                Ok((amount, fin))
+            }
+            Err(e) => {
+                if e == Error::MalformedFrame(H3_FRAME_TYPE_DATA) {
+                    self.close(now, e.code(), "");
+                }
+                Err(e)
+            }
+        }
+    }
+
+    pub fn stream_reset(&mut self, stream_id: u64, error: AppError) -> Res<()> {
+        qdebug!([self] "reset_stream {}.", stream_id);
+        let cs = transaction!(self.transactions_client.remove(&stream_id));
+        if cs.send_side_open() {
+            self.conn.stream_reset_send(stream_id, error)?;
+            Ok(())
+        } else {
+            self.conn.stream_stop_sending(stream_id, error)?;
+            Ok(())
+        }
+    }
+
+    pub fn stream_close_send(&mut self, now: Instant, stream_id: u64) -> Res<()> {
+        qdebug!([self] "close_stream {}.", stream_id);
+        let cs = transaction!(self.transactions_client.get_mut(&stream_id));
+        match cs.close_send(&mut self.conn) {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                self.close(now, Error::InternalError.code(), "");
+                Ok(())
+            }
+        }
     }
 
     // SERVER SIDE ONLY FUNCTIONS
@@ -1663,7 +1648,7 @@ mod tests {
             match e {
                 Http3Event::HeaderReady { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
-                    let h = hconn.get_headers(stream_id);
+                    let h = hconn.get_response_headers(stream_id);
                     assert_eq!(
                         h,
                         Ok(Some(vec![
@@ -1675,7 +1660,9 @@ mod tests {
                 Http3Event::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
-                    let (amount, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
+                    let (amount, fin) = hconn
+                        .read_response_data(now(), stream_id, &mut buf)
+                        .unwrap();
                     assert_eq!(fin, false);
                     assert_eq!(amount, 3);
                     assert_eq!(buf[..3], [0x61, 0x62, 0x63]);
@@ -1691,7 +1678,9 @@ mod tests {
                 Http3Event::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
-                    let (amount, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
+                    let (amount, fin) = hconn
+                        .read_response_data(now(), stream_id, &mut buf)
+                        .unwrap();
                     assert_eq!(fin, true);
                     assert_eq!(amount, 3);
                     assert_eq!(buf[..3], [0x64, 0x65, 0x66]);
@@ -1703,7 +1692,7 @@ mod tests {
         // after this stream will be removed from hcoon. We will check this by trying to read
         // from the stream and that should fail.
         let mut buf = [0u8; 100];
-        let res = hconn.read_data(now(), request_stream_id, &mut buf);
+        let res = hconn.read_response_data(now(), request_stream_id, &mut buf);
         assert!(res.is_err());
         assert_eq!(
             res.unwrap_err(),
@@ -1763,7 +1752,7 @@ mod tests {
             if let Http3Event::DataReadable { stream_id } = e {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
-                let res = hconn.read_data(now(), stream_id, &mut buf);
+                let res = hconn.read_response_data(now(), stream_id, &mut buf);
                 assert!(res.is_err());
                 assert_eq!(res.unwrap_err(), Error::MalformedFrame(H3_FRAME_TYPE_DATA));
             }
@@ -1871,7 +1860,7 @@ mod tests {
             for e in http_events {
                 match e {
                     Http3Event::HeaderReady { stream_id } => {
-                        let h = hconn.get_headers(stream_id);
+                        let h = hconn.get_response_headers(stream_id);
                         assert_eq!(
                             h,
                             Ok(Some(vec![
@@ -1885,7 +1874,9 @@ mod tests {
                             stream_id == request_stream_id_1 || stream_id == request_stream_id_2
                         );
                         let mut buf = [0u8; 100];
-                        let (amount, _) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
+                        let (amount, _) = hconn
+                            .read_response_data(now(), stream_id, &mut buf)
+                            .unwrap();
                         assert_eq!(amount, 3);
                     }
                     Http3Event::Reset { stream_id, error } => {
@@ -1962,7 +1953,7 @@ mod tests {
             if let Http3Event::DataReadable { stream_id } = e {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
-                let res = hconn.read_data(now(), stream_id, &mut buf);
+                let res = hconn.read_response_data(now(), stream_id, &mut buf);
                 let (len, fin) = res.expect("should have data");
                 assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
                 assert_eq!(fin, false);
@@ -1979,7 +1970,7 @@ mod tests {
         if let Http3Event::DataReadable { stream_id } = e {
             assert_eq!(stream_id, request_stream_id);
             let mut buf = [0u8; 100];
-            let res = hconn.read_data(now(), stream_id, &mut buf);
+            let res = hconn.read_response_data(now(), stream_id, &mut buf);
             let (len, fin) = res.expect("should read");
             assert_eq!(0, len);
             assert_eq!(fin, true);
@@ -1990,7 +1981,7 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0u8; 100];
         assert_eq!(
-            hconn.read_data(now(), 0, &mut buf),
+            hconn.read_response_data(now(), 0, &mut buf),
             Err(Error::TransportError(
                 neqo_transport::Error::InvalidStreamId
             ))
@@ -2060,7 +2051,9 @@ mod tests {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
-                let (len, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
+                let (len, fin) = hconn
+                    .read_response_data(now(), stream_id, &mut buf)
+                    .unwrap();
                 assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
                 assert_eq!(fin, false);
             }
@@ -2070,14 +2063,16 @@ mod tests {
             }
         }
 
-        // Second frame isn't read in first read_data(), but it generates
-        // another DataReadable event so that another read_data() will happen to
-        // pick it up.
+        // Second frame isn't read in first read_response_data(), but it
+        // generates another DataReadable event so that another
+        // read_response_data() will happen to pick it up.
         match hconn.events().into_iter().next().unwrap() {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
-                let (len, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
+                let (len, fin) = hconn
+                    .read_response_data(now(), stream_id, &mut buf)
+                    .unwrap();
                 assert_eq!(&buf[..len], &[0x64, 0x65, 0x66]);
                 assert_eq!(fin, true);
             }
@@ -2090,7 +2085,7 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0u8; 100];
         assert_eq!(
-            hconn.read_data(now(), 0, &mut buf),
+            hconn.read_response_data(now(), 0, &mut buf),
             Err(Error::TransportError(
                 neqo_transport::Error::InvalidStreamId
             ))

@@ -170,30 +170,33 @@ impl TransactionClient {
         }
     }
 
-    // TODO: Currently we cannot send data along with a request
     pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
             String::new()
         };
-        if self.send_state == TransactionSendState::SendingHeaders {
-            if self.request.buf.is_none() {
-                self.request.encode_request(encoder, self.stream_id);
-            }
-            if let Some(d) = &mut self.request.buf {
-                let sent = conn.stream_send(self.stream_id, &d[..])?;
-                qdebug!([label] "{} bytes sent", sent);
-                if sent == d.len() {
-                    self.request.buf = None;
-                    conn.stream_close_send(self.stream_id)?;
-                    self.send_state = TransactionSendState::Closed;
-                    qdebug!([label] "done sending request");
-                } else {
-                    let b = d.split_off(sent);
-                    self.request.buf = Some(b);
+        match self.send_state {
+            TransactionSendState::SendingHeaders => {
+                if self.request.buf.is_none() {
+                    self.request.encode_request(encoder, self.stream_id);
+                }
+                if let Some(d) = &mut self.request.buf {
+                    let sent = conn.stream_send(self.stream_id, &d[..])?;
+                    qdebug!([label] "{} bytes sent", sent);
+                    if sent == d.len() {
+                        self.request.buf = None;
+                        conn.stream_close_send(self.stream_id)?;
+                        self.send_state = TransactionSendState::Closed;
+                        qdebug!([label] "done sending request");
+                    } else {
+                        let b = d.split_off(sent);
+                        self.request.buf = Some(b);
+                    }
                 }
             }
+            TransactionSendState::SendingData => {}
+            TransactionSendState::Closed => {}
         }
         Ok(())
     }
@@ -356,6 +359,10 @@ impl TransactionClient {
     }
 
     pub fn has_data_to_send(&self) -> bool {
+        self.send_state == TransactionSendState::SendingHeaders
+    }
+
+    pub fn send_side_open(&self) -> bool {
         self.send_state == TransactionSendState::SendingHeaders
             || self.send_state == TransactionSendState::SendingData
     }

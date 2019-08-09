@@ -284,7 +284,7 @@ impl H3Handler {
                         return false;
                     }
 
-                    let headers = self.h3.get_headers(stream_id);
+                    let headers = self.h3.get_response_headers(stream_id);
                     eprintln!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
                 Http3Event::DataReadable { stream_id } => {
@@ -295,7 +295,7 @@ impl H3Handler {
 
                     let (_sz, fin) = self
                         .h3
-                        .read_data(Instant::now(), stream_id, &mut data)
+                        .read_response_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
                     eprintln!(
                         "READ[{}]: {}",

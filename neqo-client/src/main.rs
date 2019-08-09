@@ -202,7 +202,7 @@ impl Handler for PostConnectHandler {
                         return false;
                     }
 
-                    let headers = client.get_headers(stream_id);
+                    let headers = client.get_response_headers(stream_id);
                     println!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
                 Http3Event::DataReadable { stream_id } => {
@@ -212,7 +212,7 @@ impl Handler for PostConnectHandler {
                     }
 
                     let (sz, fin) = client
-                        .read_data(Instant::now(), stream_id, &mut data)
+                        .read_response_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
                     if args.omit_read_data {
                         println!("READ[{}]: {} bytes", stream_id, sz);
