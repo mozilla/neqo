@@ -7,6 +7,7 @@
 use crate::hframe::{HFrame, HFrameReader, HSettingType, H3_FRAME_TYPE_DATA};
 use crate::request_stream_client::RequestStreamClient;
 use crate::request_stream_server::RequestStreamServer;
+use crate::request_stream_server::{Header, RequestHandler};
 use neqo_common::{
     qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
     IncrementalDecoderResult,
@@ -180,7 +181,7 @@ pub struct Http3Connection {
     request_streams_client: HashMap<u64, RequestStreamClient>,
     // Server only
     #[allow(clippy::type_complexity)]
-    handler: Option<Box<FnMut(&[(String, String)], bool) -> (Vec<(String, String)>, Vec<u8>)>>,
+    handler: Option<RequestHandler>,
     request_streams_server: HashMap<u64, RequestStreamServer>,
 }
 
@@ -191,12 +192,11 @@ impl ::std::fmt::Display for Http3Connection {
 }
 
 impl Http3Connection {
-    #[allow(clippy::type_complexity)]
     pub fn new(
         c: Connection,
         max_table_size: u32,
         max_blocked_streams: u16,
-        handler: Option<Box<FnMut(&[(String, String)], bool) -> (Vec<(String, String)>, Vec<u8>)>>,
+        handler: Option<RequestHandler>,
     ) -> Http3Connection {
         qinfo!(
             "Create new http connection with max_table_size: {} and max_blocked_streams: {}",
@@ -713,7 +713,7 @@ impl Http3Connection {
         scheme: &str,
         host: &str,
         path: &str,
-        headers: &[(String, String)],
+        headers: &[Header],
     ) -> Res<u64> {
         qdebug!(
             [self]
