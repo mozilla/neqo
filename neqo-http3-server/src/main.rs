@@ -231,8 +231,13 @@ fn main() -> Result<(), io::Error> {
                 )
             });
 
-            for dgram in dgrams {
-                server.process_input(dgram, Instant::now());
+            if dgrams.is_empty() {
+                // timer expired
+                server.process_timer(Instant::now())
+            } else {
+                for dgram in dgrams {
+                    server.process_input(dgram, Instant::now());
+                }
             }
             if let Http3State::Closed(e) = server.state() {
                 println!("Closed connection from {:?}: {:?}", remote_addr, e);

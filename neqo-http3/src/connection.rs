@@ -313,6 +313,11 @@ impl Http3Connection {
         self.conn.process_input(dgram, now);
     }
 
+    pub fn process_timer(&mut self, now: Instant) {
+        qdebug!([self] "Process timer.");
+        self.conn.process_timer(now);
+    }
+
     pub fn conn(&mut self) -> &mut Connection {
         &mut self.conn
     }

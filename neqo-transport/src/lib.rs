@@ -68,6 +68,7 @@ pub enum Error {
     InvalidResumptionToken,
     WrongRole,
     InvalidInput,
+    IdleTimeout,
     PeerError(TransportError),
     InvalidRetry,
 }
@@ -106,7 +107,8 @@ impl Error {
             | Error::WrongRole
             | Error::InvalidResumptionToken
             | Error::InvalidInput
-            | Error::InvalidRetry => 1,
+            | Error::InvalidRetry
+            | Error::IdleTimeout => 1,
         }
     }
 }
