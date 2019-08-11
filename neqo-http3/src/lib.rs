@@ -13,6 +13,7 @@ pub mod transaction_server;
 
 use neqo_qpack;
 use neqo_transport;
+pub use neqo_transport::Output;
 
 use self::hframe::HFrameType;
 

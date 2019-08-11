@@ -7,7 +7,7 @@
 #![deny(warnings)]
 use neqo_common::{matches, Datagram};
 use neqo_crypto::init;
-use neqo_http3::{Header, Http3Connection, Http3Event, Http3State};
+use neqo_http3::{Header, Http3Connection, Http3Event, Http3State, Output};
 use neqo_transport::Connection;
 use std::collections::HashSet;
 use std::io::{self, ErrorKind};
@@ -146,32 +146,52 @@ fn process_loop(
             return client.state();
         }
 
-        let exiting = !handler.handle(args, client);
+        let mut exiting = !handler.handle(args, client);
 
-        let out_dgram = client.process_output(Instant::now());
-        emit_datagram(&socket, out_dgram.dgram());
+        loop {
+            let output = client.process_output(Instant::now());
+            match output {
+                Output::Datagram(dgram) => emit_datagram(&socket, Some(dgram)),
+                Output::Callback(duration) => {
+                    eprintln!("Timeout for {:?}", duration);
+                    socket.set_read_timeout(Some(duration)).unwrap();
+                    break;
+                }
+                Output::None => {
+                    eprintln!("Output::None");
+                    socket.set_read_timeout(None).unwrap();
+                    exiting = true;
+                    break;
+                }
+            }
+        }
         client.process_http3(Instant::now());
 
         if exiting {
             return client.state();
         }
 
-        let sz = match socket.recv(&mut buf[..]) {
+        match socket.recv(&mut buf[..]) {
+            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
+                // timer expired
+                client.process_timer(Instant::now());
+            }
             Err(err) => {
                 eprintln!("UDP error: {}", err);
                 exit(1)
             }
-            Ok(sz) => sz,
+            Ok(sz) => {
+                if sz == buf.len() {
+                    eprintln!("Received more than {} bytes", buf.len());
+                    continue;
+                }
+                if sz > 0 {
+                    let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
+                    client.process_input(d, Instant::now());
+                    client.process_http3(Instant::now());
+                }
+            }
         };
-        if sz == buf.len() {
-            eprintln!("Received more than {} bytes", buf.len());
-            continue;
-        }
-        if sz > 0 {
-            let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
-            client.process_input(d, Instant::now());
-            client.process_http3(Instant::now());
-        }
     }
 }
 
@@ -263,18 +283,21 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         &args,
     );
 
-    let client_stream_id = client
-        .fetch(
-            &args.method,
-            &args.url.scheme(),
-            &args.url.host_str().unwrap(),
-            &args.url.path(),
-            &args.headers.h,
-        )
-        .unwrap();
+    let client_stream_id = client.fetch(
+        &args.method,
+        &args.url.scheme(),
+        &args.url.host_str().unwrap(),
+        &args.url.path(),
+        &args.headers.h,
+    );
+
+    if let Err(err) = client_stream_id {
+        eprintln!("Could not connect: {:?}", err);
+        return;
+    }
 
     let mut h2 = PostConnectHandler::default();
-    h2.streams.insert(client_stream_id);
+    h2.streams.insert(client_stream_id.unwrap());
     process_loop(
         &local_addr,
         &remote_addr,
