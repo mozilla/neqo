@@ -73,7 +73,7 @@ impl ::std::fmt::Display for Role {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Ord, Eq)]
 /// The state of the Connection.
 pub enum State {
     Init,
@@ -1195,8 +1195,6 @@ impl Connection {
                        error_code,
                        frame_type,
                        reason_phrase);
-                self.events
-                    .connection_closed(error_code, frame_type, &reason_phrase);
                 self.set_state(State::Closed(error_code.into()));
             }
         };
@@ -1294,7 +1292,8 @@ impl Connection {
     fn set_state(&mut self, state: State) {
         if state != self.state {
             qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
-            self.state = state;
+            self.state = state.clone();
+            self.events.connection_state_change(state);
             match &self.state {
                 State::Connected => {
                     if self.role == Role::Server {
@@ -1310,19 +1309,16 @@ impl Connection {
                                 ZeroRttState::Rejected
                             }
                     }
-                    self.events.connection_connected();
                 }
-                State::Closing { error, .. } => {
+                State::Closing { .. } => {
                     self.send_streams.clear();
                     self.recv_streams.clear();
                     self.flow_mgr.borrow_mut().set_need_close_frame(true);
-                    self.events.connection_closing(error.clone().into());
                 }
-                State::Closed(error) => {
+                State::Closed(..) => {
                     // Equivalent to spec's "draining" state -- never send anything.
                     self.send_streams.clear();
                     self.recv_streams.clear();
-                    self.events.connection_closed(error.clone().into(), 0, "");
                 }
                 _ => {}
             }

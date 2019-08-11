@@ -10,7 +10,8 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use crate::frame::{CloseError, StreamType};
+use crate::connection::State;
+use crate::frame::StreamType;
 use crate::stream_id::StreamId;
 use crate::AppError;
 
@@ -33,16 +34,8 @@ pub enum ConnectionEvent {
     SendStreamComplete { stream_id: u64 },
     /// Peer increased MAX_STREAMS
     SendStreamCreatable { stream_type: StreamType },
-    /// Connection connected
-    ConnectionConnected,
-    /// Connection closing
-    ConnectionClosing { error_code: CloseError },
-    /// Connection closed
-    ConnectionClosed {
-        error_code: CloseError,
-        frame_type: u64,
-        reason_phrase: String,
-    },
+    /// Connection state change.
+    StateChange(State),
     /// The server rejected 0-RTT.
     /// This event invalidates all state in streams that has been created.
     /// Any data written to streams needs to be written again.
@@ -98,20 +91,8 @@ impl ConnectionEvents {
         self.insert(ConnectionEvent::SendStreamCreatable { stream_type });
     }
 
-    pub fn connection_connected(&self) {
-        self.insert(ConnectionEvent::ConnectionConnected);
-    }
-
-    pub fn connection_closing(&self, error_code: CloseError) {
-        self.insert(ConnectionEvent::ConnectionClosing { error_code });
-    }
-
-    pub fn connection_closed(&self, error_code: CloseError, frame_type: u64, reason_phrase: &str) {
-        self.insert(ConnectionEvent::ConnectionClosed {
-            error_code,
-            frame_type,
-            reason_phrase: reason_phrase.to_owned(),
-        });
+    pub fn connection_state_change(&self, state: State) {
+        self.insert(ConnectionEvent::StateChange(state));
     }
 
     pub fn client_0rtt_rejected(&self) {
