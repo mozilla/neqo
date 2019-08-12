@@ -17,6 +17,7 @@ use neqo_transport;
 use self::hframe::HFrameType;
 
 pub use connection::{Http3Connection, Http3Event, Http3State};
+pub use neqo_qpack::Header;
 pub use transaction_server::TransactionServer;
 
 type Res<T> = Result<T, Error>;

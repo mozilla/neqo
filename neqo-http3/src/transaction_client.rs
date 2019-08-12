@@ -7,8 +7,7 @@
 use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEADERS};
 
 use crate::connection::Http3Events;
-use crate::transaction_server::Header;
-
+use crate::Header;
 use neqo_common::{qdebug, qinfo, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
@@ -23,7 +22,7 @@ struct Request {
     scheme: String,
     host: String,
     path: String,
-    headers: Vec<(String, String)>,
+    headers: Vec<Header>,
     buf: Option<Vec<u8>>,
 }
 
@@ -68,9 +67,9 @@ impl ::std::fmt::Display for Request {
 pub struct Response {
     status: u32,
     status_line: Vec<u8>,
-    pub headers: Option<Vec<(String, String)>>,
+    pub headers: Option<Vec<Header>>,
     pub data_len: u64,
-    pub trailers: Option<Vec<(String, String)>>,
+    pub trailers: Option<Vec<Header>>,
     fin: bool,
 }
 
@@ -356,7 +355,7 @@ impl TransactionClient {
             || self.send_state == TransactionSendState::SendingData
     }
 
-    pub fn get_header(&mut self) -> Option<Vec<(String, String)>> {
+    pub fn get_header(&mut self) -> Option<Vec<Header>> {
         self.response.headers.clone()
     }
 

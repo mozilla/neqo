@@ -8,8 +8,8 @@
 
 use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_http3::transaction_server::{Header, Response};
-use neqo_http3::{Http3Connection, Http3State};
+use neqo_http3::transaction_server::Response;
+use neqo_http3::{Header, Http3Connection, Http3State};
 use neqo_transport::{Connection, Output};
 use std::collections::HashMap;
 use std::io;

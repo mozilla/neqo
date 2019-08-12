@@ -10,6 +10,7 @@ use crate::huffman::encode_huffman;
 use crate::qpack_helper::read_prefixed_encoded_int_with_connection;
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
+use crate::Header;
 use crate::{Error, Res};
 use neqo_common::{qdebug, qtrace};
 use neqo_transport::Connection;
@@ -267,7 +268,7 @@ impl QPackEncoder {
         }
     }
 
-    pub fn encode_header_block(&mut self, h: &[(String, String)], stream_id: u64) -> QPData {
+    pub fn encode_header_block(&mut self, h: &[Header], stream_id: u64) -> QPData {
         qdebug!([self] "encoding headers.");
         let mut encoded_h = QPData::default();
         let base = self.table.base();
@@ -741,7 +742,7 @@ mod tests {
     }
 
     struct TestElement {
-        pub headers: Vec<(String, String)>,
+        pub headers: Vec<Header>,
         pub header_block: &'static [u8],
         pub encoder_inst: &'static [u8],
     }
