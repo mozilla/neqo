@@ -73,7 +73,7 @@ impl ::std::fmt::Display for Role {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Ord, Eq)]
 /// The state of the Connection.
 pub enum State {
     Init,
@@ -1195,8 +1195,6 @@ impl Connection {
                        error_code,
                        frame_type,
                        reason_phrase);
-                self.events
-                    .connection_closed(error_code, frame_type, &reason_phrase);
                 self.set_state(State::Closed(error_code.into()));
             }
         };
@@ -1294,7 +1292,8 @@ impl Connection {
     fn set_state(&mut self, state: State) {
         if state != self.state {
             qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
-            self.state = state;
+            self.state = state.clone();
+            self.events.connection_state_change(state);
             match &self.state {
                 State::Connected => {
                     if self.role == Role::Server {
