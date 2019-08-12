@@ -8,7 +8,7 @@
 
 use neqo_common::{matches, Datagram};
 use neqo_http3::request_stream_server::{Header, Response};
-use neqo_http3::{Http3Connection, Http3Events, Http3State};
+use neqo_http3::{Http3Connection, Http3Event, Http3State};
 use test_fixture::*;
 
 fn new_stream_callback(request_headers: &[Header], error: bool) -> Response {

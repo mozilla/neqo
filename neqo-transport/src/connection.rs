@@ -1020,7 +1020,7 @@ impl Connection {
 
         let m = self.crypto.tls.handshake_raw(now, rec);
         if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
-            self.events.borrow_mut().authentication_needed();
+            self.events.authentication_needed();
         }
 
         match m {

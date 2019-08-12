@@ -342,9 +342,7 @@ impl Http3Connection {
 
     pub fn process_output(&mut self, now: Instant) -> Output {
         qdebug!([self] "Process output.");
-        let out = self.conn.process_output(now);
-        self.check_state_change(now);
-        out
+        self.conn.process_output(now)
     }
 
     // If this return an error the connection must be closed.
@@ -430,7 +428,7 @@ impl Http3Connection {
                     self.handle_stream_creatable(stream_type)?
                 }
                 ConnectionEvent::AuthenticationNeeded => {
-                    self.events.borrow_mut().authentication_needed();
+                    self.events.authentication_needed();
                 }
                 ConnectionEvent::StateChange(state) => {
                     match state {
@@ -1036,7 +1034,7 @@ impl Http3Events {
     }
 
     pub fn authentication_needed(&mut self) {
-        self.events.insert(Http3Event::AuthenticationNeeded);
+        self.insert(Http3Event::AuthenticationNeeded);
     }
 
     pub fn goaway_received(&self) {
@@ -1112,15 +1110,9 @@ mod tests {
             hconn.authenticated(0, now());
 
             let out = hconn.process(out.dgram(), now());
-            let connected = |e| matches!(e, Http3Event::ConnectionConnected);
+            let connected = |e| matches!(e, Http3Event::StateChange(Http3State::Connected));
             assert!(hconn.events().into_iter().any(connected));
-            let http_events = hconn.events();
-            for e in http_events {
-                match e {
-                    Http3Event::StateChange(..) => (),
-                    _ => panic!("events other than connected found"),
-                }
-            }
+
             assert_eq!(hconn.state(), Http3State::Connected);
             neqo_trans_conn.process(out.dgram(), now());
         } else {
