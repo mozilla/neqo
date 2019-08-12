@@ -8,6 +8,7 @@
 
 use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
+use neqo_http3::request_stream_server::{Header, Response};
 use neqo_http3::{Http3Connection, Http3State};
 use neqo_transport::{Connection, Output};
 use std::collections::HashMap;
@@ -63,10 +64,7 @@ impl Args {
     }
 }
 
-fn http_serve(
-    request_headers: &[(String, String)],
-    _error: bool,
-) -> (Vec<(String, String)>, Vec<u8>) {
+fn http_serve(request_headers: &[Header], _error: bool) -> Response {
     println!("Serve a request");
 
     println!("Headers: {:?}", request_headers);
@@ -97,7 +95,7 @@ fn http_serve(
 fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
     for d in out_dgrams {
         let sent = socket
-            .send_to(d, d.destination())
+            .send_to(d, &d.destination())
             .expect("Error sending datagram");
         if sent != d.len() {
             eprintln!("Unable to send all {} bytes of datagram", d.len());

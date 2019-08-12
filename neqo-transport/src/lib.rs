@@ -26,15 +26,16 @@ mod tparams;
 mod tracking;
 
 pub use self::connection::{Connection, Output, Role, State};
-pub use self::events::{ConnectionEvent, ConnectionEvents};
+pub use self::events::ConnectionEvent;
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
 
+/// The supported version of the QUIC protocol.
 pub const QUIC_VERSION: u32 = 0xff00_0016;
 
 type TransportError = u64;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum Error {
     NoError,
     InternalError,
@@ -130,7 +131,7 @@ impl ::std::fmt::Display for Error {
 
 pub type AppError = u64;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum ConnectionError {
     Transport(Error),
     Application(AppError),

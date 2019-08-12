@@ -148,7 +148,7 @@ fn main() {
 
         let mut server = connections.entry(remote_addr).or_insert_with(|| {
             println!("New connection from {:?}", remote_addr);
-            Connection::new_server(args.key.clone(), args.alpn.clone(), &anti_replay)
+            Connection::new_server(&args.key, &args.alpn, &anti_replay)
                 .expect("can't create connection")
         });
 

@@ -16,7 +16,7 @@ pub mod NSPRErrorCodes {
 
 pub type Res<T> = Result<T, Error>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum Error {
     AeadInitFailure,
     AeadError,

@@ -17,11 +17,11 @@ use smallvec::SmallVec;
 
 use neqo_common::{qerror, qinfo, qtrace, qwarn, Encoder};
 
+use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{Frame, TxMode};
 use crate::recovery::RecoveryToken;
 use crate::stream_id::StreamId;
-use crate::ConnectionEvents;
 use crate::{AppError, Error, Res};
 
 const TX_STREAM_BUFFER: usize = 0xFFFF; // 64 KiB
@@ -434,7 +434,7 @@ pub struct SendStream {
     max_stream_data: u64,
     state: SendStreamState,
     flow_mgr: Rc<RefCell<FlowMgr>>,
-    conn_events: Rc<RefCell<ConnectionEvents>>,
+    conn_events: ConnectionEvents,
 }
 
 impl SendStream {
@@ -442,10 +442,10 @@ impl SendStream {
         stream_id: StreamId,
         max_stream_data: u64,
         flow_mgr: Rc<RefCell<FlowMgr>>,
-        conn_events: Rc<RefCell<ConnectionEvents>>,
+        conn_events: ConnectionEvents,
     ) -> SendStream {
         if max_stream_data > 0 {
-            conn_events.borrow_mut().send_stream_writable(stream_id);
+            conn_events.send_stream_writable(stream_id);
         }
         SendStream {
             stream_id,
@@ -511,9 +511,7 @@ impl SendStream {
             SendStreamState::Send { ref mut send_buf } => {
                 send_buf.mark_as_acked(offset, len);
                 if send_buf.buffered() < TX_STREAM_BUFFER {
-                    self.conn_events
-                        .borrow_mut()
-                        .send_stream_writable(self.stream_id)
+                    self.conn_events.send_stream_writable(self.stream_id)
                 }
             }
             SendStreamState::DataSent {
@@ -523,9 +521,7 @@ impl SendStream {
             } => {
                 send_buf.mark_as_acked(offset, len);
                 if fin && send_buf.buffered() == 0 {
-                    self.conn_events
-                        .borrow_mut()
-                        .send_stream_complete(self.stream_id);
+                    self.conn_events.send_stream_complete(self.stream_id);
                     self.state
                         .transition(SendStreamState::DataRecvd { final_size });
                 }
@@ -876,34 +872,34 @@ mod tests {
     fn test_stream_tx() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         flow_mgr.borrow_mut().conn_increase_max_credit(4096);
-        let conn_events = Rc::new(RefCell::new(ConnectionEvents::default()));
+        let conn_events = ConnectionEvents::default();
 
         let mut s = SendStream::new(4.into(), 1024, flow_mgr.clone(), conn_events.clone());
 
-        let res = s.send(&vec![4; 100]).unwrap();
+        let res = s.send(&[4; 100]).unwrap();
         assert_eq!(res, 100);
         s.mark_as_sent(0, 50, false);
         assert_eq!(s.state.tx_buf().unwrap().data_limit(), 100);
 
         // Should hit stream flow control limit before filling up send buffer
-        let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
+        let res = s.send(&[4; TX_STREAM_BUFFER]).unwrap();
         assert_eq!(res, 1024 - 100);
 
         // should do nothing, max stream data already 1024
         s.set_max_stream_data(1024);
-        let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
+        let res = s.send(&[4; TX_STREAM_BUFFER]).unwrap();
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
-        s.set_max_stream_data(1048576);
-        let res = s.send(&vec![4; TX_STREAM_BUFFER]).unwrap();
+        s.set_max_stream_data(1_048_576);
+        let res = s.send(&[4; TX_STREAM_BUFFER]).unwrap();
         assert_eq!(res, 3072);
 
         // should now hit the tx buffer size
         flow_mgr
             .borrow_mut()
             .conn_increase_max_credit(TX_STREAM_BUFFER as u64);
-        let res = s.send(&vec![4; TX_STREAM_BUFFER + 100]).unwrap();
+        let res = s.send(&[4; TX_STREAM_BUFFER + 100]).unwrap();
         assert_eq!(res, TX_STREAM_BUFFER - 4096);
 
         // TODO(agrover@mozilla.com): test ooo acks somehow
@@ -913,7 +909,7 @@ mod tests {
     #[test]
     fn test_tx_buffer_acks() {
         let mut tx = TxBuffer::new();
-        assert_eq!(tx.send(&vec![4; 100]), 100);
+        assert_eq!(tx.send(&[4; 100]), 100);
         let res = tx.next_bytes(TxMode::Normal).unwrap();
         assert_eq!(res.0, 0);
         assert_eq!(res.1.len(), 100);

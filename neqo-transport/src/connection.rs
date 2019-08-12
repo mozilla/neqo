@@ -8,7 +8,7 @@
 
 #![allow(dead_code)]
 use std::cell::RefCell;
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::mem;
@@ -54,13 +54,14 @@ pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
 
 #[derive(Debug, PartialEq, Copy, Clone)]
+/// Client or Server.
 pub enum Role {
     Client,
     Server,
 }
 
 impl Role {
-    pub fn peer(self) -> Self {
+    pub fn remote(self) -> Self {
         match self {
             Role::Client => Role::Server,
             Role::Server => Role::Client,
@@ -74,7 +75,8 @@ impl ::std::fmt::Display for Role {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Ord, Eq)]
+/// The state of the Connection.
 pub enum State {
     Init,
     WaitInitial,
@@ -87,6 +89,28 @@ pub enum State {
         timeout: Instant,
     },
     Closed(ConnectionError),
+}
+
+// Implement Ord so that we can enforce monotonic state progression.
+impl PartialOrd for State {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        if std::mem::discriminant(self) == std::mem::discriminant(other) {
+            return Some(Ordering::Equal);
+        }
+        Some(match (self, other) {
+            (State::Init, _) => Ordering::Less,
+            (_, State::Init) => Ordering::Greater,
+            (State::WaitInitial, _) => Ordering::Less,
+            (_, State::WaitInitial) => Ordering::Greater,
+            (State::Handshaking, _) => Ordering::Less,
+            (_, State::Handshaking) => Ordering::Greater,
+            (State::Connected, _) => Ordering::Less,
+            (_, State::Connected) => Ordering::Greater,
+            (State::Closing { .. }, _) => Ordering::Less,
+            (_, State::Closing { .. }) => Ordering::Greater,
+            (State::Closed(_), _) => unreachable!(),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -108,30 +132,35 @@ struct Path {
 
 impl Path {
     // Used to create a path when receiving a packet.
-    pub fn new(d: &Datagram, peer_cid: ConnectionId) -> Path {
+    pub fn new(d: &Datagram, remote_cid: ConnectionId) -> Path {
         Path {
-            local: d.dst,
-            remote: d.src,
+            local: d.destination(),
+            remote: d.source(),
             local_cids: Vec::new(),
-            remote_cid: peer_cid,
+            remote_cid,
         }
     }
 
     pub fn received_on(&self, d: &Datagram) -> bool {
-        self.local == d.dst && self.remote == d.src
+        self.local == d.destination() && self.remote == d.source()
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 /// Type returned from process() and process_output(). Users are required to
-/// call these repeatedly until Callback is returned.
+/// call these repeatedly until `Callback` or `None` is returned.
 pub enum Output {
-    None, // This should go away. There should ALWAYS be some timer we want.
+    /// Connection requires no action.
+    None,
+    /// Connection requires the datagram be sent.
     Datagram(Datagram),
+    /// Connection requires `process_input()` be called when the `Duration`
+    /// elapses.
     Callback(Duration),
 }
 
 impl Output {
+    /// Convert into an `Option<Datagram>`.
     pub fn dgram(self) -> Option<Datagram> {
         match self {
             Output::Datagram(dg) => Some(dg),
@@ -139,6 +168,7 @@ impl Output {
         }
     }
 
+    /// Get a reference to the Datagram, if any.
     pub fn as_dgram_ref(&self) -> Option<&Datagram> {
         match self {
             Output::Datagram(dg) => Some(dg),
@@ -147,6 +177,21 @@ impl Output {
     }
 }
 
+/// A QUIC Connection
+///
+/// First, create a new connection using `new_client()` or `new_server()`.
+///
+/// For the life of the connection, handle activity in the following manner:
+/// 1. Perform operations using the `stream_*()` methods.
+/// 1. Call `process_input()` when a datagram is received or the timer
+/// expires. Obtain information on connection state changes by checking
+/// `events()`.
+/// 1. Having completed handling current activity, repeatedly call
+/// `process_output()` for packets to send, until it returns `Output::Callback`
+/// or `Output::None`.
+///
+/// After the connection is closed (either by calling `close()` or by the
+/// remote) continue processing until `state()` returns `Closed`.
 pub struct Connection {
     version: crate::packet::Version,
     role: Role,
@@ -172,7 +217,7 @@ pub struct Connection {
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
     loss_recovery_state: LossRecoveryState,
-    events: Rc<RefCell<ConnectionEvents>>,
+    events: ConnectionEvents,
     token: Option<Vec<u8>>,
     send_vn: Option<(PacketHdr, SocketAddr, SocketAddr)>,
     send_retry: Option<PacketType>, // This will be PacketType::Retry.
@@ -189,9 +234,10 @@ impl Debug for Connection {
 }
 
 impl Connection {
-    pub fn new_client<S: ToString, PA: ToString, PI: IntoIterator<Item = PA>>(
-        server_name: S,
-        protocols: PI,
+    /// Create a new QUIC connection with Client role.
+    pub fn new_client(
+        server_name: &str,
+        protocols: &[impl AsRef<str>],
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
     ) -> Res<Connection> {
@@ -212,14 +258,10 @@ impl Connection {
         Ok(c)
     }
 
-    pub fn new_server<
-        CS: ToString,
-        CI: IntoIterator<Item = CS>,
-        PA: ToString,
-        PI: IntoIterator<Item = PA>,
-    >(
-        certs: CI,
-        protocols: PI,
+    /// Create a new QUIC connection with Server role.
+    pub fn new_server(
+        certs: &[impl AsRef<str>],
+        protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
     ) -> Res<Connection> {
         Ok(Connection::new(
@@ -247,11 +289,11 @@ impl Connection {
         tps.set_empty(tp_const::DISABLE_MIGRATION);
     }
 
-    fn new<A: ToString, I: IntoIterator<Item = A>>(
+    fn new(
         r: Role,
         agent: Agent,
         anti_replay: Option<&AntiReplay>,
-        protocols: I,
+        protocols: &[impl AsRef<str>],
         paths: Option<Path>,
     ) -> Connection {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
@@ -282,7 +324,7 @@ impl Connection {
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             loss_recovery: LossRecovery::new(),
             loss_recovery_state: LossRecoveryState::default(),
-            events: Rc::new(RefCell::new(ConnectionEvents::default())),
+            events: ConnectionEvents::default(),
             token: None,
             send_vn: None,
             send_retry: None,
@@ -292,7 +334,7 @@ impl Connection {
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
     /// higher preference.
-    pub fn set_alpn<A: ToString, I: IntoIterator<Item = A>>(&mut self, protocols: I) -> Res<()> {
+    pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
         self.crypto.tls.set_alpn(protocols)?;
         Ok(())
     }
@@ -358,6 +400,7 @@ impl Connection {
         self.client_start(now)
     }
 
+    /// Send a TLS session ticket.
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
         let tps = &self.tps;
         match self.crypto.tls {
@@ -392,7 +435,7 @@ impl Connection {
         self.absorb_error(now, res);
     }
 
-    /// Get the current role.
+    /// Get the role of the connection.
     pub fn role(&self) -> Role {
         self.role
     }
@@ -402,7 +445,7 @@ impl Connection {
         &self.state
     }
 
-    /// Get statistics
+    /// Get collected statistics.
     pub fn stats(&self) -> &Stats {
         &self.stats
     }
@@ -415,12 +458,16 @@ impl Connection {
             let msg = format!("{:?}", v);
             #[cfg(not(debug_assertions))]
             let msg = String::from("");
-            self.set_state(State::Closing {
-                error: ConnectionError::Transport(v.clone()),
-                frame_type,
-                msg,
-                timeout: self.get_closing_period_time(now),
-            });
+            if let State::Closed(err) | State::Closing { error: err, .. } = &self.state {
+                qwarn!([self] "Closing again after error {:?}", err);
+            } else {
+                self.set_state(State::Closing {
+                    error: ConnectionError::Transport(v.clone()),
+                    frame_type,
+                    msg,
+                    timeout: self.get_closing_period_time(now),
+                });
+            }
         }
         res
     }
@@ -545,6 +592,7 @@ impl Connection {
                             path.remote_cid = hdr.scid.expect("Retry pkt must have SCID");
                         }
                     }
+                    qinfo!("received valid Retry, but we don't do anything with these yet.");
                     self.retry_token = Some(token.clone());
                     return Ok(());
                 }
@@ -563,7 +611,7 @@ impl Connection {
                         self.version,
                     );
                     qwarn!([self] "Sending VN on next output");
-                    self.send_vn = Some((hdr, d.src, d.dst));
+                    self.send_vn = Some((hdr, d.source(), d.destination()));
                     return Ok(());
                 }
             }
@@ -577,7 +625,7 @@ impl Connection {
                     qinfo!([self] "Received packet in WaitInitial");
                     if self.role == Role::Server {
                         if hdr.dcid.len() < 8 {
-                            qwarn!([self] "Peer DCID is too short");
+                            qwarn!([self] "Remote DCID is too short");
                             return Ok(());
                         }
                         self.crypto.states[0] =
@@ -768,7 +816,7 @@ impl Connection {
     /// spaces) and each containing 1+ frames.
     fn output_path(&mut self, path: &Path, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
-        let mut initial_only = false;
+        let mut needs_padding = false;
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -848,7 +896,13 @@ impl Connection {
             }
 
             qdebug!([self] "Need to send a packet");
-            initial_only = epoch == 0;
+            match epoch {
+                // Packets containing Initial packets need padding.
+                0 => needs_padding = true,
+                1 => (),
+                // ...unless they include higher epochs.
+                _ => needs_padding = false,
+            }
             let hdr = PacketHdr::new(
                 0,
                 match epoch {
@@ -893,7 +947,7 @@ impl Connection {
         }
 
         // Pad Initial packets sent by the client to 1200 bytes.
-        if self.role == Role::Client && initial_only {
+        if self.role == Role::Client && needs_padding {
             qdebug!([self] "pad Initial to 1200");
             out_bytes.resize(1200, 0);
         }
@@ -917,7 +971,7 @@ impl Connection {
     }
 
     /// Close the connection.
-    pub fn close<S: Into<String>>(&mut self, now: Instant, error: AppError, msg: S) {
+    pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
         self.set_state(State::Closing {
             error: ConnectionError::Application(error),
             frame_type: 0,
@@ -940,9 +994,9 @@ impl Connection {
         {
             let tph = swapped.borrow();
             let tps = tph.remote();
-            self.indexes.peer_max_stream_bidi =
+            self.indexes.remote_max_stream_bidi =
                 StreamIndex::new(tps.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
-            self.indexes.peer_max_stream_uni =
+            self.indexes.remote_max_stream_uni =
                 StreamIndex::new(tps.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
             self.flow_mgr
                 .borrow_mut()
@@ -1032,7 +1086,6 @@ impl Connection {
                 application_error_code,
             } => {
                 self.events
-                    .borrow_mut()
                     .send_stream_stop_sending(stream_id.into(), application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(stream_id.into())? {
                     ss.reset(application_error_code);
@@ -1082,14 +1135,14 @@ impl Connection {
                 stream_type,
                 maximum_streams,
             } => {
-                let peer_max = match stream_type {
-                    StreamType::BiDi => &mut self.indexes.peer_max_stream_bidi,
-                    StreamType::UniDi => &mut self.indexes.peer_max_stream_uni,
+                let remote_max = match stream_type {
+                    StreamType::BiDi => &mut self.indexes.remote_max_stream_bidi,
+                    StreamType::UniDi => &mut self.indexes.remote_max_stream_uni,
                 };
 
-                if maximum_streams > *peer_max {
-                    *peer_max = maximum_streams;
-                    self.events.borrow_mut().send_stream_creatable(stream_type);
+                if maximum_streams > *remote_max {
+                    *remote_max = maximum_streams;
+                    self.events.send_stream_creatable(stream_type);
                 }
             }
             Frame::DataBlocked { data_limit } => {
@@ -1151,9 +1204,6 @@ impl Connection {
                        error_code,
                        frame_type,
                        reason_phrase);
-                self.events
-                    .borrow_mut()
-                    .connection_closed(error_code, frame_type, &reason_phrase);
                 self.set_state(State::Closed(error_code.into()));
             }
         };
@@ -1245,13 +1295,14 @@ impl Connection {
         }
         self.send_streams.clear();
         self.recv_streams.clear();
-        self.events.borrow_mut().client_0rtt_rejected();
+        self.events.client_0rtt_rejected();
     }
 
     fn set_state(&mut self, state: State) {
         if state != self.state {
             qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
-            self.state = state;
+            self.state = state.clone();
+            self.events.connection_state_change(state);
             match &self.state {
                 State::Connected => {
                     if self.role == Role::Server {
@@ -1295,7 +1346,7 @@ impl Connection {
         let mut removed_uni = 0;
         for id in &recv_to_remove {
             self.recv_streams.remove(&id);
-            if id.is_peer_initiated(self.role()) {
+            if id.is_remote_initiated(self.role()) {
                 if id.is_bidi() {
                     removed_bidi += 1;
                 } else {
@@ -1304,7 +1355,7 @@ impl Connection {
             }
         }
 
-        // Send max_streams updates if we removed peer-initiated recv streams.
+        // Send max_streams updates if we removed remote-initiated recv streams.
         if removed_bidi > 0 {
             self.indexes.local_max_stream_bidi += removed_bidi;
             self.flow_mgr
@@ -1333,7 +1384,7 @@ impl Connection {
         }
 
         // May require creating new stream(s)
-        if stream_id.is_peer_initiated(self.role()) {
+        if stream_id.is_remote_initiated(self.role()) {
             let next_stream_idx = if stream_id.is_bidi() {
                 &mut self.indexes.local_next_stream_bidi
             } else {
@@ -1344,7 +1395,7 @@ impl Connection {
             if stream_idx >= *next_stream_idx {
                 let recv_initial_max_stream_data = if stream_id.is_bidi() {
                     if stream_idx > self.indexes.local_max_stream_bidi {
-                        qwarn!([self] "peer bidi stream create blocked, next={:?} max={:?}",
+                        qwarn!([self] "remote bidi stream create blocked, next={:?} max={:?}",
                                stream_idx,
                                self.indexes.local_max_stream_bidi);
                         return Err(Error::StreamLimitError);
@@ -1355,7 +1406,7 @@ impl Connection {
                         .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
                 } else {
                     if stream_idx > self.indexes.local_max_stream_uni {
-                        qwarn!([self] "peer uni stream create blocked, next={:?} max={:?}",
+                        qwarn!([self] "remote uni stream create blocked, next={:?} max={:?}",
                                stream_idx,
                                self.indexes.local_max_stream_uni);
                         return Err(Error::StreamLimitError);
@@ -1380,9 +1431,7 @@ impl Connection {
                     );
 
                     if next_stream_id.is_uni() {
-                        self.events
-                            .borrow_mut()
-                            .new_stream(next_stream_id, StreamType::UniDi);
+                        self.events.new_stream(next_stream_id, StreamType::UniDi);
                     } else {
                         let send_initial_max_stream_data = self
                             .tps
@@ -1398,9 +1447,7 @@ impl Connection {
                                 self.events.clone(),
                             ),
                         );
-                        self.events
-                            .borrow_mut()
-                            .new_stream(next_stream_id, StreamType::BiDi);
+                        self.events.new_stream(next_stream_id, StreamType::BiDi);
                     }
 
                     *next_stream_idx += 1;
@@ -1439,20 +1486,20 @@ impl Connection {
 
         Ok(match st {
             StreamType::UniDi => {
-                if self.indexes.peer_next_stream_uni >= self.indexes.peer_max_stream_uni {
+                if self.indexes.remote_next_stream_uni >= self.indexes.remote_max_stream_uni {
                     self.flow_mgr
                         .borrow_mut()
-                        .streams_blocked(self.indexes.peer_max_stream_uni, StreamType::UniDi);
+                        .streams_blocked(self.indexes.remote_max_stream_uni, StreamType::UniDi);
                     qwarn!([self] "local uni stream create blocked, next={:?} max={:?}",
-                           self.indexes.peer_next_stream_uni,
-                           self.indexes.peer_max_stream_uni);
+                           self.indexes.remote_next_stream_uni,
+                           self.indexes.remote_max_stream_uni);
                     return Err(Error::StreamLimitError);
                 }
                 let new_id = self
                     .indexes
-                    .peer_next_stream_uni
+                    .remote_next_stream_uni
                     .to_stream_id(StreamType::UniDi, self.role);
-                self.indexes.peer_next_stream_uni += 1;
+                self.indexes.remote_next_stream_uni += 1;
                 let initial_max_stream_data = self
                     .tps
                     .borrow()
@@ -1471,20 +1518,20 @@ impl Connection {
                 new_id.as_u64()
             }
             StreamType::BiDi => {
-                if self.indexes.peer_next_stream_bidi >= self.indexes.peer_max_stream_bidi {
+                if self.indexes.remote_next_stream_bidi >= self.indexes.remote_max_stream_bidi {
                     self.flow_mgr
                         .borrow_mut()
-                        .streams_blocked(self.indexes.peer_max_stream_bidi, StreamType::BiDi);
+                        .streams_blocked(self.indexes.remote_max_stream_bidi, StreamType::BiDi);
                     qwarn!([self] "local bidi stream create blocked, next={:?} max={:?}",
-                           self.indexes.peer_next_stream_bidi,
-                           self.indexes.peer_max_stream_bidi);
+                           self.indexes.remote_next_stream_bidi,
+                           self.indexes.remote_max_stream_bidi);
                     return Err(Error::StreamLimitError);
                 }
                 let new_id = self
                     .indexes
-                    .peer_next_stream_bidi
+                    .remote_next_stream_bidi
                     .to_stream_id(StreamType::BiDi, self.role);
-                self.indexes.peer_next_stream_bidi += 1;
+                self.indexes.remote_next_stream_bidi += 1;
                 let send_initial_max_stream_data = self
                     .tps
                     .borrow()
@@ -1575,7 +1622,7 @@ impl Connection {
 
     /// Get events that indicate state changes on the connection.
     pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
-        self.events.borrow_mut().events().into_iter()
+        self.events.events().into_iter()
     }
 
     fn check_loss_detection_timeout(&mut self, now: Instant) {
@@ -1700,7 +1747,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stream_id_methods() {
+    fn bidi_stream_properties() {
         let id1 = StreamIndex::new(4).to_stream_id(StreamType::BiDi, Role::Client);
         assert_eq!(id1.is_bidi(), true);
         assert_eq!(id1.is_uni(), false);
@@ -1709,14 +1756,17 @@ mod tests {
         assert_eq!(id1.role(), Role::Client);
         assert_eq!(id1.is_self_initiated(Role::Client), true);
         assert_eq!(id1.is_self_initiated(Role::Server), false);
-        assert_eq!(id1.is_peer_initiated(Role::Client), false);
-        assert_eq!(id1.is_peer_initiated(Role::Server), true);
+        assert_eq!(id1.is_remote_initiated(Role::Client), false);
+        assert_eq!(id1.is_remote_initiated(Role::Server), true);
         assert_eq!(id1.is_send_only(Role::Server), false);
         assert_eq!(id1.is_send_only(Role::Client), false);
         assert_eq!(id1.is_recv_only(Role::Server), false);
         assert_eq!(id1.is_recv_only(Role::Client), false);
         assert_eq!(id1.as_u64(), 16);
+    }
 
+    #[test]
+    fn uni_stream_properties() {
         let id2 = StreamIndex::new(8).to_stream_id(StreamType::UniDi, Role::Server);
         assert_eq!(id2.is_bidi(), false);
         assert_eq!(id2.is_uni(), true);
@@ -1725,8 +1775,8 @@ mod tests {
         assert_eq!(id2.role(), Role::Server);
         assert_eq!(id2.is_self_initiated(Role::Client), false);
         assert_eq!(id2.is_self_initiated(Role::Server), true);
-        assert_eq!(id2.is_peer_initiated(Role::Client), true);
-        assert_eq!(id2.is_peer_initiated(Role::Server), false);
+        assert_eq!(id2.is_remote_initiated(Role::Client), true);
+        assert_eq!(id2.is_remote_initiated(Role::Server), false);
         assert_eq!(id2.is_send_only(Role::Server), true);
         assert_eq!(id2.is_send_only(Role::Client), false);
         assert_eq!(id2.is_recv_only(Role::Server), false);
@@ -1848,6 +1898,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cognitive_complexity)]
     // tests stream send/recv after connection is established.
     fn test_conn_stream() {
         let mut client = default_client();
@@ -1895,19 +1946,15 @@ mod tests {
         qdebug!("---- client");
         // Send
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-        client.stream_send(client_stream_id, &vec![6; 100]).unwrap();
-        client.stream_send(client_stream_id, &vec![7; 40]).unwrap();
-        client
-            .stream_send(client_stream_id, &vec![8; 4000])
-            .unwrap();
+        client.stream_send(client_stream_id, &[6; 100]).unwrap();
+        client.stream_send(client_stream_id, &[7; 40]).unwrap();
+        client.stream_send(client_stream_id, &[8; 4000]).unwrap();
 
         // Send to another stream but some data after fin has been set
         let client_stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
-        client.stream_send(client_stream_id2, &vec![6; 60]).unwrap();
+        client.stream_send(client_stream_id2, &[6; 60]).unwrap();
         client.stream_close_send(client_stream_id2).unwrap();
-        client
-            .stream_send(client_stream_id2, &vec![7; 50])
-            .unwrap_err();
+        client.stream_send(client_stream_id2, &[7; 50]).unwrap_err();
         // Sending this much takes a few datagrams.
         let mut datagrams = vec![];
         let mut out = client.process(out.dgram(), now());
@@ -1929,7 +1976,7 @@ mod tests {
 
         let mut buf = vec![0; 4000];
 
-        let mut stream_ids = server.events().into_iter().filter_map(|evt| match evt {
+        let mut stream_ids = server.events().filter_map(|evt| match evt {
             ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
             _ => None,
         });
@@ -2104,11 +2151,11 @@ mod tests {
 
         // Now send a 0-RTT packet.
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-        client
-            .stream_send(client_stream_id, &vec![1, 2, 3])
-            .unwrap();
+        client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
+        // 0-RTT packets on their own shouldn't be padded to 1200.
+        assert!(client_0rtt.as_dgram_ref().unwrap().len() < 1200);
 
         let server_hs = server.process(client_hs.dgram(), now());
         assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
@@ -2117,7 +2164,6 @@ mod tests {
 
         let server_stream_id = server
             .events()
-            .into_iter()
             .find_map(|evt| match evt {
                 ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
                 _ => None,
@@ -2128,9 +2174,10 @@ mod tests {
 
     // Do a simple decode of the datagram to verify that it is coalesced.
     fn assert_coalesced_0rtt(payload: &[u8]) {
+        assert!(payload.len() >= 1200);
         let mut dec = Decoder::from(payload);
         let initial_type = dec.decode_byte().unwrap(); // Initial
-        assert_eq!(initial_type & 0b11110000, 0b11000000);
+        assert_eq!(initial_type & 0b1111_0000, 0b1100_0000);
         let version = dec.decode_uint(4).unwrap();
         assert_eq!(version, QUIC_VERSION.into());
         dec.skip_vec(1); // DCID
@@ -2139,7 +2186,7 @@ mod tests {
         let initial_len = dec.decode_varint().unwrap();
         dec.skip(usize::try_from(initial_len).unwrap());
         let zrtt_type = dec.decode_byte().unwrap();
-        assert_eq!(zrtt_type & 0b11110000, 0b11010000);
+        assert_eq!(zrtt_type & 0b1111_0000, 0b1101_0000);
     }
 
     #[test]
@@ -2158,9 +2205,7 @@ mod tests {
         // Write 0-RTT before generating any packets.
         // This should result in a datagram that coalesces Initial and 0-RTT.
         let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
-        client
-            .stream_send(client_stream_id, &vec![1, 2, 3])
-            .unwrap();
+        client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
 
@@ -2171,7 +2216,6 @@ mod tests {
 
         let server_stream_id = server
             .events()
-            .into_iter()
             .find_map(|evt| match evt {
                 ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
                 _ => None,
@@ -2223,12 +2267,12 @@ mod tests {
 
         // The server shouldn't receive that 0-RTT data.
         let recvd_stream_evt = |e| matches!(e, ConnectionEvent::NewStream { .. });
-        assert!(!server.events().into_iter().any(recvd_stream_evt));
+        assert!(!server.events().any(recvd_stream_evt));
 
         // Client should get a rejection.
         let _ = client.process(server_hs.dgram(), now());
         let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
-        assert!(client.events().into_iter().any(recvd_0rtt_reject));
+        assert!(client.events().any(recvd_0rtt_reject));
 
         // ...and the client stream should be gone.
         let res = client.stream_send(stream_id, msg);
@@ -2256,7 +2300,7 @@ mod tests {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         let mut crypto = Crypto::new(agent, test_fixture::DEFAULT_ALPN, tphandler, None).unwrap();
         let cs = crypto.create_initial_state(Role::Client, &hdr.dcid);
-        let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &vec![0; 16]);
+        let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &[0; 16]);
         let dgram = Datagram::new(loopback(), loopback(), packet);
 
         // "send" it

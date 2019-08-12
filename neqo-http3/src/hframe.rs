@@ -552,13 +552,11 @@ mod tests {
         let (amount, _) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(amount, remaining);
 
-        if !fr.done() {
-            assert!(false);
-        }
+        assert!(fr.done());
         if let Ok(f2) = fr.get_frame() {
             assert_eq!(*f, f2);
         } else {
-            assert!(false)
+            panic!("wrong frame type");
         }
     }
 
@@ -709,21 +707,16 @@ mod tests {
         conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
-        if !fr.done() {
-            assert!(false);
-        }
-        let f1 = fr.get_frame();
-        if let Ok(f) = f1 {
-            if let HFrame::Settings { settings } = f {
-                assert!(settings.len() == 2);
-                //            for i in settings.iter() {
-                assert!(settings[0] == (HSettingType::MaxHeaderListSize, 4));
-                assert!(settings[1] == (HSettingType::NumPlaceholders, 4));
-            } else {
-                assert!(false);
-            }
+        assert!(fr.done());
+        let f = fr.get_frame();
+        assert!(f.is_ok());
+        if let HFrame::Settings { settings } = f.unwrap() {
+            assert!(settings.len() == 2);
+            //            for i in settings.iter() {
+            assert!(settings[0] == (HSettingType::MaxHeaderListSize, 4));
+            assert!(settings[1] == (HSettingType::NumPlaceholders, 4));
         } else {
-            assert!(false);
+            panic!("wrong frame type");
         }
     }
 
@@ -783,20 +776,15 @@ mod tests {
         conn_c.process(out.dgram(), now());
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
-        if !fr.done() {
-            assert!(false);
-        }
-        let f1 = fr.get_frame();
-        if let Ok(f) = f1 {
-            if let HFrame::Settings { settings } = f {
-                assert!(settings.len() == 2);
-                assert!(settings[0] == (HSettingType::MaxHeaderListSize, 4));
-                assert!(settings[1] == (HSettingType::NumPlaceholders, 256));
-            } else {
-                assert!(false);
-            }
+        assert!(fr.done());
+        let f = fr.get_frame();
+        assert!(f.is_ok());
+        if let HFrame::Settings { settings } = f.unwrap() {
+            assert!(settings.len() == 2);
+            assert!(settings[0] == (HSettingType::MaxHeaderListSize, 4));
+            assert!(settings[1] == (HSettingType::NumPlaceholders, 256));
         } else {
-            assert!(false);
+            panic!("wrong frame type");
         }
     }
 
@@ -839,19 +827,14 @@ mod tests {
         let (amount, _) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(amount, 3);
 
-        if !fr.done() {
-            assert!(false);
-        }
-        let f1 = fr.get_frame();
-        if let Ok(f) = f1 {
-            if let HFrame::PushPromise { push_id, len } = f {
-                assert!(push_id == 257);
-                assert!(len == 3);
-            } else {
-                assert!(false);
-            }
+        assert!(fr.done());
+        let f = fr.get_frame();
+        assert!(f.is_ok());
+        if let HFrame::PushPromise { push_id, len } = f.unwrap() {
+            assert!(push_id == 257);
+            assert!(len == 3);
         } else {
-            assert!(false);
+            panic!("wrong frame type");
         }
     }
 
@@ -879,18 +862,13 @@ mod tests {
         let (amount, _) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(amount, 3);
 
-        if !fr.done() {
-            assert!(false);
-        }
-        let f1 = fr.get_frame();
-        if let Ok(f) = f1 {
-            if let HFrame::Data { len } = f {
-                assert!(len == 3);
-            } else {
-                assert!(false);
-            }
+        assert!(fr.done());
+        let f = fr.get_frame();
+        assert!(f.is_ok());
+        if let HFrame::Data { len } = f.unwrap() {
+            assert!(len == 3);
         } else {
-            assert!(false);
+            panic!("wrong frame type");
         }
     }
 
@@ -923,15 +901,12 @@ mod tests {
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         assert!(fr.done());
-        let f1 = fr.get_frame();
-        if let Ok(f) = f1 {
-            if let HFrame::CancelPush { push_id } = f {
-                assert!(push_id == 5);
-            } else {
-                assert!(false);
-            }
+        let f = fr.get_frame();
+        assert!(f.is_ok());
+        if let HFrame::CancelPush { push_id } = f.unwrap() {
+            assert!(push_id == 5);
         } else {
-            assert!(false);
+            panic!("wrong frame type");
         }
     }
 }

@@ -171,7 +171,7 @@ mod tests {
         pub val: &'static [u8],
         pub res: &'static [u8],
     }
-    const TEST_CASES: &'static [TestElement] = &[
+    const TEST_CASES: &[TestElement] = &[
         TestElement {
             val: b"www.example.com",
             res: &[
@@ -245,12 +245,9 @@ mod tests {
     #[test]
     fn test_decoder() {
         for e in TEST_CASES {
-            match Huffman::default().decode(e.res) {
-                Err(_) => assert!(false),
-                Ok(out) => {
-                    assert_eq!(out[..], *e.val);
-                }
-            }
+            let res = Huffman::default().decode(e.res);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap()[..], *e.val);
         }
     }
 }

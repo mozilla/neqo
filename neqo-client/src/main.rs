@@ -241,7 +241,7 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
     let mut client = Http3Connection::new(
         Connection::new_client(
             args.url.host_str().unwrap(),
-            args.alpn.clone(),
+            &args.alpn,
             local_addr,
             remote_addr,
         )
@@ -438,7 +438,7 @@ mod old {
 
         let mut client = Connection::new_client(
             args.url.host_str().unwrap(),
-            vec!["http/0.9"],
+            &["http/0.9"],
             local_addr,
             remote_addr,
         )
