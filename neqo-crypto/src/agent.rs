@@ -422,8 +422,9 @@ impl SecretAgent {
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        let (first, rest) = protocols.split_first()
-        .expect("at least one ALPN value needed");
+        let (first, rest) = protocols
+            .split_first()
+            .expect("at least one ALPN value needed");
         for v in rest {
             add(v.as_ref());
         }

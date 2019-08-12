@@ -266,7 +266,7 @@ impl Debug for Connection {
 }
 
 impl Connection {
-        /// Create a new QUIC connection with Client role.
+    /// Create a new QUIC connection with Client role.
     pub fn new_client(
         server_name: &str,
         protocols: &[impl AsRef<str>],
