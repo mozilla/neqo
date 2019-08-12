@@ -484,7 +484,7 @@ impl Handler for VnHandler {
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
     let mut client = Connection::new_client(
         peer.host,
-        &["hq-20"],
+        &["hq-22"],
         FixedConnectionIdManager::make(0),
         nctx.local_addr,
         nctx.remote_addr,

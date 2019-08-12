@@ -32,6 +32,7 @@ pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
 
+/// The supported version of the QUIC protocol.
 pub const QUIC_VERSION: u32 = 0xff00_0016;
 
 type TransportError = u64;

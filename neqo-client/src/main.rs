@@ -240,7 +240,7 @@ impl Handler for PostConnectHandler {
 fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: SocketAddr) {
     let mut client = Http3Connection::new(
         Connection::new_client(
-            args.url.host_str().as_ref().unwrap(),
+            args.url.host_str().unwrap(),
             &args.alpn,
             FixedConnectionIdManager::make(0),
             local_addr,

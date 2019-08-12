@@ -135,6 +135,6 @@ impl ConnectionEvents {
     }
 
     pub fn has_events(&self) -> bool {
-        !self.events.is_empty()
+        !self.events.borrow().is_empty()
     }
 }

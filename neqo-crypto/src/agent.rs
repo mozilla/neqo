@@ -422,10 +422,12 @@ impl SecretAgent {
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
         // before ALPN.  For that reason, we need to put the "best" option last.
-        for v in protocols.iter().skip(1) {
+        let (first, rest) = protocols.split_first()
+        .expect("at least one ALPN value needed");
+        for v in rest {
             add(v.as_ref());
         }
-        add(protocols[0].as_ref());
+        add(first.as_ref());
         assert_eq!(encoded_len, encoded.len());
 
         // Now give the result to NSS.
@@ -671,7 +673,7 @@ pub struct Client {
 impl Client {
     pub fn new(server_name: &str) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
-        let url = CString::new(server_name.to_string());
+        let url = CString::new(server_name);
         if url.is_err() {
             return Err(Error::InternalError);
         }
