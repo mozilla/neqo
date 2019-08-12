@@ -7,6 +7,7 @@
 use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEADERS};
 
 use crate::connection::Http3Events;
+use crate::request_stream_server::Header;
 
 use neqo_common::{qdebug, qinfo, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
@@ -27,13 +28,7 @@ struct Request {
 }
 
 impl Request {
-    pub fn new(
-        method: &str,
-        scheme: &str,
-        host: &str,
-        path: &str,
-        headers: &[(String, String)],
-    ) -> Request {
+    pub fn new(method: &str, scheme: &str, host: &str, path: &str, headers: &[Header]) -> Request {
         let mut r = Request {
             method: method.to_owned(),
             scheme: scheme.to_owned(),
@@ -136,7 +131,7 @@ impl RequestStreamClient {
         scheme: &str,
         host: &str,
         path: &str,
-        headers: &[(String, String)],
+        headers: &[Header],
         conn_events: Http3Events,
     ) -> RequestStreamClient {
         qinfo!("Create a request stream_id={}", stream_id);
