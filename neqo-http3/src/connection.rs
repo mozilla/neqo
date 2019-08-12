@@ -12,7 +12,7 @@ use neqo_common::{
     IncrementalDecoderResult,
 };
 use neqo_crypto::agent::CertificateInfo;
-use neqo_crypto::{err, SecretAgentInfo};
+use neqo_crypto::{PRErrorCode, SecretAgentInfo};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{
@@ -237,7 +237,7 @@ impl Http3Connection {
         self.conn.peer_certificate()
     }
 
-    pub fn authenticated(&mut self, error: err::PRErrorCode, now: Instant) {
+    pub fn authenticated(&mut self, error: PRErrorCode, now: Instant) {
         self.conn.authenticated(error, now);
     }
 

@@ -28,7 +28,7 @@ pub struct CertificateInfo {
     signed_cert_timestamp: Option<Vec<u8>>,
 }
 
-fn peer_ccertificate_chain(fd: *mut PRFileDesc) -> Option<(CertList, *const CERTCertListNode)> {
+fn peer_certificate_chain(fd: *mut PRFileDesc) -> Option<(CertList, *const CERTCertListNode)> {
     let chain = unsafe { SSL_PeerCertificateChain(fd) };
     let certs = match NonNull::new(chain as *mut CERTCertList) {
         Some(certs_ptr) => CertList::new(certs_ptr),
@@ -72,7 +72,7 @@ fn signed_cert_timestamp(fd: *mut PRFileDesc) -> Option<Vec<u8>> {
 
 impl CertificateInfo {
     pub(crate) fn new(fd: *mut PRFileDesc) -> Option<Self> {
-        match peer_ccertificate_chain(fd) {
+        match peer_certificate_chain(fd) {
             Some((certs, cursor)) => Some(CertificateInfo {
                 certs,
                 cursor,

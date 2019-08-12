@@ -17,7 +17,7 @@ mod agentio;
 mod cert;
 pub mod constants;
 mod convert;
-pub mod err;
+mod err;
 pub mod ext;
 pub mod hkdf;
 pub mod hp;
@@ -33,7 +33,7 @@ pub use self::agent::{
     SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
 };
 pub use self::constants::*;
-pub use self::err::{Error, Res, SSLErrorCodes};
+pub use self::err::{Error, PRErrorCode, Res, SSLErrorCodes};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
 pub use self::p11::SymKey;
 pub use self::replay::AntiReplay;

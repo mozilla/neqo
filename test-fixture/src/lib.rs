@@ -86,10 +86,10 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     let mut b = server;
     let mut datagram = None;
     let is_done = |c: &Connection| matches!(c.state(), State::Connected | State::Closing { .. } | State::Closed(..));
-    while !is_done(a) || !is_done(b) {
+    while !is_done(a) {
+        let _ = maybe_autenticate(a);
         let d = a.process(datagram, now());
         datagram = d.dgram();
-        let _ = maybe_autenticate(a);
         mem::swap(&mut a, &mut b);
     }
 }

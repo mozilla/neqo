@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    err, Agent, AntiReplay, Client, Epoch, HandshakeState, Record, RecordList, SecretAgentInfo,
-    Server,
+    Agent, AntiReplay, Client, Epoch, HandshakeState, PRErrorCode, Record, RecordList,
+    SecretAgentInfo, Server,
 };
 
 use crate::crypto::Crypto;
@@ -386,7 +386,7 @@ impl Connection {
     }
 
     /// Call by application when the peer cert has been verified
-    pub fn authenticated(&mut self, error: err::PRErrorCode, now: Instant) {
+    pub fn authenticated(&mut self, error: PRErrorCode, now: Instant) {
         self.crypto.tls.authenticated(error);
         let res = self.handshake(now, 0, None);
         self.absorb_error(now, res);
@@ -1688,7 +1688,7 @@ mod tests {
         .expect("create a default server")
     }
 
-    /// If state is AuthenticationNeeded call authenticated(). This funstion will
+    /// If state is AuthenticationNeeded call authenticated(). This function will
     /// consume all outstanding events on the connection.
     pub fn maybe_autenticate(conn: &mut Connection) -> bool {
         let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
