@@ -299,8 +299,8 @@ mod test {
 
     fn with_times() -> Timer<usize> {
         let mut t = Timer::new(*NOW, GRANULARITY, CAPACITY);
-        for i in 0..TIMES.len() {
-            t.add(*NOW + TIMES[i], i);
+        for (i, time) in TIMES.iter().enumerate() {
+            t.add(*NOW + *time, i);
         }
         assert_eq!(
             *NOW + *TIMES.iter().min().unwrap(),
@@ -330,8 +330,8 @@ mod test {
     #[test]
     fn remove_each() {
         let mut t = with_times();
-        for i in 0..TIMES.len() {
-            assert_eq!(Some(i), t.remove(*NOW + TIMES[i], |&x| x == i));
+        for (i, time) in TIMES.iter().enumerate() {
+            assert_eq!(Some(i), t.remove(*NOW + *time, |&x| x == i));
         }
         assert_eq!(None, t.next_time());
     }

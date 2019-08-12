@@ -559,7 +559,7 @@ mod tests {
 
     impl ConnectionIdDecoder for TestFixture {
         fn decode_cid(&self, dec: &mut Decoder) -> Option<ConnectionId> {
-            dec.decode(5).map(|x| ConnectionId::from(x))
+            dec.decode(5).map(ConnectionId::from)
         }
     }
 

@@ -102,7 +102,7 @@ fn retry_0rtt() {
         .expect("should set token");
 
     let client_stream = client.stream_create(StreamType::UniDi).unwrap();
-    client.stream_send(client_stream, &vec![1, 2, 3]).unwrap();
+    client.stream_send(client_stream, &[1, 2, 3]).unwrap();
 
     let dgram = client.process(None, now()).dgram(); // Initial w/0-RTT
     assert!(dgram.is_some());
