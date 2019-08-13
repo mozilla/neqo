@@ -7,7 +7,7 @@
 #![allow(unused_assignments)]
 
 use neqo_common::{matches, Datagram};
-use neqo_http3::request_stream_server::{Header, Response};
+use neqo_http3::transaction_server::{Header, Response};
 use neqo_http3::{Http3Connection, Http3Event, Http3State};
 use test_fixture::*;
 
