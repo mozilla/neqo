@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use bindgen::Builder;
 use serde_derive::Deserialize;
 use std::collections::HashMap;
@@ -7,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use toml;
 
-const BINDINGS_DIR: &'static str = "bindings";
-const BINDINGS_CONFIG: &'static str = "bindings.toml";
+const BINDINGS_DIR: &str = "bindings";
+const BINDINGS_CONFIG: &str = "bindings.toml";
 
 // This is the format of a single section of the configuration file.
 #[derive(Deserialize)]
@@ -33,39 +35,40 @@ struct Bindings {
 }
 
 fn is_debug() -> bool {
-    match env::var("DEBUG") {
-        Ok(d) => d.parse::<bool>().unwrap(),
-        _ => false,
-    }
+    env::var("DEBUG")
+        .map(|d| d.parse::<bool>().unwrap_or(false))
+        .unwrap_or(false)
 }
 
 // bindgen needs access to libclang.
 // On windows, this doesn't just work, you have to set LIBCLANG_PATH.
 // Rather than download the 400Mb+ files, like gecko does, let's just reuse their work.
 fn setup_clang() {
-    match env::var("LIBCLANG_PATH") {
-        Ok(_) => return,
-        _ => {}
-    };
+    if env::consts::OS != "windows" {
+        return;
+    }
+    println!("rerun-if-env-changed=LIBCLANG_PATH");
+    println!("rerun-if-env-changed=MOZBUILD_STATE_PATH");
+    if env::var("LIBCLANG_PATH").is_ok() {
+        return;
+    }
     let mozbuild_root = match env::var("MOZBUILD_STATE_PATH") {
         Ok(dir) => PathBuf::from(dir.trim()),
         _ => {
-            if env::consts::OS == "windows" {
-                eprintln!("warning: Building without a gecko setup is not likely to work.");
-                eprintln!("         A working libclang is needed to build neqo.");
-                eprintln!("         Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
-                eprintln!("");
-                eprintln!("    We recommend checking out https://github.com/mozilla/gecko-dev");
-                eprintln!("    Then run `./mach bootstrap` which will retrieve clang.");
-                eprintln!("    Make sure to export MOZBUILD_STATE_PATH when building.");
-            }
+            eprintln!("warning: Building without a gecko setup is not likely to work.");
+            eprintln!("         A working libclang is needed to build neqo.");
+            eprintln!("         Either LIBCLANG_PATH or MOZBUILD_STATE_PATH needs to be set.");
+            eprintln!("");
+            eprintln!("    We recommend checking out https://github.com/mozilla/gecko-dev");
+            eprintln!("    Then run `./mach bootstrap` which will retrieve clang.");
+            eprintln!("    Make sure to export MOZBUILD_STATE_PATH when building.");
             return;
         }
     };
     let libclang_dir = mozbuild_root.join("clang").join("lib");
     if libclang_dir.is_dir() {
         env::set_var("LIBCLANG_PATH", libclang_dir.to_str().unwrap());
-        println!("env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
+        println!("rustc-env:LIBCLANG_PATH={}", libclang_dir.to_str().unwrap());
     } else {
         println!("warning: LIBCLANG_PATH isn't set; maybe run ./mach bootstrap with gecko");
     }
@@ -138,9 +141,23 @@ fn build_nss(dir: PathBuf) {
     assert!(status.success(), "NSS build failed");
 }
 
+fn dynamic_link(extra_libs: &[&str]) {
+    let nspr_libs = if env::consts::OS == "windows" {
+        &["libplds4", "libplc4", "libnspr4"]
+    } else {
+        &["plds4", "plc4", "nspr4"]
+    };
+    for lib in nspr_libs.iter().chain(extra_libs) {
+        println!("cargo:rustc-link-lib=dylib={}", lib);
+    }
+}
+
 fn static_link(nsstarget: &PathBuf) {
     let lib_dir = nsstarget.join("lib");
-    println!("cargo:rustc-link-search={}", lib_dir.to_str().unwrap());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        lib_dir.to_str().unwrap()
+    );
     let mut static_libs = vec![
         "certdb",
         "certhi",
@@ -166,17 +183,15 @@ fn static_link(nsstarget: &PathBuf) {
         println!("cargo:rustc-link-lib=static={}", lib);
     }
 
-    let mut other_libs = if env::consts::OS == "windows" {
-        vec!["libplds4", "libplc4", "libnspr4"]
-    } else {
-        vec!["pthread", "dl", "c", "z", "plds4", "plc4", "nspr4"]
-    };
+    // Dynamic libs that aren't transitively included by NSS libs.
+    let mut other_libs = Vec::new();
+    if env::consts::OS != "windows" {
+        other_libs.extend_from_slice(&["pthread", "dl", "c", "z"]);
+    }
     if env::consts::OS == "macos" {
         other_libs.push("sqlite3");
     }
-    for lib in other_libs {
-        println!("cargo:rustc-link-lib={}", lib);
-    }
+    dynamic_link(&other_libs);
 }
 
 fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
@@ -255,9 +270,12 @@ fn main() {
     if is_debug() {
         static_link(&nsstarget);
     } else {
-        println!("cargo:rustc-link-lib=nspr4");
-        println!("cargo:rustc-link-lib=nss3");
-        println!("cargo:rustc-link-lib=ssl3");
+        let libs = if env::consts::OS == "windows" {
+            &["nssutil3.dll", "nss3.dll", "ssl3.dll"]
+        } else {
+            &["nssutil3", "nss3", "ssl3"]
+        };
+        dynamic_link(libs);
     }
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
