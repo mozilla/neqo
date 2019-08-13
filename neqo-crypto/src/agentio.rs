@@ -13,6 +13,7 @@ use crate::ssl;
 
 use neqo_common::{hex, qtrace};
 use std::cmp::min;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::mem;
 use std::ops::Deref;
@@ -43,8 +44,8 @@ pub struct Record {
 }
 
 impl Record {
-    pub fn new(epoch: Epoch, ct: ssl::SSLContentType::Type, data: &[u8]) -> Record {
-        Record {
+    pub fn new(epoch: Epoch, ct: ssl::SSLContentType::Type, data: &[u8]) -> Self {
+        Self {
             epoch,
             ct,
             data: data.to_vec(),
@@ -206,8 +207,8 @@ pub struct AgentIo {
 }
 
 impl AgentIo {
-    pub fn new() -> AgentIo {
-        AgentIo {
+    pub fn new() -> Self {
+        Self {
             input: AgentIoInput {
                 input: null(),
                 available: 0,
@@ -216,9 +217,9 @@ impl AgentIo {
         }
     }
 
-    unsafe fn borrow(fd: &mut PrFd) -> &mut AgentIo {
+    unsafe fn borrow(fd: &mut PrFd) -> &mut Self {
         #[allow(clippy::cast_ptr_alignment)]
-        let io = (**fd).secret as *mut AgentIo;
+        let io = (**fd).secret as *mut Self;
         io.as_mut().unwrap()
     }
 
@@ -256,12 +257,13 @@ unsafe extern "C" fn agent_close(fd: PrFd) -> PrStatus {
 
 unsafe extern "C" fn agent_read(mut fd: PrFd, buf: *mut c_void, amount: prio::PRInt32) -> PrStatus {
     let io = AgentIo::borrow(&mut fd);
-    if amount <= 0 {
-        return PR_FAILURE;
-    }
-    match io.input.read_input(buf as *mut u8, amount as usize) {
-        Ok(_) => PR_SUCCESS,
-        Err(_) => PR_FAILURE,
+    if let Ok(a) = amount.try_into() {
+        match io.input.read_input(buf as *mut u8, a) {
+            Ok(_) => PR_SUCCESS,
+            Err(_) => PR_FAILURE,
+        }
+    } else {
+        PR_FAILURE
     }
 }
 
@@ -276,9 +278,13 @@ unsafe extern "C" fn agent_recv(
     if amount <= 0 || flags != 0 {
         return PR_FAILURE;
     }
-    match io.input.read_input(buf as *mut u8, amount as usize) {
-        Ok(v) => v as prio::PRInt32,
-        Err(_) => -1,
+    if let Ok(a) = amount.try_into() {
+        match io.input.read_input(buf as *mut u8, a) {
+            Ok(v) => prio::PRInt32::try_from(v).unwrap_or(PR_FAILURE),
+            Err(_) => PR_FAILURE,
+        }
+    } else {
+        PR_FAILURE
     }
 }
 
@@ -291,8 +297,12 @@ unsafe extern "C" fn agent_write(
     if amount <= 0 {
         return PR_FAILURE;
     }
-    io.save_output(buf as *const u8, amount as usize);
-    amount as prio::PRInt32
+    if let Ok(a) = amount.try_into() {
+        io.save_output(buf as *const u8, a);
+        amount
+    } else {
+        PR_FAILURE
+    }
 }
 
 unsafe extern "C" fn agent_send(
@@ -307,22 +317,31 @@ unsafe extern "C" fn agent_send(
     if amount <= 0 || flags != 0 {
         return PR_FAILURE;
     }
-    io.save_output(buf as *const u8, amount as usize);
-    amount as prio::PRInt32
+    if let Ok(a) = amount.try_into() {
+        io.save_output(buf as *const u8, a);
+        amount
+    } else {
+        PR_FAILURE
+    }
 }
 
 unsafe extern "C" fn agent_available(mut fd: PrFd) -> prio::PRInt32 {
     let io = AgentIo::borrow(&mut fd);
-    io.input.available as prio::PRInt32
+    io.input.available.try_into().unwrap_or(PR_FAILURE)
 }
 
 unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
     let io = AgentIo::borrow(&mut fd);
-    io.input.available as prio::PRInt64
+    io.input
+        .available
+        .try_into()
+        .unwrap_or_else(|_| PR_FAILURE.into())
 }
 
+#[allow(clippy::cast_possible_truncation)]
 unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
     let a = addr.as_mut().unwrap();
+    // Cast is safe because prio::PR_AF_INET is 2
     a.inet.family = prio::PR_AF_INET as prio::PRUint16;
     a.inet.port = 0;
     a.inet.ip = 0;

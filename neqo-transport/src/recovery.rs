@@ -440,7 +440,7 @@ impl LossRecovery {
             (LossRecoveryMode::LostPackets, Some(earliest_time))
         } else {
             // Calculate PTO duration
-            let timeout = self.rtt_vals.pto() * 2u32.pow(self.pto_count);
+            let timeout = self.rtt_vals.pto() * 2_u32.pow(self.pto_count);
             (
                 LossRecoveryMode::PTO,
                 self.time_of_last_sent_ack_eliciting_packet
