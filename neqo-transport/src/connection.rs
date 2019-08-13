@@ -17,6 +17,8 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use smallvec::SmallVec;
+
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
@@ -199,6 +201,29 @@ impl IdleTimeout {
         match self {
             IdleTimeout::Init => None,
             IdleTimeout::PacketReceived(t) | IdleTimeout::AckElicitingPacketSent(t) => Some(*t),
+        }
+    }
+
+    fn on_packet_sent(&mut self, now: Instant) {
+        // Only reset idle timeout if we've received a packet since the last
+        // time we reset the timeout here.
+        match self {
+            IdleTimeout::AckElicitingPacketSent(_) => {}
+            IdleTimeout::Init | IdleTimeout::PacketReceived(_) => {
+                *self = IdleTimeout::AckElicitingPacketSent(now + LOCAL_IDLE_TIMEOUT);
+            }
+        }
+    }
+
+    fn on_packet_received(&mut self, now: Instant) {
+        *self = IdleTimeout::PacketReceived(now + LOCAL_IDLE_TIMEOUT);
+    }
+
+    pub fn expired(&self, now: Instant) -> bool {
+        if let Some(timeout) = self.as_instant() {
+            now >= timeout
+        } else {
+            false
         }
     }
 }
@@ -514,19 +539,16 @@ impl Connection {
             return;
         }
 
-        if let Some(timeout) = self.idle_timeout.as_instant() {
-            if now >= timeout {
-                qinfo!("idle timeout expired");
-                self.set_state(State::Closing {
-                    error: ConnectionError::Transport(Error::IdleTimeout),
-                    frame_type: 0,
-                    msg: "Idle timeout".into(),
-                    timeout: self.get_closing_period_time(now),
-                });
-            }
+        if self.idle_timeout.expired(now) {
+            qinfo!("idle timeout expired");
+            self.set_state(State::Closing {
+                error: ConnectionError::Transport(Error::IdleTimeout),
+                frame_type: 0,
+                msg: "Idle timeout".into(),
+                timeout: self.get_closing_period_time(now),
+            });
         }
 
-        self.cleanup_streams();
         self.check_loss_detection_timeout(now);
     }
 
@@ -542,26 +564,28 @@ impl Connection {
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&mut self, now: Instant) -> Duration {
         self.loss_recovery_state = self.loss_recovery.get_timer(&self.state);
-        let ack_time = self.acks.ack_time();
 
-        qdebug!([self] "LR timer?: {:?} ack timer?: {:?}", self.loss_recovery_state.callback_time, ack_time);
+        let mut delays = SmallVec::<[_; 4]>::new();
 
-        let mut timeout = match (self.loss_recovery_state.callback_time, ack_time) {
-            (Some(t_lr), Some(t_ack)) => min(t_lr, t_ack),
-            (Some(t), _) | (_, Some(t)) => t,
-            (None, None) => self.idle_timeout.as_instant().expect(
-                "only called after something has happened that will cause \
-                 idle timeout to exist",
-            ),
-        };
-
-        if let Some(idle_timeout) = self.idle_timeout.as_instant() {
-            timeout = min(timeout, idle_timeout);
+        if let Some(lr_time) = self.loss_recovery_state.callback_time() {
+            delays.push(lr_time);
         }
+
+        if let Some(ack_time) = self.acks.ack_time() {
+            delays.push(ack_time);
+        }
+
+        if let Some(idle_time) = self.idle_timeout.as_instant() {
+            delays.push(idle_time);
+        }
+
+        // Should always at least have idle timeout, once connected
+        assert_ne!(delays.is_empty(), true);
+        let earliest = delays.into_iter().min().unwrap();
 
         // TODO(agrover, mt) - need to analyze and fix #47
         // rather than just clamping to zero here.
-        max(now, timeout).duration_since(now)
+        max(now, earliest).duration_since(now)
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken
@@ -742,7 +766,7 @@ impl Connection {
             // crypto state if this fails? Otherwise, we will get a panic
             // on the assert for doesn't exist.
             // OK, we have a valid packet.
-            self.idle_timeout = IdleTimeout::PacketReceived(now + LOCAL_IDLE_TIMEOUT);
+            self.idle_timeout.on_packet_received(now);
 
             // TODO(ekr@rtfm.com): Filter for valid for this epoch.
 
@@ -991,18 +1015,9 @@ impl Connection {
             );
             self.stats.packets_tx += 1;
 
-            // Only reset idle timeout if we've received a packet since the last
-            // time we reset the timeout here.
-            match self.idle_timeout {
-                IdleTimeout::AckElicitingPacketSent(_) => {}
-                IdleTimeout::Init | IdleTimeout::PacketReceived(_) => {
-                    if ack_eliciting {
-                        self.idle_timeout =
-                            IdleTimeout::AckElicitingPacketSent(now + LOCAL_IDLE_TIMEOUT);
-                    }
-                }
+            if ack_eliciting {
+                self.idle_timeout.on_packet_sent(now);
             }
-
             self.loss_recovery
                 .on_packet_sent(space, hdr.pn, ack_eliciting, tokens, now);
 
@@ -1702,18 +1717,18 @@ impl Connection {
     fn check_loss_detection_timeout(&mut self, now: Instant) {
         qdebug!([self] "check_loss_timeouts");
 
-        if matches!(self.loss_recovery_state.mode, LossRecoveryMode::None) {
+        if matches!(self.loss_recovery_state.mode(), LossRecoveryMode::None) {
             // LR not the active timer
             return;
         }
 
-        if self.loss_recovery_state.callback_time > Some(now) {
+        if self.loss_recovery_state.callback_time() > Some(now) {
             // LR timer, but hasn't expired.
             return;
         }
 
         // Timer expired and LR was active timer.
-        match &mut self.loss_recovery_state.mode {
+        match &mut self.loss_recovery_state.mode() {
             LossRecoveryMode::None => unreachable!(),
             LossRecoveryMode::LostPackets => {
                 // Time threshold loss detection
@@ -2075,18 +2090,10 @@ mod tests {
         let mut a = client;
         let mut b = server;
         let mut datagram = None;
-        let mut more_iters = 1;
-        let mut is_done = |c: &mut Connection| {
-            let done_state = match c.state() {
-                // TODO(mt): Finish on Closed and not Closing.
-                State::Connected | State::Closing { .. } | State::Closed(..) => true,
-                _ => false,
-            };
-            if done_state && more_iters != 0 {
-                more_iters -= 1;
-                return false;
-            }
-            done_state
+        let is_done = |c: &mut Connection| match c.state() {
+            // TODO(mt): Finish on Closed and not Closing.
+            State::Connected | State::Closing { .. } | State::Closed(..) => true,
+            _ => false,
         };
         while !is_done(a) {
             let _ = maybe_autenticate(a);
@@ -2094,6 +2101,7 @@ mod tests {
             datagram = d.dgram();
             mem::swap(&mut a, &mut b);
         }
+        a.process(datagram, now());
     }
 
     fn connect(client: &mut Connection, server: &mut Connection) {
@@ -2421,7 +2429,7 @@ mod tests {
     }
 
     #[test]
-    fn test_idle_timeout() {
+    fn idle_timeout() {
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);

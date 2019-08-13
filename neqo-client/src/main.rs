@@ -153,12 +153,11 @@ fn process_loop(
             match output {
                 Output::Datagram(dgram) => emit_datagram(&socket, Some(dgram)),
                 Output::Callback(duration) => {
-                    eprintln!("Timeout for {:?}", duration);
                     socket.set_read_timeout(Some(duration)).unwrap();
                     break;
                 }
                 Output::None => {
-                    eprintln!("Output::None");
+                    // Not strictly necessary, since we're about to exit
                     socket.set_read_timeout(None).unwrap();
                     exiting = true;
                     break;
