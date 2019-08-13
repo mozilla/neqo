@@ -9,7 +9,7 @@
 use neqo_common::matches;
 use neqo_common::once::OnceResult;
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_transport::{Connection, State};
+use neqo_transport::{Connection, ConnectionEvent, State};
 use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
@@ -70,12 +70,24 @@ pub fn default_server() -> Connection {
         .expect("create a default server")
 }
 
+/// If state is AuthenticationNeeded call authenticated(). This funstion will consume
+/// all outstanding events on the connection.
+pub fn maybe_autenticate(conn: &mut Connection) -> bool {
+    let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+    if conn.events().any(authentication_needed) {
+        conn.authenticated(0, now());
+        return true;
+    }
+    false
+}
+
 pub fn handshake(client: &mut Connection, server: &mut Connection) {
     let mut a = client;
     let mut b = server;
     let mut datagram = None;
     let is_done = |c: &Connection| matches!(c.state(), State::Connected | State::Closing { .. } | State::Closed(..));
     while !is_done(a) {
+        let _ = maybe_autenticate(a);
         let d = a.process(datagram, now());
         datagram = d.dgram();
         mem::swap(&mut a, &mut b);

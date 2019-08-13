@@ -14,10 +14,12 @@ types = [
     "SSLExtensionWriter",
     "SSLHelloRetryRequestAction",
     "SSLHelloRetryRequestCallback",
+    "SSLNamedGroup",
     "SSLProtocolVariant",
     "SSLRecordWriteCallback",
     "SSLResumptionTokenCallback",
     "SSLSecretCallback",
+    "SSLSignatureScheme",
     "SSLTimeFunc",
 ]
 functions = [
@@ -37,7 +39,10 @@ functions = [
     "SSL_ImportFD",
     "SSL_NamedGroupConfig",
     "SSL_OptionSet",
+    "SSL_PeerCertificate",
     "SSL_PeerCertificateChain",
+    "SSL_PeerSignedCertTimestamps",
+    "SSL_PeerStapledOCSPResponses",
     "SSL_ResetHandshake",
     "SSL_SetNextProtoNego",
     "SSL_SetURL",
@@ -124,6 +129,7 @@ types = [
     "CERTCertList",
     "CERTCertListNode",
     "SECItem",
+    "SECItemArray",
     "CK_ATTRIBUTE_TYPE",
     "CK_MECHANISM_TYPE",
 ]

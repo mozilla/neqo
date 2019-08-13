@@ -17,6 +17,8 @@ use crate::AppError;
 
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ConnectionEvent {
+    /// Cert authentication needed
+    AuthenticationNeeded,
     /// A new uni (read) or bidi stream has been opened by the peer.
     NewStream {
         stream_id: u64,
@@ -48,6 +50,10 @@ pub struct ConnectionEvents {
 }
 
 impl ConnectionEvents {
+    pub fn authentication_needed(&self) {
+        self.insert(ConnectionEvent::AuthenticationNeeded);
+    }
+
     pub fn new_stream(&self, stream_id: StreamId, stream_type: StreamType) {
         self.insert(ConnectionEvent::NewStream {
             stream_id: stream_id.as_u64(),

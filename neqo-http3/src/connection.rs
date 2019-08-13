@@ -12,6 +12,8 @@ use neqo_common::{
     qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
     IncrementalDecoderResult,
 };
+use neqo_crypto::agent::CertificateInfo;
+use neqo_crypto::{PRErrorCode, SecretAgentInfo};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::State;
@@ -225,6 +227,19 @@ impl Http3Connection {
         }
     }
 
+    pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
+        self.conn.tls_info()
+    }
+
+    /// Get the peer's certificate.
+    pub fn peer_certificate(&self) -> Option<CertificateInfo> {
+        self.conn.peer_certificate()
+    }
+
+    pub fn authenticated(&mut self, error: PRErrorCode, now: Instant) {
+        self.conn.authenticated(error, now);
+    }
+
     fn initialize_http3_connection(&mut self) -> Res<()> {
         qdebug!([self] "initialize_http3_connection");
         self.create_control_stream()?;
@@ -411,6 +426,9 @@ impl Http3Connection {
                 }
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.handle_stream_creatable(stream_type)?
+                }
+                ConnectionEvent::AuthenticationNeeded => {
+                    self.events.authentication_needed();
                 }
                 ConnectionEvent::StateChange(state) => {
                     match state {
@@ -868,6 +886,7 @@ impl Http3Connection {
                     | Http3Event::DataReadable { stream_id }
                     | Http3Event::NewPushStream { stream_id } => *stream_id < goaway_stream_id,
                     Http3Event::Reset { .. }
+                    | Http3Event::AuthenticationNeeded
                     | Http3Event::GoawayReceived
                     | Http3Event::StateChange { .. } => true,
                     Http3Event::RequestsCreatable => false,
@@ -980,6 +999,8 @@ pub enum Http3Event {
     NewPushStream { stream_id: u64 },
     /// New stream can be created
     RequestsCreatable,
+    /// Cert authentication needed
+    AuthenticationNeeded,
     /// Client has received a GOAWAY frame
     GoawayReceived,
     /// Connection state change.
@@ -1012,6 +1033,10 @@ impl Http3Events {
         self.insert(Http3Event::RequestsCreatable);
     }
 
+    pub fn authentication_needed(&mut self) {
+        self.insert(Http3Event::AuthenticationNeeded);
+    }
+
     pub fn goaway_received(&self) {
         self.insert(Http3Event::GoawayReceived);
     }
@@ -1036,6 +1061,7 @@ impl Http3Events {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_common::matches;
     use neqo_transport::State;
     use test_fixture::*;
 
@@ -1075,15 +1101,18 @@ mod tests {
             assert_eq!(*neqo_trans_conn.state(), State::WaitInitial);
             let out = neqo_trans_conn.process(out.dgram(), now());
             assert_eq!(*neqo_trans_conn.state(), State::Handshaking);
-            assert_eq!(hconn.state(), Http3State::Initializing);
             let out = hconn.process(out.dgram(), now());
-            let http_events = hconn.events();
-            for e in http_events {
-                match e {
-                    Http3Event::StateChange(..) => (),
-                    _ => panic!("events other than connected found"),
-                }
-            }
+            let out = neqo_trans_conn.process(out.dgram(), now());
+            assert!(out.as_dgram_ref().is_none());
+
+            let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
+            assert!(hconn.events().into_iter().any(authentication_needed));
+            hconn.authenticated(0, now());
+
+            let out = hconn.process(out.dgram(), now());
+            let connected = |e| matches!(e, Http3Event::StateChange(Http3State::Connected));
+            assert!(hconn.events().into_iter().any(connected));
+
             assert_eq!(hconn.state(), Http3State::Connected);
             neqo_trans_conn.process(out.dgram(), now());
         } else {
@@ -1091,6 +1120,11 @@ mod tests {
             let out = neqo_trans_conn.process(None, now());
             let out = hconn.process(out.dgram(), now());
             let out = neqo_trans_conn.process(out.dgram(), now());
+            let _ = hconn.process(out.dgram(), now());
+            let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+            assert!(neqo_trans_conn.events().any(authentication_needed));
+            neqo_trans_conn.authenticated(0, now());
+            let out = neqo_trans_conn.process(None, now());
             let out = hconn.process(out.dgram(), now());
             assert_eq!(hconn.state(), Http3State::Connected);
             neqo_trans_conn.process(out.dgram(), now());
