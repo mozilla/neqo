@@ -7,10 +7,10 @@
 use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{Record, RecordList};
 use crate::assert_initialized;
-pub use crate::cert::CertificateChain;
+pub use crate::cert::CertificateInfo;
 use crate::constants::*;
 use crate::convert::to_c_uint;
-use crate::err::{Error, Res};
+use crate::err::{Error, PRErrorCode, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
 use crate::p11;
 use crate::prio;
@@ -37,7 +37,7 @@ pub enum HandshakeState {
     New,
     InProgress,
     AuthenticationPending,
-    Authenticated,
+    Authenticated(PRErrorCode),
     Complete(SecretAgentInfo),
     Failed(Error),
 }
@@ -146,6 +146,7 @@ pub struct SecretAgentInfo {
     resumed: bool,
     early_data: bool,
     alpn: Option<String>,
+    signature_scheme: SignatureScheme,
 }
 
 impl SecretAgentInfo {
@@ -166,6 +167,7 @@ impl SecretAgentInfo {
             resumed: info.resumed != 0,
             early_data: info.earlyDataAccepted != 0,
             alpn: get_alpn(fd, false)?,
+            signature_scheme: info.signatureScheme as SignatureScheme,
         })
     }
 
@@ -186,6 +188,9 @@ impl SecretAgentInfo {
     }
     pub fn alpn(&self) -> Option<&String> {
         self.alpn.as_ref()
+    }
+    pub fn signature_scheme(&self) -> SignatureScheme {
+        self.signature_scheme
     }
 }
 
@@ -243,7 +248,6 @@ impl SecretAgent {
     // ssl::SSL_* APIs only need an opaque type.
     fn create_fd(&mut self) -> Res<()> {
         assert_initialized();
-
         let label = CString::new("sslwrapper").expect("cstring failed");
         let id = unsafe { prio::PR_GetUniqueIdentity(label.as_ptr()) };
 
@@ -490,8 +494,8 @@ impl SecretAgent {
     }
 
     /// Get the peer's certificate chain.
-    pub fn peer_certificate(&self) -> Option<CertificateChain> {
-        CertificateChain::new(self.fd)
+    pub fn peer_certificate(&self) -> Option<CertificateInfo> {
+        CertificateInfo::new(self.fd)
     }
 
     /// Return any fatal alert that the TLS stack might have sent.
@@ -502,10 +506,10 @@ impl SecretAgent {
     /// Call this function to mark the peer as authenticated.
     /// Only call this function if handshake/handshake_raw returns
     /// HandshakeState::AuthenticationPending, or it will panic.
-    pub fn authenticated(&mut self) {
+    pub fn authenticated(&mut self, error: PRErrorCode) {
         assert_eq!(self.state, HandshakeState::AuthenticationPending);
         *self.auth_required = false;
-        self.state = HandshakeState::Authenticated;
+        self.state = HandshakeState::Authenticated(error);
     }
 
     fn capture_error<T>(&mut self, res: Res<T>) -> Res<T> {
@@ -552,8 +556,8 @@ impl SecretAgent {
             // Within this scope, _h maintains a mutable reference to self.io.
             let _h = self.io.wrap(input);
             match self.state {
-                HandshakeState::Authenticated => unsafe {
-                    ssl::SSL_AuthCertificateComplete(self.fd, 0)
+                HandshakeState::Authenticated(ref err) => unsafe {
+                    ssl::SSL_AuthCertificateComplete(self.fd, *err)
                 },
                 _ => unsafe { ssl::SSL_ForceHandshake(self.fd) },
             }
@@ -615,8 +619,8 @@ impl SecretAgent {
         let mut records = self.setup_raw()?;
 
         // Fire off any authentication we might need to complete.
-        if self.state == HandshakeState::Authenticated {
-            let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, 0) };
+        if let HandshakeState::Authenticated(ref err) = self.state {
+            let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, *err) };
             qdebug!([self] "SSL_AuthCertificateComplete: {:?}", rv);
             // This should return SECSuccess, so don't use update_state().
             self.capture_error(result::result(rv))?;

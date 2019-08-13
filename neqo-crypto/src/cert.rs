@@ -7,25 +7,80 @@
 use std::ptr::{null_mut, NonNull};
 
 use crate::p11::{
-    CERTCertList, CERTCertListNode, CERT_GetCertificateDer, CertList, PRCList, SECItem, SECItemType,
+    CERTCertList, CERTCertListNode, CERT_GetCertificateDer, CertList, PRCList, SECItem,
+    SECItemArray, SECItemType,
 };
 use crate::result;
-use crate::ssl::{PRFileDesc, SSL_PeerCertificateChain};
+use crate::ssl::{
+    PRFileDesc, SSL_PeerCertificateChain, SSL_PeerSignedCertTimestamps,
+    SSL_PeerStapledOCSPResponses,
+};
 
-pub struct CertificateChain {
+use std::slice;
+
+pub struct CertificateInfo {
     certs: CertList,
     cursor: *const CERTCertListNode,
+    /// stapled_ocsp_responses and signed_cert_timestamp are properties
+    /// associated with each of the certificates. Right now, NSS only
+    /// reports the value for the end-entity certificate (the first).
+    stapled_ocsp_responses: Option<Vec<Vec<u8>>>,
+    signed_cert_timestamp: Option<Vec<u8>>,
 }
 
-impl CertificateChain {
+fn peer_certificate_chain(fd: *mut PRFileDesc) -> Option<(CertList, *const CERTCertListNode)> {
+    let chain = unsafe { SSL_PeerCertificateChain(fd) };
+    let certs = match NonNull::new(chain as *mut CERTCertList) {
+        Some(certs_ptr) => CertList::new(certs_ptr),
+        None => return None,
+    };
+    let cursor = CertificateInfo::head(&certs);
+    Some((certs, cursor))
+}
+
+fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
+    let ocsp_nss = unsafe { SSL_PeerStapledOCSPResponses(fd) };
+    match NonNull::new(ocsp_nss as *mut SECItemArray) {
+        Some(ocsp_ptr) => {
+            let mut ocsp_helper: Vec<Vec<u8>> = Vec::new();
+            let len = unsafe { ocsp_ptr.as_ref().len };
+            for inx in 0..len {
+                let item_nss =
+                    unsafe { ocsp_ptr.as_ref().items.offset(inx as isize) as *const SECItem };
+                let item =
+                    unsafe { slice::from_raw_parts((*item_nss).data, (*item_nss).len as usize) };
+                ocsp_helper.push(item.to_owned());
+            }
+            Some(ocsp_helper)
+        }
+        None => None,
+    }
+}
+
+fn signed_cert_timestamp(fd: *mut PRFileDesc) -> Option<Vec<u8>> {
+    let sct_nss = unsafe { SSL_PeerSignedCertTimestamps(fd) };
+    match NonNull::new(sct_nss as *mut SECItem) {
+        Some(sct_ptr) => {
+            let sct_slice = unsafe {
+                slice::from_raw_parts(sct_ptr.as_ref().data, sct_ptr.as_ref().len as usize)
+            };
+            Some(sct_slice.to_owned())
+        }
+        None => None,
+    }
+}
+
+impl CertificateInfo {
     pub(crate) fn new(fd: *mut PRFileDesc) -> Option<Self> {
-        let chain = unsafe { SSL_PeerCertificateChain(fd) };
-        let certs = match NonNull::new(chain as *mut CERTCertList) {
-            Some(certs_ptr) => CertList::new(certs_ptr),
-            None => return None,
-        };
-        let cursor = CertificateChain::head(&certs);
-        Some(CertificateChain { certs, cursor })
+        match peer_certificate_chain(fd) {
+            Some((certs, cursor)) => Some(CertificateInfo {
+                certs,
+                cursor,
+                stapled_ocsp_responses: stapled_ocsp_responses(fd),
+                signed_cert_timestamp: signed_cert_timestamp(fd),
+            }),
+            None => None,
+        }
     }
 
     fn head(certs: &CertList) -> *const CERTCertListNode {
@@ -34,11 +89,11 @@ impl CertificateChain {
     }
 }
 
-impl<'a> Iterator for &'a mut CertificateChain {
+impl<'a> Iterator for &'a mut CertificateInfo {
     type Item = &'a [u8];
     fn next(&mut self) -> Option<&'a [u8]> {
         self.cursor = unsafe { *self.cursor }.links.next as *const CERTCertListNode;
-        if self.cursor == CertificateChain::head(&self.certs) {
+        if self.cursor == CertificateInfo::head(&self.certs) {
             return None;
         }
         let mut item = SECItem {
@@ -52,5 +107,15 @@ impl<'a> Iterator for &'a mut CertificateChain {
             panic!("Error getting DER from certificate");
         }
         Some(unsafe { std::slice::from_raw_parts(item.data, item.len as usize) })
+    }
+}
+
+impl CertificateInfo {
+    pub fn stapled_ocsp_responses(&mut self) -> &Option<Vec<Vec<u8>>> {
+        &self.stapled_ocsp_responses
+    }
+
+    pub fn signed_cert_timestamp(&mut self) -> &Option<Vec<u8>> {
+        &self.signed_cert_timestamp
     }
 }

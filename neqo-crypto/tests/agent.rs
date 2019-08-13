@@ -40,8 +40,8 @@ fn basic() {
     assert!(bytes.is_empty());
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
-    client.authenticated();
-    assert_eq!(*client.state(), HandshakeState::Authenticated);
+    client.authenticated(0);
+    assert_eq!(*client.state(), HandshakeState::Authenticated(0));
 
     // Calling handshake() again indicates that we're happy with the cert.
     let bytes = client.handshake(now(), &[]).expect("send CF");
@@ -104,8 +104,8 @@ fn raw() {
     assert!(client_records.is_empty());
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
-    client.authenticated();
-    assert_eq!(*client.state(), HandshakeState::Authenticated);
+    client.authenticated(0);
+    assert_eq!(*client.state(), HandshakeState::Authenticated(0));
 
     // Calling handshake() again indicates that we're happy with the cert.
     let client_records = client.handshake_raw(now(), None).expect("send CF");

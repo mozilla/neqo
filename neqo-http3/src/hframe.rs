@@ -522,6 +522,9 @@ mod tests {
         let out = conn_s.process(out.dgram(), now());
         let out = conn_c.process(out.dgram(), now());
         conn_s.process(out.dgram(), now());
+        conn_c.authenticated(0, now());
+        let out = conn_c.process(None, now());
+        conn_s.process(out.dgram(), now());
 
         // create a stream
         let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
