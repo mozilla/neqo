@@ -261,7 +261,7 @@ impl Default for HFrameReader {
 impl HFrameReader {
     pub fn new() -> HFrameReader {
         HFrameReader {
-            state: HFrameReaderState::GetType,
+            state: HFrameReaderState::BeforeFrame,
             hframe_type: 0,
             hframe_len: 0,
             push_id_len: 0, // TODO(mt) remove this, it's bad
@@ -281,9 +281,15 @@ impl HFrameReader {
             let to_read = std::cmp::min(self.decoder.min_remaining(), 4096);
             let mut buf = vec![0; to_read];
             let mut input = match conn.stream_recv(stream_id, &mut buf[..]) {
-                Ok((_, true)) => {
+                Ok((read, true)) => {
                     break match self.state {
-                        HFrameReaderState::BeforeFrame => Ok(true),
+                        HFrameReaderState::BeforeFrame => {
+                            if read == 0 {
+                                Ok(true)
+                            } else {
+                                Err(Error::MalformedFrame(0xff))
+                            }
+                        }
                         _ => Err(Error::MalformedFrame(0xff)),
                     };
                 }
@@ -908,5 +914,23 @@ mod tests {
         } else {
             panic!("wrong frame type");
         }
+    }
+
+    // Test closing a stream before any frame is sent should not cause an error.
+    #[test]
+    fn test_frame_reading_when_stream_is_closed_before_sending_data() {
+        let (mut conn_c, mut conn_s) = connect();
+
+        // create a stream
+        let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
+        conn_s.stream_send(stream_id, &[0x00]).unwrap();
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
+
+        let mut fr: HFrameReader = HFrameReader::new();
+        assert_eq!(Ok(()), conn_c.stream_close_send(stream_id));
+        let out = conn_c.process(None, now());
+        conn_s.process(out.dgram(), now());
+        assert_eq!(Ok(true), fr.receive(&mut conn_s, stream_id));
     }
 }
