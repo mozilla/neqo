@@ -154,7 +154,10 @@ fn dynamic_link(extra_libs: &[&str]) {
 
 fn static_link(nsstarget: &PathBuf) {
     let lib_dir = nsstarget.join("lib");
-    println!("cargo:rustc-link-search=native={}", lib_dir.to_str().unwrap());
+    println!(
+        "cargo:rustc-link-search=native={}",
+        lib_dir.to_str().unwrap()
+    );
     let mut static_libs = vec![
         "certdb",
         "certhi",
