@@ -16,6 +16,7 @@ mod qpack_send_buf;
 mod static_table;
 mod table;
 
+pub type Header = (String, String);
 type Res<T> = Result<T, Error>;
 
 #[derive(Debug)]

@@ -6,7 +6,8 @@
 
 use crate::hframe::{HFrame, HFrameReader, HSettingType, H3_FRAME_TYPE_DATA};
 use crate::transaction_client::TransactionClient;
-use crate::transaction_server::{Header, RequestHandler, TransactionServer};
+use crate::transaction_server::{RequestHandler, TransactionServer};
+use crate::Header;
 use neqo_common::{
     qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
     IncrementalDecoderResult,
@@ -15,9 +16,9 @@ use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{PRErrorCode, SecretAgentInfo};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
-use neqo_transport::State;
-use neqo_transport::{AppError, CloseError, Connection, ConnectionEvent, Output, Role, StreamType};
-
+use neqo_transport::{
+    AppError, CloseError, Connection, ConnectionEvent, Output, Role, State, StreamType,
+};
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::mem;
@@ -917,7 +918,7 @@ impl Http3Connection {
     }
 
     // API
-    pub fn get_headers(&mut self, stream_id: u64) -> Res<Option<Vec<(String, String)>>> {
+    pub fn get_headers(&mut self, stream_id: u64) -> Res<Option<Vec<Header>>> {
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
@@ -2033,7 +2034,7 @@ mod tests {
                 &"https".to_string(),
                 &"something.com".to_string(),
                 &"/".to_string(),
-                &Vec::<(String, String)>::new(),
+                &Vec::<Header>::new(),
             )
             .unwrap();
         assert_eq!(request_stream_id, 0);

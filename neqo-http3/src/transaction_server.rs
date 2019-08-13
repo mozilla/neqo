@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::hframe::{ElementDependencyType, HFrame, HFrameReader, PrioritizedElementType};
+use crate::Header;
 use crate::{Error, Res};
 use neqo_common::{qdebug, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
@@ -12,7 +13,6 @@ use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
 use std::mem;
 
-pub type Header = (String, String);
 pub type Response = (Vec<Header>, Vec<u8>);
 pub type RequestHandler = Box<FnMut(&[Header], bool) -> Response>;
 

@@ -7,7 +7,7 @@
 #![deny(warnings)]
 use neqo_common::{matches, Datagram};
 use neqo_crypto::init;
-use neqo_http3::{Http3Connection, Http3Event, Http3State};
+use neqo_http3::{Header, Http3Connection, Http3Event, Http3State};
 use neqo_transport::Connection;
 use std::collections::HashSet;
 use std::io::{self, ErrorKind};
@@ -21,7 +21,7 @@ use url::Url;
 
 #[derive(Debug)]
 struct Headers {
-    pub h: Vec<(String, String)>,
+    pub h: Vec<Header>,
 }
 
 // dragana: this is a very stupid parser.
