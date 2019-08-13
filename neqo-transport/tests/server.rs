@@ -37,7 +37,11 @@ fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef 
     assert!(dgram.is_some());
     let dgram = server.process(dgram, now()).dgram(); // ServerHello...
     assert!(dgram.is_some());
-    let dgram = client.process(dgram, now()).dgram();
+    // Ingest the server Certificate and authenticate.
+    let _ = client.process(dgram, now()).dgram();
+    // Drop any datagram the client sends here; it's just an ACK.
+    client.authenticated(0, now());
+    let dgram = client.process(None, now()).dgram();
     assert!(dgram.is_some());
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram, now()).dgram();
@@ -70,7 +74,9 @@ fn retry() {
     assert!(dgram.is_some());
     let dgram = server.process(dgram, now()).dgram(); // Initial, HS
     assert!(dgram.is_some());
-    let dgram = client.process(dgram, now()).dgram(); // HS (done)
+    let _ = client.process(dgram, now()).dgram(); // Ingest, drop any ACK.
+    client.authenticated(0, now());
+    let dgram = client.process(None, now()).dgram(); // Send Finished
     assert!(dgram.is_some());
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram, now()).dgram(); // (done)
@@ -118,12 +124,15 @@ fn retry_0rtt() {
 
     let dgram = server.process(dgram, now()).dgram(); // Initial, HS
     assert!(dgram.is_some());
-    let dgram = client.process(dgram, now()).dgram(); // HS (done)
+    let dgram = client.process(dgram, now()).dgram();
+    // Note: the client doesn't need to authenticate the server here
+    // as there is no certificate; authentication is based on the ticket.
     assert!(dgram.is_some());
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram, now()).dgram(); // (done)
     assert!(dgram.is_some());
     connected_server(&mut server);
+    assert!(client.tls_info().unwrap().resumed());
 }
 
 #[test]

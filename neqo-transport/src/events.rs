@@ -10,50 +10,34 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use crate::frame::{CloseError, StreamType};
+use crate::connection::State;
+use crate::frame::StreamType;
 use crate::stream_id::StreamId;
 use crate::AppError;
 
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum ConnectionEvent {
-    Connected,
+    /// Cert authentication needed
+    AuthenticationNeeded,
     /// A new uni (read) or bidi stream has been opened by the peer.
     NewStream {
         stream_id: u64,
         stream_type: StreamType,
     },
     /// Space available in the buffer for an application write to succeed.
-    SendStreamWritable {
-        stream_id: u64,
-    },
+    SendStreamWritable { stream_id: u64 },
     /// New bytes available for reading.
-    RecvStreamReadable {
-        stream_id: u64,
-    },
+    RecvStreamReadable { stream_id: u64 },
     /// Peer reset the stream.
-    RecvStreamReset {
-        stream_id: u64,
-        app_error: AppError,
-    },
+    RecvStreamReset { stream_id: u64, app_error: AppError },
     /// Peer has sent STOP_SENDIconnectioNG
-    SendStreamStopSending {
-        stream_id: u64,
-        app_error: AppError,
-    },
+    SendStreamStopSending { stream_id: u64, app_error: AppError },
     /// Peer has acked everything sent on the stream.
-    SendStreamComplete {
-        stream_id: u64,
-    },
+    SendStreamComplete { stream_id: u64 },
     /// Peer increased MAX_STREAMS
-    SendStreamCreatable {
-        stream_type: StreamType,
-    },
-    /// Connection closed
-    ConnectionClosed {
-        error_code: CloseError,
-        frame_type: u64,
-        reason_phrase: String,
-    },
+    SendStreamCreatable { stream_type: StreamType },
+    /// Connection state change.
+    StateChange(State),
     /// The server rejected 0-RTT.
     /// This event invalidates all state in streams that has been created.
     /// Any data written to streams needs to be written again.
@@ -66,11 +50,11 @@ pub struct ConnectionEvents {
 }
 
 impl ConnectionEvents {
-    pub fn connected(&mut self) {
-        self.insert(ConnectionEvent::Connected);
+    pub fn authentication_needed(&self) {
+        self.insert(ConnectionEvent::AuthenticationNeeded);
     }
 
-    pub fn new_stream(&mut self, stream_id: StreamId, stream_type: StreamType) {
+    pub fn new_stream(&self, stream_id: StreamId, stream_type: StreamType) {
         self.insert(ConnectionEvent::NewStream {
             stream_id: stream_id.as_u64(),
             stream_type,
@@ -113,12 +97,8 @@ impl ConnectionEvents {
         self.insert(ConnectionEvent::SendStreamCreatable { stream_type });
     }
 
-    pub fn connection_closed(&self, error_code: CloseError, frame_type: u64, reason_phrase: &str) {
-        self.insert(ConnectionEvent::ConnectionClosed {
-            error_code,
-            frame_type,
-            reason_phrase: reason_phrase.to_owned(),
-        });
+    pub fn connection_state_change(&self, state: State) {
+        self.insert(ConnectionEvent::StateChange(state));
     }
 
     pub fn client_0rtt_rejected(&self) {

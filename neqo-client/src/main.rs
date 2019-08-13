@@ -5,14 +5,13 @@
 // except according to those terms.
 
 #![deny(warnings)]
-use neqo_common::Datagram;
-use neqo_crypto::init_db;
+use neqo_common::{matches, Datagram};
+use neqo_crypto::init;
 use neqo_http3::{Http3Connection, Http3Event, Http3State};
 use neqo_transport::{Connection, FixedConnectionIdManager};
 use std::collections::HashSet;
 use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
-use std::path::PathBuf;
 use std::process::exit;
 use std::str::FromStr;
 use std::string::ParseError;
@@ -61,9 +60,6 @@ impl FromStr for Headers {
     about = "A basic QUIC HTTP/0.9 and HTTP3 client."
 )]
 pub struct Args {
-    #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
-    db: PathBuf,
-
     #[structopt(short = "a", long, default_value = "h3-22")]
     /// ALPN labels to negotiate.
     ///
@@ -180,6 +176,10 @@ fn process_loop(
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, _args: &Args, client: &mut Http3Connection) -> bool {
+        let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
+        if client.events().into_iter().any(authentication_needed) {
+            client.authenticated(0, Instant::now());
+        }
         Http3State::Connected != client.state()
     }
 }
@@ -285,8 +285,8 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
 }
 
 fn main() {
+    init();
     let args = Args::from_args();
-    init_db(args.db.clone());
 
     let remote_addr = match args.remote_addr() {
         Err(e) => {

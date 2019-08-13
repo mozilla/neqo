@@ -17,8 +17,10 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
+use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, Client, Epoch, HandshakeState, Record, RecordList, SecretAgentInfo, Server,
+    Agent, AntiReplay, Client, Epoch, HandshakeState, PRErrorCode, Record, RecordList,
+    SecretAgentInfo, Server,
 };
 
 use crate::crypto::Crypto;
@@ -72,7 +74,7 @@ impl ::std::fmt::Display for Role {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Ord, Eq)]
 /// The state of the Connection.
 pub enum State {
     Init,
@@ -463,6 +465,22 @@ impl Connection {
             }
             Agent::Client(_) => Err(Error::WrongRole),
         }
+    }
+
+    pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
+        self.crypto.tls.info()
+    }
+
+    /// Get the peer's certificate chain and other info.
+    pub fn peer_certificate(&self) -> Option<CertificateInfo> {
+        self.crypto.tls.peer_certificate()
+    }
+
+    /// Call by application when the peer cert has been verified
+    pub fn authenticated(&mut self, error: PRErrorCode, now: Instant) {
+        self.crypto.tls.authenticated(error);
+        let res = self.handshake(now, 0, None);
+        self.absorb_error(now, res);
     }
 
     /// Get the role of the connection.
@@ -1077,20 +1095,11 @@ impl Connection {
             });
         }
 
-        let m = {
-            let m = self.crypto.tls.handshake_raw(now, rec);
+        let m = self.crypto.tls.handshake_raw(now, rec);
+        if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
+            self.events.authentication_needed();
+        }
 
-            if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
-                // TODO(ekr@rtfm.com): IMPORTANT: This overrides
-                // authentication and so is fantastically dangerous.
-                // Fix before shipping.
-                qwarn!([self] "marking connection as authenticated without checking");
-                self.crypto.tls.authenticated();
-                self.crypto.tls.handshake_raw(now, None)
-            } else {
-                m
-            }
-        };
         match m {
             Err(e) => {
                 qwarn!([self] "Handshake failed");
@@ -1273,8 +1282,6 @@ impl Connection {
                        error_code,
                        frame_type,
                        reason_phrase);
-                self.events
-                    .connection_closed(error_code, frame_type, &reason_phrase);
                 self.set_state(State::Closed(error_code.into()));
             }
         };
@@ -1372,7 +1379,7 @@ impl Connection {
     fn set_state(&mut self, state: State) {
         if state > self.state {
             qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
-            self.state = state;
+            self.state = state.clone();
             match &self.state {
                 State::Connected => {
                     if self.role == Role::Server {
@@ -1388,7 +1395,6 @@ impl Connection {
                                 ZeroRttState::Rejected
                             }
                     }
-                    self.events.connected();
                 }
                 State::Closing { .. } => {
                     self.send_streams.clear();
@@ -1402,6 +1408,7 @@ impl Connection {
                 }
                 _ => {}
             }
+            self.events.connection_state_change(state);
         } else {
             assert_eq!(state, self.state);
         }
@@ -1808,6 +1815,17 @@ mod tests {
         .expect("create a default server")
     }
 
+    /// If state is AuthenticationNeeded call authenticated(). This function will
+    /// consume all outstanding events on the connection.
+    pub fn maybe_autenticate(conn: &mut Connection) -> bool {
+        let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+        if conn.events().any(authentication_needed) {
+            conn.authenticated(0, now());
+            return true;
+        }
+        false
+    }
+
     #[test]
     fn bidi_stream_properties() {
         let id1 = StreamIndex::new(4).to_stream_id(StreamType::BiDi, Role::Client);
@@ -1854,6 +1872,10 @@ mod tests {
         let out = server.process(out.dgram(), now());
 
         let out = client.process(out.dgram(), now());
+        let _ = server.process(out.dgram(), now());
+        assert!(maybe_autenticate(&mut client));
+        let out = client.process(None, now());
+
         // client now in State::Connected
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
@@ -1883,6 +1905,16 @@ mod tests {
         assert!(out.as_dgram_ref().is_some());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
 
+        qdebug!("---- client: cert verification");
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+
+        assert!(maybe_autenticate(&mut client));
+
         qdebug!("---- client: SH..FIN -> FIN");
         let out = client.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_some());
@@ -1900,6 +1932,49 @@ mod tests {
 
         assert_eq!(*client.state(), State::Connected);
         assert_eq!(*server.state(), State::Connected);
+    }
+
+    #[test]
+    fn test_conn_handshake_failed_authentication() {
+        qdebug!("---- client: generate CH");
+        let mut client = default_client();
+        let out = client.process(None, now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+        let mut server = default_server();
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        qdebug!("---- client: cert verification");
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+        assert!(client.events().any(authentication_needed));
+        qdebug!("---- client: Alert(certificate_revoked)");
+        client.authenticated(-(0x2000) + 12, now());
+
+        qdebug!("---- client: -> Alert(certificate_revoked)");
+        let out = client.process(None, now());
+        // This part of test needs to be adapted when issue #128 is fixed.
+        assert!(out.as_dgram_ref().is_none());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+
+        qdebug!("---- server: Alert(certificate_revoked)");
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
+        assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(44)));
+        // This part of test needs to be adapted when issue #128 is fixed.
+        //assert_error(&server, ConnectionError::Transport(Error::PeerError(300)));
     }
 
     #[test]
@@ -1925,9 +2000,19 @@ mod tests {
         qdebug!("---- client");
         let out = client.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_some());
-        assert_eq!(*client.state(), State::Connected);
         qdebug!("Output={:0x?}", out.as_dgram_ref());
         // -->> Initial[1]: ACK[0]
+
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+
+        assert!(maybe_autenticate(&mut client));
+
+        qdebug!("---- client");
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some());
+        assert_eq!(*client.state(), State::Connected);
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
         // -->> Handshake[0]: CRYPTO[FIN], ACK[0]
 
         qdebug!("---- server");
@@ -2002,6 +2087,7 @@ mod tests {
             _ => false,
         };
         while !is_done(a) {
+            let _ = maybe_autenticate(a);
             let d = a.process(datagram, now());
             datagram = d.dgram();
             mem::swap(&mut a, &mut b);
@@ -2055,22 +2141,32 @@ mod tests {
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
         let mut server = default_server();
-        let out = server.process(out.dgram(), now());
+        let out_to_rep = server.process(out.dgram(), now());
+        assert!(out_to_rep.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out_to_rep.as_dgram_ref());
+
+        qdebug!("---- client: cert verification");
+        let out = client.process(Some(out_to_rep.as_dgram_ref().unwrap().clone()), now());
         assert!(out.as_dgram_ref().is_some());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
 
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+
+        assert!(maybe_autenticate(&mut client));
+
         qdebug!("---- client: SH..FIN -> FIN");
-        let out2 = client.process(Some(out.as_dgram_ref().unwrap().clone()), now());
-        assert!(out2.as_dgram_ref().is_some());
-        qdebug!("Output={:0x?}", out2.as_dgram_ref());
+        let out = client.process(None, now());
+        assert!(out.as_dgram_ref().is_some());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         assert_eq!(2, client.stats().packets_rx);
         assert_eq!(0, client.stats().dups_rx);
 
         qdebug!("---- Dup, ignored");
-        let out2 = client.process(out.dgram().clone(), now());
-        assert!(out2.as_dgram_ref().is_none());
-        qdebug!("Output={:0x?}", out2.as_dgram_ref());
+        let out = client.process(out_to_rep.dgram().clone(), now());
+        assert!(out.as_dgram_ref().is_none());
+        qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         // Four packets total received, two of them are dups
         assert_eq!(4, client.stats().packets_rx);

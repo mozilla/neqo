@@ -12,11 +12,12 @@ use neqo_common::{
     qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
     IncrementalDecoderResult,
 };
+use neqo_crypto::agent::CertificateInfo;
+use neqo_crypto::{PRErrorCode, SecretAgentInfo};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
-use neqo_transport::{
-    AppError, CloseError, Connection, ConnectionEvent, Output, Role, State, StreamType,
-};
+use neqo_transport::State;
+use neqo_transport::{AppError, CloseError, Connection, ConnectionEvent, Output, Role, StreamType};
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -154,7 +155,7 @@ impl NewStreamTypeReader {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub enum Http3State {
     Initializing,
     Connected,
@@ -226,6 +227,19 @@ impl Http3Connection {
         }
     }
 
+    pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
+        self.conn.tls_info()
+    }
+
+    /// Get the peer's certificate.
+    pub fn peer_certificate(&self) -> Option<CertificateInfo> {
+        self.conn.peer_certificate()
+    }
+
+    pub fn authenticated(&mut self, error: PRErrorCode, now: Instant) {
+        self.conn.authenticated(error, now);
+    }
+
     fn initialize_http3_connection(&mut self) -> Res<()> {
         qdebug!([self] "initialize_http3_connection");
         self.create_control_stream()?;
@@ -285,26 +299,6 @@ impl Http3Connection {
         self.conn.role()
     }
 
-    pub fn check_state_change(&mut self, now: Instant) {
-        match self.state {
-            Http3State::Initializing => {
-                if self.conn.state().clone() == State::Connected {
-                    self.state = Http3State::Connected;
-                    self.events.connected();
-                    let res = self.initialize_http3_connection();
-                    self.check_result(now, res);
-                }
-            }
-            Http3State::Connected => {
-                if let State::Closing { error, .. } = self.conn.state().clone() {
-                    self.events.connection_closing();
-                    self.state = Http3State::Closing(error.into());
-                }
-            }
-            _ => {}
-        }
-    }
-
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         qdebug!([self] "Process.");
         if let Some(d) = dgram {
@@ -317,7 +311,6 @@ impl Http3Connection {
     pub fn process_input(&mut self, dgram: Datagram, now: Instant) {
         qdebug!([self] "Process input.");
         self.conn.process_input(dgram, now);
-        self.check_state_change(now);
     }
 
     pub fn conn(&mut self) -> &mut Connection {
@@ -339,7 +332,11 @@ impl Http3Connection {
                 let res = self.process_sending();
                 self.check_result(now, res);
             }
-            _ => {}
+            Http3State::Closed { .. } => {}
+            _ => {
+                let res = self.check_connection_events();
+                let _ = self.check_result(now, res);
+            }
         }
     }
 
@@ -392,6 +389,12 @@ impl Http3Connection {
         Ok(())
     }
 
+    // Active state means that we still can recv new streams, recv data and send data.
+    // This is Connected state and GoingAway (in this state some streams are still active).
+    fn state_active(&self) -> bool {
+        (self.state == Http3State::Connected) || (self.state == Http3State::GoingAway)
+    }
+
     // If this return an error the connection must be closed.
     fn check_connection_events(&mut self) -> Res<()> {
         qdebug!([self] "check_connection_events");
@@ -399,13 +402,15 @@ impl Http3Connection {
         for e in events {
             qdebug!([self] "check_connection_events - event {:?}.", e);
             match e {
-                ConnectionEvent::Connected => (),
                 ConnectionEvent::NewStream {
                     stream_id,
                     stream_type,
                 } => self.handle_new_stream(stream_id, stream_type)?,
-                ConnectionEvent::SendStreamWritable { .. } => {}
+                ConnectionEvent::SendStreamWritable { .. } => {
+                    assert!(self.state_active());
+                }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
+                    assert!(self.state_active());
                     self.streams_are_readable.insert(stream_id);
                 }
                 ConnectionEvent::RecvStreamReset {
@@ -422,8 +427,20 @@ impl Http3Connection {
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.handle_stream_creatable(stream_type)?
                 }
-                ConnectionEvent::ConnectionClosed { error_code, .. } => {
-                    self.handle_connection_closed(error_code)?
+                ConnectionEvent::AuthenticationNeeded => {
+                    self.events.authentication_needed();
+                }
+                ConnectionEvent::StateChange(state) => {
+                    match state {
+                        State::Connected => self.handle_connection_connected()?,
+                        State::Closing { error, .. } => {
+                            self.handle_connection_closing(error.clone().into())?
+                        }
+                        State::Closed(error) => {
+                            self.handle_connection_closed(error.clone().into())?
+                        }
+                        _ => {}
+                    };
                 }
                 ConnectionEvent::ZeroRttRejected => {
                     // TODO(mt) work out what to do here.
@@ -436,6 +453,7 @@ impl Http3Connection {
 
     fn handle_new_stream(&mut self, stream_id: u64, stream_type: StreamType) -> Res<()> {
         qdebug!([self] "A new stream: {:?} {}.", stream_type, stream_id);
+        assert!(self.state_active());
         match stream_type {
             StreamType::BiDi => match self.role() {
                 Role::Server => self.handle_new_client_request(stream_id),
@@ -470,6 +488,7 @@ impl Http3Connection {
 
     fn handle_stream_readable(&mut self, stream_id: u64) -> Res<()> {
         qdebug!([self] "Readable stream {}.", stream_id);
+        assert!(self.state_active());
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
@@ -542,27 +561,46 @@ impl Http3Connection {
     }
 
     fn handle_stream_reset(&mut self, stream_id: u64, app_err: AppError) -> Res<()> {
+        assert!(self.state_active());
         self.events.reset(stream_id, app_err);
         Ok(())
     }
 
     fn handle_stream_stop_sending(&mut self, _stream_id: u64, _app_err: AppError) -> Res<()> {
+        assert!(self.state_active());
         Ok(())
     }
 
     fn handle_stream_complete(&mut self, _stream_id: u64) -> Res<()> {
+        assert!(self.state_active());
         Ok(())
     }
 
     fn handle_stream_creatable(&mut self, stream_type: StreamType) -> Res<()> {
+        assert!(self.state_active());
         if stream_type == StreamType::BiDi {
             self.events.new_requests_creatable();
         }
         Ok(())
     }
 
+    fn handle_connection_connected(&mut self) -> Res<()> {
+        assert_eq!(self.state, Http3State::Initializing);
+        self.events.connection_state_change(Http3State::Connected);
+        self.state = Http3State::Connected;
+        self.initialize_http3_connection()
+    }
+
+    fn handle_connection_closing(&mut self, error_code: CloseError) -> Res<()> {
+        self.events
+            .connection_state_change(Http3State::Closing(error_code));
+        self.state = Http3State::Closing(error_code);
+        Ok(())
+    }
+
     fn handle_connection_closed(&mut self, error_code: CloseError) -> Res<()> {
-        self.events.connection_closed(error_code);
+        self.events
+            .connection_state_change(Http3State::Closed(error_code));
         self.state = Http3State::Closed(error_code);
         Ok(())
     }
@@ -848,10 +886,9 @@ impl Http3Connection {
                     | Http3Event::DataReadable { stream_id }
                     | Http3Event::NewPushStream { stream_id } => *stream_id < goaway_stream_id,
                     Http3Event::Reset { .. }
-                    | Http3Event::ConnectionConnected
+                    | Http3Event::AuthenticationNeeded
                     | Http3Event::GoawayReceived
-                    | Http3Event::ConnectionClosing
-                    | Http3Event::ConnectionClosed { .. } => true,
+                    | Http3Event::StateChange { .. } => true,
                     Http3Event::RequestsCreatable => false,
                 })
                 .cloned()
@@ -953,34 +990,21 @@ impl Http3Connection {
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub enum Http3Event {
     /// Space available in the buffer for an application write to succeed.
-    HeaderReady {
-        stream_id: u64,
-    },
+    HeaderReady { stream_id: u64 },
     /// New bytes available for reading.
-    DataReadable {
-        stream_id: u64,
-    },
+    DataReadable { stream_id: u64 },
     /// Peer reset the stream.
-    Reset {
-        stream_id: u64,
-        error: AppError,
-    },
+    Reset { stream_id: u64, error: AppError },
     /// A new push stream
-    NewPushStream {
-        stream_id: u64,
-    },
+    NewPushStream { stream_id: u64 },
     /// New stream can be created
     RequestsCreatable,
-    // Connection change state to Connected.
-    ConnectionConnected,
-    // Client has received a GOAWAY frame
+    /// Cert authentication needed
+    AuthenticationNeeded,
+    /// Client has received a GOAWAY frame
     GoawayReceived,
-    // Connection change state to Closing.
-    ConnectionClosing,
-    // Connection change state to Closed.
-    ConnectionClosed {
-        error_code: CloseError,
-    },
+    /// Connection state change.
+    StateChange(Http3State),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1009,21 +1033,16 @@ impl Http3Events {
         self.insert(Http3Event::RequestsCreatable);
     }
 
-    pub fn connected(&self) {
-        self.insert(Http3Event::ConnectionConnected);
+    pub fn authentication_needed(&mut self) {
+        self.insert(Http3Event::AuthenticationNeeded);
     }
 
     pub fn goaway_received(&self) {
         self.insert(Http3Event::GoawayReceived);
     }
 
-    pub fn connection_closing(&self) {
-        self.insert(Http3Event::ConnectionClosing);
-    }
-
-    pub fn connection_closed(&self, error_code: CloseError) {
-        self.events.borrow_mut().clear();
-        self.insert(Http3Event::ConnectionClosed { error_code });
+    pub fn connection_state_change(&self, state: Http3State) {
+        self.insert(Http3Event::StateChange(state));
     }
 
     pub fn events(&self) -> BTreeSet<Http3Event> {
@@ -1042,6 +1061,8 @@ impl Http3Events {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_common::matches;
+    use neqo_transport::State;
     use test_fixture::*;
 
     fn assert_closed(hconn: &Http3Connection, expected: Error) {
@@ -1080,15 +1101,18 @@ mod tests {
             assert_eq!(*neqo_trans_conn.state(), State::WaitInitial);
             let out = neqo_trans_conn.process(out.dgram(), now());
             assert_eq!(*neqo_trans_conn.state(), State::Handshaking);
-            assert_eq!(hconn.state(), Http3State::Initializing);
             let out = hconn.process(out.dgram(), now());
-            let http_events = hconn.events();
-            for e in http_events {
-                match e {
-                    Http3Event::ConnectionConnected => (),
-                    _ => panic!("events other than connected found"),
-                }
-            }
+            let out = neqo_trans_conn.process(out.dgram(), now());
+            assert!(out.as_dgram_ref().is_none());
+
+            let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
+            assert!(hconn.events().into_iter().any(authentication_needed));
+            hconn.authenticated(0, now());
+
+            let out = hconn.process(out.dgram(), now());
+            let connected = |e| matches!(e, Http3Event::StateChange(Http3State::Connected));
+            assert!(hconn.events().into_iter().any(connected));
+
             assert_eq!(hconn.state(), Http3State::Connected);
             neqo_trans_conn.process(out.dgram(), now());
         } else {
@@ -1096,6 +1120,11 @@ mod tests {
             let out = neqo_trans_conn.process(None, now());
             let out = hconn.process(out.dgram(), now());
             let out = neqo_trans_conn.process(out.dgram(), now());
+            let _ = hconn.process(out.dgram(), now());
+            let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+            assert!(neqo_trans_conn.events().any(authentication_needed));
+            neqo_trans_conn.authenticated(0, now());
+            let out = neqo_trans_conn.process(None, now());
             let out = hconn.process(out.dgram(), now());
             assert_eq!(hconn.state(), Http3State::Connected);
             neqo_trans_conn.process(out.dgram(), now());
@@ -1105,7 +1134,6 @@ mod tests {
         let mut connected = false;
         for e in events {
             match e {
-                ConnectionEvent::Connected => connected = true,
                 ConnectionEvent::NewStream {
                     stream_id,
                     stream_type,
@@ -1146,6 +1174,8 @@ mod tests {
                 ConnectionEvent::SendStreamWritable { stream_id } => {
                     assert!((stream_id == 2) || (stream_id == 6) || (stream_id == 10));
                 }
+                ConnectionEvent::StateChange(State::Connected) => connected = true,
+                ConnectionEvent::StateChange(_) => (),
                 _ => panic!("unexpected event"),
             }
         }

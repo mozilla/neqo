@@ -6,7 +6,7 @@
 
 #![deny(warnings)]
 
-use neqo_common::Datagram;
+use neqo_common::{matches, Datagram};
 use neqo_crypto::init;
 use neqo_http3::{Http3Connection, Http3Event};
 use neqo_transport::{
@@ -127,6 +127,10 @@ fn process_loop(
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
+        let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+        if client.events().any(authentication_needed) {
+            client.authenticated(0, Instant::now());
+        }
         match client.state() {
             State::Connected => false,
             State::Closing { .. } => false,
