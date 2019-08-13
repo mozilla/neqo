@@ -635,8 +635,11 @@ impl SendStream {
     pub fn close(&mut self) {
         match self.state {
             SendStreamState::Ready => {
-                self.state
-                    .transition(SendStreamState::DataRecvd { final_size: 0 });
+                self.state.transition(SendStreamState::DataSent {
+                    send_buf: TxBuffer::new(),
+                    final_size: 0,
+                    fin_sent: false,
+                });
             }
             SendStreamState::Send { ref mut send_buf } => {
                 let final_size = send_buf.retired + send_buf.buffered() as u64;
