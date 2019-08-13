@@ -180,7 +180,8 @@ mod test {
 
     #[test]
     fn convert_stable() {
-        let now = Time::from(Instant::now());
+        init();
+        let now = Time::now();
         let pr: PRTime = now.try_into().expect("should convert successfully");
         println!("now {:?}", now);
         println!("pr {:?}", pr);
@@ -191,22 +192,26 @@ mod test {
 
     #[test]
     fn past_time() {
+        init();
         let base = get_base();
         assert!(Time::try_from(base.prtime - 1).is_err());
     }
 
     #[test]
     fn negative_time() {
+        init();
         assert!(Time::try_from(-1).is_err());
     }
 
     #[test]
     fn negative_interval() {
+        init();
         assert!(Interval::try_from(-1).is_err());
     }
 
     #[test]
     fn overflow_interval() {
+        init();
         let interval = Interval::from(Duration::from_nanos(std::u64::MAX));
         let res: Res<PRTime> = interval.try_into();
         assert!(res.is_err());

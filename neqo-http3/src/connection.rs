@@ -2124,4 +2124,96 @@ mod tests {
             ))
         );
     }
+
+    #[test]
+    fn test_receive_grease_before_response() {
+        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let request_stream_id = hconn
+            .fetch(
+                &"GET".to_string(),
+                &"https".to_string(),
+                &"something.com".to_string(),
+                &"/".to_string(),
+                &Vec::<(String, String)>::new(),
+            )
+            .unwrap();
+        assert_eq!(request_stream_id, 0);
+
+        let out = hconn.process(None, now());
+        neqo_trans_conn.process(out.dgram(), now());
+
+        // find the new request/response stream and send frame v on it.
+        let events = neqo_trans_conn.events();
+        for e in events {
+            match e {
+                ConnectionEvent::NewStream {
+                    stream_id,
+                    stream_type,
+                } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    assert_eq!(stream_type, StreamType::BiDi);
+                }
+                ConnectionEvent::RecvStreamReadable { stream_id } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    let mut buf = [0u8; 100];
+                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, true);
+                    assert_eq!(amount, 18);
+                    assert_eq!(
+                        buf[..18],
+                        [
+                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
+                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
+                        ]
+                    );
+
+                    // Construct an unknown frame.
+                    const UNKNOWN_FRAME_LEN: usize = 832;
+                    let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+                    enc.encode_varint(1028u64); // Arbitrary type.
+                    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+                    let mut buf: Vec<_> = enc.into();
+                    buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
+                    let _ = neqo_trans_conn.stream_send(stream_id, &buf).unwrap();
+
+                    // Send a headers and a data frame with fin
+                    let data = &[
+                        // headers
+                        0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
+                        // 1 complete data frames
+                        0x0, 0x3, 0x61, 0x62, 0x63,
+                    ];
+                    let _ = neqo_trans_conn.stream_send(stream_id, data);
+                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
+                }
+                _ => {}
+            }
+        }
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
+        hconn.process(None, now());
+
+        // Read first frame
+        match hconn.events().into_iter().nth(1).unwrap() {
+            Http3Event::DataReadable { stream_id } => {
+                assert_eq!(stream_id, request_stream_id);
+                let mut buf = [0u8; 100];
+                let (len, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
+                assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
+                assert_eq!(fin, true);
+            }
+            x => {
+                eprintln!("event {:?}", x);
+                panic!()
+            }
+        }
+        // Stream should now be closed and gone
+        let mut buf = [0u8; 100];
+        assert_eq!(
+            hconn.read_data(now(), 0, &mut buf),
+            Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId
+            ))
+        );
+    }
 }

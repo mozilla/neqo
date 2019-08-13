@@ -2315,4 +2315,26 @@ mod tests {
             _ => false,
         });
     }
+
+    #[test]
+    // Send fin even if a peer closes a reomte bidi send stream before sending any data.
+    fn report_fin_when_stream_closed_wo_data() {
+        // Note that the two servers in this test will get different anti-replay filters.
+        // That's OK because we aren't testing anti-replay.
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        // create a stream
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        client.stream_send(stream_id, &[0x00]).unwrap();
+        let out = client.process(None, now());
+        server.process(out.dgram(), now());
+
+        assert_eq!(Ok(()), server.stream_close_send(stream_id));
+        let out = server.process(None, now());
+        client.process(out.dgram(), now());
+        let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
+        assert!(client.events().any(stream_readable));
+    }
 }
