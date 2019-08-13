@@ -380,7 +380,6 @@ impl HFrameReader {
                     match progress {
                         IncrementalDecoderResult::Ignored => {
                             self.reset();
-                            break Ok(false);
                         }
                         IncrementalDecoderResult::InProgress => {}
                         _ => break Err(Error::NoMoreData),

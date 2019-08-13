@@ -5,9 +5,8 @@
 // except according to those terms.
 
 use crate::hframe::{HFrame, HFrameReader, HSettingType, H3_FRAME_TYPE_DATA};
-use crate::request_stream_client::RequestStreamClient;
-use crate::request_stream_server::RequestStreamServer;
-use crate::request_stream_server::{Header, RequestHandler};
+use crate::transaction_client::TransactionClient;
+use crate::transaction_server::{Header, RequestHandler, TransactionServer};
 use neqo_common::{
     qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
     IncrementalDecoderResult,
@@ -179,11 +178,11 @@ pub struct Http3Connection {
     streams_have_data_to_send: BTreeSet<u64>,
     // Client only
     events: Http3Events,
-    request_streams_client: HashMap<u64, RequestStreamClient>,
+    transactions_client: HashMap<u64, TransactionClient>,
     // Server only
     #[allow(clippy::type_complexity)]
     handler: Option<RequestHandler>,
-    request_streams_server: HashMap<u64, RequestStreamServer>,
+    transactions_server: HashMap<u64, TransactionServer>,
 }
 
 impl ::std::fmt::Display for Http3Connection {
@@ -217,8 +216,8 @@ impl Http3Connection {
             qpack_encoder: QPackEncoder::new(true),
             qpack_decoder: QPackDecoder::new(max_table_size, max_blocked_streams),
             new_streams: HashMap::new(),
-            request_streams_client: HashMap::new(),
-            request_streams_server: HashMap::new(),
+            transactions_client: HashMap::new(),
+            transactions_server: HashMap::new(),
             settings_received: false,
             streams_are_readable: BTreeSet::new(),
             streams_have_data_to_send: BTreeSet::new(),
@@ -361,7 +360,7 @@ impl Http3Connection {
         let to_send = mem::replace(&mut self.streams_have_data_to_send, BTreeSet::new());
         if self.role() == Role::Client {
             for stream_id in to_send {
-                if let Some(cs) = &mut self.request_streams_client.get_mut(&stream_id) {
+                if let Some(cs) = &mut self.transactions_client.get_mut(&stream_id) {
                     cs.send(&mut self.conn, &mut self.qpack_encoder)?;
                     if cs.has_data_to_send() {
                         self.streams_have_data_to_send.insert(stream_id);
@@ -371,7 +370,7 @@ impl Http3Connection {
         } else {
             for stream_id in to_send {
                 let mut remove_stream = false;
-                if let Some(cs) = &mut self.request_streams_server.get_mut(&stream_id) {
+                if let Some(cs) = &mut self.transactions_server.get_mut(&stream_id) {
                     cs.send(&mut self.conn)?;
                     if cs.has_data_to_send() {
                         self.streams_have_data_to_send.insert(stream_id);
@@ -380,7 +379,7 @@ impl Http3Connection {
                     }
                 }
                 if remove_stream {
-                    self.request_streams_server.remove(&stream_id);
+                    self.transactions_server.remove(&stream_id);
                 }
             }
         }
@@ -617,24 +616,24 @@ impl Http3Connection {
 
         let mut found = false;
 
-        if let Some(request_stream) = &mut self.request_streams_client.get_mut(&stream_id) {
+        if let Some(transaction) = &mut self.transactions_client.get_mut(&stream_id) {
             qdebug!([label] "Request/response stream {} is readable.", stream_id);
             found = true;
             let res = if unblocked {
-                request_stream.unblock(&mut self.qpack_decoder)
+                transaction.unblock(&mut self.qpack_decoder)
             } else {
-                request_stream.receive(&mut self.conn, &mut self.qpack_decoder)
+                transaction.receive(&mut self.conn, &mut self.qpack_decoder)
             };
             if let Err(e) = res {
                 qdebug!([label] "Error {} ocurred", e);
                 if e.is_stream_error() {
-                    self.request_streams_client.remove(&stream_id);
+                    self.transactions_client.remove(&stream_id);
                     self.conn.stream_stop_sending(stream_id, e.code())?;
                 } else {
                     return Err(e);
                 }
-            } else if request_stream.done() {
-                self.request_streams_client.remove(&stream_id);
+            } else if transaction.done() {
+                self.transactions_client.remove(&stream_id);
             }
         }
         Ok(found)
@@ -652,32 +651,32 @@ impl Http3Connection {
 
         let mut found = false;
 
-        if let Some(request_stream) = &mut self.request_streams_server.get_mut(&stream_id) {
+        if let Some(transaction) = &mut self.transactions_server.get_mut(&stream_id) {
             qdebug!([label] "Request/response stream {} is readable.", stream_id);
             found = true;
             let res = if unblocked {
-                request_stream.unblock(&mut self.qpack_decoder)
+                transaction.unblock(&mut self.qpack_decoder)
             } else {
-                request_stream.receive(&mut self.conn, &mut self.qpack_decoder)
+                transaction.receive(&mut self.conn, &mut self.qpack_decoder)
             };
             if let Err(e) = res {
                 qdebug!([label] "Error {} ocurred", e);
                 if e.is_stream_error() {
-                    self.request_streams_client.remove(&stream_id);
+                    self.transactions_client.remove(&stream_id);
                     self.conn.stream_stop_sending(stream_id, e.code())?;
                 } else {
                     return Err(e);
                 }
             }
-            if request_stream.done_reading_request() {
+            if transaction.done_reading_request() {
                 if let Some(ref mut cb) = self.handler {
-                    let (headers, data) = (cb)(request_stream.get_request_headers(), false);
-                    request_stream.set_response(&headers, data, &mut self.qpack_encoder);
+                    let (headers, data) = (cb)(transaction.get_request_headers(), false);
+                    transaction.set_response(&headers, data, &mut self.qpack_encoder);
                 }
-                if request_stream.has_data_to_send() {
+                if transaction.has_data_to_send() {
                     self.streams_have_data_to_send.insert(stream_id);
                 } else {
-                    self.request_streams_client.remove(&stream_id);
+                    self.transactions_client.remove(&stream_id);
                 }
             }
         }
@@ -736,13 +735,13 @@ impl Http3Connection {
     pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
         qdebug!([self] "Closed.");
         self.state = Http3State::Closing(CloseError::Application(error));
-        if (!self.request_streams_client.is_empty() || !self.request_streams_server.is_empty())
+        if (!self.transactions_client.is_empty() || !self.transactions_server.is_empty())
             && (error == 0)
         {
             qwarn!("close() called when streams still active");
         }
-        self.request_streams_client.clear();
-        self.request_streams_server.clear();
+        self.transactions_client.clear();
+        self.transactions_server.clear();
         self.conn.close(now, error, msg);
     }
 
@@ -763,9 +762,9 @@ impl Http3Connection {
             path
         );
         let id = self.conn.stream_create(StreamType::BiDi)?;
-        self.request_streams_client.insert(
+        self.transactions_client.insert(
             id,
-            RequestStreamClient::new(id, method, scheme, host, path, headers, self.events.clone()),
+            TransactionClient::new(id, method, scheme, host, path, headers, self.events.clone()),
         );
         self.streams_have_data_to_send.insert(id);
         Ok(id)
@@ -773,7 +772,7 @@ impl Http3Connection {
 
     pub fn stream_reset(&mut self, stream_id: u64, error: AppError) -> Res<()> {
         qdebug!([self] "reset_stream {}.", stream_id);
-        match &mut self.request_streams_client.remove(&stream_id) {
+        match &mut self.transactions_client.remove(&stream_id) {
             Some(cs) => {
                 if cs.has_data_to_send() {
                     self.conn.stream_reset_send(stream_id, error)?;
@@ -791,7 +790,7 @@ impl Http3Connection {
 
     pub fn stream_close_send(&mut self, now: Instant, stream_id: u64) -> Res<()> {
         qdebug!([self] "close_stream {}.", stream_id);
-        if let Some(cs) = &mut self.request_streams_client.get_mut(&stream_id) {
+        if let Some(cs) = &mut self.transactions_client.get_mut(&stream_id) {
             match cs.close_send(&mut self.conn) {
                 Ok(()) => Ok(()),
                 Err(_) => {
@@ -865,14 +864,14 @@ impl Http3Connection {
             return Err(Error::UnexpectedFrame);
         } else {
             // Issue reset events for streams >= goaway stream id
-            self.request_streams_client
+            self.transactions_client
                 .iter()
                 .filter(|(id, _)| **id >= goaway_stream_id)
                 .map(|(id, _)| *id)
                 .for_each(|id| self.events.reset(id, Error::RequestRejected.code()));
 
             // Actually remove (i.e. don't retain) these streams
-            self.request_streams_client
+            self.transactions_client
                 .retain(|id, _| *id < goaway_stream_id);
 
             // Remove events for any of these streams by creating a new set of
@@ -924,7 +923,7 @@ impl Http3Connection {
         } else {
             String::new()
         };
-        if let Some(cs) = &mut self.request_streams_client.get_mut(&stream_id) {
+        if let Some(cs) = &mut self.transactions_client.get_mut(&stream_id) {
             qdebug!([label] "get_header from stream {}.", stream_id);
             Ok(cs.get_header())
         } else {
@@ -945,12 +944,12 @@ impl Http3Connection {
         } else {
             String::new()
         };
-        if let Some(cs) = &mut self.request_streams_client.get_mut(&stream_id) {
+        if let Some(cs) = &mut self.transactions_client.get_mut(&stream_id) {
             qdebug!([label] "read_data from stream {}.", stream_id);
             match cs.read_data(&mut self.conn, buf) {
                 Ok((amount, fin)) => {
                     if fin {
-                        self.request_streams_client.remove(&stream_id);
+                        self.transactions_client.remove(&stream_id);
                     } else if amount > 0 {
                         // Directly call receive instead of adding to
                         // streams_are_readable here. This allows the app to
@@ -982,8 +981,8 @@ impl Http3Connection {
 
     // SERVER SIDE ONLY FUNCTIONS
     fn handle_new_client_request(&mut self, stream_id: u64) {
-        self.request_streams_server
-            .insert(stream_id, RequestStreamServer::new(stream_id));
+        self.transactions_server
+            .insert(stream_id, TransactionServer::new(stream_id));
     }
 }
 
@@ -2115,6 +2114,98 @@ mod tests {
             }
         }
 
+        // Stream should now be closed and gone
+        let mut buf = [0u8; 100];
+        assert_eq!(
+            hconn.read_data(now(), 0, &mut buf),
+            Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId
+            ))
+        );
+    }
+
+    #[test]
+    fn test_receive_grease_before_response() {
+        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let request_stream_id = hconn
+            .fetch(
+                &"GET".to_string(),
+                &"https".to_string(),
+                &"something.com".to_string(),
+                &"/".to_string(),
+                &Vec::<(String, String)>::new(),
+            )
+            .unwrap();
+        assert_eq!(request_stream_id, 0);
+
+        let out = hconn.process(None, now());
+        neqo_trans_conn.process(out.dgram(), now());
+
+        // find the new request/response stream and send frame v on it.
+        let events = neqo_trans_conn.events();
+        for e in events {
+            match e {
+                ConnectionEvent::NewStream {
+                    stream_id,
+                    stream_type,
+                } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    assert_eq!(stream_type, StreamType::BiDi);
+                }
+                ConnectionEvent::RecvStreamReadable { stream_id } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    let mut buf = [0u8; 100];
+                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, true);
+                    assert_eq!(amount, 18);
+                    assert_eq!(
+                        buf[..18],
+                        [
+                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
+                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
+                        ]
+                    );
+
+                    // Construct an unknown frame.
+                    const UNKNOWN_FRAME_LEN: usize = 832;
+                    let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+                    enc.encode_varint(1028u64); // Arbitrary type.
+                    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+                    let mut buf: Vec<_> = enc.into();
+                    buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
+                    let _ = neqo_trans_conn.stream_send(stream_id, &buf).unwrap();
+
+                    // Send a headers and a data frame with fin
+                    let data = &[
+                        // headers
+                        0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
+                        // 1 complete data frames
+                        0x0, 0x3, 0x61, 0x62, 0x63,
+                    ];
+                    let _ = neqo_trans_conn.stream_send(stream_id, data);
+                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
+                }
+                _ => {}
+            }
+        }
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
+        hconn.process(None, now());
+
+        // Read first frame
+        match hconn.events().into_iter().nth(1).unwrap() {
+            Http3Event::DataReadable { stream_id } => {
+                assert_eq!(stream_id, request_stream_id);
+                let mut buf = [0u8; 100];
+                let (len, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
+                assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
+                assert_eq!(fin, true);
+            }
+            x => {
+                eprintln!("event {:?}", x);
+                panic!()
+            }
+        }
         // Stream should now be closed and gone
         let mut buf = [0u8; 100];
         assert_eq!(
