@@ -280,17 +280,23 @@ impl HFrameReader {
         loop {
             let to_read = std::cmp::min(self.decoder.min_remaining(), 4096);
             let mut buf = vec![0; to_read];
+            let fin;
             let mut input = match conn.stream_recv(stream_id, &mut buf[..]) {
-                Ok((_, true)) => {
+                Ok((0, true)) => {
+                    qtrace!([conn] "HFrameReader::receive: stream has been closed.");
                     break match self.state {
                         HFrameReaderState::BeforeFrame => Ok(true),
                         _ => Err(Error::MalformedFrame(0xff)),
                     };
                 }
                 Ok((0, false)) => break Ok(false),
-                Ok((amount, false)) => Decoder::from(&buf[..amount]),
+                Ok((amount, f)) => {
+                    qtrace!([conn] "HFrameReader::receive: reading {} byte, fin={}.", amount, f);
+                    fin = f;
+                    Decoder::from(&buf[..amount])
+                }
                 Err(e) => {
-                    qdebug!([conn] "Error reading data from stream {}: {:?}", stream_id, e);
+                    qdebug!([conn] "HFrameReader::receive: error reading data from stream {}: {:?}", stream_id, e);
                     break Err(e.into());
                 }
             };
@@ -302,6 +308,7 @@ impl HFrameReader {
             match self.state {
                 HFrameReaderState::BeforeFrame | HFrameReaderState::GetType => match progress {
                     IncrementalDecoderResult::Uint(v) => {
+                        qtrace!([conn] "HFrameReader::receive: read frame type {}", v);
                         self.hframe_type = v;
                         self.decoder = IncrementalDecoder::decode_varint();
                         self.state = HFrameReaderState::GetLength;
@@ -317,6 +324,7 @@ impl HFrameReader {
                 HFrameReaderState::GetLength => {
                     match progress {
                         IncrementalDecoderResult::Uint(len) => {
+                            qtrace!([conn] "HFrameReader::receive: frame type {} length {}", self.hframe_type, len);
                             self.hframe_len = len;
                             self.state = match self.hframe_type {
                                 // DATA and HEADERS payload are left on the quic stream and picked up separately
@@ -335,17 +343,26 @@ impl HFrameReader {
                                 | H3_FRAME_TYPE_GOAWAY
                                 | H3_FRAME_TYPE_MAX_PUSH_ID
                                 | H3_FRAME_TYPE_DUPLICATE_PUSH => {
-                                    self.decoder = IncrementalDecoder::decode(len as usize);
-                                    HFrameReaderState::GetData
+                                    if len == 0 {
+                                        HFrameReaderState::Done
+                                    } else {
+                                        self.decoder = IncrementalDecoder::decode(len as usize);
+                                        HFrameReaderState::GetData
+                                    }
                                 }
                                 _ => {
-                                    self.decoder = IncrementalDecoder::ignore(len as usize);
-                                    HFrameReaderState::UnknownFrameDischargeData
+                                    if len == 0 {
+                                        self.decoder = IncrementalDecoder::decode_varint();
+                                        HFrameReaderState::BeforeFrame
+                                    } else {
+                                        self.decoder = IncrementalDecoder::ignore(len as usize);
+                                        HFrameReaderState::UnknownFrameDischargeData
+                                    }
                                 }
                             };
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => break Err(Error::NoMoreData),
+                        _ => break Err(Error::MalformedFrame(0xff)),
                     }
                 }
                 HFrameReaderState::GetPushPromiseData => {
@@ -358,10 +375,9 @@ impl HFrameReader {
                             enc.encode_uint(8, push_id);
                             self.payload = enc.into();
                             self.state = HFrameReaderState::Done;
-                            break Ok(false);
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => break Err(Error::NoMoreData),
+                        _ => break Err(Error::MalformedFrame(0xff)),
                     };
                 }
                 HFrameReaderState::GetData => {
@@ -370,10 +386,9 @@ impl HFrameReader {
                             qtrace!([conn] "received frame {}: {}", self.hframe_type, hex(&data[..]));
                             self.payload = data;
                             self.state = HFrameReaderState::Done;
-                            break Ok(false);
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => break Err(Error::NoMoreData),
+                        _ => break Err(Error::MalformedFrame(0xff)),
                     };
                 }
                 HFrameReaderState::UnknownFrameDischargeData => {
@@ -382,11 +397,23 @@ impl HFrameReader {
                             self.reset();
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => break Err(Error::NoMoreData),
+                        _ => break Err(Error::MalformedFrame(0xff)),
                     };
                 }
                 HFrameReaderState::Done => {
-                    break Ok(false);
+                    break Ok(fin);
+                }
+            };
+
+            if self.state == HFrameReaderState::Done {
+                break Ok(fin);
+            }
+
+            if fin {
+                if self.state == HFrameReaderState::BeforeFrame {
+                    break Ok(fin);
+                } else {
+                    break Err(Error::MalformedFrame(0xff));
                 }
             }
         }
@@ -907,5 +934,196 @@ mod tests {
         } else {
             panic!("wrong frame type");
         }
+    }
+
+    fn test_reading_frame(
+        buf: &[u8],
+        send_fin_with_data: bool,
+        send_fin_after_data: bool,
+        expect_fin: bool,
+        succeed: bool,
+        frame_done: bool,
+    ) {
+        let (mut conn_c, mut conn_s) = connect();
+
+        // create a stream
+        let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
+
+        let mut fr: HFrameReader = HFrameReader::new();
+
+        conn_s.stream_send(stream_id, &buf).unwrap();
+        if send_fin_with_data {
+            conn_s.stream_close_send(stream_id).unwrap();
+        }
+
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
+
+        if send_fin_after_data {
+            conn_s.stream_close_send(stream_id).unwrap();
+            let out = conn_s.process(None, now());
+            conn_c.process(out.dgram(), now());
+        }
+
+        if succeed {
+            assert_eq!(Ok(expect_fin), fr.receive(&mut conn_c, stream_id));
+            assert_eq!(frame_done, fr.done());
+        } else {
+            assert_eq!(
+                Err(Error::MalformedFrame(255)),
+                fr.receive(&mut conn_c, stream_id)
+            );
+        }
+    }
+
+    #[test]
+    fn test_complete_and_incomplete_unknown_frame() {
+        // Construct an unknown frame.
+        const UNKNOWN_FRAME_LEN: usize = 832;
+        let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+        enc.encode_varint(1028u64); // Arbitrary type.
+        enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+        let mut buf: Vec<_> = enc.into();
+        buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
+
+        let len = std::cmp::min(buf.len() - 1, 10);
+        for i in 1..len {
+            test_reading_frame(&buf[..i], false, false, false, true, false);
+            test_reading_frame(&buf[..i], true, false, true, false, false);
+            test_reading_frame(&buf[..i], false, true, true, false, false);
+        }
+        test_reading_frame(&buf, false, false, false, true, false);
+        test_reading_frame(&buf, true, false, true, true, false);
+        test_reading_frame(&buf, false, true, true, true, false);
+    }
+
+    // if we read more than done_state bytes HFrameReader will be in done state.
+    fn test_complete_and_incomplete_frame(buf: &[u8], done_state: usize) {
+        // Let's consume partial frames. It is enough to test partal frames
+        // up to 10 byte. 10 byte is greater than frame type and frame
+        // length and bit of data.
+        let len = std::cmp::min(buf.len() - 1, 10);
+        for i in 1..len {
+            test_reading_frame(&buf[..i], false, false, false, true, i >= done_state);
+            test_reading_frame(
+                &buf[..i],
+                true,
+                false,
+                i <= done_state,
+                i >= done_state,
+                i >= done_state,
+            );
+            test_reading_frame(
+                &buf[..i],
+                false,
+                true,
+                i <= done_state,
+                i >= done_state,
+                i >= done_state,
+            );
+        }
+        test_reading_frame(buf, false, false, false, true, buf.len() >= done_state);
+        test_reading_frame(buf, true, false, buf.len() <= done_state, true, true);
+        test_reading_frame(buf, false, true, buf.len() <= done_state, true, true);
+    }
+
+    #[test]
+    fn test_complete_and_incomplete_frames() {
+        const FRAME_LEN: usize = 10;
+
+        // H3_FRAME_TYPE_DATA len=0
+        let f = HFrame::Data { len: 0 };
+        let mut enc = Encoder::with_capacity(2);
+        f.encode(&mut enc);
+        let buf: Vec<_> = enc.into();
+        test_complete_and_incomplete_frame(&buf, 2);
+
+        // H3_FRAME_TYPE_DATA len=FRAME_LEN
+        let f = HFrame::Data {
+            len: FRAME_LEN as u64,
+        };
+        let mut enc = Encoder::with_capacity(2);
+        f.encode(&mut enc);
+        let mut buf: Vec<_> = enc.into();
+        buf.resize(FRAME_LEN + buf.len(), 0);
+        test_complete_and_incomplete_frame(&buf, 2);
+
+        // H3_FRAME_TYPE_HEADERS len=0
+        let f = HFrame::Data { len: 0 };
+        let mut enc = Encoder::with_capacity(2);
+        f.encode(&mut enc);
+        let buf: Vec<_> = enc.into();
+        test_complete_and_incomplete_frame(&buf, 2);
+
+        // H3_FRAME_TYPE_HEADERS len=FRAME_LEN
+        let f = HFrame::Headers {
+            len: FRAME_LEN as u64,
+        };
+        let mut enc = Encoder::with_capacity(2);
+        f.encode(&mut enc);
+        let mut buf: Vec<_> = enc.into();
+        buf.resize(FRAME_LEN + buf.len(), 0);
+        test_complete_and_incomplete_frame(&buf, 2);
+
+        // H3_FRAME_TYPE_PRIORITY
+        let f = HFrame::Priority {
+            priorized_elem_type: PrioritizedElementType::RequestStream,
+            elem_dependency_type: ElementDependencyType::RequestStream,
+            priority_elem_id: 2,
+            elem_dependency_id: 1,
+            weight: 3,
+        };
+        let mut enc = Encoder::default();
+        f.encode(&mut enc);
+        let buf: Vec<_> = enc.into();
+        test_complete_and_incomplete_frame(&buf, buf.len());
+
+        // H3_FRAME_TYPE_CANCEL_PUSH
+        let f = HFrame::CancelPush { push_id: 5 };
+        let mut enc = Encoder::default();
+        f.encode(&mut enc);
+        let buf: Vec<_> = enc.into();
+        test_complete_and_incomplete_frame(&buf, buf.len());
+
+        // H3_FRAME_TYPE_SETTINGS
+        let f = HFrame::Settings {
+            settings: vec![
+                (HSettingType::MaxHeaderListSize, 4),
+                (HSettingType::NumPlaceholders, 4),
+            ],
+        };
+        let mut enc = Encoder::default();
+        f.encode(&mut enc);
+        let buf: Vec<_> = enc.into();
+        test_complete_and_incomplete_frame(&buf, buf.len());
+
+        // H3_FRAME_TYPE_PUSH_PROMISE
+        let f = HFrame::PushPromise { push_id: 4, len: 4 };
+        let mut enc = Encoder::default();
+        f.encode(&mut enc);
+        let mut buf: Vec<_> = enc.into();
+        buf.resize(4 + 4 + buf.len(), 0);
+        test_complete_and_incomplete_frame(&buf, 3);
+
+        // H3_FRAME_TYPE_GOAWAY
+        let f = HFrame::Goaway { stream_id: 5 };
+        let mut enc = Encoder::default();
+        f.encode(&mut enc);
+        let buf: Vec<_> = enc.into();
+        test_complete_and_incomplete_frame(&buf, buf.len());
+
+        // H3_FRAME_TYPE_MAX_PUSH_ID
+        let f = HFrame::MaxPushId { push_id: 5 };
+        let mut enc = Encoder::default();
+        f.encode(&mut enc);
+        let buf: Vec<_> = enc.into();
+        test_complete_and_incomplete_frame(&buf, buf.len());
+
+        // H3_FRAME_TYPE_DUPLICATE_PUSH
+        let f = HFrame::DuplicatePush { push_id: 5 };
+        let mut enc = Encoder::default();
+        f.encode(&mut enc);
+        let buf: Vec<_> = enc.into();
+        test_complete_and_incomplete_frame(&buf, buf.len());
     }
 }
