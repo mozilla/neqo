@@ -261,7 +261,7 @@ impl Default for HFrameReader {
 impl HFrameReader {
     pub fn new() -> HFrameReader {
         HFrameReader {
-            state: HFrameReaderState::GetType,
+            state: HFrameReaderState::BeforeFrame,
             hframe_type: 0,
             hframe_len: 0,
             push_id_len: 0, // TODO(mt) remove this, it's bad
@@ -278,6 +278,7 @@ impl HFrameReader {
     // returns true if quic stream was closed.
     pub fn receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         loop {
+            qtrace!([conn] "HFrameReader::receive: state {:?}", self.state);
             let to_read = std::cmp::min(self.decoder.min_remaining(), 4096);
             let mut buf = vec![0; to_read];
             let fin;
