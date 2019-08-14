@@ -8,7 +8,7 @@
 
 use neqo_common::{matches, Datagram};
 use neqo_crypto::init;
-use neqo_http3::{Http3Connection, Http3Event};
+use neqo_http3::{Header, Http3Connection, Http3Event};
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, State,
     StreamType,
@@ -189,7 +189,7 @@ impl Handler for H9Handler {
 // HTTP/3 IMPLEMENTATION
 #[derive(Debug)]
 struct Headers {
-    pub h: Vec<(String, String)>,
+    pub h: Vec<Header>,
 }
 
 // dragana: this is a very stupid parser.

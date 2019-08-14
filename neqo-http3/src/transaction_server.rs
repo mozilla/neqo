@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::hframe::{ElementDependencyType, HFrame, HFrameReader, PrioritizedElementType};
+use crate::Header;
 use crate::{Error, Res};
 use neqo_common::{qdebug, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
@@ -12,12 +13,11 @@ use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
 use std::mem;
 
-pub type Header = (String, String);
 pub type Response = (Vec<Header>, Vec<u8>);
 pub type RequestHandler = Box<FnMut(&[Header], bool) -> Response>;
 
 #[derive(PartialEq, Debug)]
-enum RequestStreamServerState {
+enum TransactionState {
     WaitingForRequestHeaders,
     ReadingRequestHeaders { buf: Vec<u8>, offset: usize },
     BlockedDecodingHeaders { buf: Vec<u8> },
@@ -27,8 +27,8 @@ enum RequestStreamServerState {
     Closed,
 }
 
-pub struct RequestStreamServer {
-    state: RequestStreamServerState,
+pub struct TransactionServer {
+    state: TransactionState,
     stream_id: u64,
     frame_reader: HFrameReader,
     request_headers: Option<Vec<Header>>,
@@ -36,10 +36,10 @@ pub struct RequestStreamServer {
     fin: bool,
 }
 
-impl RequestStreamServer {
-    pub fn new(stream_id: u64) -> RequestStreamServer {
-        RequestStreamServer {
-            state: RequestStreamServerState::WaitingForRequestHeaders,
+impl TransactionServer {
+    pub fn new(stream_id: u64) -> TransactionServer {
+        TransactionServer {
+            state: TransactionState::WaitingForRequestHeaders,
             stream_id,
             frame_reader: HFrameReader::new(),
             request_headers: None,
@@ -75,7 +75,7 @@ impl RequestStreamServer {
         }
         self.response_buf = Some(d.into());
 
-        self.state = RequestStreamServerState::SendingResponse;
+        self.state = TransactionState::SendingResponse;
     }
 
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
@@ -84,14 +84,14 @@ impl RequestStreamServer {
         } else {
             String::new()
         };
-        if self.state == RequestStreamServerState::SendingResponse {
+        if self.state == TransactionState::SendingResponse {
             if let Some(d) = &mut self.response_buf {
                 let sent = conn.stream_send(self.stream_id, &d[..])?;
                 qdebug!([label] "{} bytes sent", sent);
                 if sent == d.len() {
                     self.response_buf = None;
                     conn.stream_close_send(self.stream_id)?;
-                    self.state = RequestStreamServerState::Closed;
+                    self.state = TransactionState::Closed;
                     qdebug!([label] "done sending request");
                 } else {
                     let b = d.split_off(sent);
@@ -104,7 +104,7 @@ impl RequestStreamServer {
 
     fn recv_frame(&mut self, conn: &mut Connection) -> Res<()> {
         if self.frame_reader.receive(conn, self.stream_id)? {
-            self.state = RequestStreamServerState::Closed;
+            self.state = TransactionState::Closed;
         }
         Ok(())
     }
@@ -118,7 +118,7 @@ impl RequestStreamServer {
         qdebug!([label] "state={:?}: receiving data.", self.state);
         loop {
             match self.state {
-                RequestStreamServerState::WaitingForRequestHeaders => {
+                TransactionState::WaitingForRequestHeaders => {
                     self.recv_frame(conn)?;
                     if !self.frame_reader.done() {
                         break Ok(());
@@ -144,7 +144,7 @@ impl RequestStreamServer {
                         }
                     };
                 }
-                RequestStreamServerState::ReadingRequestHeaders {
+                TransactionState::ReadingRequestHeaders {
                     ref mut buf,
                     ref mut offset,
                 } => {
@@ -158,7 +158,7 @@ impl RequestStreamServer {
                     *offset += amount as usize;
                     self.fin = fin;
                     if fin && *offset < buf.len() {
-                        self.state = RequestStreamServerState::Error;
+                        self.state = TransactionState::Error;
                         break Ok(());
                     }
                     if *offset < buf.len() {
@@ -170,16 +170,16 @@ impl RequestStreamServer {
                         qdebug!([label] "decoding header is blocked.");
                         let mut tmp: Vec<u8> = Vec::new();
                         mem::swap(&mut tmp, buf);
-                        self.state = RequestStreamServerState::BlockedDecodingHeaders { buf: tmp };
+                        self.state = TransactionState::BlockedDecodingHeaders { buf: tmp };
                     } else {
-                        self.state = RequestStreamServerState::ReadingRequestDone;
+                        self.state = TransactionState::ReadingRequestDone;
                     }
                 }
-                RequestStreamServerState::BlockedDecodingHeaders { .. } => break Ok(()),
-                RequestStreamServerState::ReadingRequestDone => break Ok(()),
-                RequestStreamServerState::SendingResponse => break Ok(()),
-                RequestStreamServerState::Error => break Ok(()),
-                RequestStreamServerState::Closed => {
+                TransactionState::BlockedDecodingHeaders { .. } => break Ok(()),
+                TransactionState::ReadingRequestDone => break Ok(()),
+                TransactionState::SendingResponse => break Ok(()),
+                TransactionState::Error => break Ok(()),
+                TransactionState::Closed => {
                     panic!("Stream readable after being closed!");
                 }
             };
@@ -199,13 +199,13 @@ impl RequestStreamServer {
     }
 
     fn handle_headers_frame(&mut self, len: u64) -> Res<()> {
-        if self.state == RequestStreamServerState::Closed {
+        if self.state == TransactionState::Closed {
             return Ok(());
         }
         if len == 0 {
-            self.state = RequestStreamServerState::Error;
+            self.state = TransactionState::Error;
         } else {
-            self.state = RequestStreamServerState::ReadingRequestHeaders {
+            self.state = TransactionState::ReadingRequestHeaders {
                 buf: vec![0; len as usize],
                 offset: 0,
             };
@@ -214,12 +214,12 @@ impl RequestStreamServer {
     }
 
     pub fn unblock(&mut self, decoder: &mut QPackDecoder) -> Res<()> {
-        if let RequestStreamServerState::BlockedDecodingHeaders { ref mut buf } = self.state {
+        if let TransactionState::BlockedDecodingHeaders { ref mut buf } = self.state {
             self.request_headers = decoder.decode_header_block(buf, self.stream_id)?;
             if self.request_headers.is_none() {
                 panic!("We must not be blocked again!");
             }
-            self.state = RequestStreamServerState::ReadingRequestDone;
+            self.state = TransactionState::ReadingRequestDone;
         } else {
             panic!("Stream must be in the block state!");
         }
@@ -227,15 +227,15 @@ impl RequestStreamServer {
     }
 
     pub fn done_reading_request(&self) -> bool {
-        self.state == RequestStreamServerState::ReadingRequestDone
+        self.state == TransactionState::ReadingRequestDone
     }
     pub fn has_data_to_send(&self) -> bool {
-        self.state == RequestStreamServerState::SendingResponse
+        self.state == TransactionState::SendingResponse
     }
 }
 
-impl ::std::fmt::Display for RequestStreamServer {
+impl ::std::fmt::Display for TransactionServer {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "RequestStreamServer {}", self.stream_id)
+        write!(f, "TransactionServer {}", self.stream_id)
     }
 }

@@ -11,6 +11,7 @@ use crate::qpack_helper::{
 };
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
+use crate::Header;
 use crate::{Error, Res};
 use neqo_common::qdebug;
 use neqo_transport::Connection;
@@ -522,11 +523,7 @@ impl QPackDecoder {
     }
 
     // this function returns None if the stream is blocked waiting for table insertions.
-    pub fn decode_header_block(
-        &mut self,
-        buf: &[u8],
-        stream_id: u64,
-    ) -> Res<Option<Vec<(String, String)>>> {
+    pub fn decode_header_block(&mut self, buf: &[u8], stream_id: u64) -> Res<Option<Vec<Header>>> {
         qdebug!([self] "decode header block.");
         let mut reader = BufWrapper { buf, offset: 0 };
 
@@ -550,7 +547,7 @@ impl QPackDecoder {
             }
             return Ok(None);
         }
-        let mut h: Vec<(String, String)> = Vec::new();
+        let mut h: Vec<Header> = Vec::new();
 
         loop {
             if reader.done() {
@@ -594,7 +591,7 @@ impl QPackDecoder {
         Ok((req_insert_cnt, base))
     }
 
-    fn read_indexed(&self, buf: &mut BufWrapper, base: u64) -> Res<(String, String)> {
+    fn read_indexed(&self, buf: &mut BufWrapper, base: u64) -> Res<Header> {
         let static_table = buf.peek()? & 0x40 != 0;
         let index = read_prefixed_encoded_int_slice(buf, 2)?;
         qdebug!([self] "decoder indexed {} static={}.", index, static_table);
@@ -610,7 +607,7 @@ impl QPackDecoder {
         }
     }
 
-    fn read_post_base_index(&self, buf: &mut BufWrapper, base: u64) -> Res<(String, String)> {
+    fn read_post_base_index(&self, buf: &mut BufWrapper, base: u64) -> Res<Header> {
         let index = read_prefixed_encoded_int_slice(buf, 4)?;
         qdebug!([self] "decode post-based {}.", index);
         if let Ok(entry) = self.table.get_dynamic(index, base, true) {
@@ -620,7 +617,7 @@ impl QPackDecoder {
         }
     }
 
-    fn read_literal_with_name_ref(&self, buf: &mut BufWrapper, base: u64) -> Res<(String, String)> {
+    fn read_literal_with_name_ref(&self, buf: &mut BufWrapper, base: u64) -> Res<Header> {
         qdebug!([self] "read literal with name reference.");
         // ignore n bit.
         let static_table = buf.peek()? & 0x10 != 0;
@@ -657,11 +654,7 @@ impl QPackDecoder {
         Ok((to_string(&name)?, to_string(&value)?))
     }
 
-    fn read_literal_with_post_base_name_ref(
-        &self,
-        buf: &mut BufWrapper,
-        base: u64,
-    ) -> Res<(String, String)> {
+    fn read_literal_with_post_base_name_ref(&self, buf: &mut BufWrapper, base: u64) -> Res<Header> {
         qdebug!([self] "decoder literal with post-based index.");
         // ignore n bit.
         let index = read_prefixed_encoded_int_slice(buf, 5)?;
@@ -685,7 +678,7 @@ impl QPackDecoder {
         Ok((to_string(&name)?, to_string(&value)?))
     }
 
-    fn read_literal_with_name_literal(&self, buf: &mut BufWrapper) -> Res<(String, String)> {
+    fn read_literal_with_name_literal(&self, buf: &mut BufWrapper) -> Res<Header> {
         qdebug!([self] "decode literal with name literal.");
         // ignore n bit.
 
@@ -965,7 +958,7 @@ mod tests {
     }
 
     struct TestElement {
-        pub headers: Vec<(String, String)>,
+        pub headers: Vec<Header>,
         pub header_block: &'static [u8],
         pub encoder_inst: &'static [u8],
     }

@@ -8,8 +8,8 @@
 
 pub mod connection;
 pub mod hframe;
-mod request_stream_client;
-pub mod request_stream_server;
+mod transaction_client;
+pub mod transaction_server;
 
 use neqo_qpack;
 use neqo_transport;
@@ -17,7 +17,8 @@ use neqo_transport;
 use self::hframe::HFrameType;
 
 pub use connection::{Http3Connection, Http3Event, Http3State};
-pub use request_stream_server::RequestStreamServer;
+pub use neqo_qpack::Header;
+pub use transaction_server::TransactionServer;
 
 type Res<T> = Result<T, Error>;
 

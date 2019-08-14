@@ -7,8 +7,7 @@
 use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEADERS};
 
 use crate::connection::Http3Events;
-use crate::request_stream_server::Header;
-
+use crate::Header;
 use neqo_common::{qdebug, qinfo, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
@@ -23,7 +22,7 @@ struct Request {
     scheme: String,
     host: String,
     path: String,
-    headers: Vec<(String, String)>,
+    headers: Vec<Header>,
     buf: Option<Vec<u8>>,
 }
 
@@ -68,9 +67,9 @@ impl ::std::fmt::Display for Request {
 pub struct Response {
     status: u32,
     status_line: Vec<u8>,
-    pub headers: Option<Vec<(String, String)>>,
+    pub headers: Option<Vec<Header>>,
     pub data_len: u64,
-    pub trailers: Option<Vec<(String, String)>>,
+    pub trailers: Option<Vec<Header>>,
     fin: bool,
 }
 
@@ -88,22 +87,41 @@ impl Response {
 }
 
 /*
- *  States:
- *    SendingRequest,
- *    WaitingForResponseHeaders : we wait for headers. in this state we can also get PRIORITY frame
- *                                or a PUSH_PROMISE.
- *    ReadingHeaders : we got HEADERS frame headerand now we are reading header block.
- *    WaitingForData : we got HEADERS, we are waiting for one or more data frames. In this state we
- *                    can receive one or more PUSH_PROMIS frames or a HEADERS frame carrying trailers.
- *    ReadingData : we got a DATA frame, now we leting app read payload. From here we will go back to
- *                 WaitingForData state to wait for more data frames or to CLosed state
- *    ReadingTrailers : reading trailers.
- *    Closed : waiting for app to pick up data, after that we can delete the RequestStreamClient.
+ *  Transaction send states:
+ *    SendingHeaders : sending headers. From here we may switch to SendingData
+ *                     or Closed (if the app does not want to send data and
+ *                     has alreadyclosed the send stream).
+ *    SendingData : We are sending request data until the app closes stream.
+ *    Closed
  */
 
 #[derive(PartialEq, Debug)]
-enum RequestStreamClientState {
-    SendingRequest,
+enum TransactionSendState {
+    SendingHeaders,
+    SendingData,
+    Closed,
+}
+
+/*
+ * Transaction receive state:
+ *    WaitingForResponseHeaders : we wait for headers. in this state we can
+ *                                also get PRIORITY frame or a PUSH_PROMISE.
+ *    ReadingHeaders : we have HEADERS frame and now we are reading header
+ *                     block. This may block on encoder instructions. In this
+ *                     state we do no read from the stream.
+ *    WaitingForData : we got HEADERS, we are waiting for one or more data
+ *                     frames. In this state we can receive one or more
+ *                     PUSH_PROMIS frames or a HEADERS frame carrying trailers.
+ *    ReadingData : we got a DATA frame, now we letting the app read payload.
+ *                  From here we will go back to WaitingForData state to wait
+ *                  for more data frames or to CLosed state
+ *    ReadingTrailers : reading trailers.
+ *    ClosePending : waiting for app to pick up data, after that we can delete
+ * the TransactionClient.
+ *    Closed
+ */
+#[derive(PartialEq, Debug)]
+enum TransactionRecvState {
     WaitingForResponseHeaders,
     ReadingHeaders { buf: Vec<u8>, offset: usize },
     BlockedDecodingHeaders { buf: Vec<u8> },
@@ -115,8 +133,9 @@ enum RequestStreamClientState {
 }
 
 //  This is used for normal request/responses.
-pub struct RequestStreamClient {
-    state: RequestStreamClientState,
+pub struct TransactionClient {
+    send_state: TransactionSendState,
+    recv_state: TransactionRecvState,
     stream_id: u64,
     request: Request,
     response: Response,
@@ -124,7 +143,7 @@ pub struct RequestStreamClient {
     conn_events: Http3Events,
 }
 
-impl RequestStreamClient {
+impl TransactionClient {
     pub fn new(
         stream_id: u64,
         method: &str,
@@ -133,10 +152,11 @@ impl RequestStreamClient {
         path: &str,
         headers: &[Header],
         conn_events: Http3Events,
-    ) -> RequestStreamClient {
+    ) -> TransactionClient {
         qinfo!("Create a request stream_id={}", stream_id);
-        RequestStreamClient {
-            state: RequestStreamClientState::SendingRequest,
+        TransactionClient {
+            send_state: TransactionSendState::SendingHeaders,
+            recv_state: TransactionRecvState::WaitingForResponseHeaders,
             stream_id,
             request: Request::new(method, scheme, host, path, headers),
             response: Response::new(),
@@ -152,7 +172,7 @@ impl RequestStreamClient {
         } else {
             String::new()
         };
-        if self.state == RequestStreamClientState::SendingRequest {
+        if self.send_state == TransactionSendState::SendingHeaders {
             if self.request.buf.is_none() {
                 self.request.encode_request(encoder, self.stream_id);
             }
@@ -162,7 +182,7 @@ impl RequestStreamClient {
                 if sent == d.len() {
                     self.request.buf = None;
                     conn.stream_close_send(self.stream_id)?;
-                    self.state = RequestStreamClientState::WaitingForResponseHeaders;
+                    self.send_state = TransactionSendState::Closed;
                     qdebug!([label] "done sending request");
                 } else {
                     let b = d.split_off(sent);
@@ -175,7 +195,7 @@ impl RequestStreamClient {
 
     fn recv_frame(&mut self, conn: &mut Connection) -> Res<()> {
         if self.frame_reader.receive(conn, self.stream_id)? {
-            self.state = RequestStreamClientState::ClosePending;
+            self.recv_state = TransactionRecvState::ClosePending;
         }
         Ok(())
     }
@@ -187,14 +207,9 @@ impl RequestStreamClient {
             String::new()
         };
         loop {
-            qdebug!([label] "state={:?}.", self.state);
-            match self.state {
-                RequestStreamClientState::SendingRequest => {
-                    /*TODO(dd.mozilla@gmail.com) if we get response while streaming data. We may also get a stop_sending...*/
-                    // this currently cannot happen
-                    break Ok(());
-                }
-                RequestStreamClientState::WaitingForResponseHeaders => {
+            qdebug!([label] "send_state={:?} recv_state={:?}.", self.send_state, self.recv_state);
+            match self.recv_state {
+                TransactionRecvState::WaitingForResponseHeaders => {
                     self.recv_frame(conn)?;
                     if !self.frame_reader.done() {
                         break Ok(());
@@ -202,7 +217,6 @@ impl RequestStreamClient {
                     let f = self.frame_reader.get_frame()?;
                     qdebug!([label] "A new frame has been received: {:?}", f);
                     match f {
-                        //self.frame_reader.get_frame()? {
                         HFrame::Priority { .. } => break Err(Error::UnexpectedFrame),
                         HFrame::Headers { len } => self.handle_headers_frame(len)?,
                         HFrame::PushPromise { .. } => break Err(Error::UnexpectedFrame),
@@ -211,14 +225,14 @@ impl RequestStreamClient {
                         }
                     };
                 }
-                RequestStreamClientState::ReadingHeaders {
+                TransactionRecvState::ReadingHeaders {
                     ref mut buf,
                     ref mut offset,
                 } => {
                     let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[*offset..])?;
                     qdebug!(
                         [label]
-                        "state=ReadingHeaders: read {} bytes fin={}.",
+                        "recv_state=ReadingHeaders: read {} bytes fin={}.",
                         amount,
                         fin
                     );
@@ -228,7 +242,7 @@ impl RequestStreamClient {
                             // Malformated frame
                             break Err(Error::MalformedFrame(H3_FRAME_TYPE_HEADERS));
                         }
-                        self.state = RequestStreamClientState::Closed;
+                        self.recv_state = TransactionRecvState::Closed;
                         break Ok(());
                     }
                     if *offset < buf.len() {
@@ -240,16 +254,16 @@ impl RequestStreamClient {
                         qdebug!([label] "decoding header is blocked.");
                         let mut tmp: Vec<u8> = Vec::new();
                         mem::swap(&mut tmp, buf);
-                        self.state = RequestStreamClientState::BlockedDecodingHeaders { buf: tmp };
+                        self.recv_state = TransactionRecvState::BlockedDecodingHeaders { buf: tmp };
                     } else {
                         self.conn_events.header_ready(self.stream_id);
-                        self.state = RequestStreamClientState::WaitingForData;
+                        self.recv_state = TransactionRecvState::WaitingForData;
                     }
                 }
-                RequestStreamClientState::BlockedDecodingHeaders { .. } => break Ok(()),
-                RequestStreamClientState::WaitingForData => {
+                TransactionRecvState::BlockedDecodingHeaders { .. } => break Ok(()),
+                TransactionRecvState::WaitingForData => {
                     self.recv_frame(conn)?;
-                    if self.state == RequestStreamClientState::ClosePending {
+                    if self.recv_state == TransactionRecvState::ClosePending {
                         // Received 0 byte fin? Client must see this.
                         self.conn_events.data_readable(self.stream_id);
                     }
@@ -267,15 +281,15 @@ impl RequestStreamClient {
                         _ => break Err(Error::WrongStream),
                     };
                 }
-                RequestStreamClientState::ReadingData { .. } => {
+                TransactionRecvState::ReadingData { .. } => {
                     self.conn_events.data_readable(self.stream_id);
                     break Ok(());
                 }
-                //                RequestStreamClientState::ReadingTrailers => break Ok(()),
-                RequestStreamClientState::ClosePending => {
+                //                TransactionRecvState::ReadingTrailers => break Ok(()),
+                TransactionRecvState::ClosePending => {
                     panic!("Stream readable after being closed!");
                 }
-                RequestStreamClientState::Closed => {
+                TransactionRecvState::Closed => {
                     panic!("Stream readable after being closed!");
                 }
             };
@@ -283,13 +297,13 @@ impl RequestStreamClient {
     }
 
     fn handle_headers_frame(&mut self, len: u64) -> Res<()> {
-        if self.state == RequestStreamClientState::Closed {
+        if self.recv_state == TransactionRecvState::Closed {
             return Ok(());
         }
         if len == 0 {
-            self.state = RequestStreamClientState::WaitingForData;
+            self.recv_state = TransactionRecvState::WaitingForData;
         } else {
-            self.state = RequestStreamClientState::ReadingHeaders {
+            self.recv_state = TransactionRecvState::ReadingHeaders {
                 buf: vec![0; len as usize],
                 offset: 0,
             };
@@ -299,23 +313,23 @@ impl RequestStreamClient {
 
     fn handle_data_frame(&mut self, len: u64) -> Res<()> {
         self.response.data_len = len;
-        if self.state != RequestStreamClientState::Closed {
+        if self.recv_state != TransactionRecvState::Closed {
             if self.response.data_len > 0 {
-                self.state = RequestStreamClientState::ReadingData {
+                self.recv_state = TransactionRecvState::ReadingData {
                     remaining_data_len: len as usize,
                 };
             } else {
-                self.state = RequestStreamClientState::WaitingForData;
+                self.recv_state = TransactionRecvState::WaitingForData;
             }
         }
         Ok(())
     }
 
     pub fn unblock(&mut self, decoder: &mut QPackDecoder) -> Res<()> {
-        if let RequestStreamClientState::BlockedDecodingHeaders { ref mut buf } = self.state {
+        if let TransactionRecvState::BlockedDecodingHeaders { ref mut buf } = self.recv_state {
             self.response.headers = decoder.decode_header_block(buf, self.stream_id)?;
             self.conn_events.header_ready(self.stream_id);
-            self.state = RequestStreamClientState::WaitingForData;
+            self.recv_state = TransactionRecvState::WaitingForData;
             if self.response.headers.is_none() {
                 panic!("We must not be blocked again!");
             }
@@ -326,26 +340,28 @@ impl RequestStreamClient {
     }
 
     pub fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
-        self.state = RequestStreamClientState::WaitingForResponseHeaders;
+        self.send_state = TransactionSendState::Closed;
         conn.stream_close_send(self.stream_id)?;
         Ok(())
     }
 
     pub fn done(&self) -> bool {
-        self.state == RequestStreamClientState::Closed
+        self.send_state == TransactionSendState::Closed
+            && self.recv_state == TransactionRecvState::Closed
     }
 
     pub fn has_data_to_send(&self) -> bool {
-        self.state == RequestStreamClientState::SendingRequest
+        self.send_state == TransactionSendState::SendingHeaders
+            || self.send_state == TransactionSendState::SendingData
     }
 
-    pub fn get_header(&mut self) -> Option<Vec<(String, String)>> {
+    pub fn get_header(&mut self) -> Option<Vec<Header>> {
         self.response.headers.clone()
     }
 
     pub fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)> {
-        match self.state {
-            RequestStreamClientState::ReadingData {
+        match self.recv_state {
+            TransactionRecvState::ReadingData {
                 ref mut remaining_data_len,
             } => {
                 let to_read = if *remaining_data_len > buf.len() {
@@ -361,15 +377,15 @@ impl RequestStreamClient {
                     if *remaining_data_len > 0 {
                         return Err(Error::MalformedFrame(H3_FRAME_TYPE_DATA));
                     }
-                    self.state = RequestStreamClientState::Closed;
+                    self.recv_state = TransactionRecvState::Closed;
                 } else if *remaining_data_len == 0 {
-                    self.state = RequestStreamClientState::WaitingForData;
+                    self.recv_state = TransactionRecvState::WaitingForData;
                 }
 
                 Ok((amount, fin))
             }
-            RequestStreamClientState::ClosePending => {
-                self.state = RequestStreamClientState::Closed;
+            TransactionRecvState::ClosePending => {
+                self.recv_state = TransactionRecvState::Closed;
                 Ok((0, true))
             }
             _ => Ok((0, false)),
@@ -377,8 +393,8 @@ impl RequestStreamClient {
     }
 }
 
-impl ::std::fmt::Display for RequestStreamClient {
+impl ::std::fmt::Display for TransactionClient {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "RequestStreamClient {}", self.stream_id)
+        write!(f, "TransactionClient {}", self.stream_id)
     }
 }

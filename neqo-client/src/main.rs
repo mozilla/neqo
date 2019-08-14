@@ -7,7 +7,7 @@
 #![deny(warnings)]
 use neqo_common::{matches, Datagram};
 use neqo_crypto::init;
-use neqo_http3::{Http3Connection, Http3Event, Http3State};
+use neqo_http3::{Header, Http3Connection, Http3Event, Http3State};
 use neqo_transport::{Connection, FixedConnectionIdManager};
 use std::collections::HashSet;
 use std::io::{self, ErrorKind};
@@ -21,7 +21,7 @@ use url::Url;
 
 #[derive(Debug)]
 struct Headers {
-    pub h: Vec<(String, String)>,
+    pub h: Vec<Header>,
 }
 
 // dragana: this is a very stupid parser.
@@ -150,6 +150,7 @@ fn process_loop(
 
         let out_dgram = client.process_output(Instant::now());
         emit_datagram(&socket, out_dgram.dgram());
+        client.process_http3(Instant::now());
 
         if exiting {
             return client.state();
@@ -169,6 +170,7 @@ fn process_loop(
         if sz > 0 {
             let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
             client.process_input(d, Instant::now());
+            client.process_http3(Instant::now());
         }
     }
 }
