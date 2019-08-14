@@ -580,7 +580,7 @@ impl Connection {
         }
 
         // Should always at least have idle timeout, once connected
-        assert_ne!(delays.is_empty(), true);
+        assert!(!delays.is_empty());
         let earliest = delays.into_iter().min().unwrap();
 
         // TODO(agrover, mt) - need to analyze and fix #47
@@ -2446,6 +2446,97 @@ mod tests {
         client.process_timer(now + Duration::from_secs(60));
 
         // Not connected after 60 seconds.
+        assert!(matches!(client.state(), State::Closing{..}));
+    }
+
+    #[test]
+    fn idle_send_packet1() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        let res = client.process(None, now);
+        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);;
+
+        let out = client.process(None, now + Duration::from_secs(10));
+        let out = server.process(out.dgram(), now + Duration::from_secs(10));
+
+        // Still connected after 69 seconds because idle timer reset by outgoing
+        // packet
+        client.process(out.dgram(), now + Duration::from_secs(69));
+        assert!(matches!(client.state(), State::Connected));
+
+        // Not connected after 70 seconds.
+        client.process_timer(now + Duration::from_secs(70));
+        assert!(matches!(client.state(), State::Closing{..}));
+    }
+
+    #[test]
+    fn idle_send_packet2() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        let res = client.process(None, now);
+        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);;
+
+        let _out = client.process(None, now + Duration::from_secs(10));
+
+        assert_eq!(client.stream_send(2, b"there").unwrap(), 5);;
+        let _out = client.process(None, now + Duration::from_secs(20));
+
+        // Still connected after 69 seconds.
+        client.process(None, now + Duration::from_secs(69));
+        assert!(matches!(client.state(), State::Connected));
+
+        // Not connected after 70 seconds because timer not reset by second
+        // outgoing packet
+        client.process_timer(now + Duration::from_secs(70));
+        assert!(matches!(client.state(), State::Closing{..}));
+    }
+
+    #[test]
+    fn idle_recv_packet() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        let res = client.process(None, now);
+        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+
+        assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
+        assert_eq!(client.stream_send(0, b"hello").unwrap(), 5);
+
+        // Respond with another packet
+        let out = client.process(None, now + Duration::from_secs(10));
+        server.process_input(out.dgram().unwrap(), now + Duration::from_secs(10));
+        assert_eq!(server.stream_send(0, b"world").unwrap(), 5);
+        let out = server.process_output(now + Duration::from_secs(10));
+        assert_ne!(out.as_dgram_ref(), None);
+
+        // Still connected after 79 seconds because idle timer reset by received
+        // packet
+        client.process(out.dgram(), now + Duration::from_secs(20));
+        assert!(matches!(client.state(), State::Connected));
+
+        // Still connected after 79 seconds.
+        client.process_timer(now + Duration::from_secs(79));
+        assert!(matches!(client.state(), State::Connected));
+
+        // Not connected after 80 seconds.
+        client.process_timer(now + Duration::from_secs(80));
         assert!(matches!(client.state(), State::Closing{..}));
     }
 }
