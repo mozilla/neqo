@@ -497,11 +497,8 @@ impl SendStream {
         };
 
         if fin {
-            if let SendStreamState::DataSent {
-                ref mut fin_sent, ..
-            } = self.state
-            {
-                *fin_sent = true
+            if let SendStreamState::DataSent { fin_sent, .. } = &mut self.state {
+                *fin_sent = true;
             }
         }
     }
@@ -522,8 +519,9 @@ impl SendStream {
                 send_buf.mark_as_acked(offset, len);
                 if fin && send_buf.buffered() == 0 {
                     self.conn_events.send_stream_complete(self.stream_id);
-                    self.state
-                        .transition(SendStreamState::DataRecvd { final_size });
+                    self.state.transition(SendStreamState::DataRecvd {
+                        final_size,
+                    });
                 }
             }
             _ => qtrace!("mark_as_acked called from state {}", self.state.name()),
@@ -536,11 +534,8 @@ impl SendStream {
         };
 
         if fin {
-            if let SendStreamState::DataSent {
-                ref mut fin_sent, ..
-            } = self.state
-            {
-                *fin_sent = false
+            if let SendStreamState::DataSent { fin_sent, .. } = &mut self.state {
+                *fin_sent = false;
             }
         }
     }
@@ -619,9 +614,9 @@ impl SendStream {
 
         let buf = &buf[..can_send_bytes as usize];
 
-        let sent = match self.state {
+        let sent = match &mut self.state {
             SendStreamState::Ready => unreachable!(),
-            SendStreamState::Send { ref mut send_buf } => send_buf.send(buf),
+            SendStreamState::Send { send_buf } => send_buf.send(buf),
             _ => return Err(Error::FinalSizeError),
         };
 
@@ -633,7 +628,7 @@ impl SendStream {
     }
 
     pub fn close(&mut self) {
-        match self.state {
+        match &mut self.state {
             SendStreamState::Ready => {
                 self.state.transition(SendStreamState::DataSent {
                     send_buf: TxBuffer::new(),
@@ -641,7 +636,7 @@ impl SendStream {
                     fin_sent: false,
                 });
             }
-            SendStreamState::Send { ref mut send_buf } => {
+            SendStreamState::Send { send_buf } => {
                 let final_size = send_buf.retired + send_buf.buffered() as u64;
                 let owned_buf = mem::replace(send_buf, TxBuffer::new());
                 self.state.transition(SendStreamState::DataSent {
