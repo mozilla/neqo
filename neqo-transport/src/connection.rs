@@ -608,12 +608,6 @@ impl Connection {
         self.cleanup_streams();
     }
 
-    /// Not sure that this is right.
-    /// Andy seemed to think that it was better than rolling this into process_output.
-    pub fn process_timer(&mut self, now: Instant) {
-        self.check_loss_detection_timeout(now);
-    }
-
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&mut self, now: Instant) -> Duration {
         self.loss_recovery_state = self.loss_recovery.get_timer(&self.state);
