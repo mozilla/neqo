@@ -519,9 +519,8 @@ impl SendStream {
                 send_buf.mark_as_acked(offset, len);
                 if fin && send_buf.buffered() == 0 {
                     self.conn_events.send_stream_complete(self.stream_id);
-                    self.state.transition(SendStreamState::DataRecvd {
-                        final_size,
-                    });
+                    self.state
+                        .transition(SendStreamState::DataRecvd { final_size });
                 }
             }
             _ => qtrace!("mark_as_acked called from state {}", self.state.name()),
