@@ -9,7 +9,7 @@
 #[macro_use]
 mod exp;
 #[macro_use]
-pub mod p11;
+mod p11;
 
 pub mod aead;
 pub mod agent;
@@ -25,8 +25,8 @@ mod prio;
 mod replay;
 mod result;
 mod secrets;
-pub mod ssl;
-pub mod time;
+mod ssl;
+mod time;
 
 pub use self::agent::{
     Agent, Client, HandshakeState, Record, RecordList, SecretAgent, SecretAgentInfo,

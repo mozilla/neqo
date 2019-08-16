@@ -71,12 +71,6 @@ pub struct Time {
     t: Instant,
 }
 
-impl Time {
-    pub fn now() -> Time {
-        Time::from(Instant::now())
-    }
-}
-
 impl Deref for Time {
     type Target = Instant;
     fn deref(&self) -> &Self::Target {
