@@ -498,11 +498,8 @@ impl SendStream {
         };
 
         if fin {
-            if let SendStreamState::DataSent {
-                ref mut fin_sent, ..
-            } = self.state
-            {
-                *fin_sent = true
+            if let SendStreamState::DataSent { fin_sent, .. } = &mut self.state {
+                *fin_sent = true;
             }
         }
     }
@@ -533,14 +530,11 @@ impl SendStream {
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
         if let Some(buf) = self.state.tx_buf_mut() {
-            buf.mark_as_lost(offset, len)
+            buf.mark_as_lost(offset, len);
         }
 
         if fin {
-            if let SendStreamState::DataSent {
-                ref mut fin_sent, ..
-            } = self.state
-            {
+            if let SendStreamState::DataSent { fin_sent, .. } = &mut self.state {
                 *fin_sent = false;
             }
         }
@@ -627,9 +621,9 @@ impl SendStream {
 
         let buf = &buf[..can_send_bytes as usize];
 
-        let sent = match self.state {
+        let sent = match &mut self.state {
             SendStreamState::Ready => unreachable!(),
-            SendStreamState::Send { ref mut send_buf } => send_buf.send(buf),
+            SendStreamState::Send { send_buf } => send_buf.send(buf),
             _ => return Err(Error::FinalSizeError),
         };
 
@@ -641,7 +635,7 @@ impl SendStream {
     }
 
     pub fn close(&mut self) {
-        match self.state {
+        match &mut self.state {
             SendStreamState::Ready => {
                 self.state.transition(SendStreamState::DataSent {
                     send_buf: TxBuffer::new(),
@@ -649,7 +643,7 @@ impl SendStream {
                     fin_sent: false,
                 });
             }
-            SendStreamState::Send { ref mut send_buf } => {
+            SendStreamState::Send { send_buf } => {
                 let final_size = send_buf.retired + send_buf.buffered() as u64;
                 let owned_buf = mem::replace(send_buf, TxBuffer::new());
                 self.state.transition(SendStreamState::DataSent {
