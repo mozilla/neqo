@@ -177,9 +177,6 @@ mod test {
         init();
         let now = Time::from(Instant::now());
         let pr: PRTime = now.try_into().expect("should convert successfully");
-        println!("now {:?}", now);
-        println!("pr {:?}", pr);
-        println!("Time::try_from(pr) {:?}", Time::try_from(pr));
         let t2 = Time::try_from(pr).expect("should convert back too");
         assert_eq!(t2, now);
     }
