@@ -46,7 +46,12 @@ use std::path::{Path, PathBuf};
 use std::ptr::null;
 
 mod nss {
-    #![allow(clippy::const_static_lifetime, non_upper_case_globals)]
+    #![warn(warnings)]
+    #![allow(
+        clippy::redundant_static_lifetimes,
+        clippy::const_static_lifetime,
+        non_upper_case_globals
+    )]
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 

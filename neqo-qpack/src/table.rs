@@ -200,7 +200,7 @@ impl HeaderTable {
         name_index: u64,
         value: Vec<u8>,
     ) -> Res<()> {
-        let mut name;
+        let name;
         if name_static_table {
             let entry = self.get_static(name_index)?;
             name = entry.name().to_vec()
@@ -213,8 +213,8 @@ impl HeaderTable {
 
     pub fn duplicate(&mut self, index: u64) -> Res<()> {
         // need to remember name and value because inser may delete the entry.
-        let mut name: Vec<u8>;
-        let mut value: Vec<u8>;
+        let name: Vec<u8>;
+        let value: Vec<u8>;
         {
             let entry = self.get_dynamic(index, self.base, false)?;
             name = entry.name().to_vec();
