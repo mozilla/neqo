@@ -9,7 +9,7 @@
 #[macro_use]
 mod exp;
 #[macro_use]
-pub mod p11;
+mod p11;
 
 pub mod aead;
 pub mod agent;
@@ -25,8 +25,8 @@ mod prio;
 mod replay;
 mod result;
 mod secrets;
-pub mod ssl;
-pub mod time;
+mod ssl;
+mod time;
 
 pub use self::agent::{
     Agent, Client, HandshakeState, Record, RecordList, SecretAgent, SecretAgentInfo,
@@ -46,7 +46,12 @@ use std::path::{Path, PathBuf};
 use std::ptr::null;
 
 mod nss {
-    #![allow(clippy::const_static_lifetime, non_upper_case_globals)]
+    #![warn(warnings)]
+    #![allow(
+        clippy::redundant_static_lifetimes,
+        clippy::const_static_lifetime,
+        non_upper_case_globals
+    )]
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
 }
 

@@ -100,7 +100,7 @@ fn process_loop(
     remote_addr: &SocketAddr,
     socket: &UdpSocket,
     client: &mut Http3Connection,
-    handler: &mut Handler,
+    handler: &mut dyn Handler,
     args: &Args,
 ) -> neqo_http3::connection::Http3State {
     let buf = &mut [0u8; 2048];
@@ -391,7 +391,7 @@ mod old {
         remote_addr: &SocketAddr,
         socket: &UdpSocket,
         client: &mut Connection,
-        handler: &mut HandlerOld,
+        handler: &mut dyn HandlerOld,
         args: &Args,
     ) -> State {
         let buf = &mut [0u8; 2048];

@@ -100,7 +100,7 @@ pub fn read_prefixed_encoded_int_slice(buf: &mut BufWrapper, prefix_len: u8) -> 
 }
 
 pub fn read_prefixed_encoded_int(
-    s: &mut ReadByte,
+    s: &mut dyn ReadByte,
     val: &mut u64,
     cnt: &mut u8,
     prefix_len: u8,

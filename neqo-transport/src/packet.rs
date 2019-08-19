@@ -63,7 +63,7 @@ pub struct ConnectionId(pub Vec<u8>);
 
 impl ConnectionId {
     pub fn generate(len: usize) -> ConnectionId {
-        assert!(matches!(len, 4...18));
+        assert!(matches!(len, 4..=18));
         let mut v = vec![0; len];
         rand::thread_rng().fill(&mut v[..]);
         ConnectionId(v)
@@ -250,7 +250,7 @@ fn decode_pnl(u: u8) -> usize {
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 
-pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
+pub fn decode_packet_hdr(dec: &dyn PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     macro_rules! d {
         ($d:expr) => {
             match $d {
@@ -330,7 +330,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
 }
 
 pub fn decrypt_packet(
-    crypto: &CryptoCtx,
+    crypto: &dyn CryptoCtx,
     pn: PacketNumberDecoder,
     hdr: &mut PacketHdr,
     pkt: &[u8],
@@ -382,7 +382,7 @@ pub fn decrypt_packet(
     )?)
 }
 
-fn encode_packet_short(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
+fn encode_packet_short(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     let mut enc = Encoder::default();
     // Leading byte.
     let pnl = pn_length(hdr.pn);
@@ -408,7 +408,7 @@ fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
 }
 
 /* Handle Initial, 0-RTT, Handshake. */
-fn encode_packet_long(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
+fn encode_packet_long(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     let mut enc = Encoder::default();
 
     let pnl = pn_length(hdr.pn);
@@ -428,7 +428,12 @@ fn encode_packet_long(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u
     encrypt_packet(crypto, hdr, enc, body)
 }
 
-fn encrypt_packet(crypto: &CryptoCtx, hdr: &PacketHdr, mut enc: Encoder, body: &[u8]) -> Vec<u8> {
+fn encrypt_packet(
+    crypto: &dyn CryptoCtx,
+    hdr: &PacketHdr,
+    mut enc: Encoder,
+    body: &[u8],
+) -> Vec<u8> {
     let hdr_len = enc.len();
     // Encrypt the packet. This has too many copies.
     let ct = crypto.aead_encrypt(hdr.pn, &enc, body).unwrap();
@@ -476,7 +481,7 @@ pub fn encode_retry(hdr: &PacketHdr) -> Vec<u8> {
     }
 }
 
-pub fn encode_packet(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
+pub fn encode_packet(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     match &hdr.tipe {
         PacketType::Short => encode_packet_short(crypto, hdr, body),
         PacketType::VN(vers) => encode_packet_vn(hdr, &vers),
