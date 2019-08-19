@@ -66,6 +66,7 @@ pub enum Error {
     InvalidResumptionToken,
     WrongRole,
     InvalidInput,
+    IdleTimeout,
     PeerError(TransportError),
 }
 
@@ -102,7 +103,8 @@ impl Error {
             | Error::VersionNegotiation
             | Error::WrongRole
             | Error::InvalidResumptionToken
-            | Error::InvalidInput => 1,
+            | Error::InvalidInput
+            | Error::IdleTimeout => 1,
         }
     }
 }
@@ -115,7 +117,7 @@ impl From<neqo_crypto::Error> for Error {
 }
 
 impl ::std::error::Error for Error {
-    fn source(&self) -> Option<&(::std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
         match self {
             Error::CryptoError(e) => Some(e),
             _ => None,

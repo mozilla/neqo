@@ -623,7 +623,7 @@ impl QPackDecoder {
         let static_table = buf.peek()? & 0x10 != 0;
         let index = read_prefixed_encoded_int_slice(buf, 4)?;
 
-        let mut name: Vec<u8>;
+        let name: Vec<u8>;
         if static_table {
             if let Ok(entry) = self.table.get_static(index) {
                 name = entry.name().to_vec();
@@ -658,7 +658,7 @@ impl QPackDecoder {
         qdebug!([self] "decoder literal with post-based index.");
         // ignore n bit.
         let index = read_prefixed_encoded_int_slice(buf, 5)?;
-        let mut name: Vec<u8>;
+        let name: Vec<u8>;
         if let Ok(entry) = self.table.get_dynamic(index, base, true) {
             name = entry.name().to_vec();
         } else {

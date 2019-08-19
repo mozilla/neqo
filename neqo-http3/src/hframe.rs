@@ -317,9 +317,7 @@ impl HFrameReader {
                     IncrementalDecoderResult::InProgress => {
                         self.state = HFrameReaderState::GetType;
                     }
-                    _ => {
-                        break Err(Error::MalformedFrame(0xff));
-                    }
+                    _ => panic!("We most be in one of the states above."),
                 },
 
                 HFrameReaderState::GetLength => {
@@ -363,7 +361,7 @@ impl HFrameReader {
                             };
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => break Err(Error::MalformedFrame(0xff)),
+                        _ => panic!("We most be in one of the states above."),
                     }
                 }
                 HFrameReaderState::GetPushPromiseData => {
@@ -378,7 +376,7 @@ impl HFrameReader {
                             self.state = HFrameReaderState::Done;
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => break Err(Error::MalformedFrame(0xff)),
+                        _ => panic!("We most be in one of the states above."),
                     };
                 }
                 HFrameReaderState::GetData => {
@@ -389,7 +387,7 @@ impl HFrameReader {
                             self.state = HFrameReaderState::Done;
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => break Err(Error::MalformedFrame(0xff)),
+                        _ => panic!("We most be in one of the states above."),
                     };
                 }
                 HFrameReaderState::UnknownFrameDischargeData => {
@@ -398,7 +396,7 @@ impl HFrameReader {
                             self.reset();
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => break Err(Error::MalformedFrame(0xff)),
+                        _ => panic!("We most be in one of the states above."),
                     };
                 }
                 HFrameReaderState::Done => {
@@ -937,44 +935,66 @@ mod tests {
         }
     }
 
+    enum FrameReadingTestSend {
+        OnlyData,
+        DataWithFin,
+        DataThenFin,
+    }
+
+    enum FrameReadingTestExpect {
+        Error,
+        Incomplete,
+        FrameComplete,
+        FrameAndStreamComplete,
+        StreamDoneWithoutFrame,
+    }
+
     fn test_reading_frame(
         buf: &[u8],
-        send_fin_with_data: bool,
-        send_fin_after_data: bool,
-        expect_fin: bool,
-        succeed: bool,
-        frame_done: bool,
+        test_to_send: FrameReadingTestSend,
+        expected_result: FrameReadingTestExpect,
     ) {
         let (mut conn_c, mut conn_s) = connect();
 
         // create a stream
         let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
 
-        let mut fr: HFrameReader = HFrameReader::new();
-
         conn_s.stream_send(stream_id, &buf).unwrap();
-        if send_fin_with_data {
+        if let FrameReadingTestSend::DataWithFin = test_to_send {
             conn_s.stream_close_send(stream_id).unwrap();
         }
 
         let out = conn_s.process(None, now());
         conn_c.process(out.dgram(), now());
 
-        if send_fin_after_data {
+        if let FrameReadingTestSend::DataThenFin = test_to_send {
             conn_s.stream_close_send(stream_id).unwrap();
             let out = conn_s.process(None, now());
             conn_c.process(out.dgram(), now());
         }
 
-        if succeed {
-            assert_eq!(Ok(expect_fin), fr.receive(&mut conn_c, stream_id));
-            assert_eq!(frame_done, fr.done());
-        } else {
-            assert_eq!(
-                Err(Error::MalformedFrame(255)),
-                fr.receive(&mut conn_c, stream_id)
-            );
-        }
+        let mut fr = HFrameReader::new();
+        let rv = fr.receive(&mut conn_c, stream_id);
+
+        match expected_result {
+            FrameReadingTestExpect::Error => assert_eq!(Err(Error::MalformedFrame(255)), rv),
+            FrameReadingTestExpect::Incomplete => {
+                assert_eq!(Ok(false), rv);
+                assert_eq!(false, fr.done());
+            }
+            FrameReadingTestExpect::FrameComplete => {
+                assert_eq!(Ok(false), rv);
+                assert_eq!(true, fr.done());
+            }
+            FrameReadingTestExpect::FrameAndStreamComplete => {
+                assert_eq!(Ok(true), rv);
+                assert_eq!(true, fr.done());
+            }
+            FrameReadingTestExpect::StreamDoneWithoutFrame => {
+                assert_eq!(Ok(true), rv);
+                assert_eq!(false, fr.done());
+            }
+        };
     }
 
     #[test]
@@ -989,13 +1009,37 @@ mod tests {
 
         let len = std::cmp::min(buf.len() - 1, 10);
         for i in 1..len {
-            test_reading_frame(&buf[..i], false, false, false, true, false);
-            test_reading_frame(&buf[..i], true, false, true, false, false);
-            test_reading_frame(&buf[..i], false, true, true, false, false);
+            test_reading_frame(
+                &buf[..i],
+                FrameReadingTestSend::OnlyData,
+                FrameReadingTestExpect::Incomplete,
+            );
+            test_reading_frame(
+                &buf[..i],
+                FrameReadingTestSend::DataWithFin,
+                FrameReadingTestExpect::Error,
+            );
+            test_reading_frame(
+                &buf[..i],
+                FrameReadingTestSend::DataThenFin,
+                FrameReadingTestExpect::Error,
+            );
         }
-        test_reading_frame(&buf, false, false, false, true, false);
-        test_reading_frame(&buf, true, false, true, true, false);
-        test_reading_frame(&buf, false, true, true, true, false);
+        test_reading_frame(
+            &buf,
+            FrameReadingTestSend::OnlyData,
+            FrameReadingTestExpect::Incomplete,
+        );
+        test_reading_frame(
+            &buf,
+            FrameReadingTestSend::DataWithFin,
+            FrameReadingTestExpect::StreamDoneWithoutFrame,
+        );
+        test_reading_frame(
+            &buf,
+            FrameReadingTestSend::DataThenFin,
+            FrameReadingTestExpect::StreamDoneWithoutFrame,
+        );
     }
 
     // if we read more than done_state bytes HFrameReader will be in done state.
@@ -1005,27 +1049,61 @@ mod tests {
         // length and bit of data.
         let len = std::cmp::min(buf.len() - 1, 10);
         for i in 1..len {
-            test_reading_frame(&buf[..i], false, false, false, true, i >= done_state);
             test_reading_frame(
                 &buf[..i],
-                true,
-                false,
-                i <= done_state,
-                i >= done_state,
-                i >= done_state,
+                FrameReadingTestSend::OnlyData,
+                if i >= done_state {
+                    FrameReadingTestExpect::FrameComplete
+                } else {
+                    FrameReadingTestExpect::Incomplete
+                },
             );
             test_reading_frame(
                 &buf[..i],
-                false,
-                true,
-                i <= done_state,
-                i >= done_state,
-                i >= done_state,
+                FrameReadingTestSend::DataWithFin,
+                if i == done_state {
+                    FrameReadingTestExpect::FrameAndStreamComplete
+                } else if i > done_state {
+                    FrameReadingTestExpect::FrameComplete
+                } else {
+                    FrameReadingTestExpect::Error
+                },
+            );
+            test_reading_frame(
+                &buf[..i],
+                FrameReadingTestSend::DataThenFin,
+                if i == done_state {
+                    FrameReadingTestExpect::FrameAndStreamComplete
+                } else if i > done_state {
+                    FrameReadingTestExpect::FrameComplete
+                } else {
+                    FrameReadingTestExpect::Error
+                },
             );
         }
-        test_reading_frame(buf, false, false, false, true, buf.len() >= done_state);
-        test_reading_frame(buf, true, false, buf.len() <= done_state, true, true);
-        test_reading_frame(buf, false, true, buf.len() <= done_state, true, true);
+        test_reading_frame(
+            buf,
+            FrameReadingTestSend::OnlyData,
+            FrameReadingTestExpect::FrameComplete,
+        );
+        test_reading_frame(
+            buf,
+            FrameReadingTestSend::DataWithFin,
+            if buf.len() == done_state {
+                FrameReadingTestExpect::FrameAndStreamComplete
+            } else {
+                FrameReadingTestExpect::FrameComplete
+            },
+        );
+        test_reading_frame(
+            buf,
+            FrameReadingTestSend::DataThenFin,
+            if buf.len() == done_state {
+                FrameReadingTestExpect::FrameAndStreamComplete
+            } else {
+                FrameReadingTestExpect::FrameComplete
+            },
+        );
     }
 
     #[test]
@@ -1126,5 +1204,23 @@ mod tests {
         f.encode(&mut enc);
         let buf: Vec<_> = enc.into();
         test_complete_and_incomplete_frame(&buf, buf.len());
+    }
+
+    // Test closing a stream before any frame is sent should not cause an error.
+    #[test]
+    fn test_frame_reading_when_stream_is_closed_before_sending_data() {
+        let (mut conn_c, mut conn_s) = connect();
+
+        // create a stream
+        let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
+        conn_s.stream_send(stream_id, &[0x00]).unwrap();
+        let out = conn_s.process(None, now());
+        conn_c.process(out.dgram(), now());
+
+        let mut fr: HFrameReader = HFrameReader::new();
+        assert_eq!(Ok(()), conn_c.stream_close_send(stream_id));
+        let out = conn_c.process(None, now());
+        conn_s.process(out.dgram(), now());
+        assert_eq!(Ok(true), fr.receive(&mut conn_s, stream_id));
     }
 }

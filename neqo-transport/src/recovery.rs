@@ -95,8 +95,8 @@ impl RttVals {
 
 #[derive(Debug)]
 pub(crate) struct LossRecoveryState {
-    pub(crate) mode: LossRecoveryMode,
-    pub(crate) callback_time: Option<Instant>,
+    mode: LossRecoveryMode,
+    callback_time: Option<Instant>,
 }
 
 impl LossRecoveryState {
@@ -105,6 +105,14 @@ impl LossRecoveryState {
             mode,
             callback_time,
         }
+    }
+
+    pub fn callback_time(&self) -> Option<Instant> {
+        self.callback_time
+    }
+
+    pub fn mode(&self) -> LossRecoveryMode {
+        self.mode
     }
 }
 
@@ -117,7 +125,7 @@ impl Default for LossRecoveryState {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub(crate) enum LossRecoveryMode {
     None,
     LostPackets,

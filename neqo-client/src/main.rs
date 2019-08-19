@@ -7,52 +7,15 @@
 #![deny(warnings)]
 use neqo_common::{matches, Datagram};
 use neqo_crypto::init;
-use neqo_http3::{Header, Http3Connection, Http3Event, Http3State};
+use neqo_http3::{Header, Http3Connection, Http3Event, Http3State, Output};
 use neqo_transport::Connection;
 use std::collections::HashSet;
 use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::process::exit;
-use std::str::FromStr;
-use std::string::ParseError;
 use std::time::Instant;
 use structopt::StructOpt;
 use url::Url;
-
-#[derive(Debug)]
-struct Headers {
-    pub h: Vec<Header>,
-}
-
-// dragana: this is a very stupid parser.
-// headers should be in form "[(something1, something2), (something3, something4)]"
-impl FromStr for Headers {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut res = Headers { h: Vec::new() };
-        let h1: Vec<&str> = s
-            .trim_matches(|p| p == '[' || p == ']')
-            .split(')')
-            .collect();
-
-        for h in h1 {
-            let h2: Vec<&str> = h
-                .trim_matches(|p| p == ',')
-                .trim()
-                .trim_matches(|p| p == '(' || p == ')')
-                .split(',')
-                .collect();
-
-            if h2.len() == 2 {
-                res.h
-                    .push((h2[0].trim().to_string(), h2[1].trim().to_string()));
-            }
-        }
-
-        Ok(res)
-    }
-}
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -71,8 +34,8 @@ pub struct Args {
     #[structopt(short = "m", default_value = "GET")]
     method: String,
 
-    #[structopt(short = "h", long, default_value = "[]")]
-    headers: Headers,
+    #[structopt(short = "h", long, number_of_values = 2)]
+    header: Vec<String>,
 
     #[structopt(name = "max-table-size", short = "t", long, default_value = "128")]
     max_table_size: u32,
@@ -137,7 +100,7 @@ fn process_loop(
     remote_addr: &SocketAddr,
     socket: &UdpSocket,
     client: &mut Http3Connection,
-    handler: &mut Handler,
+    handler: &mut dyn Handler,
     args: &Args,
 ) -> neqo_http3::connection::Http3State {
     let buf = &mut [0u8; 2048];
@@ -146,32 +109,51 @@ fn process_loop(
             return client.state();
         }
 
-        let exiting = !handler.handle(args, client);
+        let mut exiting = !handler.handle(args, client);
 
-        let out_dgram = client.process_output(Instant::now());
-        emit_datagram(&socket, out_dgram.dgram());
+        loop {
+            let output = client.process_output(Instant::now());
+            match output {
+                Output::Datagram(dgram) => emit_datagram(&socket, Some(dgram)),
+                Output::Callback(duration) => {
+                    socket.set_read_timeout(Some(duration)).unwrap();
+                    break;
+                }
+                Output::None => {
+                    // Not strictly necessary, since we're about to exit
+                    socket.set_read_timeout(None).unwrap();
+                    exiting = true;
+                    break;
+                }
+            }
+        }
         client.process_http3(Instant::now());
 
         if exiting {
             return client.state();
         }
 
-        let sz = match socket.recv(&mut buf[..]) {
+        match socket.recv(&mut buf[..]) {
+            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
+                // timer expired
+                client.process_timer(Instant::now());
+            }
             Err(err) => {
                 eprintln!("UDP error: {}", err);
                 exit(1)
             }
-            Ok(sz) => sz,
+            Ok(sz) => {
+                if sz == buf.len() {
+                    eprintln!("Received more than {} bytes", buf.len());
+                    continue;
+                }
+                if sz > 0 {
+                    let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
+                    client.process_input(d, Instant::now());
+                    client.process_http3(Instant::now());
+                }
+            }
         };
-        if sz == buf.len() {
-            eprintln!("Received more than {} bytes", buf.len());
-            continue;
-        }
-        if sz > 0 {
-            let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
-            client.process_input(d, Instant::now());
-            client.process_http3(Instant::now());
-        }
     }
 }
 
@@ -239,6 +221,21 @@ impl Handler for PostConnectHandler {
     }
 }
 
+fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
+    values
+        .iter()
+        .scan(None, |state, value| {
+            if let Some(name) = state.take() {
+                *state = None;
+                Some((name, value.as_ref().to_string())) // TODO use a real type
+            } else {
+                *state = Some(value.as_ref().to_string());
+                None
+            }
+        })
+        .collect()
+}
+
 fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: SocketAddr) {
     let mut client = Http3Connection::new(
         Connection::new_client(
@@ -263,18 +260,21 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         &args,
     );
 
-    let client_stream_id = client
-        .fetch(
-            &args.method,
-            &args.url.scheme(),
-            &args.url.host_str().unwrap(),
-            &args.url.path(),
-            &args.headers.h,
-        )
-        .unwrap();
+    let client_stream_id = client.fetch(
+        &args.method,
+        &args.url.scheme(),
+        &args.url.host_str().unwrap(),
+        &args.url.path(),
+        &to_headers(&args.header),
+    );
+
+    if let Err(err) = client_stream_id {
+        eprintln!("Could not connect: {:?}", err);
+        return;
+    }
 
     let mut h2 = PostConnectHandler::default();
-    h2.streams.insert(client_stream_id);
+    h2.streams.insert(client_stream_id.unwrap());
     process_loop(
         &local_addr,
         &remote_addr,
@@ -391,7 +391,7 @@ mod old {
         remote_addr: &SocketAddr,
         socket: &UdpSocket,
         client: &mut Connection,
-        handler: &mut HandlerOld,
+        handler: &mut dyn HandlerOld,
         args: &Args,
     ) -> State {
         let buf = &mut [0u8; 2048];
