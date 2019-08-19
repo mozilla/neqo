@@ -18,8 +18,8 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     RUST_VERSION=stable
 
 RUN set -eux; \
-    curl -sSLf "https://static.rust-lang.org/rustup/archive/1.16.0/x86_64-unknown-linux-gnu/rustup-init" -o rustup-init; \
-    echo '2d4ddf4e53915a23dda722608ed24e5c3f29ea1688da55aa4e98765fc6223f71 *rustup-init' | sha256sum -c -; \
+    curl -sSLf "https://static.rust-lang.org/rustup/archive/1.18.3/x86_64-unknown-linux-gnu/rustup-init" -o rustup-init; \
+    echo 'a46fe67199b7bcbbde2dcbc23ae08db6f29883e260e23899a88b9073effc9076 *rustup-init' | sha256sum -c -; \
     chmod +x rustup-init; \
     ./rustup-init -y --no-modify-path --default-toolchain "$RUST_VERSION"; \
     rm -f rustup-init; \
