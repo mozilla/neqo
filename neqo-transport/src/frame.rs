@@ -493,7 +493,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
                 token: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
             })
         }
-        FRAME_TYPE_STREAM...FRAME_TYPE_STREAM_MAX => {
+        FRAME_TYPE_STREAM..=FRAME_TYPE_STREAM_MAX => {
             let s = dv!(dec);
             let o = if t & STREAM_FRAME_BIT_OFF != 0 {
                 dv!(dec)
