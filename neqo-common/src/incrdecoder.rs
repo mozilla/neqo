@@ -4,11 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::convert::TryFrom;
 use std::mem;
 
 use crate::codec::Decoder;
 
-/// IncrementalDecoder incrementally processes input from incomplete input.
+/// `IncrementalDecoder` incrementally processes input from incomplete input.
 /// Use this to process data that might be incomplete when it arrives.
 ///
 /// ```
@@ -32,7 +33,7 @@ pub enum IncrementalDecoder {
     Ignoring { remaining: usize },
 }
 
-/// IncrementalDecoderResult is the result of decoding a partial input.
+/// `IncrementalDecoderResult` is the result of decoding a partial input.
 /// You only get an error if the decoder completed its last instruction.
 #[derive(Debug, PartialEq)]
 pub enum IncrementalDecoderResult {
@@ -45,7 +46,7 @@ pub enum IncrementalDecoderResult {
 
 impl IncrementalDecoder {
     /// Decode a buffer of fixed size.
-    pub fn decode(n: usize) -> IncrementalDecoder {
+    pub fn decode(n: usize) -> Self {
         IncrementalDecoder::InBuffer {
             v: Vec::new(),
             remaining: n,
@@ -53,27 +54,27 @@ impl IncrementalDecoder {
     }
 
     /// Decode an unsigned integer of fixed size.
-    pub fn decode_uint(n: usize) -> IncrementalDecoder {
+    pub fn decode_uint(n: usize) -> Self {
         IncrementalDecoder::InUint { v: 0, remaining: n }
     }
 
     /// Decode a QUIC variable-length integer.
-    pub fn decode_varint() -> IncrementalDecoder {
+    pub fn decode_varint() -> Self {
         IncrementalDecoder::BeforeVarint
     }
 
     /// Decode a vector that as a fixed-sized length prefix.
-    pub fn decode_vec(n: usize) -> IncrementalDecoder {
-        IncrementalDecoder::InBufferLen(Box::new(IncrementalDecoder::decode_uint(n)))
+    pub fn decode_vec(n: usize) -> Self {
+        IncrementalDecoder::InBufferLen(Box::new(Self::decode_uint(n)))
     }
 
     /// Decode a vector that as a varint-sized length prefix.
-    pub fn decode_vvec() -> IncrementalDecoder {
-        IncrementalDecoder::InBufferLen(Box::new(IncrementalDecoder::decode_varint()))
+    pub fn decode_vvec() -> Self {
+        IncrementalDecoder::InBufferLen(Box::new(Self::decode_varint()))
     }
 
     /// Ignore a certain number of bytes.
-    pub fn ignore(n: usize) -> IncrementalDecoder {
+    pub fn ignore(n: usize) -> Self {
         IncrementalDecoder::Ignoring { remaining: n }
     }
 
@@ -110,12 +111,12 @@ impl IncrementalDecoder {
         dv: &mut Decoder,
     ) -> IncrementalDecoderResult {
         if remaining <= dv.remaining() {
-            v = IncrementalDecoder::consume_uint_part(v, remaining, dv);
+            v = Self::consume_uint_part(v, remaining, dv);
             *self = IncrementalDecoder::Idle;
             IncrementalDecoderResult::Uint(v)
         } else {
             let r = dv.remaining();
-            v = IncrementalDecoder::consume_uint_part(v, r, dv);
+            v = Self::consume_uint_part(v, r, dv);
             remaining -= r;
             *self = IncrementalDecoder::InUint { v, remaining };
             IncrementalDecoderResult::InProgress
@@ -181,7 +182,11 @@ impl IncrementalDecoder {
                     IncrementalDecoderResult::InProgress
                 }
                 IncrementalDecoderResult::Uint(n) => {
-                    self.consume_buffer_remainder(Vec::with_capacity(n as usize), n as usize, dv)
+                    if let Ok(len) = usize::try_from(n) {
+                        self.consume_buffer_remainder(Vec::with_capacity(len), len, dv)
+                    } else {
+                        IncrementalDecoderResult::Error
+                    }
                 }
                 _ => unreachable!(),
             },
@@ -208,7 +213,7 @@ impl IncrementalDecoder {
 }
 
 impl Default for IncrementalDecoder {
-    fn default() -> IncrementalDecoder {
+    fn default() -> Self {
         IncrementalDecoder::Idle
     }
 }
@@ -244,7 +249,11 @@ mod tests {
     // Take a |decoder|, an encoded buffer |db|, and an |expected| outcome and run
     // the buffer through the encoder several times and check the result.
     // Split the buffer in a different position each time.
-    fn run_split(decoder: IncrementalDecoder, mut db: Encoder, expected: IncrementalDecoderResult) {
+    fn run_split(
+        decoder: &IncrementalDecoder,
+        mut db: Encoder,
+        expected: &IncrementalDecoderResult,
+    ) {
         eprintln!(
             "decode {:?} ; with {:?} ; expect {:?}",
             decoder, db, expected
@@ -274,7 +283,7 @@ mod tests {
             }
 
             assert_eq!(dec.min_remaining(), 0);
-            assert_eq!(res, expected);
+            assert_eq!(&res, expected);
         }
     }
 
@@ -284,11 +293,11 @@ mod tests {
     }
 
     impl UintTestCase {
-        pub fn run(&self, dec: IncrementalDecoder) {
+        pub fn run(&self, dec: &IncrementalDecoder) {
             run_split(
-                dec,
+                &dec,
                 Encoder::from_hex(&self.b),
-                IncrementalDecoderResult::Uint(self.v),
+                &IncrementalDecoderResult::Uint(self.v),
             );
         }
     }
@@ -309,7 +318,7 @@ mod tests {
             "012345" => 0x12345,
             "ffffffffffffffff" => 0xffff_ffff_ffff_ffff,
         ] {
-            c.run(IncrementalDecoder::decode_uint(c.b.len() / 2));
+            c.run(&IncrementalDecoder::decode_uint(c.b.len() / 2));
         }
     }
 
@@ -326,7 +335,7 @@ mod tests {
             "c000000040000000" => 1 << 30,
             "ffffffffffffffff" => (1 << 62) - 1,
         ] {
-            c.run(IncrementalDecoder::decode_varint());
+            c.run(&IncrementalDecoder::decode_varint());
         }
     }
 
@@ -336,11 +345,11 @@ mod tests {
     }
 
     impl BufTestCase {
-        pub fn run(&self, dec: IncrementalDecoder) {
+        pub fn run(&self, dec: &IncrementalDecoder) {
             run_split(
-                dec,
+                &dec,
                 Encoder::from_hex(&self.b),
-                IncrementalDecoderResult::Buffer(Encoder::from_hex(&self.v).into()),
+                &IncrementalDecoderResult::Buffer(Encoder::from_hex(&self.v).into()),
             );
         }
     }
@@ -359,7 +368,7 @@ mod tests {
             "01ff" => "ff",
             "03012345" => "012345",
         ] {
-            c.run(IncrementalDecoder::decode_vec(1));
+            c.run(&IncrementalDecoder::decode_vec(1));
         }
         for c in buf_tc![
             "0000" => "",
@@ -367,7 +376,7 @@ mod tests {
             "0001ff" => "ff",
             "0003012345" => "012345",
         ] {
-            c.run(IncrementalDecoder::decode_vec(2));
+            c.run(&IncrementalDecoder::decode_vec(2));
         }
     }
 
@@ -379,7 +388,7 @@ mod tests {
             "01ff" => "ff",
             "03012345" => "012345",
         ] {
-            c.run(IncrementalDecoder::decode_vvec());
+            c.run(&IncrementalDecoder::decode_vvec());
         }
     }
 
@@ -403,9 +412,9 @@ mod tests {
     fn ignore() {
         let enc = Encoder::from_hex("12345678");
         run_split(
-            IncrementalDecoder::ignore(4),
+            &IncrementalDecoder::ignore(4),
             enc,
-            IncrementalDecoderResult::Ignored,
+            &IncrementalDecoderResult::Ignored,
         );
     }
 }

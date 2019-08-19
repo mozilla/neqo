@@ -39,7 +39,7 @@ impl Server {
         ConnectionId::generate(self.cidlen)
     }
 
-    pub fn check_retry(&self, received: Datagram) -> Res<RetryResult> {
+    pub fn check_retry(&self, received: &Datagram) -> Res<RetryResult> {
         qinfo!("Generating a Retry packet");
         qtrace!("Received packet: {}", hex(&received[..]));
 

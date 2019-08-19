@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ptr::{null_mut, NonNull};
-
 use crate::p11::{
     CERTCertList, CERTCertListNode, CERT_GetCertificateDer, CertList, PRCList, SECItem,
     SECItemArray, SECItemType,
@@ -15,6 +13,8 @@ use crate::ssl::{
     PRFileDesc, SSL_PeerCertificateChain, SSL_PeerSignedCertTimestamps,
     SSL_PeerStapledOCSPResponses,
 };
+use std::convert::TryInto;
+use std::ptr::{null_mut, NonNull};
 
 use std::slice;
 
@@ -38,6 +38,8 @@ fn peer_certificate_chain(fd: *mut PRFileDesc) -> Option<(CertList, *const CERTC
     Some((certs, cursor))
 }
 
+// As explained in rfc6961, an OCSPResponseList can have at most
+// 2^24 items. Casting its length is therefore safe even on 32 bits targets.
 fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
     let ocsp_nss = unsafe { SSL_PeerStapledOCSPResponses(fd) };
     match NonNull::new(ocsp_nss as *mut SECItemArray) {
@@ -45,8 +47,11 @@ fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
             let mut ocsp_helper: Vec<Vec<u8>> = Vec::new();
             let len = unsafe { ocsp_ptr.as_ref().len };
             for inx in 0..len {
-                let item_nss =
-                    unsafe { ocsp_ptr.as_ref().items.offset(inx as isize) as *const SECItem };
+                let item_nss = if let Ok(i) = inx.try_into() {
+                    unsafe { ocsp_ptr.as_ref().items.offset(i) as *const SECItem }
+                } else {
+                    return None;
+                };
                 let item =
                     unsafe { slice::from_raw_parts((*item_nss).data, (*item_nss).len as usize) };
                 ocsp_helper.push(item.to_owned());
@@ -73,7 +78,7 @@ fn signed_cert_timestamp(fd: *mut PRFileDesc) -> Option<Vec<u8>> {
 impl CertificateInfo {
     pub(crate) fn new(fd: *mut PRFileDesc) -> Option<Self> {
         match peer_certificate_chain(fd) {
-            Some((certs, cursor)) => Some(CertificateInfo {
+            Some((certs, cursor)) => Some(Self {
                 certs,
                 cursor,
                 stapled_ocsp_responses: stapled_ocsp_responses(fd),

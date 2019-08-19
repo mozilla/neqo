@@ -5,6 +5,10 @@
 // except according to those terms.
 
 #![deny(warnings)]
+// Bindgen auto generated code
+// won't adhere to the clippy rules below
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::unseparated_literal_suffix)]
 
 #[macro_use]
 mod exp;
@@ -88,9 +92,9 @@ pub fn init() {
                 return NssLoaded::External;
             }
 
-            let st = nss::NSS_NoDB_Init(null());
+            let mut st = nss::NSS_NoDB_Init(null());
             result(st).expect("NSS_NoDB_Init failed");
-            let st = nss::NSS_SetDomesticPolicy();
+            st = nss::NSS_SetDomesticPolicy();
             result(st).expect("NSS_SetDomesticPolicy failed");
 
             NssLoaded::NoDb
@@ -111,7 +115,7 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
             let pathstr = path.to_str().expect("path converts to string").to_string();
             let dircstr = CString::new(pathstr).expect("new CString");
             let empty = CString::new("").expect("new empty CString");
-            let st = nss::NSS_Initialize(
+            let mut st = nss::NSS_Initialize(
                 dircstr.as_ptr(),
                 empty.as_ptr(),
                 empty.as_ptr(),
@@ -120,10 +124,10 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
             );
             result(st).expect("NSS_Initialize failed");
 
-            let st = nss::NSS_SetDomesticPolicy();
+            st = nss::NSS_SetDomesticPolicy();
             result(st).expect("NSS_SetDomesticPolicy failed");
 
-            let st = ssl::SSL_ConfigServerSessionIDCache(1024, 0, 0, dircstr.as_ptr());
+            st = ssl::SSL_ConfigServerSessionIDCache(1024, 0, 0, dircstr.as_ptr());
             result(st).expect("SSL_ConfigServerSessionIDCache failed");
 
             NssLoaded::Db(path.to_path_buf().into_boxed_path())
