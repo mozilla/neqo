@@ -805,9 +805,9 @@ impl Http3Connection {
                 }
             }
         } else {
-            return Err(Error::TransportError(
+            Err(Error::TransportError(
                 neqo_transport::Error::InvalidStreamId,
-            ));
+            ))
         }
     }
 
@@ -970,13 +970,13 @@ impl Http3Connection {
                     if e == Error::MalformedFrame(H3_FRAME_TYPE_DATA) {
                         self.close(now, e.code(), "");
                     }
-                    return Err(e);
+                    Err(e)
                 }
             }
         } else {
-            return Err(Error::TransportError(
+            Err(Error::TransportError(
                 neqo_transport::Error::InvalidStreamId,
-            ));
+            ))
         }
     }
 

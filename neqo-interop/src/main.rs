@@ -76,7 +76,7 @@ impl Timer {
 fn process_loop(
     nctx: &NetworkCtx,
     client: &mut Connection,
-    handler: &mut Handler,
+    handler: &mut dyn Handler,
     timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];

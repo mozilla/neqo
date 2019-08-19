@@ -83,7 +83,7 @@ impl Error {
             Error::RequestRejected => 20,
             Error::GeneralProtocolError => 0xff,
             Error::MalformedFrame(t) => match t {
-                0...0xfe => (*t as neqo_transport::AppError) + 0x100,
+                0..=0xfe => (*t as neqo_transport::AppError) + 0x100,
                 _ => 0x1ff,
             },
             // These are all internal errors.
@@ -120,7 +120,7 @@ impl Error {
             19 => Error::UnexpectedFrame,
             20 => Error::RequestRejected,
             0xff => Error::GeneralProtocolError,
-            0x100...0x1ff => Error::MalformedFrame(error - 0x100),
+            0x100..=0x1ff => Error::MalformedFrame(error - 0x100),
             0x200 => Error::QpackError(neqo_qpack::Error::DecompressionFailed),
             0x201 => Error::QpackError(neqo_qpack::Error::EncoderStreamError),
             0x202 => Error::QpackError(neqo_qpack::Error::DecoderStreamError),
