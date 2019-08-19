@@ -49,7 +49,6 @@ mod nss {
     #![warn(warnings)]
     #![allow(
         clippy::redundant_static_lifetimes,
-        clippy::const_static_lifetime,
         non_upper_case_globals
     )]
     include!(concat!(env!("OUT_DIR"), "/nss_init.rs"));
