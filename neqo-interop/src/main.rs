@@ -451,6 +451,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         .h3
         .fetch("GET", "https", &hc.host, &hc.path, &[])
         .unwrap();
+    let _ = hc.h3.stream_close_send(client_stream_id);
 
     hc.streams.insert(client_stream_id);
     if let Err(e) = process_loop_h3(nctx, &mut hc, Duration::new(5, 0)) {
