@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use crate::constants::*;
-use crate::convert::to_c_uint;
 use crate::err::{Error, NSPRErrorCodes, PR_SetError, Res};
 use crate::prio;
 use crate::ssl;
@@ -60,7 +59,7 @@ impl Record {
                 self.epoch,
                 self.ct,
                 self.data.as_ptr(),
-                to_c_uint(self.data.len())?,
+                c_uint::try_from(self.data.len())?,
             )
         }
     }
@@ -255,7 +254,7 @@ unsafe extern "C" fn agent_close(fd: PrFd) -> PrStatus {
 
 unsafe extern "C" fn agent_read(mut fd: PrFd, buf: *mut c_void, amount: prio::PRInt32) -> PrStatus {
     let io = AgentIo::borrow(&mut fd);
-    if let Ok(a) = amount.try_into() {
+    if let Ok(a) = usize::try_from(amount) {
         match io.input.read_input(buf as *mut u8, a) {
             Ok(_) => PR_SUCCESS,
             Err(_) => PR_FAILURE,
@@ -273,10 +272,10 @@ unsafe extern "C" fn agent_recv(
     _timeout: prio::PRIntervalTime,
 ) -> prio::PRInt32 {
     let io = AgentIo::borrow(&mut fd);
-    if amount <= 0 || flags != 0 {
+    if flags != 0 {
         return PR_FAILURE;
     }
-    if let Ok(a) = amount.try_into() {
+    if let Ok(a) = usize::try_from(amount) {
         match io.input.read_input(buf as *mut u8, a) {
             Ok(v) => prio::PRInt32::try_from(v).unwrap_or(PR_FAILURE),
             Err(_) => PR_FAILURE,
@@ -292,10 +291,7 @@ unsafe extern "C" fn agent_write(
     amount: prio::PRInt32,
 ) -> PrStatus {
     let io = AgentIo::borrow(&mut fd);
-    if amount <= 0 {
-        return PR_FAILURE;
-    }
-    if let Ok(a) = amount.try_into() {
+    if let Ok(a) = usize::try_from(amount) {
         io.save_output(buf as *const u8, a);
         amount
     } else {
@@ -312,10 +308,10 @@ unsafe extern "C" fn agent_send(
 ) -> prio::PRInt32 {
     let io = AgentIo::borrow(&mut fd);
 
-    if amount <= 0 || flags != 0 {
+    if flags != 0 {
         return PR_FAILURE;
     }
-    if let Ok(a) = amount.try_into() {
+    if let Ok(a) = usize::try_from(amount) {
         io.save_output(buf as *const u8, a);
         amount
     } else {

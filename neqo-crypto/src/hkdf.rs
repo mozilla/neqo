@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use crate::constants::*;
-use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
 use crate::p11::{
     PK11Origin, PK11SymKey, PK11_GetInternalSlot, PK11_ImportSymKey, SECItem, SECItemType, Slot,
@@ -13,6 +12,7 @@ use crate::p11::{
     CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE,
 };
 
+use std::convert::TryFrom;
 use std::os::raw::{c_char, c_uchar, c_uint};
 use std::ptr::{null_mut, NonNull};
 
@@ -50,7 +50,7 @@ pub fn import_key(version: Version, cipher: Cipher, buf: &[u8]) -> Res<SymKey> {
     let mut item = SECItem {
         type_: SECItemType::siBuffer,
         data: buf.as_ptr() as *mut c_uchar,
-        len: to_c_uint(buf.len())?,
+        len: c_uint::try_from(buf.len())?,
     };
     let slot_ptr = unsafe { PK11_GetInternalSlot() };
     let slot = match NonNull::new(slot_ptr) {
@@ -112,9 +112,9 @@ pub fn expand_label<S: Into<String>>(
             cipher,
             **prk,
             handshake_hash.as_ptr(),
-            to_c_uint(handshake_hash.len())?,
+            c_uint::try_from(handshake_hash.len())?,
             l.as_ptr() as *const c_char,
-            to_c_uint(l.len())?,
+            c_uint::try_from(l.len())?,
             &mut secret,
         )
     }?;

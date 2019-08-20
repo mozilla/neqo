@@ -9,7 +9,6 @@ pub use crate::agentio::{Record, RecordList};
 use crate::assert_initialized;
 pub use crate::cert::CertificateInfo;
 use crate::constants::*;
-use crate::convert::to_c_uint;
 use crate::err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
 use crate::p11;
@@ -60,7 +59,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
             &mut alpn_state,
             chosen.as_mut_ptr(),
             &mut chosen_len,
-            to_c_uint(chosen.len())?,
+            c_uint::try_from(chosen.len())?,
         )
     })?;
 
@@ -103,7 +102,7 @@ impl SecretAgentPreInfo {
             ssl::SSL_GetPreliminaryChannelInfo(
                 fd,
                 &mut info,
-                mem::size_of::<ssl::SSLPreliminaryChannelInfo>().try_into()?,
+                c_uint::try_from(mem::size_of::<ssl::SSLPreliminaryChannelInfo>())?,
             )
         })?;
 
@@ -153,17 +152,17 @@ impl SecretAgentInfo {
             ssl::SSL_GetChannelInfo(
                 fd,
                 &mut info,
-                mem::size_of::<ssl::SSLChannelInfo>().try_into()?,
+                c_uint::try_from(mem::size_of::<ssl::SSLChannelInfo>())?,
             )
         })?;
-        Ok(SecretAgentInfo {
+        Ok(Self {
             version: info.protocolVersion as Version,
             cipher: info.cipherSuite as Cipher,
-            group: info.keaGroup.try_into()?,
+            group: Group::try_from(info.keaGroup)?,
             resumed: info.resumed != 0,
             early_data: info.earlyDataAccepted != 0,
             alpn: get_alpn(fd, false)?,
-            signature_scheme: info.signatureScheme.try_into()?,
+            signature_scheme: SignatureScheme::try_from(info.signatureScheme)?,
         })
     }
 
@@ -376,7 +375,7 @@ impl SecretAgent {
 
         let ptr = group_vec.as_slice().as_ptr();
         secstatus_to_res(unsafe {
-            ssl::SSL_NamedGroupConfig(self.fd, ptr, to_c_uint(group_vec.len())?)
+            ssl::SSL_NamedGroupConfig(self.fd, ptr, c_uint::try_from(group_vec.len())?)
         })
     }
 
@@ -414,7 +413,7 @@ impl SecretAgent {
         // Prepare to encode.
         let mut encoded = Vec::with_capacity(encoded_len);
         let mut add = |v: &str| {
-            if let Ok(s) = v.len().try_into() {
+            if let Ok(s) = u8::try_from(v.len()) {
                 encoded.push(s);
                 encoded.extend_from_slice(v.as_bytes());
             }
@@ -436,7 +435,7 @@ impl SecretAgent {
             ssl::SSL_SetNextProtoNego(
                 self.fd,
                 encoded.as_slice().as_ptr(),
-                to_c_uint(encoded.len())?,
+                c_uint::try_from(encoded.len())?,
             )
         })
     }
@@ -708,7 +707,11 @@ impl Client {
     /// Enable resumption, using a token previously provided.
     pub fn set_resumption_token(&mut self, token: &[u8]) -> Res<()> {
         unsafe {
-            ssl::SSL_SetResumptionToken(self.agent.fd, token.as_ptr(), to_c_uint(token.len())?)
+            ssl::SSL_SetResumptionToken(
+                self.agent.fd,
+                token.as_ptr(),
+                c_uint::try_from(token.len())?,
+            )
         }
     }
 }
@@ -825,7 +828,7 @@ impl Server {
                 assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
                 let slc = std::slice::from_raw_parts_mut(retry_token, tok.len());
                 slc.copy_from_slice(&tok);
-                *retry_token_len = to_c_uint(tok.len()).expect("token was way too big");
+                *retry_token_len = c_uint::try_from(tok.len()).expect("token was way too big");
                 ssl::SSLHelloRetryRequestAction::ssl_hello_retry_request
             }
         }
@@ -842,7 +845,7 @@ impl Server {
         let mut check_state = ZeroRttCheckState::new(self.agent.fd, checker);
         let arg = &mut *check_state as *mut ZeroRttCheckState as *mut c_void;
         unsafe {
-            ssl::SSL_HelloRetryRequestCallback(self.agent.fd, Some(Server::hello_retry_cb), arg)
+            ssl::SSL_HelloRetryRequestCallback(self.agent.fd, Some(Self::hello_retry_cb), arg)
         }?;
         unsafe { ssl::SSL_SetMaxEarlyDataSize(self.agent.fd, max_early_data) }?;
         self.zero_rtt_check = Some(check_state);
@@ -858,7 +861,9 @@ impl Server {
         *self.agent.now = Time::from(now).try_into()?;
         let records = self.setup_raw()?;
 
-        unsafe { ssl::SSL_SendSessionTicket(self.fd, extra.as_ptr(), to_c_uint(extra.len())?) }?;
+        unsafe {
+            ssl::SSL_SendSessionTicket(self.fd, extra.as_ptr(), c_uint::try_from(extra.len())?)
+        }?;
 
         Ok(*records)
     }

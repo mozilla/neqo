@@ -4,12 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
 use crate::ssl::PRFileDesc;
 use crate::time::{Interval, PRTime, Time};
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::ops::{Deref, DerefMut};
 use std::os::raw::c_uint;
 use std::ptr::{null_mut, NonNull};
@@ -56,8 +55,8 @@ impl AntiReplay {
             SSL_CreateAntiReplayContext(
                 Time::from(now).try_into()?,
                 Interval::from(window).try_into()?,
-                to_c_uint(k)?,
-                to_c_uint(bits)?,
+                c_uint::try_from(k)?,
+                c_uint::try_from(bits)?,
                 &mut ctx,
             )
         }?;

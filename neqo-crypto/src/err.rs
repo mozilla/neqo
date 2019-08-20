@@ -58,14 +58,13 @@ impl std::fmt::Display for Error {
     }
 }
 
-// TryFromIntError is only ever used in time.rs for time conversion.
 impl From<std::num::TryFromIntError> for Error {
     fn from(_: std::num::TryFromIntError) -> Self {
-        Error::TimeTravelError
+        Error::IntegerOverflow
     }
 }
 impl From<std::ffi::NulError> for Error {
-    fn from(_: std::ffi::NulError) -> Error {
+    fn from(_: std::ffi::NulError) -> Self {
         Error::InternalError
     }
 }
@@ -109,7 +108,8 @@ pub fn is_blocked(result: &Res<()>) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::err::{
-        is_blocked, Error, NSPRErrorCodes, PRErrorCode, PR_SetError, SECErrorCodes, SSLErrorCodes, secstatus_to_res,
+        is_blocked, secstatus_to_res, Error, NSPRErrorCodes, PRErrorCode, PR_SetError,
+        SECErrorCodes, SSLErrorCodes,
     };
     use crate::ssl;
     use test_fixture::fixture_init;

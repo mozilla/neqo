@@ -5,13 +5,13 @@
 // except according to those terms.
 
 use crate::constants::*;
-use crate::convert::to_c_uint;
 use crate::err::{secstatus_to_res, Error, Res};
 use crate::p11::{
     PK11SymKey, PK11_Encrypt, PK11_GetBlockSize, PK11_GetMechanism, SECItem, SECItemType, SymKey,
     CKM_AES_ECB, CKM_NSS_CHACHA20_CTR, CK_MECHANISM_TYPE,
 };
 
+use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::os::raw::{c_char, c_uint};
 use std::ptr::{null, null_mut, NonNull};
@@ -65,7 +65,7 @@ pub fn extract_hp<S: Into<String>>(
             null(),
             0,
             l.as_ptr() as *const c_char,
-            to_c_uint(l.len())?,
+            c_uint::try_from(l.len())?,
             mech,
             key_size,
             &mut secret,
@@ -93,7 +93,7 @@ impl HpKey {
         let mut item = SECItem {
             type_: SECItemType::siBuffer,
             data: sample.as_ptr() as *mut u8,
-            len: to_c_uint(sample.len())?,
+            len: c_uint::try_from(sample.len())?,
         };
         let zero = vec![0_u8; block_size];
         let (iv, inbuf) = match () {
@@ -110,9 +110,9 @@ impl HpKey {
                 iv,
                 output_slice.as_mut_ptr(),
                 &mut output_len,
-                to_c_uint(output.len())?,
+                c_uint::try_from(output.len())?,
                 inbuf.as_ptr() as *const u8,
-                to_c_uint(inbuf.len())?,
+                c_uint::try_from(inbuf.len())?,
             )
         })?;
         assert_eq!(output_len as usize, block_size);

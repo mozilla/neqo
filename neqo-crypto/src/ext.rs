@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use crate::constants::*;
-use crate::convert::to_c_uint;
 use crate::err::Res;
 use crate::ssl::{
     PRBool, PRFileDesc, SECFailure, SECStatus, SECSuccess, SSLAlertDescription,
@@ -13,6 +12,7 @@ use crate::ssl::{
 };
 
 use std::cell::RefCell;
+use std::convert::TryFrom;
 use std::ops::DerefMut;
 use std::os::raw::{c_uint, c_void};
 use std::rc::Rc;
@@ -83,7 +83,7 @@ impl ExtensionTracker {
             // Cast is safe here because the message type is always part of the enum
             match handler.write(message as HandshakeMessage, d) {
                 ExtensionWriterResult::Write(sz) => {
-                    *len = to_c_uint(sz).expect("integer overflow from extension writer");
+                    *len = c_uint::try_from(sz).expect("integer overflow from extension writer");
                     1
                 }
                 ExtensionWriterResult::Skip => 0,
