@@ -6,7 +6,6 @@
 
 use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
-use crate::result;
 use crate::ssl::PRFileDesc;
 use crate::time::{Interval, PRTime, Time};
 
@@ -53,7 +52,7 @@ impl AntiReplay {
     /// See the documentation in NSS for advice on how to set these values.
     pub fn new(now: Instant, window: Duration, k: usize, bits: usize) -> Res<Self> {
         let mut ctx: *mut SSLAntiReplayContext = null_mut();
-        let rv = unsafe {
+        unsafe {
             SSL_CreateAntiReplayContext(
                 Time::from(now).try_into()?,
                 Interval::from(window).try_into()?,
@@ -61,8 +60,7 @@ impl AntiReplay {
                 to_c_uint(bits)?,
                 &mut ctx,
             )
-        };
-        result::result(rv)?;
+        }?;
 
         match NonNull::new(ctx) {
             Some(ctx_nn) => Ok(Self {
@@ -74,7 +72,6 @@ impl AntiReplay {
 
     /// Configure the provided socket with this anti-replay context.
     pub(crate) fn config_socket(&self, fd: *mut PRFileDesc) -> Res<()> {
-        let rv = unsafe { SSL_SetAntiReplayContext(fd, *self.ctx) };
-        result::result(rv)
+        unsafe { SSL_SetAntiReplayContext(fd, *self.ctx) }
     }
 }

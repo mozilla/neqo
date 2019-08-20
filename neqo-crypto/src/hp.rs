@@ -6,12 +6,11 @@
 
 use crate::constants::*;
 use crate::convert::to_c_uint;
-use crate::err::{Error, Res};
+use crate::err::{secstatus_to_res, Error, Res};
 use crate::p11::{
     PK11SymKey, PK11_Encrypt, PK11_GetBlockSize, PK11_GetMechanism, SECItem, SECItemType, SymKey,
     CKM_AES_ECB, CKM_NSS_CHACHA20_CTR, CK_MECHANISM_TYPE,
 };
-use crate::result;
 
 use std::fmt::{self, Debug};
 use std::os::raw::{c_char, c_uint};
@@ -58,7 +57,7 @@ pub fn extract_hp<S: Into<String>>(
 
     // Note that this doesn't allow for passing null() for the handshake hash.
     // A zero-length slice produces an identical result.
-    let rv = unsafe {
+    unsafe {
         SSL_HkdfExpandLabelWithMech(
             version,
             cipher,
@@ -71,8 +70,7 @@ pub fn extract_hp<S: Into<String>>(
             key_size,
             &mut secret,
         )
-    };
-    result::result(rv)?;
+    }?;
     match NonNull::new(secret) {
         None => Err(Error::HkdfError),
         Some(p) => Ok(HpKey(SymKey::new(p))),
@@ -105,7 +103,7 @@ impl HpKey {
             }
             _ => unreachable!(),
         };
-        let rv = unsafe {
+        secstatus_to_res(unsafe {
             PK11_Encrypt(
                 k,
                 mech,
@@ -116,8 +114,7 @@ impl HpKey {
                 inbuf.as_ptr() as *const u8,
                 to_c_uint(inbuf.len())?,
             )
-        };
-        result::result(rv)?;
+        })?;
         assert_eq!(output_len as usize, block_size);
         Ok(output)
     }

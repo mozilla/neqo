@@ -8,7 +8,6 @@ use crate::constants::*;
 use crate::convert::to_c_uint;
 use crate::err::{Error, NSPRErrorCodes, PR_SetError, Res};
 use crate::prio;
-use crate::result;
 use crate::ssl;
 
 use neqo_common::{hex, qtrace};
@@ -55,7 +54,7 @@ impl Record {
     // Shoves this record into the socket, returns true if blocked.
     fn write(self, fd: *mut ssl::PRFileDesc) -> Res<()> {
         qtrace!("write {:?}", self);
-        let rv = unsafe {
+        unsafe {
             ssl::SSL_RecordLayerData(
                 fd,
                 self.epoch,
@@ -63,8 +62,7 @@ impl Record {
                 self.data.as_ptr(),
                 to_c_uint(self.data.len())?,
             )
-        };
-        result::result(rv)
+        }
     }
 }
 

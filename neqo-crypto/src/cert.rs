@@ -4,11 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use crate::err::secstatus_to_res;
 use crate::p11::{
     CERTCertList, CERTCertListNode, CERT_GetCertificateDer, CertList, PRCList, SECItem,
     SECItemArray, SECItemType,
 };
-use crate::result;
 use crate::ssl::{
     PRFileDesc, SSL_PeerCertificateChain, SSL_PeerSignedCertTimestamps,
     SSL_PeerStapledOCSPResponses,
@@ -107,10 +107,8 @@ impl<'a> Iterator for &'a mut CertificateInfo {
             len: 0,
         };
         let cert = unsafe { *self.cursor }.cert;
-        let rv = unsafe { CERT_GetCertificateDer(cert, &mut item) };
-        if result::result(rv).is_err() {
-            panic!("Error getting DER from certificate");
-        }
+        secstatus_to_res(unsafe { CERT_GetCertificateDer(cert, &mut item) })
+            .expect("getting DER from certificate should work");
         Some(unsafe { std::slice::from_raw_parts(item.data, item.len as usize) })
     }
 }

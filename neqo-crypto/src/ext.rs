@@ -7,7 +7,6 @@
 use crate::constants::*;
 use crate::convert::to_c_uint;
 use crate::err::Res;
-use crate::result;
 use crate::ssl::{
     PRBool, PRFileDesc, SECFailure, SECStatus, SECSuccess, SSLAlertDescription,
     SSLExtensionHandler, SSLExtensionWriter, SSLHandshakeType,
@@ -131,15 +130,14 @@ impl ExtensionTracker {
             handler: Box::new(Box::new(handler)),
         };
         let p = &mut *tracker.handler as *mut Box<Rc<RefCell<dyn ExtensionHandler>>> as *mut c_void;
-        let rv = SSL_InstallExtensionHooks(
+        SSL_InstallExtensionHooks(
             fd,
             extension,
             Some(Self::extension_writer),
             p,
             Some(Self::extension_handler),
             p,
-        );
-        result::result(rv)?;
+        )?;
         Ok(tracker)
     }
 }

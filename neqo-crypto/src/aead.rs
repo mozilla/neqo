@@ -10,7 +10,6 @@ use crate::constants::*;
 use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
 use crate::p11::{PK11SymKey, SymKey};
-use crate::result;
 use crate::ssl;
 use crate::ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext};
 
@@ -77,15 +76,14 @@ impl Aead {
         let prefix_str = prefix.into();
         let p = prefix_str.as_bytes();
         let mut ctx: *mut ssl::SSLAeadContext = null_mut();
-        let rv = SSL_MakeAead(
+        SSL_MakeAead(
             version,
             cipher,
             secret,
             p.as_ptr() as *const i8,
             p.len().try_into()?,
             &mut ctx,
-        );
-        result::result(rv)?;
+        )?;
         match NonNull::new(ctx) {
             Some(ctx_ptr) => Ok(Self {
                 ctx: AeadContext::new(ctx_ptr),
@@ -102,7 +100,7 @@ impl Aead {
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
         let mut l: c_uint = 0;
-        let rv = unsafe {
+        unsafe {
             SSL_AeadEncrypt(
                 *self.ctx.deref(),
                 count,
@@ -114,9 +112,8 @@ impl Aead {
                 &mut l,
                 to_c_uint(output.len())?,
             )
-        };
-        result::result(rv)?;
-        Ok(&output[0..l as usize])
+        }?;
+        Ok(&output[0..(l.try_into().unwrap())])
     }
 
     pub fn decrypt<'a>(
@@ -127,7 +124,7 @@ impl Aead {
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
         let mut l: c_uint = 0;
-        let rv = unsafe {
+        unsafe {
             SSL_AeadDecrypt(
                 *self.ctx.deref(),
                 count,
@@ -139,9 +136,8 @@ impl Aead {
                 &mut l,
                 to_c_uint(output.len())?,
             )
-        };
-        result::result(rv)?;
-        Ok(&output[0..l as usize])
+        }?;
+        Ok(&output[0..(l.try_into().unwrap())])
     }
 }
 

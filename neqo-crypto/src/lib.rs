@@ -27,7 +27,6 @@ pub mod hkdf;
 pub mod hp;
 mod prio;
 mod replay;
-mod result;
 mod secrets;
 mod ssl;
 mod time;
@@ -55,8 +54,8 @@ mod nss {
 }
 
 // Need to map the types through.
-fn result(code: nss::SECStatus) -> Res<()> {
-    crate::result::result(code as crate::ssl::SECStatus)
+fn secstatus_to_res(code: nss::SECStatus) -> Res<()> {
+    crate::err::secstatus_to_res(code as crate::ssl::SECStatus)
 }
 
 enum NssLoaded {
@@ -69,7 +68,7 @@ impl Drop for NssLoaded {
     fn drop(&mut self) {
         match self {
             NssLoaded::NoDb | NssLoaded::Db(_) => unsafe {
-                result(nss::NSS_Shutdown()).expect("NSS Shutdown failed")
+                secstatus_to_res(nss::NSS_Shutdown()).expect("NSS Shutdown failed")
             },
             _ => {}
         }
@@ -92,10 +91,8 @@ pub fn init() {
                 return NssLoaded::External;
             }
 
-            let mut st = nss::NSS_NoDB_Init(null());
-            result(st).expect("NSS_NoDB_Init failed");
-            st = nss::NSS_SetDomesticPolicy();
-            result(st).expect("NSS_SetDomesticPolicy failed");
+            secstatus_to_res(nss::NSS_NoDB_Init(null())).expect("NSS_NoDB_Init failed");
+            secstatus_to_res(nss::NSS_SetDomesticPolicy()).expect("NSS_SetDomesticPolicy failed");
 
             NssLoaded::NoDb
         });
@@ -115,20 +112,23 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
             let pathstr = path.to_str().expect("path converts to string").to_string();
             let dircstr = CString::new(pathstr).expect("new CString");
             let empty = CString::new("").expect("new empty CString");
-            let mut st = nss::NSS_Initialize(
+            secstatus_to_res(nss::NSS_Initialize(
                 dircstr.as_ptr(),
                 empty.as_ptr(),
                 empty.as_ptr(),
                 nss::SECMOD_DB.as_ptr() as *const i8,
                 nss::NSS_INIT_READONLY,
-            );
-            result(st).expect("NSS_Initialize failed");
+            ))
+            .expect("NSS_Initialize failed");
 
-            st = nss::NSS_SetDomesticPolicy();
-            result(st).expect("NSS_SetDomesticPolicy failed");
-
-            st = ssl::SSL_ConfigServerSessionIDCache(1024, 0, 0, dircstr.as_ptr());
-            result(st).expect("SSL_ConfigServerSessionIDCache failed");
+            secstatus_to_res(nss::NSS_SetDomesticPolicy()).expect("NSS_SetDomesticPolicy failed");
+            secstatus_to_res(ssl::SSL_ConfigServerSessionIDCache(
+                1024,
+                0,
+                0,
+                dircstr.as_ptr(),
+            ))
+            .expect("SSL_ConfigServerSessionIDCache failed");
 
             NssLoaded::Db(path.to_path_buf().into_boxed_path())
         });

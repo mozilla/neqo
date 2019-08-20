@@ -12,7 +12,6 @@ use crate::p11::{
     SymKey, CKA_DERIVE, CKM_INVALID_MECHANISM, CKM_NSS_HKDF_SHA256, CKM_NSS_HKDF_SHA384,
     CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE,
 };
-use crate::result;
 
 use std::os::raw::{c_char, c_uchar, c_uint};
 use std::ptr::{null_mut, NonNull};
@@ -86,8 +85,7 @@ pub fn extract(
         Some(s) => **s,
         None => null_mut(),
     };
-    let rv = unsafe { SSL_HkdfExtract(version, cipher, salt_ptr, **ikm, &mut prk) };
-    result::result(rv)?;
+    unsafe { SSL_HkdfExtract(version, cipher, salt_ptr, **ikm, &mut prk) }?;
     match NonNull::new(prk) {
         Some(p) => Ok(SymKey::new(p)),
         None => Err(Error::InternalError),
@@ -108,7 +106,7 @@ pub fn expand_label<S: Into<String>>(
 
     // Note that this doesn't allow for passing null() for the handshake hash.
     // A zero-length slice produces an identical result.
-    let rv = unsafe {
+    unsafe {
         SSL_HkdfExpandLabel(
             version,
             cipher,
@@ -119,8 +117,7 @@ pub fn expand_label<S: Into<String>>(
             to_c_uint(l.len())?,
             &mut secret,
         )
-    };
-    result::result(rv)?;
+    }?;
     match NonNull::new(secret) {
         Some(p) => Ok(SymKey::new(p)),
         None => Err(Error::HkdfError),
