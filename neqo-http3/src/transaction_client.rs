@@ -21,8 +21,8 @@ const MAX_DATA_HEADER_SIZE_2: usize = 63; // Maximal amount of data with DATA fr
 const MAX_DATA_HEADER_SIZE_2_LIMIT: usize = 66; // 63 + 3 (size of the next biffer data frame header)
 const MAX_DATA_HEADER_SIZE_3: usize = 16383; // Maximal amount of data with DATA frame header size 3
 const MAX_DATA_HEADER_SIZE_3_LIMIT: usize = 16388; // 16383 + 5 (size of the next biffer data frame header)
-const MAX_DATA_HEADER_SIZE_5: usize = 1073741823; // Maximal amount of data with DATA frame header size 3
-const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = 1073741832; // 1073741823 + 9 (size of the next biffer data frame header)
+const MAX_DATA_HEADER_SIZE_5: usize = 1_073_741_823; // Maximal amount of data with DATA frame header size 3
+const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = 1_073_741_832; // 1073741823 + 9 (size of the next biffer data frame header)
 
 #[derive(PartialEq, Debug)]
 struct Request {
@@ -203,24 +203,22 @@ impl TransactionClient {
         } else {
             String::new()
         };
-        match self.send_state {
-            TransactionSendState::SendingHeaders {
-                ref mut request,
-                fin,
-            } => {
-                if request.send(conn, encoder, self.stream_id)? {
-                    if fin {
-                        conn.stream_close_send(self.stream_id)?;
-                        self.send_state = TransactionSendState::Closed;
-                        qdebug!([label] "done sending request");
-                    } else {
-                        self.send_state = TransactionSendState::SendingData;
-                        self.conn_events.data_writable(self.stream_id);
-                        qdebug!([label] "change to state SendingData");
-                    }
+        if let TransactionSendState::SendingHeaders {
+            ref mut request,
+            fin,
+        } = self.send_state
+        {
+            if request.send(conn, encoder, self.stream_id)? {
+                if fin {
+                    conn.stream_close_send(self.stream_id)?;
+                    self.send_state = TransactionSendState::Closed;
+                    qdebug!([label] "done sending request");
+                } else {
+                    self.send_state = TransactionSendState::SendingData;
+                    self.conn_events.data_writable(self.stream_id);
+                    qdebug!([label] "change to state SendingData");
                 }
             }
-            _ => {}
         }
         Ok(())
     }

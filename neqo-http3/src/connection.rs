@@ -851,7 +851,7 @@ impl Http3Connection {
         let _ = self.conn.stream_reset_send(stream_id, error);
         cs.reset_receiving_side();
         // Stream maybe already be closed and we may get an error here, but we do not care.
-        let _ = self.conn.stream_stop_sending(stream_id, error)?;
+        self.conn.stream_stop_sending(stream_id, error)?;
         self.events.remove_events_for_stream_id(stream_id);
         Ok(())
     }
@@ -1995,57 +1995,52 @@ mod tests {
         // find the new request/response stream, check received frames and send a response.
         let events = neqo_trans_conn.events();
         for e in events {
-            match e {
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    if stream_id == request_stream_id {
-                        // Read only the HEADER frame
-                        let mut buf = [0u8; 18];
-                        let (amount, fin) =
-                            neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                        assert_eq!(fin, false);
-                        assert_eq!(amount, 18);
-                        assert_eq!(
-                            buf[..18],
-                            [
-                                0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a,
-                                0x67, 0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1,
-                            ]
-                        );
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                if stream_id == request_stream_id {
+                    // Read only the HEADER frame
+                    let mut buf = [0u8; 18];
+                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, false);
+                    assert_eq!(amount, 18);
+                    assert_eq!(
+                        buf[..18],
+                        [
+                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
+                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1,
+                        ]
+                    );
 
-                        // Read the DATA frame.
-                        let mut buf = [1u8; 0xffff];
-                        let (amount, fin) =
-                            neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                        assert_eq!(fin, true);
-                        assert_eq!(
-                            amount,
-                            request_body.len() + expected_data_frame_header.len()
-                        );
+                    // Read the DATA frame.
+                    let mut buf = [1u8; 0xffff];
+                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, true);
+                    assert_eq!(
+                        amount,
+                        request_body.len() + expected_data_frame_header.len()
+                    );
 
-                        // Check the DATA frame header
-                        assert_eq!(
-                            &buf[..expected_data_frame_header.len()],
-                            expected_data_frame_header
-                        );
+                    // Check the DATA frame header
+                    assert_eq!(
+                        &buf[..expected_data_frame_header.len()],
+                        expected_data_frame_header
+                    );
 
-                        // Check data.
-                        assert_eq!(&buf[expected_data_frame_header.len()..amount], request_body);
+                    // Check data.
+                    assert_eq!(&buf[expected_data_frame_header.len()..amount], request_body);
 
-                        // send response - 200  Content-Length: 3
-                        // with content: 'abc'.
-                        let _ = neqo_trans_conn.stream_send(
-                            stream_id,
-                            &[
-                                // headers
-                                0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
-                                // a data frame
-                                0x0, 0x3, 0x61, 0x62, 0x63,
-                            ],
-                        );
-                        neqo_trans_conn.stream_close_send(stream_id).unwrap();
-                    }
+                    // send response - 200  Content-Length: 3
+                    // with content: 'abc'.
+                    let _ = neqo_trans_conn.stream_send(
+                        stream_id,
+                        &[
+                            // headers
+                            0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
+                            // a data frame
+                            0x0, 0x3, 0x61, 0x62, 0x63,
+                        ],
+                    );
+                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
                 }
-                _ => {}
             }
         }
 
@@ -2118,70 +2113,65 @@ mod tests {
         // find the new request/response stream, check received frames and send a response.
         let events = neqo_trans_conn.events();
         for e in events {
-            match e {
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    if stream_id == request_stream_id {
-                        // Read only the HEADER frame
-                        let mut buf = [0u8; 18];
-                        let (amount, fin) =
-                            neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                        assert_eq!(fin, false);
-                        assert_eq!(amount, 18);
-                        assert_eq!(
-                            buf[..18],
-                            [
-                                0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a,
-                                0x67, 0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1,
-                            ]
-                        );
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                if stream_id == request_stream_id {
+                    // Read only the HEADER frame
+                    let mut buf = [0u8; 18];
+                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, false);
+                    assert_eq!(amount, 18);
+                    assert_eq!(
+                        buf[..18],
+                        [
+                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
+                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1,
+                        ]
+                    );
 
-                        // Read DATA frames.
-                        let mut buf = [1u8; 0xffff];
-                        let (amount, fin) =
-                            neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                        assert_eq!(fin, true);
-                        assert_eq!(
-                            amount,
-                            expected_first_data_frame_header.len()
-                                + first_frame.len()
-                                + expected_second_data_frame_header.len()
-                                + expected_second_data_frame.len()
-                        );
+                    // Read DATA frames.
+                    let mut buf = [1u8; 0xffff];
+                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, true);
+                    assert_eq!(
+                        amount,
+                        expected_first_data_frame_header.len()
+                            + first_frame.len()
+                            + expected_second_data_frame_header.len()
+                            + expected_second_data_frame.len()
+                    );
 
-                        // Check the first DATA frame header
-                        let end = expected_first_data_frame_header.len();
-                        assert_eq!(&buf[..end], expected_first_data_frame_header);
+                    // Check the first DATA frame header
+                    let end = expected_first_data_frame_header.len();
+                    assert_eq!(&buf[..end], expected_first_data_frame_header);
 
-                        // Check the first frame data.
-                        let start = end;
-                        let end = end + first_frame.len();
-                        assert_eq!(&buf[start..end], first_frame);
+                    // Check the first frame data.
+                    let start = end;
+                    let end = end + first_frame.len();
+                    assert_eq!(&buf[start..end], first_frame);
 
-                        // Check the second DATA frame header
-                        let start = end;
-                        let end = end + expected_second_data_frame_header.len();
-                        assert_eq!(&buf[start..end], expected_second_data_frame_header);
+                    // Check the second DATA frame header
+                    let start = end;
+                    let end = end + expected_second_data_frame_header.len();
+                    assert_eq!(&buf[start..end], expected_second_data_frame_header);
 
-                        // Check the second frame data.
-                        let start = end;
-                        let end = end + expected_second_data_frame.len();
-                        assert_eq!(&buf[start..end], expected_second_data_frame);
+                    // Check the second frame data.
+                    let start = end;
+                    let end = end + expected_second_data_frame.len();
+                    assert_eq!(&buf[start..end], expected_second_data_frame);
 
-                        // send response - 200  Content-Length: 3
-                        // with content: 'abc'.
-                        let _ = neqo_trans_conn.stream_send(
-                            stream_id,
-                            &[
-                                // headers
-                                0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
-                                // a data frame
-                                0x0, 0x3, 0x61, 0x62, 0x63,
-                            ],
-                        );
-                        neqo_trans_conn.stream_close_send(stream_id).unwrap();
-                    }
+                    // send response - 200  Content-Length: 3
+                    // with content: 'abc'.
+                    let _ = neqo_trans_conn.stream_send(
+                        stream_id,
+                        &[
+                            // headers
+                            0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
+                            // a data frame
+                            0x0, 0x3, 0x61, 0x62, 0x63,
+                        ],
+                    );
+                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
                 }
-                _ => {}
             }
         }
 
@@ -2278,30 +2268,26 @@ mod tests {
         // find the new request/response stream and check request data.
         let events = neqo_trans_conn.events();
         for e in events {
-            match e {
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    if stream_id == request_stream_id {
-                        // Read only header frame
-                        let mut buf = [0u8; 18];
-                        let (amount, fin) =
-                            neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                        assert_eq!(fin, false);
-                        assert_eq!(amount, 18);
-                        assert_eq!(
-                            buf[..18],
-                            [
-                                0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a,
-                                0x67, 0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1,
-                            ]
-                        );
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                if stream_id == request_stream_id {
+                    // Read only header frame
+                    let mut buf = [0u8; 18];
+                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, false);
+                    assert_eq!(amount, 18);
+                    assert_eq!(
+                        buf[..18],
+                        [
+                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
+                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1,
+                        ]
+                    );
 
-                        // Read DATA frames.
-                        let mut buf = [1u8; 0xffff];
-                        let (_, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                        assert_eq!(fin, false);
-                    }
+                    // Read DATA frames.
+                    let mut buf = [1u8; 0xffff];
+                    let (_, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, false);
                 }
-                _ => {}
             }
         }
     }
