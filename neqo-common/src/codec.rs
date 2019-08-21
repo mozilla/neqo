@@ -83,14 +83,13 @@ impl<'a> Decoder<'a> {
     }
 
     fn decode_checked(&mut self, n: u64) -> Option<&[u8]> {
-        match TryFrom::try_from(n) {
-            Ok(len) => self.decode(len),
-            _ => {
-                // sizeof(usize) < sizeof(u64) and the value is greater than usize can hold.
-                // Throw away the rest of the input.
-                self.offset = self.buf.len();
-                None
-            }
+        if let Ok(len) = TryFrom::try_from(n) {
+            self.decode(len)
+        } else {
+            // sizeof(usize) < sizeof(u64) and the value is greater than usize can hold.
+            // Throw away the rest of the input.
+            self.offset = self.buf.len();
+            None
         }
     }
 
@@ -100,7 +99,7 @@ impl<'a> Decoder<'a> {
         if self.remaining() < n {
             return None;
         }
-        let mut v = 0u64;
+        let mut v = 0_u64;
         for i in 0..n {
             let b = self.buf[self.offset + i];
             v = v << 8 | u64::from(b);
@@ -194,13 +193,13 @@ impl Encoder {
     }
 
     /// Default construction of an empty buffer.
-    pub fn new() -> Encoder {
-        Encoder::default()
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Construction of a buffer with a predetermined capacity.
-    pub fn with_capacity(capacity: usize) -> Encoder {
-        Encoder {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
             buf: Vec::with_capacity(capacity),
         }
     }
@@ -212,13 +211,13 @@ impl Encoder {
     }
 
     /// Don't use this except in testing.
-    pub fn from_hex(s: &str) -> Encoder {
+    pub fn from_hex(s: &str) -> Self {
         if s.len() % 2 != 0 {
             panic!("Needs to be even length");
         }
 
         let cap = s.len() / 2;
-        let mut enc = Encoder::with_capacity(cap);
+        let mut enc = Self::with_capacity(cap);
 
         for i in 0..cap {
             let v = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).unwrap();
@@ -240,6 +239,7 @@ impl Encoder {
     }
 
     /// Encode an integer of any size up to u64.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn encode_uint<T: Into<u64>>(&mut self, n: usize, v: T) -> &mut Self {
         let v = v.into();
         assert!(n > 0 && n <= 8);
@@ -269,6 +269,7 @@ impl Encoder {
     }
 
     /// Encode a vector in TLS style using a closure for the contents.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn encode_vec_with<F: FnOnce(&mut Self)>(&mut self, n: usize, f: F) -> &mut Self {
         let start = self.buf.len();
         self.buf.resize(self.buf.len() + n, 0);
@@ -309,14 +310,14 @@ impl Debug for Encoder {
 }
 
 impl<'a> From<Decoder<'a>> for Encoder {
-    fn from(dec: Decoder<'a>) -> Encoder {
-        Encoder::from(&dec.buf[dec.offset..])
+    fn from(dec: Decoder<'a>) -> Self {
+        Self::from(&dec.buf[dec.offset..])
     }
 }
 
 impl From<&[u8]> for Encoder {
-    fn from(buf: &[u8]) -> Encoder {
-        Encoder {
+    fn from(buf: &[u8]) -> Self {
+        Self {
             buf: Vec::from(buf),
         }
     }
@@ -516,10 +517,10 @@ mod tests {
     #[test]
     fn encode_uint() {
         let mut enc = Encoder::default();
-        enc.encode_uint(2, 10u8); // 000a
-        enc.encode_uint(1, 257u16); // 01
-        enc.encode_uint(3, 0xff_ffffu32); // ffffff
-        enc.encode_uint(8, 0xfedc_ba98_7654_3210u64);
+        enc.encode_uint(2, 10_u8); // 000a
+        enc.encode_uint(1, 257_u16); // 01
+        enc.encode_uint(3, 0xff_ffff_u32); // ffffff
+        enc.encode_uint(8, 0xfedc_ba98_7654_3210_u64);
         assert_eq!(enc, Encoder::from_hex("000a01fffffffedcba9876543210"));
     }
 

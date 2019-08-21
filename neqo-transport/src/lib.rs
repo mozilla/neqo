@@ -38,6 +38,7 @@ pub const QUIC_VERSION: u32 = 0xff00_0016;
 type TransportError = u64;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[allow(clippy::pub_enum_variant_names)]
 pub enum Error {
     NoError,
     InternalError,
@@ -52,6 +53,7 @@ pub enum Error {
     InvalidMigration,
     CryptoError(neqo_crypto::Error),
     CryptoAlert(u8),
+    TypeError,
     NoMoreData,
     TooMuchData,
     UnknownFrameType,
@@ -77,7 +79,6 @@ impl Error {
     pub fn code(&self) -> TransportError {
         match self {
             Error::NoError => 0,
-            Error::InternalError => 1,
             Error::ServerBusy => 2,
             Error::FlowControlError => 3,
             Error::StreamLimitError => 4,
@@ -91,6 +92,7 @@ impl Error {
             Error::PeerError(a) => *a,
             // TODO(ekr@rtfm.com): Map these errors.
             Error::CryptoError(_)
+            | Error::TypeError
             | Error::NoMoreData
             | Error::TooMuchData
             | Error::UnknownFrameType
@@ -108,7 +110,8 @@ impl Error {
             | Error::InvalidResumptionToken
             | Error::InvalidInput
             | Error::InvalidRetry
-            | Error::IdleTimeout => 1,
+            | Error::IdleTimeout
+            | Error::InternalError => 1,
         }
     }
 }
@@ -117,6 +120,13 @@ impl From<neqo_crypto::Error> for Error {
     fn from(err: neqo_crypto::Error) -> Self {
         qinfo!("Crypto operation failed {:?}", err);
         Error::CryptoError(err)
+    }
+}
+
+impl From<std::num::TryFromIntError> for Error {
+    fn from(err: std::num::TryFromIntError) -> Self {
+        qinfo!("Type decode to u16 failed {:?}", err);
+        Error::TypeError
     }
 }
 

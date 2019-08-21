@@ -15,8 +15,8 @@ pub struct Datagram {
 }
 
 impl Datagram {
-    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, d: V) -> Datagram {
-        Datagram {
+    pub fn new<V: Into<Vec<u8>>>(src: SocketAddr, dst: SocketAddr, d: V) -> Self {
+        Self {
             src,
             dst,
             d: d.into(),

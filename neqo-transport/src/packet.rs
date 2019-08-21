@@ -6,6 +6,9 @@
 
 // Encoding and decoding packets off the wire.
 
+// A lot of methods and types contain the word Packet
+#![allow(clippy::module_name_repetitions)]
+
 use derive_more::Deref;
 use rand::Rng;
 
@@ -38,7 +41,7 @@ pub enum PacketType {
 }
 
 impl Default for PacketType {
-    fn default() -> PacketType {
+    fn default() -> Self {
         PacketType::Short
     }
 }
@@ -62,11 +65,11 @@ pub type PacketNumber = u64;
 pub struct ConnectionId(pub Vec<u8>);
 
 impl ConnectionId {
-    pub fn generate(len: usize) -> ConnectionId {
+    pub fn generate(len: usize) -> Self {
         assert!(matches!(len, 0..=20));
         let mut v = vec![0; len];
         rand::thread_rng().fill(&mut v[..]);
-        ConnectionId(v)
+        Self(v)
     }
 
     // Apply a wee bit of greasing here in picking a length between 8 and 20 bytes long.
@@ -102,6 +105,7 @@ pub trait ConnectionIdDecoder {
 }
 
 #[derive(Default, Debug)]
+#[allow(clippy::module_name_repetitions)]
 pub struct PacketHdr {
     pub tbyte: u8,
     pub tipe: PacketType,
@@ -115,6 +119,9 @@ pub struct PacketHdr {
 }
 
 impl PacketHdr {
+    // Similar names are allowed here because
+    // dcid and scid are defined and commonly used in the spec.
+    #[allow(clippy::similar_names)]
     pub fn new(
         tbyte: u8,
         tipe: PacketType,
@@ -123,8 +130,8 @@ impl PacketHdr {
         scid: Option<ConnectionId>,
         pn: PacketNumber,
         epoch: Epoch,
-    ) -> PacketHdr {
-        PacketHdr {
+    ) -> Self {
+        Self {
             tbyte,
             tipe,
             version,
@@ -152,16 +159,16 @@ pub struct PacketNumberDecoder {
     expected: u64,
 }
 impl PacketNumberDecoder {
-    pub fn new(largest_acknowledged: Option<u64>) -> PacketNumberDecoder {
-        PacketNumberDecoder {
-            expected: largest_acknowledged.map(|x| x + 1).unwrap_or(0),
+    pub fn new(largest_acknowledged: Option<u64>) -> Self {
+        Self {
+            expected: largest_acknowledged.map_or(0, |x| x + 1),
         }
     }
 
     // TODO(mt) test this.  It's a strict implementation of the spec,
     // but that doesn't mean we shouldn't test it.
     fn decode_pn(&self, pn: u64, w: usize) -> PacketNumber {
-        let window = 1u64 << (w * 8);
+        let window = 1_u64 << (w * 8);
         let candidate = (self.expected & !(window - 1)) | pn;
         if candidate + (window / 2) <= self.expected {
             candidate + window
@@ -413,7 +420,7 @@ pub fn encode_packet_vn(hdr: &PacketHdr) -> Vec<u8> {
     let mut rand_byte: [u8; 1] = [0; 1];
     rand::thread_rng().fill(&mut rand_byte);
     d.encode_byte(PACKET_BIT_LONG | rand_byte[0]);
-    d.encode_uint(4, 0u64); // version
+    d.encode_uint(4, 0_u64); // version
     d.encode_vec(1, &hdr.dcid);
     d.encode_vec(1, hdr.scid.as_ref().unwrap());
     if let PacketType::VN(vers) = &hdr.tipe {

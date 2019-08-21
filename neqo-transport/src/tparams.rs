@@ -14,6 +14,7 @@ use neqo_crypto::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriter
 use neqo_crypto::{HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::rc::Rc;
 
 struct PreferredAddress {
@@ -72,9 +73,9 @@ impl TransportParameter {
         };
     }
 
-    fn decode(dec: &mut Decoder) -> Res<Option<(u16, TransportParameter)>> {
+    fn decode(dec: &mut Decoder) -> Res<Option<(u16, Self)>> {
         let tipe = match dec.decode_uint(2) {
-            Some(v) => v as u16,
+            Some(v) => v.try_into()?,
             _ => return Err(Error::NoMoreData),
         };
         let content = match dec.decode_vec(2) {
@@ -143,8 +144,8 @@ impl TransportParameters {
 
     /// Decode is a static function that parses transport parameters
     /// using the provided decoder.
-    pub fn decode(d: &mut Decoder) -> Res<TransportParameters> {
-        let mut tps = TransportParameters::default();
+    pub fn decode(d: &mut Decoder) -> Res<Self> {
+        let mut tps = Self::default();
         qtrace!("Parsed fixed TP header");
 
         let params = match d.decode_vec(2) {
@@ -247,7 +248,7 @@ impl TransportParameters {
     /// Return true if the remembered transport parameters are OK for 0-RTT.
     /// Generally this means that any value that is currently in effect is greater than
     /// or equal to the promised value.
-    pub fn ok_for_0rtt(&self, remembered: &TransportParameters) -> bool {
+    pub fn ok_for_0rtt(&self, remembered: &Self) -> bool {
         for (k, v_rem) in &remembered.params {
             // Skip checks for these, which don't affect 0-RTT.
             if matches!(
@@ -342,7 +343,7 @@ pub struct TpZeroRttChecker {
 
 impl TpZeroRttChecker {
     pub fn wrap(handler: Rc<RefCell<TransportParametersHandler>>) -> Box<dyn ZeroRttChecker> {
-        Box::new(TpZeroRttChecker { handler })
+        Box::new(Self { handler })
     }
 }
 
@@ -354,20 +355,18 @@ impl ZeroRttChecker for TpZeroRttChecker {
             return ZeroRttCheckResult::Reject;
         }
         let mut dec = Decoder::from(token);
-        let tpslice = match dec.decode_vvec() {
-            Some(v) => v,
-            _ => {
-                qinfo!("0-RTT: token code error");
-                return ZeroRttCheckResult::Fail;
-            }
+        let tpslice = if let Some(v) = dec.decode_vvec() {
+            v
+        } else {
+            qinfo!("0-RTT: token code error");
+            return ZeroRttCheckResult::Fail;
         };
         let mut dec_tp = Decoder::from(tpslice);
-        let remembered = match TransportParameters::decode(&mut dec_tp) {
-            Ok(v) => v,
-            _ => {
-                qinfo!("0-RTT: transport parameter decode error");
-                return ZeroRttCheckResult::Fail;
-            }
+        let remembered = if let Ok(v) = TransportParameters::decode(&mut dec_tp) {
+            v
+        } else {
+            qinfo!("0-RTT: transport parameter decode error");
+            return ZeroRttCheckResult::Fail;
         };
         if self.handler.borrow().local.ok_for_0rtt(&remembered) {
             qinfo!("0-RTT: transport parameters OK, accepting");

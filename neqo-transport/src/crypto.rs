@@ -63,6 +63,9 @@ impl Crypto {
 
     // Create the initial crypto state.
     pub fn create_initial_state(&mut self, role: Role, dcid: &[u8]) -> CryptoState {
+        const CLIENT_INITIAL_LABEL: &str = "client in";
+        const SERVER_INITIAL_LABEL: &str = "server in";
+
         qinfo!(
             [self]
             "Creating initial cipher state role={:?} dcid={}",
@@ -70,8 +73,6 @@ impl Crypto {
             hex(dcid)
         );
 
-        const CLIENT_INITIAL_LABEL: &str = "client in";
-        const SERVER_INITIAL_LABEL: &str = "server in";
         let (write_label, read_label) = match role {
             Role::Client => (CLIENT_INITIAL_LABEL, SERVER_INITIAL_LABEL),
             Role::Server => (SERVER_INITIAL_LABEL, CLIENT_INITIAL_LABEL),
@@ -249,11 +250,11 @@ impl CryptoDxState {
         label: S,
         dcid: &[u8],
     ) -> Option<CryptoDxState> {
-        let cipher = TLS_AES_128_GCM_SHA256;
         const INITIAL_SALT: &[u8] = &[
             0x7f, 0xbc, 0xdb, 0x0e, 0x7c, 0x66, 0xbb, 0xe9, 0x19, 0x3a, 0x96, 0xcd, 0x21, 0x51,
             0x9e, 0xbd, 0x7a, 0x02, 0x64, 0x4a,
         ];
+        let cipher = TLS_AES_128_GCM_SHA256;
         let initial_secret = hkdf::extract(
             TLS_VERSION_1_3,
             cipher,

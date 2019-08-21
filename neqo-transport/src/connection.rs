@@ -150,7 +150,7 @@ impl Path {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-/// Type returned from process() and process_output(). Users are required to
+/// Type returned from process() and `process_output()`. Users are required to
 /// call these repeatedly until `Callback` or `None` is returned.
 pub enum Output {
     /// Connection requires no action.
@@ -1135,14 +1135,14 @@ impl Connection {
         let swapped = mem::replace(&mut self.tps, Rc::default());
         {
             let tph = swapped.borrow();
-            let tps = tph.remote();
+            let remote = tph.remote();
             self.indexes.remote_max_stream_bidi =
-                StreamIndex::new(tps.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
+                StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
             self.indexes.remote_max_stream_uni =
-                StreamIndex::new(tps.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
+                StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
             self.flow_mgr
                 .borrow_mut()
-                .conn_increase_max_credit(tps.get_integer(tp_const::INITIAL_MAX_DATA));
+                .conn_increase_max_credit(remote.get_integer(tp_const::INITIAL_MAX_DATA));
         }
         mem::replace(&mut self.tps, swapped);
     }
@@ -1402,8 +1402,8 @@ impl Connection {
         for acked in acked_packets {
             for token in acked.tokens {
                 match token {
-                    RecoveryToken::Ack(at) => self.acks.acked(at),
-                    RecoveryToken::Stream(st) => self.send_streams.acked(st),
+                    RecoveryToken::Ack(at) => self.acks.acked(&at),
+                    RecoveryToken::Stream(st) => self.send_streams.acked(&st),
                     RecoveryToken::Crypto(ct) => self.crypto.acked(ct),
                     RecoveryToken::Flow(ft) => {
                         self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
@@ -1415,7 +1415,7 @@ impl Connection {
             for token in lost.tokens {
                 match token {
                     RecoveryToken::Ack(_) => {}
-                    RecoveryToken::Stream(st) => self.send_streams.lost(st),
+                    RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                     RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                     RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                         ft,
@@ -1443,7 +1443,7 @@ impl Connection {
             for token in dropped.tokens {
                 match token {
                     RecoveryToken::Ack(_) => {}
-                    RecoveryToken::Stream(st) => self.send_streams.lost(st),
+                    RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                     RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                     RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                         ft,
@@ -1822,7 +1822,7 @@ impl Connection {
                     for token in lost.tokens {
                         match token {
                             RecoveryToken::Ack(_) => {} // Do nothing
-                            RecoveryToken::Stream(st) => self.send_streams.lost(st),
+                            RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                             RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                             RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                                 ft,

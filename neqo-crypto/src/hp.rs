@@ -81,12 +81,14 @@ pub fn extract_hp<S: Into<String>>(
 
 impl HpKey {
     /// Generate a header protection mask for QUIC.
+    #[allow(clippy::cast_sign_loss)]
     pub fn mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
         let k: *mut PK11SymKey = *self.0;
         let mech = unsafe { PK11_GetMechanism(k) };
+        // Cast is safe because block size is always greater than or equal to 0
         let block_size = unsafe { PK11_GetBlockSize(mech, null_mut()) } as usize;
 
-        let mut output = vec![0u8; block_size];
+        let mut output = vec![0_u8; block_size];
         let output_slice = &mut output[..];
         let mut output_len: c_uint = 0;
 
@@ -95,7 +97,7 @@ impl HpKey {
             data: sample.as_ptr() as *mut u8,
             len: to_c_uint(sample.len())?,
         };
-        let zero = vec![0u8; block_size];
+        let zero = vec![0_u8; block_size];
         let (iv, inbuf) = match () {
             _ if mech == CK_MECHANISM_TYPE::from(CKM_AES_ECB) => (null_mut(), sample),
             _ if mech == CK_MECHANISM_TYPE::from(CKM_NSS_CHACHA20_CTR) => {

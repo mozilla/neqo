@@ -9,7 +9,7 @@
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::{hash_map::IterMut, BTreeMap, HashMap};
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::mem;
 use std::rc::Rc;
 
@@ -46,16 +46,14 @@ impl RangeTracker {
         self.used
             .range(..)
             .next_back()
-            .map(|(k, (v, _))| *k + *v)
-            .unwrap_or(0)
+            .map_or(0, |(k, (v, _))| *k + *v)
     }
 
     fn acked_from_zero(&self) -> u64 {
         self.used
             .get(&0)
             .filter(|(_, state)| *state == RangeState::Acked)
-            .map(|(v, _)| *v)
-            .unwrap_or(0)
+            .map_or(0, |(v, _)| *v)
     }
 
     /// Find the first unmarked range. If all are contiguous, this will return
@@ -284,10 +282,10 @@ pub struct TxBuffer {
 }
 
 impl TxBuffer {
-    pub fn new() -> TxBuffer {
-        TxBuffer {
+    pub fn new() -> Self {
+        Self {
             send_buf: SliceDeque::with_capacity(TX_STREAM_BUFFER),
-            ..TxBuffer::default()
+            ..Self::default()
         }
     }
 
@@ -303,15 +301,25 @@ impl TxBuffer {
 
     pub fn next_bytes(&self, _mode: TxMode) -> Option<(u64, &[u8])> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
-
-        if start == self.retired + self.buffered() as u64 {
-            return None;
-        }
-
-        let buff_off = (start - self.retired) as usize;
-        match maybe_len {
-            Some(len) => Some((start, &self.send_buf[buff_off..buff_off + len as usize])),
-            None => Some((start, &self.send_buf[buff_off..])),
+        match (usize::try_from(start), usize::try_from(self.retired)) {
+            (Ok(s), Ok(retired)) => {
+                if s == retired + self.buffered() {
+                    return None;
+                }
+                debug_assert!(s >= retired);
+                let buff_off = s - retired;
+                // Unwrap is safe here because we checked if maybe_len.is_some() beforehand
+                if maybe_len.is_some() {
+                    if let Ok(len) = usize::try_from(maybe_len.unwrap()) {
+                        Some((start, &self.send_buf[buff_off..buff_off + len]))
+                    } else {
+                        Some((start, &self.send_buf[buff_off..]))
+                    }
+                } else {
+                    Some((start, &self.send_buf[buff_off..]))
+                }
+            }
+            _ => None,
         }
     }
 
@@ -326,10 +334,12 @@ impl TxBuffer {
 
         // We can drop contig acked range from the buffer
         let new_retirable = self.ranges.acked_from_zero() - self.retired;
-        if new_retirable > 0 {
-            let keep_len = self.buffered() - new_retirable as usize;
+        if let Ok(nr) = usize::try_from(new_retirable) {
+            let keep_len: usize = self.buffered() - nr;
             self.send_buf.truncate_front(keep_len);
             self.retired += new_retirable;
+        } else {
+            // FIXME: What do we want to do here ?
         }
     }
 
@@ -380,8 +390,9 @@ enum SendStreamState {
 impl SendStreamState {
     fn tx_buf(&self) -> Option<&TxBuffer> {
         match self {
-            SendStreamState::Send { send_buf } => Some(send_buf),
-            SendStreamState::DataSent { send_buf, .. } => Some(send_buf),
+            SendStreamState::Send { send_buf } | SendStreamState::DataSent { send_buf, .. } => {
+                Some(send_buf)
+            }
             SendStreamState::Ready
             | SendStreamState::DataRecvd { .. }
             | SendStreamState::ResetSent
@@ -391,8 +402,9 @@ impl SendStreamState {
 
     fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
         match self {
-            SendStreamState::Send { send_buf } => Some(send_buf),
-            SendStreamState::DataSent { send_buf, .. } => Some(send_buf),
+            SendStreamState::Send { send_buf } | SendStreamState::DataSent { send_buf, .. } => {
+                Some(send_buf)
+            }
             SendStreamState::Ready
             | SendStreamState::DataRecvd { .. }
             | SendStreamState::ResetSent
@@ -402,8 +414,8 @@ impl SendStreamState {
 
     fn final_size(&self) -> Option<u64> {
         match self {
-            SendStreamState::DataSent { final_size, .. } => Some(*final_size),
-            SendStreamState::DataRecvd { final_size } => Some(*final_size),
+            SendStreamState::DataSent { final_size, .. }
+            | SendStreamState::DataRecvd { final_size } => Some(*final_size),
             SendStreamState::Ready
             | SendStreamState::Send { .. }
             | SendStreamState::ResetSent
@@ -422,7 +434,7 @@ impl SendStreamState {
         }
     }
 
-    fn transition(&mut self, new_state: SendStreamState) {
+    fn transition(&mut self, new_state: Self) {
         qtrace!("SendStream state {} -> {}", self.name(), new_state.name());
         *self = new_state;
     }
@@ -444,11 +456,11 @@ impl SendStream {
         max_stream_data: u64,
         flow_mgr: Rc<RefCell<FlowMgr>>,
         conn_events: ConnectionEvents,
-    ) -> SendStream {
+    ) -> Self {
         if max_stream_data > 0 {
             conn_events.send_stream_writable(stream_id);
         }
-        SendStream {
+        Self {
             stream_id,
             max_stream_data,
             state: SendStreamState::Ready,
@@ -470,11 +482,11 @@ impl SendStream {
                 if bytes.is_some() {
                     // Must be a resend
                     bytes
-                } else if !fin_sent {
+                } else if fin_sent {
+                    None
+                } else {
                     // Send empty stream frame with fin set
                     Some((final_size, &[]))
-                } else {
-                    None
                 }
             }
             SendStreamState::Ready
@@ -555,8 +567,7 @@ impl SendStream {
     pub fn credit_avail(&self) -> u64 {
         self.state
             .tx_buf()
-            .map(|tx| self.max_stream_data - tx.data_limit())
-            .unwrap_or(0)
+            .map_or(0, |tx| self.max_stream_data - tx.data_limit())
     }
 
     /// Bytes sendable on stream. Constrained by both stream credit available
@@ -564,8 +575,7 @@ impl SendStream {
     pub fn avail(&self) -> u64 {
         self.state
             .tx_buf()
-            .map(|tx| min(self.credit_avail(), tx.avail() as u64))
-            .unwrap_or(0)
+            .map_or(0, |tx| min(self.credit_avail(), tx.avail() as u64))
     }
 
     pub fn max_stream_data(&self) -> u64 {
@@ -611,7 +621,7 @@ impl SendStream {
         let stream_credit_avail = self.credit_avail();
         let conn_credit_avail = self.flow_mgr.borrow().conn_credit_avail();
         let credit_avail = min(stream_credit_avail, conn_credit_avail);
-        let buff_avail = self.state.tx_buf().map(|tx| tx.avail()).unwrap_or(0);
+        let buff_avail = self.state.tx_buf().map_or(0, TxBuffer::avail);
         let space_avail = min(credit_avail, buff_avail as u64);
         let can_send_bytes = min(space_avail, buf.len() as u64);
 
@@ -619,7 +629,7 @@ impl SendStream {
             return Ok(0);
         }
 
-        let buf = &buf[..can_send_bytes as usize];
+        let buf = &buf[..can_send_bytes.try_into()?];
 
         let sent = match &mut self.state {
             SendStreamState::Ready => unreachable!(),
@@ -707,9 +717,9 @@ impl SendStreams {
         self.0.insert(id, stream);
     }
 
-    pub fn acked(&mut self, token: StreamRecoveryToken) {
+    pub fn acked(&mut self, token: &StreamRecoveryToken) {
         if let Some(ss) = self.0.get_mut(&token.id) {
-            ss.mark_as_acked(token.offset, token.length as usize, token.fin);
+            ss.mark_as_acked(token.offset, token.length, token.fin);
         }
     }
 
@@ -719,9 +729,13 @@ impl SendStreams {
         }
     }
 
-    pub fn lost(&mut self, token: StreamRecoveryToken) {
+    pub fn lost(&mut self, token: &StreamRecoveryToken) {
         if let Some(ss) = self.0.get_mut(&token.id) {
-            ss.mark_as_lost(token.offset, token.length as usize, token.fin);
+            if let Ok(len) = token.length.try_into() {
+                ss.mark_as_lost(token.offset, len, token.fin);
+            } else {
+                //FIXME: Do we want to log something?
+            }
         }
     }
 
@@ -762,24 +776,24 @@ impl SendStreams {
                     remaining
                 );
                 let frame_hdr_len = stream_frame_hdr_len(*stream_id, offset, remaining);
-                let data_len = min(data.len(), remaining - frame_hdr_len);
+                let length = min(data.len(), remaining - frame_hdr_len);
                 let fin = match fin {
                     None => false,
-                    Some(fin) => fin == offset + data_len as u64,
+                    Some(fin) => fin == offset + length as u64,
                 };
                 let frame = Frame::Stream {
                     fin,
                     stream_id: stream_id.as_u64(),
                     offset,
-                    data: data[..data_len].to_vec(),
+                    data: data[..length].to_vec(),
                 };
-                stream.mark_as_sent(offset, data_len, fin);
+                stream.mark_as_sent(offset, length, fin);
                 return Some((
                     frame,
                     Some(RecoveryToken::Stream(StreamRecoveryToken {
                         id: *stream_id,
                         offset,
-                        length: data_len as u64,
+                        length,
                         fin,
                     })),
                 ));
@@ -814,7 +828,7 @@ fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> u
 pub(crate) struct StreamRecoveryToken {
     pub(crate) id: StreamId,
     offset: u64,
-    length: u64,
+    length: usize,
     fin: bool,
 }
 
