@@ -19,14 +19,16 @@ mod SSLOption {
 }
 
 // I clearly don't understand how bindgen operates.
+#[allow(clippy::empty_enum)]
 pub enum PLArenaPool {}
+#[allow(clippy::empty_enum)]
 pub enum PRFileDesc {}
 
 // Remap some constants.
 pub const SECSuccess: SECStatus = _SECStatus_SECSuccess;
 pub const SECFailure: SECStatus = _SECStatus_SECFailure;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum Opt {
     Locking,
     Tickets,
@@ -41,7 +43,9 @@ pub enum Opt {
 }
 
 impl Opt {
-    pub fn as_int(&self) -> PRInt32 {
+    // Cast is safe here because SSLOptions are within the i32 range
+    #[allow(clippy::cast_possible_wrap)]
+    pub fn as_int(self) -> PRInt32 {
         let i = match self {
             Opt::Locking => SSLOption::SSL_NO_LOCKS,
             Opt::Tickets => SSLOption::SSL_ENABLE_SESSION_TICKETS,
@@ -58,7 +62,7 @@ impl Opt {
     }
 
     // Some options are backwards, like SSL_NO_LOCKS, so use this to manage that.
-    pub fn map_enabled(&self, enabled: bool) -> PRIntn {
+    pub fn map_enabled(self, enabled: bool) -> PRIntn {
         let v = match self {
             Opt::Locking => !enabled,
             _ => enabled,

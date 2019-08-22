@@ -12,6 +12,7 @@ use crate::frame::decode_frame;
 use crate::packet::PacketHdr;
 use neqo_common::{qdebug, Decoder};
 
+#[allow(clippy::module_name_repetitions)]
 pub fn dump_packet(conn: &Connection, dir: &str, hdr: &PacketHdr, payload: &[u8]) {
     let mut s = String::from("");
     let mut d = Decoder::from(payload);

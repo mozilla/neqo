@@ -12,6 +12,7 @@ use crate::stream_id::StreamIndex;
 use crate::{AppError, TransportError};
 use crate::{ConnectionError, Error, Res};
 
+#[allow(clippy::module_name_repetitions)]
 pub type FrameType = u64;
 
 const FRAME_TYPE_PADDING: FrameType = 0x0;
@@ -90,8 +91,7 @@ impl CloseError {
 
     fn code(&self) -> u64 {
         match self {
-            CloseError::Transport(c) => *c,
-            CloseError::Application(c) => *c,
+            CloseError::Transport(c) | CloseError::Application(c) => *c,
         }
     }
 }
@@ -232,8 +232,7 @@ impl Frame {
         enc.encode_varint(self.get_type());
 
         match self {
-            Frame::Padding => (),
-            Frame::Ping => (),
+            Frame::Padding | Frame::Ping => (),
             Frame::Ack {
                 largest_acknowledged,
                 ack_delay,
@@ -369,10 +368,10 @@ impl Frame {
         if !ack_ranges.is_empty() && largest_acked < first_ack_range + 1 {
             return Err(Error::FrameEncodingError);
         }
-        let mut cur = if !ack_ranges.is_empty() {
-            largest_acked - first_ack_range - 1
-        } else {
+        let mut cur = if ack_ranges.is_empty() {
             0
+        } else {
+            largest_acked - first_ack_range - 1
         };
         for r in ack_ranges {
             if cur < r.gap + 1 {
@@ -420,6 +419,7 @@ impl Frame {
     }
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
     macro_rules! d {
         ($d:expr) => {
@@ -493,20 +493,20 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
                 token: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
             })
         }
-        FRAME_TYPE_STREAM...FRAME_TYPE_STREAM_MAX => {
+        FRAME_TYPE_STREAM..=FRAME_TYPE_STREAM_MAX => {
             let s = dv!(dec);
-            let o = if t & STREAM_FRAME_BIT_OFF != 0 {
-                dv!(dec)
-            } else {
+            let o = if t & STREAM_FRAME_BIT_OFF == 0 {
                 0
+            } else {
+                dv!(dec)
             };
             qdebug!("STREAM {}", t);
-            let data = if (t & STREAM_FRAME_BIT_LEN) != 0 {
-                qdebug!("STREAM frame has a length");
-                d!(dec.decode_vvec())
-            } else {
+            let data = if (t & STREAM_FRAME_BIT_LEN) == 0 {
                 qdebug!("STREAM frame extends to the end of the packet");
                 dec.decode_remainder()
+            } else {
+                qdebug!("STREAM frame has a length");
+                d!(dec.decode_vvec())
             };
             Ok(Frame::Stream {
                 fin: (t & STREAM_FRAME_BIT_FIN) != 0,

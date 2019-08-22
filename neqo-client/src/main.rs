@@ -13,46 +13,9 @@ use std::collections::HashSet;
 use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::process::exit;
-use std::str::FromStr;
-use std::string::ParseError;
 use std::time::Instant;
 use structopt::StructOpt;
 use url::Url;
-
-#[derive(Debug)]
-struct Headers {
-    pub h: Vec<Header>,
-}
-
-// dragana: this is a very stupid parser.
-// headers should be in form "[(something1, something2), (something3, something4)]"
-impl FromStr for Headers {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut res = Headers { h: Vec::new() };
-        let h1: Vec<&str> = s
-            .trim_matches(|p| p == '[' || p == ']')
-            .split(')')
-            .collect();
-
-        for h in h1 {
-            let h2: Vec<&str> = h
-                .trim_matches(|p| p == ',')
-                .trim()
-                .trim_matches(|p| p == '(' || p == ')')
-                .split(',')
-                .collect();
-
-            if h2.len() == 2 {
-                res.h
-                    .push((h2[0].trim().to_string(), h2[1].trim().to_string()));
-            }
-        }
-
-        Ok(res)
-    }
-}
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -71,8 +34,8 @@ pub struct Args {
     #[structopt(short = "m", default_value = "GET")]
     method: String,
 
-    #[structopt(short = "h", long, default_value = "[]")]
-    headers: Headers,
+    #[structopt(short = "h", long, number_of_values = 2)]
+    header: Vec<String>,
 
     #[structopt(name = "max-table-size", short = "t", long, default_value = "128")]
     max_table_size: u32,
@@ -137,7 +100,7 @@ fn process_loop(
     remote_addr: &SocketAddr,
     socket: &UdpSocket,
     client: &mut Http3Connection,
-    handler: &mut Handler,
+    handler: &mut dyn Handler,
     args: &Args,
 ) -> neqo_http3::connection::Http3State {
     let buf = &mut [0u8; 2048];
@@ -258,6 +221,21 @@ impl Handler for PostConnectHandler {
     }
 }
 
+fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
+    values
+        .iter()
+        .scan(None, |state, value| {
+            if let Some(name) = state.take() {
+                *state = None;
+                Some((name, value.as_ref().to_string())) // TODO use a real type
+            } else {
+                *state = Some(value.as_ref().to_string());
+                None
+            }
+        })
+        .collect()
+}
+
 fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: SocketAddr) {
     let mut client = Http3Connection::new(
         Connection::new_client(
@@ -287,7 +265,7 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         &args.url.scheme(),
         &args.url.host_str().unwrap(),
         &args.url.path(),
-        &args.headers.h,
+        &to_headers(&args.header),
     );
 
     if let Err(err) = client_stream_id {
@@ -413,7 +391,7 @@ mod old {
         remote_addr: &SocketAddr,
         socket: &UdpSocket,
         client: &mut Connection,
-        handler: &mut HandlerOld,
+        handler: &mut dyn HandlerOld,
         args: &Args,
     ) -> State {
         let buf = &mut [0u8; 2048];

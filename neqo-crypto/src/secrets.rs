@@ -38,6 +38,7 @@ impl From<SSLSecretDirection::Type> for SecretDirection {
 }
 
 #[derive(Debug, Default)]
+#[allow(clippy::module_name_repetitions)]
 pub struct DirectionalSecrets {
     // We only need to maintain 3 secrets for the epochs used during the handshake.
     secrets: [Option<SymKey>; 3],
@@ -74,7 +75,7 @@ impl Secrets {
         secret: *mut PK11SymKey,
         arg: *mut c_void,
     ) {
-        let secrets_ptr = arg as *mut Secrets;
+        let secrets_ptr = arg as *mut Self;
         let secrets = secrets_ptr.as_mut().unwrap();
         secrets.put_raw(epoch, dir, secret);
     }

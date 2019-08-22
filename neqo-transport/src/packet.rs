@@ -6,6 +6,9 @@
 
 // Encoding and decoding packets off the wire.
 
+// A lot of methods and types contain the word Packet
+#![allow(clippy::module_name_repetitions)]
+
 use derive_more::Deref;
 use rand::Rng;
 
@@ -38,7 +41,7 @@ pub enum PacketType {
 }
 
 impl Default for PacketType {
-    fn default() -> PacketType {
+    fn default() -> Self {
         PacketType::Short
     }
 }
@@ -62,11 +65,11 @@ pub type PacketNumber = u64;
 pub struct ConnectionId(pub Vec<u8>);
 
 impl ConnectionId {
-    pub fn generate(len: usize) -> ConnectionId {
-        assert!(matches!(len, 4...18));
+    pub fn generate(len: usize) -> Self {
+        assert!(matches!(len, 4..=18));
         let mut v = vec![0; len];
         rand::thread_rng().fill(&mut v[..]);
-        ConnectionId(v)
+        Self(v)
     }
 }
 
@@ -83,6 +86,7 @@ impl ::std::fmt::Display for ConnectionId {
 }
 
 #[derive(Default, Debug)]
+#[allow(clippy::module_name_repetitions)]
 pub struct PacketHdr {
     pub tbyte: u8,
     pub tipe: PacketType,
@@ -96,6 +100,9 @@ pub struct PacketHdr {
 }
 
 impl PacketHdr {
+    // Similar names are allowed here because
+    // dcid and scid are defined and commonly used in the spec.
+    #[allow(clippy::similar_names)]
     pub fn new(
         tbyte: u8,
         tipe: PacketType,
@@ -104,8 +111,8 @@ impl PacketHdr {
         scid: Option<ConnectionId>,
         pn: PacketNumber,
         epoch: Epoch,
-    ) -> PacketHdr {
-        PacketHdr {
+    ) -> Self {
+        Self {
             tbyte,
             tipe,
             version,
@@ -137,16 +144,16 @@ pub struct PacketNumberDecoder {
     expected: u64,
 }
 impl PacketNumberDecoder {
-    pub fn new(largest_acknowledged: Option<u64>) -> PacketNumberDecoder {
-        PacketNumberDecoder {
-            expected: largest_acknowledged.map(|x| x + 1).unwrap_or(0),
+    pub fn new(largest_acknowledged: Option<u64>) -> Self {
+        Self {
+            expected: largest_acknowledged.map_or(0, |x| x + 1),
         }
     }
 
     // TODO(mt) test this.  It's a strict implementation of the spec,
     // but that doesn't mean we shouldn't test it.
     fn decode_pn(&self, pn: u64, w: usize) -> PacketNumber {
-        let window = 1u64 << (w * 8);
+        let window = 1_u64 << (w * 8);
         let candidate = (self.expected & !(window - 1)) | pn;
         if candidate + (window / 2) <= self.expected {
             candidate + window
@@ -250,7 +257,7 @@ fn decode_pnl(u: u8) -> usize {
   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 
-pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
+pub fn decode_packet_hdr(dec: &dyn PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
     macro_rules! d {
         ($d:expr) => {
             match $d {
@@ -330,7 +337,7 @@ pub fn decode_packet_hdr(dec: &PacketDecoder, pd: &[u8]) -> Res<PacketHdr> {
 }
 
 pub fn decrypt_packet(
-    crypto: &CryptoCtx,
+    crypto: &dyn CryptoCtx,
     pn: PacketNumberDecoder,
     hdr: &mut PacketHdr,
     pkt: &[u8],
@@ -382,7 +389,7 @@ pub fn decrypt_packet(
     )?)
 }
 
-fn encode_packet_short(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
+fn encode_packet_short(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     let mut enc = Encoder::default();
     // Leading byte.
     let pnl = pn_length(hdr.pn);
@@ -398,7 +405,7 @@ fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
     let mut rand_byte: [u8; 1] = [0; 1];
     rand::thread_rng().fill(&mut rand_byte);
     d.encode_byte(PACKET_BIT_LONG | rand_byte[0]);
-    d.encode_uint(4, 0u64); // version
+    d.encode_uint(4, 0_u64); // version
     d.encode_vec(1, &hdr.dcid);
     d.encode_vec(1, hdr.scid.as_ref().unwrap());
     for ver in vers {
@@ -408,7 +415,7 @@ fn encode_packet_vn(hdr: &PacketHdr, vers: &[u32]) -> Vec<u8> {
 }
 
 /* Handle Initial, 0-RTT, Handshake. */
-fn encode_packet_long(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
+fn encode_packet_long(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     let mut enc = Encoder::default();
 
     let pnl = pn_length(hdr.pn);
@@ -428,7 +435,12 @@ fn encode_packet_long(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u
     encrypt_packet(crypto, hdr, enc, body)
 }
 
-fn encrypt_packet(crypto: &CryptoCtx, hdr: &PacketHdr, mut enc: Encoder, body: &[u8]) -> Vec<u8> {
+fn encrypt_packet(
+    crypto: &dyn CryptoCtx,
+    hdr: &PacketHdr,
+    mut enc: Encoder,
+    body: &[u8],
+) -> Vec<u8> {
     let hdr_len = enc.len();
     // Encrypt the packet. This has too many copies.
     let ct = crypto.aead_encrypt(hdr.pn, &enc, body).unwrap();
@@ -476,7 +488,7 @@ pub fn encode_retry(hdr: &PacketHdr) -> Vec<u8> {
     }
 }
 
-pub fn encode_packet(crypto: &CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
+pub fn encode_packet(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Vec<u8> {
     match &hdr.tipe {
         PacketType::Short => encode_packet_short(crypto, hdr, body),
         PacketType::VN(vers) => encode_packet_vn(hdr, &vers),

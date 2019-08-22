@@ -23,8 +23,8 @@ pub struct StreamIndexes {
 }
 
 impl StreamIndexes {
-    pub fn new() -> StreamIndexes {
-        StreamIndexes {
+    pub fn new() -> Self {
+        Self {
             local_max_stream_bidi: StreamIndex::new(LOCAL_STREAM_LIMIT_BIDI),
             local_max_stream_uni: StreamIndex::new(LOCAL_STREAM_LIMIT_UNI),
             local_next_stream_uni: StreamIndex::new(0),
@@ -100,7 +100,7 @@ impl StreamId {
 
 impl From<u64> for StreamId {
     fn from(val: u64) -> Self {
-        StreamId(val)
+        Self(val)
     }
 }
 
@@ -108,8 +108,8 @@ impl From<u64> for StreamId {
 pub struct StreamIndex(u64);
 
 impl StreamIndex {
-    pub fn new(val: u64) -> StreamIndex {
-        StreamIndex(val)
+    pub fn new(val: u64) -> Self {
+        Self(val)
     }
 
     pub fn to_stream_id(self, stream_type: StreamType, role: Role) -> StreamId {
@@ -132,12 +132,12 @@ impl StreamIndex {
 
 impl From<StreamId> for StreamIndex {
     fn from(val: StreamId) -> Self {
-        StreamIndex(val.as_u64() >> 2)
+        Self(val.as_u64() >> 2)
     }
 }
 
 impl AddAssign<u64> for StreamIndex {
     fn add_assign(&mut self, other: u64) {
-        *self = StreamIndex::new(self.as_u64() + other)
+        *self = Self::new(self.as_u64() + other)
     }
 }

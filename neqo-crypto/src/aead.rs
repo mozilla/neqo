@@ -14,6 +14,7 @@ use crate::result;
 use crate::ssl;
 use crate::ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext};
 
+use std::convert::TryInto;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_char, c_uint};
@@ -62,9 +63,9 @@ impl Aead {
         cipher: Cipher,
         secret: &SymKey,
         prefix: S,
-    ) -> Res<Aead> {
+    ) -> Res<Self> {
         let s: *mut PK11SymKey = **secret;
-        unsafe { Aead::from_raw(version, cipher, s, prefix) }
+        unsafe { Self::from_raw(version, cipher, s, prefix) }
     }
 
     unsafe fn from_raw<S: Into<String>>(
@@ -72,7 +73,7 @@ impl Aead {
         cipher: Cipher,
         secret: *mut PK11SymKey,
         prefix: S,
-    ) -> Res<Aead> {
+    ) -> Res<Self> {
         let prefix_str = prefix.into();
         let p = prefix_str.as_bytes();
         let mut ctx: *mut ssl::SSLAeadContext = null_mut();
@@ -81,12 +82,12 @@ impl Aead {
             cipher,
             secret,
             p.as_ptr() as *const i8,
-            p.len() as u32,
+            p.len().try_into()?,
             &mut ctx,
         );
         result::result(rv)?;
         match NonNull::new(ctx) {
-            Some(ctx_ptr) => Ok(Aead {
+            Some(ctx_ptr) => Ok(Self {
                 ctx: AeadContext::new(ctx_ptr),
             }),
             None => Err(Error::InternalError),

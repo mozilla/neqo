@@ -17,6 +17,7 @@ use std::ptr::{null_mut, NonNull};
 use std::time::{Duration, Instant};
 
 // This is an opaque struct in NSS.
+#[allow(clippy::empty_enum)]
 pub enum SSLAntiReplayContext {}
 
 experimental_api!(SSL_CreateAntiReplayContext(
@@ -38,10 +39,11 @@ scoped_ptr!(
     SSL_ReleaseAntiReplayContext
 );
 
-/// AntiReplay is used by servers when processing 0-RTT handshakes.
+/// `AntiReplay` is used by servers when processing 0-RTT handshakes.
 /// It limits the exposure of servers to replay attack by rejecting 0-RTT
 /// if it appears to be a replay.  There is a false-positive rate that can be
 /// managed by tuning the parameters used to create the context.
+#[allow(clippy::module_name_repetitions)]
 pub struct AntiReplay {
     ctx: AntiReplayContext,
 }
@@ -49,7 +51,7 @@ pub struct AntiReplay {
 impl AntiReplay {
     /// Make a new anti-replay context.
     /// See the documentation in NSS for advice on how to set these values.
-    pub fn new(now: Instant, window: Duration, k: usize, bits: usize) -> Res<AntiReplay> {
+    pub fn new(now: Instant, window: Duration, k: usize, bits: usize) -> Res<Self> {
         let mut ctx: *mut SSLAntiReplayContext = null_mut();
         let rv = unsafe {
             SSL_CreateAntiReplayContext(
@@ -63,7 +65,7 @@ impl AntiReplay {
         result::result(rv)?;
 
         match NonNull::new(ctx) {
-            Some(ctx_nn) => Ok(AntiReplay {
+            Some(ctx_nn) => Ok(Self {
                 ctx: AntiReplayContext::new(ctx_nn),
             }),
             None => Err(Error::InternalError),

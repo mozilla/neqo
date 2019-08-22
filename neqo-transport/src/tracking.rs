@@ -8,6 +8,7 @@
 
 use std::cmp::min;
 use std::collections::VecDeque;
+use std::convert::TryInto;
 use std::ops::{Index, IndexMut};
 use std::time::{Duration, Instant};
 
@@ -26,7 +27,7 @@ pub enum PNSpace {
 }
 
 impl From<Epoch> for PNSpace {
-    fn from(epoch: Epoch) -> PNSpace {
+    fn from(epoch: Epoch) -> Self {
         match epoch {
             0 => PNSpace::Initial,
             2 => PNSpace::Handshake,
@@ -44,8 +45,8 @@ pub struct PacketRange {
 
 impl PacketRange {
     /// Make a single packet range.
-    pub fn new(pn: u64) -> PacketRange {
-        PacketRange {
+    pub fn new(pn: u64) -> Self {
+        Self {
             largest: pn,
             smallest: pn,
             ack_needed: true,
@@ -87,7 +88,7 @@ impl PacketRange {
     }
 
     /// Maybe merge a lower-numbered range into this.
-    pub fn merge_smaller(&mut self, other: &PacketRange) {
+    pub fn merge_smaller(&mut self, other: &Self) {
         qinfo!([self] "Merging {}", other);
         // This only works if they are immediately adjacent.
         assert_eq!(self.smallest - 1, other.largest);
@@ -99,7 +100,7 @@ impl PacketRange {
     /// When a packet containing the range `other` is acknowledged,
     /// clear the ack_needed attribute on this.
     /// Requires that other is equal to this, or a larger range.
-    pub fn acknowledged(&mut self, other: &PacketRange) {
+    pub fn acknowledged(&mut self, other: &Self) {
         if (other.smallest <= self.smallest) && (other.largest >= self.largest) {
             qinfo!([self] "Acknowledged");
             self.ack_needed = false;
@@ -141,8 +142,8 @@ pub struct RecvdPackets {
 
 impl RecvdPackets {
     /// Make a new RecvdPackets for the indicated packet number space.
-    pub fn new(space: PNSpace) -> RecvdPackets {
-        RecvdPackets {
+    pub fn new(space: PNSpace) -> Self {
+        Self {
             space,
             ranges: VecDeque::new(),
             min_tracked: 0,
@@ -262,14 +263,14 @@ pub struct AckTracker {
 
 impl AckTracker {
     pub fn ack_time(&self) -> Option<Instant> {
-        let mut iter = self.spaces.iter().filter_map(|x| x.ack_time());
+        let mut iter = self.spaces.iter().filter_map(RecvdPackets::ack_time);
         match iter.next() {
             Some(v) => Some(iter.fold(v, min)),
             _ => None,
         }
     }
 
-    pub fn acked(&mut self, token: AckToken) {
+    pub fn acked(&mut self, token: &AckToken) {
         self.spaces[token.space as usize].acknowledged(&token.ranges);
     }
 
@@ -329,26 +330,33 @@ impl AckTracker {
         let ack_delay = now.duration_since(space.largest_pn_time.unwrap());
         // We use the default exponent so
         // ack_delay is in multiples of 8 microseconds.
-        let ack_delay = (ack_delay.as_micros() / 8) as u64;
-        let ack = Frame::Ack {
-            largest_acknowledged: first.largest,
-            ack_delay,
-            first_ack_range: first.len() - 1,
-            ack_ranges,
-        };
-        Some((
-            ack,
-            Some(RecoveryToken::Ack(AckToken {
-                space: PNSpace::from(epoch),
-                ranges,
-            })),
-        ))
+        if let Ok(delay) = (ack_delay.as_micros() / 8).try_into() {
+            let ack = Frame::Ack {
+                largest_acknowledged: first.largest,
+                ack_delay: delay,
+                first_ack_range: first.len() - 1,
+                ack_ranges,
+            };
+            Some((
+                ack,
+                Some(RecoveryToken::Ack(AckToken {
+                    space: PNSpace::from(epoch),
+                    ranges,
+                })),
+            ))
+        } else {
+            qwarn!(
+                "ack_delay.as_micros() did not fit a u64 {:?}",
+                ack_delay.as_micros()
+            );
+            None
+        }
     }
 }
 
 impl Default for AckTracker {
-    fn default() -> AckTracker {
-        AckTracker {
+    fn default() -> Self {
+        Self {
             spaces: [
                 RecvdPackets::new(PNSpace::Initial),
                 RecvdPackets::new(PNSpace::Handshake),

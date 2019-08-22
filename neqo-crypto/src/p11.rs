@@ -29,8 +29,8 @@ macro_rules! scoped_ptr {
         }
 
         impl $scoped {
-            pub fn new(ptr: NonNull<$target>) -> $scoped {
-                $scoped { ptr: ptr.as_ptr() }
+            pub fn new(ptr: NonNull<$target>) -> Self {
+                Self { ptr: ptr.as_ptr() }
             }
         }
 
