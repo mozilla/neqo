@@ -283,7 +283,7 @@ impl HFrameReader {
             let fin;
             let mut input = match conn.stream_recv(stream_id, &mut buf[..]) {
                 Ok((0, true)) => {
-                    qtrace!([conn] "HFrameReader::receive: stream has been closed.");
+                    qtrace!([conn] "HFrameReader::receive: stream has been closed");
                     break match self.state {
                         HFrameReaderState::BeforeFrame => Ok(true),
                         _ => Err(Error::MalformedFrame(0xff)),
@@ -291,7 +291,7 @@ impl HFrameReader {
                 }
                 Ok((0, false)) => break Ok(false),
                 Ok((amount, f)) => {
-                    qtrace!([conn] "HFrameReader::receive: reading {} byte, fin={}.", amount, f);
+                    qtrace!([conn] "HFrameReader::receive: reading {} byte, fin={}", amount, f);
                     fin = f;
                     Decoder::from(&buf[..amount])
                 }
@@ -316,7 +316,7 @@ impl HFrameReader {
                     IncrementalDecoderResult::InProgress => {
                         self.state = HFrameReaderState::GetType;
                     }
-                    _ => panic!("We most be in one of the states above."),
+                    _ => panic!("We must be in one of the states above"),
                 },
 
                 HFrameReaderState::GetLength => {
@@ -360,7 +360,7 @@ impl HFrameReader {
                             };
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => panic!("We most be in one of the states above."),
+                        _ => panic!("We must be in one of the states above"),
                     }
                 }
                 HFrameReaderState::GetPushPromiseData => {
@@ -375,7 +375,7 @@ impl HFrameReader {
                             self.state = HFrameReaderState::Done;
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => panic!("We most be in one of the states above."),
+                        _ => panic!("We must be in one of the states above"),
                     };
                 }
                 HFrameReaderState::GetData => {
@@ -386,7 +386,7 @@ impl HFrameReader {
                             self.state = HFrameReaderState::Done;
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => panic!("We most be in one of the states above."),
+                        _ => panic!("We must be in one of the states above"),
                     };
                 }
                 HFrameReaderState::UnknownFrameDischargeData => {
@@ -395,7 +395,7 @@ impl HFrameReader {
                             self.reset();
                         }
                         IncrementalDecoderResult::InProgress => {}
-                        _ => panic!("We most be in one of the states above."),
+                        _ => panic!("We must be in one of the states above"),
                     };
                 }
                 HFrameReaderState::Done => {
