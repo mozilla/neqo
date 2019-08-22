@@ -8,6 +8,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_snake_case)]
 #![allow(clippy::cognitive_complexity)]
+#![allow(clippy::empty_enum)]
 
 include!(concat!(env!("OUT_DIR"), "/nspr_io.rs"));
 

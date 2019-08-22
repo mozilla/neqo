@@ -17,6 +17,7 @@ pub mod NSPRErrorCodes {
 pub type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
+#[allow(clippy::pub_enum_variant_names)]
 pub enum Error {
     AeadInitFailure,
     AeadError,
@@ -57,7 +58,7 @@ impl std::fmt::Display for Error {
 
 // TryFromIntError is only ever used in time.rs for time conversion.
 impl From<std::num::TryFromIntError> for Error {
-    fn from(_: std::num::TryFromIntError) -> Error {
+    fn from(_: std::num::TryFromIntError) -> Self {
         Error::TimeTravelError
     }
 }

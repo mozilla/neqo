@@ -53,7 +53,7 @@ impl HandshakeState {
 
 fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
     let mut alpn_state = ssl::SSLNextProtoState::SSL_NEXT_PROTO_NO_SUPPORT;
-    let mut chosen = vec![0u8; 255];
+    let mut chosen = vec![0_u8; 255];
     let mut chosen_len: c_uint = 0;
     let rv = unsafe {
         ssl::SSL_GetNextProto(
@@ -99,18 +99,18 @@ macro_rules! preinfo_arg {
 }
 
 impl SecretAgentPreInfo {
-    fn new(fd: *mut ssl::PRFileDesc) -> Res<SecretAgentPreInfo> {
+    fn new(fd: *mut ssl::PRFileDesc) -> Res<Self> {
         let mut info: ssl::SSLPreliminaryChannelInfo = unsafe { mem::uninitialized() };
         let rv = unsafe {
             ssl::SSL_GetPreliminaryChannelInfo(
                 fd,
                 &mut info,
-                mem::size_of::<ssl::SSLPreliminaryChannelInfo>() as ssl::PRUint32,
+                mem::size_of::<ssl::SSLPreliminaryChannelInfo>().try_into()?,
             )
         };
         result::result(rv)?;
 
-        Ok(SecretAgentPreInfo {
+        Ok(Self {
             info,
             alpn: get_alpn(fd, true)?,
         })
@@ -150,24 +150,24 @@ pub struct SecretAgentInfo {
 }
 
 impl SecretAgentInfo {
-    fn new(fd: *mut ssl::PRFileDesc) -> Res<SecretAgentInfo> {
+    fn new(fd: *mut ssl::PRFileDesc) -> Res<Self> {
         let mut info: ssl::SSLChannelInfo = unsafe { mem::uninitialized() };
         let rv = unsafe {
             ssl::SSL_GetChannelInfo(
                 fd,
                 &mut info,
-                mem::size_of::<ssl::SSLChannelInfo>() as ssl::PRUint32,
+                mem::size_of::<ssl::SSLChannelInfo>().try_into()?,
             )
         };
         result::result(rv)?;
-        Ok(SecretAgentInfo {
+        Ok(Self {
             version: info.protocolVersion as Version,
             cipher: info.cipherSuite as Cipher,
-            group: info.keaGroup as Group,
+            group: info.keaGroup.try_into()?,
             resumed: info.resumed != 0,
             early_data: info.earlyDataAccepted != 0,
             alpn: get_alpn(fd, false)?,
-            signature_scheme: info.signatureScheme as SignatureScheme,
+            signature_scheme: info.signatureScheme.try_into()?,
         })
     }
 
@@ -194,8 +194,9 @@ impl SecretAgentInfo {
     }
 }
 
-/// SecretAgent holds the common parts of client and server.
+/// `SecretAgent` holds the common parts of client and server.
 #[derive(Debug)]
+#[allow(clippy::module_name_repetitions)]
 pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
     secrets: SecretHolder,
@@ -218,10 +219,10 @@ pub struct SecretAgent {
 }
 
 impl SecretAgent {
-    fn new() -> Res<SecretAgent> {
-        let mut agent = SecretAgent {
+    fn new() -> Res<Self> {
+        let mut agent = Self {
             fd: null_mut(),
-            secrets: Default::default(),
+            secrets: SecretHolder::default(),
             raw: None,
             io: Box::new(AgentIo::new()),
             state: HandshakeState::New,
@@ -230,8 +231,8 @@ impl SecretAgent {
             alert: Box::new(None),
             now: Box::new(0),
 
-            extension_handlers: Default::default(),
-            inf: Default::default(),
+            extension_handlers: Vec::new(),
+            inf: None,
 
             no_eoed: false,
         };
@@ -290,13 +291,10 @@ impl SecretAgent {
             // Fatal alerts demand attention.
             let p = arg as *mut Option<Alert>;
             let st = p.as_mut().unwrap();
-            match st {
-                None => {
-                    *st = Some(alert.description);
-                }
-                _ => {
-                    qwarn!([format!("{:p}", fd)] "duplicate alert {}", alert.description);
-                }
+            if st.is_none() {
+                *st = Some(alert.description);
+            } else {
+                qwarn!([format!("{:p}", fd)] "duplicate alert {}", alert.description);
             }
         }
     }
@@ -309,29 +307,29 @@ impl SecretAgent {
 
     // Ready this for connecting.
     fn ready(&mut self, is_server: bool) -> Res<()> {
-        let rv = unsafe {
+        let mut rv = unsafe {
             ssl::SSL_AuthCertificateHook(
                 self.fd,
-                Some(SecretAgent::auth_complete_hook),
+                Some(Self::auth_complete_hook),
                 &mut *self.auth_required as *mut bool as *mut c_void,
             )
         };
         result::result(rv)?;
 
-        let rv = unsafe {
+        rv = unsafe {
             ssl::SSL_AlertSentCallback(
                 self.fd,
-                Some(SecretAgent::alert_sent_cb),
+                Some(Self::alert_sent_cb),
                 &mut *self.alert as *mut Option<Alert> as *mut c_void,
             )
         };
         result::result(rv)?;
 
         // TODO(mt) move to time.rs so we can remove PRTime definition from nss_ssl bindings.
-        let rv = unsafe {
+        rv = unsafe {
             ssl::SSL_SetTimeFunc(
                 self.fd,
-                Some(SecretAgent::time_func),
+                Some(Self::time_func),
                 &mut *self.now as *mut PRTime as *mut c_void,
             )
         };
@@ -419,8 +417,10 @@ impl SecretAgent {
         // Prepare to encode.
         let mut encoded = Vec::with_capacity(encoded_len);
         let mut add = |v: &str| {
-            encoded.push(v.len() as u8);
-            encoded.extend_from_slice(v.as_bytes());
+            if let Ok(s) = v.len().try_into() {
+                encoded.push(s);
+                encoded.extend_from_slice(v.as_bytes());
+            }
         };
 
         // NSS inherited an idiosyncratic API as a result of having implemented NPN
@@ -574,7 +574,7 @@ impl SecretAgent {
         self.set_raw(true)?;
 
         // Setup for accepting records.
-        let mut records: Box<RecordList> = Default::default();
+        let mut records = Box::new(RecordList::default());
         let records_ptr = &mut *records as *mut RecordList as *mut c_void;
         let rv =
             unsafe { ssl::SSL_RecordLayerWriteCallback(self.fd, Some(ingest_record), records_ptr) };
@@ -683,7 +683,7 @@ impl Client {
         }
         result::result(unsafe { ssl::SSL_SetURL(agent.fd, url.unwrap().as_ptr()) })?;
         agent.ready(false)?;
-        let mut client = Client {
+        let mut client = Self {
             agent,
             resumption: Box::new(None),
         };
@@ -709,7 +709,7 @@ impl Client {
         let rv = unsafe {
             ssl::SSL_SetResumptionTokenCallback(
                 self.fd,
-                Some(Client::resumption_token_cb),
+                Some(Self::resumption_token_cb),
                 &mut *self.resumption as *mut Option<Vec<u8>> as *mut c_void,
             )
         };
@@ -743,7 +743,7 @@ impl DerefMut for Client {
     }
 }
 
-/// ZeroRttCheckResult encapsulates the options for handling a ClientHello.
+/// `ZeroRttCheckResult` encapsulates the options for handling a `ClientHello`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ZeroRttCheckResult {
     /// Accept 0-RTT; the default.
@@ -756,7 +756,7 @@ pub enum ZeroRttCheckResult {
     Fail,
 }
 
-/// A ZeroRttChecker is used by the agent to validate the application token (as provided by send_ticket)
+/// A `ZeroRttChecker` is used by the agent to validate the application token (as provided by `send_ticket`)
 pub trait ZeroRttChecker: std::fmt::Debug {
     fn check(&self, token: &[u8]) -> ZeroRttCheckResult;
 }
@@ -768,11 +768,8 @@ struct ZeroRttCheckState {
 }
 
 impl ZeroRttCheckState {
-    pub fn new(
-        fd: *mut ssl::PRFileDesc,
-        checker: Box<dyn ZeroRttChecker>,
-    ) -> Box<ZeroRttCheckState> {
-        Box::new(ZeroRttCheckState { fd, checker })
+    pub fn new(fd: *mut ssl::PRFileDesc, checker: Box<dyn ZeroRttChecker>) -> Box<Self> {
+        Box::new(Self { fd, checker })
     }
 }
 
@@ -811,7 +808,7 @@ impl Server {
         }
 
         agent.ready(true)?;
-        Ok(Server {
+        Ok(Self {
             agent,
             zero_rtt_check: None,
         })
@@ -865,11 +862,11 @@ impl Server {
     ) -> Res<()> {
         let mut check_state = ZeroRttCheckState::new(self.agent.fd, checker);
         let arg = &mut *check_state as *mut ZeroRttCheckState as *mut c_void;
-        let rv = unsafe {
-            ssl::SSL_HelloRetryRequestCallback(self.agent.fd, Some(Server::hello_retry_cb), arg)
+        let mut rv = unsafe {
+            ssl::SSL_HelloRetryRequestCallback(self.agent.fd, Some(Self::hello_retry_cb), arg)
         };
         result::result(rv)?;
-        let rv = unsafe { ssl::SSL_SetMaxEarlyDataSize(self.agent.fd, max_early_data) };
+        rv = unsafe { ssl::SSL_SetMaxEarlyDataSize(self.agent.fd, max_early_data) };
         result::result(rv)?;
         self.zero_rtt_check = Some(check_state);
         self.agent.enable_0rtt()?;

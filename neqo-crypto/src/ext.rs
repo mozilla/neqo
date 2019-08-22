@@ -70,6 +70,7 @@ impl ExtensionTracker {
         f(rc.borrow_mut().deref_mut())
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     unsafe extern "C" fn extension_writer(
         _fd: *mut PRFileDesc,
         message: SSLHandshakeType::Type,
@@ -79,7 +80,8 @@ impl ExtensionTracker {
         arg: *mut c_void,
     ) -> PRBool {
         let d = std::slice::from_raw_parts_mut(data, max_len as usize);
-        ExtensionTracker::wrap_handler_call(arg, |handler| {
+        Self::wrap_handler_call(arg, |handler| {
+            // Cast is safe here because the message type is always part of the enum
             match handler.write(message as HandshakeMessage, d) {
                 ExtensionWriterResult::Write(sz) => {
                     *len = to_c_uint(sz).expect("integer overflow from extension writer");
@@ -99,7 +101,9 @@ impl ExtensionTracker {
         arg: *mut c_void,
     ) -> SECStatus {
         let d = std::slice::from_raw_parts(data, len as usize);
-        ExtensionTracker::wrap_handler_call(arg, |handler| {
+        #[allow(clippy::cast_possible_truncation)]
+        Self::wrap_handler_call(arg, |handler| {
+            // Cast is safe here because the message type is always part of the enum
             match handler.handle(message as HandshakeMessage, d) {
                 ExtensionHandlerResult::Ok => SECSuccess,
                 ExtensionHandlerResult::Alert(a) => {
@@ -114,7 +118,7 @@ impl ExtensionTracker {
         fd: *mut PRFileDesc,
         extension: Extension,
         handler: Rc<RefCell<dyn ExtensionHandler>>,
-    ) -> Res<ExtensionTracker> {
+    ) -> Res<Self> {
         // The ergonomics here aren't great for users of this API, but it's
         // even worse here. The double box is used to allow us to own a reference
         // to the handler AND also pass a bare pointer to the inner box to C.
@@ -122,7 +126,7 @@ impl ExtensionTracker {
         // the access in the callback from decrementing the Rc counters when the
         // duped instance is dropped.  That would result in the object being dropped
         // in the callbacks (and the UAF that follows).
-        let mut tracker = ExtensionTracker {
+        let mut tracker = Self {
             extension,
             handler: Box::new(Box::new(handler)),
         };
@@ -130,9 +134,9 @@ impl ExtensionTracker {
         let rv = SSL_InstallExtensionHooks(
             fd,
             extension,
-            Some(ExtensionTracker::extension_writer),
+            Some(Self::extension_writer),
             p,
-            Some(ExtensionTracker::extension_handler),
+            Some(Self::extension_handler),
             p,
         );
         result::result(rv)?;
