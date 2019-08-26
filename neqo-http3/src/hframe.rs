@@ -508,9 +508,7 @@ mod tests {
     #[test]
     fn test_settings_frame4() {
         let f = HFrame::Settings {
-            settings: vec![
-                (HSettingType::MaxHeaderListSize, 4),
-            ],
+            settings: vec![(HSettingType::MaxHeaderListSize, 4)],
         };
         enc_dec(&f, "04020604", 0);
     }
@@ -1003,9 +1001,7 @@ mod tests {
 
         // H3_FRAME_TYPE_SETTINGS
         let f = HFrame::Settings {
-            settings: vec![
-                (HSettingType::MaxHeaderListSize, 4),
-            ],
+            settings: vec![(HSettingType::MaxHeaderListSize, 4)],
         };
         let mut enc = Encoder::default();
         f.encode(&mut enc);

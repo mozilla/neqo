@@ -1252,8 +1252,7 @@ mod tests {
         // Create server control stream.
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         // Send a HEADERS frame instead (which contains garbage).
-        let sent =
-            neqo_trans_conn.stream_send(control_stream, &[0x0, 0x1, 0x3, 0x0, 0x1, 0x2]);
+        let sent = neqo_trans_conn.stream_send(control_stream, &[0x0, 0x1, 0x3, 0x0, 0x1, 0x2]);
         assert_eq!(sent, Ok(6));
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
@@ -1268,8 +1267,7 @@ mod tests {
         // Create client control stream.
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         // Send a MAX_PUSH_ID frame instead.
-        let sent =
-            neqo_trans_conn.stream_send(control_stream, &[0x0, 0xd, 0x1, 0xf]);
+        let sent = neqo_trans_conn.stream_send(control_stream, &[0x0, 0xd, 0x1, 0xf]);
         assert_eq!(sent, Ok(4));
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
