@@ -217,7 +217,6 @@ impl TransactionClient {
                     let f = self.frame_reader.get_frame()?;
                     qdebug!([label] "A new frame has been received: {:?}", f);
                     match f {
-                        HFrame::Priority { .. } => break Err(Error::UnexpectedFrame),
                         HFrame::Headers { len } => self.handle_headers_frame(len)?,
                         HFrame::PushPromise { .. } => break Err(Error::UnexpectedFrame),
                         _ => {

@@ -17,7 +17,6 @@ pub type HFrameType = u64;
 
 pub const H3_FRAME_TYPE_DATA: HFrameType = 0x0;
 pub const H3_FRAME_TYPE_HEADERS: HFrameType = 0x1;
-const H3_FRAME_TYPE_PRIORITY: HFrameType = 0x2;
 const H3_FRAME_TYPE_CANCEL_PUSH: HFrameType = 0x3;
 const H3_FRAME_TYPE_SETTINGS: HFrameType = 0x4;
 const H3_FRAME_TYPE_PUSH_PROMISE: HFrameType = 0x5;
@@ -28,8 +27,6 @@ const H3_FRAME_TYPE_DUPLICATE_PUSH: HFrameType = 0xe;
 type SettingsType = u64;
 
 const SETTINGS_MAX_HEADER_LIST_SIZE: SettingsType = 0x6;
-const SETTINGS_NUM_PLACEHOLDERS: SettingsType = 0x8;
-
 const SETTINGS_QPACK_MAX_TABLE_CAPACITY: SettingsType = 0x1;
 const SETTINGS_QPACK_BLOCKED_STREAMS: SettingsType = 0x7;
 
@@ -40,46 +37,9 @@ pub enum HStreamType {
     Push,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum PrioritizedElementType {
-    RequestStream,
-    PushStream,
-    Placeholder,
-    CurrentStream,
-}
-
-fn prior_elem_from_byte(b: u8) -> PrioritizedElementType {
-    match b & 0x3 {
-        0x0 => PrioritizedElementType::RequestStream,
-        0x1 => PrioritizedElementType::PushStream,
-        0x2 => PrioritizedElementType::Placeholder,
-        0x3 => PrioritizedElementType::CurrentStream,
-        _ => panic!("Can't happen"),
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum ElementDependencyType {
-    RequestStream,
-    PushStream,
-    Placeholder,
-    Root,
-}
-
-fn elem_dep_from_byte(b: u8) -> ElementDependencyType {
-    match (b & (0x3 << 2)) >> 2 {
-        0x0 => ElementDependencyType::RequestStream,
-        0x1 => ElementDependencyType::PushStream,
-        0x2 => ElementDependencyType::Placeholder,
-        0x3 => ElementDependencyType::Root,
-        _ => panic!("Can't happen"),
-    }
-}
-
 #[derive(PartialEq, Debug)]
 pub enum HSettingType {
     MaxHeaderListSize,
-    NumPlaceholders,
     MaxTableSize,
     BlockedStreams,
     UnknownType,
@@ -93,14 +53,6 @@ pub enum HFrame {
     },
     Headers {
         len: u64, // length of the header block
-    },
-    Priority {
-        priorized_elem_type: PrioritizedElementType,
-        elem_dependency_type: ElementDependencyType,
-        // TODO(mt) exclusive bit
-        priority_elem_id: u64,
-        elem_dependency_id: u64,
-        weight: u8,
     },
     CancelPush {
         push_id: u64,
@@ -128,7 +80,6 @@ impl HFrame {
         match self {
             HFrame::Data { .. } => H3_FRAME_TYPE_DATA,
             HFrame::Headers { .. } => H3_FRAME_TYPE_HEADERS,
-            HFrame::Priority { .. } => H3_FRAME_TYPE_PRIORITY,
             HFrame::CancelPush { .. } => H3_FRAME_TYPE_CANCEL_PUSH,
             HFrame::Settings { .. } => H3_FRAME_TYPE_SETTINGS,
             HFrame::PushPromise { .. } => H3_FRAME_TYPE_PUSH_PROMISE,
@@ -146,22 +97,6 @@ impl HFrame {
                 // DATA and HEADERS frames only encode the length here.
                 enc.encode_varint(*len);
             }
-            HFrame::Priority {
-                priorized_elem_type,
-                elem_dependency_type,
-                priority_elem_id,
-                elem_dependency_id,
-                weight,
-            } => {
-                enc.encode_vvec_with(|enc_inner| {
-                    enc_inner.encode_byte(
-                        (*priorized_elem_type as u8) | ((*elem_dependency_type as u8) << 2),
-                    );
-                    enc_inner.encode_varint(*priority_elem_id);
-                    enc_inner.encode_varint(*elem_dependency_id);
-                    enc_inner.encode_byte(*weight);
-                });
-            }
             HFrame::CancelPush { push_id } => {
                 enc.encode_vvec_with(|enc_inner| {
                     enc_inner.encode_varint(*push_id);
@@ -173,10 +108,6 @@ impl HFrame {
                         match iter.0 {
                             HSettingType::MaxHeaderListSize => {
                                 enc_inner.encode_varint(SETTINGS_MAX_HEADER_LIST_SIZE as u64);
-                                enc_inner.encode_varint(iter.1);
-                            }
-                            HSettingType::NumPlaceholders => {
-                                enc_inner.encode_varint(SETTINGS_NUM_PLACEHOLDERS as u64);
                                 enc_inner.encode_varint(iter.1);
                             }
                             HSettingType::MaxTableSize => {
@@ -220,7 +151,6 @@ impl HFrame {
         match self {
             HFrame::Data { .. } => !(s == HStreamType::Control),
             HFrame::Headers { .. } => !(s == HStreamType::Control),
-            HFrame::Priority { .. } => !(s == HStreamType::Control),
             HFrame::CancelPush { .. } => (s == HStreamType::Control),
             HFrame::Settings { .. } => (s == HStreamType::Control),
             HFrame::PushPromise { .. } => (s == HStreamType::Request),
@@ -335,8 +265,7 @@ impl HFrameReader {
                                     HFrameReaderState::GetPushPromiseData
                                 }
                                 // for other frames get all data before decoding.
-                                H3_FRAME_TYPE_PRIORITY
-                                | H3_FRAME_TYPE_CANCEL_PUSH
+                                H3_FRAME_TYPE_CANCEL_PUSH
                                 | H3_FRAME_TYPE_SETTINGS
                                 | H3_FRAME_TYPE_GOAWAY
                                 | H3_FRAME_TYPE_MAX_PUSH_ID
@@ -435,31 +364,6 @@ impl HFrameReader {
             H3_FRAME_TYPE_HEADERS => HFrame::Headers {
                 len: self.hframe_len,
             },
-            H3_FRAME_TYPE_PRIORITY => {
-                let tb = match dec.decode_byte() {
-                    Some(v) => v,
-                    _ => return Err(Error::NotEnoughData),
-                };
-                let pe = match dec.decode_varint() {
-                    Some(v) => v,
-                    _ => return Err(Error::NotEnoughData),
-                };
-                let de = match dec.decode_varint() {
-                    Some(v) => v,
-                    _ => return Err(Error::NotEnoughData),
-                };
-                let w = match dec.decode_byte() {
-                    Some(v) => v,
-                    _ => return Err(Error::NotEnoughData),
-                };
-                HFrame::Priority {
-                    priorized_elem_type: prior_elem_from_byte(tb),
-                    elem_dependency_type: elem_dep_from_byte(tb),
-                    priority_elem_id: pe,
-                    elem_dependency_id: de,
-                    weight: w,
-                }
-            }
             H3_FRAME_TYPE_CANCEL_PUSH => HFrame::CancelPush {
                 push_id: match dec.decode_varint() {
                     Some(v) => v,
@@ -475,7 +379,6 @@ impl HFrameReader {
                     };
                     let st = match st_read {
                         SETTINGS_MAX_HEADER_LIST_SIZE => HSettingType::MaxHeaderListSize,
-                        SETTINGS_NUM_PLACEHOLDERS => HSettingType::NumPlaceholders,
                         SETTINGS_QPACK_MAX_TABLE_CAPACITY => HSettingType::MaxTableSize,
                         SETTINGS_QPACK_BLOCKED_STREAMS => HSettingType::BlockedStreams,
                         _ => HSettingType::UnknownType,
@@ -597,54 +500,6 @@ mod tests {
     }
 
     #[test]
-    fn test_priority_frame1() {
-        let f = HFrame::Priority {
-            priorized_elem_type: PrioritizedElementType::RequestStream,
-            elem_dependency_type: ElementDependencyType::RequestStream,
-            priority_elem_id: 2,
-            elem_dependency_id: 1,
-            weight: 3,
-        };
-        enc_dec(&f, "020400020103", 0);
-    }
-
-    #[test]
-    fn test_priority_frame2() {
-        let f = HFrame::Priority {
-            priorized_elem_type: PrioritizedElementType::PushStream,
-            elem_dependency_type: ElementDependencyType::PushStream,
-            priority_elem_id: 2,
-            elem_dependency_id: 1,
-            weight: 3,
-        };
-        enc_dec(&f, "020405020103", 0);
-    }
-
-    #[test]
-    fn test_priority_frame3() {
-        let f = HFrame::Priority {
-            priorized_elem_type: PrioritizedElementType::Placeholder,
-            elem_dependency_type: ElementDependencyType::Placeholder,
-            priority_elem_id: 2,
-            elem_dependency_id: 1,
-            weight: 3,
-        };
-        enc_dec(&f, "02040a020103", 0);
-    }
-
-    #[test]
-    fn test_priority_frame4() {
-        let f = HFrame::Priority {
-            priorized_elem_type: PrioritizedElementType::CurrentStream,
-            elem_dependency_type: ElementDependencyType::Root,
-            priority_elem_id: 2,
-            elem_dependency_id: 1,
-            weight: 3,
-        };
-        enc_dec(&f, "02040f020103", 0);
-    }
-
-    #[test]
     fn test_cancel_push_frame4() {
         let f = HFrame::CancelPush { push_id: 5 };
         enc_dec(&f, "030105", 0);
@@ -655,10 +510,9 @@ mod tests {
         let f = HFrame::Settings {
             settings: vec![
                 (HSettingType::MaxHeaderListSize, 4),
-                (HSettingType::NumPlaceholders, 4),
             ],
         };
-        enc_dec(&f, "040406040804", 0);
+        enc_dec(&f, "04020604", 0);
     }
 
     #[test]
@@ -733,12 +587,10 @@ mod tests {
 
         assert!(fr.done());
         let f = fr.get_frame();
-        assert!(f.is_ok());
         if let HFrame::Settings { settings } = f.unwrap() {
-            assert!(settings.len() == 2);
+            assert!(settings.len() == 1);
             //            for i in settings.iter() {
             assert!(settings[0] == (HSettingType::MaxHeaderListSize, 4));
-            assert!(settings[1] == (HSettingType::NumPlaceholders, 4));
         } else {
             panic!("wrong frame type");
         }
@@ -804,9 +656,8 @@ mod tests {
         let f = fr.get_frame();
         assert!(f.is_ok());
         if let HFrame::Settings { settings } = f.unwrap() {
-            assert!(settings.len() == 2);
+            assert!(settings.len() == 1);
             assert!(settings[0] == (HSettingType::MaxHeaderListSize, 4));
-            assert!(settings[1] == (HSettingType::NumPlaceholders, 256));
         } else {
             panic!("wrong frame type");
         }
@@ -1143,19 +994,6 @@ mod tests {
         buf.resize(FRAME_LEN + buf.len(), 0);
         test_complete_and_incomplete_frame(&buf, 2);
 
-        // H3_FRAME_TYPE_PRIORITY
-        let f = HFrame::Priority {
-            priorized_elem_type: PrioritizedElementType::RequestStream,
-            elem_dependency_type: ElementDependencyType::RequestStream,
-            priority_elem_id: 2,
-            elem_dependency_id: 1,
-            weight: 3,
-        };
-        let mut enc = Encoder::default();
-        f.encode(&mut enc);
-        let buf: Vec<_> = enc.into();
-        test_complete_and_incomplete_frame(&buf, buf.len());
-
         // H3_FRAME_TYPE_CANCEL_PUSH
         let f = HFrame::CancelPush { push_id: 5 };
         let mut enc = Encoder::default();
@@ -1167,7 +1005,6 @@ mod tests {
         let f = HFrame::Settings {
             settings: vec![
                 (HSettingType::MaxHeaderListSize, 4),
-                (HSettingType::NumPlaceholders, 4),
             ],
         };
         let mut enc = Encoder::default();
