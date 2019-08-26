@@ -27,30 +27,29 @@ impl<'a> Decoder<'a> {
         self.buf.len() - self.offset
     }
 
-    /// Skip n bytes.  Panics if `n > self.remaining()`.
+    /// Skip n bytes.  Panics if `n` is too large.
     pub fn skip(&mut self, n: usize) {
         assert!(self.remaining() >= n);
         self.offset += n;
     }
 
+    /// Skip helper that panics if `n` is `None` or not able to fit in `usize`.
+    fn skip_inner(&mut self, n: Option<u64>) {
+        self.skip(usize::try_from(n.unwrap()).unwrap());
+    }
+
     /// Skip a vector.  Panics if there isn't enough space.
     /// Only use this for tests because we panic rather than reporting a result.
     pub fn skip_vec(&mut self, n: usize) {
-        let len = match self.decode_uint(n) {
-            Some(l) => l,
-            None => panic!("can't decode length"),
-        };
-        self.skip(usize::try_from(len).unwrap());
+        let len = self.decode_uint(n);
+        self.skip_inner(len);
     }
 
     /// Skip a variable length vector.  Panics if there isn't enough space.
     /// Only use this for tests because we panic rather than reporting a result.
     pub fn skip_vvec(&mut self) {
-        let len = match self.decode_varint() {
-            Some(l) => l,
-            None => panic!("can't decode length"),
-        };
-        self.skip(usize::try_from(len).unwrap());
+        let len = self.decode_varint();
+        self.skip_inner(len);
     }
 
     /// Decodes (reads) a single byte.
@@ -65,10 +64,10 @@ impl<'a> Decoder<'a> {
 
     /// Provides the next byte without moving the read position.
     pub fn peek_byte(&mut self) -> Option<u8> {
-        if self.buf.len() > self.offset {
-            Some(self.buf[self.offset])
-        } else {
+        if self.remaining() < 1 {
             None
+        } else {
+            Some(self.buf[self.offset])
         }
     }
 
@@ -80,17 +79,6 @@ impl<'a> Decoder<'a> {
         let res = &self.buf[self.offset..self.offset + n];
         self.offset += n;
         Some(res)
-    }
-
-    fn decode_checked(&mut self, n: u64) -> Option<&[u8]> {
-        if let Ok(len) = TryFrom::try_from(n) {
-            self.decode(len)
-        } else {
-            // sizeof(usize) < sizeof(u64) and the value is greater than usize can hold.
-            // Throw away the rest of the input.
-            self.offset = self.buf.len();
-            None
-        }
     }
 
     /// Decodes an unsigned integer of length 1..8.
@@ -130,25 +118,36 @@ impl<'a> Decoder<'a> {
         res
     }
 
+    fn decode_checked(&mut self, n: Option<u64>) -> Option<&[u8]> {
+        let len = match n {
+            Some(l) => l,
+            _ => return None,
+        };
+        match usize::try_from(len) {
+            Ok(l) => self.decode(l),
+            _ => {
+                // sizeof(usize) < sizeof(u64) and the value is greater than
+                // usize can hold. Throw away the rest of the input.
+                self.offset = self.buf.len();
+                None
+            }
+        }
+    }
+
     /// Decodes a TLS-style length-prefixed buffer.
     pub fn decode_vec(&mut self, n: usize) -> Option<&[u8]> {
-        let len = match self.decode_uint(n) {
-            Some(l) => l,
-            None => return None,
-        };
+        let len = self.decode_uint(n);
         self.decode_checked(len)
     }
 
-    /// Decodes a QUIC-variant-length prefixed buffer.
+    /// Decodes a QUIC varint-length-prefixed buffer.
     pub fn decode_vvec(&mut self) -> Option<&[u8]> {
-        let len = match self.decode_varint() {
-            Some(l) => l,
-            None => return None,
-        };
+        let len = self.decode_varint();
         self.decode_checked(len)
     }
 }
 
+// Implement `Deref` for `Decoder` so that values can be examined without moving the cursor.
 impl<'a> Deref for Decoder<'a> {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
@@ -288,17 +287,41 @@ impl Encoder {
     }
 
     /// Encode a vector with a varint length using a closure.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn encode_vvec_with<F: FnOnce(&mut Self)>(&mut self, f: F) -> &mut Self {
         let start = self.buf.len();
+        // Optimize for short buffers, reserve a single byte for the length.
+        self.buf.resize(self.buf.len() + 1, 0);
         f(self);
-        let len = self.buf.len() - start;
-        self.encode_varint(u64::try_from(len).unwrap());
-        // Unfortunately, this moves all the data that was encoded.  Without knowing
-        // the length of what is encoded, this is what we get.
-        // We could reserve one octet and optimize for small vectors,
-        // but that complicates the encoding process.  Leave that for later.
-        let rot = self.buf.len() - start - len;
-        self.buf[start..].rotate_right(rot);
+        let len = self.buf.len() - start - 1;
+
+        // Now to insert a varint for `len` before the encoded block.
+        //
+        // We now have one zero byte at `start`, followed by `len` encoded bytes:
+        //   |  0  | ... encoded ... |
+        // We are going to encode a varint by putting the low bytes in that spare byte.
+        // Any additional bytes for the varint are put after the encoded blob:
+        //   | low | ... encoded ... | varint high |
+        // Then we will rotate that entire piece right, by however many bytes we add:
+        //   | varint high | low | ... encoded ... |
+        // As long as encoding more than 63 bytes is rare, this won't cost much relative
+        // to the convenience of being able to use this function.
+
+        let v = u64::try_from(len).expect("encoded value fits in a u64");
+        // The lower order byte fits before the inserted block of bytes.
+        self.buf[start] = (v & 0xff) as u8;
+        let (count, bits) = match () {
+            // Great.  The byte we have is enough.
+            _ if v < (1 << 6) => return self,
+            _ if v < (1 << 14) => (1, 1 << 6),
+            _ if v < (1 << 30) => (3, 2 << 22),
+            _ if v < (1 << 62) => (7, 3 << 54),
+            _ => panic!("Varint value too large"),
+        };
+        // Now, we need to encode the high bits after the main block, ...
+        self.encode_uint(count, (v >> 8) | bits);
+        // ..., then rotate the entire thing right by the same amount.
+        self.buf[start..].rotate_right(count);
         self
     }
 }
@@ -628,6 +651,17 @@ mod tests {
             enc_inner.encode(&Encoder::from_hex("02"));
         });
         assert_eq!(enc, Encoder::from_hex("0102"));
+    }
+
+    #[test]
+    fn encode_vvec_with_longer() {
+        let mut enc = Encoder::default();
+        enc.encode_vvec_with(|enc_inner| {
+            enc_inner.encode(&[0xa5; 65]);
+        });
+        let mut v: Vec<u8> = enc.into();
+        v.split_off(3);
+        assert_eq!(v, vec![0x40, 0x41, 0xa5]);
     }
 
     // Test that Deref to &[u8] works for Encoder.
