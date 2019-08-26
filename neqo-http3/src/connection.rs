@@ -788,7 +788,9 @@ impl Http3Connection {
                     Ok(())
                 }
             }
-            None => Err(Error::InvalidStreamId),
+            None => Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId,
+            )),
         }
     }
 
@@ -803,7 +805,9 @@ impl Http3Connection {
                 }
             }
         } else {
-            Err(Error::InvalidStreamId)
+            Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId,
+            ))
         }
     }
 
@@ -919,55 +923,60 @@ impl Http3Connection {
     }
 
     // API
-    pub fn read_response_headers(&mut self, stream_id: u64) -> Res<(Vec<Header>, bool)> {
-        qdebug!([self] "read_response_headers from stream {}.", stream_id);
-        let cs = self
-            .transactions_client
-            .get_mut(&stream_id)
-            .ok_or(Error::InvalidStreamId)?;
-        match cs.read_response_headers() {
-            Ok((headers, fin)) => {
-                if fin {
-                    self.transactions_client.remove(&stream_id);
-                }
-                Ok((headers, fin))
-            }
-            Err(e) => Err(e),
+    pub fn get_headers(&mut self, stream_id: u64) -> Res<Option<Vec<Header>>> {
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
+        };
+        if let Some(cs) = &mut self.transactions_client.get_mut(&stream_id) {
+            qdebug!([label] "get_header from stream {}.", stream_id);
+            Ok(cs.get_header())
+        } else {
+            Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId,
+            ))
         }
     }
 
-    pub fn read_response_data(
+    pub fn read_data(
         &mut self,
         now: Instant,
         stream_id: u64,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        qdebug!([self] "read_data from stream {}.", stream_id);
-        let cs = self
-            .transactions_client
-            .get_mut(&stream_id)
-            .ok_or(Error::InvalidStreamId)?;
-
-        match cs.read_response_data(&mut self.conn, buf) {
-            Ok((amount, fin)) => {
-                if fin {
-                    self.transactions_client.remove(&stream_id);
-                } else if amount > 0 {
-                    // Directly call receive instead of adding to
-                    // streams_are_readable here. This allows the app to
-                    // pick up subsequent already-received data frames in
-                    // the stream even if no new packets arrive to cause
-                    // process_http3() to run.
-                    cs.receive(&mut self.conn, &mut self.qpack_decoder)?;
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
+        };
+        if let Some(cs) = &mut self.transactions_client.get_mut(&stream_id) {
+            qdebug!([label] "read_data from stream {}.", stream_id);
+            match cs.read_data(&mut self.conn, buf) {
+                Ok((amount, fin)) => {
+                    if fin {
+                        self.transactions_client.remove(&stream_id);
+                    } else if amount > 0 {
+                        // Directly call receive instead of adding to
+                        // streams_are_readable here. This allows the app to
+                        // pick up subsequent already-received data frames in
+                        // the stream even if no new packets arrive to cause
+                        // process_http3() to run.
+                        cs.receive(&mut self.conn, &mut self.qpack_decoder)?;
+                    }
+                    Ok((amount, fin))
                 }
-                Ok((amount, fin))
-            }
-            Err(e) => {
-                if e == Error::MalformedFrame(H3_FRAME_TYPE_DATA) {
-                    self.close(now, e.code(), "");
+                Err(e) => {
+                    if e == Error::MalformedFrame(H3_FRAME_TYPE_DATA) {
+                        self.close(now, e.code(), "");
+                    }
+                    Err(e)
                 }
-                Err(e)
             }
+        } else {
+            Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId,
+            ))
         }
     }
 
@@ -1687,24 +1696,19 @@ mod tests {
             match e {
                 Http3Event::HeaderReady { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
-                    let h = hconn.read_response_headers(stream_id);
+                    let h = hconn.get_headers(stream_id);
                     assert_eq!(
                         h,
-                        Ok((
-                            vec![
-                                (String::from(":status"), String::from("200")),
-                                (String::from("content-length"), String::from("3"))
-                            ],
-                            false
-                        ))
+                        Ok(Some(vec![
+                            (String::from(":status"), String::from("200")),
+                            (String::from("content-length"), String::from("3"))
+                        ]))
                     );
                 }
                 Http3Event::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
-                    let (amount, fin) = hconn
-                        .read_response_data(now(), stream_id, &mut buf)
-                        .unwrap();
+                    let (amount, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
                     assert_eq!(fin, false);
                     assert_eq!(amount, 3);
                     assert_eq!(buf[..3], [0x61, 0x62, 0x63]);
@@ -1720,9 +1724,7 @@ mod tests {
                 Http3Event::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
-                    let (amount, fin) = hconn
-                        .read_response_data(now(), stream_id, &mut buf)
-                        .unwrap();
+                    let (amount, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
                     assert_eq!(fin, true);
                     assert_eq!(amount, 3);
                     assert_eq!(buf[..3], [0x64, 0x65, 0x66]);
@@ -1734,9 +1736,12 @@ mod tests {
         // after this stream will be removed from hcoon. We will check this by trying to read
         // from the stream and that should fail.
         let mut buf = [0u8; 100];
-        let res = hconn.read_response_data(now(), request_stream_id, &mut buf);
+        let res = hconn.read_data(now(), request_stream_id, &mut buf);
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
+        assert_eq!(
+            res.unwrap_err(),
+            Error::TransportError(neqo_transport::Error::InvalidStreamId)
+        );
 
         hconn.close(now(), 0, "");
     }
@@ -1791,7 +1796,7 @@ mod tests {
             if let Http3Event::DataReadable { stream_id } = e {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
-                let res = hconn.read_response_data(now(), stream_id, &mut buf);
+                let res = hconn.read_data(now(), stream_id, &mut buf);
                 assert!(res.is_err());
                 assert_eq!(res.unwrap_err(), Error::MalformedFrame(H3_FRAME_TYPE_DATA));
             }
@@ -1899,16 +1904,13 @@ mod tests {
             for e in http_events {
                 match e {
                     Http3Event::HeaderReady { stream_id } => {
-                        let h = hconn.read_response_headers(stream_id);
+                        let h = hconn.get_headers(stream_id);
                         assert_eq!(
                             h,
-                            Ok((
-                                vec![
-                                    (String::from(":status"), String::from("200")),
-                                    (String::from("content-length"), String::from("3"))
-                                ],
-                                false
-                            ))
+                            Ok(Some(vec![
+                                (String::from(":status"), String::from("200")),
+                                (String::from("content-length"), String::from("3"))
+                            ]))
                         );
                     }
                     Http3Event::DataReadable { stream_id } => {
@@ -1916,9 +1918,7 @@ mod tests {
                             stream_id == request_stream_id_1 || stream_id == request_stream_id_2
                         );
                         let mut buf = [0u8; 100];
-                        let (amount, _) = hconn
-                            .read_response_data(now(), stream_id, &mut buf)
-                            .unwrap();
+                        let (amount, _) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
                         assert_eq!(amount, 3);
                     }
                     Http3Event::Reset { stream_id, error } => {
@@ -1938,7 +1938,8 @@ mod tests {
         hconn.close(now(), 0, "");
     }
 
-    fn connect_and_send_request() -> (Http3Connection, Connection, u64) {
+    #[test]
+    fn test_stream_fin_wo_data() {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
@@ -1972,6 +1973,15 @@ mod tests {
                             0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
                         ]
                     );
+
+                    // Send some good data wo fin
+                    let data = &[
+                        // headers
+                        0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
+                        // the data frame is complete.
+                        0x0, 0x3, 0x61, 0x62, 0x63,
+                    ];
+                    let _ = neqo_trans_conn.stream_send(stream_id, data);
                 }
                 _ => {}
             }
@@ -1979,319 +1989,17 @@ mod tests {
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
 
-        (hconn, neqo_trans_conn, request_stream_id)
-    }
-
-    // Close stream before headers.
-    #[test]
-    fn test_stream_fin_wo_headers() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
-        // send fin before sending any data.
-        neqo_trans_conn.stream_close_send(0).unwrap();
-
-        let out = neqo_trans_conn.process(None, now());
-        hconn.process(out.dgram(), now());
-
-        // Recv HeaderReady wo headers with fin.
-        let e = hconn.events().into_iter().next().unwrap();
-        if let Http3Event::HeaderReady { stream_id } = e {
-            assert_eq!(stream_id, request_stream_id);
-            let h = hconn.read_response_headers(stream_id);
-            assert_eq!(h, Ok((vec![], true)));
-        } else {
-            panic!("wrong event type");
-        }
-
-        // Stream should now be closed and gone
-        let mut buf = [0u8; 100];
-        assert_eq!(
-            hconn.read_response_data(now(), 0, &mut buf),
-            Err(Error::InvalidStreamId)
-        );
-    }
-
-    // Close stream imemediately after headers.
-    #[test]
-    fn test_stream_fin_after_headers() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
-        let data = &[
-            // headers
-            0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
-        ];
-        let _ = neqo_trans_conn.stream_send(request_stream_id, data);
-        // ok NOW send fin
-        neqo_trans_conn.stream_close_send(0).unwrap();
-
-        let out = neqo_trans_conn.process(None, now());
-        hconn.process(out.dgram(), now());
-
-        // Recv HeaderReady with headers and fin.
-        let e = hconn.events().into_iter().next().unwrap();
-        if let Http3Event::HeaderReady { stream_id } = e {
-            assert_eq!(stream_id, request_stream_id);
-            let h = hconn.read_response_headers(stream_id);
-            assert_eq!(
-                h,
-                Ok((
-                    vec![
-                        (String::from(":status"), String::from("200")),
-                        (String::from("content-length"), String::from("3"))
-                    ],
-                    true
-                ))
-            );
-        } else {
-            panic!("wrong event type");
-        }
-
-        // Stream should now be closed and gone
-        let mut buf = [0u8; 100];
-        assert_eq!(
-            hconn.read_response_data(now(), 0, &mut buf),
-            Err(Error::InvalidStreamId)
-        );
-    }
-
-    // Send headers, read headers and than close stream.
-    // We should get HeaderReady and a DataReadable
-    #[test]
-    fn test_stream_fin_after_headers_are_read_wo_data_frame() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
-        // Send some good data wo fin
-        let data = &[
-            // headers
-            0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
-        ];
-        let _ = neqo_trans_conn.stream_send(request_stream_id, data);
-
-        let out = neqo_trans_conn.process(None, now());
-        hconn.process(out.dgram(), now());
-
-        // Recv headers wo fin
-        let http_events = hconn.events();
-        for e in http_events {
-            match e {
-                Http3Event::HeaderReady { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let h = hconn.read_response_headers(stream_id);
-                    assert_eq!(
-                        h,
-                        Ok((
-                            vec![
-                                (String::from(":status"), String::from("200")),
-                                (String::from("content-length"), String::from("3"))
-                            ],
-                            false
-                        ))
-                    );
-                }
-                Http3Event::DataReadable { .. } => {
-                    panic!("We should not receive a DataGeadable event!");
-                }
-                _ => {}
-            };
-        }
-
-        // ok NOW send fin
-        neqo_trans_conn.stream_close_send(0).unwrap();
-
-        let out = neqo_trans_conn.process(None, now());
-        hconn.process(out.dgram(), now());
-
-        // Recv DataReadable wo data with fin
-        let http_events = hconn.events();
-        for e in http_events {
-            match e {
-                Http3Event::HeaderReady { .. } => {
-                    panic!("We should not get another HeaderReady!");
-                }
-                Http3Event::DataReadable { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    let res = hconn.read_response_data(now(), stream_id, &mut buf);
-                    let (len, fin) = res.expect("should read");
-                    assert_eq!(0, len);
-                    assert_eq!(fin, true);
-                }
-                _ => {}
-            };
-        }
-
-        // Stream should now be closed and gone
-        let mut buf = [0u8; 100];
-        assert_eq!(
-            hconn.read_response_data(now(), 0, &mut buf),
-            Err(Error::InvalidStreamId)
-        );
-    }
-
-    // Send headers anf an empy data frame and a close stream.
-    // We should only recv HeadersReady event
-    #[test]
-    fn test_stream_fin_after_headers_and_a_empty_data_frame() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
-        // Send some good data wo fin
-        let data = &[
-            // headers
-            0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // data
-            0x00, 0x00,
-        ];
-        let _ = neqo_trans_conn.stream_send(request_stream_id, data);
-        // ok NOW send fin
-        neqo_trans_conn.stream_close_send(0).unwrap();
-
-        let out = neqo_trans_conn.process(None, now());
-        hconn.process(out.dgram(), now());
-
-        // Recv HeaderReady with fin.
-        let http_events = hconn.events();
-        for e in http_events {
-            match e {
-                Http3Event::HeaderReady { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let h = hconn.read_response_headers(stream_id);
-                    assert_eq!(
-                        h,
-                        Ok((
-                            vec![
-                                (String::from(":status"), String::from("200")),
-                                (String::from("content-length"), String::from("3"))
-                            ],
-                            true
-                        ))
-                    );
-                }
-                Http3Event::DataReadable { .. } => {
-                    panic!("We should not receive a DataGeadable event!");
-                }
-                _ => {}
-            };
-        }
-
-        // Stream should now be closed and gone
-        let mut buf = [0u8; 100];
-        assert_eq!(
-            hconn.read_response_data(now(), 0, &mut buf),
-            Err(Error::InvalidStreamId)
-        );
-    }
-
-    // Send headers and an empty data frame. Read headers and then close the stream.
-    // We should get a HeaderReady without fin and a DataReadable wo data and with fin.
-    #[test]
-    fn test_stream_fin_after_headers_an_empty_data_frame_are_read() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
-        // Send some good data wo fin
-        let data = &[
-            // headers
-            0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // the data frame
-            0x0, 0x0,
-        ];
-        let _ = neqo_trans_conn.stream_send(request_stream_id, data);
-
-        let out = neqo_trans_conn.process(None, now());
-        hconn.process(out.dgram(), now());
-
-        // Recv headers wo fin
-        let http_events = hconn.events();
-        for e in http_events {
-            match e {
-                Http3Event::HeaderReady { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let h = hconn.read_response_headers(stream_id);
-                    assert_eq!(
-                        h,
-                        Ok((
-                            vec![
-                                (String::from(":status"), String::from("200")),
-                                (String::from("content-length"), String::from("3"))
-                            ],
-                            false
-                        ))
-                    );
-                }
-                Http3Event::DataReadable { .. } => {
-                    panic!("We should not receive a DataGeadable event!");
-                }
-                _ => {}
-            };
-        }
-
-        // ok NOW send fin
-        neqo_trans_conn.stream_close_send(0).unwrap();
-
-        let out = neqo_trans_conn.process(None, now());
-        hconn.process(out.dgram(), now());
-
-        // Recv no data, but do get fin
-        let http_events = hconn.events();
-        for e in http_events {
-            match e {
-                Http3Event::HeaderReady { .. } => {
-                    panic!("We should not get another HeaderReady!");
-                }
-                Http3Event::DataReadable { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    let res = hconn.read_response_data(now(), stream_id, &mut buf);
-                    let (len, fin) = res.expect("should read");
-                    assert_eq!(0, len);
-                    assert_eq!(fin, true);
-                }
-                _ => {}
-            };
-        }
-
-        // Stream should now be closed and gone
-        let mut buf = [0u8; 100];
-        assert_eq!(
-            hconn.read_response_data(now(), 0, &mut buf),
-            Err(Error::InvalidStreamId)
-        );
-    }
-
-    #[test]
-    fn test_stream_fin_after_a_data_frame() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
-        // Send some good data wo fin
-        let data = &[
-            // headers
-            0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // the data frame is complete
-            0x0, 0x3, 0x61, 0x62, 0x63,
-        ];
-        let _ = neqo_trans_conn.stream_send(request_stream_id, data);
-
-        let out = neqo_trans_conn.process(None, now());
-        hconn.process(out.dgram(), now());
-
         // Recv some good data wo fin
         let http_events = hconn.events();
         for e in http_events {
-            match e {
-                Http3Event::HeaderReady { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let h = hconn.read_response_headers(stream_id);
-                    assert_eq!(
-                        h,
-                        Ok((
-                            vec![
-                                (String::from(":status"), String::from("200")),
-                                (String::from("content-length"), String::from("3"))
-                            ],
-                            false
-                        ))
-                    );
-                }
-                Http3Event::DataReadable { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    let res = hconn.read_response_data(now(), stream_id, &mut buf);
-                    let (len, fin) = res.expect("should have data");
-                    assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
-                    assert_eq!(fin, false);
-                }
-                _ => {}
-            };
+            if let Http3Event::DataReadable { stream_id } = e {
+                assert_eq!(stream_id, request_stream_id);
+                let mut buf = [0u8; 100];
+                let res = hconn.read_data(now(), stream_id, &mut buf);
+                let (len, fin) = res.expect("should have data");
+                assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
+                assert_eq!(fin, false);
+            }
         }
 
         // ok NOW send fin
@@ -2304,7 +2012,7 @@ mod tests {
         if let Http3Event::DataReadable { stream_id } = e {
             assert_eq!(stream_id, request_stream_id);
             let mut buf = [0u8; 100];
-            let res = hconn.read_response_data(now(), stream_id, &mut buf);
+            let res = hconn.read_data(now(), stream_id, &mut buf);
             let (len, fin) = res.expect("should read");
             assert_eq!(0, len);
             assert_eq!(fin, true);
@@ -2315,8 +2023,10 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0u8; 100];
         assert_eq!(
-            hconn.read_response_data(now(), 0, &mut buf),
-            Err(Error::InvalidStreamId)
+            hconn.read_data(now(), 0, &mut buf),
+            Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId
+            ))
         );
     }
 
@@ -2324,7 +2034,13 @@ mod tests {
     fn test_multiple_data_frames() {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
-            .fetch("GET", "https", "something.com", "/", &Vec::<Header>::new())
+            .fetch(
+                &"GET".to_string(),
+                &"https".to_string(),
+                &"something.com".to_string(),
+                &"/".to_string(),
+                &Vec::<Header>::new(),
+            )
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
@@ -2377,9 +2093,7 @@ mod tests {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
-                let (len, fin) = hconn
-                    .read_response_data(now(), stream_id, &mut buf)
-                    .unwrap();
+                let (len, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
                 assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
                 assert_eq!(fin, false);
             }
@@ -2389,16 +2103,14 @@ mod tests {
             }
         }
 
-        // Second frame isn't read in first read_response_data(), but it generates
-        // another DataReadable event so that another read_response_data() will happen to
+        // Second frame isn't read in first read_data(), but it generates
+        // another DataReadable event so that another read_data() will happen to
         // pick it up.
         match hconn.events().into_iter().next().unwrap() {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
-                let (len, fin) = hconn
-                    .read_response_data(now(), stream_id, &mut buf)
-                    .unwrap();
+                let (len, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
                 assert_eq!(&buf[..len], &[0x64, 0x65, 0x66]);
                 assert_eq!(fin, true);
             }
@@ -2411,8 +2123,10 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0u8; 100];
         assert_eq!(
-            hconn.read_response_data(now(), 0, &mut buf),
-            Err(Error::InvalidStreamId)
+            hconn.read_data(now(), 0, &mut buf),
+            Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId
+            ))
         );
     }
 
@@ -2421,10 +2135,10 @@ mod tests {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch(
-                "GET",
-                "https",
-                "something.com",
-                "/",
+                &"GET".to_string(),
+                &"https".to_string(),
+                &"something.com".to_string(),
+                &"/".to_string(),
                 &Vec::<(String, String)>::new(),
             )
             .unwrap();
@@ -2489,9 +2203,7 @@ mod tests {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
-                let (len, fin) = hconn
-                    .read_response_data(now(), stream_id, &mut buf)
-                    .unwrap();
+                let (len, fin) = hconn.read_data(now(), stream_id, &mut buf).unwrap();
                 assert_eq!(&buf[..len], &[0x61, 0x62, 0x63]);
                 assert_eq!(fin, true);
             }
@@ -2503,8 +2215,10 @@ mod tests {
         // Stream should now be closed and gone
         let mut buf = [0u8; 100];
         assert_eq!(
-            hconn.read_response_data(now(), 0, &mut buf),
-            Err(Error::InvalidStreamId)
+            hconn.read_data(now(), 0, &mut buf),
+            Err(Error::TransportError(
+                neqo_transport::Error::InvalidStreamId
+            ))
         );
     }
 }
