@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::hframe::{ElementDependencyType, HFrame, HFrameReader, PrioritizedElementType};
+use crate::hframe::{HFrame, HFrameReader};
 use crate::Header;
 use crate::{Error, Res};
 use neqo_common::{qdebug, Encoder};
@@ -125,19 +125,6 @@ impl TransactionServer {
                     }
                     qdebug!([label] "received a frame");
                     match self.frame_reader.get_frame()? {
-                        HFrame::Priority {
-                            priorized_elem_type,
-                            elem_dependency_type,
-                            priority_elem_id,
-                            elem_dependency_id,
-                            weight,
-                        } => self.handle_priority_frame(
-                            priorized_elem_type,
-                            elem_dependency_type,
-                            priority_elem_id,
-                            elem_dependency_id,
-                            weight,
-                        )?,
                         HFrame::Headers { len } => self.handle_headers_frame(len)?,
                         _ => {
                             break { Err(Error::WrongStream) };
@@ -184,18 +171,6 @@ impl TransactionServer {
                 }
             };
         }
-    }
-
-    fn handle_priority_frame(
-        &mut self,
-        _priorized_elem_type: PrioritizedElementType,
-        _elem_dependensy_type: ElementDependencyType,
-        _priority_elem_id: u64,
-        _elem_dependency_id: u64,
-        _weight: u8,
-    ) -> Res<()> {
-        // Not implemented
-        Ok(())
     }
 
     fn handle_headers_frame(&mut self, len: u64) -> Res<()> {
