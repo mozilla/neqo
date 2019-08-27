@@ -1228,10 +1228,23 @@ impl Connection {
                     rs.inbound_stream_frame(fin, offset, data)?;
                 }
             }
-            Frame::MaxData { maximum_data } => self
-                .flow_mgr
-                .borrow_mut()
-                .conn_increase_max_credit(maximum_data),
+            Frame::MaxData { maximum_data } => {
+                let conn_was_blocked = self.flow_mgr.borrow().conn_credit_avail() == 0;
+                if self
+                    .flow_mgr
+                    .borrow_mut()
+                    .conn_increase_max_credit(maximum_data)
+                    && conn_was_blocked
+                {
+                    for (id, ss) in &mut self.send_streams {
+                        if ss.avail() > 0 {
+                            // These may not actually all be writable if one
+                            // uses up all the conn credit. Not our fault.
+                            self.events.send_stream_writable(*id)
+                        }
+                    }
+                }
+            }
             Frame::MaxStreamData {
                 stream_id,
                 maximum_stream_data,

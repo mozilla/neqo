@@ -457,16 +457,17 @@ impl SendStream {
         flow_mgr: Rc<RefCell<FlowMgr>>,
         conn_events: ConnectionEvents,
     ) -> Self {
-        if max_stream_data > 0 {
-            conn_events.send_stream_writable(stream_id);
-        }
-        Self {
+        let ss = Self {
             stream_id,
             max_stream_data,
             state: SendStreamState::Ready,
             flow_mgr,
             conn_events,
+        };
+        if ss.avail() > 0 {
+            ss.conn_events.send_stream_writable(stream_id);
         }
+        ss
     }
 
     /// Return the next range to be sent, if any.
@@ -520,7 +521,7 @@ impl SendStream {
         match self.state {
             SendStreamState::Send { ref mut send_buf } => {
                 send_buf.mark_as_acked(offset, len);
-                if send_buf.buffered() < TxBuffer::BUFFER_SIZE {
+                if self.avail() > 0 {
                     self.conn_events.send_stream_writable(self.stream_id)
                 }
             }
@@ -563,12 +564,14 @@ impl SendStream {
             .map_or(0, |tx| self.max_stream_data - tx.data_limit())
     }
 
-    /// Bytes sendable on stream. Constrained by both stream credit available
-    /// and space in the tx buffer.
+    /// Bytes sendable on stream. Constrained by stream credit available,
+    /// connection credit available, and space in the tx buffer.
     pub fn avail(&self) -> u64 {
-        self.state
+        let stream_avail = self
+            .state
             .tx_buf()
-            .map_or(0, |tx| min(self.credit_avail(), tx.avail() as u64))
+            .map_or(0, |tx| min(self.credit_avail(), tx.avail() as u64));
+        min(stream_avail, self.flow_mgr.borrow().conn_credit_avail())
     }
 
     pub fn max_stream_data(&self) -> u64 {
@@ -576,7 +579,11 @@ impl SendStream {
     }
 
     pub fn set_max_stream_data(&mut self, value: u64) {
-        self.max_stream_data = max(self.max_stream_data, value)
+        let stream_was_blocked = self.avail() == 0;
+        self.max_stream_data = max(self.max_stream_data, value);
+        if stream_was_blocked && self.avail() > 0 {
+            self.conn_events.send_stream_writable(self.stream_id)
+        }
     }
 
     pub fn reset_acked(&mut self) {
@@ -611,12 +618,7 @@ impl SendStream {
             });
         }
 
-        let stream_credit_avail = self.credit_avail();
-        let conn_credit_avail = self.flow_mgr.borrow().conn_credit_avail();
-        let credit_avail = min(stream_credit_avail, conn_credit_avail);
-        let buff_avail = self.state.tx_buf().map_or(0, TxBuffer::avail);
-        let space_avail = min(credit_avail, buff_avail as u64);
-        let can_send_bytes = min(space_avail, buf.len() as u64);
+        let can_send_bytes = min(self.avail(), buf.len() as u64);
 
         if can_send_bytes == 0 {
             return Ok(0);
