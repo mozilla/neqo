@@ -218,15 +218,12 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
 
     let mut builder = Builder::default().header(header).generate_comments(false);
 
-    builder = builder.clang_arg(String::from("-v"));
+    builder = builder.clang_arg("-v");
     for i in includes {
         builder = builder.clang_arg(String::from("-I") + i.to_str().unwrap());
     }
     if bindings.cplusplus {
-        builder = builder
-            .clang_arg(String::from("-x"))
-            .clang_arg(String::from("c++"));
-        builder = builder.clang_arg(String::from("-std=c++11"));
+        builder = builder.clang_args(&["-x", "c++", "-std=c++11"]);
     }
 
     // Apply the configuration.
