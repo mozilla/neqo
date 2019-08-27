@@ -6,7 +6,7 @@
 
 use crate::constants::*;
 use crate::convert::to_c_uint;
-use crate::err::{Error, NSPRErrorCodes, PR_SetError, Res};
+use crate::err::{nspr, Error, PR_SetError, Res};
 use crate::prio;
 use crate::result;
 use crate::ssl;
@@ -171,7 +171,7 @@ impl AgentIoInput {
     fn read_input(&mut self, buf: *mut u8, count: usize) -> Res<usize> {
         let amount = min(self.available, count);
         if amount == 0 {
-            unsafe { PR_SetError(NSPRErrorCodes::PR_WOULD_BLOCK_ERROR, 0) };
+            unsafe { PR_SetError(nspr::PR_WOULD_BLOCK_ERROR, 0) };
             return Err(Error::NoDataAvailable);
         }
 

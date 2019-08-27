@@ -429,6 +429,7 @@ impl HFrameReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_crypto::AuthenticationStatus;
     use neqo_transport::StreamType;
     use num_traits::Num;
     use test_fixture::*;
@@ -449,7 +450,7 @@ mod tests {
         let out = conn_s.process(out.dgram(), now());
         let out = conn_c.process(out.dgram(), now());
         conn_s.process(out.dgram(), now());
-        conn_c.authenticated(0, now());
+        conn_c.authenticated(AuthenticationStatus::Ok, now());
         let out = conn_c.process(None, now());
         conn_s.process(out.dgram(), now());
 
