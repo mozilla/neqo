@@ -12,8 +12,7 @@ use neqo_common::{
     qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
     IncrementalDecoderResult,
 };
-use neqo_crypto::agent::CertificateInfo;
-use neqo_crypto::{PRErrorCode, SecretAgentInfo};
+use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{
@@ -233,8 +232,8 @@ impl Http3Connection {
         self.conn.peer_certificate()
     }
 
-    pub fn authenticated(&mut self, error: PRErrorCode, now: Instant) {
-        self.conn.authenticated(error, now);
+    pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
+        self.conn.authenticated(status, now);
     }
 
     fn initialize_http3_connection(&mut self) -> Res<()> {
@@ -1101,7 +1100,7 @@ mod tests {
 
             let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
             assert!(hconn.events().into_iter().any(authentication_needed));
-            hconn.authenticated(0, now());
+            hconn.authenticated(AuthenticationStatus::Ok, now());
 
             let out = hconn.process(out.dgram(), now());
             let connected = |e| matches!(e, Http3Event::StateChange(Http3State::Connected));
@@ -1117,7 +1116,7 @@ mod tests {
             let _ = hconn.process(out.dgram(), now());
             let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
             assert!(neqo_trans_conn.events().any(authentication_needed));
-            neqo_trans_conn.authenticated(0, now());
+            neqo_trans_conn.authenticated(AuthenticationStatus::Ok, now());
             let out = neqo_trans_conn.process(None, now());
             let out = hconn.process(out.dgram(), now());
             assert_eq!(hconn.state(), Http3State::Connected);

@@ -22,7 +22,7 @@ use smallvec::SmallVec;
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, Client, Epoch, HandshakeState, PRErrorCode, Record, RecordList,
+    Agent, AntiReplay, AuthenticationStatus, Client, Epoch, HandshakeState, Record, RecordList,
     SecretAgentInfo, Server,
 };
 
@@ -484,8 +484,8 @@ impl Connection {
     }
 
     /// Call by application when the peer cert has been verified
-    pub fn authenticated(&mut self, error: PRErrorCode, now: Instant) {
-        self.crypto.tls.authenticated(error);
+    pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
+        self.crypto.tls.authenticated(status);
         let res = self.handshake(now, 0, None);
         self.absorb_error(now, res);
     }
@@ -1849,7 +1849,7 @@ mod tests {
     pub fn maybe_autenticate(conn: &mut Connection) -> bool {
         let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
         if conn.events().any(authentication_needed) {
-            conn.authenticated(0, now());
+            conn.authenticated(AuthenticationStatus::Ok, now());
             return true;
         }
         false
@@ -1989,7 +1989,7 @@ mod tests {
         let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
         assert!(client.events().any(authentication_needed));
         qdebug!("---- client: Alert(certificate_revoked)");
-        client.authenticated(-(0x2000) + 12, now());
+        client.authenticated(AuthenticationStatus::CertRevoked, now());
 
         qdebug!("---- client: -> Alert(certificate_revoked)");
         let out = client.process(None, now());

@@ -5,12 +5,18 @@
 // except according to those terms.
 
 #![allow(dead_code)]
-#![allow(non_snake_case)]
 
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
-include!(concat!(env!("OUT_DIR"), "/nss_secerr.rs"));
-include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
-pub mod NSPRErrorCodes {
+mod codes {
+    #![allow(non_snake_case)]
+    include!(concat!(env!("OUT_DIR"), "/nss_secerr.rs"));
+    include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
+    include!(concat!(env!("OUT_DIR"), "/mozpkix.rs"));
+}
+pub use codes::mozilla_pkix_ErrorCode as mozpkix;
+pub use codes::SECErrorCodes as sec;
+pub use codes::SSLErrorCodes as ssl;
+pub mod nspr {
     include!(concat!(env!("OUT_DIR"), "/nspr_err.rs"));
 }
 
@@ -65,14 +71,14 @@ impl From<std::num::TryFromIntError> for Error {
 
 #[cfg(test)]
 mod tests {
-    use crate::err::{NSPRErrorCodes, SECErrorCodes, SSLErrorCodes};
+    use crate::err::{nspr, sec, ssl};
     use test_fixture::fixture_init;
 
     #[test]
     fn error_code() {
         fixture_init();
-        assert_eq!(15 - 0x3000, SSLErrorCodes::SSL_ERROR_BAD_MAC_READ);
-        assert_eq!(166 - 0x2000, SECErrorCodes::SEC_ERROR_LIBPKIX_INTERNAL);
-        assert_eq!(-5998, NSPRErrorCodes::PR_WOULD_BLOCK_ERROR);
+        assert_eq!(15 - 0x3000, ssl::SSL_ERROR_BAD_MAC_READ);
+        assert_eq!(166 - 0x2000, sec::SEC_ERROR_LIBPKIX_INTERNAL);
+        assert_eq!(-5998, nspr::PR_WOULD_BLOCK_ERROR);
     }
 }

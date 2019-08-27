@@ -18,6 +18,7 @@ mod p11;
 pub mod aead;
 pub mod agent;
 mod agentio;
+mod auth;
 mod cert;
 pub mod constants;
 mod convert;
@@ -37,11 +38,12 @@ pub use self::agent::{
     SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
 };
 pub use self::constants::*;
-pub use self::err::{Error, PRErrorCode, Res, SSLErrorCodes};
+pub use self::err::{Error, PRErrorCode, Res};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
 pub use self::p11::SymKey;
 pub use self::replay::AntiReplay;
 pub use self::secrets::SecretDirection;
+pub use auth::AuthenticationStatus;
 
 use neqo_common::once::OnceResult;
 

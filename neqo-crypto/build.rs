@@ -32,6 +32,10 @@ struct Bindings {
     // or variables fields are specified, everything defined will be mapped,
     // so this can be used to limit that.
     exclude: Option<Vec<String>>,
+
+    // Whether the file is to be interpreted as C++
+    #[serde(default)]
+    cplusplus: bool,
 }
 
 fn is_debug() -> bool {
@@ -205,7 +209,8 @@ fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
 }
 
 fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
-    let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + ".h");
+    let suffix = if bindings.cplusplus { ".hpp" } else { ".h" };
+    let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + suffix);
     let header = header_path.to_str().unwrap();
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join(String::from(base) + ".rs");
 
@@ -216,6 +221,12 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
     builder = builder.clang_arg(String::from("-v"));
     for i in includes {
         builder = builder.clang_arg(String::from("-I") + i.to_str().unwrap());
+    }
+    if bindings.cplusplus {
+        builder = builder
+            .clang_arg(String::from("-x"))
+            .clang_arg(String::from("c++"));
+        builder = builder.clang_arg(String::from("-std=c++11"));
     }
 
     // Apply the configuration.
