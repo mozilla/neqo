@@ -6,7 +6,7 @@
 
 #![allow(dead_code)]
 
-use crate::ssl;
+use crate::ssl::{SECStatus, SECSuccess};
 
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
 mod codes {
@@ -90,8 +90,8 @@ where
     }
 }
 
-pub fn secstatus_to_res(rv: ssl::SECStatus) -> Res<()> {
-    if rv == ssl::_SECStatus_SECSuccess {
+pub fn secstatus_to_res(rv: SECStatus) -> Res<()> {
+    if rv == SECSuccess {
         return Ok(());
     }
 
@@ -106,7 +106,7 @@ pub fn secstatus_to_res(rv: ssl::SECStatus) -> Res<()> {
 
 pub fn is_blocked(result: &Res<()>) -> bool {
     match result {
-        Err(Error::NssError { code, .. }) => *code == NSPRErrorCodes::PR_WOULD_BLOCK_ERROR,
+        Err(Error::NssError { code, .. }) => *code == nspr::PR_WOULD_BLOCK_ERROR,
         _ => false,
     }
 }
@@ -114,7 +114,7 @@ pub fn is_blocked(result: &Res<()>) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::err::{self, is_blocked, secstatus_to_res, Error, PRErrorCode, PR_SetError};
-    use crate::ssl;
+    use crate::ssl::{SECFailure, SECSuccess};
     use test_fixture::fixture_init;
 
     fn set_error_code(code: PRErrorCode) {
@@ -133,13 +133,13 @@ mod tests {
 
     #[test]
     fn is_ok() {
-        assert!(secstatus_to_res(ssl::SECSuccess).is_ok());
+        assert!(secstatus_to_res(SECSuccess).is_ok());
     }
 
     #[test]
     fn is_err() {
         set_error_code(err::ssl::SSL_ERROR_BAD_MAC_READ);
-        let r = secstatus_to_res(ssl::SECFailure);
+        let r = secstatus_to_res(SECFailure);
         assert!(r.is_err());
         match r.unwrap_err() {
             Error::NssError { name, code, desc } => {
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn is_err_zero_code() {
         set_error_code(0);
-        let r = secstatus_to_res(ssl::SECFailure);
+        let r = secstatus_to_res(SECFailure);
         assert!(r.is_err());
         match r.unwrap_err() {
             Error::NssError { name, code, .. } => {
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn blocked() {
         set_error_code(err::nspr::PR_WOULD_BLOCK_ERROR);
-        let r = secstatus_to_res(ssl::SECFailure);
+        let r = secstatus_to_res(SECFailure);
         assert!(r.is_err());
         assert!(is_blocked(&r));
         match r.unwrap_err() {
