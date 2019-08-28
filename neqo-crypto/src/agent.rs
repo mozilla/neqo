@@ -7,6 +7,7 @@
 use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{Record, RecordList};
 use crate::assert_initialized;
+use crate::auth::AuthenticationStatus;
 pub use crate::cert::CertificateInfo;
 use crate::constants::*;
 use crate::err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res};
@@ -15,8 +16,7 @@ use crate::p11;
 use crate::prio;
 use crate::replay::AntiReplay;
 use crate::secrets::SecretHolder;
-use crate::ssl;
-use crate::ssl::PRBool;
+use crate::ssl::{self, PRBool};
 use crate::time::{PRTime, Time};
 
 use neqo_common::{qdebug, qinfo, qwarn};
@@ -501,10 +501,10 @@ impl SecretAgent {
     /// Call this function to mark the peer as authenticated.
     /// Only call this function if handshake/handshake_raw returns
     /// HandshakeState::AuthenticationPending, or it will panic.
-    pub fn authenticated(&mut self, error: PRErrorCode) {
+    pub fn authenticated(&mut self, status: AuthenticationStatus) {
         assert_eq!(self.state, HandshakeState::AuthenticationPending);
         *self.auth_required = false;
-        self.state = HandshakeState::Authenticated(error);
+        self.state = HandshakeState::Authenticated(status.into());
     }
 
     fn capture_error<T>(&mut self, res: Res<T>) -> Res<T> {

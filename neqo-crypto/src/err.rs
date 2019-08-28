@@ -5,14 +5,20 @@
 // except according to those terms.
 
 #![allow(dead_code)]
-#![allow(non_snake_case)]
 
 use crate::ssl;
 
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
-include!(concat!(env!("OUT_DIR"), "/nss_secerr.rs"));
-include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
-pub mod NSPRErrorCodes {
+mod codes {
+    #![allow(non_snake_case)]
+    include!(concat!(env!("OUT_DIR"), "/nss_secerr.rs"));
+    include!(concat!(env!("OUT_DIR"), "/nss_sslerr.rs"));
+    include!(concat!(env!("OUT_DIR"), "/mozpkix.rs"));
+}
+pub use codes::mozilla_pkix_ErrorCode as mozpkix;
+pub use codes::SECErrorCodes as sec;
+pub use codes::SSLErrorCodes as ssl;
+pub mod nspr {
     include!(concat!(env!("OUT_DIR"), "/nspr_err.rs"));
 }
 
@@ -107,10 +113,7 @@ pub fn is_blocked(result: &Res<()>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::err::{
-        is_blocked, secstatus_to_res, Error, NSPRErrorCodes, PRErrorCode, PR_SetError,
-        SECErrorCodes, SSLErrorCodes,
-    };
+    use crate::err::{self, is_blocked, secstatus_to_res, Error, PRErrorCode, PR_SetError};
     use crate::ssl;
     use test_fixture::fixture_init;
 
@@ -123,9 +126,9 @@ mod tests {
     #[test]
     fn error_code() {
         fixture_init();
-        assert_eq!(15 - 0x3000, SSLErrorCodes::SSL_ERROR_BAD_MAC_READ);
-        assert_eq!(166 - 0x2000, SECErrorCodes::SEC_ERROR_LIBPKIX_INTERNAL);
-        assert_eq!(-5998, NSPRErrorCodes::PR_WOULD_BLOCK_ERROR);
+        assert_eq!(15 - 0x3000, err::ssl::SSL_ERROR_BAD_MAC_READ);
+        assert_eq!(166 - 0x2000, err::sec::SEC_ERROR_LIBPKIX_INTERNAL);
+        assert_eq!(-5998, err::nspr::PR_WOULD_BLOCK_ERROR);
     }
 
     #[test]
@@ -135,7 +138,7 @@ mod tests {
 
     #[test]
     fn is_err() {
-        set_error_code(SSLErrorCodes::SSL_ERROR_BAD_MAC_READ);
+        set_error_code(err::ssl::SSL_ERROR_BAD_MAC_READ);
         let r = secstatus_to_res(ssl::SECFailure);
         assert!(r.is_err());
         match r.unwrap_err() {
@@ -169,7 +172,7 @@ mod tests {
 
     #[test]
     fn blocked() {
-        set_error_code(NSPRErrorCodes::PR_WOULD_BLOCK_ERROR);
+        set_error_code(err::nspr::PR_WOULD_BLOCK_ERROR);
         let r = secstatus_to_res(ssl::SECFailure);
         assert!(r.is_err());
         assert!(is_blocked(&r));

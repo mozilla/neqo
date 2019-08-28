@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use crate::constants::*;
-use crate::err::{Error, NSPRErrorCodes, PR_SetError, Res};
+use crate::err::{nspr, Error, PR_SetError, Res};
 use crate::prio;
 use crate::ssl;
 
@@ -168,7 +168,7 @@ impl AgentIoInput {
     fn read_input(&mut self, buf: *mut u8, count: usize) -> Res<usize> {
         let amount = min(self.available, count);
         if amount == 0 {
-            unsafe { PR_SetError(NSPRErrorCodes::PR_WOULD_BLOCK_ERROR, 0) };
+            unsafe { PR_SetError(nspr::PR_WOULD_BLOCK_ERROR, 0) };
             return Err(Error::NoDataAvailable);
         }
 

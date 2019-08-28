@@ -7,6 +7,7 @@
 #![allow(unused_assignments)]
 
 use neqo_common::{matches, Datagram};
+use neqo_crypto::AuthenticationStatus;
 use neqo_http3::transaction_server::Response;
 use neqo_http3::{Header, Http3Connection, Http3Event, Http3State};
 use test_fixture::*;
@@ -50,7 +51,7 @@ fn connect() -> (Http3Connection, Http3Connection, Option<Datagram>) {
     let _ = hconn_s.process(out.dgram(), now()); //consume ACK
     let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
     assert!(hconn_c.events().into_iter().any(authentication_needed));
-    hconn_c.authenticated(0, now());
+    hconn_c.authenticated(AuthenticationStatus::Ok, now());
     let out = hconn_c.process(None, now()); // Handshake
     assert_eq!(hconn_c.state(), Http3State::Connected);
     let out = hconn_s.process(out.dgram(), now()); // Handshake
