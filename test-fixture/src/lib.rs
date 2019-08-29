@@ -8,7 +8,7 @@
 
 use neqo_common::matches;
 use neqo_common::once::OnceResult;
-use neqo_crypto::{init_db, AntiReplay};
+use neqo_crypto::{init_db, AntiReplay, AuthenticationStatus};
 use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
 use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -88,7 +88,7 @@ pub fn default_server() -> Connection {
 pub fn maybe_autenticate(conn: &mut Connection) -> bool {
     let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
     if conn.events().any(authentication_needed) {
-        conn.authenticated(0, now());
+        conn.authenticated(AuthenticationStatus::Ok, now());
         return true;
     }
     false

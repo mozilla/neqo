@@ -7,18 +7,16 @@
 use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
 pub use crate::agentio::{Record, RecordList};
 use crate::assert_initialized;
+use crate::auth::AuthenticationStatus;
 pub use crate::cert::CertificateInfo;
 use crate::constants::*;
-use crate::convert::to_c_uint;
-use crate::err::{Error, PRErrorCode, Res};
+use crate::err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
 use crate::p11;
 use crate::prio;
 use crate::replay::AntiReplay;
-use crate::result;
 use crate::secrets::SecretHolder;
-use crate::ssl;
-use crate::ssl::PRBool;
+use crate::ssl::{self, PRBool};
 use crate::time::{PRTime, Time};
 
 use neqo_common::{qdebug, qinfo, qwarn};
@@ -55,16 +53,15 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
     let mut alpn_state = ssl::SSLNextProtoState::SSL_NEXT_PROTO_NO_SUPPORT;
     let mut chosen = vec![0_u8; 255];
     let mut chosen_len: c_uint = 0;
-    let rv = unsafe {
+    secstatus_to_res(unsafe {
         ssl::SSL_GetNextProto(
             fd,
             &mut alpn_state,
             chosen.as_mut_ptr(),
             &mut chosen_len,
-            to_c_uint(chosen.len())?,
+            c_uint::try_from(chosen.len())?,
         )
-    };
-    result::result(rv)?;
+    })?;
 
     let alpn = match (pre, alpn_state) {
         (true, ssl::SSLNextProtoState::SSL_NEXT_PROTO_EARLY_VALUE)
@@ -101,14 +98,13 @@ macro_rules! preinfo_arg {
 impl SecretAgentPreInfo {
     fn new(fd: *mut ssl::PRFileDesc) -> Res<Self> {
         let mut info: ssl::SSLPreliminaryChannelInfo = unsafe { mem::uninitialized() };
-        let rv = unsafe {
+        secstatus_to_res(unsafe {
             ssl::SSL_GetPreliminaryChannelInfo(
                 fd,
                 &mut info,
-                mem::size_of::<ssl::SSLPreliminaryChannelInfo>().try_into()?,
+                c_uint::try_from(mem::size_of::<ssl::SSLPreliminaryChannelInfo>())?,
             )
-        };
-        result::result(rv)?;
+        })?;
 
         Ok(Self {
             info,
@@ -152,22 +148,21 @@ pub struct SecretAgentInfo {
 impl SecretAgentInfo {
     fn new(fd: *mut ssl::PRFileDesc) -> Res<Self> {
         let mut info: ssl::SSLChannelInfo = unsafe { mem::uninitialized() };
-        let rv = unsafe {
+        secstatus_to_res(unsafe {
             ssl::SSL_GetChannelInfo(
                 fd,
                 &mut info,
-                mem::size_of::<ssl::SSLChannelInfo>().try_into()?,
+                c_uint::try_from(mem::size_of::<ssl::SSLChannelInfo>())?,
             )
-        };
-        result::result(rv)?;
+        })?;
         Ok(Self {
             version: info.protocolVersion as Version,
             cipher: info.cipherSuite as Cipher,
-            group: info.keaGroup.try_into()?,
+            group: Group::try_from(info.keaGroup)?,
             resumed: info.resumed != 0,
             early_data: info.earlyDataAccepted != 0,
             alpn: get_alpn(fd, false)?,
-            signature_scheme: info.signatureScheme.try_into()?,
+            signature_scheme: SignatureScheme::try_from(info.signatureScheme)?,
         })
     }
 
@@ -249,7 +244,7 @@ impl SecretAgent {
     // ssl::SSL_* APIs only need an opaque type.
     fn create_fd(&mut self) -> Res<()> {
         assert_initialized();
-        let label = CString::new("sslwrapper").expect("cstring failed");
+        let label = CString::new("sslwrapper")?;
         let id = unsafe { prio::PR_GetUniqueIdentity(label.as_ptr()) };
 
         let base_fd = unsafe { prio::PR_CreateIOLayerStub(id, METHODS) };
@@ -307,36 +302,33 @@ impl SecretAgent {
 
     // Ready this for connecting.
     fn ready(&mut self, is_server: bool) -> Res<()> {
-        let mut rv = unsafe {
+        secstatus_to_res(unsafe {
             ssl::SSL_AuthCertificateHook(
                 self.fd,
                 Some(Self::auth_complete_hook),
                 &mut *self.auth_required as *mut bool as *mut c_void,
             )
-        };
-        result::result(rv)?;
+        })?;
 
-        rv = unsafe {
+        secstatus_to_res(unsafe {
             ssl::SSL_AlertSentCallback(
                 self.fd,
                 Some(Self::alert_sent_cb),
                 &mut *self.alert as *mut Option<Alert> as *mut c_void,
             )
-        };
-        result::result(rv)?;
+        })?;
 
         // TODO(mt) move to time.rs so we can remove PRTime definition from nss_ssl bindings.
-        rv = unsafe {
+        unsafe {
             ssl::SSL_SetTimeFunc(
                 self.fd,
                 Some(Self::time_func),
                 &mut *self.now as *mut PRTime as *mut c_void,
             )
-        };
-        result::result(rv)?;
+        }?;
 
         self.configure()?;
-        result::result(unsafe { ssl::SSL_ResetHandshake(self.fd, is_server as ssl::PRBool) })
+        secstatus_to_res(unsafe { ssl::SSL_ResetHandshake(self.fd, is_server as ssl::PRBool) })
     }
 
     /// Default configuration.
@@ -353,7 +345,7 @@ impl SecretAgent {
             min: min as ssl::PRUint16,
             max: max as ssl::PRUint16,
         };
-        result::result(unsafe { ssl::SSL_VersionRangeSet(self.fd, &range) })
+        secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &range) })
     }
 
     pub fn enable_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
@@ -361,14 +353,15 @@ impl SecretAgent {
         let cipher_count = unsafe { ssl::SSL_GetNumImplementedCiphers() } as usize;
         for i in 0..cipher_count {
             let p = all_ciphers.wrapping_add(i);
-            let rv =
-                unsafe { ssl::SSL_CipherPrefSet(self.fd, i32::from(*p), false as ssl::PRBool) };
-            result::result(rv)?;
+            secstatus_to_res(unsafe {
+                ssl::SSL_CipherPrefSet(self.fd, i32::from(*p), false as ssl::PRBool)
+            })?;
         }
 
         for c in ciphers {
-            let rv = unsafe { ssl::SSL_CipherPrefSet(self.fd, i32::from(*c), true as ssl::PRBool) };
-            result::result(rv)?;
+            secstatus_to_res(unsafe {
+                ssl::SSL_CipherPrefSet(self.fd, i32::from(*c), true as ssl::PRBool)
+            })?;
         }
         Ok(())
     }
@@ -381,13 +374,16 @@ impl SecretAgent {
             .collect();
 
         let ptr = group_vec.as_slice().as_ptr();
-        let rv = unsafe { ssl::SSL_NamedGroupConfig(self.fd, ptr, to_c_uint(group_vec.len())?) };
-        result::result(rv)
+        secstatus_to_res(unsafe {
+            ssl::SSL_NamedGroupConfig(self.fd, ptr, c_uint::try_from(group_vec.len())?)
+        })
     }
 
     /// Set TLS options.
     pub fn set_option(&mut self, opt: ssl::Opt, value: bool) -> Res<()> {
-        result::result(unsafe { ssl::SSL_OptionSet(self.fd, opt.as_int(), opt.map_enabled(value)) })
+        secstatus_to_res(unsafe {
+            ssl::SSL_OptionSet(self.fd, opt.as_int(), opt.map_enabled(value))
+        })
     }
 
     /// Enable 0-RTT.
@@ -418,7 +414,7 @@ impl SecretAgent {
         // Prepare to encode.
         let mut encoded = Vec::with_capacity(encoded_len);
         let mut add = |v: &str| {
-            if let Ok(s) = v.len().try_into() {
+            if let Ok(s) = u8::try_from(v.len()) {
                 encoded.push(s);
                 encoded.extend_from_slice(v.as_bytes());
             }
@@ -436,14 +432,13 @@ impl SecretAgent {
         assert_eq!(encoded_len, encoded.len());
 
         // Now give the result to NSS.
-        let rv = unsafe {
+        secstatus_to_res(unsafe {
             ssl::SSL_SetNextProtoNego(
                 self.fd,
                 encoded.as_slice().as_ptr(),
-                to_c_uint(encoded.len())?,
+                c_uint::try_from(encoded.len())?,
             )
-        };
-        result::result(rv)
+        })
     }
 
     /// Install an extension handler.
@@ -507,10 +502,10 @@ impl SecretAgent {
     /// Call this function to mark the peer as authenticated.
     /// Only call this function if handshake/handshake_raw returns
     /// HandshakeState::AuthenticationPending, or it will panic.
-    pub fn authenticated(&mut self, error: PRErrorCode) {
+    pub fn authenticated(&mut self, status: AuthenticationStatus) {
         assert_eq!(self.state, HandshakeState::AuthenticationPending);
         *self.auth_required = false;
-        self.state = HandshakeState::Authenticated(error);
+        self.state = HandshakeState::Authenticated(status.into());
     }
 
     fn capture_error<T>(&mut self, res: Res<T>) -> Res<T> {
@@ -521,25 +516,20 @@ impl SecretAgent {
         res
     }
 
-    fn update_state(&mut self, rv: ssl::SECStatus) -> Res<()> {
-        let blocked = self.capture_error(result::result_or_blocked(rv))?;
-        self.state = if blocked {
+    fn update_state(&mut self, res: Res<()>) -> Res<()> {
+        self.state = if is_blocked(&res) {
             if *self.auth_required {
                 HandshakeState::AuthenticationPending
             } else {
                 HandshakeState::InProgress
             }
         } else {
+            self.capture_error(res)?;
             let info = self.capture_error(SecretAgentInfo::new(self.fd))?;
             HandshakeState::Complete(info)
         };
         qinfo!([self] "state -> {:?}", self.state);
         Ok(())
-    }
-
-    fn set_failed(&mut self) -> Error {
-        self.capture_error(result::result(ssl::SECFailure))
-            .unwrap_err()
     }
 
     // Drive the TLS handshake, taking bytes from @input and putting
@@ -566,7 +556,7 @@ impl SecretAgent {
         // Take before updating state so that we leave the output buffer empty
         // even if there is an error.
         let output = self.io.take_output();
-        self.update_state(rv)?;
+        self.update_state(secstatus_to_res(rv))?;
         Ok(output)
     }
 
@@ -579,10 +569,7 @@ impl SecretAgent {
         let records_ptr = &mut *records as *mut RecordList as *mut c_void;
         let rv =
             unsafe { ssl::SSL_RecordLayerWriteCallback(self.fd, Some(ingest_record), records_ptr) };
-        if rv != ssl::SECSuccess {
-            return Err(self.set_failed());
-        }
-
+        self.capture_error(rv)?;
         Ok(records)
     }
 
@@ -596,8 +583,7 @@ impl SecretAgent {
 
         if self.no_eoed {
             let mut read_epoch: u16 = 0;
-            let rv = unsafe { ssl::SSL_GetCurrentEpoch(self.fd, &mut read_epoch, null_mut()) };
-            result::result(rv)?;
+            unsafe { ssl::SSL_GetCurrentEpoch(self.fd, &mut read_epoch, null_mut()) }?;
             if read_epoch == 1 {
                 // It's waiting for EndOfEarlyData, so feed one in.
                 // Note that this is the test that ensures that we only do this for the server.
@@ -621,10 +607,11 @@ impl SecretAgent {
 
         // Fire off any authentication we might need to complete.
         if let HandshakeState::Authenticated(ref err) = self.state {
-            let rv = unsafe { ssl::SSL_AuthCertificateComplete(self.fd, *err) };
-            qdebug!([self] "SSL_AuthCertificateComplete: {:?}", rv);
+            let result =
+                secstatus_to_res(unsafe { ssl::SSL_AuthCertificateComplete(self.fd, *err) });
+            qdebug!([self] "SSL_AuthCertificateComplete: {:?}", result);
             // This should return SECSuccess, so don't use update_state().
-            self.capture_error(result::result(rv))?;
+            self.capture_error(result)?;
         }
 
         // Feed in any records.
@@ -636,7 +623,7 @@ impl SecretAgent {
         }
 
         // Drive the handshake once more.
-        let rv = unsafe { ssl::SSL_ForceHandshake(self.fd) };
+        let rv = secstatus_to_res(unsafe { ssl::SSL_ForceHandshake(self.fd) });
         self.update_state(rv)?;
 
         if self.no_eoed {
@@ -678,11 +665,8 @@ pub struct Client {
 impl Client {
     pub fn new(server_name: &str) -> Res<Self> {
         let mut agent = SecretAgent::new()?;
-        let url = CString::new(server_name);
-        if url.is_err() {
-            return Err(Error::InternalError);
-        }
-        result::result(unsafe { ssl::SSL_SetURL(agent.fd, url.unwrap().as_ptr()) })?;
+        let url = CString::new(server_name)?;
+        secstatus_to_res(unsafe { ssl::SSL_SetURL(agent.fd, url.as_ptr()) })?;
         agent.ready(false)?;
         let mut client = Self {
             agent,
@@ -708,14 +692,13 @@ impl Client {
     }
 
     fn ready(&mut self) -> Res<()> {
-        let rv = unsafe {
+        unsafe {
             ssl::SSL_SetResumptionTokenCallback(
                 self.fd,
                 Some(Self::resumption_token_cb),
                 &mut *self.resumption as *mut Option<Vec<u8>> as *mut c_void,
             )
-        };
-        result::result(rv)
+        }
     }
 
     /// Return the resumption token.
@@ -725,10 +708,13 @@ impl Client {
 
     /// Enable resumption, using a token previously provided.
     pub fn set_resumption_token(&mut self, token: &[u8]) -> Res<()> {
-        let rv = unsafe {
-            ssl::SSL_SetResumptionToken(self.agent.fd, token.as_ptr(), to_c_uint(token.len())?)
-        };
-        result::result(rv)
+        unsafe {
+            ssl::SSL_SetResumptionToken(
+                self.agent.fd,
+                token.as_ptr(),
+                c_uint::try_from(token.len())?,
+            )
+        }
     }
 }
 
@@ -787,11 +773,7 @@ impl Server {
         let mut agent = SecretAgent::new()?;
 
         for n in certificates {
-            let c = CString::new(n.as_ref());
-            if c.is_err() {
-                return Err(Error::CertificateLoading);
-            }
-            let c = c.unwrap();
+            let c = CString::new(n.as_ref())?;
             let cert = match NonNull::new(unsafe {
                 p11::PK11_FindCertFromNickname(c.as_ptr(), null_mut())
             }) {
@@ -804,7 +786,7 @@ impl Server {
                 None => return Err(Error::CertificateLoading),
                 Some(ptr) => p11::PrivateKey::new(ptr),
             };
-            result::result(unsafe {
+            secstatus_to_res(unsafe {
                 ssl::SSL_ConfigServerCert(agent.fd, *cert.deref(), *key.deref(), null(), 0)
             })?;
         }
@@ -848,7 +830,7 @@ impl Server {
                 assert!(tok.len() <= usize::try_from(retry_token_max).unwrap());
                 let slc = std::slice::from_raw_parts_mut(retry_token, tok.len());
                 slc.copy_from_slice(&tok);
-                *retry_token_len = to_c_uint(tok.len()).expect("token was way too big");
+                *retry_token_len = c_uint::try_from(tok.len()).expect("token was way too big");
                 ssl::SSLHelloRetryRequestAction::ssl_hello_retry_request
             }
         }
@@ -864,12 +846,10 @@ impl Server {
     ) -> Res<()> {
         let mut check_state = ZeroRttCheckState::new(self.agent.fd, checker);
         let arg = &mut *check_state as *mut ZeroRttCheckState as *mut c_void;
-        let mut rv = unsafe {
+        unsafe {
             ssl::SSL_HelloRetryRequestCallback(self.agent.fd, Some(Self::hello_retry_cb), arg)
-        };
-        result::result(rv)?;
-        rv = unsafe { ssl::SSL_SetMaxEarlyDataSize(self.agent.fd, max_early_data) };
-        result::result(rv)?;
+        }?;
+        unsafe { ssl::SSL_SetMaxEarlyDataSize(self.agent.fd, max_early_data) }?;
         self.zero_rtt_check = Some(check_state);
         self.agent.enable_0rtt()?;
         anti_replay.config_socket(self.fd)?;
@@ -883,9 +863,9 @@ impl Server {
         *self.agent.now = Time::from(now).try_into()?;
         let records = self.setup_raw()?;
 
-        let rv =
-            unsafe { ssl::SSL_SendSessionTicket(self.fd, extra.as_ptr(), to_c_uint(extra.len())?) };
-        result::result(rv)?;
+        unsafe {
+            ssl::SSL_SendSessionTicket(self.fd, extra.as_ptr(), c_uint::try_from(extra.len())?)
+        }?;
 
         Ok(*records)
     }

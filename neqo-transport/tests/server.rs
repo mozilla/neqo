@@ -7,6 +7,7 @@
 #![deny(warnings)]
 
 use neqo_common::{Datagram, Decoder};
+use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     server::ActiveConnectionRef, server::Server, Connection, ConnectionError, Error,
     FixedConnectionIdManager, Output, State, StreamType, QUIC_VERSION,
@@ -40,7 +41,7 @@ fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef 
     // Ingest the server Certificate and authenticate.
     let _ = client.process(dgram, now()).dgram();
     // Drop any datagram the client sends here; it's just an ACK.
-    client.authenticated(0, now());
+    client.authenticated(AuthenticationStatus::Ok, now());
     let dgram = client.process(None, now()).dgram();
     assert!(dgram.is_some());
     assert_eq!(*client.state(), State::Connected);
@@ -75,7 +76,7 @@ fn retry() {
     let dgram = server.process(dgram, now()).dgram(); // Initial, HS
     assert!(dgram.is_some());
     let _ = client.process(dgram, now()).dgram(); // Ingest, drop any ACK.
-    client.authenticated(0, now());
+    client.authenticated(AuthenticationStatus::Ok, now());
     let dgram = client.process(None, now()).dgram(); // Send Finished
     assert!(dgram.is_some());
     assert_eq!(*client.state(), State::Connected);

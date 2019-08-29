@@ -4,13 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
-use crate::result;
 use crate::ssl::PRFileDesc;
 use crate::time::{Interval, PRTime, Time};
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::ops::{Deref, DerefMut};
 use std::os::raw::c_uint;
 use std::ptr::{null_mut, NonNull};
@@ -53,16 +51,15 @@ impl AntiReplay {
     /// See the documentation in NSS for advice on how to set these values.
     pub fn new(now: Instant, window: Duration, k: usize, bits: usize) -> Res<Self> {
         let mut ctx: *mut SSLAntiReplayContext = null_mut();
-        let rv = unsafe {
+        unsafe {
             SSL_CreateAntiReplayContext(
                 Time::from(now).try_into()?,
                 Interval::from(window).try_into()?,
-                to_c_uint(k)?,
-                to_c_uint(bits)?,
+                c_uint::try_from(k)?,
+                c_uint::try_from(bits)?,
                 &mut ctx,
             )
-        };
-        result::result(rv)?;
+        }?;
 
         match NonNull::new(ctx) {
             Some(ctx_nn) => Ok(Self {
@@ -74,7 +71,6 @@ impl AntiReplay {
 
     /// Configure the provided socket with this anti-replay context.
     pub(crate) fn config_socket(&self, fd: *mut PRFileDesc) -> Res<()> {
-        let rv = unsafe { SSL_SetAntiReplayContext(fd, *self.ctx) };
-        result::result(rv)
+        unsafe { SSL_SetAntiReplayContext(fd, *self.ctx) }
     }
 }

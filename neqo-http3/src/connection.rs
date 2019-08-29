@@ -12,8 +12,7 @@ use neqo_common::{
     qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
     IncrementalDecoderResult,
 };
-use neqo_crypto::agent::CertificateInfo;
-use neqo_crypto::{PRErrorCode, SecretAgentInfo};
+use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{
@@ -31,7 +30,6 @@ const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 
 const MAX_HEADER_LIST_SIZE_DEFAULT: u64 = u64::max_value();
-const NUM_PLACEHOLDERS_DEFAULT: u64 = 0;
 
 // The local control stream, responsible for encoding frames and sending them
 #[derive(Default, Debug)]
@@ -168,7 +166,6 @@ pub struct Http3Connection {
     state: Http3State,
     conn: Connection,
     max_header_list_size: u64,
-    num_placeholders: u64,
     control_stream_local: ControlStreamLocal,
     control_stream_remote: ControlStreamRemote,
     new_streams: HashMap<u64, NewStreamTypeReader>,
@@ -211,7 +208,6 @@ impl Http3Connection {
             state: Http3State::Initializing,
             conn: c,
             max_header_list_size: MAX_HEADER_LIST_SIZE_DEFAULT,
-            num_placeholders: NUM_PLACEHOLDERS_DEFAULT,
             control_stream_local: ControlStreamLocal::default(),
             control_stream_remote: ControlStreamRemote::new(),
             qpack_encoder: QPackEncoder::new(true),
@@ -236,8 +232,8 @@ impl Http3Connection {
         self.conn.peer_certificate()
     }
 
-    pub fn authenticated(&mut self, error: PRErrorCode, now: Instant) {
-        self.conn.authenticated(error, now);
+    pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
+        self.conn.authenticated(status, now);
     }
 
     fn initialize_http3_connection(&mut self) -> Res<()> {
@@ -830,7 +826,6 @@ impl Http3Connection {
             }
             return match f {
                 HFrame::Settings { settings } => self.handle_settings(&settings),
-                HFrame::Priority { .. } => Ok(()),
                 HFrame::CancelPush { .. } => Ok(()),
                 HFrame::Goaway { stream_id } => self.handle_goaway(stream_id),
                 HFrame::MaxPushId { push_id } => self.handle_max_push_id(push_id),
@@ -847,13 +842,6 @@ impl Http3Connection {
             match t {
                 HSettingType::MaxHeaderListSize => {
                     self.max_header_list_size = *v;
-                }
-                HSettingType::NumPlaceholders => {
-                    if self.role() == Role::Server {
-                        return Err(Error::WrongStreamDirection);
-                    } else {
-                        self.num_placeholders = *v;
-                    }
                 }
                 HSettingType::MaxTableSize => self.qpack_encoder.set_max_capacity(*v)?,
                 HSettingType::BlockedStreams => self.qpack_encoder.set_max_blocked_streams(*v)?,
@@ -1112,7 +1100,7 @@ mod tests {
 
             let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
             assert!(hconn.events().into_iter().any(authentication_needed));
-            hconn.authenticated(0, now());
+            hconn.authenticated(AuthenticationStatus::Ok, now());
 
             let out = hconn.process(out.dgram(), now());
             let connected = |e| matches!(e, Http3Event::StateChange(Http3State::Connected));
@@ -1128,7 +1116,7 @@ mod tests {
             let _ = hconn.process(out.dgram(), now());
             let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
             assert!(neqo_trans_conn.events().any(authentication_needed));
-            neqo_trans_conn.authenticated(0, now());
+            neqo_trans_conn.authenticated(AuthenticationStatus::Ok, now());
             let out = neqo_trans_conn.process(None, now());
             let out = hconn.process(out.dgram(), now());
             assert_eq!(hconn.state(), Http3State::Connected);
@@ -1259,32 +1247,30 @@ mod tests {
     }
 
     // Client: test missing SETTINGS frame
-    // (the first frame sent is a PRIORITY frame).
+    // (the first frame sent is a garbage frame).
     #[test]
     fn test_client_missing_settings() {
         let (mut hconn, mut neqo_trans_conn) = connect(true);
-        // create server control stream.
+        // Create server control stream.
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        // send a PRIORITY frame.
-        let sent =
-            neqo_trans_conn.stream_send(control_stream, &[0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3]);
-        assert_eq!(sent, Ok(7));
+        // Send a HEADERS frame instead (which contains garbage).
+        let sent = neqo_trans_conn.stream_send(control_stream, &[0x0, 0x1, 0x3, 0x0, 0x1, 0x2]);
+        assert_eq!(sent, Ok(6));
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::MissingSettings);
     }
 
     // Server: test missing SETTINGS frame
-    // (the first frame sent is a PRIORITY frame).
+    // (the first frame sent is a MAX_PUSH_ID frame).
     #[test]
     fn test_server_missing_settings() {
         let (mut hconn, mut neqo_trans_conn) = connect(false);
-        // create server control stream.
+        // Create client control stream.
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        // send a PRIORITY frame.
-        let sent =
-            neqo_trans_conn.stream_send(control_stream, &[0x0, 0x2, 0x4, 0x0, 0x2, 0x1, 0x3]);
-        assert_eq!(sent, Ok(7));
+        // Send a MAX_PUSH_ID frame instead.
+        let sent = neqo_trans_conn.stream_send(control_stream, &[0x0, 0xd, 0x1, 0xf]);
+        assert_eq!(sent, Ok(4));
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::MissingSettings);
@@ -1561,11 +1547,6 @@ mod tests {
     #[test]
     fn test_max_push_id_frame_on_request_stream() {
         test_wrong_frame_on_request_stream(&[0xd, 0x1, 0x5], Error::WrongStream);
-    }
-
-    #[test]
-    fn test_priority_frame_on_client_on_request_stream() {
-        test_wrong_frame_on_request_stream(&[0x2, 0x4, 0xf, 0x2, 0x1, 0x3], Error::UnexpectedFrame);
     }
 
     // Test reading of a slowly streamed frame. bytes are received one by one

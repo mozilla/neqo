@@ -7,7 +7,6 @@
 use crate::constants::*;
 use crate::err::Res;
 use crate::p11::{PK11SymKey, PK11_ReferenceSymKey, SymKey};
-use crate::result;
 use crate::ssl::{PRFileDesc, SSLSecretCallback, SSLSecretDirection};
 
 use neqo_common::qdebug;
@@ -117,9 +116,7 @@ impl SecretHolder {
     /// of the connection, or bad things might happen.
     pub fn register(&mut self, fd: *mut PRFileDesc) -> Res<()> {
         let p = &*self.secrets as *const Secrets as *const c_void;
-        let rv =
-            unsafe { SSL_SecretCallback(fd, Some(Secrets::secret_available), p as *mut c_void) };
-        result::result(rv)
+        unsafe { SSL_SecretCallback(fd, Some(Secrets::secret_available), p as *mut c_void) }
     }
 }
 

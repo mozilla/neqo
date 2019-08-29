@@ -40,7 +40,7 @@ fn basic() {
     assert!(bytes.is_empty());
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
-    client.authenticated(0);
+    client.authenticated(AuthenticationStatus::Ok);
     assert_eq!(*client.state(), HandshakeState::Authenticated(0));
 
     // Calling handshake() again indicates that we're happy with the cert.
@@ -104,7 +104,7 @@ fn raw() {
     assert!(client_records.is_empty());
     assert_eq!(*client.state(), HandshakeState::AuthenticationPending);
 
-    client.authenticated(0);
+    client.authenticated(AuthenticationStatus::Ok);
     assert_eq!(*client.state(), HandshakeState::Authenticated(0));
 
     // Calling handshake() again indicates that we're happy with the cert.

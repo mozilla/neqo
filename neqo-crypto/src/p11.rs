@@ -9,8 +9,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-use crate::err::{Error, Res};
-use crate::result;
+use crate::err::{secstatus_to_res, Error, Res};
 
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
@@ -49,7 +48,7 @@ macro_rules! scoped_ptr {
 
         impl Drop for $scoped {
             fn drop(&mut self) {
-                unsafe { $dtor(self.ptr) };
+                let _ = unsafe { $dtor(self.ptr) };
             }
         }
     };
@@ -64,8 +63,7 @@ scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 impl SymKey {
     /// You really don't want to use this.
     pub fn as_bytes<'a>(&'a self) -> Res<&'a [u8]> {
-        let rv = unsafe { PK11_ExtractKeyValue(self.ptr) };
-        result::result(rv)?;
+        secstatus_to_res(unsafe { PK11_ExtractKeyValue(self.ptr) })?;
 
         let key_item = unsafe { PK11_GetKeyData(self.ptr) };
         // This is accessing a value attached to the key, so we can treat this as a borrow.

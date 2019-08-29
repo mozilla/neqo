@@ -4,16 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use crate::err::secstatus_to_res;
 use crate::p11::{
     CERTCertList, CERTCertListNode, CERT_GetCertificateDer, CertList, PRCList, SECItem,
     SECItemArray, SECItemType,
 };
-use crate::result;
 use crate::ssl::{
     PRFileDesc, SSL_PeerCertificateChain, SSL_PeerSignedCertTimestamps,
     SSL_PeerStapledOCSPResponses,
 };
-use std::convert::TryInto;
+use neqo_common::qerror;
+
+use std::convert::TryFrom;
 use std::ptr::{null_mut, NonNull};
 
 use std::slice;
@@ -45,15 +47,15 @@ fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
     match NonNull::new(ocsp_nss as *mut SECItemArray) {
         Some(ocsp_ptr) => {
             let mut ocsp_helper: Vec<Vec<u8>> = Vec::new();
-            let len = unsafe { ocsp_ptr.as_ref().len };
-            for inx in 0..len {
-                let item_nss = if let Ok(i) = inx.try_into() {
-                    unsafe { ocsp_ptr.as_ref().items.offset(i) as *const SECItem }
-                } else {
-                    return None;
-                };
-                let item =
-                    unsafe { slice::from_raw_parts((*item_nss).data, (*item_nss).len as usize) };
+            let len = if let Ok(l) = isize::try_from(unsafe { ocsp_ptr.as_ref().len }) {
+                l
+            } else {
+                qerror!([format!("{:p}", fd)], "Received illegal OSCP length");
+                return None;
+            };
+            for idx in 0..len {
+                let itemp = unsafe { ocsp_ptr.as_ref().items.offset(idx) as *const SECItem };
+                let item = unsafe { slice::from_raw_parts((*itemp).data, (*itemp).len as usize) };
                 ocsp_helper.push(item.to_owned());
             }
             Some(ocsp_helper)
@@ -107,10 +109,8 @@ impl<'a> Iterator for &'a mut CertificateInfo {
             len: 0,
         };
         let cert = unsafe { *self.cursor }.cert;
-        let rv = unsafe { CERT_GetCertificateDer(cert, &mut item) };
-        if result::result(rv).is_err() {
-            panic!("Error getting DER from certificate");
-        }
+        secstatus_to_res(unsafe { CERT_GetCertificateDer(cert, &mut item) })
+            .expect("getting DER from certificate should work");
         Some(unsafe { std::slice::from_raw_parts(item.data, item.len as usize) })
     }
 }
