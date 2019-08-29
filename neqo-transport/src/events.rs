@@ -107,8 +107,8 @@ impl ConnectionEvents {
         self.insert(ConnectionEvent::ZeroRttRejected);
     }
 
-    pub fn events(&self) -> BTreeSet<ConnectionEvent> {
-        self.events.replace(BTreeSet::new())
+    pub fn events(&self) -> impl Iterator<Item = ConnectionEvent> {
+        self.events.replace(BTreeSet::new()).into_iter()
     }
 
     fn insert(&self, event: ConnectionEvent) {

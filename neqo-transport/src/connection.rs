@@ -1744,7 +1744,7 @@ impl Connection {
 
     /// Get events that indicate state changes on the connection.
     pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
-        self.events.events().into_iter()
+        self.events.events()
     }
 
     fn check_loss_detection_timeout(&mut self, now: Instant) {
