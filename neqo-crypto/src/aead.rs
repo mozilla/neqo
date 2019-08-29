@@ -7,14 +7,12 @@
 #![allow(clippy::too_many_arguments)]
 
 use crate::constants::*;
-use crate::convert::to_c_uint;
 use crate::err::{Error, Res};
 use crate::p11::{PK11SymKey, SymKey};
-use crate::result;
 use crate::ssl;
 use crate::ssl::{PRUint16, PRUint64, PRUint8, SSLAeadContext};
 
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_char, c_uint};
@@ -77,15 +75,14 @@ impl Aead {
         let prefix_str = prefix.into();
         let p = prefix_str.as_bytes();
         let mut ctx: *mut ssl::SSLAeadContext = null_mut();
-        let rv = SSL_MakeAead(
+        SSL_MakeAead(
             version,
             cipher,
             secret,
             p.as_ptr() as *const i8,
-            p.len().try_into()?,
+            c_uint::try_from(p.len())?,
             &mut ctx,
-        );
-        result::result(rv)?;
+        )?;
         match NonNull::new(ctx) {
             Some(ctx_ptr) => Ok(Self {
                 ctx: AeadContext::new(ctx_ptr),
@@ -102,21 +99,20 @@ impl Aead {
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
         let mut l: c_uint = 0;
-        let rv = unsafe {
+        unsafe {
             SSL_AeadEncrypt(
                 *self.ctx.deref(),
                 count,
                 aad.as_ptr(),
-                to_c_uint(aad.len())?,
+                c_uint::try_from(aad.len())?,
                 input.as_ptr(),
-                to_c_uint(input.len())?,
+                c_uint::try_from(input.len())?,
                 output.as_mut_ptr(),
                 &mut l,
-                to_c_uint(output.len())?,
+                c_uint::try_from(output.len())?,
             )
-        };
-        result::result(rv)?;
-        Ok(&output[0..l as usize])
+        }?;
+        Ok(&output[0..(l.try_into().unwrap())])
     }
 
     pub fn decrypt<'a>(
@@ -127,21 +123,20 @@ impl Aead {
         output: &'a mut [u8],
     ) -> Res<&'a [u8]> {
         let mut l: c_uint = 0;
-        let rv = unsafe {
+        unsafe {
             SSL_AeadDecrypt(
                 *self.ctx.deref(),
                 count,
                 aad.as_ptr(),
-                to_c_uint(aad.len())?,
+                c_uint::try_from(aad.len())?,
                 input.as_ptr(),
-                to_c_uint(input.len())?,
+                c_uint::try_from(input.len())?,
                 output.as_mut_ptr(),
                 &mut l,
-                to_c_uint(output.len())?,
+                c_uint::try_from(output.len())?,
             )
-        };
-        result::result(rv)?;
-        Ok(&output[0..l as usize])
+        }?;
+        Ok(&output[0..(l.try_into().unwrap())])
     }
 }
 
