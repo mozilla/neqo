@@ -825,6 +825,10 @@ pub(crate) struct StreamRecoveryToken {
 mod tests {
     use super::*;
 
+    use neqo_common::matches;
+
+    use crate::events::ConnectionEvent;
+
     #[test]
     fn test_mark_range() {
         let mut rt = RangeTracker::default();
@@ -934,5 +938,68 @@ mod tests {
         tx.mark_as_acked(0, 100);
         let res = tx.next_bytes(TxMode::Normal);
         assert_eq!(res, None);
+    }
+
+    #[test]
+    fn send_stream_avail() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        flow_mgr.borrow_mut().conn_increase_max_credit(2);
+        let conn_events = ConnectionEvents::default();
+
+        let mut s = SendStream::new(4.into(), 0, flow_mgr.clone(), conn_events.clone());
+
+        // Stream is initially blocked (conn:2, stream:0)
+        // and will not accept data.
+        assert_eq!(s.send(b"hi").unwrap(), 0);
+
+        // increasing to (conn:2, stream:2) will allow 2 bytes, and also
+        // generate a SendStreamWritable event.
+        s.set_max_stream_data(2);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 1);
+        assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
+        assert_eq!(s.send(b"hello").unwrap(), 2);
+
+        // increasing to (conn:2, stream:4) will not generate an event or allow
+        // sending anything.
+        s.set_max_stream_data(4);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+        assert_eq!(s.send(b"hello").unwrap(), 0);
+
+        // increasing conn max (conn:4, stream:4) will unblock but not emit event
+        // b/c that happens in Connection::emit_frame() (not tested)
+        assert_eq!(flow_mgr.borrow_mut().conn_increase_max_credit(4), true);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+        assert_eq!(s.avail(), 2);
+        assert_eq!(s.send(b"hello").unwrap(), 2);
+
+        // No event because still blocked by conn
+        s.set_max_stream_data(1_000_000_000);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+
+        // No event because happens in emit_frame()
+        flow_mgr
+            .borrow_mut()
+            .conn_increase_max_credit(1_000_000_000);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+
+        // Unblocking both by a large amount will cause avail() to be limited by
+        // tx buffer size.
+        assert_eq!(s.avail(), u64::try_from(TxBuffer::BUFFER_SIZE - 4).unwrap());
+
+        assert_eq!(
+            s.send(&[b'a'; TxBuffer::BUFFER_SIZE]).unwrap(),
+            TxBuffer::BUFFER_SIZE - 4
+        );
+
+        // No event because still blocked by tx buffer full
+        s.set_max_stream_data(2_000_000_000);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+        assert_eq!(s.send(b"hello").unwrap(), 0);
     }
 }
