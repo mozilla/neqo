@@ -4,17 +4,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ptr::{null_mut, NonNull};
-
+use crate::err::secstatus_to_res;
 use crate::p11::{
     CERTCertList, CERTCertListNode, CERT_GetCertificateDer, CertList, PRCList, SECItem,
     SECItemArray, SECItemType,
 };
-use crate::result;
 use crate::ssl::{
     PRFileDesc, SSL_PeerCertificateChain, SSL_PeerSignedCertTimestamps,
     SSL_PeerStapledOCSPResponses,
 };
+use neqo_common::qerror;
+
+use std::convert::TryFrom;
+use std::ptr::{null_mut, NonNull};
 
 use std::slice;
 
@@ -38,17 +40,22 @@ fn peer_certificate_chain(fd: *mut PRFileDesc) -> Option<(CertList, *const CERTC
     Some((certs, cursor))
 }
 
+// As explained in rfc6961, an OCSPResponseList can have at most
+// 2^24 items. Casting its length is therefore safe even on 32 bits targets.
 fn stapled_ocsp_responses(fd: *mut PRFileDesc) -> Option<Vec<Vec<u8>>> {
     let ocsp_nss = unsafe { SSL_PeerStapledOCSPResponses(fd) };
     match NonNull::new(ocsp_nss as *mut SECItemArray) {
         Some(ocsp_ptr) => {
             let mut ocsp_helper: Vec<Vec<u8>> = Vec::new();
-            let len = unsafe { ocsp_ptr.as_ref().len };
-            for inx in 0..len {
-                let item_nss =
-                    unsafe { ocsp_ptr.as_ref().items.offset(inx as isize) as *const SECItem };
-                let item =
-                    unsafe { slice::from_raw_parts((*item_nss).data, (*item_nss).len as usize) };
+            let len = if let Ok(l) = isize::try_from(unsafe { ocsp_ptr.as_ref().len }) {
+                l
+            } else {
+                qerror!([format!("{:p}", fd)], "Received illegal OSCP length");
+                return None;
+            };
+            for idx in 0..len {
+                let itemp = unsafe { ocsp_ptr.as_ref().items.offset(idx) as *const SECItem };
+                let item = unsafe { slice::from_raw_parts((*itemp).data, (*itemp).len as usize) };
                 ocsp_helper.push(item.to_owned());
             }
             Some(ocsp_helper)
@@ -73,7 +80,7 @@ fn signed_cert_timestamp(fd: *mut PRFileDesc) -> Option<Vec<u8>> {
 impl CertificateInfo {
     pub(crate) fn new(fd: *mut PRFileDesc) -> Option<Self> {
         match peer_certificate_chain(fd) {
-            Some((certs, cursor)) => Some(CertificateInfo {
+            Some((certs, cursor)) => Some(Self {
                 certs,
                 cursor,
                 stapled_ocsp_responses: stapled_ocsp_responses(fd),
@@ -102,10 +109,8 @@ impl<'a> Iterator for &'a mut CertificateInfo {
             len: 0,
         };
         let cert = unsafe { *self.cursor }.cert;
-        let rv = unsafe { CERT_GetCertificateDer(cert, &mut item) };
-        if result::result(rv).is_err() {
-            panic!("Error getting DER from certificate");
-        }
+        secstatus_to_res(unsafe { CERT_GetCertificateDer(cert, &mut item) })
+            .expect("getting DER from certificate should work");
         Some(unsafe { std::slice::from_raw_parts(item.data, item.len as usize) })
     }
 }

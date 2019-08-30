@@ -5,8 +5,7 @@
 // except according to those terms.
 
 use crate::err::{
-    Error, NSPRErrorCodes, PR_ErrorToName, PR_ErrorToString, PR_GetError, Res,
-    PR_LANGUAGE_I_DEFAULT,
+    nspr, Error, PR_ErrorToName, PR_ErrorToString, PR_GetError, Res, PR_LANGUAGE_I_DEFAULT,
 };
 use crate::ssl;
 
@@ -40,7 +39,7 @@ fn result_helper(rv: ssl::SECStatus, allow_blocked: bool) -> Res<bool> {
     }
 
     let code = unsafe { PR_GetError() };
-    if allow_blocked && code == NSPRErrorCodes::PR_WOULD_BLOCK_ERROR {
+    if allow_blocked && code == nspr::PR_WOULD_BLOCK_ERROR {
         return Ok(true);
     }
 
@@ -55,7 +54,7 @@ fn result_helper(rv: ssl::SECStatus, allow_blocked: bool) -> Res<bool> {
 #[cfg(test)]
 mod tests {
     use super::{result, result_or_blocked};
-    use crate::err::{Error, NSPRErrorCodes, PRErrorCode, PR_SetError, SSLErrorCodes};
+    use crate::err::{self, nspr, Error, PRErrorCode, PR_SetError};
     use crate::ssl;
     use test_fixture::fixture_init;
 
@@ -73,7 +72,7 @@ mod tests {
         // This code doesn't work without initializing NSS first.
         fixture_init();
 
-        set_error_code(SSLErrorCodes::SSL_ERROR_BAD_MAC_READ);
+        set_error_code(err::ssl::SSL_ERROR_BAD_MAC_READ);
         let r = result(ssl::SECFailure);
         assert!(r.is_err());
         match r.unwrap_err() {
@@ -113,7 +112,7 @@ mod tests {
         // This code doesn't work without initializing NSS first.
         fixture_init();
 
-        set_error_code(NSPRErrorCodes::PR_WOULD_BLOCK_ERROR);
+        set_error_code(nspr::PR_WOULD_BLOCK_ERROR);
         let r = result(ssl::SECFailure);
         assert!(r.is_err());
         match r.unwrap_err() {
@@ -128,7 +127,7 @@ mod tests {
 
     #[test]
     fn is_blocked() {
-        set_error_code(NSPRErrorCodes::PR_WOULD_BLOCK_ERROR);
+        set_error_code(nspr::PR_WOULD_BLOCK_ERROR);
         assert!(result_or_blocked(ssl::SECFailure).unwrap());
     }
 }

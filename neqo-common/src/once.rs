@@ -6,6 +6,7 @@
 
 use std::sync::Once;
 
+#[allow(clippy::module_name_repetitions)]
 pub struct OnceResult<T> {
     once: Once,
     v: Option<T>,
@@ -13,7 +14,7 @@ pub struct OnceResult<T> {
 
 impl<T> OnceResult<T> {
     pub const fn new() -> Self {
-        OnceResult {
+        Self {
             once: Once::new(),
             v: None,
         }

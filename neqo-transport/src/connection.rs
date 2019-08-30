@@ -22,7 +22,7 @@ use smallvec::SmallVec;
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, Client, Epoch, HandshakeState, PRErrorCode, Record, RecordList,
+    Agent, AntiReplay, AuthenticationStatus, Client, Epoch, HandshakeState, Record, RecordList,
     SecretAgentInfo, Server,
 };
 
@@ -151,7 +151,7 @@ impl Path {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-/// Type returned from process() and process_output(). Users are required to
+/// Type returned from process() and `process_output()`. Users are required to
 /// call these repeatedly until `Callback` or `None` is returned.
 pub enum Output {
     /// Connection requires no action.
@@ -484,8 +484,8 @@ impl Connection {
     }
 
     /// Call by application when the peer cert has been verified
-    pub fn authenticated(&mut self, error: PRErrorCode, now: Instant) {
-        self.crypto.tls.authenticated(error);
+    pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
+        self.crypto.tls.authenticated(status);
         let res = self.handshake(now, 0, None);
         self.absorb_error(now, res);
     }
@@ -625,8 +625,8 @@ impl Connection {
 
     /// Process input and generate output.
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
-        if let Some(dgram) = dgram {
-            self.process_input(dgram, now);
+        if let Some(d) = dgram {
+            self.process_input(d, now);
         }
         self.process_output(now)
     }
@@ -635,7 +635,6 @@ impl Connection {
         self.valid_cids.contains(cid) || self.paths.iter().any(|p| p.local_cids.contains(cid))
     }
 
-    #[allow(clippy::cognitive_complexity)]
     fn input(&mut self, d: Datagram, now: Instant) -> Res<()> {
         let mut slc = &d[..];
 
@@ -736,87 +735,108 @@ impl Connection {
 
             qdebug!([self] "Received unverified packet {:?}", hdr);
 
-            // Decryption failure, or not having keys is not fatal.
-            // If the state isn't available, or we can't decrypt the packet, drop
-            // the rest of the datagram on the floor, but don't generate an error.
-            let largest_acknowledged = self
-                .loss_recovery
-                .largest_acknowledged(PNSpace::from(hdr.epoch));
-            let res = match self.crypto.obtain_crypto_state(self.role, hdr.epoch) {
-                Ok(cs) => match cs.rx.as_ref() {
-                    Some(rx) => {
-                        let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
-                        decrypt_packet(rx, pn_decoder, &mut hdr, slc)
-                    }
-                    _ => Err(Error::KeysNotFound),
-                },
-                Err(e) => Err(e),
-            };
+            let body = self.decrypt_body(&mut hdr, slc);
             slc = &slc[hdr.hdr_len + hdr.body_len()..];
-            let body = match res {
-                Ok(b) => b,
-                _ => {
-                    // TODO(mt): Check for stateless reset, which is fatal.
+            if let Some(body) = body {
+                // TODO(ekr@rtfm.com): Have the server blow away the initial
+                // crypto state if this fails? Otherwise, we will get a panic
+                // on the assert for doesn't exist.
+                // OK, we have a valid packet.
+                self.idle_timeout.on_packet_received(now);
+                dump_packet(self, "<- RX", &hdr, &body);
+                if self.process_packet(&hdr, body, now)? {
                     continue;
                 }
-            };
-            dump_packet(self, "<- RX", &hdr, &body);
-
-            // TODO(ekr@rtfm.com): Have the server blow away the initial
-            // crypto state if this fails? Otherwise, we will get a panic
-            // on the assert for doesn't exist.
-            // OK, we have a valid packet.
-            self.idle_timeout.on_packet_received(now);
-
-            // TODO(ekr@rtfm.com): Filter for valid for this epoch.
-
-            let ack_eliciting = self.input_packet(hdr.epoch, Decoder::from(&body[..]), now)?;
-            let space = PNSpace::from(hdr.epoch);
-            if self.acks[space].is_duplicate(hdr.pn) {
-                qdebug!([self] "Received duplicate packet epoch={} pn={}", hdr.epoch, hdr.pn);
-                self.stats.dups_rx += 1;
-                continue;
             }
-            self.acks[space].set_received(now, hdr.pn, ack_eliciting);
-
-            if matches!(self.state, State::WaitInitial) {
-                if self.role == Role::Server {
-                    assert!(matches!(hdr.tipe, PacketType::Initial(..)));
-                    // A server needs to accept the client's selected CID during the handshake.
-                    self.valid_cids.push(hdr.dcid.clone());
-                    // Install a path.
-                    assert!(self.paths.is_none());
-                    let mut p = Path::new(&d, hdr.scid.unwrap());
-                    p.local_cids.push(ConnectionId::generate(CID_LENGTH));
-                    self.paths = Some(p);
-
-                    // SecretAgentPreinfo::early_data() always returns false for a server,
-                    // but a non-zero maximum tells us if we are accepting 0-RTT.
-                    self.zero_rtt_state = if self.crypto.tls.preinfo()?.max_early_data() > 0 {
-                        ZeroRttState::Accepted
-                    } else {
-                        ZeroRttState::Rejected
-                    };
-                } else {
-                    qdebug!([self] "Changing to use Server CID={}", hdr.scid.as_ref().unwrap());
-                    let p = self
-                        .paths
-                        .iter_mut()
-                        .find(|p| p.received_on(&d))
-                        .expect("should have a path for sending Initial");
-                    p.remote_cid = hdr.scid.unwrap();
-                }
-                self.set_state(State::Handshaking);
-            }
-
-            if !self.paths.iter().any(|p| p.received_on(&d)) {
-                // Right now, we don't support any form of migration.
-                // So generate an error if a packet is received on a new path.
-                return Err(Error::InvalidMigration);
-            }
+            self.start_handshake(hdr, &d)?;
+            self.process_migrations(&d)?;
         }
-
         Ok(())
+    }
+
+    fn decrypt_body(&mut self, mut hdr: &mut PacketHdr, slc: &[u8]) -> Option<Vec<u8>> {
+        // Decryption failure, or not having keys is not fatal.
+        // If the state isn't available, or we can't decrypt the packet, drop
+        // the rest of the datagram on the floor, but don't generate an error.
+        let largest_acknowledged = self
+            .loss_recovery
+            .largest_acknowledged(PNSpace::from(hdr.epoch));
+        match self.crypto.obtain_crypto_state(self.role, hdr.epoch) {
+            Ok(cs) => match cs.rx.as_ref() {
+                Some(rx) => {
+                    let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
+                    decrypt_packet(rx, pn_decoder, &mut hdr, slc).ok()
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Ok(true) if the packet is a duplicate
+    fn process_packet(&mut self, hdr: &PacketHdr, body: Vec<u8>, now: Instant) -> Res<bool> {
+        // TODO(ekr@rtfm.com): Have the server blow away the initial
+        // crypto state if this fails? Otherwise, we will get a panic
+        // on the assert for doesn't exist.
+        // OK, we have a valid packet.
+
+        // TODO(ekr@rtfm.com): Filter for valid for this epoch.
+
+        let ack_eliciting = self.input_packet(hdr.epoch, Decoder::from(&body[..]), now)?;
+        let space = PNSpace::from(hdr.epoch);
+        if self.acks[space].is_duplicate(hdr.pn) {
+            qdebug!([self] "Received duplicate packet epoch={} pn={}", hdr.epoch, hdr.pn);
+            self.stats.dups_rx += 1;
+            Ok(true)
+        } else {
+            self.acks[space].set_received(now, hdr.pn, ack_eliciting);
+            Ok(false)
+        }
+    }
+
+    fn start_handshake(&mut self, hdr: PacketHdr, d: &Datagram) -> Res<()> {
+        // No handshake to process.
+        if !matches!(self.state, State::WaitInitial) {
+            return Ok(());
+        }
+        if self.role == Role::Server {
+            assert!(matches!(hdr.tipe, PacketType::Initial(..)));
+            // A server needs to accept the client's selected CID during the handshake.
+            self.valid_cids.push(hdr.dcid.clone());
+            // Install a path.
+            assert!(self.paths.is_none());
+            let mut p = Path::new(&d, hdr.scid.unwrap());
+            p.local_cids.push(ConnectionId::generate(CID_LENGTH));
+            self.paths = Some(p);
+
+            // SecretAgentPreinfo::early_data() always returns false for a server,
+            // but a non-zero maximum tells us if we are accepting 0-RTT.
+            self.zero_rtt_state = if self.crypto.tls.preinfo()?.max_early_data() > 0 {
+                ZeroRttState::Accepted
+            } else {
+                ZeroRttState::Rejected
+            };
+        } else {
+            qdebug!([self] "Changing to use Server CID={}", hdr.scid.as_ref().unwrap());
+            let p = self
+                .paths
+                .iter_mut()
+                .find(|p| p.received_on(&d))
+                .expect("should have a path for sending Initial");
+            p.remote_cid = hdr.scid.unwrap();
+        }
+        self.set_state(State::Handshaking);
+        Ok(())
+    }
+
+    fn process_migrations(&self, d: &Datagram) -> Res<()> {
+        if !self.paths.iter().any(|p| p.received_on(&d)) {
+            // Right now, we don't support any form of migration.
+            // So generate an error if a packet is received on a new path.
+            Err(Error::InvalidMigration)
+        } else {
+            Ok(())
+        }
     }
 
     // Return whether the packet had ack-eliciting frames.
@@ -1082,14 +1102,14 @@ impl Connection {
         let swapped = mem::replace(&mut self.tps, Rc::default());
         {
             let tph = swapped.borrow();
-            let tps = tph.remote();
+            let remote = tph.remote();
             self.indexes.remote_max_stream_bidi =
-                StreamIndex::new(tps.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
+                StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
             self.indexes.remote_max_stream_uni =
-                StreamIndex::new(tps.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
+                StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
             self.flow_mgr
                 .borrow_mut()
-                .conn_increase_max_credit(tps.get_integer(tp_const::INITIAL_MAX_DATA));
+                .conn_increase_max_credit(remote.get_integer(tp_const::INITIAL_MAX_DATA));
         }
         mem::replace(&mut self.tps, swapped);
     }
@@ -1330,8 +1350,8 @@ impl Connection {
         for acked in acked_packets {
             for token in acked.tokens {
                 match token {
-                    RecoveryToken::Ack(at) => self.acks.acked(at),
-                    RecoveryToken::Stream(st) => self.send_streams.acked(st),
+                    RecoveryToken::Ack(at) => self.acks.acked(&at),
+                    RecoveryToken::Stream(st) => self.send_streams.acked(&st),
                     RecoveryToken::Crypto(ct) => self.crypto.acked(ct),
                     RecoveryToken::Flow(ft) => {
                         self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
@@ -1343,7 +1363,7 @@ impl Connection {
             for token in lost.tokens {
                 match token {
                     RecoveryToken::Ack(_) => {}
-                    RecoveryToken::Stream(st) => self.send_streams.lost(st),
+                    RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                     RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                     RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                         ft,
@@ -1371,7 +1391,7 @@ impl Connection {
             for token in dropped.tokens {
                 match token {
                     RecoveryToken::Ack(_) => {}
-                    RecoveryToken::Stream(st) => self.send_streams.lost(st),
+                    RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                     RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                     RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                         ft,
@@ -1743,7 +1763,7 @@ impl Connection {
                     for token in lost.tokens {
                         match token {
                             RecoveryToken::Ack(_) => {} // Do nothing
-                            RecoveryToken::Stream(st) => self.send_streams.lost(st),
+                            RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                             RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                             RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                                 ft,
@@ -1829,7 +1849,7 @@ mod tests {
     pub fn maybe_autenticate(conn: &mut Connection) -> bool {
         let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
         if conn.events().any(authentication_needed) {
-            conn.authenticated(0, now());
+            conn.authenticated(AuthenticationStatus::Ok, now());
             return true;
         }
         false
@@ -1969,7 +1989,7 @@ mod tests {
         let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
         assert!(client.events().any(authentication_needed));
         qdebug!("---- client: Alert(certificate_revoked)");
-        client.authenticated(-(0x2000) + 12, now());
+        client.authenticated(AuthenticationStatus::CertRevoked, now());
 
         qdebug!("---- client: -> Alert(certificate_revoked)");
         let out = client.process(None, now());

@@ -6,7 +6,7 @@
 
 #![deny(warnings)]
 use neqo_common::{matches, Datagram};
-use neqo_crypto::init;
+use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Connection, Http3Event, Http3State, Output};
 use neqo_transport::Connection;
 use std::collections::HashSet;
@@ -162,7 +162,7 @@ impl Handler for PreConnectHandler {
     fn handle(&mut self, _args: &Args, client: &mut Http3Connection) -> bool {
         let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
         if client.events().into_iter().any(authentication_needed) {
-            client.authenticated(0, Instant::now());
+            client.authenticated(AuthenticationStatus::Ok, Instant::now());
         }
         Http3State::Connected != client.state()
     }

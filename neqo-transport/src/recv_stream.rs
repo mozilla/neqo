@@ -10,6 +10,7 @@
 use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
+use std::convert::TryInto;
 use std::mem;
 use std::ops::Bound::{Included, Unbounded};
 use std::rc::Rc;
@@ -177,8 +178,7 @@ impl RxStreamOrderer {
         self.data_ranges
             .keys()
             .next()
-            .map(|&start| start <= self.retired)
-            .unwrap_or(false)
+            .map_or(false, |&start| start <= self.retired)
     }
 
     /// How many bytes are readable?
@@ -230,9 +230,9 @@ impl RxStreamOrderer {
 
                 // Convert to offset into data vec and move past bytes we
                 // already have
-                let copy_offset = (max(range_start, self.retired) - range_start) as usize;
-                let copy_bytes = min(range_data.len() - copy_offset as usize, buf_remaining);
-                let copy_slc = &mut range_data[copy_offset as usize..copy_offset + copy_bytes];
+                let copy_offset = (max(range_start, self.retired) - range_start).try_into()?;
+                let copy_bytes = min(range_data.len() - copy_offset, buf_remaining);
+                let copy_slc = &mut range_data[copy_offset..copy_offset + copy_bytes];
                 buf[copied..copied + copy_bytes].copy_from_slice(copy_slc);
                 copied += copy_bytes;
                 buf_remaining -= copy_bytes;
@@ -294,7 +294,7 @@ enum RecvStreamState {
 }
 
 impl RecvStreamState {
-    fn new(max_bytes: u64) -> RecvStreamState {
+    fn new(max_bytes: u64) -> Self {
         RecvStreamState::Recv {
             recv_buf: RxStreamOrderer::new(),
             max_bytes,
@@ -314,9 +314,9 @@ impl RecvStreamState {
 
     fn recv_buf(&self) -> Option<&RxStreamOrderer> {
         match self {
-            RecvStreamState::Recv { recv_buf, .. } => Some(recv_buf),
-            RecvStreamState::SizeKnown { recv_buf, .. } => Some(recv_buf),
-            RecvStreamState::DataRecvd { recv_buf } => Some(recv_buf),
+            RecvStreamState::Recv { recv_buf, .. }
+            | RecvStreamState::SizeKnown { recv_buf, .. }
+            | RecvStreamState::DataRecvd { recv_buf } => Some(recv_buf),
             RecvStreamState::DataRead | RecvStreamState::ResetRecvd => None,
         }
     }
@@ -328,7 +328,7 @@ impl RecvStreamState {
         }
     }
 
-    fn transition(&mut self, new_state: RecvStreamState) {
+    fn transition(&mut self, new_state: Self) {
         qtrace!("RecvStream state {} -> {}", self.name(), new_state.name());
         *self = new_state;
     }
@@ -349,8 +349,8 @@ impl RecvStream {
         max_stream_data: u64,
         flow_mgr: Rc<RefCell<FlowMgr>>,
         conn_events: ConnectionEvents,
-    ) -> RecvStream {
-        RecvStream {
+    ) -> Self {
+        Self {
             stream_id,
             state: RecvStreamState::new(max_stream_data),
             flow_mgr,
@@ -379,9 +379,7 @@ impl RecvStream {
                     return Err(Error::FlowControlError);
                 }
 
-                if !fin {
-                    recv_buf.inbound_frame(offset, data)?;
-                } else {
+                if fin {
                     let final_size = offset + data.len() as u64;
                     if final_size < recv_buf.highest_seen_offset() {
                         return Err(Error::FinalSizeError);
@@ -398,6 +396,8 @@ impl RecvStream {
                             final_size,
                         });
                     }
+                } else {
+                    recv_buf.inbound_frame(offset, data)?;
                 }
             }
             RecvStreamState::SizeKnown {
@@ -481,8 +481,7 @@ impl RecvStream {
     fn data_ready(&self) -> bool {
         self.state
             .recv_buf()
-            .map(RxStreamOrderer::data_ready)
-            .unwrap_or(false)
+            .map_or(false, RxStreamOrderer::data_ready)
     }
 
     pub fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {

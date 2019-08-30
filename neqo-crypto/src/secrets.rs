@@ -7,7 +7,6 @@
 use crate::constants::*;
 use crate::err::Res;
 use crate::p11::{PK11SymKey, PK11_ReferenceSymKey, SymKey};
-use crate::result;
 use crate::ssl::{PRFileDesc, SSLSecretCallback, SSLSecretDirection};
 
 use neqo_common::qdebug;
@@ -38,6 +37,7 @@ impl From<SSLSecretDirection::Type> for SecretDirection {
 }
 
 #[derive(Debug, Default)]
+#[allow(clippy::module_name_repetitions)]
 pub struct DirectionalSecrets {
     // We only need to maintain 3 secrets for the epochs used during the handshake.
     secrets: [Option<SymKey>; 3],
@@ -74,7 +74,7 @@ impl Secrets {
         secret: *mut PK11SymKey,
         arg: *mut c_void,
     ) {
-        let secrets_ptr = arg as *mut Secrets;
+        let secrets_ptr = arg as *mut Self;
         let secrets = secrets_ptr.as_mut().unwrap();
         secrets.put_raw(epoch, dir, secret);
     }
@@ -116,9 +116,7 @@ impl SecretHolder {
     /// of the connection, or bad things might happen.
     pub fn register(&mut self, fd: *mut PRFileDesc) -> Res<()> {
         let p = &*self.secrets as *const Secrets as *const c_void;
-        let rv =
-            unsafe { SSL_SecretCallback(fd, Some(Secrets::secret_available), p as *mut c_void) };
-        result::result(rv)
+        unsafe { SSL_SecretCallback(fd, Some(Secrets::secret_available), p as *mut c_void) }
     }
 }
 

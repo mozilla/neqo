@@ -5,6 +5,10 @@
 // except according to those terms.
 
 #![deny(warnings)]
+// Bindgen auto generated code
+// won't adhere to the clippy rules below
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::unseparated_literal_suffix)]
 
 #[macro_use]
 mod exp;
@@ -14,16 +18,15 @@ mod p11;
 pub mod aead;
 pub mod agent;
 mod agentio;
+mod auth;
 mod cert;
 pub mod constants;
-mod convert;
 mod err;
 pub mod ext;
 pub mod hkdf;
 pub mod hp;
 mod prio;
 mod replay;
-mod result;
 mod secrets;
 mod ssl;
 mod time;
@@ -33,11 +36,12 @@ pub use self::agent::{
     SecretAgentPreInfo, Server, ZeroRttCheckResult, ZeroRttChecker,
 };
 pub use self::constants::*;
-pub use self::err::{Error, PRErrorCode, Res, SSLErrorCodes};
+pub use self::err::{Error, PRErrorCode, Res};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
 pub use self::p11::SymKey;
 pub use self::replay::AntiReplay;
 pub use self::secrets::SecretDirection;
+pub use auth::AuthenticationStatus;
 
 use neqo_common::once::OnceResult;
 
@@ -51,8 +55,8 @@ mod nss {
 }
 
 // Need to map the types through.
-fn result(code: nss::SECStatus) -> Res<()> {
-    crate::result::result(code as crate::ssl::SECStatus)
+fn secstatus_to_res(code: nss::SECStatus) -> Res<()> {
+    crate::err::secstatus_to_res(code as crate::ssl::SECStatus)
 }
 
 enum NssLoaded {
@@ -65,7 +69,7 @@ impl Drop for NssLoaded {
     fn drop(&mut self) {
         match self {
             NssLoaded::NoDb | NssLoaded::Db(_) => unsafe {
-                result(nss::NSS_Shutdown()).expect("NSS Shutdown failed")
+                secstatus_to_res(nss::NSS_Shutdown()).expect("NSS Shutdown failed")
             },
             _ => {}
         }
@@ -88,10 +92,8 @@ pub fn init() {
                 return NssLoaded::External;
             }
 
-            let st = nss::NSS_NoDB_Init(null());
-            result(st).expect("NSS_NoDB_Init failed");
-            let st = nss::NSS_SetDomesticPolicy();
-            result(st).expect("NSS_SetDomesticPolicy failed");
+            secstatus_to_res(nss::NSS_NoDB_Init(null())).expect("NSS_NoDB_Init failed");
+            secstatus_to_res(nss::NSS_SetDomesticPolicy()).expect("NSS_SetDomesticPolicy failed");
 
             NssLoaded::NoDb
         });
@@ -111,20 +113,23 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
             let pathstr = path.to_str().expect("path converts to string").to_string();
             let dircstr = CString::new(pathstr).expect("new CString");
             let empty = CString::new("").expect("new empty CString");
-            let st = nss::NSS_Initialize(
+            secstatus_to_res(nss::NSS_Initialize(
                 dircstr.as_ptr(),
                 empty.as_ptr(),
                 empty.as_ptr(),
                 nss::SECMOD_DB.as_ptr() as *const i8,
                 nss::NSS_INIT_READONLY,
-            );
-            result(st).expect("NSS_Initialize failed");
+            ))
+            .expect("NSS_Initialize failed");
 
-            let st = nss::NSS_SetDomesticPolicy();
-            result(st).expect("NSS_SetDomesticPolicy failed");
-
-            let st = ssl::SSL_ConfigServerSessionIDCache(1024, 0, 0, dircstr.as_ptr());
-            result(st).expect("SSL_ConfigServerSessionIDCache failed");
+            secstatus_to_res(nss::NSS_SetDomesticPolicy()).expect("NSS_SetDomesticPolicy failed");
+            secstatus_to_res(ssl::SSL_ConfigServerSessionIDCache(
+                1024,
+                0,
+                0,
+                dircstr.as_ptr(),
+            ))
+            .expect("SSL_ConfigServerSessionIDCache failed");
 
             NssLoaded::Db(path.to_path_buf().into_boxed_path())
         });

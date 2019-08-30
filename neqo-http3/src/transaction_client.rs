@@ -82,7 +82,7 @@ enum TransactionSendState {
 /*
  * Transaction receive state:
  *    WaitingForResponseHeaders : we wait for headers. in this state we can
- *                                also get PRIORITY frame or a PUSH_PROMISE.
+ *                                also get a PUSH_PROMISE frame.
  *    ReadingHeaders : we have HEADERS frame and now we are reading header
  *                     block. This may block on encoder instructions. In this
  *                     state we do no read from the stream.
@@ -236,7 +236,6 @@ impl TransactionClient {
     fn handle_frame_in_state_waiting_for_headers(&mut self, frame: HFrame, fin: bool) -> Res<()> {
         qdebug!([self] "A new frame has been received: {:?}", frame);
         match frame {
-            HFrame::Priority { .. } => Err(Error::UnexpectedFrame),
             HFrame::Headers { len } => self.handle_headers_frame(len, fin),
             HFrame::PushPromise { .. } => Err(Error::UnexpectedFrame),
             _ => Err(Error::WrongStream),
