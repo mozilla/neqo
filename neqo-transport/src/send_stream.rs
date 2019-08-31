@@ -412,6 +412,19 @@ impl SendStreamState {
         }
     }
 
+    fn tx_avail(&self) -> u64 {
+        match self {
+            // In Ready, TxBuffer not yet allocated but size is known
+            SendStreamState::Ready => TxBuffer::BUFFER_SIZE.try_into().unwrap(),
+            SendStreamState::Send { send_buf } | SendStreamState::DataSent { send_buf, .. } => {
+                send_buf.avail().try_into().unwrap()
+            }
+            SendStreamState::DataRecvd { .. }
+            | SendStreamState::ResetSent
+            | SendStreamState::ResetRecvd => 0,
+        }
+    }
+
     fn final_size(&self) -> Option<u64> {
         match self {
             SendStreamState::DataSent { final_size, .. }
@@ -559,19 +572,22 @@ impl SendStream {
 
     /// Stream credit available
     pub fn credit_avail(&self) -> u64 {
-        self.state
-            .tx_buf()
-            .map_or(0, |tx| self.max_stream_data - tx.data_limit())
+        if self.state == SendStreamState::Ready {
+            self.max_stream_data
+        } else {
+            self.state
+                .tx_buf()
+                .map_or(0, |tx| self.max_stream_data - tx.data_limit())
+        }
     }
 
     /// Bytes sendable on stream. Constrained by stream credit available,
     /// connection credit available, and space in the tx buffer.
     pub fn avail(&self) -> u64 {
-        let stream_avail = self
-            .state
-            .tx_buf()
-            .map_or(0, |tx| min(self.credit_avail(), tx.avail() as u64));
-        min(stream_avail, self.flow_mgr.borrow().conn_credit_avail())
+        min(
+            min(self.state.tx_avail(), self.credit_avail()),
+            self.flow_mgr.borrow().conn_credit_avail(),
+        )
     }
 
     pub fn max_stream_data(&self) -> u64 {
@@ -941,7 +957,7 @@ mod tests {
     }
 
     #[test]
-    fn send_stream_avail() {
+    fn send_stream_writable_event_gen() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         flow_mgr.borrow_mut().conn_increase_max_credit(2);
         let conn_events = ConnectionEvents::default();
@@ -1001,5 +1017,20 @@ mod tests {
         let evts = conn_events.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 0);
         assert_eq!(s.send(b"hello").unwrap(), 0);
+    }
+
+    #[test]
+    fn send_stream_writable_event_new_stream() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        flow_mgr.borrow_mut().conn_increase_max_credit(2);
+        let conn_events = ConnectionEvents::default();
+
+        let _s = SendStream::new(4.into(), 100, flow_mgr.clone(), conn_events.clone());
+
+        // Creating a new stream with conn and stream credits should result in
+        // an event.
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 1);
+        assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
     }
 }
