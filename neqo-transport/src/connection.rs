@@ -137,8 +137,8 @@ struct Path {
 
 impl Path {
     // Used to create a path when receiving a packet.
-    pub fn new(d: &Datagram, remote_cid: ConnectionId) -> Path {
-        Path {
+    pub fn new(d: &Datagram, remote_cid: ConnectionId) -> Self {
+        Self {
             local: d.destination(),
             remote: d.source(),
             local_cids: Vec::new(),
@@ -292,9 +292,9 @@ impl Connection {
         protocols: &[impl AsRef<str>],
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-    ) -> Res<Connection> {
+    ) -> Res<Self> {
         let dcid = ConnectionId::generate(CID_LENGTH);
-        let mut c = Connection::new(
+        let mut c = Self::new(
             Role::Client,
             Client::new(server_name)?.into(),
             None,
@@ -315,8 +315,8 @@ impl Connection {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
-    ) -> Res<Connection> {
-        Ok(Connection::new(
+    ) -> Res<Self> {
+        Ok(Self::new(
             Role::Server,
             Server::new(certs)?.into(),
             Some(anti_replay),
@@ -351,13 +351,13 @@ impl Connection {
         anti_replay: Option<&AntiReplay>,
         protocols: &[impl AsRef<str>],
         paths: Option<Path>,
-    ) -> Connection {
+    ) -> Self {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
-        Connection::set_tp_defaults(&mut tphandler.borrow_mut().local);
+        Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
         let crypto = Crypto::new(agent, protocols, tphandler.clone(), anti_replay)
             .expect("TLS should be configured successfully");
 
-        Connection {
+        Self {
             version: QUIC_VERSION,
             role: r,
             state: match r {
