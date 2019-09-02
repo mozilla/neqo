@@ -983,8 +983,9 @@ mod tests {
         assert_eq!(evts.len(), 0);
         assert_eq!(s.send(b"hello").unwrap(), 0);
 
-        // increasing conn max (conn:4, stream:4) will unblock but not emit event
-        // b/c that happens in Connection::emit_frame() (not tested)
+        // Increasing conn max (conn:4, stream:4) will unblock but not emit
+        // event b/c that happens in Connection::emit_frame() (tested in
+        // connection.rs)
         assert_eq!(flow_mgr.borrow_mut().conn_increase_max_credit(4), true);
         let evts = conn_events.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 0);
