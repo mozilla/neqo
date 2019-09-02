@@ -13,8 +13,11 @@ use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, State,
     StreamType,
 };
+
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::rc::Rc;
 // use std::path::PathBuf;
 use std::str::FromStr;
 use std::string::ParseError;
@@ -403,7 +406,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connecti
     let mut client = Connection::new_client(
         peer.host,
         &test.alpn(),
-        FixedConnectionIdManager::make(0),
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
     )
@@ -489,7 +492,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
     let mut client = Connection::new_client(
         peer.host,
         &["hq-22"],
-        FixedConnectionIdManager::make(0),
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
     )

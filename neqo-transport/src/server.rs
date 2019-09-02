@@ -79,7 +79,7 @@ impl RetryToken {
         token
     }
 
-    pub fn require_retry(&mut self, retry: bool) {
+    pub fn set_retry_required(&mut self, retry: bool) {
         self.require_retry = retry;
     }
 
@@ -169,8 +169,8 @@ impl Server {
         Datagram::new(received.destination(), received.source(), vn)
     }
 
-    pub fn require_retry(&mut self, require_retry: bool) {
-        self.retry.require_retry(require_retry);
+    pub fn set_retry_required(&mut self, require_retry: bool) {
+        self.retry.set_retry_required(require_retry);
     }
 
     fn remove_timer(&mut self, c: &StateRef) {

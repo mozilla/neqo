@@ -10,11 +10,14 @@ use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{transaction_server::Response, Header, Http3Connection, Http3State};
 use neqo_transport::{Connection, FixedConnectionIdManager, Output};
+
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use structopt::StructOpt;
@@ -220,7 +223,7 @@ fn main() -> Result<(), io::Error> {
                             &[args.key.clone()],
                             &[args.alpn.clone()],
                             &anti_replay,
-                            FixedConnectionIdManager::make(10),
+                            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
                         )
                         .expect("must succeed"),
                         args.max_table_size,

@@ -14,6 +14,8 @@ use neqo_transport::{
 };
 use test_fixture::{self, assertions, default_client, now};
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Duration;
 
 // Different than the one in the fixture, which is a single connection.
@@ -23,7 +25,7 @@ fn default_server() -> Server {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         test_fixture::anti_replay(),
-        FixedConnectionIdManager::make(7),
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(7))),
     )
 }
 
@@ -35,7 +37,7 @@ fn connected_server(server: &mut Server) -> ActiveConnectionRef {
 }
 
 fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef {
-    server.require_retry(false);
+    server.set_retry_required(false);
 
     assert_eq!(*client.state(), State::Init);
     let dgram = client.process(None, now()).dgram(); // ClientHello
@@ -70,7 +72,7 @@ fn single_client() {
 #[test]
 fn retry() {
     let mut server = default_server();
-    server.require_retry(true);
+    server.set_retry_required(true);
     let mut client = default_client();
 
     let dgram = client.process(None, now()).dgram(); // Initial
@@ -111,7 +113,7 @@ fn retry_0rtt() {
     // Calling active_connections clears the set of active connections.
     assert_eq!(server.active_connections().len(), 1);
 
-    server.require_retry(true);
+    server.set_retry_required(true);
     let mut client = default_client();
     client
         .set_resumption_token(now(), &token)

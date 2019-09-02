@@ -10,8 +10,11 @@ use neqo_common::matches;
 use neqo_common::once::OnceResult;
 use neqo_crypto::{init_db, AntiReplay, AuthenticationStatus};
 use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
+
+use std::cell::RefCell;
 use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 pub mod assertions;
@@ -64,7 +67,7 @@ pub fn default_client() -> Connection {
     Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
-        FixedConnectionIdManager::make(3),
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
     )
@@ -78,7 +81,7 @@ pub fn default_server() -> Connection {
         DEFAULT_KEYS,
         DEFAULT_ALPN,
         &anti_replay(),
-        FixedConnectionIdManager::make(5),
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
     )
     .expect("create a default server")
 }

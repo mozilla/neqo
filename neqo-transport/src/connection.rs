@@ -192,8 +192,8 @@ pub struct FixedConnectionIdManager {
     len: usize,
 }
 impl FixedConnectionIdManager {
-    pub fn make(len: usize) -> Rc<RefCell<dyn ConnectionIdManager>> {
-        Rc::new(RefCell::new(FixedConnectionIdManager { len }))
+    pub fn new(len: usize) -> Self {
+        Self { len }
     }
 }
 impl ConnectionIdDecoder for FixedConnectionIdManager {
@@ -1899,7 +1899,7 @@ mod tests {
         Connection::new_client(
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
-            FixedConnectionIdManager::make(3),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
         )
@@ -1911,7 +1911,7 @@ mod tests {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
-            FixedConnectionIdManager::make(5),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         )
         .expect("create a default server")
     }
@@ -2218,7 +2218,7 @@ mod tests {
         let mut client = Connection::new_client(
             "example.com",
             &["bad-alpn"],
-            FixedConnectionIdManager::make(9),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
             loopback(),
             loopback(),
         )
@@ -2420,7 +2420,7 @@ mod tests {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &ar,
-            FixedConnectionIdManager::make(10),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
         )
         .unwrap();
 
