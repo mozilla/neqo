@@ -15,14 +15,14 @@ struct TimerItem<T> {
 }
 
 impl<T> TimerItem<T> {
-    fn time(ti: &TimerItem<T>) -> Instant {
+    fn time(ti: &Self) -> Instant {
         ti.time
     }
 }
 
 /// A timer queue.
 /// This uses a classic timer wheel arrangement, with some characteristics that might be considered peculiar.
-/// Each slot in the wheel is sorted (complexity O(log(N) on insertion).
+/// Each slot in the wheel is sorted (complexity O(N) insertions, but O(logN) to find cut points).
 /// Time is relative, the wheel has an origin time and it is unable to represent times that are more than
 /// `granularity * capacity` past that time.
 pub struct Timer<T> {
@@ -34,12 +34,12 @@ pub struct Timer<T> {
 
 impl<T> Timer<T> {
     /// Construct a new wheel at the given granularity, starting at the given time.
-    pub fn new(now: Instant, granularity: Duration, capacity: usize) -> Timer<T> {
+    pub fn new(now: Instant, granularity: Duration, capacity: usize) -> Self {
         assert!(u32::try_from(capacity).is_ok());
         assert!(granularity.as_nanos() > 0);
         let mut items = Vec::with_capacity(capacity);
         items.resize_with(capacity, Default::default);
-        Timer {
+        Self {
             items,
             now,
             granularity,
@@ -62,12 +62,14 @@ impl<T> Timer<T> {
     /// Two timers cannot be more than this far apart.
     /// In practice, this value is less by one amount of the timer granularity.
     #[inline]
+    #[allow(clippy::cast_possible_truncation)] // guarded by assertion
     pub fn span(&self) -> Duration {
         self.granularity * (self.items.len() as u32)
     }
 
     /// For the given `time`, get the number of whole buckets in the future that is.
     #[inline]
+    #[allow(clippy::cast_possible_truncation)] // guarded by assertion
     fn delta(&self, time: Instant) -> usize {
         // This really should use Instant::div_duration(), but it can't yet.
         ((time - self.now).as_nanos() / self.granularity.as_nanos()) as usize
@@ -85,6 +87,7 @@ impl<T> Timer<T> {
     }
 
     /// Slide forward in time by `n * self.granularity`.
+    #[allow(clippy::cast_possible_truncation)] // guarded by assertion
     fn tick(&mut self, n: usize) {
         let new = self.bucket(n);
         let iter = if new < self.cursor {
@@ -122,8 +125,7 @@ impl<T> Timer<T> {
 
         let bucket = self.bucket(d);
         let ins = match self.items[bucket].binary_search_by_key(&time, TimerItem::time) {
-            Ok(j) => j,
-            Err(j) => j,
+            Ok(j) | Err(j) => j,
         };
         self.items[bucket].insert(ins, TimerItem { time, item });
     }
@@ -183,7 +185,7 @@ impl<T> Timer<T> {
         if until >= self.now + self.span() {
             // Drain everything, so a clean sweep.
             let mut empty_items = Vec::with_capacity(self.items.len());
-            empty_items.resize_with(self.items.len(), Default::default);
+            empty_items.resize_with(self.items.len(), Vec::default);
             let mut items = mem::replace(&mut self.items, empty_items);
             self.now = until;
             self.cursor = 0;
@@ -197,13 +199,11 @@ impl<T> Timer<T> {
         let mut buckets = Vec::with_capacity(delta + 1);
 
         // First, the whole buckets.
-        for _ in 0..delta {
-            buckets.push(mem::replace(
-                &mut self.items[self.cursor],
-                Default::default(),
-            ));
-            self.tick(1);
+        for i in 0..delta {
+            let idx = self.bucket(i);
+            buckets.push(mem::replace(&mut self.items[idx], Vec::default()));
         }
+        self.tick(delta);
 
         // Now we need to split the last bucket, because there might be
         // some items with `item.time > until`.
