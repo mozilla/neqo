@@ -748,7 +748,7 @@ impl SendStreams {
     }
 
     pub(crate) fn retry(&mut self) {
-        for (_, stream) in self {
+        for stream in self.0.values_mut() {
             stream.retry();
         }
     }
