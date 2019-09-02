@@ -589,15 +589,12 @@ impl Connection {
 
         if self.idle_timeout.expired(now) {
             qinfo!("idle timeout expired");
-            self.set_state(State::Closing {
-                error: ConnectionError::Transport(Error::IdleTimeout),
-                frame_type: 0,
-                msg: "Idle timeout".into(),
-                timeout: self.get_closing_period_time(now),
-            });
+            self.set_state(State::Closed(ConnectionError::Transport(
+                Error::IdleTimeout,
+            )));
+        } else {
+            self.check_loss_detection_timeout(now);
         }
-
-        self.check_loss_detection_timeout(now);
     }
 
     /// Call in to process activity on the connection. Either new packets have
@@ -2498,7 +2495,7 @@ mod tests {
         client.process_timer(now + Duration::from_secs(60));
 
         // Not connected after 60 seconds.
-        assert!(matches!(client.state(), State::Closing{..}));
+        assert!(matches!(client.state(), State::Closed(_)));
     }
 
     #[test]
@@ -2525,7 +2522,7 @@ mod tests {
 
         // Not connected after 70 seconds.
         client.process_timer(now + Duration::from_secs(70));
-        assert!(matches!(client.state(), State::Closing{..}));
+        assert!(matches!(client.state(), State::Closed(_)));
     }
 
     #[test]
@@ -2554,7 +2551,7 @@ mod tests {
         // Not connected after 70 seconds because timer not reset by second
         // outgoing packet
         client.process_timer(now + Duration::from_secs(70));
-        assert!(matches!(client.state(), State::Closing{..}));
+        assert!(matches!(client.state(), State::Closed(_)));
     }
 
     #[test]
@@ -2589,6 +2586,6 @@ mod tests {
 
         // Not connected after 80 seconds.
         client.process_timer(now + Duration::from_secs(80));
-        assert!(matches!(client.state(), State::Closing{..}));
+        assert!(matches!(client.state(), State::Closed(_)));
     }
 }

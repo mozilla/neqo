@@ -50,19 +50,12 @@ impl<T> Timer<T> {
     /// Return a reference to the time of the next entry.
     pub fn next_time(&self) -> Option<Instant> {
         for i in 0..self.items.len() {
-            let idx = (self.cursor + i) % self.items.len();
+            let idx = self.bucket(i);
             if let Some(t) = self.items[idx].first() {
                 return Some(t.time);
             }
         }
         None
-    }
-
-    /// Slide forward in time by `self.granularity`.
-    fn tick(&mut self) {
-        assert!(self.items[self.cursor].is_empty());
-        self.now += self.granularity;
-        self.cursor = (self.cursor + 1) % self.items.len();
     }
 
     /// Get the full span of time that this can cover.
@@ -77,9 +70,33 @@ impl<T> Timer<T> {
     #[inline]
     fn delta(&self, time: Instant) -> usize {
         // This really should use Instant::div_duration(), but it can't yet.
-        let delta = ((time - self.now).as_nanos() / self.granularity.as_nanos()) as usize;
+        ((time - self.now).as_nanos() / self.granularity.as_nanos()) as usize
+    }
+
+    #[inline]
+    fn time_bucket(&self, time: Instant) -> usize {
+        self.bucket(self.delta(time))
+    }
+
+    #[inline]
+    fn bucket(&self, delta: usize) -> usize {
         debug_assert!(delta < self.items.len());
-        delta
+        (self.cursor + delta) % self.items.len()
+    }
+
+    /// Slide forward in time by `n * self.granularity`.
+    fn tick(&mut self, n: usize) {
+        let new = self.bucket(n);
+        let iter = if new < self.cursor {
+            (self.cursor..self.items.len()).chain(0..new)
+        } else {
+            (self.cursor..new).chain(0..0)
+        };
+        for i in iter {
+            assert!(self.items[i].is_empty());
+        }
+        self.now += self.granularity * (n as u32);
+        self.cursor = new;
     }
 
     /// Asserts if the time given is in the past or too far in the future.
@@ -96,12 +113,14 @@ impl<T> Timer<T> {
             self.cursor = 0;
         }
 
-        // Adjust time forward as much as is necessary.
-        // This will assert if it is forced to discard a value.
-        while time >= self.now + self.span() {
-            self.tick();
+        // Adjust time forward the minimum amount necessary.
+        let mut d = self.delta(time);
+        if d >= self.items.len() {
+            self.tick(1 + d - self.items.len());
+            d = self.items.len() - 1;
         }
-        let bucket = (self.cursor + self.delta(time)) % self.items.len();
+
+        let bucket = self.bucket(d);
         let ins = match self.items[bucket].binary_search_by_key(&time, TimerItem::time) {
             Ok(j) => j,
             Err(j) => j,
@@ -115,7 +134,10 @@ impl<T> Timer<T> {
     where
         F: FnMut(&T) -> bool,
     {
-        let bucket = (self.cursor + self.delta(time)) % self.items.len();
+        if time < self.now {
+            return None;
+        }
+        let bucket = self.time_bucket(time);
         let start_index = match self.items[bucket].binary_search_by_key(&time, TimerItem::time) {
             Ok(idx) => idx,
             _ => return None,
@@ -145,16 +167,13 @@ impl<T> Timer<T> {
     /// Take the next item, unless there are no items with
     /// a timeout in the past relative to `until`.
     pub fn take_next(&mut self, until: Instant) -> Option<T> {
-        loop {
-            if !self.items[self.cursor].is_empty() && self.items[self.cursor][0].time <= until {
-                return Some(self.items[self.cursor].remove(0).item);
-            }
-            if until > self.now + self.granularity {
-                self.tick();
-            } else {
-                return None;
+        for i in 0..self.items.len() {
+            let idx = self.bucket(i);
+            if !self.items[idx].is_empty() && self.items[idx][0].time <= until {
+                return Some(self.items[idx].remove(0).item);
             }
         }
+        None
     }
 
     /// Create an iterator that takes all items until the given time.
@@ -183,7 +202,7 @@ impl<T> Timer<T> {
                 &mut self.items[self.cursor],
                 Default::default(),
             ));
-            self.tick();
+            self.tick(1);
         }
 
         // Now we need to split the last bucket, because there might be

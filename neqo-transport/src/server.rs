@@ -6,11 +6,10 @@
 
 // This file implements a server that can handle multiple connections.
 
-use neqo_common::timer::Timer;
-use neqo_common::{hex, qinfo, qtrace, qwarn, Datagram, Decoder};
+use neqo_common::{hex, matches, qinfo, qtrace, qwarn, timer::Timer, Datagram, Decoder};
 use neqo_crypto::AntiReplay;
 
-use crate::connection::{Connection, ConnectionIdManager, Output};
+use crate::connection::{Connection, ConnectionIdManager, Output, State};
 use crate::packet::{
     decode_packet_hdr, encode_packet_vn, encode_retry, ConnectionId, ConnectionIdDecoder,
     PacketHdr, PacketType, Version,
@@ -34,7 +33,7 @@ pub enum InitialResult {
 /// a new connection across all QUIC versions this server supports.
 const MIN_INITIAL_PACKET_SIZE: usize = 1200;
 const TIMER_GRANULARITY: Duration = Duration::from_millis(10);
-const TIMER_CAPACITY: usize = 1024;
+const TIMER_CAPACITY: usize = 16384;
 const FIXED_TOKEN: &[u8] = &[1, 2, 3];
 
 type StateRef = Rc<RefCell<ServerConnectionState>>;
@@ -44,7 +43,7 @@ type ConnectionTableRef = Rc<RefCell<HashMap<ConnectionId, StateRef>>>;
 #[derive(Debug)]
 struct ServerConnectionState {
     c: Connection,
-    // TODO(mt) work out whether this needs to hold anything.
+    last_timer: Instant,
 }
 
 impl Deref for ServerConnectionState {
@@ -174,6 +173,11 @@ impl Server {
         self.retry.require_retry(require_retry);
     }
 
+    fn remove_timer(&mut self, c: &StateRef) {
+        let last = c.borrow().last_timer;
+        self.timers.remove(last, |t| Rc::ptr_eq(t, c));
+    }
+
     fn process_connection(
         &mut self,
         c: StateRef,
@@ -183,17 +187,32 @@ impl Server {
         qtrace!([self] "Process connection {:?}", c);
         let out = c.borrow_mut().process(dgram, now);
         match out {
-            Output::Datagram(_) => self.waiting.push_back(c.clone()),
-            Output::Callback(delay) => self.timers.add(now + delay, c.clone()),
-            _ => (),
+            Output::Datagram(_) => {
+                qtrace!([self] "Sending packet, added to waiting connections");
+                self.waiting.push_back(c.clone());
+            }
+            Output::Callback(delay) => {
+                let next = now + delay;
+                if next != c.borrow().last_timer {
+                    qtrace!([self] "Change timer to {:?}", next);
+                    self.remove_timer(&c);
+                    c.borrow_mut().last_timer = next;
+                    self.timers.add(next, c.clone());
+                }
+            }
+            _ => {
+                self.remove_timer(&c);
+            }
         }
         if c.borrow().has_events() {
             qtrace!([self] "Connection active: {:?}", c);
             self.active.insert(ActiveConnectionRef { c: c.clone() });
         }
-        // if *c.borrow().state() == State::Closed {
-        //     self.connections.retain(|| ); // TODO(mt)
-        // }
+        if matches!(c.borrow().state(), State::Closed(_)) {
+            self.connections
+                .borrow_mut()
+                .retain(|_, v| !Rc::ptr_eq(v, &c));
+        }
         out.dgram()
     }
 
@@ -260,7 +279,7 @@ impl Server {
             if let Some(odcid) = odcid {
                 c.original_connection_id(&odcid);
             }
-            let c = Rc::new(RefCell::new(ServerConnectionState { c }));
+            let c = Rc::new(RefCell::new(ServerConnectionState { c, last_timer: now }));
             cid_mgr.borrow_mut().c = Some(c.clone());
             self.process_connection(c, Some(dgram), now)
         } else {

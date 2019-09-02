@@ -404,7 +404,6 @@ impl SecretAgent {
     /// 255 octets in length.
     pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
         // Validate and set length.
-        // Unfortunately, this means that we need to run the iterator twice.
         let mut encoded_len = protocols.len();
         for v in protocols {
             assert!(v.as_ref().len() < 256);

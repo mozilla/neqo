@@ -6,13 +6,15 @@
 
 #![deny(warnings)]
 
-use neqo_common::{Datagram, Decoder};
+use neqo_common::{qtrace, Datagram, Decoder};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{
     server::ActiveConnectionRef, server::Server, Connection, ConnectionError, Error,
     FixedConnectionIdManager, Output, State, StreamType, QUIC_VERSION,
 };
 use test_fixture::{self, assertions, default_client, now};
+
+use std::time::Duration;
 
 // Different than the one in the fixture, which is a single connection.
 fn default_server() -> Server {
@@ -34,13 +36,20 @@ fn connected_server(server: &mut Server) -> ActiveConnectionRef {
 
 fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef {
     server.require_retry(false);
+
+    assert_eq!(*client.state(), State::Init);
     let dgram = client.process(None, now()).dgram(); // ClientHello
     assert!(dgram.is_some());
     let dgram = server.process(dgram, now()).dgram(); // ServerHello...
     assert!(dgram.is_some());
-    // Ingest the server Certificate and authenticate.
-    let _ = client.process(dgram, now()).dgram();
-    // Drop any datagram the client sends here; it's just an ACK.
+
+    // Ingest the server Certificate.
+    let dgram = client.process(dgram, now()).dgram();
+    assert!(dgram.is_some()); // This should just be an ACK.
+    let dgram = server.process(dgram, now()).dgram();
+    assert!(dgram.is_none()); // So the server should have nothing to say.
+
+    // Now mark the server as authenticated.
     client.authenticated(AuthenticationStatus::Ok, now());
     let dgram = client.process(None, now()).dgram();
     assert!(dgram.is_some());
@@ -188,5 +197,15 @@ fn version_negotiation() {
 
 #[test]
 fn closed() {
-    // TODO(mt) fully close a server connection and it should be dropped
+    // Let a server connection idle and it should be removed.
+    let mut server = default_server();
+    let mut client = default_client();
+    connect(&mut client, &mut server);
+
+    let res = server.process(None, now());
+    assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+
+    qtrace!("60s later");
+    let res = server.process(None, now() + Duration::from_secs(60));
+    assert_eq!(res, Output::None);
 }
