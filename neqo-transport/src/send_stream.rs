@@ -25,8 +25,6 @@ use crate::recovery::RecoveryToken;
 use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
 
-const TX_STREAM_BUFFER: usize = 0xFFFF; // 64 KiB
-
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum RangeState {
     Sent,
@@ -282,19 +280,21 @@ pub struct TxBuffer {
 }
 
 impl TxBuffer {
+    const BUFFER_SIZE: usize = 0xFFFF; // 64 KiB
+
     pub fn new() -> Self {
         Self {
-            send_buf: SliceDeque::with_capacity(TX_STREAM_BUFFER),
+            send_buf: SliceDeque::with_capacity(TxBuffer::BUFFER_SIZE),
             ..Self::default()
         }
     }
 
     /// Attempt to add some or all of the passed-in buffer to the TxBuffer.
     pub fn send(&mut self, buf: &[u8]) -> usize {
-        let can_buffer = min(TX_STREAM_BUFFER - self.buffered(), buf.len());
+        let can_buffer = min(TxBuffer::BUFFER_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
             self.send_buf.extend(&buf[..can_buffer]);
-            assert!(self.send_buf.len() <= TX_STREAM_BUFFER);
+            assert!(self.send_buf.len() <= TxBuffer::BUFFER_SIZE);
         }
         can_buffer
     }
@@ -360,7 +360,7 @@ impl TxBuffer {
     }
 
     fn avail(&self) -> usize {
-        TX_STREAM_BUFFER - self.buffered()
+        TxBuffer::BUFFER_SIZE - self.buffered()
     }
 
     fn highest_sent(&self) -> u64 {
@@ -520,7 +520,7 @@ impl SendStream {
         match self.state {
             SendStreamState::Send { ref mut send_buf } => {
                 send_buf.mark_as_acked(offset, len);
-                if send_buf.buffered() < TX_STREAM_BUFFER {
+                if send_buf.buffered() < TxBuffer::BUFFER_SIZE {
                     self.conn_events.send_stream_writable(self.stream_id)
                 }
             }
@@ -894,25 +894,25 @@ mod tests {
         assert_eq!(s.state.tx_buf().unwrap().data_limit(), 100);
 
         // Should hit stream flow control limit before filling up send buffer
-        let res = s.send(&[4; TX_STREAM_BUFFER]).unwrap();
+        let res = s.send(&[4; TxBuffer::BUFFER_SIZE]).unwrap();
         assert_eq!(res, 1024 - 100);
 
         // should do nothing, max stream data already 1024
         s.set_max_stream_data(1024);
-        let res = s.send(&[4; TX_STREAM_BUFFER]).unwrap();
+        let res = s.send(&[4; TxBuffer::BUFFER_SIZE]).unwrap();
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
         s.set_max_stream_data(1_048_576);
-        let res = s.send(&[4; TX_STREAM_BUFFER]).unwrap();
+        let res = s.send(&[4; TxBuffer::BUFFER_SIZE]).unwrap();
         assert_eq!(res, 3072);
 
         // should now hit the tx buffer size
         flow_mgr
             .borrow_mut()
-            .conn_increase_max_credit(TX_STREAM_BUFFER as u64);
-        let res = s.send(&[4; TX_STREAM_BUFFER + 100]).unwrap();
-        assert_eq!(res, TX_STREAM_BUFFER - 4096);
+            .conn_increase_max_credit(TxBuffer::BUFFER_SIZE as u64);
+        let res = s.send(&[4; TxBuffer::BUFFER_SIZE + 100]).unwrap();
+        assert_eq!(res, TxBuffer::BUFFER_SIZE - 4096);
 
         // TODO(agrover@mozilla.com): test ooo acks somehow
         s.mark_as_acked(0, 40, false);

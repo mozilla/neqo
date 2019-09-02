@@ -30,7 +30,7 @@ pub enum ConnectionEvent {
     RecvStreamReadable { stream_id: u64 },
     /// Peer reset the stream.
     RecvStreamReset { stream_id: u64, app_error: AppError },
-    /// Peer has sent STOP_SENDIconnectioNG
+    /// Peer has sent STOP_SENDING
     SendStreamStopSending { stream_id: u64, app_error: AppError },
     /// Peer has acked everything sent on the stream.
     SendStreamComplete { stream_id: u64 },
