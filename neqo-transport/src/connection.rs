@@ -97,6 +97,7 @@ pub enum State {
 
 // Implement Ord so that we can enforce monotonic state progression.
 impl PartialOrd for State {
+    #[allow(clippy::match_same_arms)] // Lint bug: rust-lang/rust-clippy#860
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         if std::mem::discriminant(self) == std::mem::discriminant(other) {
             return Some(Ordering::Equal);
@@ -830,12 +831,12 @@ impl Connection {
     }
 
     fn process_migrations(&self, d: &Datagram) -> Res<()> {
-        if !self.paths.iter().any(|p| p.received_on(&d)) {
+        if self.paths.iter().any(|p| p.received_on(&d)) {
+            Ok(())
+        } else {
             // Right now, we don't support any form of migration.
             // So generate an error if a packet is received on a new path.
             Err(Error::InvalidMigration)
-        } else {
-            Ok(())
         }
     }
 

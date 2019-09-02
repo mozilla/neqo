@@ -92,7 +92,6 @@ impl From<PRErrorCode> for AuthenticationStatus {
             mozpkix::MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED => {
                 Self::PolicyRejection
             }
-            sec::SEC_ERROR_LIBRARY_FAILURE => Self::Unknown,
             _ => Self::Unknown,
         }
     }
