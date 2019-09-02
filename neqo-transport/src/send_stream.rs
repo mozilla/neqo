@@ -412,6 +412,19 @@ impl SendStreamState {
         }
     }
 
+    fn tx_avail(&self) -> u64 {
+        match self {
+            // In Ready, TxBuffer not yet allocated but size is known
+            SendStreamState::Ready => TxBuffer::BUFFER_SIZE.try_into().unwrap(),
+            SendStreamState::Send { send_buf } | SendStreamState::DataSent { send_buf, .. } => {
+                send_buf.avail().try_into().unwrap()
+            }
+            SendStreamState::DataRecvd { .. }
+            | SendStreamState::ResetSent
+            | SendStreamState::ResetRecvd => 0,
+        }
+    }
+
     fn final_size(&self) -> Option<u64> {
         match self {
             SendStreamState::DataSent { final_size, .. }
@@ -457,16 +470,17 @@ impl SendStream {
         flow_mgr: Rc<RefCell<FlowMgr>>,
         conn_events: ConnectionEvents,
     ) -> Self {
-        if max_stream_data > 0 {
-            conn_events.send_stream_writable(stream_id);
-        }
-        Self {
+        let ss = Self {
             stream_id,
             max_stream_data,
             state: SendStreamState::Ready,
             flow_mgr,
             conn_events,
+        };
+        if ss.avail() > 0 {
+            ss.conn_events.send_stream_writable(stream_id);
         }
+        ss
     }
 
     /// Return the next range to be sent, if any.
@@ -520,7 +534,7 @@ impl SendStream {
         match self.state {
             SendStreamState::Send { ref mut send_buf } => {
                 send_buf.mark_as_acked(offset, len);
-                if send_buf.buffered() < TxBuffer::BUFFER_SIZE {
+                if self.avail() > 0 {
                     self.conn_events.send_stream_writable(self.stream_id)
                 }
             }
@@ -558,17 +572,22 @@ impl SendStream {
 
     /// Stream credit available
     pub fn credit_avail(&self) -> u64 {
-        self.state
-            .tx_buf()
-            .map_or(0, |tx| self.max_stream_data - tx.data_limit())
+        if self.state == SendStreamState::Ready {
+            self.max_stream_data
+        } else {
+            self.state
+                .tx_buf()
+                .map_or(0, |tx| self.max_stream_data - tx.data_limit())
+        }
     }
 
-    /// Bytes sendable on stream. Constrained by both stream credit available
-    /// and space in the tx buffer.
+    /// Bytes sendable on stream. Constrained by stream credit available,
+    /// connection credit available, and space in the tx buffer.
     pub fn avail(&self) -> u64 {
-        self.state
-            .tx_buf()
-            .map_or(0, |tx| min(self.credit_avail(), tx.avail() as u64))
+        min(
+            min(self.state.tx_avail(), self.credit_avail()),
+            self.flow_mgr.borrow().conn_credit_avail(),
+        )
     }
 
     pub fn max_stream_data(&self) -> u64 {
@@ -576,7 +595,11 @@ impl SendStream {
     }
 
     pub fn set_max_stream_data(&mut self, value: u64) {
-        self.max_stream_data = max(self.max_stream_data, value)
+        let stream_was_blocked = self.avail() == 0;
+        self.max_stream_data = max(self.max_stream_data, value);
+        if stream_was_blocked && self.avail() > 0 {
+            self.conn_events.send_stream_writable(self.stream_id)
+        }
     }
 
     pub fn reset_acked(&mut self) {
@@ -611,12 +634,7 @@ impl SendStream {
             });
         }
 
-        let stream_credit_avail = self.credit_avail();
-        let conn_credit_avail = self.flow_mgr.borrow().conn_credit_avail();
-        let credit_avail = min(stream_credit_avail, conn_credit_avail);
-        let buff_avail = self.state.tx_buf().map_or(0, TxBuffer::avail);
-        let space_avail = min(credit_avail, buff_avail as u64);
-        let can_send_bytes = min(space_avail, buf.len() as u64);
+        let can_send_bytes = min(self.avail(), buf.len() as u64);
 
         if can_send_bytes == 0 {
             return Ok(0);
@@ -823,6 +841,10 @@ pub(crate) struct StreamRecoveryToken {
 mod tests {
     use super::*;
 
+    use neqo_common::matches;
+
+    use crate::events::ConnectionEvent;
+
     #[test]
     fn test_mark_range() {
         let mut rt = RangeTracker::default();
@@ -932,5 +954,84 @@ mod tests {
         tx.mark_as_acked(0, 100);
         let res = tx.next_bytes(TxMode::Normal);
         assert_eq!(res, None);
+    }
+
+    #[test]
+    fn send_stream_writable_event_gen() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        flow_mgr.borrow_mut().conn_increase_max_credit(2);
+        let conn_events = ConnectionEvents::default();
+
+        let mut s = SendStream::new(4.into(), 0, flow_mgr.clone(), conn_events.clone());
+
+        // Stream is initially blocked (conn:2, stream:0)
+        // and will not accept data.
+        assert_eq!(s.send(b"hi").unwrap(), 0);
+
+        // increasing to (conn:2, stream:2) will allow 2 bytes, and also
+        // generate a SendStreamWritable event.
+        s.set_max_stream_data(2);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 1);
+        assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
+        assert_eq!(s.send(b"hello").unwrap(), 2);
+
+        // increasing to (conn:2, stream:4) will not generate an event or allow
+        // sending anything.
+        s.set_max_stream_data(4);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+        assert_eq!(s.send(b"hello").unwrap(), 0);
+
+        // Increasing conn max (conn:4, stream:4) will unblock but not emit
+        // event b/c that happens in Connection::emit_frame() (tested in
+        // connection.rs)
+        assert_eq!(flow_mgr.borrow_mut().conn_increase_max_credit(4), true);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+        assert_eq!(s.avail(), 2);
+        assert_eq!(s.send(b"hello").unwrap(), 2);
+
+        // No event because still blocked by conn
+        s.set_max_stream_data(1_000_000_000);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+
+        // No event because happens in emit_frame()
+        flow_mgr
+            .borrow_mut()
+            .conn_increase_max_credit(1_000_000_000);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+
+        // Unblocking both by a large amount will cause avail() to be limited by
+        // tx buffer size.
+        assert_eq!(s.avail(), u64::try_from(TxBuffer::BUFFER_SIZE - 4).unwrap());
+
+        assert_eq!(
+            s.send(&[b'a'; TxBuffer::BUFFER_SIZE]).unwrap(),
+            TxBuffer::BUFFER_SIZE - 4
+        );
+
+        // No event because still blocked by tx buffer full
+        s.set_max_stream_data(2_000_000_000);
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+        assert_eq!(s.send(b"hello").unwrap(), 0);
+    }
+
+    #[test]
+    fn send_stream_writable_event_new_stream() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        flow_mgr.borrow_mut().conn_increase_max_credit(2);
+        let conn_events = ConnectionEvents::default();
+
+        let _s = SendStream::new(4.into(), 100, flow_mgr.clone(), conn_events.clone());
+
+        // Creating a new stream with conn and stream credits should result in
+        // an event.
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 1);
+        assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
     }
 }

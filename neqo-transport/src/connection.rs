@@ -8,7 +8,7 @@
 
 #![allow(dead_code)]
 use std::cell::RefCell;
-use std::cmp::{max, min, Ordering};
+use std::cmp::{max, Ordering};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::{self, Debug};
@@ -54,7 +54,12 @@ const CID_LENGTH: usize = 8;
 
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
+
+#[cfg(not(test))]
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
+#[cfg(test)]
+const LOCAL_MAX_DATA: u64 = 0x3FFF; // 16,383
+
 const LOCAL_IDLE_TIMEOUT: Duration = Duration::from_secs(60); // 1 minute
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -1157,6 +1162,24 @@ impl Connection {
         Ok(())
     }
 
+    fn handle_max_data(&mut self, maximum_data: u64) {
+        let conn_was_blocked = self.flow_mgr.borrow().conn_credit_avail() == 0;
+        let conn_credit_increased = self
+            .flow_mgr
+            .borrow_mut()
+            .conn_increase_max_credit(maximum_data);
+
+        if conn_was_blocked && conn_credit_increased {
+            for (id, ss) in &mut self.send_streams {
+                if ss.avail() > 0 {
+                    // These may not actually all be writable if one
+                    // uses up all the conn credit. Not our fault.
+                    self.events.send_stream_writable(*id)
+                }
+            }
+        }
+    }
+
     fn input_frame(&mut self, epoch: Epoch, frame: Frame, now: Instant) -> Res<()> {
         match frame {
             Frame::Padding => {
@@ -1228,10 +1251,7 @@ impl Connection {
                     rs.inbound_stream_frame(fin, offset, data)?;
                 }
             }
-            Frame::MaxData { maximum_data } => self
-                .flow_mgr
-                .borrow_mut()
-                .conn_increase_max_credit(maximum_data),
+            Frame::MaxData { maximum_data } => self.handle_max_data(maximum_data),
             Frame::MaxStreamData {
                 stream_id,
                 maximum_stream_data,
@@ -1688,10 +1708,7 @@ impl Connection {
     /// i.e. that will not be blocked by flow credits or send buffer max
     /// capacity.
     pub fn stream_avail_send_space(&self, stream_id: u64) -> Res<u64> {
-        Ok(min(
-            self.send_streams.get(stream_id.into())?.avail(),
-            self.flow_mgr.borrow().conn_credit_avail(),
-        ))
+        Ok(self.send_streams.get(stream_id.into())?.avail())
     }
 
     /// Close the stream. Enqueued data will be sent.
@@ -1731,7 +1748,7 @@ impl Connection {
 
     /// Get events that indicate state changes on the connection.
     pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
-        self.events.events().into_iter()
+        self.events.events()
     }
 
     fn check_loss_detection_timeout(&mut self, now: Instant) {
@@ -2558,5 +2575,42 @@ mod tests {
         // Not connected after 80 seconds.
         client.process_timer(now + Duration::from_secs(80));
         assert!(matches!(client.state(), State::Closing{..}));
+    }
+
+    #[test]
+    fn max_data() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(stream_id, 2);
+        assert_eq!(
+            client.stream_avail_send_space(stream_id).unwrap(),
+            LOCAL_MAX_DATA // 16383, when cfg(test)
+        );
+        assert_eq!(
+            client
+                .stream_send(stream_id, &[b'a'; RX_STREAM_DATA_WINDOW as usize])
+                .unwrap(),
+            LOCAL_MAX_DATA as usize
+        );
+        let evts = client.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 2); // SendStreamWritable, StateChange(connected)
+        assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 0);
+        let ss = client.send_streams.get_mut(stream_id.into()).unwrap();
+        ss.mark_as_sent(0, 4096, false);
+        ss.mark_as_acked(0, 4096, false);
+
+        // no event because still limited by conn max data
+        let evts = client.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+
+        // increase max data
+        client.handle_max_data(100_000);
+        assert_eq!(client.stream_avail_send_space(stream_id).unwrap(), 49152);
+        let evts = client.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 1);
+        assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
     }
 }
