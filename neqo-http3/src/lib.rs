@@ -52,6 +52,8 @@ pub enum Error {
     DecodingFrame,
     NotEnoughData,
     Unexpected,
+    InvalidStreamId,
+    Unavailable,
     // So we can wrap and report these errors.
     TransportError(neqo_transport::Error),
     QpackError(neqo_qpack::Error),
@@ -91,6 +93,8 @@ impl Error {
             | Error::DecodingFrame
             | Error::NotEnoughData
             | Error::Unexpected
+            | Error::InvalidStreamId
+            | Error::Unavailable
             | Error::TransportError(..) => 3,
             Error::QpackError(e) => e.code(),
         }
