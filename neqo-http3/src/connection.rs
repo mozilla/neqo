@@ -1863,8 +1863,9 @@ mod tests {
                         .read_response_data(now(), stream_id, &mut buf)
                         .unwrap();
                     assert_eq!(fin, true);
-                    assert_eq!(amount, 3);
-                    assert_eq!(buf[..3], [0x61, 0x62, 0x63]);
+                    const EXPECTED_RESPONSE_BODY: &[u8] = &[0x61, 0x62, 0x63];
+                    assert_eq!(amount, EXPECTED_RESPONSE_BODY.len());
+                    assert_eq!(&buf[..3], EXPECTED_RESPONSE_BODY);
                 }
                 _ => {}
             }
@@ -1918,14 +1919,13 @@ mod tests {
                     let mut buf = [0u8; 100];
                     let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert_eq!(fin, true);
-                    assert_eq!(amount, 23);
-                    assert_eq!(
-                        buf[..23],
-                        [
-                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1, 0x0, 0x3, 0x64, 0x65, 0x66,
-                        ]
-                    );
+                    const EXPECTED_RESPONSE_BODY: &[u8] = &[
+                        0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
+                        0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1, 0x0, 0x3, 0x64, 0x65, 0x66,
+                    ];
+                    assert_eq!(amount, EXPECTED_RESPONSE_BODY.len());
+                    assert_eq!(&buf[..23], EXPECTED_RESPONSE_BODY);
+
                     // send response - 200  Content-Length: 3
                     // with content: 'abc'.
                     let _ = neqo_trans_conn.stream_send(

@@ -17,12 +17,12 @@ use crate::{Error, Res};
 use std::cmp::min;
 use std::mem;
 
-const MAX_DATA_HEADER_SIZE_2: usize = 63; // Maximal amount of data with DATA frame header size 2
-const MAX_DATA_HEADER_SIZE_2_LIMIT: usize = 66; // 63 + 3 (size of the next biffer data frame header)
-const MAX_DATA_HEADER_SIZE_3: usize = 16383; // Maximal amount of data with DATA frame header size 3
-const MAX_DATA_HEADER_SIZE_3_LIMIT: usize = 16388; // 16383 + 5 (size of the next biffer data frame header)
-const MAX_DATA_HEADER_SIZE_5: usize = 1_073_741_823; // Maximal amount of data with DATA frame header size 3
-const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = 1_073_741_832; // 1073741823 + 9 (size of the next biffer data frame header)
+const MAX_DATA_HEADER_SIZE_2: usize = (1 << 6) - 1; // Maximal amount of data with DATA frame header size 2
+const MAX_DATA_HEADER_SIZE_2_LIMIT: usize = MAX_DATA_HEADER_SIZE_2 + 3; // 63 + 3 (size of the next buffer data frame header)
+const MAX_DATA_HEADER_SIZE_3: usize = (1 << 14) - 1; // Maximal amount of data with DATA frame header size 3
+const MAX_DATA_HEADER_SIZE_3_LIMIT: usize = MAX_DATA_HEADER_SIZE_3 + 5; // 16383 + 5 (size of the next buffer data frame header)
+const MAX_DATA_HEADER_SIZE_5: usize = (1 << 30) - 1; // Maximal amount of data with DATA frame header size 3
+const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 1073741823 + 9 (size of the next buffer data frame header)
 
 #[derive(PartialEq, Debug)]
 struct Request {
