@@ -23,11 +23,11 @@ jobs:
 
       - run:
           name: Build
-          command: NSS_JOBS=3 cargo build -v --all-targets --all-features
+          command: NSS_JOBS=3 cargo build -v --all-targets --tests
 
       - run:
           name: Clippy
-          command: NSS_JOBS=3 cargo clippy -v --all-targets --all-features
+          command: NSS_JOBS=3 cargo clippy -v --all-targets --tests
 
       - run:
           name: Test

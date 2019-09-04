@@ -208,7 +208,7 @@ fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
     includes
 }
 
-fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
+fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf], flags: &[String]) {
     let suffix = if bindings.cplusplus { ".hpp" } else { ".h" };
     let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + suffix);
     let header = header_path.to_str().unwrap();
@@ -222,6 +222,7 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
     for i in includes {
         builder = builder.clang_arg(String::from("-I") + i.to_str().unwrap());
     }
+    builder = builder.clang_args(flags);
     if bindings.cplusplus {
         builder = builder.clang_args(&["-x", "c++", "-std=c++11"]);
     }
@@ -253,9 +254,7 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
         .expect("couldn't write bindings");
 }
 
-fn main() {
-    setup_clang();
-
+fn setup_for_non_gecko() -> Vec<PathBuf> {
     println!("cargo:rerun-if-env-changed=NSS_DIR");
     let nss = nss_dir();
     build_nss(nss.clone());
@@ -285,6 +284,62 @@ fn main() {
         };
         dynamic_link(libs);
     }
+    includes
+}
+
+fn setup_for_gecko() -> Vec<PathBuf> {
+    let mut includes: Vec<PathBuf> = Vec::new();
+    let libs = if env::consts::OS == "windows" {
+        &["nssutil3.dll", "nss3.dll", "ssl3.dll"]
+    } else {
+        &["nssutil3", "nss3", "ssl3"]
+    };
+    dynamic_link(libs);
+
+    match env::var_os("MOZ_TOPOBJDIR") {
+        Some(path) => {
+            let nsprinclude = PathBuf::from(path.clone())
+                .join("dist")
+                .join("include")
+                .join("nspr");
+            includes.push(nsprinclude);
+            let nssinclude = PathBuf::from(path.clone())
+                .join("dist")
+                .join("include")
+                .join("nss");
+            includes.push(nssinclude);
+            for i in &includes {
+                println!("cargo:include={}", i.to_str().unwrap());
+            }
+        }
+        None => {
+            println!("cargo:warning={}", "MOZ_TOPOBJDIR should be set by default, otherwise the build is not guaranted to finish.");
+        }
+    }
+    includes
+}
+
+fn main() {
+    setup_clang();
+
+    let includes = if cfg!(feature = "gecko") {
+        setup_for_gecko()
+    } else {
+        setup_for_non_gecko()
+    };
+
+    let mut flags: Vec<String> = Vec::new();
+    flags.push(String::from("-DNO_NSPR_10_SUPPORT"));
+    if env::consts::OS == "windows" {
+        flags.push(String::from("-DWIN"));
+    } else if env::consts::OS == "macos" {
+        flags.push(String::from("-DDARWIN"));
+    } else if env::consts::OS == "linux" {
+        flags.push(String::from("-DLINUX"));
+    } else if env::consts::OS == "android" {
+        flags.push(String::from("-DLINUX"));
+        flags.push(String::from("-DANDROID"));
+    }
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
     println!("cargo:rerun-if-changed={}", config_file.to_str().unwrap());
@@ -292,6 +347,6 @@ fn main() {
     let config: HashMap<String, Bindings> = toml::from_str(&config).unwrap();
 
     for (k, v) in &config {
-        build_bindings(k, v, &includes[..]);
+        build_bindings(k, v, &includes[..], &flags[..]);
     }
 }
