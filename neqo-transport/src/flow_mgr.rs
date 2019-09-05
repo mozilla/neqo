@@ -7,7 +7,6 @@
 // Tracks possibly-redundant flow control signals from other code and converts
 // into flow control frames needing to be sent to the remote.
 
-use std::cmp::max;
 use std::collections::HashMap;
 use std::mem;
 
@@ -52,8 +51,14 @@ impl FlowMgr {
         assert!(self.used_data <= self.max_data)
     }
 
-    pub fn conn_increase_max_credit(&mut self, new: u64) {
-        self.max_data = max(self.max_data, new)
+    /// Returns whether max credit was actually increased.
+    pub fn conn_increase_max_credit(&mut self, new: u64) -> bool {
+        if new > self.max_data {
+            self.max_data = new;
+            true
+        } else {
+            false
+        }
     }
 
     // -- frames scoped on connection --
