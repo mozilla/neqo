@@ -123,14 +123,13 @@ impl<'a> Decoder<'a> {
             Some(l) => l,
             _ => return None,
         };
-        match usize::try_from(len) {
-            Ok(l) => self.decode(l),
-            _ => {
-                // sizeof(usize) < sizeof(u64) and the value is greater than
-                // usize can hold. Throw away the rest of the input.
-                self.offset = self.buf.len();
-                None
-            }
+        if let Ok(l) = usize::try_from(len) {
+            self.decode(l)
+        } else {
+            // sizeof(usize) < sizeof(u64) and the value is greater than
+            // usize can hold. Throw away the rest of the input.
+            self.offset = self.buf.len();
+            None
         }
     }
 

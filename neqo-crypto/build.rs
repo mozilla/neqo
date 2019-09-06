@@ -145,7 +145,16 @@ fn build_nss(dir: PathBuf) {
     assert!(status.success(), "NSS build failed");
 }
 
-fn dynamic_link(extra_libs: &[&str]) {
+fn dynamic_link() {
+    let libs = if env::consts::OS == "windows" {
+        &["nssutil3.dll", "nss3.dll", "ssl3.dll"]
+    } else {
+        &["nssutil3", "nss3", "ssl3"]
+    };
+    dynamic_link_both(libs);
+}
+
+fn dynamic_link_both(extra_libs: &[&str]) {
     let nspr_libs = if env::consts::OS == "windows" {
         &["libplds4", "libplc4", "libnspr4"]
     } else {
@@ -195,7 +204,7 @@ fn static_link(nsstarget: &PathBuf) {
     if env::consts::OS == "macos" {
         other_libs.push("sqlite3");
     }
-    dynamic_link(&other_libs);
+    dynamic_link_both(&other_libs);
 }
 
 fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
@@ -221,6 +230,18 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
     builder = builder.clang_arg("-v");
     for i in includes {
         builder = builder.clang_arg(String::from("-I") + i.to_str().unwrap());
+    }
+
+    builder = builder.clang_arg("-DNO_NSPR_10_SUPPORT");
+    if env::consts::OS == "windows" {
+        builder = builder.clang_arg("-DWIN");
+    } else if env::consts::OS == "macos" {
+        builder = builder.clang_arg("-DDARWIN");
+    } else if env::consts::OS == "linux" {
+        builder = builder.clang_arg("-DLINUX");
+    } else if env::consts::OS == "android" {
+        builder = builder.clang_arg("-DLINUX");
+        builder = builder.clang_arg("-DANDROID");
     }
     if bindings.cplusplus {
         builder = builder.clang_args(&["-x", "c++", "-std=c++11"]);
@@ -253,9 +274,7 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
         .expect("couldn't write bindings");
 }
 
-fn main() {
-    setup_clang();
-
+fn setup_standalone() -> Vec<PathBuf> {
     println!("cargo:rerun-if-env-changed=NSS_DIR");
     let nss = nss_dir();
     build_nss(nss.clone());
@@ -278,12 +297,52 @@ fn main() {
     if is_debug() {
         static_link(&nsstarget);
     } else {
-        let libs = if env::consts::OS == "windows" {
-            &["nssutil3.dll", "nss3.dll", "ssl3.dll"]
-        } else {
-            &["nssutil3", "nss3", "ssl3"]
-        };
-        dynamic_link(libs);
+        dynamic_link();
+    }
+    includes
+}
+
+fn setup_for_gecko() -> Vec<PathBuf> {
+    let mut includes: Vec<PathBuf> = Vec::new();
+    dynamic_link();
+
+    match env::var_os("MOZ_TOPOBJDIR").map(PathBuf::from) {
+        Some(path) => {
+            let nsprinclude = path.join("dist").join("include").join("nspr");
+            includes.push(nsprinclude);
+            let nssinclude = path.join("dist").join("include").join("nss");
+            includes.push(nssinclude);
+            for i in &includes {
+                println!("cargo:include={}", i.to_str().unwrap());
+            }
+        }
+        None => {
+            println!("cargo:warning={}", "MOZ_TOPOBJDIR should be set by default, otherwise the build is not guaranteed to finish.");
+        }
+    }
+    includes
+}
+
+fn main() {
+    setup_clang();
+
+    let includes = if cfg!(feature = "gecko") {
+        setup_for_gecko()
+    } else {
+        setup_standalone()
+    };
+
+    let mut flags: Vec<String> = Vec::new();
+    flags.push(String::from("-DNO_NSPR_10_SUPPORT"));
+    if env::consts::OS == "windows" {
+        flags.push(String::from("-DWIN"));
+    } else if env::consts::OS == "macos" {
+        flags.push(String::from("-DDARWIN"));
+    } else if env::consts::OS == "linux" {
+        flags.push(String::from("-DLINUX"));
+    } else if env::consts::OS == "android" {
+        flags.push(String::from("-DLINUX"));
+        flags.push(String::from("-DANDROID"));
     }
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
