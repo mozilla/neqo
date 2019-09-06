@@ -204,7 +204,7 @@ impl TransactionServer {
     pub fn done_reading_request(&self) -> bool {
         self.state == TransactionState::ReadingRequestDone
     }
-    pub fn has_data_to_send(&self) -> bool {
+    pub fn is_state_sending(&self) -> bool {
         self.state == TransactionState::SendingResponse
     }
 }

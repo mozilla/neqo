@@ -54,6 +54,7 @@ pub enum Error {
     Unexpected,
     InvalidStreamId,
     Unavailable,
+    AlreadyClosed,
     // So we can wrap and report these errors.
     TransportError(neqo_transport::Error),
     QpackError(neqo_qpack::Error),
@@ -95,6 +96,7 @@ impl Error {
             | Error::Unexpected
             | Error::InvalidStreamId
             | Error::Unavailable
+            | Error::AlreadyClosed
             | Error::TransportError(..) => 3,
             Error::QpackError(e) => e.code(),
         }
