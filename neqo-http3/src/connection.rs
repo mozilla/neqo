@@ -1176,12 +1176,12 @@ mod tests {
             assert!(out.as_dgram_ref().is_none());
 
             let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
-            assert!(hconn.events().into_iter().any(authentication_needed));
+            assert!(hconn.events().any(authentication_needed));
             hconn.authenticated(AuthenticationStatus::Ok, now());
 
             let out = hconn.process(out.dgram(), now());
             let connected = |e| matches!(e, Http3Event::StateChange(Http3State::Connected));
-            assert!(hconn.events().into_iter().any(connected));
+            assert!(hconn.events().any(connected));
 
             assert_eq!(hconn.state(), Http3State::Connected);
             neqo_trans_conn.process(out.dgram(), now());
@@ -1876,7 +1876,7 @@ mod tests {
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
-        assert!(hconn.events().into_iter().any(data_writable));
+        assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0x64, 0x65, 0x66]);
         assert_eq!(sent, Ok(3));
         let _ = hconn.stream_close_send(request_stream_id);
@@ -1940,7 +1940,7 @@ mod tests {
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
-        assert!(hconn.events().into_iter().any(data_writable));
+        assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, request_body);
         assert_eq!(sent, Ok(request_body.len()));
 
@@ -2052,7 +2052,7 @@ mod tests {
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
-        assert!(hconn.events().into_iter().any(data_writable));
+        assert!(hconn.events().any(data_writable));
 
         // Send the first frame.
         let sent = hconn.send_request_body(request_stream_id, first_frame);
@@ -2268,7 +2268,7 @@ mod tests {
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
-        assert!(hconn.events().into_iter().any(data_writable));
+        assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
 
@@ -2370,7 +2370,7 @@ mod tests {
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
-        assert!(hconn.events().into_iter().any(data_writable));
+        assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
 
@@ -2435,7 +2435,7 @@ mod tests {
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
-        assert!(hconn.events().into_iter().any(data_writable));
+        assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
 
@@ -2495,7 +2495,7 @@ mod tests {
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
-        assert!(hconn.events().into_iter().any(data_writable));
+        assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
 
@@ -2575,7 +2575,7 @@ mod tests {
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
-        assert!(hconn.events().into_iter().any(data_writable));
+        assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
 
@@ -2649,7 +2649,7 @@ mod tests {
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
-        assert!(hconn.events().into_iter().any(data_writable));
+        assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
 
@@ -2948,7 +2948,7 @@ mod tests {
         hconn.process(out.dgram(), now());
 
         // Recv HeaderReady wo headers with fin.
-        let e = hconn.events().into_iter().next().unwrap();
+        let e = hconn.events().next().unwrap();
         if let Http3Event::HeaderReady { stream_id } = e {
             assert_eq!(stream_id, request_stream_id);
             let h = hconn.read_response_headers(stream_id);
@@ -2981,7 +2981,7 @@ mod tests {
         hconn.process(out.dgram(), now());
 
         // Recv HeaderReady with headers and fin.
-        let e = hconn.events().into_iter().next().unwrap();
+        let e = hconn.events().next().unwrap();
         if let Http3Event::HeaderReady { stream_id } = e {
             assert_eq!(stream_id, request_stream_id);
             let h = hconn.read_response_headers(stream_id);
@@ -3255,7 +3255,7 @@ mod tests {
         hconn.process(out.dgram(), now());
 
         // fin wo data should generate DataReadable
-        let e = hconn.events().into_iter().next().unwrap();
+        let e = hconn.events().next().unwrap();
         if let Http3Event::DataReadable { stream_id } = e {
             assert_eq!(stream_id, request_stream_id);
             let mut buf = [0u8; 100];
@@ -3329,7 +3329,7 @@ mod tests {
         hconn.process(out.dgram(), now());
 
         // Read first frame
-        match hconn.events().into_iter().nth(1).unwrap() {
+        match hconn.events().nth(1).unwrap() {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
@@ -3348,7 +3348,7 @@ mod tests {
         // Second frame isn't read in first read_response_data(), but it generates
         // another DataReadable event so that another read_response_data() will happen to
         // pick it up.
-        match hconn.events().into_iter().next().unwrap() {
+        match hconn.events().next().unwrap() {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
@@ -3442,7 +3442,7 @@ mod tests {
         hconn.process(None, now());
 
         // Read first frame
-        match hconn.events().into_iter().nth(1).unwrap() {
+        match hconn.events().nth(1).unwrap() {
             Http3Event::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
