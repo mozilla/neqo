@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use smallvec::SmallVec;
+
 use crate::hframe::{HFrame, HFrameReader, HSettingType, H3_FRAME_TYPE_DATA};
 use crate::transaction_client::TransactionClient;
 use crate::transaction_server::{RequestHandler, TransactionServer};
@@ -605,17 +607,9 @@ impl Http3Connection {
             // otherwise post reset.
             if app_err == Error::EarlyResponse.code() && !cs.is_sending_closed() {
                 // Remove DataWritable event if any.
-                let updated_events = self
-                    .events
-                    .events()
-                    .iter()
-                    .filter(|evt| match evt {
-                        Http3Event::DataWritable { stream_id } => *stream_id != stop_stream_id,
-                        _ => true,
-                    })
-                    .cloned()
-                    .collect::<BTreeSet<_>>();
-                self.events.replace(updated_events);
+                self.events.remove(&Http3Event::DataWritable {
+                    stream_id: stop_stream_id,
+                });
                 self.events.stop_sending(stop_stream_id, app_err);
             }
 
@@ -916,39 +910,22 @@ impl Http3Connection {
             return Err(Error::UnexpectedFrame);
         } else {
             // Issue reset events for streams >= goaway stream id
-            self.transactions_client
+            for id in self
+                .transactions_client
                 .iter()
                 .filter(|(id, _)| **id >= goaway_stream_id)
                 .map(|(id, _)| *id)
-                .for_each(|id| self.events.reset(id, Error::RequestRejected.code()));
+            {
+                self.events.remove_events_for_stream_id(id);
+                self.events.reset(id, Error::RequestRejected.code())
+            }
+            self.events.remove(&Http3Event::RequestsCreatable);
+            self.events.goaway_received();
 
             // Actually remove (i.e. don't retain) these streams
             self.transactions_client
                 .retain(|id, _| *id < goaway_stream_id);
 
-            // Remove events for any of these streams by creating a new set of
-            // filtered events and then swapping with the original set.
-            let updated_events = self
-                .events
-                .events()
-                .iter()
-                .filter(|evt| match evt {
-                    Http3Event::HeaderReady { stream_id }
-                    | Http3Event::DataWritable { stream_id }
-                    | Http3Event::DataReadable { stream_id }
-                    | Http3Event::NewPushStream { stream_id } => *stream_id < goaway_stream_id,
-                    Http3Event::Reset { .. }
-                    | Http3Event::StopSending { .. }
-                    | Http3Event::AuthenticationNeeded
-                    | Http3Event::GoawayReceived
-                    | Http3Event::StateChange { .. } => true,
-                    Http3Event::RequestsCreatable => false,
-                })
-                .cloned()
-                .collect::<BTreeSet<_>>();
-            self.events.replace(updated_events);
-
-            self.events.goaway_received();
             if self.state == Http3State::Connected {
                 self.state = Http3State::GoingAway;
             }
@@ -1032,9 +1009,8 @@ impl Http3Connection {
         }
     }
 
-    pub fn events(&mut self) -> Vec<Http3Event> {
-        // Turn it into a vec for simplicity's sake
-        self.events.events().into_iter().collect()
+    pub fn events(&mut self) -> impl Iterator<Item = Http3Event> {
+        self.events.events()
     }
 
     // SERVER SIDE ONLY FUNCTIONS
@@ -1102,7 +1078,7 @@ impl Http3Events {
         self.insert(Http3Event::RequestsCreatable);
     }
 
-    pub fn authentication_needed(&mut self) {
+    pub fn authentication_needed(&self) {
         self.insert(Http3Event::AuthenticationNeeded);
     }
 
@@ -1114,22 +1090,22 @@ impl Http3Events {
         self.insert(Http3Event::StateChange(state));
     }
 
-    pub fn events(&self) -> BTreeSet<Http3Event> {
-        self.replace(BTreeSet::new())
-    }
-
-    pub fn replace(&self, new_events: BTreeSet<Http3Event>) -> BTreeSet<Http3Event> {
-        self.events.replace(new_events)
+    pub fn events(&self) -> impl Iterator<Item = Http3Event> {
+        self.events.replace(BTreeSet::new()).into_iter()
     }
 
     fn insert(&self, event: Http3Event) {
         self.events.borrow_mut().insert(event);
     }
 
+    fn remove(&self, event: &Http3Event) -> bool {
+        self.events.borrow_mut().remove(event)
+    }
+
     fn remove_events_for_stream_id(&self, remove_stream_id: u64) {
-        let updated_events = self
+        let events_to_remove = self
             .events
-            .replace(BTreeSet::new())
+            .borrow()
             .iter()
             .filter(|evt| match evt {
                 Http3Event::HeaderReady { stream_id }
@@ -1137,15 +1113,18 @@ impl Http3Events {
                 | Http3Event::DataReadable { stream_id }
                 | Http3Event::NewPushStream { stream_id }
                 | Http3Event::Reset { stream_id, .. }
-                | Http3Event::StopSending { stream_id, .. } => *stream_id != remove_stream_id,
+                | Http3Event::StopSending { stream_id, .. } => *stream_id == remove_stream_id,
                 Http3Event::AuthenticationNeeded
                 | Http3Event::GoawayReceived
                 | Http3Event::StateChange { .. }
-                | Http3Event::RequestsCreatable => true,
+                | Http3Event::RequestsCreatable => false,
             })
             .cloned()
-            .collect::<BTreeSet<_>>();
-        self.events.replace(updated_events);
+            .collect::<SmallVec<[_; 8]>>();
+
+        for evt in events_to_remove {
+            self.remove(&evt);
+        }
     }
 }
 
@@ -1713,7 +1692,7 @@ mod tests {
 
     #[test]
     #[allow(clippy::cognitive_complexity)]
-    fn fetch() {
+    fn fetch_basic() {
         let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
@@ -1725,7 +1704,8 @@ mod tests {
         neqo_trans_conn.process(out.dgram(), now());
 
         // find the new request/response stream and send frame v on it.
-        let events = neqo_trans_conn.events();
+        let events = neqo_trans_conn.events().collect::<Vec<_>>();
+        assert_eq!(events.len(), 6); // NewStream, RecvStreamReadable, SendStreamWritable x 4
         for e in events {
             match e {
                 ConnectionEvent::NewStream {
@@ -1771,7 +1751,8 @@ mod tests {
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
 
-        let http_events = hconn.events();
+        let http_events = hconn.events().collect::<Vec<_>>();
+        assert_eq!(http_events.len(), 2);
         for e in http_events {
             match e {
                 Http3Event::HeaderReady { stream_id } => {
@@ -1803,7 +1784,8 @@ mod tests {
         }
 
         hconn.process_http3(now());
-        let http_events = hconn.events();
+        let http_events = hconn.events().collect::<Vec<_>>();
+        assert_eq!(http_events.len(), 1);
         for e in http_events {
             match e {
                 Http3Event::DataReadable { stream_id } => {
@@ -1824,7 +1806,6 @@ mod tests {
         // from the stream and that should fail.
         let mut buf = [0u8; 100];
         let res = hconn.read_response_data(now(), request_stream_id, &mut buf);
-        assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
         hconn.close(now(), 0, "");
@@ -2867,7 +2848,7 @@ mod tests {
         hconn.process(out.dgram(), now());
 
         let mut stream_reset = false;
-        let mut http_events = hconn.events();
+        let mut http_events = hconn.events().collect::<Vec<_>>();
         while !http_events.is_empty() {
             for e in http_events {
                 match e {
@@ -2903,7 +2884,7 @@ mod tests {
                 }
             }
             hconn.process_http3(now());
-            http_events = hconn.events();
+            http_events = hconn.events().collect::<Vec<_>>();
         }
 
         assert!(stream_reset);
