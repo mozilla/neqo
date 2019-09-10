@@ -5,8 +5,8 @@
 // except according to those terms.
 
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::cmp::min;
+use std::rc::Rc;
 
 use neqo_common::{hex, qdebug, qinfo, qtrace};
 use neqo_crypto::aead::Aead;
@@ -17,7 +17,7 @@ use neqo_crypto::{
 };
 
 use crate::connection::Role;
-use crate::frame::{Frame, TxMode, crypto_frame_hdr_len};
+use crate::frame::{crypto_frame_hdr_len, Frame, TxMode};
 use crate::packet::{CryptoCtx, PacketNumber};
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
