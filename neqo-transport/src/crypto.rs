@@ -6,6 +6,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::cmp::min;
 
 use neqo_common::{hex, qdebug, qinfo, qtrace};
 use neqo_crypto::aead::Aead;
@@ -16,7 +17,7 @@ use neqo_crypto::{
 };
 
 use crate::connection::Role;
-use crate::frame::{Frame, TxMode};
+use crate::frame::{Frame, TxMode, crypto_frame_hdr_len};
 use crate::packet::{CryptoCtx, PacketNumber};
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
@@ -158,26 +159,26 @@ impl Crypto {
     ) -> Option<(Frame, Option<RecoveryToken>)> {
         let tx_stream = &mut self.streams[epoch as usize].tx;
         if let Some((offset, data)) = tx_stream.next_bytes(mode) {
-            let data_len = data.len();
-            assert!(data_len <= remaining);
+            let frame_hdr_len = crypto_frame_hdr_len(offset, remaining);
+            let length = min(data.len(), remaining - frame_hdr_len);
             let frame = Frame::Crypto {
                 offset,
-                data: data.to_vec(),
+                data: data[..length].to_vec(),
             };
-            tx_stream.mark_as_sent(offset, data_len);
+            tx_stream.mark_as_sent(offset, length);
 
             qdebug!(
                 "Emitting crypto frame epoch={}, offset={}, len={}",
                 epoch,
                 offset,
-                data_len
+                length
             );
             Some((
                 frame,
                 Some(RecoveryToken::Crypto(CryptoRecoveryToken {
                     epoch,
                     offset,
-                    length: data_len as u64,
+                    length: length as u64,
                 })),
             ))
         } else {

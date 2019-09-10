@@ -419,6 +419,13 @@ impl Frame {
     }
 }
 
+/// Calculate the crypto frame header size so we know how much data we can fit
+pub fn crypto_frame_hdr_len(offset: u64, remaining: usize) -> usize {
+    let mut hdr_len = 1; // for frame type
+    hdr_len += Encoder::varint_len(offset);
+    hdr_len + Encoder::varint_len(remaining as u64)
+}
+
 #[allow(clippy::module_name_repetitions)]
 pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
     macro_rules! d {
