@@ -1055,6 +1055,9 @@ impl Connection {
             let mut packet = encode_packet(tx, &hdr, &encoder);
             dump_packet(self, "TX ->", &hdr, &encoder);
             out_bytes.append(&mut packet);
+            if out_bytes.len() >= self.pmtu {
+                break;
+            }
         }
 
         if out_bytes.is_empty() {
@@ -2613,5 +2616,39 @@ mod tests {
         let evts = client.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 1);
         assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
+    }
+
+    // Test that we split crypto data if they cannot fit into one packet.
+    // To test this we will use a long server certificate.
+    #[test]
+    fn test_crypto_frame_split() {
+        let mut client = default_client();
+        let out = client.process(None, now());
+        let mut server = Connection::new_server(
+            test_fixture::LONG_CERT_KEYS,
+            test_fixture::DEFAULT_ALPN,
+            &test_fixture::anti_replay(),
+        )
+        .expect("create a server");
+        let out = server.process(out.dgram(), now());
+
+        let out = client.process(out.dgram(), now());
+        // The cert and ServerDone  does not fit into a single packet, therefore client needs
+        // to receive one more packet before the handshake is completed.
+
+        // Client already hase cert.
+        assert!(maybe_autenticate(&mut client));
+        let out_2 = client.process(None, now());
+        // Client still do not have ServerDone to finish the handshake
+        assert_eq!(*client.state(), State::Handshaking);
+
+        // receive the second part of the cert.
+        let out = server.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let _ = server.process(out_2.dgram(), now());
+        let _ = server.process(out.dgram(), now());
+
+        assert_eq!(*client.state(), State::Connected);
+        assert_eq!(*server.state(), State::Connected);
     }
 }
