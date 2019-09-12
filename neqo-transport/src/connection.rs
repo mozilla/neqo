@@ -1864,7 +1864,7 @@ mod tests {
 
     /// If state is AuthenticationNeeded call authenticated(). This function will
     /// consume all outstanding events on the connection.
-    pub fn maybe_autenticate(conn: &mut Connection) -> bool {
+    pub fn maybe_authenticate(conn: &mut Connection) -> bool {
         let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
         if conn.events().any(authentication_needed) {
             conn.authenticated(AuthenticationStatus::Ok, now());
@@ -1920,7 +1920,7 @@ mod tests {
 
         let out = client.process(out.dgram(), now());
         let _ = server.process(out.dgram(), now());
-        assert!(maybe_autenticate(&mut client));
+        assert!(maybe_authenticate(&mut client));
         let out = client.process(None, now());
 
         // client now in State::Connected
@@ -1960,7 +1960,7 @@ mod tests {
         let out = server.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_none());
 
-        assert!(maybe_autenticate(&mut client));
+        assert!(maybe_authenticate(&mut client));
 
         qdebug!("---- client: SH..FIN -> FIN");
         let out = client.process(out.dgram(), now());
@@ -2053,7 +2053,7 @@ mod tests {
         let out = server.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_none());
 
-        assert!(maybe_autenticate(&mut client));
+        assert!(maybe_authenticate(&mut client));
 
         qdebug!("---- client");
         let out = client.process(out.dgram(), now());
@@ -2134,7 +2134,7 @@ mod tests {
             _ => false,
         };
         while !is_done(a) {
-            let _ = maybe_autenticate(a);
+            let _ = maybe_authenticate(a);
             let d = a.process(datagram, now());
             datagram = d.dgram();
             mem::swap(&mut a, &mut b);
@@ -2195,7 +2195,7 @@ mod tests {
         let out = server.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_none());
 
-        assert!(maybe_autenticate(&mut client));
+        assert!(maybe_authenticate(&mut client));
 
         qdebug!("---- client: SH..FIN -> FIN");
         let out = client.process(None, now());
