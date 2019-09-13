@@ -2637,7 +2637,7 @@ mod tests {
         // to receive one more packet before the handshake is completed.
 
         // Client already hase cert.
-        assert!(maybe_autenticate(&mut client));
+        assert!(maybe_authenticate(&mut client));
         let out_2 = client.process(None, now());
         // Client still do not have ServerDone to finish the handshake
         assert_eq!(*client.state(), State::Handshaking);
