@@ -2630,6 +2630,7 @@ mod tests {
         )
         .expect("create a server");
 
+
         let client1 = client.process(None, now());
         assert!(client1.as_dgram_ref().is_some());
 
