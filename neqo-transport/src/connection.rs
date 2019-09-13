@@ -2630,7 +2630,6 @@ mod tests {
         )
         .expect("create a server");
 
-
         let client1 = client.process(None, now());
         assert!(client1.as_dgram_ref().is_some());
 
@@ -2642,7 +2641,7 @@ mod tests {
         assert!(server2.as_dgram_ref().is_some());
 
         let client2 = client.process(server1.dgram(), now());
-        assert!(client2.as_dgram_ref().is_some());// this is an ack.
+        assert!(client2.as_dgram_ref().is_some()); // this is an ack.
         let _ = maybe_authenticate(&mut client); // maybe client has the cert but will not have complete server fight to finish handshate.
         assert_eq!(*client.state(), State::Handshaking);
 
@@ -2653,7 +2652,8 @@ mod tests {
         // Consume the second packet from the server.
         let client3 = client.process(server2.dgram(), now());
 
-        let _ = maybe_authenticate(&mut client); // check authentication.
+        // check authentication.
+        let _ = maybe_authenticate(&mut client);
         // Now client has all data to finish handshake.
         assert_eq!(*client.state(), State::Connected);
 
