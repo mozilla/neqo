@@ -2623,30 +2623,46 @@ mod tests {
     #[test]
     fn test_crypto_frame_split() {
         let mut client = default_client();
-        let out = client.process(None, now());
         let mut server = Connection::new_server(
             test_fixture::LONG_CERT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
         )
         .expect("create a server");
-        let out = server.process(out.dgram(), now());
 
-        let out = client.process(out.dgram(), now());
-        // The cert and ServerDone  does not fit into a single packet, therefore client needs
-        // to receive one more packet before the handshake is completed.
+        let client1 = client.process(None, now());
+        assert!(client1.as_dgram_ref().is_some());
 
-        // Client already hase cert.
-        assert!(maybe_authenticate(&mut client));
-        let out_2 = client.process(None, now());
-        // Client still do not have ServerDone to finish the handshake
+        // The entire server flight doesn't fit in a single packet because the
+        // certificate is large, therefore the server will produce 2 paclets.
+        let server1 = server.process(client1.dgram(), now());
+        assert!(server1.as_dgram_ref().is_some());
+        let server2 = server.process(None, now());
+        assert!(server2.as_dgram_ref().is_some());
+
+        let client2 = client.process(server1.dgram(), now());
+        assert!(client2.as_dgram_ref().is_some());// this is an ack.
+        let _ = maybe_authenticate(&mut client); // maybe client has the cert but will not have complete server fight to finish handshate.
         assert_eq!(*client.state(), State::Handshaking);
 
-        // receive the second part of the cert.
-        let out = server.process(out.dgram(), now());
-        let out = client.process(out.dgram(), now());
-        let _ = server.process(out_2.dgram(), now());
-        let _ = server.process(out.dgram(), now());
+        // let server process the ack for the first packet.
+        let server3 = server.process(client2.dgram(), now());
+        assert!(server3.as_dgram_ref().is_none());
+
+        // Consume the second packet from the server.
+        let client3 = client.process(server2.dgram(), now());
+
+        let _ = maybe_authenticate(&mut client); // check authentication.
+        // Now client has all data to finish handshake.
+        assert_eq!(*client.state(), State::Connected);
+
+        let client4 = client.process(server3.dgram(), now());
+        // one of this will contain data depending if authetincation was done
+        // after the first or second server packet.
+        assert!(client3.as_dgram_ref().is_some() || client4.as_dgram_ref().is_some());
+
+        let _ = server.process(client3.dgram(), now());
+        let _ = server.process(client4.dgram(), now());
 
         assert_eq!(*client.state(), State::Connected);
         assert_eq!(*server.state(), State::Connected);
