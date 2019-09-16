@@ -2634,15 +2634,18 @@ mod tests {
         assert!(client1.as_dgram_ref().is_some());
 
         // The entire server flight doesn't fit in a single packet because the
-        // certificate is large, therefore the server will produce 2 paclets.
+        // certificate is large, therefore the server will produce 2 packets.
         let server1 = server.process(client1.dgram(), now());
         assert!(server1.as_dgram_ref().is_some());
         let server2 = server.process(None, now());
         assert!(server2.as_dgram_ref().is_some());
 
         let client2 = client.process(server1.dgram(), now());
-        assert!(client2.as_dgram_ref().is_some()); // this is an ack.
-        let _ = maybe_authenticate(&mut client); // maybe client has the cert but will not have complete server fight to finish handshate.
+        // this is an ack.
+        assert!(client2.as_dgram_ref().is_some());
+        // The client might have the certificate now, so we can't guarantee that
+        // this will work.
+        let auth1 = maybe_authenticate(&mut client);
         assert_eq!(*client.state(), State::Handshaking);
 
         // let server process the ack for the first packet.
@@ -2653,14 +2656,15 @@ mod tests {
         let client3 = client.process(server2.dgram(), now());
 
         // check authentication.
-        let _ = maybe_authenticate(&mut client);
+        let auth2 = maybe_authenticate(&mut client);
+        assert!(auth1 ^ auth2);
         // Now client has all data to finish handshake.
         assert_eq!(*client.state(), State::Connected);
 
         let client4 = client.process(server3.dgram(), now());
-        // one of this will contain data depending if authetincation was done
+        // One of these will contain data depending on whether Authentication was completed
         // after the first or second server packet.
-        assert!(client3.as_dgram_ref().is_some() || client4.as_dgram_ref().is_some());
+        assert!(client3.as_dgram_ref().is_some() ^ client4.as_dgram_ref().is_some());
 
         let _ = server.process(client3.dgram(), now());
         let _ = server.process(client4.dgram(), now());
