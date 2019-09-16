@@ -1114,10 +1114,7 @@ impl Http3Events {
                 | Http3Event::NewPushStream { stream_id }
                 | Http3Event::Reset { stream_id, .. }
                 | Http3Event::StopSending { stream_id, .. } => *stream_id == remove_stream_id,
-                Http3Event::AuthenticationNeeded
-                | Http3Event::GoawayReceived
-                | Http3Event::StateChange { .. }
-                | Http3Event::RequestsCreatable => false,
+                _ => false,
             })
             .cloned()
             .collect::<SmallVec<[_; 8]>>();
