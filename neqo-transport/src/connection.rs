@@ -1055,6 +1055,9 @@ impl Connection {
             let mut packet = encode_packet(tx, &hdr, &encoder);
             dump_packet(self, "TX ->", &hdr, &encoder);
             out_bytes.append(&mut packet);
+            if out_bytes.len() >= self.pmtu {
+                break;
+            }
         }
 
         if out_bytes.is_empty() {
@@ -2613,5 +2616,60 @@ mod tests {
         let evts = client.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 1);
         assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
+    }
+
+    // Test that we split crypto data if they cannot fit into one packet.
+    // To test this we will use a long server certificate.
+    #[test]
+    fn test_crypto_frame_split() {
+        let mut client = default_client();
+        let mut server = Connection::new_server(
+            test_fixture::LONG_CERT_KEYS,
+            test_fixture::DEFAULT_ALPN,
+            &test_fixture::anti_replay(),
+        )
+        .expect("create a server");
+
+        let client1 = client.process(None, now());
+        assert!(client1.as_dgram_ref().is_some());
+
+        // The entire server flight doesn't fit in a single packet because the
+        // certificate is large, therefore the server will produce 2 packets.
+        let server1 = server.process(client1.dgram(), now());
+        assert!(server1.as_dgram_ref().is_some());
+        let server2 = server.process(None, now());
+        assert!(server2.as_dgram_ref().is_some());
+
+        let client2 = client.process(server1.dgram(), now());
+        // this is an ack.
+        assert!(client2.as_dgram_ref().is_some());
+        // The client might have the certificate now, so we can't guarantee that
+        // this will work.
+        let auth1 = maybe_authenticate(&mut client);
+        assert_eq!(*client.state(), State::Handshaking);
+
+        // let server process the ack for the first packet.
+        let server3 = server.process(client2.dgram(), now());
+        assert!(server3.as_dgram_ref().is_none());
+
+        // Consume the second packet from the server.
+        let client3 = client.process(server2.dgram(), now());
+
+        // check authentication.
+        let auth2 = maybe_authenticate(&mut client);
+        assert!(auth1 ^ auth2);
+        // Now client has all data to finish handshake.
+        assert_eq!(*client.state(), State::Connected);
+
+        let client4 = client.process(server3.dgram(), now());
+        // One of these will contain data depending on whether Authentication was completed
+        // after the first or second server packet.
+        assert!(client3.as_dgram_ref().is_some() ^ client4.as_dgram_ref().is_some());
+
+        let _ = server.process(client3.dgram(), now());
+        let _ = server.process(client4.dgram(), now());
+
+        assert_eq!(*client.state(), State::Connected);
+        assert_eq!(*server.state(), State::Connected);
     }
 }
