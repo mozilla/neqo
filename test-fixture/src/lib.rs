@@ -52,6 +52,7 @@ pub fn anti_replay() -> AntiReplay {
 
 pub const DEFAULT_SERVER_NAME: &str = "example.com";
 pub const DEFAULT_KEYS: &[&str] = &["key"];
+pub const LONG_CERT_KEYS: &[&str] = &["A long cert"];
 pub const DEFAULT_ALPN: &[&str] = &["alpn"];
 
 /// Create a default socket address.

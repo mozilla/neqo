@@ -164,7 +164,7 @@ struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, _args: &Args, client: &mut Http3Connection) -> bool {
         let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
-        if client.events().into_iter().any(authentication_needed) {
+        if client.events().any(authentication_needed) {
             client.authenticated(AuthenticationStatus::Ok, Instant::now());
         }
         Http3State::Connected != client.state()
@@ -276,9 +276,11 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         eprintln!("Could not connect: {:?}", err);
         return;
     }
+    let client_stream_id = client_stream_id.unwrap();
+    let _ = client.stream_close_send(client_stream_id);
 
     let mut h2 = PostConnectHandler::default();
-    h2.streams.insert(client_stream_id.unwrap());
+    h2.streams.insert(client_stream_id);
     process_loop(
         &local_addr,
         &remote_addr,

@@ -8,7 +8,7 @@
 
 #![allow(dead_code)]
 use std::cell::RefCell;
-use std::cmp::{max, min, Ordering};
+use std::cmp::{max, Ordering};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::{self, Debug};
@@ -53,7 +53,12 @@ const NUM_EPOCHS: Epoch = 4;
 
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
+
+#[cfg(not(test))]
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
+#[cfg(test)]
+const LOCAL_MAX_DATA: u64 = 0x3FFF; // 16,383
+
 const LOCAL_IDLE_TIMEOUT: Duration = Duration::from_secs(60); // 1 minute
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -96,6 +101,7 @@ pub enum State {
 
 // Implement Ord so that we can enforce monotonic state progression.
 impl PartialOrd for State {
+    #[allow(clippy::match_same_arms)] // Lint bug: rust-lang/rust-clippy#860
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         if std::mem::discriminant(self) == std::mem::discriminant(other) {
             return Some(Ordering::Equal);
@@ -135,8 +141,8 @@ struct Path {
 
 impl Path {
     // Used to create a path when receiving a packet.
-    pub fn new(d: &Datagram, remote_cid: ConnectionId) -> Path {
-        Path {
+    pub fn new(d: &Datagram, remote_cid: ConnectionId) -> Self {
+        Self {
             local: d.destination(),
             remote: d.source(),
             local_cids: Vec::new(),
@@ -326,10 +332,10 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-    ) -> Res<Connection> {
+    ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let local_cids = vec![cid_manager.borrow_mut().generate_cid()];
-        let mut c = Connection::new(
+        let mut c = Self::new(
             Role::Client,
             Client::new(server_name)?.into(),
             cid_manager,
@@ -352,8 +358,8 @@ impl Connection {
         protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
         cid_manager: CidMgr,
-    ) -> Res<Connection> {
-        Ok(Connection::new(
+    ) -> Res<Self> {
+        Ok(Self::new(
             Role::Server,
             Server::new(certs)?.into(),
             cid_manager,
@@ -390,13 +396,13 @@ impl Connection {
         anti_replay: Option<&AntiReplay>,
         protocols: &[impl AsRef<str>],
         paths: Option<Path>,
-    ) -> Connection {
+    ) -> Self {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
-        Connection::set_tp_defaults(&mut tphandler.borrow_mut().local);
+        Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
         let crypto = Crypto::new(agent, protocols, tphandler.clone(), anti_replay)
             .expect("TLS should be configured successfully");
 
-        Connection {
+        Self {
             version: QUIC_VERSION,
             role: r,
             state: match r {
@@ -911,12 +917,12 @@ impl Connection {
     }
 
     fn process_migrations(&self, d: &Datagram) -> Res<()> {
-        if !self.paths.iter().any(|p| p.received_on(&d)) {
+        if self.paths.iter().any(|p| p.received_on(&d)) {
+            Ok(())
+        } else {
             // Right now, we don't support any form of migration.
             // So generate an error if a packet is received on a new path.
             Err(Error::InvalidMigration)
-        } else {
-            Ok(())
         }
     }
 
@@ -1100,6 +1106,9 @@ impl Connection {
             let mut packet = encode_packet(tx, &hdr, &encoder);
             dump_packet(self, "TX ->", &hdr, &encoder);
             out_bytes.append(&mut packet);
+            if out_bytes.len() >= self.pmtu {
+                break;
+            }
         }
 
         if out_bytes.is_empty() {
@@ -1227,6 +1236,24 @@ impl Connection {
         Ok(())
     }
 
+    fn handle_max_data(&mut self, maximum_data: u64) {
+        let conn_was_blocked = self.flow_mgr.borrow().conn_credit_avail() == 0;
+        let conn_credit_increased = self
+            .flow_mgr
+            .borrow_mut()
+            .conn_increase_max_credit(maximum_data);
+
+        if conn_was_blocked && conn_credit_increased {
+            for (id, ss) in &mut self.send_streams {
+                if ss.avail() > 0 {
+                    // These may not actually all be writable if one
+                    // uses up all the conn credit. Not our fault.
+                    self.events.send_stream_writable(*id)
+                }
+            }
+        }
+    }
+
     fn input_frame(&mut self, epoch: Epoch, frame: Frame, now: Instant) -> Res<()> {
         match frame {
             Frame::Padding => {
@@ -1298,10 +1325,7 @@ impl Connection {
                     rs.inbound_stream_frame(fin, offset, data)?;
                 }
             }
-            Frame::MaxData { maximum_data } => self
-                .flow_mgr
-                .borrow_mut()
-                .conn_increase_max_credit(maximum_data),
+            Frame::MaxData { maximum_data } => self.handle_max_data(maximum_data),
             Frame::MaxStreamData {
                 stream_id,
                 maximum_stream_data,
@@ -1760,10 +1784,7 @@ impl Connection {
     /// i.e. that will not be blocked by flow credits or send buffer max
     /// capacity.
     pub fn stream_avail_send_space(&self, stream_id: u64) -> Res<u64> {
-        Ok(min(
-            self.send_streams.get(stream_id.into())?.avail(),
-            self.flow_mgr.borrow().conn_credit_avail(),
-        ))
+        Ok(self.send_streams.get(stream_id.into())?.avail())
     }
 
     /// Close the stream. Enqueued data will be sent.
@@ -1803,7 +1824,7 @@ impl Connection {
 
     /// Get events that indicate state changes on the connection.
     pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
-        self.events.events().into_iter()
+        self.events.events()
     }
 
     /// Return true if there are outstanding events.
@@ -1918,7 +1939,7 @@ mod tests {
 
     /// If state is AuthenticationNeeded call authenticated(). This function will
     /// consume all outstanding events on the connection.
-    pub fn maybe_autenticate(conn: &mut Connection) -> bool {
+    pub fn maybe_authenticate(conn: &mut Connection) -> bool {
         let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
         if conn.events().any(authentication_needed) {
             conn.authenticated(AuthenticationStatus::Ok, now());
@@ -1974,7 +1995,7 @@ mod tests {
 
         let out = client.process(out.dgram(), now());
         let _ = server.process(out.dgram(), now());
-        assert!(maybe_autenticate(&mut client));
+        assert!(maybe_authenticate(&mut client));
         let out = client.process(None, now());
 
         // client now in State::Connected
@@ -2014,7 +2035,7 @@ mod tests {
         let out = server.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_none());
 
-        assert!(maybe_autenticate(&mut client));
+        assert!(maybe_authenticate(&mut client));
 
         qdebug!("---- client: SH..FIN -> FIN");
         let out = client.process(out.dgram(), now());
@@ -2107,7 +2128,7 @@ mod tests {
         let out = server.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_none());
 
-        assert!(maybe_autenticate(&mut client));
+        assert!(maybe_authenticate(&mut client));
 
         qdebug!("---- client");
         let out = client.process(out.dgram(), now());
@@ -2188,7 +2209,7 @@ mod tests {
             _ => false,
         };
         while !is_done(a) {
-            let _ = maybe_autenticate(a);
+            let _ = maybe_authenticate(a);
             let d = a.process(datagram, now());
             datagram = d.dgram();
             mem::swap(&mut a, &mut b);
@@ -2255,7 +2276,7 @@ mod tests {
         let out = server.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_none());
 
-        assert!(maybe_autenticate(&mut client));
+        assert!(maybe_authenticate(&mut client));
 
         qdebug!("---- client: SH..FIN -> FIN");
         let out = client.process(None, now());
@@ -2587,5 +2608,98 @@ mod tests {
         // Not connected after 80 seconds.
         client.process_timer(now + Duration::from_secs(80));
         assert!(matches!(client.state(), State::Closed(_)));
+    }
+
+    #[test]
+    fn max_data() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(stream_id, 2);
+        assert_eq!(
+            client.stream_avail_send_space(stream_id).unwrap(),
+            LOCAL_MAX_DATA // 16383, when cfg(test)
+        );
+        assert_eq!(
+            client
+                .stream_send(stream_id, &[b'a'; RX_STREAM_DATA_WINDOW as usize])
+                .unwrap(),
+            LOCAL_MAX_DATA as usize
+        );
+        let evts = client.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 2); // SendStreamWritable, StateChange(connected)
+        assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 0);
+        let ss = client.send_streams.get_mut(stream_id.into()).unwrap();
+        ss.mark_as_sent(0, 4096, false);
+        ss.mark_as_acked(0, 4096, false);
+
+        // no event because still limited by conn max data
+        let evts = client.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 0);
+
+        // increase max data
+        client.handle_max_data(100_000);
+        assert_eq!(client.stream_avail_send_space(stream_id).unwrap(), 49152);
+        let evts = client.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 1);
+        assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
+    }
+
+    // Test that we split crypto data if they cannot fit into one packet.
+    // To test this we will use a long server certificate.
+    #[test]
+    fn test_crypto_frame_split() {
+        let mut client = default_client();
+        let mut server = Connection::new_server(
+            test_fixture::LONG_CERT_KEYS,
+            test_fixture::DEFAULT_ALPN,
+            &test_fixture::anti_replay(),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
+        )
+        .expect("create a server");
+
+        let client1 = client.process(None, now());
+        assert!(client1.as_dgram_ref().is_some());
+
+        // The entire server flight doesn't fit in a single packet because the
+        // certificate is large, therefore the server will produce 2 packets.
+        let server1 = server.process(client1.dgram(), now());
+        assert!(server1.as_dgram_ref().is_some());
+        let server2 = server.process(None, now());
+        assert!(server2.as_dgram_ref().is_some());
+
+        let client2 = client.process(server1.dgram(), now());
+        // This is an ack.
+        assert!(client2.as_dgram_ref().is_some());
+        // The client might have the certificate now, so we can't guarantee that
+        // this will work.
+        let auth1 = maybe_authenticate(&mut client);
+        assert_eq!(*client.state(), State::Handshaking);
+
+        // let server process the ack for the first packet.
+        let server3 = server.process(client2.dgram(), now());
+        assert!(server3.as_dgram_ref().is_none());
+
+        // Consume the second packet from the server.
+        let client3 = client.process(server2.dgram(), now());
+
+        // Check authentication.
+        let auth2 = maybe_authenticate(&mut client);
+        assert!(auth1 ^ auth2);
+        // Now client has all data to finish handshake.
+        assert_eq!(*client.state(), State::Connected);
+
+        let client4 = client.process(server3.dgram(), now());
+        // One of these will contain data depending on whether Authentication was completed
+        // after the first or second server packet.
+        assert!(client3.as_dgram_ref().is_some() ^ client4.as_dgram_ref().is_some());
+
+        let _ = server.process(client3.dgram(), now());
+        let _ = server.process(client4.dgram(), now());
+
+        assert_eq!(*client.state(), State::Connected);
+        assert_eq!(*server.state(), State::Connected);
     }
 }

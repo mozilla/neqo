@@ -17,3 +17,6 @@ toml = "0.4"
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
+
+[features]
+gecko = []

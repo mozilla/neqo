@@ -400,20 +400,11 @@ impl LossRecovery {
     pub fn get_timer(&mut self, conn_state: &State) -> LossRecoveryState {
         qdebug!([self] "get_loss_detection_timer.");
 
-        let mut has_ack_eliciting_out = false;
-        for sp in self
+        let has_ack_eliciting_out = self
             .spaces
             .iter()
             .flat_map(|spc| self.spaces[*spc].sent_packets.values())
-        {
-            if sp.ack_eliciting {
-                has_ack_eliciting_out = true
-            }
-
-            if has_ack_eliciting_out {
-                break;
-            }
-        }
+            .any(|sp| sp.ack_eliciting);
 
         qdebug!(
             [self]
