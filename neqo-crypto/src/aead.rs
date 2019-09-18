@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::too_many_arguments)]
-
 use crate::constants::*;
 use crate::err::{Error, Res};
 use crate::p11::{PK11SymKey, SymKey};

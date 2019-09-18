@@ -6,6 +6,7 @@
 
 use std::cell::RefCell;
 use std::cmp::min;
+use std::convert::TryInto;
 use std::rc::Rc;
 
 use neqo_common::{hex, qdebug, qinfo, qtrace};
@@ -144,11 +145,28 @@ impl Crypto {
         );
         self.streams[token.epoch as usize]
             .tx
-            .mark_as_acked(token.offset, token.length as usize);
+            .mark_as_acked(token.offset, token.length);
     }
 
-    pub fn lost(&mut self, _token: CryptoRecoveryToken) {
-        // TODO(agrover@mozilla.com): @ekr: resend?
+    pub fn lost(&mut self, token: CryptoRecoveryToken) {
+        qinfo!(
+            "Lost crypto frame epoch={} offset={} length={}",
+            token.epoch,
+            token.offset,
+            token.length
+        );
+        self.streams[token.epoch as usize]
+            .tx
+            .mark_as_lost(token.offset, token.length);
+    }
+
+    pub fn retry(&mut self) {
+        let sent = self.streams[0].tx.highest_sent();
+        self.streams[0].tx.mark_as_lost(0, sent.try_into().unwrap());
+
+        for s in &self.streams[1..] {
+            debug_assert_eq!(s.tx.highest_sent(), 0);
+        }
     }
 
     pub fn get_frame(
@@ -178,7 +196,7 @@ impl Crypto {
                 Some(RecoveryToken::Crypto(CryptoRecoveryToken {
                     epoch,
                     offset,
-                    length: length as u64,
+                    length,
                 })),
             ))
         } else {
@@ -321,5 +339,5 @@ pub(crate) struct CryptoStream {
 pub(crate) struct CryptoRecoveryToken {
     epoch: u16,
     offset: u64,
-    length: u64,
+    length: usize,
 }

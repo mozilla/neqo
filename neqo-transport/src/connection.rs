@@ -32,7 +32,7 @@ use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{decode_frame, AckRange, Frame, FrameType, StreamType, TxMode};
 use crate::packet::{
-    decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, PacketDecoder, PacketHdr,
+    decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, ConnectionIdDecoder, PacketHdr,
     PacketNumberDecoder, PacketType,
 };
 use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken};
@@ -50,7 +50,6 @@ use crate::{AppError, ConnectionError, Error, Res};
 struct Packet(Vec<u8>);
 
 const NUM_EPOCHS: Epoch = 4;
-const CID_LENGTH: usize = 8;
 
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
@@ -187,6 +186,41 @@ impl Output {
     }
 }
 
+pub trait ConnectionIdManager: ConnectionIdDecoder {
+    fn generate_cid(&mut self) -> ConnectionId;
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder;
+}
+/// Alias the common form for ConnectionIdManager.
+type CidMgr = Rc<RefCell<dyn ConnectionIdManager>>;
+
+/// An FixedConnectionIdManager produces random connection IDs of a fixed length.
+pub struct FixedConnectionIdManager {
+    len: usize,
+}
+impl FixedConnectionIdManager {
+    pub fn new(len: usize) -> Self {
+        Self { len }
+    }
+}
+impl ConnectionIdDecoder for FixedConnectionIdManager {
+    fn decode_cid(&self, dec: &mut Decoder) -> Option<ConnectionId> {
+        dec.decode(self.len).map(ConnectionId::from)
+    }
+}
+impl ConnectionIdManager for FixedConnectionIdManager {
+    fn generate_cid(&mut self) -> ConnectionId {
+        ConnectionId::generate(self.len)
+    }
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
+}
+
+struct RetryInfo {
+    token: Vec<u8>,
+    odcid: ConnectionId,
+}
+
 #[derive(Debug, Clone)]
 /// There's a little bit of different behavior for resetting idle timeout. See
 /// -transport 10.2 ("Idle Timeout").
@@ -256,13 +290,15 @@ pub struct Connection {
     tps: Rc<RefCell<TransportParametersHandler>>,
     /// What we are doing with 0-RTT.
     zero_rtt_state: ZeroRttState,
+    /// This object will generate connection IDs for the connection.
+    cid_manager: CidMgr,
     /// Network paths.  Right now, this tracks at most one path, so it uses `Option`.
     paths: Option<Path>,
     /// The connection IDs that we will accept.
     /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     valid_cids: Vec<ConnectionId>,
-    retry_token: Option<Vec<u8>>,
+    retry_info: Option<RetryInfo>,
     pub(crate) crypto: Crypto,
     pub(crate) acks: AckTracker,
     idle_timeout: IdleTimeout,
@@ -276,8 +312,6 @@ pub struct Connection {
     loss_recovery_state: LossRecoveryState,
     events: ConnectionEvents,
     token: Option<Vec<u8>>,
-    send_vn: Option<(PacketHdr, SocketAddr, SocketAddr)>,
-    send_retry: Option<PacketType>, // This will be PacketType::Retry.
     stats: Stats,
 }
 
@@ -295,19 +329,22 @@ impl Connection {
     pub fn new_client(
         server_name: &str,
         protocols: &[impl AsRef<str>],
+        cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
     ) -> Res<Self> {
-        let dcid = ConnectionId::generate(CID_LENGTH);
+        let dcid = ConnectionId::generate_initial();
+        let local_cids = vec![cid_manager.borrow_mut().generate_cid()];
         let mut c = Self::new(
             Role::Client,
             Client::new(server_name)?.into(),
+            cid_manager,
             None,
             protocols,
             Some(Path {
                 local: local_addr,
                 remote: remote_addr,
-                local_cids: vec![ConnectionId::generate(CID_LENGTH)],
+                local_cids,
                 remote_cid: dcid.clone(),
             }),
         );
@@ -320,10 +357,12 @@ impl Connection {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
+        cid_manager: CidMgr,
     ) -> Res<Self> {
         Ok(Self::new(
             Role::Server,
             Server::new(certs)?.into(),
+            cid_manager,
             Some(anti_replay),
             protocols,
             None,
@@ -353,6 +392,7 @@ impl Connection {
     fn new(
         r: Role,
         agent: Agent,
+        cid_manager: CidMgr,
         anti_replay: Option<&AntiReplay>,
         protocols: &[impl AsRef<str>],
         paths: Option<Path>,
@@ -369,11 +409,12 @@ impl Connection {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
             },
+            cid_manager,
             paths,
             valid_cids: Vec::new(),
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
-            retry_token: None,
+            retry_info: None,
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::default(),
@@ -387,10 +428,17 @@ impl Connection {
             loss_recovery_state: LossRecoveryState::default(),
             events: ConnectionEvents::default(),
             token: None,
-            send_vn: None,
-            send_retry: None,
             stats: Stats::default(),
         }
+    }
+
+    /// Set the connection ID that was originally chosen by the client.
+    pub(crate) fn original_connection_id(&mut self, odcid: &ConnectionId) {
+        assert_eq!(self.role, Role::Server);
+        self.tps
+            .borrow_mut()
+            .local
+            .set_bytes(tp_const::ORIGINAL_CONNECTION_ID, odcid.to_vec());
     }
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
@@ -547,15 +595,12 @@ impl Connection {
 
         if self.idle_timeout.expired(now) {
             qinfo!("idle timeout expired");
-            self.set_state(State::Closing {
-                error: ConnectionError::Transport(Error::IdleTimeout),
-                frame_type: 0,
-                msg: "Idle timeout".into(),
-                timeout: self.get_closing_period_time(now),
-            });
+            self.set_state(State::Closed(ConnectionError::Transport(
+                Error::IdleTimeout,
+            )));
+        } else {
+            self.check_loss_detection_timeout(now);
         }
-
-        self.check_loss_detection_timeout(now);
     }
 
     /// Call in to process activity on the connection. Either new packets have
@@ -564,7 +609,6 @@ impl Connection {
         let res = self.input(dgram, now);
         self.absorb_error(now, res);
         self.cleanup_streams();
-        self.check_loss_detection_timeout(now);
     }
 
     /// Get the time that we next need to be called back, relative to `now`.
@@ -634,11 +678,68 @@ impl Connection {
         if let Some(d) = dgram {
             self.process_input(d, now);
         }
+        self.process_timer(now);
         self.process_output(now)
     }
 
     fn is_valid_cid(&self, cid: &ConnectionId) -> bool {
         self.valid_cids.contains(cid) || self.paths.iter().any(|p| p.local_cids.contains(cid))
+    }
+
+    fn is_valid_initial(&self, hdr: &PacketHdr) -> bool {
+        if let PacketType::Initial(token) = &hdr.tipe {
+            // Server checks the token, so if we have one,
+            // assume that the DCID is OK.
+            if hdr.dcid.len() < 8 {
+                if token.is_empty() {
+                    qinfo!([self] "Drop Initial with short DCID");
+                    false
+                } else {
+                    qinfo!([self] "Initial received with token, assuming OK");
+                    true
+                }
+            } else {
+                // This is the normal path. Don't log.
+                true
+            }
+        } else {
+            qdebug!([self] "Dropping non-Initial packet");
+            false
+        }
+    }
+
+    fn handle_retry(&mut self, scid: &ConnectionId, odcid: &ConnectionId, token: &[u8]) -> Res<()> {
+        qdebug!([self] "received Retry");
+        if self.retry_info.is_some() {
+            qinfo!([self] "Dropping extra Retry");
+            return Ok(());
+        }
+        if token.is_empty() {
+            qinfo!([self] "Dropping Retry without a token");
+            return Ok(());
+        }
+        match self.paths.iter_mut().find(|p| p.remote_cid == *odcid) {
+            None => {
+                qinfo!([self] "Ignoring Retry with mismatched ODCID");
+                return Ok(());
+            }
+            Some(path) => {
+                path.remote_cid = scid.clone();
+            }
+        }
+        qinfo!([self] "Valid Retry received, restarting with provided token");
+        self.retry_info = Some(RetryInfo {
+            token: token.to_vec(),
+            odcid: odcid.clone(),
+        });
+        // Reset the crypto streams and any 0-RTT.
+        self.crypto.retry();
+        self.send_streams.retry();
+
+        // Switching crypto state here might not happen eventually.
+        // https://github.com/quicwg/base-drafts/issues/2823
+        self.crypto.states[0] = Some(self.crypto.create_initial_state(self.role, scid));
+        Ok(())
     }
 
     fn input(&mut self, d: Datagram, now: Instant) -> Res<()> {
@@ -648,7 +749,8 @@ impl Connection {
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
-            let mut hdr = match decode_packet_hdr(self, slc) {
+            let res = decode_packet_hdr(self.cid_manager.borrow().as_decoder(), slc);
+            let mut hdr = match res {
                 Ok(h) => h,
                 Err(e) => {
                     qinfo!([self] "Received indecipherable packet header {} {}", hex(slc), e);
@@ -664,26 +766,7 @@ impl Connection {
                     return Err(Error::VersionNegotiation);
                 }
                 (PacketType::Retry { odcid, token }, State::WaitInitial, Role::Client) => {
-                    if self.retry_token.is_some() {
-                        qwarn!("received another Retry, dropping it");
-                        return Ok(());
-                    }
-                    if token.is_empty() {
-                        qwarn!("received Retry, but no token, dropping it");
-                        return Ok(());
-                    }
-                    match self.paths.iter_mut().find(|p| p.remote_cid == *odcid) {
-                        None => {
-                            qwarn!("received Retry, but not for us, dropping it");
-                            return Ok(());
-                        }
-                        Some(path) => {
-                            path.remote_cid = hdr.scid.expect("Retry pkt must have SCID");
-                        }
-                    }
-                    qinfo!("received valid Retry, but we don't do anything with these yet.");
-                    self.retry_token = Some(token.clone());
-                    return Ok(());
+                    return self.handle_retry(hdr.scid.as_ref().unwrap(), odcid, token);
                 }
                 (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {
                     qwarn!("dropping {:?}", hdr.tipe);
@@ -695,12 +778,10 @@ impl Connection {
             if let Some(version) = hdr.version {
                 if version != self.version {
                     qwarn!(
-                        "hdr version {:?} and self.version {} disagree",
-                        hdr.version,
+                        "Dropping packet from version {:x} (self.version={:x})",
+                        hdr.version.unwrap(),
                         self.version,
                     );
-                    qwarn!([self] "Sending VN on next output");
-                    self.send_vn = Some((hdr, d.source(), d.destination()));
                     return Ok(());
                 }
             }
@@ -713,8 +794,7 @@ impl Connection {
                 State::WaitInitial => {
                     qinfo!([self] "Received packet in WaitInitial");
                     if self.role == Role::Server {
-                        if hdr.dcid.len() < 8 {
-                            qwarn!([self] "Remote DCID is too short");
+                        if !self.is_valid_initial(&hdr) {
                             return Ok(());
                         }
                         self.crypto.states[0] =
@@ -812,7 +892,8 @@ impl Connection {
             // Install a path.
             assert!(self.paths.is_none());
             let mut p = Path::new(&d, hdr.scid.unwrap());
-            p.local_cids.push(ConnectionId::generate(CID_LENGTH));
+            p.local_cids
+                .push(self.cid_manager.borrow_mut().generate_cid());
             self.paths = Some(p);
 
             // SecretAgentPreinfo::early_data() always returns false for a server,
@@ -861,37 +942,7 @@ impl Connection {
         Ok(ack_eliciting)
     }
 
-    fn output_vn(
-        &mut self,
-        recvd_hdr: PacketHdr,
-        remote: SocketAddr,
-        local: SocketAddr,
-    ) -> Datagram {
-        qinfo!("Sending VN Packet instead of normal output");
-        let hdr = PacketHdr::new(
-            0,
-            // Actual version we support and a greased value.
-            PacketType::VN(vec![QUIC_VERSION, 0x4a4a_4a4a]),
-            Some(0),
-            recvd_hdr.scid.unwrap().clone(),
-            Some(recvd_hdr.dcid.clone()),
-            0, // unused
-            0, // unused
-        );
-
-        // Do not save any state when generating VN pkt, so cs is not
-        // retained.
-        let cs = self.crypto.create_initial_state(self.role, &recvd_hdr.dcid);
-        let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &[]);
-        self.stats.packets_tx += 1;
-        Datagram::new(local, remote, packet)
-    }
-
     fn output(&mut self, now: Instant) -> Option<Datagram> {
-        if let Some((vn_hdr, remote, local)) = self.send_vn.take() {
-            return Some(self.output_vn(vn_hdr, remote, local));
-        }
-
         let mut out = None;
         // Can't call a method on self while iterating over self.paths
         let paths = mem::replace(&mut self.paths, Default::default());
@@ -1018,8 +1069,8 @@ impl Connection {
                 0,
                 match epoch {
                     0 => {
-                        let token = match &self.retry_token {
-                            Some(v) => v.clone(),
+                        let token = match &self.retry_info {
+                            Some(v) => v.token.clone(),
                             _ => Vec::new(),
                         };
                         PacketType::Initial(token)
@@ -1123,6 +1174,24 @@ impl Connection {
         mem::replace(&mut self.tps, swapped);
     }
 
+    fn validate_odcid(&self) -> Res<()> {
+        if let Some(info) = &self.retry_info {
+            let tph = self.tps.borrow();
+            let tp = tph.remote().get_bytes(tp_const::ORIGINAL_CONNECTION_ID);
+            if let Some(odcid_tp) = tp {
+                if odcid_tp[..] == info.odcid[..] {
+                    Ok(())
+                } else {
+                    Err(Error::InvalidRetry)
+                }
+            } else {
+                Err(Error::InvalidRetry)
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     fn handshake(&mut self, now: Instant, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         qdebug!("Handshake epoch={} data={:0x?}", epoch, data);
         let mut rec: Option<Record> = None;
@@ -1160,6 +1229,7 @@ impl Connection {
                 return Err(Error::CryptoAlert(120));
             }
 
+            self.validate_odcid()?;
             self.set_state(State::Connected);
             self.set_initial_limits();
         }
@@ -1432,10 +1502,9 @@ impl Connection {
     }
 
     fn set_state(&mut self, state: State) {
-        if state != self.state {
+        if state > self.state {
             qinfo!([self] "State change from {:?} -> {:?}", self.state, state);
             self.state = state.clone();
-            self.events.connection_state_change(state);
             match &self.state {
                 State::Connected => {
                     if self.role == Role::Server {
@@ -1464,6 +1533,9 @@ impl Connection {
                 }
                 _ => {}
             }
+            self.events.connection_state_change(state);
+        } else {
+            assert_eq!(state, self.state);
         }
     }
 
@@ -1755,6 +1827,11 @@ impl Connection {
         self.events.events()
     }
 
+    /// Return true if there are outstanding events.
+    pub fn has_events(&self) -> bool {
+        self.events.has_events()
+    }
+
     fn check_loss_detection_timeout(&mut self, now: Instant) {
         qdebug!([self] "check_loss_timeouts");
 
@@ -1826,18 +1903,11 @@ impl ::std::fmt::Display for Connection {
     }
 }
 
-impl PacketDecoder for Connection {
-    fn get_cid_len(&self) -> usize {
-        CID_LENGTH
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::frame::StreamType;
-    use std::convert::TryFrom;
-    use test_fixture::{self, fixture_init, loopback, now};
+    use test_fixture::{self, assertions, fixture_init, loopback, now};
 
     // This is fabulous: because test_fixture uses the public API for Connection,
     // it gets a different type to the ones that are referenced via super::*.
@@ -1850,6 +1920,7 @@ mod tests {
         Connection::new_client(
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
         )
@@ -1861,6 +1932,7 @@ mod tests {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         )
         .expect("create a default server")
     }
@@ -2164,8 +2236,14 @@ mod tests {
     #[test]
     fn test_no_alpn() {
         fixture_init();
-        let mut client =
-            Connection::new_client("example.com", &["bad-alpn"], loopback(), loopback()).unwrap();
+        let mut client = Connection::new_client(
+            "example.com",
+            &["bad-alpn"],
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
+            loopback(),
+            loopback(),
+        )
+        .unwrap();
         let mut server = default_server();
 
         handshake(&mut client, &mut server);
@@ -2303,23 +2381,6 @@ mod tests {
         assert_eq!(client_stream_id, server_stream_id);
     }
 
-    // Do a simple decode of the datagram to verify that it is coalesced.
-    fn assert_coalesced_0rtt(payload: &[u8]) {
-        assert!(payload.len() >= 1200);
-        let mut dec = Decoder::from(payload);
-        let initial_type = dec.decode_byte().unwrap(); // Initial
-        assert_eq!(initial_type & 0b1111_0000, 0b1100_0000);
-        let version = dec.decode_uint(4).unwrap();
-        assert_eq!(version, QUIC_VERSION.into());
-        dec.skip_vec(1); // DCID
-        dec.skip_vec(1); // SCID
-        dec.skip_vvec();
-        let initial_len = dec.decode_varint().unwrap();
-        dec.skip(usize::try_from(initial_len).unwrap());
-        let zrtt_type = dec.decode_byte().unwrap();
-        assert_eq!(zrtt_type & 0b1111_0000, 0b1101_0000);
-    }
-
     #[test]
     fn zero_rtt_send_coalesce() {
         let mut client = default_client();
@@ -2340,7 +2401,7 @@ mod tests {
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
 
-        assert_coalesced_0rtt(&client_0rtt.as_dgram_ref().unwrap()[..]);
+        assertions::assert_coalesced_0rtt(&client_0rtt.as_dgram_ref().unwrap()[..]);
 
         let server_hs = server.process(client_0rtt.dgram(), now());
         assert!(server_hs.as_dgram_ref().is_some()); // Should produce ServerHello etc...
@@ -2376,9 +2437,13 @@ mod tests {
         // should result in the server rejecting 0-RTT.
         let ar = AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3)
             .expect("setup anti-replay");
-        let mut server =
-            Connection::new_server(test_fixture::DEFAULT_KEYS, test_fixture::DEFAULT_ALPN, &ar)
-                .unwrap();
+        let mut server = Connection::new_server(
+            test_fixture::DEFAULT_KEYS,
+            test_fixture::DEFAULT_ALPN,
+            &ar,
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+        )
+        .unwrap();
 
         // Send ClientHello.
         let client_hs = client.process(None, now());
@@ -2409,42 +2474,6 @@ mod tests {
         let res = client.stream_send(stream_id, msg);
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
-    }
-
-    #[test]
-    fn test_vn() {
-        let mut server = default_server();
-
-        // Make a packet with a bad version
-        let hdr = PacketHdr::new(
-            0,
-            PacketType::Initial(vec![]),
-            Some(0xbad),
-            ConnectionId::generate(8),
-            Some(ConnectionId::generate(8)),
-            0, // pn
-            0, // epoch
-        );
-        let agent = Client::new(test_fixture::DEFAULT_SERVER_NAME)
-            .unwrap()
-            .into();
-        let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
-        let mut crypto = Crypto::new(agent, test_fixture::DEFAULT_ALPN, tphandler, None).unwrap();
-        let cs = crypto.create_initial_state(Role::Client, &hdr.dcid);
-        let packet = encode_packet(cs.tx.as_ref().unwrap(), &hdr, &[0; 16]);
-        let dgram = Datagram::new(loopback(), loopback(), packet);
-
-        // "send" it
-        let ret_dgram = server.process(Some(dgram), now());
-
-        // We should have received a VN packet.
-        assert!(ret_dgram.as_dgram_ref().is_some());
-        let ret_pkt = ret_dgram.dgram().unwrap();
-        let ret_hdr = decode_packet_hdr(&server, &*ret_pkt).unwrap();
-        assert!(match &ret_hdr.tipe {
-            PacketType::VN(vns) if vns.len() == 2 => true,
-            _ => false,
-        });
     }
 
     #[test]
@@ -2487,7 +2516,7 @@ mod tests {
         client.process_timer(now + Duration::from_secs(60));
 
         // Not connected after 60 seconds.
-        assert!(matches!(client.state(), State::Closing{..}));
+        assert!(matches!(client.state(), State::Closed(_)));
     }
 
     #[test]
@@ -2514,7 +2543,7 @@ mod tests {
 
         // Not connected after 70 seconds.
         client.process_timer(now + Duration::from_secs(70));
-        assert!(matches!(client.state(), State::Closing{..}));
+        assert!(matches!(client.state(), State::Closed(_)));
     }
 
     #[test]
@@ -2543,7 +2572,7 @@ mod tests {
         // Not connected after 70 seconds because timer not reset by second
         // outgoing packet
         client.process_timer(now + Duration::from_secs(70));
-        assert!(matches!(client.state(), State::Closing{..}));
+        assert!(matches!(client.state(), State::Closed(_)));
     }
 
     #[test]
@@ -2578,7 +2607,7 @@ mod tests {
 
         // Not connected after 80 seconds.
         client.process_timer(now + Duration::from_secs(80));
-        assert!(matches!(client.state(), State::Closing{..}));
+        assert!(matches!(client.state(), State::Closed(_)));
     }
 
     #[test]
@@ -2627,6 +2656,7 @@ mod tests {
             test_fixture::LONG_CERT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
         )
         .expect("create a server");
 
@@ -2641,7 +2671,7 @@ mod tests {
         assert!(server2.as_dgram_ref().is_some());
 
         let client2 = client.process(server1.dgram(), now());
-        // this is an ack.
+        // This is an ack.
         assert!(client2.as_dgram_ref().is_some());
         // The client might have the certificate now, so we can't guarantee that
         // this will work.
@@ -2655,7 +2685,7 @@ mod tests {
         // Consume the second packet from the server.
         let client3 = client.process(server2.dgram(), now());
 
-        // check authentication.
+        // Check authentication.
         let auth2 = maybe_authenticate(&mut client);
         assert!(auth1 ^ auth2);
         // Now client has all data to finish handshake.

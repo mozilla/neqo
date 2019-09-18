@@ -1198,6 +1198,7 @@ mod tests {
         }
 
         let events = neqo_trans_conn.events();
+        let mut connected = false;
         for e in events {
             match e {
                 ConnectionEvent::NewStream {
@@ -1240,10 +1241,12 @@ mod tests {
                 ConnectionEvent::SendStreamWritable { stream_id } => {
                     assert!((stream_id == 2) || (stream_id == 6) || (stream_id == 10));
                 }
-                ConnectionEvent::StateChange(..) => {}
+                ConnectionEvent::StateChange(State::Connected) => connected = true,
+                ConnectionEvent::StateChange(_) => (),
                 _ => panic!("unexpected event"),
             }
         }
+        assert!(connected);
         (hconn, neqo_trans_conn)
     }
 
