@@ -31,6 +31,7 @@ fn new_stream_callback(request_headers: &[Header], error: bool) -> Response {
             (String::from("content-length"), String::from("3")),
         ],
         b"123".to_vec(),
+        None,
     )
 }
 
