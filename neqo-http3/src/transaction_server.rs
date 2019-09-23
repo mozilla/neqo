@@ -161,8 +161,17 @@ impl TransactionServer {
                     } else {
                         self.state = TransactionState::ReadingRequestDone;
                     }
+                    break Ok(());
                 }
-                TransactionState::BlockedDecodingHeaders { .. } => break Ok(()),
+                TransactionState::BlockedDecodingHeaders { ref mut buf } => {
+                    self.request_headers = decoder.decode_header_block(buf, self.stream_id)?;
+                    if self.request_headers.is_some() {
+                        self.state = TransactionState::ReadingRequestDone;
+                    } else {
+                        qdebug!([self] "decoding header is still blocked.");
+                    }
+                    break Ok(());
+                }
                 TransactionState::ReadingRequestDone => break Ok(()),
                 TransactionState::SendingResponse => break Ok(()),
                 TransactionState::Error => break Ok(()),
@@ -184,19 +193,6 @@ impl TransactionServer {
                 buf: vec![0; len as usize],
                 offset: 0,
             };
-        }
-        Ok(())
-    }
-
-    pub fn unblock(&mut self, decoder: &mut QPackDecoder) -> Res<()> {
-        if let TransactionState::BlockedDecodingHeaders { ref mut buf } = self.state {
-            self.request_headers = decoder.decode_header_block(buf, self.stream_id)?;
-            if self.request_headers.is_none() {
-                panic!("We must not be blocked again!");
-            }
-            self.state = TransactionState::ReadingRequestDone;
-        } else {
-            panic!("Stream must be in the block state!");
         }
         Ok(())
     }

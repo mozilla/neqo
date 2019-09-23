@@ -509,9 +509,9 @@ impl Http3Connection {
         };
         let mut unblocked_streams: Vec<u64> = Vec::new();
 
-        if self.read_stream_client(stream_id, false)? {
+        if self.read_stream_client(stream_id)? {
             qdebug!([label] "Request/response stream {} read.", stream_id);
-        } else if self.read_stream_server(stream_id, false)? {
+        } else if self.read_stream_server(stream_id)? {
         } else if self
             .control_stream_remote
             .receive_if_this_stream(&mut self.conn, stream_id)?
@@ -565,9 +565,9 @@ impl Http3Connection {
         for stream_id in unblocked_streams {
             qdebug!([self] "Stream {} is unblocked", stream_id);
             if self.role() == Role::Client {
-                self.read_stream_client(stream_id, true)?;
+                self.read_stream_client(stream_id)?;
             } else {
-                self.read_stream_server(stream_id, true)?;
+                self.read_stream_server(stream_id)?;
             }
         }
         Ok(())
@@ -670,7 +670,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn read_stream_client(&mut self, stream_id: u64, unblocked: bool) -> Res<bool> {
+    fn read_stream_client(&mut self, stream_id: u64) -> Res<bool> {
         if self.role() != Role::Client {
             return Ok(false);
         }
@@ -685,11 +685,7 @@ impl Http3Connection {
         if let Some(transaction) = &mut self.transactions_client.get_mut(&stream_id) {
             qdebug!([label] "Request/response stream {} is readable.", stream_id);
             found = true;
-            let res = if unblocked {
-                transaction.unblock(&mut self.qpack_decoder)
-            } else {
-                transaction.receive(&mut self.conn, &mut self.qpack_decoder)
-            };
+            let res = transaction.receive(&mut self.conn, &mut self.qpack_decoder);
             if let Err(e) = res {
                 qdebug!([label] "Error {} ocurred", e);
                 if e.is_stream_error() {
@@ -705,7 +701,7 @@ impl Http3Connection {
         Ok(found)
     }
 
-    fn read_stream_server(&mut self, stream_id: u64, unblocked: bool) -> Res<bool> {
+    fn read_stream_server(&mut self, stream_id: u64) -> Res<bool> {
         if self.role() != Role::Server {
             return Ok(false);
         }
@@ -720,11 +716,7 @@ impl Http3Connection {
         if let Some(transaction) = &mut self.transactions_server.get_mut(&stream_id) {
             qdebug!([label] "Request/response stream {} is readable.", stream_id);
             found = true;
-            let res = if unblocked {
-                transaction.unblock(&mut self.qpack_decoder)
-            } else {
-                transaction.receive(&mut self.conn, &mut self.qpack_decoder)
-            };
+            let res = transaction.receive(&mut self.conn, &mut self.qpack_decoder);
             if let Err(e) = res {
                 qdebug!([label] "Error {} ocurred", e);
                 if e.is_stream_error() {
@@ -1285,7 +1277,9 @@ mod tests {
         let _ = connect(false);
     }
 
-    fn connect_and_receive_control_stream(client: bool) -> (Http3Connection, Connection, u64) {
+    fn connect_and_receive_control_stream(
+        client: bool,
+    ) -> (Http3Connection, Connection, u64, QPackEncoder) {
         let (mut hconn, mut neqo_trans_conn) = connect(client);
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         let mut sent = neqo_trans_conn.stream_send(
@@ -1293,9 +1287,9 @@ mod tests {
             &[0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64],
         );
         assert_eq!(sent, Ok(9));
-        let encoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        sent = neqo_trans_conn.stream_send(encoder_stream, &[0x2]);
-        assert_eq!(sent, Ok(1));
+        let mut encoder = QPackEncoder::new(true);
+        encoder.add_send_stream(neqo_trans_conn.stream_create(StreamType::UniDi).unwrap());
+        encoder.send(&mut neqo_trans_conn).unwrap();
         let decoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         sent = neqo_trans_conn.stream_send(decoder_stream, &[0x3]);
         assert_eq!(sent, Ok(1));
@@ -1304,7 +1298,7 @@ mod tests {
 
         // assert no error occured.
         assert_eq!(hconn.state(), Http3State::Connected);
-        (hconn, neqo_trans_conn, control_stream)
+        (hconn, neqo_trans_conn, control_stream, encoder)
     }
 
     // Client: Test receiving a new control stream and a SETTINGS frame.
@@ -1323,7 +1317,7 @@ mod tests {
     // has been closed.
     #[test]
     fn test_client_close_control_stream() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         neqo_trans_conn.stream_close_send(3).unwrap();
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
@@ -1334,7 +1328,7 @@ mod tests {
     // has been closed.
     #[test]
     fn test_server_close_control_stream() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(false);
         neqo_trans_conn.stream_close_send(2).unwrap();
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
@@ -1375,7 +1369,7 @@ mod tests {
     // with error HTTP_UNEXPECTED_FRAME.
     #[test]
     fn test_client_receive_settings_twice() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         // send the second SETTINGS frame.
         let sent = neqo_trans_conn.stream_send(3, &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
         assert_eq!(sent, Ok(8));
@@ -1388,7 +1382,7 @@ mod tests {
     // with error HTTP_UNEXPECTED_FRAME.
     #[test]
     fn test_server_receive_settings_twice() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(false);
         // send the second SETTINGS frame.
         let sent = neqo_trans_conn.stream_send(2, &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
         assert_eq!(sent, Ok(8));
@@ -1398,7 +1392,7 @@ mod tests {
     }
 
     fn test_wrong_frame_on_control_stream(client: bool, v: &[u8]) {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(client);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(client);
 
         // receive a frame that is not allowed on the control stream.
         if client {
@@ -1445,7 +1439,7 @@ mod tests {
     // This function also tests getting stream id that does not fit into a single byte.
     #[test]
     fn test_client_received_unknown_stream() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
 
         // create a stream with unknown type.
         let new_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
@@ -1477,7 +1471,7 @@ mod tests {
     // also test getting stream id that does not fit into a single byte.
     #[test]
     fn test_server_received_unknown_stream() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(false);
 
         // create a stream with unknown type.
         let new_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
@@ -1508,7 +1502,7 @@ mod tests {
     // Client: receive a push stream
     #[test]
     fn test_client_received_push_stream() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
 
         // create a push stream.
         let push_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
@@ -1538,7 +1532,7 @@ mod tests {
     // Server: receiving a push stream on a server should cause WrongStreamDirection
     #[test]
     fn test_server_received_push_stream() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(false);
 
         // create a push stream.
         let push_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
@@ -1567,7 +1561,7 @@ mod tests {
 
     // Test wrong frame on req/rec stream
     fn test_wrong_frame_on_request_stream(v: &[u8], err: Error) {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
 
         assert_eq!(
             hconn.fetch("GET", "https", "something.com", "/", &[]),
@@ -1714,7 +1708,7 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn fetch() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -1884,7 +1878,7 @@ mod tests {
     // Send a request with the request body.
     #[test]
     fn fetch_with_data() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -1948,7 +1942,7 @@ mod tests {
 
     // send a request with request body containing request_body. We expect to receive expected_data_frame_header.
     fn fetch_with_data_length_xbytes(request_body: &[u8], expected_data_frame_header: &[u8]) {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2060,7 +2054,7 @@ mod tests {
         expected_second_data_frame_header: &[u8],
         expected_second_data_frame: &[u8],
     ) {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2276,7 +2270,7 @@ mod tests {
     // Test receiving STOP_SENDING with the EarlyResponse error code.
     #[test]
     fn test_stop_sending_early_response() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2378,7 +2372,7 @@ mod tests {
     // Server sends stop sending and reset.
     #[test]
     fn test_stop_sending_other_error_with_reset() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2443,7 +2437,7 @@ mod tests {
     // We will reset the stream anyway.
     #[test]
     fn test_stop_sending_other_error_wo_reset() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2503,7 +2497,7 @@ mod tests {
     // in hconn.events. The events will be removed.
     #[test]
     fn test_stop_sending_and_reset_other_error_with_events() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2583,7 +2577,7 @@ mod tests {
     // The events will be removed.
     #[test]
     fn test_stop_sending_other_error_with_events() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2657,7 +2651,7 @@ mod tests {
     // Server sends a reset. We will close sending side as well.
     #[test]
     fn test_reset_wo_stop_sending() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2714,7 +2708,7 @@ mod tests {
     }
 
     fn test_incomplet_frame(res: &[u8], error: Error) {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2809,7 +2803,7 @@ mod tests {
     // test goaway
     #[test]
     fn test_goaway() {
-        let (mut hconn, mut neqo_trans_conn, _control_stream) =
+        let (mut hconn, mut neqo_trans_conn, _control_stream, _) =
             connect_and_receive_control_stream(true);
         let request_stream_id_1 = hconn
             .fetch("GET", "https", "something.com", "/", &[])
@@ -2912,7 +2906,7 @@ mod tests {
     }
 
     fn connect_and_send_request() -> (Http3Connection, Connection, u64) {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -3296,7 +3290,7 @@ mod tests {
 
     #[test]
     fn test_multiple_data_frames() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &Vec::<Header>::new())
             .unwrap();
@@ -3393,7 +3387,7 @@ mod tests {
 
     #[test]
     fn test_receive_grease_before_response() {
-        let (mut hconn, mut neqo_trans_conn, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch(
                 "GET",
@@ -3482,5 +3476,109 @@ mod tests {
             hconn.read_response_data(now(), 0, &mut buf),
             Err(Error::InvalidStreamId)
         );
+    }
+
+    #[test]
+    fn test_read_frames_header_blocked() {
+        let (mut hconn, mut neqo_trans_conn, _, mut encoder) =
+            connect_and_receive_control_stream(true);
+        let request_stream_id = hconn
+            .fetch(
+                "GET",
+                "https",
+                "something.com",
+                "/",
+                &Vec::<(String, String)>::new(),
+            )
+            .unwrap();
+        assert_eq!(request_stream_id, 0);
+        let _ = hconn.stream_close_send(request_stream_id);
+        let out = hconn.process(None, now());
+        neqo_trans_conn.process(out.dgram(), now());
+
+        encoder.set_max_capacity(100).unwrap();
+        encoder.set_max_blocked_streams(100).unwrap();
+
+        // find the new request/response stream and send frame v on it.
+        let events = neqo_trans_conn.events();
+        for e in events {
+            match e {
+                ConnectionEvent::NewStream {
+                    stream_id,
+                    stream_type,
+                } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    assert_eq!(stream_type, StreamType::BiDi);
+                }
+                ConnectionEvent::RecvStreamReadable { stream_id } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    let mut buf = [0u8; 100];
+                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(fin, true);
+                    assert_eq!(amount, 18);
+                    assert_eq!(
+                        buf[..18],
+                        [
+                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
+                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
+                        ]
+                    );
+
+                    let headers = vec![
+                        (String::from(":status"), String::from("200")),
+                        (String::from("my-header"), String::from("my-header")),
+                        (String::from("content-length"), String::from("3")),
+                    ];
+                    let encoded_headers = encoder.encode_header_block(&headers, stream_id);
+                    let hframe = HFrame::Headers {
+                        len: encoded_headers.len() as u64,
+                    };
+                    let mut d = Encoder::default();
+                    hframe.encode(&mut d);
+                    d.encode(&encoded_headers);
+                    let d_frame = HFrame::Data { len: 3 };
+                    d_frame.encode(&mut d);
+                    d.encode(&[0x61, 0x62, 0x63]);
+                    let _ = neqo_trans_conn.stream_send(stream_id, &d[..]);
+                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
+                }
+                _ => {}
+            }
+        }
+        // Send response before sending encoder instructions.
+        let out = neqo_trans_conn.process(None, now());
+        let _out = hconn.process(out.dgram(), now());
+
+        let header_ready_event = |e| matches!(e, Http3Event::HeaderReady { .. });
+        assert!(!hconn.events().into_iter().any(header_ready_event));
+
+        // Send encoder instructions to unblock the stream.
+        encoder.send(&mut neqo_trans_conn).unwrap();
+
+        let out = neqo_trans_conn.process(None, now());
+        let _out = hconn.process(out.dgram(), now());
+        let _out = hconn.process(None, now());
+
+        let mut recv_header = false;
+        let mut recv_data = false;
+        // Now the stream is unblocked and both headers abnd data will be consumed.
+        let events = hconn.events();
+        for e in events {
+            match e {
+                Http3Event::HeaderReady { stream_id } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    recv_header = true;
+                }
+                Http3Event::DataReadable { stream_id } => {
+                    recv_data = true;
+                    assert_eq!(stream_id, request_stream_id);
+                }
+                x => {
+                    eprintln!("event {:?}", x);
+                    panic!()
+                }
+            }
+        }
+        assert!(recv_header && recv_data);
     }
 }
