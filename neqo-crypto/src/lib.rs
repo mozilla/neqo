@@ -46,6 +46,7 @@ pub use auth::AuthenticationStatus;
 use neqo_common::once::OnceResult;
 
 use std::ffi::CString;
+use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 use std::ptr::null;
 
@@ -117,7 +118,7 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
                 dircstr.as_ptr(),
                 empty.as_ptr(),
                 empty.as_ptr(),
-                nss::SECMOD_DB.as_ptr() as *const i8,
+                nss::SECMOD_DB.as_ptr() as *const c_char,
                 nss::NSS_INIT_READONLY,
             ))
             .expect("NSS_Initialize failed");

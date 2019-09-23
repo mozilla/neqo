@@ -6,6 +6,8 @@
 
 #![allow(dead_code)]
 
+use std::os::raw::c_char;
+
 use crate::ssl::{SECStatus, SECSuccess};
 
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
@@ -79,7 +81,7 @@ use std::ffi::CStr;
 
 fn wrap_str_fn<F>(f: F, dflt: &str) -> String
 where
-    F: FnOnce() -> *const i8,
+    F: FnOnce() -> *const c_char,
 {
     unsafe {
         let p = f();
