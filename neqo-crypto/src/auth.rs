@@ -39,13 +39,19 @@ impl Into<PRErrorCode> for AuthenticationStatus {
             AuthenticationStatus::Ok => 0,
             AuthenticationStatus::CaInvalid => sec::SEC_ERROR_CA_CERT_INVALID,
             AuthenticationStatus::CaNotV3 => mozpkix::MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA,
-            AuthenticationStatus::CertAlgorithmDisabled => sec::SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED,
+            AuthenticationStatus::CertAlgorithmDisabled => {
+                sec::SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED
+            }
             AuthenticationStatus::CertExpired => sec::SEC_ERROR_EXPIRED_CERTIFICATE,
             AuthenticationStatus::CertInvalidTime => sec::SEC_ERROR_INVALID_TIME,
-            AuthenticationStatus::CertIsCa => mozpkix::MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY,
+            AuthenticationStatus::CertIsCa => {
+                mozpkix::MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY
+            }
             AuthenticationStatus::CertKeyUsage => sec::SEC_ERROR_INADEQUATE_KEY_USAGE,
             AuthenticationStatus::CertMitm => mozpkix::MOZILLA_PKIX_ERROR_MITM_DETECTED,
-            AuthenticationStatus::CertNotYetValid => mozpkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE,
+            AuthenticationStatus::CertNotYetValid => {
+                mozpkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE
+            }
             AuthenticationStatus::CertRevoked => sec::SEC_ERROR_REVOKED_CERTIFICATE,
             AuthenticationStatus::CertSelfSigned => mozpkix::MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT,
             AuthenticationStatus::CertSubjectInvalid => ssl::SSL_ERROR_BAD_CERT_DOMAIN,
@@ -53,7 +59,9 @@ impl Into<PRErrorCode> for AuthenticationStatus {
             AuthenticationStatus::CertWeakKey => mozpkix::MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE,
             AuthenticationStatus::IssuerEmptyName => mozpkix::MOZILLA_PKIX_ERROR_EMPTY_ISSUER_NAME,
             AuthenticationStatus::IssuerExpired => sec::SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE,
-            AuthenticationStatus::IssuerNotYetValid => mozpkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE,
+            AuthenticationStatus::IssuerNotYetValid => {
+                mozpkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE
+            }
             AuthenticationStatus::IssuerUnknown => sec::SEC_ERROR_UNKNOWN_ISSUER,
             AuthenticationStatus::IssuerUntrusted => sec::SEC_ERROR_UNTRUSTED_ISSUER,
             AuthenticationStatus::PolicyRejection => {
@@ -72,13 +80,19 @@ impl From<PRErrorCode> for AuthenticationStatus {
             0 => AuthenticationStatus::Ok,
             sec::SEC_ERROR_CA_CERT_INVALID => AuthenticationStatus::CaInvalid,
             mozpkix::MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA => AuthenticationStatus::CaNotV3,
-            sec::SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED => AuthenticationStatus::CertAlgorithmDisabled,
+            sec::SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED => {
+                AuthenticationStatus::CertAlgorithmDisabled
+            }
             sec::SEC_ERROR_EXPIRED_CERTIFICATE => AuthenticationStatus::CertExpired,
             sec::SEC_ERROR_INVALID_TIME => AuthenticationStatus::CertInvalidTime,
-            mozpkix::MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY => AuthenticationStatus::CertIsCa,
+            mozpkix::MOZILLA_PKIX_ERROR_CA_CERT_USED_AS_END_ENTITY => {
+                AuthenticationStatus::CertIsCa
+            }
             sec::SEC_ERROR_INADEQUATE_KEY_USAGE => AuthenticationStatus::CertKeyUsage,
             mozpkix::MOZILLA_PKIX_ERROR_MITM_DETECTED => AuthenticationStatus::CertMitm,
-            mozpkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE => AuthenticationStatus::CertNotYetValid,
+            mozpkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE => {
+                AuthenticationStatus::CertNotYetValid
+            }
             sec::SEC_ERROR_REVOKED_CERTIFICATE => AuthenticationStatus::CertRevoked,
             mozpkix::MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT => AuthenticationStatus::CertSelfSigned,
             ssl::SSL_ERROR_BAD_CERT_DOMAIN => AuthenticationStatus::CertSubjectInvalid,
@@ -86,7 +100,9 @@ impl From<PRErrorCode> for AuthenticationStatus {
             mozpkix::MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE => AuthenticationStatus::CertWeakKey,
             mozpkix::MOZILLA_PKIX_ERROR_EMPTY_ISSUER_NAME => AuthenticationStatus::IssuerEmptyName,
             sec::SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE => AuthenticationStatus::IssuerExpired,
-            mozpkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE => AuthenticationStatus::IssuerNotYetValid,
+            mozpkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE => {
+                AuthenticationStatus::IssuerNotYetValid
+            }
             sec::SEC_ERROR_UNKNOWN_ISSUER => AuthenticationStatus::IssuerUnknown,
             sec::SEC_ERROR_UNTRUSTED_ISSUER => AuthenticationStatus::IssuerUntrusted,
             mozpkix::MOZILLA_PKIX_ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED => {
