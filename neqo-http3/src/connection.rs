@@ -730,8 +730,20 @@ impl Http3Connection {
             }
             if transaction.done_reading_request() {
                 if let Some(ref mut cb) = self.handler {
-                    let (headers, data) = (cb)(transaction.get_request_headers(), false);
-                    transaction.set_response(&headers, data, &mut self.qpack_encoder);
+                    let (headers, data, close_error) = (cb)(transaction.get_request_headers(), false);
+                    qdebug!("Sending response: {:?} {:?} {:?}", headers, data, close_error);
+                    match close_error {
+                        Some(e) => {
+                            let _ = self.conn.stream_stop_sending(stream_id, e.code());
+                            if e != Error::EarlyResponse {
+                                self.transactions_client.remove(&stream_id);
+                                let _ = self.conn.stream_reset_send(stream_id, e.code());
+                            } else {
+                                transaction.set_response(&headers, data, &mut self.qpack_encoder);
+                            }
+                        }
+                        None => transaction.set_response(&headers, data, &mut self.qpack_encoder)
+                    };
                 }
                 if transaction.is_state_sending() {
                     self.streams_have_data_to_send.insert(stream_id);
