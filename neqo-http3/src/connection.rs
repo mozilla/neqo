@@ -3561,7 +3561,7 @@ mod tests {
 
         let mut recv_header = false;
         let mut recv_data = false;
-        // Now the stream is unblocked and both headers abnd data will be consumed.
+        // Now the stream is unblocked and both headers and data will be consumed.
         let events = hconn.events();
         for e in events {
             match e {
