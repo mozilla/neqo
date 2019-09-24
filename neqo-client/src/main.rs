@@ -8,11 +8,14 @@
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Connection, Http3Event, Http3State, Output};
-use neqo_transport::Connection;
+use neqo_transport::{Connection, FixedConnectionIdManager};
+
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::process::exit;
+use std::rc::Rc;
 use std::time::Instant;
 use structopt::StructOpt;
 use url::Url;
@@ -161,7 +164,7 @@ struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, _args: &Args, client: &mut Http3Connection) -> bool {
         let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
-        if client.events().into_iter().any(authentication_needed) {
+        if client.events().any(authentication_needed) {
             client.authenticated(AuthenticationStatus::Ok, Instant::now());
         }
         Http3State::Connected != client.state()
@@ -241,6 +244,7 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         Connection::new_client(
             args.url.host_str().unwrap(),
             &args.alpn,
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
             local_addr,
             remote_addr,
         )
@@ -319,13 +323,17 @@ fn main() {
 }
 
 mod old {
+    use std::cell::RefCell;
     use std::collections::HashSet;
     use std::net::{SocketAddr, UdpSocket};
     use std::process::exit;
+    use std::rc::Rc;
     use std::time::Instant;
 
     use neqo_common::Datagram;
-    use neqo_transport::{Connection, ConnectionEvent, State, StreamType};
+    use neqo_transport::{
+        Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
+    };
 
     use super::{emit_datagram, Args};
 
@@ -443,6 +451,7 @@ mod old {
         let mut client = Connection::new_client(
             args.url.host_str().unwrap(),
             &["http/0.9"],
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
             local_addr,
             remote_addr,
         )

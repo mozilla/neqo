@@ -50,7 +50,7 @@ fn connect() -> (Http3Connection, Http3Connection, Option<Datagram>) {
     let out = hconn_c.process(out.dgram(), now()); // ACK
     let _ = hconn_s.process(out.dgram(), now()); //consume ACK
     let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
-    assert!(hconn_c.events().into_iter().any(authentication_needed));
+    assert!(hconn_c.events().any(authentication_needed));
     hconn_c.authenticated(AuthenticationStatus::Ok, now());
     let out = hconn_c.process(None, now()); // Handshake
     assert_eq!(hconn_c.state(), Http3State::Connected);

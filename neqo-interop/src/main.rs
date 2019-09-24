@@ -9,9 +9,15 @@
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Connection, Http3Event};
-use neqo_transport::{Connection, ConnectionError, ConnectionEvent, Error, State, StreamType};
+use neqo_transport::{
+    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, State,
+    StreamType,
+};
+
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::rc::Rc;
 // use std::path::PathBuf;
 use std::str::FromStr;
 use std::string::ParseError;
@@ -397,9 +403,14 @@ struct NetworkCtx {
 }
 
 fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connection), String> {
-    let mut client =
-        Connection::new_client(peer.host, &test.alpn(), nctx.local_addr, nctx.remote_addr)
-            .expect("must succeed");
+    let mut client = Connection::new_client(
+        peer.host,
+        &test.alpn(),
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+        nctx.local_addr,
+        nctx.remote_addr,
+    )
+    .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     let res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));
@@ -479,9 +490,14 @@ impl Handler for VnHandler {
     }
 }
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
-    let mut client =
-        Connection::new_client(peer.host, &["hq-20"], nctx.local_addr, nctx.remote_addr)
-            .expect("must succeed");
+    let mut client = Connection::new_client(
+        peer.host,
+        &["hq-22"],
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+        nctx.local_addr,
+        nctx.remote_addr,
+    )
+    .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = VnHandler {};
     let _res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));

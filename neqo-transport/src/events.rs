@@ -114,4 +114,8 @@ impl ConnectionEvents {
     fn insert(&self, event: ConnectionEvent) {
         self.events.borrow_mut().insert(event);
     }
+
+    pub fn has_events(&self) -> bool {
+        !self.events.borrow().is_empty()
+    }
 }

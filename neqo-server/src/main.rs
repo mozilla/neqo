@@ -8,12 +8,15 @@
 
 use neqo_common::Datagram;
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_transport::{Connection, ConnectionEvent, State};
+use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
 use regex::Regex;
+
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
 
@@ -148,8 +151,13 @@ fn main() {
 
         let mut server = connections.entry(remote_addr).or_insert_with(|| {
             println!("New connection from {:?}", remote_addr);
-            Connection::new_server(&args.key, &args.alpn, &anti_replay)
-                .expect("can't create connection")
+            Connection::new_server(
+                &args.key,
+                &args.alpn,
+                &anti_replay,
+                Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+            )
+            .expect("can't create connection")
         });
 
         if sz > 0 {

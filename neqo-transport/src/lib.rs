@@ -25,8 +25,10 @@ mod stream_id;
 mod tparams;
 mod tracking;
 
-pub use self::connection::{Connection, Output, Role, State};
-pub use self::events::ConnectionEvent;
+pub use self::connection::{
+    Connection, ConnectionIdManager, FixedConnectionIdManager, Output, Role, State,
+};
+pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
 
@@ -70,6 +72,7 @@ pub enum Error {
     InvalidInput,
     IdleTimeout,
     PeerError(TransportError),
+    InvalidRetry,
 }
 
 impl Error {
@@ -106,6 +109,7 @@ impl Error {
             | Error::WrongRole
             | Error::InvalidResumptionToken
             | Error::InvalidInput
+            | Error::InvalidRetry
             | Error::IdleTimeout
             | Error::InternalError => 1,
         }

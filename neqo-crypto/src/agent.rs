@@ -676,7 +676,7 @@ impl Client {
     }
 
     unsafe extern "C" fn resumption_token_cb(
-        _fd: *mut ssl::PRFileDesc,
+        fd: *mut ssl::PRFileDesc,
         token: *const u8,
         len: c_uint,
         arg: *mut c_void,
@@ -685,6 +685,7 @@ impl Client {
         let resumption = resumption_ptr.as_mut().unwrap();
         let mut v = Vec::with_capacity(len as usize);
         v.extend_from_slice(std::slice::from_raw_parts(token, len as usize));
+        qdebug!([format!("{:p}", fd)] "Got resumption token");
         *resumption = Some(v);
         ssl::SECSuccess
     }

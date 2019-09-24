@@ -363,7 +363,7 @@ impl TxBuffer {
         TxBuffer::BUFFER_SIZE - self.buffered()
     }
 
-    fn highest_sent(&self) -> u64 {
+    pub fn highest_sent(&self) -> u64 {
         self.ranges.highest_offset()
     }
 }
@@ -556,13 +556,20 @@ impl SendStream {
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
         if let Some(buf) = self.state.tx_buf_mut() {
-            buf.mark_as_lost(offset, len)
-        };
+            buf.mark_as_lost(offset, len);
+        }
 
         if fin {
             if let SendStreamState::DataSent { fin_sent, .. } = &mut self.state {
                 *fin_sent = false;
             }
+        }
+    }
+
+    pub fn retry(&mut self) {
+        if let Some(buf) = self.state.tx_buf_mut() {
+            let sent = buf.highest_sent();
+            self.mark_as_lost(0, sent.try_into().unwrap(), true);
         }
     }
 
@@ -756,6 +763,12 @@ impl SendStreams {
 
     pub fn clear_terminal(&mut self) {
         self.0.retain(|_, stream| !stream.is_terminal())
+    }
+
+    pub(crate) fn retry(&mut self) {
+        for stream in self.0.values_mut() {
+            stream.retry();
+        }
     }
 
     pub(crate) fn get_frame(

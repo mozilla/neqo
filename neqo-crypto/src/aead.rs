@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::too_many_arguments)]
-
 use crate::constants::*;
 use crate::err::{Error, Res};
 use crate::p11::{PK11SymKey, SymKey};
@@ -79,7 +77,7 @@ impl Aead {
             version,
             cipher,
             secret,
-            p.as_ptr() as *const i8,
+            p.as_ptr() as *const c_char,
             c_uint::try_from(p.len())?,
             &mut ctx,
         )?;
