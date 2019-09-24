@@ -392,12 +392,6 @@ impl Http3Connection {
         Ok(())
     }
 
-    // Active state means that we still can recv new streams, recv data and send data.
-    // This is Connected state and GoingAway (in this state some streams are still active).
-    fn state_active(&self) -> bool {
-        (self.state == Http3State::Connected) || (self.state == Http3State::GoingAway)
-    }
-
     // If this return an error the connection must be closed.
     fn check_connection_events(&mut self) -> Res<()> {
         qdebug!([self] "check_connection_events");
@@ -413,7 +407,6 @@ impl Http3Connection {
                     self.handle_send_stream_writable(stream_id)?
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    assert!(self.state_active());
                     self.streams_are_readable.insert(stream_id);
                 }
                 ConnectionEvent::RecvStreamReset {
@@ -456,7 +449,6 @@ impl Http3Connection {
 
     fn handle_new_stream(&mut self, stream_id: u64, stream_type: StreamType) -> Res<()> {
         qdebug!([self] "A new stream: {:?} {}.", stream_type, stream_id);
-        assert!(self.state_active());
         match stream_type {
             StreamType::BiDi => match self.role() {
                 Role::Server => self.handle_new_client_request(stream_id),
@@ -491,7 +483,6 @@ impl Http3Connection {
 
     fn handle_send_stream_writable(&mut self, stream_id: u64) -> Res<()> {
         qdebug!([self] "Writable stream {}.", stream_id);
-        assert!(self.state_active());
 
         if let Some(cs) = self.transactions_client.get_mut(&stream_id) {
             if cs.is_state_sending_data() {
@@ -503,7 +494,7 @@ impl Http3Connection {
 
     fn handle_stream_readable(&mut self, stream_id: u64) -> Res<()> {
         qdebug!([self] "Readable stream {}.", stream_id);
-        assert!(self.state_active());
+
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
@@ -576,7 +567,6 @@ impl Http3Connection {
     }
 
     fn handle_stream_reset(&mut self, stream_id: u64, app_err: AppError) -> Res<()> {
-        assert!(self.state_active());
         qdebug!([self] "handle_stream_reset stream_id={} app_err={}", stream_id, app_err);
         if let Some(cs) = self.transactions_client.get_mut(&stream_id) {
             // Remove all events for this stream.
@@ -596,7 +586,6 @@ impl Http3Connection {
     }
 
     fn handle_stream_stop_sending(&mut self, stop_stream_id: u64, app_err: AppError) -> Res<()> {
-        assert!(self.state_active());
         qdebug!([self] "handle_stream_stop_sending stream_id={} app_err={}", stop_stream_id, app_err);
 
         if let Some(cs) = self.transactions_client.get_mut(&stop_stream_id) {
@@ -631,12 +620,10 @@ impl Http3Connection {
     }
 
     fn handle_stream_complete(&mut self, _stream_id: u64) -> Res<()> {
-        assert!(self.state_active());
         Ok(())
     }
 
     fn handle_stream_creatable(&mut self, stream_type: StreamType) -> Res<()> {
-        assert!(self.state_active());
         if stream_type == StreamType::BiDi {
             self.events.new_requests_creatable();
         }
