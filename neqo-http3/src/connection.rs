@@ -3531,7 +3531,7 @@ mod tests {
         let _out = hconn.process(out.dgram(), now());
 
         let header_ready_event = |e| matches!(e, Http3Event::HeaderReady { .. });
-        assert!(!hconn.events().into_iter().any(header_ready_event));
+        assert!(!hconn.events().any(header_ready_event));
 
         // Send encoder instructions to unblock the stream.
         encoder.send(&mut neqo_trans_conn).unwrap();
