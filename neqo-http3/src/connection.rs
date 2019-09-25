@@ -1215,8 +1215,10 @@ mod tests {
                         let (amount, fin) =
                             neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
                         assert_eq!(fin, false);
-                        assert_eq!(amount, 9);
-                        assert_eq!(buf[..9], [0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
+                        const CONTROL_STREAM_DATA: &[u8] =
+                            &[0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64];
+                        assert_eq!(amount, CONTROL_STREAM_DATA.len());
+                        assert_eq!(&buf[..9], CONTROL_STREAM_DATA);
                     } else if stream_id == 6 || stream_id == 7 {
                         let mut buf = [0u8; 100];
                         let (amount, fin) =
@@ -1261,9 +1263,13 @@ mod tests {
         let _ = connect(false);
     }
 
-    fn connect_and_receive_control_stream(
-        client: bool,
-    ) -> (Http3Connection, Connection, u64, QPackEncoder) {
+    struct PeerConnection {
+        conn: Connection,
+        control_stream_id: u64,
+        encoder: QPackEncoder,
+    }
+
+    fn connect_and_receive_control_stream(client: bool) -> (Http3Connection, PeerConnection) {
         let (mut hconn, mut neqo_trans_conn) = connect(client);
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         let mut sent = neqo_trans_conn.stream_send(
@@ -1282,7 +1288,14 @@ mod tests {
 
         // assert no error occured.
         assert_eq!(hconn.state(), Http3State::Connected);
-        (hconn, neqo_trans_conn, control_stream, encoder)
+        (
+            hconn,
+            PeerConnection {
+                conn: neqo_trans_conn,
+                control_stream_id: control_stream,
+                encoder,
+            },
+        )
     }
 
     // Client: Test receiving a new control stream and a SETTINGS frame.
@@ -1301,9 +1314,12 @@ mod tests {
     // has been closed.
     #[test]
     fn test_client_close_control_stream() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
-        neqo_trans_conn.stream_close_send(3).unwrap();
-        let out = neqo_trans_conn.process(None, now());
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        peer_conn
+            .conn
+            .stream_close_send(peer_conn.control_stream_id)
+            .unwrap();
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::ClosedCriticalStream);
     }
@@ -1312,9 +1328,12 @@ mod tests {
     // has been closed.
     #[test]
     fn test_server_close_control_stream() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(false);
-        neqo_trans_conn.stream_close_send(2).unwrap();
-        let out = neqo_trans_conn.process(None, now());
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(false);
+        peer_conn
+            .conn
+            .stream_close_send(peer_conn.control_stream_id)
+            .unwrap();
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::ClosedCriticalStream);
     }
@@ -1353,11 +1372,14 @@ mod tests {
     // with error HTTP_UNEXPECTED_FRAME.
     #[test]
     fn test_client_receive_settings_twice() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         // send the second SETTINGS frame.
-        let sent = neqo_trans_conn.stream_send(3, &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
+        let sent = peer_conn.conn.stream_send(
+            peer_conn.control_stream_id,
+            &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64],
+        );
         assert_eq!(sent, Ok(8));
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::UnexpectedFrame);
     }
@@ -1366,26 +1388,25 @@ mod tests {
     // with error HTTP_UNEXPECTED_FRAME.
     #[test]
     fn test_server_receive_settings_twice() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(false);
         // send the second SETTINGS frame.
-        let sent = neqo_trans_conn.stream_send(2, &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64]);
+        let sent = peer_conn.conn.stream_send(
+            peer_conn.control_stream_id,
+            &[0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64],
+        );
         assert_eq!(sent, Ok(8));
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
         assert_closed(&hconn, Error::UnexpectedFrame);
     }
 
     fn test_wrong_frame_on_control_stream(client: bool, v: &[u8]) {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(client);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(client);
 
         // receive a frame that is not allowed on the control stream.
-        if client {
-            let _ = neqo_trans_conn.stream_send(3, v);
-        } else {
-            let _ = neqo_trans_conn.stream_send(2, v);
-        }
+        let _ = peer_conn.conn.stream_send(peer_conn.control_stream_id, v);
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         assert_closed(&hconn, Error::WrongStream);
@@ -1423,18 +1444,19 @@ mod tests {
     // This function also tests getting stream id that does not fit into a single byte.
     #[test]
     fn test_client_received_unknown_stream() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
 
         // create a stream with unknown type.
-        let new_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        let _ =
-            neqo_trans_conn.stream_send(new_stream_id, &[0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
-        let out = neqo_trans_conn.process(None, now());
+        let new_stream_id = peer_conn.conn.stream_create(StreamType::UniDi).unwrap();
+        let _ = peer_conn
+            .conn
+            .stream_send(new_stream_id, &[0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
+        let out = peer_conn.conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::UnknownStreamType.
-        let events = neqo_trans_conn.events();
+        let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
         for e in events {
             if let ConnectionEvent::SendStreamStopSending {
@@ -1455,18 +1477,19 @@ mod tests {
     // also test getting stream id that does not fit into a single byte.
     #[test]
     fn test_server_received_unknown_stream() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(false);
 
         // create a stream with unknown type.
-        let new_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        let _ =
-            neqo_trans_conn.stream_send(new_stream_id, &[0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
-        let out = neqo_trans_conn.process(None, now());
+        let new_stream_id = peer_conn.conn.stream_create(StreamType::UniDi).unwrap();
+        let _ = peer_conn
+            .conn
+            .stream_send(new_stream_id, &[0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
+        let out = peer_conn.conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::UnknownStreamType.
-        let events = neqo_trans_conn.events();
+        let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
         for e in events {
             if let ConnectionEvent::SendStreamStopSending {
@@ -1486,17 +1509,17 @@ mod tests {
     // Client: receive a push stream
     #[test]
     fn test_client_received_push_stream() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
 
         // create a push stream.
-        let push_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        let _ = neqo_trans_conn.stream_send(push_stream_id, &[0x1]);
-        let out = neqo_trans_conn.process(None, now());
+        let push_stream_id = peer_conn.conn.stream_create(StreamType::UniDi).unwrap();
+        let _ = peer_conn.conn.stream_send(push_stream_id, &[0x1]);
+        let out = peer_conn.conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::Error::PushRefused.
-        let events = neqo_trans_conn.events();
+        let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
         for e in events {
             if let ConnectionEvent::SendStreamStopSending {
@@ -1516,17 +1539,17 @@ mod tests {
     // Server: receiving a push stream on a server should cause WrongStreamDirection
     #[test]
     fn test_server_received_push_stream() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(false);
 
         // create a push stream.
-        let push_stream_id = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        let _ = neqo_trans_conn.stream_send(push_stream_id, &[0x1]);
-        let out = neqo_trans_conn.process(None, now());
+        let push_stream_id = peer_conn.conn.stream_create(StreamType::UniDi).unwrap();
+        let _ = peer_conn.conn.stream_send(push_stream_id, &[0x1]);
+        let out = peer_conn.conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::WrongStreamDirection.
-        let events = neqo_trans_conn.events();
+        let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
         for e in events {
             if let ConnectionEvent::SendStreamStopSending {
@@ -1545,7 +1568,7 @@ mod tests {
 
     // Test wrong frame on req/rec stream
     fn test_wrong_frame_on_request_stream(v: &[u8], err: Error) {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
 
         assert_eq!(
             hconn.fetch("GET", "https", "something.com", "/", &[]),
@@ -1553,10 +1576,10 @@ mod tests {
         );
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // find the new request/response stream and send frame v on it.
-        let events = neqo_trans_conn.events();
+        let events = peer_conn.conn.events();
         for e in events {
             if let ConnectionEvent::NewStream {
                 stream_id,
@@ -1564,18 +1587,18 @@ mod tests {
             } = e
             {
                 assert_eq!(stream_type, StreamType::BiDi);
-                let _ = neqo_trans_conn.stream_send(stream_id, v);
+                let _ = peer_conn.conn.stream_send(stream_id, v);
             }
         }
         // Generate packet with the above bad h3 input
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         // Process bad input and generate stop sending frame
         let out = hconn.process(out.dgram(), now());
         // Process stop sending frame and generate an event and a reset frame
-        let out = neqo_trans_conn.process(out.dgram(), now());
+        let out = peer_conn.conn.process(out.dgram(), now());
 
         let mut stop_sending_event_found = false;
-        for e in neqo_trans_conn.events() {
+        for e in peer_conn.conn.events() {
             if let ConnectionEvent::SendStreamStopSending {
                 stream_id,
                 app_error,
@@ -1689,10 +1712,24 @@ mod tests {
         assert_closed(&hconn, Error::WrongStream);
     }
 
+    // We usually send the same request header. This function check if the request has been
+    // receive properly by a peer.
+    fn check_header_frame(peer_conn: &mut Connection, stream_id: u64, expected_fin: bool) {
+        let mut buf = [0u8; 18];
+        let (amount, fin) = peer_conn.stream_recv(stream_id, &mut buf).unwrap();
+        const EXPECTED_REQUEST_HEADER_FRAME: &[u8] = &[
+            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67, 0x35, 0x53,
+            0x2e, 0x43, 0xd3, 0xc1,
+        ];
+        assert_eq!(fin, expected_fin);
+        assert_eq!(amount, EXPECTED_REQUEST_HEADER_FRAME.len());
+        assert_eq!(&buf[..], EXPECTED_REQUEST_HEADER_FRAME);
+    }
+
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn fetch_basic() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -1700,10 +1737,10 @@ mod tests {
         let _ = hconn.stream_close_send(request_stream_id);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // find the new request/response stream and send frame v on it.
-        let events = neqo_trans_conn.events().collect::<Vec<_>>();
+        let events = peer_conn.conn.events().collect::<Vec<_>>();
         assert_eq!(events.len(), 6); // NewStream, RecvStreamReadable, SendStreamWritable x 4
         for e in events {
             match e {
@@ -1716,21 +1753,12 @@ mod tests {
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, true);
-                    assert_eq!(amount, 18);
-                    assert_eq!(
-                        buf[..18],
-                        [
-                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
-                        ]
-                    );
+                    check_header_frame(&mut peer_conn.conn, stream_id, true);
+
                     // send response - 200  Content-Length: 6
                     // with content: 'abcdef'.
                     // The content will be send in 2 DATA frames.
-                    let _ = neqo_trans_conn.stream_send(
+                    let _ = peer_conn.conn.stream_send(
                         stream_id,
                         &[
                             // headers
@@ -1742,12 +1770,12 @@ mod tests {
                             0x0, 0x3, 0x64, 0x65, 0x66,
                         ],
                     );
-                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
+                    peer_conn.conn.stream_close_send(stream_id).unwrap();
                 }
                 _ => {}
             }
         }
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         let http_events = hconn.events().collect::<Vec<_>>();
@@ -1864,14 +1892,14 @@ mod tests {
     // Send a request with the request body.
     #[test]
     fn fetch_with_data() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
@@ -1881,10 +1909,10 @@ mod tests {
         let _ = hconn.stream_close_send(request_stream_id);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // find the new request/response stream and send response on it.
-        let events = neqo_trans_conn.events();
+        let events = peer_conn.conn.events();
         for e in events {
             match e {
                 ConnectionEvent::NewStream {
@@ -1896,19 +1924,19 @@ mod tests {
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
+                    check_header_frame(&mut peer_conn.conn, stream_id, false);
+
+                    // Read request body.
                     let mut buf = [0u8; 100];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    let (amount, fin) = peer_conn.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert_eq!(fin, true);
-                    const EXPECTED_RESPONSE_BODY: &[u8] = &[
-                        0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                        0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1, 0x0, 0x3, 0x64, 0x65, 0x66,
-                    ];
-                    assert_eq!(amount, EXPECTED_RESPONSE_BODY.len());
-                    assert_eq!(&buf[..23], EXPECTED_RESPONSE_BODY);
+                    const EXPECTED_REQUEST_BODY: &[u8] = &[0x0, 0x3, 0x64, 0x65, 0x66];
+                    assert_eq!(amount, EXPECTED_REQUEST_BODY.len());
+                    assert_eq!(&buf[..5], EXPECTED_REQUEST_BODY);
 
                     // send response - 200  Content-Length: 3
                     // with content: 'abc'.
-                    let _ = neqo_trans_conn.stream_send(
+                    let _ = peer_conn.conn.stream_send(
                         stream_id,
                         &[
                             // headers
@@ -1917,25 +1945,25 @@ mod tests {
                             0x0, 0x3, 0x61, 0x62, 0x63,
                         ],
                     );
-                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
+                    peer_conn.conn.stream_close_send(stream_id).unwrap();
                 }
                 _ => {}
             }
         }
 
-        read_response(hconn, neqo_trans_conn, request_stream_id);
+        read_response(hconn, peer_conn.conn, request_stream_id);
     }
 
     // send a request with request body containing request_body. We expect to receive expected_data_frame_header.
     fn fetch_with_data_length_xbytes(request_body: &[u8], expected_data_frame_header: &[u8]) {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
@@ -1949,31 +1977,21 @@ mod tests {
         // We need to loop a bit until all data has been sent.
         let mut out = hconn.process(None, now());
         for _i in 0..20 {
-            out = neqo_trans_conn.process(out.dgram(), now());
+            out = peer_conn.conn.process(out.dgram(), now());
             out = hconn.process(out.dgram(), now());
         }
 
         // find the new request/response stream, check received frames and send a response.
-        let events = neqo_trans_conn.events();
+        let events = peer_conn.conn.events();
         for e in events {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read only the HEADER frame
-                    let mut buf = [0u8; 18];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, false);
-                    assert_eq!(amount, 18);
-                    assert_eq!(
-                        buf[..18],
-                        [
-                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1,
-                        ]
-                    );
+                    check_header_frame(&mut peer_conn.conn, stream_id, false);
 
                     // Read the DATA frame.
                     let mut buf = [1u8; 0xffff];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    let (amount, fin) = peer_conn.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert_eq!(fin, true);
                     assert_eq!(
                         amount,
@@ -1991,7 +2009,7 @@ mod tests {
 
                     // send response - 200  Content-Length: 3
                     // with content: 'abc'.
-                    let _ = neqo_trans_conn.stream_send(
+                    let _ = peer_conn.conn.stream_send(
                         stream_id,
                         &[
                             // headers
@@ -2000,12 +2018,12 @@ mod tests {
                             0x0, 0x3, 0x61, 0x62, 0x63,
                         ],
                     );
-                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
+                    peer_conn.conn.stream_close_send(stream_id).unwrap();
                 }
             }
         }
 
-        read_response(hconn, neqo_trans_conn, request_stream_id);
+        read_response(hconn, peer_conn.conn, request_stream_id);
     }
 
     // send a request with 63 bytes. The DATA frame length field will still have 1 byte.
@@ -2040,14 +2058,14 @@ mod tests {
         expected_second_data_frame_header: &[u8],
         expected_second_data_frame: &[u8],
     ) {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
@@ -2067,31 +2085,21 @@ mod tests {
         let mut out = hconn.process(None, now());
         // We need to loop a bit until all data has been sent.
         for _i in 0..55 {
-            out = neqo_trans_conn.process(out.dgram(), now());
+            out = peer_conn.conn.process(out.dgram(), now());
             out = hconn.process(out.dgram(), now());
         }
 
         // find the new request/response stream, check received frames and send a response.
-        let events = neqo_trans_conn.events();
+        let events = peer_conn.conn.events();
         for e in events {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read only the HEADER frame
-                    let mut buf = [0u8; 18];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, false);
-                    assert_eq!(amount, 18);
-                    assert_eq!(
-                        buf[..18],
-                        [
-                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1,
-                        ]
-                    );
+                    check_header_frame(&mut peer_conn.conn, stream_id, false);
 
                     // Read DATA frames.
                     let mut buf = [1u8; 0xffff];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    let (amount, fin) = peer_conn.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert_eq!(fin, true);
                     assert_eq!(
                         amount,
@@ -2122,7 +2130,7 @@ mod tests {
 
                     // send response - 200  Content-Length: 3
                     // with content: 'abc'.
-                    let _ = neqo_trans_conn.stream_send(
+                    let _ = peer_conn.conn.stream_send(
                         stream_id,
                         &[
                             // headers
@@ -2131,12 +2139,12 @@ mod tests {
                             0x0, 0x3, 0x61, 0x62, 0x63,
                         ],
                     );
-                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
+                    peer_conn.conn.stream_close_send(stream_id).unwrap();
                 }
             }
         }
 
-        read_response(hconn, neqo_trans_conn, request_stream_id);
+        read_response(hconn, peer_conn.conn, request_stream_id);
     }
 
     // Send 2 frames. For the second one we can only send 63 bytes.
@@ -2225,24 +2233,14 @@ mod tests {
         );
     }
 
-    fn read_request(neqo_trans_conn: &mut Connection, request_stream_id: u64) {
+    fn read_request(mut neqo_trans_conn: &mut Connection, request_stream_id: u64) {
         // find the new request/response stream and check request data.
         let events = neqo_trans_conn.events();
         for e in events {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read only header frame
-                    let mut buf = [0u8; 18];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, false);
-                    assert_eq!(amount, 18);
-                    assert_eq!(
-                        buf[..18],
-                        [
-                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1,
-                        ]
-                    );
+                    check_header_frame(&mut neqo_trans_conn, stream_id, false);
 
                     // Read DATA frames.
                     let mut buf = [1u8; 0xffff];
@@ -2256,14 +2254,14 @@ mod tests {
     // Test receiving STOP_SENDING with the EarlyResponse error code.
     #[test]
     fn test_stop_sending_early_response() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
@@ -2272,19 +2270,21 @@ mod tests {
         assert_eq!(sent, Ok(10000));
 
         let out = hconn.process(None, now());
-        let _ = neqo_trans_conn.process(out.dgram(), now());
+        let _ = peer_conn.conn.process(out.dgram(), now());
 
-        read_request(&mut neqo_trans_conn, request_stream_id);
+        read_request(&mut peer_conn.conn, request_stream_id);
 
         // Stop sending with early_response.
         assert_eq!(
             Ok(()),
-            neqo_trans_conn.stream_stop_sending(request_stream_id, Error::EarlyResponse.code())
+            peer_conn
+                .conn
+                .stream_stop_sending(request_stream_id, Error::EarlyResponse.code())
         );
 
         // send response - 200  Content-Length: 3
         // with content: 'abc'.
-        let _ = neqo_trans_conn.stream_send(
+        let _ = peer_conn.conn.stream_send(
             request_stream_id,
             &[
                 // headers
@@ -2292,11 +2292,9 @@ mod tests {
                 0x0, 0x3, 0x61, 0x62, 0x63,
             ],
         );
-        neqo_trans_conn
-            .stream_close_send(request_stream_id)
-            .unwrap();
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         let mut response_headers = false;
@@ -2358,14 +2356,14 @@ mod tests {
     // Server sends stop sending and reset.
     #[test]
     fn test_stop_sending_other_error_with_reset() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
@@ -2374,22 +2372,26 @@ mod tests {
         assert_eq!(sent, Ok(10000));
 
         let out = hconn.process(None, now());
-        let _ = neqo_trans_conn.process(out.dgram(), now());
+        let _ = peer_conn.conn.process(out.dgram(), now());
 
-        read_request(&mut neqo_trans_conn, request_stream_id);
+        read_request(&mut peer_conn.conn, request_stream_id);
 
         // Stop sending with RequestRejected.
         assert_eq!(
             Ok(()),
-            neqo_trans_conn.stream_stop_sending(request_stream_id, Error::RequestRejected.code())
+            peer_conn
+                .conn
+                .stream_stop_sending(request_stream_id, Error::RequestRejected.code())
         );
         // also reset with RequestRejested.
         assert_eq!(
             Ok(()),
-            neqo_trans_conn.stream_reset_send(request_stream_id, Error::RequestRejected.code())
+            peer_conn
+                .conn
+                .stream_reset_send(request_stream_id, Error::RequestRejected.code())
         );
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         let http_events = hconn.events();
@@ -2423,14 +2425,14 @@ mod tests {
     // We will reset the stream anyway.
     #[test]
     fn test_stop_sending_other_error_wo_reset() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
@@ -2439,17 +2441,19 @@ mod tests {
         assert_eq!(sent, Ok(10000));
 
         let out = hconn.process(None, now());
-        let _ = neqo_trans_conn.process(out.dgram(), now());
+        let _ = peer_conn.conn.process(out.dgram(), now());
 
-        read_request(&mut neqo_trans_conn, request_stream_id);
+        read_request(&mut peer_conn.conn, request_stream_id);
 
         // Stop sending with RequestRejected.
         assert_eq!(
             Ok(()),
-            neqo_trans_conn.stream_stop_sending(request_stream_id, Error::RequestRejected.code())
+            peer_conn
+                .conn
+                .stream_stop_sending(request_stream_id, Error::RequestRejected.code())
         );
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         let http_events = hconn.events();
@@ -2483,14 +2487,14 @@ mod tests {
     // in hconn.events. The events will be removed.
     #[test]
     fn test_stop_sending_and_reset_other_error_with_events() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
@@ -2499,13 +2503,13 @@ mod tests {
         assert_eq!(sent, Ok(10000));
 
         let out = hconn.process(None, now());
-        let _ = neqo_trans_conn.process(out.dgram(), now());
+        let _ = peer_conn.conn.process(out.dgram(), now());
 
-        read_request(&mut neqo_trans_conn, request_stream_id);
+        read_request(&mut peer_conn.conn, request_stream_id);
 
         // send response - 200  Content-Length: 3
         // with content: 'abc'.
-        let _ = neqo_trans_conn.stream_send(
+        let _ = peer_conn.conn.stream_send(
             request_stream_id,
             &[
                 // headers
@@ -2514,21 +2518,25 @@ mod tests {
             ],
         );
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
         // At this moment we have some new events, i.e. a HeadersReady event
 
         // Send a stop sending and reset.
         assert_eq!(
             Ok(()),
-            neqo_trans_conn.stream_stop_sending(request_stream_id, Error::RequestCancelled.code())
+            peer_conn
+                .conn
+                .stream_stop_sending(request_stream_id, Error::RequestCancelled.code())
         );
         assert_eq!(
             Ok(()),
-            neqo_trans_conn.stream_reset_send(request_stream_id, Error::RequestCancelled.code())
+            peer_conn
+                .conn
+                .stream_reset_send(request_stream_id, Error::RequestCancelled.code())
         );
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         let http_events = hconn.events();
@@ -2563,14 +2571,14 @@ mod tests {
     // The events will be removed.
     #[test]
     fn test_stop_sending_other_error_with_events() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
@@ -2579,13 +2587,13 @@ mod tests {
         assert_eq!(sent, Ok(10000));
 
         let out = hconn.process(None, now());
-        let _ = neqo_trans_conn.process(out.dgram(), now());
+        let _ = peer_conn.conn.process(out.dgram(), now());
 
-        read_request(&mut neqo_trans_conn, request_stream_id);
+        read_request(&mut peer_conn.conn, request_stream_id);
 
         // send response - 200  Content-Length: 3
         // with content: 'abc'.
-        let _ = neqo_trans_conn.stream_send(
+        let _ = peer_conn.conn.stream_send(
             request_stream_id,
             &[
                 // headers
@@ -2594,17 +2602,19 @@ mod tests {
             ],
         );
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
         // At this moment we have some new event, i.e. a HeadersReady event
 
         // Send a stop sending.
         assert_eq!(
             Ok(()),
-            neqo_trans_conn.stream_stop_sending(request_stream_id, Error::RequestCancelled.code())
+            peer_conn
+                .conn
+                .stream_stop_sending(request_stream_id, Error::RequestCancelled.code())
         );
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         let http_events = hconn.events();
@@ -2637,14 +2647,14 @@ mod tests {
     // Server sends a reset. We will close sending side as well.
     #[test]
     fn test_reset_wo_stop_sending() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
         assert_eq!(request_stream_id, 0);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
         let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
@@ -2653,17 +2663,19 @@ mod tests {
         assert_eq!(sent, Ok(10000));
 
         let out = hconn.process(None, now());
-        let _ = neqo_trans_conn.process(out.dgram(), now());
+        let _ = peer_conn.conn.process(out.dgram(), now());
 
-        read_request(&mut neqo_trans_conn, request_stream_id);
+        read_request(&mut peer_conn.conn, request_stream_id);
 
         // Send a reset.
         assert_eq!(
             Ok(()),
-            neqo_trans_conn.stream_reset_send(request_stream_id, Error::RequestCancelled.code())
+            peer_conn
+                .conn
+                .stream_reset_send(request_stream_id, Error::RequestCancelled.code())
         );
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         let http_events = hconn.events();
@@ -2694,49 +2706,14 @@ mod tests {
     }
 
     fn test_incomplet_frame(res: &[u8], error: Error) {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
-        let request_stream_id = hconn
-            .fetch("GET", "https", "something.com", "/", &[])
-            .unwrap();
-        assert_eq!(request_stream_id, 0);
-        let _ = hconn.stream_close_send(request_stream_id);
+        let (mut hconn, mut peer_conn, request_stream_id) = connect_and_send_request();
 
-        let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        // send an incomplete response - 200  Content-Length: 3
+        // with content: 'abc'.
+        let _ = peer_conn.conn.stream_send(request_stream_id, res);
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
 
-        // find the new request/response stream and send frame v on it.
-        let events = neqo_trans_conn.events();
-        for e in events {
-            match e {
-                ConnectionEvent::NewStream {
-                    stream_id,
-                    stream_type,
-                } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(stream_type, StreamType::BiDi);
-                }
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, true);
-                    assert_eq!(amount, 18);
-                    assert_eq!(
-                        buf[..18],
-                        [
-                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
-                        ]
-                    );
-                    // send an incomplete response - 200  Content-Length: 3
-                    // with content: 'abc'.
-                    let _ = neqo_trans_conn.stream_send(stream_id, res);
-                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
-                }
-                _ => {}
-            }
-        }
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         let http_events = hconn.events();
@@ -2789,8 +2766,7 @@ mod tests {
     // test goaway
     #[test]
     fn test_goaway() {
-        let (mut hconn, mut neqo_trans_conn, _control_stream, _) =
-            connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id_1 = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2805,26 +2781,25 @@ mod tests {
         assert_eq!(request_stream_id_3, 8);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
-        let _ = neqo_trans_conn.stream_send(
-            3, //control_stream,
-            &[0x7, 0x1, 0x8],
-        );
+        let _ = peer_conn
+            .conn
+            .stream_send(peer_conn.control_stream_id, &[0x7, 0x1, 0x8]);
 
         // find the new request/response stream and send frame v on it.
-        let events = neqo_trans_conn.events();
+        let events = peer_conn.conn.events();
         for e in events {
             match e {
                 ConnectionEvent::NewStream { .. } => {}
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     let mut buf = [0u8; 100];
-                    let _ = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
+                    let _ = peer_conn.conn.stream_recv(stream_id, &mut buf).unwrap();
                     if stream_id == request_stream_id_1 || stream_id == request_stream_id_2 {
                         // send response - 200  Content-Length: 6
                         // with content: 'abcdef'.
                         // The content will be send in 2 DATA frames.
-                        let _ = neqo_trans_conn.stream_send(
+                        let _ = peer_conn.conn.stream_send(
                             stream_id,
                             &[
                                 // headers
@@ -2837,13 +2812,13 @@ mod tests {
                             ],
                         );
 
-                        neqo_trans_conn.stream_close_send(stream_id).unwrap();
+                        peer_conn.conn.stream_close_send(stream_id).unwrap();
                     }
                 }
                 _ => {}
             }
         }
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         let mut stream_reset = false;
@@ -2891,8 +2866,8 @@ mod tests {
         hconn.close(now(), 0, "");
     }
 
-    fn connect_and_send_request() -> (Http3Connection, Connection, u64) {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
+    fn connect_and_send_request() -> (Http3Connection, PeerConnection, u64) {
+        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2900,10 +2875,10 @@ mod tests {
         let _ = hconn.stream_close_send(request_stream_id);
 
         let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        peer_conn.conn.process(out.dgram(), now());
 
         // find the new request/response stream and send frame v on it.
-        let events = neqo_trans_conn.events();
+        let events = peer_conn.conn.events();
         for e in events {
             match e {
                 ConnectionEvent::NewStream {
@@ -2915,35 +2890,25 @@ mod tests {
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, true);
-                    assert_eq!(amount, 18);
-                    assert_eq!(
-                        buf[..18],
-                        [
-                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
-                        ]
-                    );
+                    check_header_frame(&mut peer_conn.conn, stream_id, true);
                 }
                 _ => {}
             }
         }
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
-        (hconn, neqo_trans_conn, request_stream_id)
+        (hconn, peer_conn, request_stream_id)
     }
 
     // Close stream before headers.
     #[test]
     fn test_stream_fin_wo_headers() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
+        let (mut hconn, mut peer_conn, request_stream_id) = connect_and_send_request();
         // send fin before sending any data.
-        neqo_trans_conn.stream_close_send(0).unwrap();
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         // Recv HeaderReady wo headers with fin.
@@ -2967,16 +2932,16 @@ mod tests {
     // Close stream imemediately after headers.
     #[test]
     fn test_stream_fin_after_headers() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
+        let (mut hconn, mut peer_conn, request_stream_id) = connect_and_send_request();
         let data = &[
             // headers
             0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
         ];
-        let _ = neqo_trans_conn.stream_send(request_stream_id, data);
+        let _ = peer_conn.conn.stream_send(request_stream_id, data);
         // ok NOW send fin
-        neqo_trans_conn.stream_close_send(0).unwrap();
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         // Recv HeaderReady with headers and fin.
@@ -3010,15 +2975,15 @@ mod tests {
     // We should get HeaderReady and a DataReadable
     #[test]
     fn test_stream_fin_after_headers_are_read_wo_data_frame() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
+        let (mut hconn, mut peer_conn, request_stream_id) = connect_and_send_request();
         // Send some good data wo fin
         let data = &[
             // headers
             0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
         ];
-        let _ = neqo_trans_conn.stream_send(request_stream_id, data);
+        let _ = peer_conn.conn.stream_send(request_stream_id, data);
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         // Recv headers wo fin
@@ -3047,9 +3012,9 @@ mod tests {
         }
 
         // ok NOW send fin
-        neqo_trans_conn.stream_close_send(0).unwrap();
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         // Recv DataReadable wo data with fin
@@ -3083,18 +3048,18 @@ mod tests {
     // We should only recv HeadersReady event
     #[test]
     fn test_stream_fin_after_headers_and_a_empty_data_frame() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
+        let (mut hconn, mut peer_conn, request_stream_id) = connect_and_send_request();
         // Send some good data wo fin
         let data = &[
             // headers
             0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // data
             0x00, 0x00,
         ];
-        let _ = neqo_trans_conn.stream_send(request_stream_id, data);
+        let _ = peer_conn.conn.stream_send(request_stream_id, data);
         // ok NOW send fin
-        neqo_trans_conn.stream_close_send(0).unwrap();
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         // Recv HeaderReady with fin.
@@ -3134,16 +3099,16 @@ mod tests {
     // We should get a HeaderReady without fin and a DataReadable wo data and with fin.
     #[test]
     fn test_stream_fin_after_headers_an_empty_data_frame_are_read() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
+        let (mut hconn, mut peer_conn, request_stream_id) = connect_and_send_request();
         // Send some good data wo fin
         let data = &[
             // headers
             0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // the data frame
             0x0, 0x0,
         ];
-        let _ = neqo_trans_conn.stream_send(request_stream_id, data);
+        let _ = peer_conn.conn.stream_send(request_stream_id, data);
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         // Recv headers wo fin
@@ -3172,9 +3137,9 @@ mod tests {
         }
 
         // ok NOW send fin
-        neqo_trans_conn.stream_close_send(0).unwrap();
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         // Recv no data, but do get fin
@@ -3206,16 +3171,16 @@ mod tests {
 
     #[test]
     fn test_stream_fin_after_a_data_frame() {
-        let (mut hconn, mut neqo_trans_conn, request_stream_id) = connect_and_send_request();
+        let (mut hconn, mut peer_conn, request_stream_id) = connect_and_send_request();
         // Send some good data wo fin
         let data = &[
             // headers
             0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // the data frame is complete
             0x0, 0x3, 0x61, 0x62, 0x63,
         ];
-        let _ = neqo_trans_conn.stream_send(request_stream_id, data);
+        let _ = peer_conn.conn.stream_send(request_stream_id, data);
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         // Recv some good data wo fin
@@ -3249,8 +3214,8 @@ mod tests {
         }
 
         // ok NOW send fin
-        neqo_trans_conn.stream_close_send(0).unwrap();
-        let out = neqo_trans_conn.process(None, now());
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         // fin wo data should generate DataReadable
@@ -3276,55 +3241,18 @@ mod tests {
 
     #[test]
     fn test_multiple_data_frames() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
-        let request_stream_id = hconn
-            .fetch("GET", "https", "something.com", "/", &Vec::<Header>::new())
-            .unwrap();
-        assert_eq!(request_stream_id, 0);
-        let _ = hconn.stream_close_send(request_stream_id);
+        let (mut hconn, mut peer_conn, request_stream_id) = connect_and_send_request();
 
-        let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        // Send two data frames with fin
+        let data = &[
+            // headers
+            0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // 2 complete data frames
+            0x0, 0x3, 0x61, 0x62, 0x63, 0x0, 0x3, 0x64, 0x65, 0x66,
+        ];
+        let _ = peer_conn.conn.stream_send(request_stream_id, data);
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
 
-        // find the new request/response stream and send frame v on it.
-        let events = neqo_trans_conn.events();
-        for e in events {
-            match e {
-                ConnectionEvent::NewStream {
-                    stream_id,
-                    stream_type,
-                } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(stream_type, StreamType::BiDi);
-                }
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, true);
-                    assert_eq!(amount, 18);
-                    assert_eq!(
-                        buf[..18],
-                        [
-                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
-                        ]
-                    );
-
-                    // Send two data frames with fin
-                    let data = &[
-                        // headers
-                        0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
-                        // 2 complete data frames
-                        0x0, 0x3, 0x61, 0x62, 0x63, 0x0, 0x3, 0x64, 0x65, 0x66,
-                    ];
-                    let _ = neqo_trans_conn.stream_send(stream_id, data);
-                    neqo_trans_conn.stream_close_send(0).unwrap();
-                }
-                _ => {}
-            }
-        }
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
         // Read first frame
@@ -3373,70 +3301,27 @@ mod tests {
 
     #[test]
     fn test_receive_grease_before_response() {
-        let (mut hconn, mut neqo_trans_conn, _, _) = connect_and_receive_control_stream(true);
-        let request_stream_id = hconn
-            .fetch(
-                "GET",
-                "https",
-                "something.com",
-                "/",
-                &Vec::<(String, String)>::new(),
-            )
-            .unwrap();
-        assert_eq!(request_stream_id, 0);
-        let _ = hconn.stream_close_send(request_stream_id);
+        let (mut hconn, mut peer_conn, request_stream_id) = connect_and_send_request();
 
-        let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        // Construct an unknown frame.
+        const UNKNOWN_FRAME_LEN: usize = 832;
+        let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
+        enc.encode_varint(1028u64); // Arbitrary type.
+        enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+        let mut buf: Vec<_> = enc.into();
+        buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
+        let _ = peer_conn.conn.stream_send(request_stream_id, &buf).unwrap();
 
-        // find the new request/response stream and send frame v on it.
-        let events = neqo_trans_conn.events();
-        for e in events {
-            match e {
-                ConnectionEvent::NewStream {
-                    stream_id,
-                    stream_type,
-                } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(stream_type, StreamType::BiDi);
-                }
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, true);
-                    assert_eq!(amount, 18);
-                    assert_eq!(
-                        buf[..18],
-                        [
-                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
-                        ]
-                    );
+        // Send a headers and a data frame with fin
+        let data = &[
+            // headers
+            0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33, // 1 complete data frames
+            0x0, 0x3, 0x61, 0x62, 0x63,
+        ];
+        let _ = peer_conn.conn.stream_send(request_stream_id, data);
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
 
-                    // Construct an unknown frame.
-                    const UNKNOWN_FRAME_LEN: usize = 832;
-                    let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
-                    enc.encode_varint(1028u64); // Arbitrary type.
-                    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
-                    let mut buf: Vec<_> = enc.into();
-                    buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
-                    let _ = neqo_trans_conn.stream_send(stream_id, &buf).unwrap();
-
-                    // Send a headers and a data frame with fin
-                    let data = &[
-                        // headers
-                        0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
-                        // 1 complete data frames
-                        0x0, 0x3, 0x61, 0x62, 0x63,
-                    ];
-                    let _ = neqo_trans_conn.stream_send(stream_id, data);
-                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
-                }
-                _ => {}
-            }
-        }
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
         hconn.process(None, now());
 
@@ -3466,82 +3351,42 @@ mod tests {
 
     #[test]
     fn test_read_frames_header_blocked() {
-        let (mut hconn, mut neqo_trans_conn, _, mut encoder) =
-            connect_and_receive_control_stream(true);
-        let request_stream_id = hconn
-            .fetch(
-                "GET",
-                "https",
-                "something.com",
-                "/",
-                &Vec::<(String, String)>::new(),
-            )
-            .unwrap();
-        assert_eq!(request_stream_id, 0);
-        let _ = hconn.stream_close_send(request_stream_id);
-        let out = hconn.process(None, now());
-        neqo_trans_conn.process(out.dgram(), now());
+        let (mut hconn, mut peer_conn, request_stream_id) = connect_and_send_request();
 
-        encoder.set_max_capacity(100).unwrap();
-        encoder.set_max_blocked_streams(100).unwrap();
+        peer_conn.encoder.set_max_capacity(100).unwrap();
+        peer_conn.encoder.set_max_blocked_streams(100).unwrap();
 
-        // find the new request/response stream and send frame v on it.
-        let events = neqo_trans_conn.events();
-        for e in events {
-            match e {
-                ConnectionEvent::NewStream {
-                    stream_id,
-                    stream_type,
-                } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(stream_type, StreamType::BiDi);
-                }
-                ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    let mut buf = [0u8; 100];
-                    let (amount, fin) = neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
-                    assert_eq!(fin, true);
-                    assert_eq!(amount, 18);
-                    assert_eq!(
-                        buf[..18],
-                        [
-                            0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67,
-                            0x35, 0x53, 0x2e, 0x43, 0xd3, 0xc1
-                        ]
-                    );
+        let headers = vec![
+            (String::from(":status"), String::from("200")),
+            (String::from("my-header"), String::from("my-header")),
+            (String::from("content-length"), String::from("3")),
+        ];
+        let encoded_headers = peer_conn
+            .encoder
+            .encode_header_block(&headers, request_stream_id);
+        let hframe = HFrame::Headers {
+            len: encoded_headers.len() as u64,
+        };
+        let mut d = Encoder::default();
+        hframe.encode(&mut d);
+        d.encode(&encoded_headers);
+        let d_frame = HFrame::Data { len: 3 };
+        d_frame.encode(&mut d);
+        d.encode(&[0x61, 0x62, 0x63]);
+        let _ = peer_conn.conn.stream_send(request_stream_id, &d[..]);
+        peer_conn.conn.stream_close_send(request_stream_id).unwrap();
 
-                    let headers = vec![
-                        (String::from(":status"), String::from("200")),
-                        (String::from("my-header"), String::from("my-header")),
-                        (String::from("content-length"), String::from("3")),
-                    ];
-                    let encoded_headers = encoder.encode_header_block(&headers, stream_id);
-                    let hframe = HFrame::Headers {
-                        len: encoded_headers.len() as u64,
-                    };
-                    let mut d = Encoder::default();
-                    hframe.encode(&mut d);
-                    d.encode(&encoded_headers);
-                    let d_frame = HFrame::Data { len: 3 };
-                    d_frame.encode(&mut d);
-                    d.encode(&[0x61, 0x62, 0x63]);
-                    let _ = neqo_trans_conn.stream_send(stream_id, &d[..]);
-                    neqo_trans_conn.stream_close_send(stream_id).unwrap();
-                }
-                _ => {}
-            }
-        }
         // Send response before sending encoder instructions.
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         let _out = hconn.process(out.dgram(), now());
 
         let header_ready_event = |e| matches!(e, Http3Event::HeaderReady { .. });
         assert!(!hconn.events().any(header_ready_event));
 
         // Send encoder instructions to unblock the stream.
-        encoder.send(&mut neqo_trans_conn).unwrap();
+        peer_conn.encoder.send(&mut peer_conn.conn).unwrap();
 
-        let out = neqo_trans_conn.process(None, now());
+        let out = peer_conn.conn.process(None, now());
         let _out = hconn.process(out.dgram(), now());
         let _out = hconn.process(None, now());
 
