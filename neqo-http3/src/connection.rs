@@ -1138,16 +1138,23 @@ mod tests {
         };
     }
 
+    #[derive(PartialEq)]
+    enum Role {
+        Client,
+        Server,
+    }
+    use crate::connection::tests::Role::{Client, Server};
+
     // Start a client/server and check setting frame.
     #[allow(clippy::cognitive_complexity)]
-    fn connect(client: bool) -> (Http3Connection, Connection) {
+    fn connect_and_receive_settings(role: Role) -> (Http3Connection, Connection) {
         // Create a client/server and connect it to a server/client.
         // We will have a http3 server/client on one side and a neqo_transport
         // connection on the other side so that we can check what the http3
         // side sends and also to simulate an incorrectly behaving http3
         // server/client.
 
-        let (mut hconn, mut neqo_trans_conn) = if client {
+        let (mut hconn, mut neqo_trans_conn) = if role == Client {
             (
                 Http3Connection::new(default_client(), 100, 100, None),
                 default_server(),
@@ -1158,7 +1165,7 @@ mod tests {
                 default_client(),
             )
         };
-        if client {
+        if role == Client {
             assert_eq!(hconn.state(), Http3State::Initializing);
             let out = hconn.process(None, now());
             assert_eq!(hconn.state(), Http3State::Initializing);
@@ -1203,7 +1210,8 @@ mod tests {
                     stream_type,
                 } => {
                     assert!(
-                        (client && ((stream_id == 2) || (stream_id == 6) || (stream_id == 10)))
+                        ((role == Client)
+                            && ((stream_id == 2) || (stream_id == 6) || (stream_id == 10)))
                             || ((stream_id == 3) || (stream_id == 7) || (stream_id == 11))
                     );
                     assert_eq!(stream_type, StreamType::UniDi);
@@ -1253,14 +1261,14 @@ mod tests {
     // The client will open the control and qpack streams and send SETTINGS frame.
     #[test]
     fn test_client_connect() {
-        let _ = connect(true);
+        let _ = connect_and_receive_settings(Client);
     }
 
     // Test http3 connection inintialization.
     // The server will open the control and qpack streams and send SETTINGS frame.
     #[test]
     fn test_server_connect() {
-        let _ = connect(false);
+        let _ = connect_and_receive_settings(Server);
     }
 
     struct PeerConnection {
@@ -1269,8 +1277,9 @@ mod tests {
         encoder: QPackEncoder,
     }
 
-    fn connect_and_receive_control_stream(client: bool) -> (Http3Connection, PeerConnection) {
-        let (mut hconn, mut neqo_trans_conn) = connect(client);
+    // Connect transport, send and receive settings.
+    fn connect(role: Role) -> (Http3Connection, PeerConnection) {
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_settings(role);
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         let mut sent = neqo_trans_conn.stream_send(
             control_stream,
@@ -1301,20 +1310,20 @@ mod tests {
     // Client: Test receiving a new control stream and a SETTINGS frame.
     #[test]
     fn test_client_receive_control_frame() {
-        let _ = connect_and_receive_control_stream(true);
+        let _ = connect(Client);
     }
 
     // Server: Test receiving a new control stream and a SETTINGS frame.
     #[test]
     fn test_server_receive_control_frame() {
-        let _ = connect_and_receive_control_stream(false);
+        let _ = connect(Server);
     }
 
     // Client: Test that the connection will be closed if control stream
     // has been closed.
     #[test]
     fn test_client_close_control_stream() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         peer_conn
             .conn
             .stream_close_send(peer_conn.control_stream_id)
@@ -1328,7 +1337,7 @@ mod tests {
     // has been closed.
     #[test]
     fn test_server_close_control_stream() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut peer_conn) = connect(Server);
         peer_conn
             .conn
             .stream_close_send(peer_conn.control_stream_id)
@@ -1342,7 +1351,7 @@ mod tests {
     // (the first frame sent is a garbage frame).
     #[test]
     fn test_client_missing_settings() {
-        let (mut hconn, mut neqo_trans_conn) = connect(true);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_settings(Client);
         // Create server control stream.
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         // Send a HEADERS frame instead (which contains garbage).
@@ -1357,7 +1366,7 @@ mod tests {
     // (the first frame sent is a MAX_PUSH_ID frame).
     #[test]
     fn test_server_missing_settings() {
-        let (mut hconn, mut neqo_trans_conn) = connect(false);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_settings(Server);
         // Create client control stream.
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         // Send a MAX_PUSH_ID frame instead.
@@ -1372,7 +1381,7 @@ mod tests {
     // with error HTTP_UNEXPECTED_FRAME.
     #[test]
     fn test_client_receive_settings_twice() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         // send the second SETTINGS frame.
         let sent = peer_conn.conn.stream_send(
             peer_conn.control_stream_id,
@@ -1388,7 +1397,7 @@ mod tests {
     // with error HTTP_UNEXPECTED_FRAME.
     #[test]
     fn test_server_receive_settings_twice() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut peer_conn) = connect(Server);
         // send the second SETTINGS frame.
         let sent = peer_conn.conn.stream_send(
             peer_conn.control_stream_id,
@@ -1400,8 +1409,8 @@ mod tests {
         assert_closed(&hconn, Error::UnexpectedFrame);
     }
 
-    fn test_wrong_frame_on_control_stream(client: bool, v: &[u8]) {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(client);
+    fn test_wrong_frame_on_control_stream(role: Role, v: &[u8]) {
+        let (mut hconn, mut peer_conn) = connect(role);
 
         // receive a frame that is not allowed on the control stream.
         let _ = peer_conn.conn.stream_send(peer_conn.control_stream_id, v);
@@ -1415,36 +1424,36 @@ mod tests {
     // send DATA frame on a cortrol stream
     #[test]
     fn test_data_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(true, &[0x0, 0x2, 0x1, 0x2]);
-        test_wrong_frame_on_control_stream(false, &[0x0, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(Client, &[0x0, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(Server, &[0x0, 0x2, 0x1, 0x2]);
     }
 
     // send HEADERS frame on a cortrol stream
     #[test]
     fn test_headers_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(true, &[0x1, 0x2, 0x1, 0x2]);
-        test_wrong_frame_on_control_stream(false, &[0x1, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(Client, &[0x1, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(Server, &[0x1, 0x2, 0x1, 0x2]);
     }
 
     // send PUSH_PROMISE frame on a cortrol stream
     #[test]
     fn test_push_promise_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(true, &[0x5, 0x2, 0x1, 0x2]);
-        test_wrong_frame_on_control_stream(false, &[0x5, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(Client, &[0x5, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(Server, &[0x5, 0x2, 0x1, 0x2]);
     }
 
     // send DUPLICATE_PUSH frame on a cortrol stream
     #[test]
     fn test_duplicate_push_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(true, &[0xe, 0x2, 0x1, 0x2]);
-        test_wrong_frame_on_control_stream(false, &[0xe, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(Client, &[0xe, 0x2, 0x1, 0x2]);
+        test_wrong_frame_on_control_stream(Server, &[0xe, 0x2, 0x1, 0x2]);
     }
 
     // Client: receive unkonwn stream type
     // This function also tests getting stream id that does not fit into a single byte.
     #[test]
     fn test_client_received_unknown_stream() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
 
         // create a stream with unknown type.
         let new_stream_id = peer_conn.conn.stream_create(StreamType::UniDi).unwrap();
@@ -1477,7 +1486,7 @@ mod tests {
     // also test getting stream id that does not fit into a single byte.
     #[test]
     fn test_server_received_unknown_stream() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut peer_conn) = connect(Server);
 
         // create a stream with unknown type.
         let new_stream_id = peer_conn.conn.stream_create(StreamType::UniDi).unwrap();
@@ -1509,7 +1518,7 @@ mod tests {
     // Client: receive a push stream
     #[test]
     fn test_client_received_push_stream() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
 
         // create a push stream.
         let push_stream_id = peer_conn.conn.stream_create(StreamType::UniDi).unwrap();
@@ -1539,7 +1548,7 @@ mod tests {
     // Server: receiving a push stream on a server should cause WrongStreamDirection
     #[test]
     fn test_server_received_push_stream() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(false);
+        let (mut hconn, mut peer_conn) = connect(Server);
 
         // create a push stream.
         let push_stream_id = peer_conn.conn.stream_create(StreamType::UniDi).unwrap();
@@ -1568,7 +1577,7 @@ mod tests {
 
     // Test wrong frame on req/rec stream
     fn test_wrong_frame_on_request_stream(v: &[u8], err: Error) {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
 
         assert_eq!(
             hconn.fetch("GET", "https", "something.com", "/", &[]),
@@ -1648,7 +1657,7 @@ mod tests {
     // Test reading of a slowly streamed frame. bytes are received one by one
     #[test]
     fn test_frame_reading() {
-        let (mut hconn, mut neqo_trans_conn) = connect(true);
+        let (mut hconn, mut neqo_trans_conn) = connect_and_receive_settings(Client);
 
         // create a control stream.
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
@@ -1729,7 +1738,7 @@ mod tests {
     #[test]
     #[allow(clippy::cognitive_complexity)]
     fn fetch_basic() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -1892,7 +1901,7 @@ mod tests {
     // Send a request with the request body.
     #[test]
     fn fetch_with_data() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -1956,7 +1965,7 @@ mod tests {
 
     // send a request with request body containing request_body. We expect to receive expected_data_frame_header.
     fn fetch_with_data_length_xbytes(request_body: &[u8], expected_data_frame_header: &[u8]) {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2058,7 +2067,7 @@ mod tests {
         expected_second_data_frame_header: &[u8],
         expected_second_data_frame: &[u8],
     ) {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2254,7 +2263,7 @@ mod tests {
     // Test receiving STOP_SENDING with the EarlyResponse error code.
     #[test]
     fn test_stop_sending_early_response() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2356,7 +2365,7 @@ mod tests {
     // Server sends stop sending and reset.
     #[test]
     fn test_stop_sending_other_error_with_reset() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2425,7 +2434,7 @@ mod tests {
     // We will reset the stream anyway.
     #[test]
     fn test_stop_sending_other_error_wo_reset() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2487,7 +2496,7 @@ mod tests {
     // in hconn.events. The events will be removed.
     #[test]
     fn test_stop_sending_and_reset_other_error_with_events() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2571,7 +2580,7 @@ mod tests {
     // The events will be removed.
     #[test]
     fn test_stop_sending_other_error_with_events() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2647,7 +2656,7 @@ mod tests {
     // Server sends a reset. We will close sending side as well.
     #[test]
     fn test_reset_wo_stop_sending() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2766,7 +2775,7 @@ mod tests {
     // test goaway
     #[test]
     fn test_goaway() {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id_1 = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
@@ -2867,7 +2876,7 @@ mod tests {
     }
 
     fn connect_and_send_request() -> (Http3Connection, PeerConnection, u64) {
-        let (mut hconn, mut peer_conn) = connect_and_receive_control_stream(true);
+        let (mut hconn, mut peer_conn) = connect(Client);
         let request_stream_id = hconn
             .fetch("GET", "https", "something.com", "/", &[])
             .unwrap();
