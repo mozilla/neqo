@@ -357,7 +357,7 @@ mod old {
     impl HandlerOld for PostConnectHandlerOld {
         fn handle(&mut self, args: &Args, client: &mut Connection) -> bool {
             let mut data = vec![0; 4000];
-            for event in client.events() {
+            while let Some(event) = client.next_event() {
                 match event {
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         if !self.streams.contains(&stream_id) {

@@ -175,7 +175,7 @@ fn main() {
             continue;
         }
         let mut streams = Vec::new();
-        for event in server.events() {
+        while let Some(event) = server.next_event() {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = event {
                 streams.push(stream_id)
             }
