@@ -223,7 +223,7 @@ fn get_includes(nsstarget: &Path, nssdist: &Path) -> Vec<PathBuf> {
     includes
 }
 
-fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
+fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool) {
     let suffix = if bindings.cplusplus { ".hpp" } else { ".h" };
     let header_path = PathBuf::from(BINDINGS_DIR).join(String::from(base) + suffix);
     let header = header_path.to_str().unwrap();
@@ -234,24 +234,25 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
     let mut builder = Builder::default().header(header).generate_comments(false);
 
     builder = builder.clang_arg("-v");
-    for i in includes {
-        builder = builder.clang_arg(String::from("-I") + i.to_str().unwrap());
+
+    if !gecko {
+        builder = builder.clang_arg("-DNO_NSPR_10_SUPPORT");
+        if env::consts::OS == "windows" {
+            builder = builder.clang_arg("-DWIN");
+        } else if env::consts::OS == "macos" {
+            builder = builder.clang_arg("-DDARWIN");
+        } else if env::consts::OS == "linux" {
+            builder = builder.clang_arg("-DLINUX");
+        } else if env::consts::OS == "android" {
+            builder = builder.clang_arg("-DLINUX");
+            builder = builder.clang_arg("-DANDROID");
+        }
+        if bindings.cplusplus {
+            builder = builder.clang_args(&["-x", "c++", "-std=c++11"]);
+        }
     }
 
-    builder = builder.clang_arg("-DNO_NSPR_10_SUPPORT");
-    if env::consts::OS == "windows" {
-        builder = builder.clang_arg("-DWIN");
-    } else if env::consts::OS == "macos" {
-        builder = builder.clang_arg("-DDARWIN");
-    } else if env::consts::OS == "linux" {
-        builder = builder.clang_arg("-DLINUX");
-    } else if env::consts::OS == "android" {
-        builder = builder.clang_arg("-DLINUX");
-        builder = builder.clang_arg("-DANDROID");
-    }
-    if bindings.cplusplus {
-        builder = builder.clang_args(&["-x", "c++", "-std=c++11"]);
-    }
+    builder = builder.clang_args(flags);
 
     // Apply the configuration.
     let empty: Vec<String> = vec![];
@@ -280,7 +281,7 @@ fn build_bindings(base: &str, bindings: &Bindings, includes: &[PathBuf]) {
         .expect("couldn't write bindings");
 }
 
-fn setup_standalone() -> Vec<PathBuf> {
+fn setup_standalone() -> Vec<String> {
     println!("cargo:rerun-if-env-changed=NSS_DIR");
     let nss = nss_dir();
     build_nss(nss.clone());
@@ -305,51 +306,96 @@ fn setup_standalone() -> Vec<PathBuf> {
     } else {
         dynamic_link();
     }
-    includes
+
+    let mut flags: Vec<String> = Vec::new();
+    for i in includes {
+        flags.push(String::from("-I") + i.to_str().unwrap());
+    }
+
+    flags
 }
 
-fn setup_for_gecko() -> Vec<PathBuf> {
-    let mut includes: Vec<PathBuf> = Vec::new();
-    dynamic_link();
+fn setup_for_gecko() -> Vec<String> {
+    let mut flags: Vec<String> = Vec::new();
+
+    let libs = match env::var("CARGO_CFG_TARGET_OS").as_ref().map(|x| x.as_str()) {
+        Ok("android") | Ok("macos") => vec!["nss3"],
+        _ => vec!["nssutil3", "nss3", "ssl3", "plds4", "plc4", "nspr4"],
+    };
+
+    for lib in libs.iter() {
+        println!("cargo:rustc-link-lib=dylib={}", lib);
+    }
 
     match env::var_os("MOZ_TOPOBJDIR").map(PathBuf::from) {
         Some(path) => {
-            let nsprinclude = path.join("dist").join("include").join("nspr");
-            includes.push(nsprinclude);
-            let nssinclude = path.join("dist").join("include").join("nss");
-            includes.push(nssinclude);
-            for i in &includes {
-                println!("cargo:include={}", i.to_str().unwrap());
-            }
+            println!(
+                "cargo:rustc-link-search=native={}",
+                path.join("dist").join("bin").to_str().unwrap()
+            );
+            println!(
+                "cargo:rustc-link-search=native={}",
+                path.join("security")
+                    .join("nss")
+                    .join("lib")
+                    .join("nss")
+                    .join("nss_nss3")
+                    .to_str()
+                    .unwrap()
+            );
+            println!(
+                "cargo:rustc-link-search=native={}",
+                path.join("security")
+                    .join("nss")
+                    .join("lib")
+                    .join("ssl")
+                    .join("ssl_ssl3")
+                    .to_str()
+                    .unwrap()
+            );
+            println!(
+                "cargo:rustc-link-search=native={}",
+                path.join("config")
+                    .join("external")
+                    .join("nspr")
+                    .join("pr")
+                    .to_str()
+                    .unwrap()
+            );
+
+            let flags_path = path.join("netwerk/socket/neqo/extra-bindgen-flags");
+
+            println!("cargo:rerun-if-changed={}", flags_path.to_str().unwrap());
+            flags = fs::read_to_string(flags_path)
+                .expect("Failed to read extra-bindgen-flags file")
+                .split_whitespace()
+                .map(|s| s.to_owned())
+                .collect();
+
+            flags.push(String::from("-include"));
+            flags.push(
+                path.join("dist")
+                    .join("include")
+                    .join("mozilla-config.h")
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
+            );
         }
         None => {
             println!("cargo:warning={}", "MOZ_TOPOBJDIR should be set by default, otherwise the build is not guaranteed to finish.");
         }
     }
-    includes
+    flags
 }
 
 fn main() {
-    setup_clang();
-
-    let includes = if cfg!(feature = "gecko") {
+    let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
     } else {
+        setup_clang();
         setup_standalone()
     };
-
-    let mut flags: Vec<String> = Vec::new();
-    flags.push(String::from("-DNO_NSPR_10_SUPPORT"));
-    if env::consts::OS == "windows" {
-        flags.push(String::from("-DWIN"));
-    } else if env::consts::OS == "macos" {
-        flags.push(String::from("-DDARWIN"));
-    } else if env::consts::OS == "linux" {
-        flags.push(String::from("-DLINUX"));
-    } else if env::consts::OS == "android" {
-        flags.push(String::from("-DLINUX"));
-        flags.push(String::from("-DANDROID"));
-    }
 
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
     println!("cargo:rerun-if-changed={}", config_file.to_str().unwrap());
@@ -357,6 +403,6 @@ fn main() {
     let config: HashMap<String, Bindings> = toml::from_str(&config).unwrap();
 
     for (k, v) in &config {
-        build_bindings(k, v, &includes[..]);
+        build_bindings(k, v, &flags[..], cfg!(feature = "gecko"));
     }
 }
