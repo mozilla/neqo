@@ -6,19 +6,27 @@
 
 // This file implements a server that can handle multiple connections.
 
-use neqo_common::{hex, matches, qinfo, qtrace, qwarn, timer::Timer, Datagram, Decoder};
-use neqo_crypto::AntiReplay;
+use neqo_common::{
+    hex, matches, qerror, qinfo, qtrace, qwarn, timer::Timer, Datagram, Decoder, Encoder,
+};
+use neqo_crypto::{
+    constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
+    selfencrypt::SelfEncrypt,
+    AntiReplay,
+};
 
 use crate::connection::{Connection, ConnectionIdManager, Output, State};
 use crate::packet::{
     decode_packet_hdr, encode_packet_vn, encode_retry, ConnectionId, ConnectionIdDecoder,
     PacketHdr, PacketType, Version,
 };
-use crate::QUIC_VERSION;
+use crate::{Res, QUIC_VERSION};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::TryFrom;
 use std::mem;
+use std::net::{IpAddr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -34,7 +42,6 @@ pub enum InitialResult {
 const MIN_INITIAL_PACKET_SIZE: usize = 1200;
 const TIMER_GRANULARITY: Duration = Duration::from_millis(10);
 const TIMER_CAPACITY: usize = 16384;
-const FIXED_TOKEN: &[u8] = &[1, 2, 3];
 
 type StateRef = Rc<RefCell<ServerConnectionState>>;
 type CidMgr = Rc<RefCell<dyn ConnectionIdManager>>;
@@ -66,24 +73,98 @@ enum RetryTokenResult {
     Invalid,
 }
 
-// TODO(mt) self-encrypt tokens
-#[derive(Default)]
 struct RetryToken {
+    /// Whether to send a Retry.
     require_retry: bool,
+    /// A self-encryption object used for protecting Retry tokens.
+    self_encrypt: SelfEncrypt,
+    /// When this object was created.
+    start_time: Instant,
 }
 
 impl RetryToken {
-    pub fn generate_token(&mut self, dcid: &ConnectionId) -> Vec<u8> {
-        let mut token = Vec::from(FIXED_TOKEN);
-        token.extend_from_slice(dcid);
-        token
+    fn new(now: Instant) -> Res<Self> {
+        Ok(RetryToken {
+            require_retry: false,
+            self_encrypt: SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256)?,
+            start_time: now,
+        })
+    }
+
+    fn encode_peer_address(peer_address: SocketAddr) -> Vec<u8> {
+        // Let's be "clever" by putting the peer's address in the AAD.
+        // We don't need to encode these into the token as they should be
+        // available when we need to check the token.
+        let mut encoded_address = Encoder::default();
+        match peer_address.ip() {
+            IpAddr::V4(a) => {
+                encoded_address.encode_byte(4);
+                encoded_address.encode(&a.octets());
+            }
+            IpAddr::V6(a) => {
+                encoded_address.encode_byte(6);
+                encoded_address.encode(&a.octets());
+            }
+        }
+        encoded_address.encode_uint(2, peer_address.port());
+        encoded_address.into()
+    }
+
+    /// This generates a token for use with Retry.
+    pub fn generate_token(
+        &mut self,
+        dcid: &ConnectionId,
+        peer_address: SocketAddr,
+        now: Instant,
+    ) -> Res<Vec<u8>> {
+        // TODO(mt) rotate keys on a fixed schedule.
+        let mut token = Encoder::default();
+        const EXPIRATION: Duration = Duration::from_secs(5);
+        let end = now + EXPIRATION;
+        let end_millis = u32::try_from(end.duration_since(self.start_time).as_millis())?;
+        token.encode_uint(4, end_millis);
+        token.encode(dcid);
+        let peer_addr = RetryToken::encode_peer_address(peer_address);
+        Ok(self.self_encrypt.seal(&peer_addr, &token)?)
     }
 
     pub fn set_retry_required(&mut self, retry: bool) {
         self.require_retry = retry;
     }
 
-    pub fn validate(&self, hdr: &PacketHdr) -> RetryTokenResult {
+    /// Decrypts `token` and returns the connection Id it contains.
+    /// Returns `None` if the date is invalid in any way (such as it being expired or garbled).
+    fn decrypt_token(
+        &self,
+        token: &[u8],
+        peer_address: SocketAddr,
+        now: Instant,
+    ) -> Option<ConnectionId> {
+        let peer_addr = RetryToken::encode_peer_address(peer_address);
+        let data = if let Ok(d) = self.self_encrypt.open(&peer_addr, token) {
+            d
+        } else {
+            return None;
+        };
+        let mut dec = Decoder::new(&data);
+        match dec.decode_uint(4) {
+            Some(d) => {
+                let end = self.start_time + Duration::from_millis(d);
+                if end < now {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+        Some(ConnectionId::from(dec.decode_remainder()))
+    }
+
+    pub fn validate(
+        &self,
+        hdr: &PacketHdr,
+        peer_address: SocketAddr,
+        now: Instant,
+    ) -> RetryTokenResult {
         if let PacketType::Initial(token) = &hdr.tipe {
             if token.is_empty() {
                 if self.require_retry {
@@ -91,8 +172,7 @@ impl RetryToken {
                 } else {
                     RetryTokenResult::Pass
                 }
-            } else if token[0..FIXED_TOKEN.len()] == FIXED_TOKEN[..] {
-                let cid = ConnectionId::from(&token[FIXED_TOKEN.len()..]);
+            } else if let Some(cid) = self.decrypt_token(token, peer_address, now) {
                 RetryTokenResult::Valid(cid)
             } else {
                 RetryTokenResult::Invalid
@@ -140,19 +220,19 @@ impl Server {
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
         cid_manager: CidMgr,
-    ) -> Server {
-        Server {
+    ) -> Res<Self> {
+        Ok(Self {
             version: QUIC_VERSION,
             certs: certs.iter().map(|x| String::from(x.as_ref())).collect(),
             protocols: protocols.iter().map(|x| String::from(x.as_ref())).collect(),
             anti_replay,
             cid_manager,
-            connections: Rc::new(RefCell::new(Default::default())),
-            active: Default::default(),
-            waiting: Default::default(),
+            connections: Rc::default(),
+            active: HashSet::default(),
+            waiting: VecDeque::default(),
             timers: Timer::new(now, TIMER_GRANULARITY, TIMER_CAPACITY),
-            retry: Default::default(),
-        }
+            retry: RetryToken::new(now)?,
+        })
     }
 
     fn create_vn(&self, hdr: &PacketHdr, received: Datagram) -> Datagram {
@@ -230,13 +310,20 @@ impl Server {
         dgram: Datagram,
         now: Instant,
     ) -> Option<Datagram> {
-        match self.retry.validate(&hdr) {
+        match self.retry.validate(&hdr, dgram.source(), now) {
             RetryTokenResult::Invalid => None,
             RetryTokenResult::Pass => self.accept_connection(None, dgram, now),
             RetryTokenResult::Valid(dcid) => self.accept_connection(Some(dcid), dgram, now),
             RetryTokenResult::Validate => {
                 qinfo!([self] "Send retry for {:?}", hdr.dcid);
-                let token = self.retry.generate_token(&hdr.dcid);
+
+                let res = self.retry.generate_token(&hdr.dcid, dgram.source(), now);
+                let token = if let Ok(t) = res {
+                    t
+                } else {
+                    qerror!([self], "unable to generate token, dropping packet");
+                    return None;
+                };
                 let payload = encode_retry(&PacketHdr::new(
                     0, // tbyte (unused on encode)
                     PacketType::Retry {
@@ -314,7 +401,7 @@ impl Server {
         }
 
         if dgram.len() < MIN_INITIAL_PACKET_SIZE {
-            qtrace!([self] "Bogus packet");
+            qtrace!([self] "Bogus packet: too short");
             return None;
         }
 
