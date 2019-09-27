@@ -833,9 +833,9 @@ impl Connection {
                 if self.process_packet(&hdr, body, now)? {
                     continue;
                 }
+                self.start_handshake(hdr, &d)?;
+                self.process_migrations(&d)?;
             }
-            self.start_handshake(hdr, &d)?;
-            self.process_migrations(&d)?;
         }
         Ok(())
     }
