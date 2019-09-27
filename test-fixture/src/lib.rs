@@ -89,7 +89,7 @@ pub fn default_server() -> Connection {
 
 /// If state is AuthenticationNeeded call authenticated(). This funstion will consume
 /// all outstanding events on the connection.
-pub fn maybe_autenticate(conn: &mut Connection) -> bool {
+pub fn maybe_authenticate(conn: &mut Connection) -> bool {
     let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
     if conn.events().any(authentication_needed) {
         conn.authenticated(AuthenticationStatus::Ok, now());
@@ -104,7 +104,7 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     let mut datagram = None;
     let is_done = |c: &Connection| matches!(c.state(), State::Connected | State::Closing { .. } | State::Closed(..));
     while !is_done(a) {
-        let _ = maybe_autenticate(a);
+        let _ = maybe_authenticate(a);
         let d = a.process(datagram, now());
         datagram = d.dgram();
         mem::swap(&mut a, &mut b);

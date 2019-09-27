@@ -11,6 +11,9 @@
 
 use crate::err::{secstatus_to_res, Error, Res};
 
+use neqo_common::hex;
+
+use std::convert::TryInto;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 
@@ -76,6 +79,30 @@ impl SymKey {
 
 impl std::fmt::Debug for SymKey {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "SymKey")
+        if let Ok(b) = self.as_bytes() {
+            write!(f, "SymKey {}", hex(b))
+        } else {
+            write!(f, "Opaque SymKey")
+        }
+    }
+}
+
+/// Generate a randomized buffer.
+pub fn random(size: usize) -> Res<Vec<u8>> {
+    let mut buf = vec![0; size];
+    secstatus_to_res(unsafe { PK11_GenerateRandom(buf.as_mut_ptr(), buf.len().try_into()?) })?;
+    Ok(buf)
+}
+
+#[cfg(test)]
+mod test {
+    use super::random;
+    use test_fixture::fixture_init;
+
+    #[test]
+    fn randomness() {
+        fixture_init();
+        // If this ever fails, there is either a bug, or it's time to buy a lottery ticket.
+        assert_ne!(random(16), random(16));
     }
 }
