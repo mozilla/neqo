@@ -61,6 +61,7 @@ pub enum Error {
     DecryptError,
     HandshakeFailed,
     IdleTimeout,
+    IntegerOverflow,
     InvalidInput,
     InvalidPacket,
     InvalidResumptionToken,
@@ -70,7 +71,6 @@ pub enum Error {
     NoMoreData,
     PeerError(TransportError),
     TooMuchData,
-    TypeError,
     UnexpectedMessage,
     UnknownFrameType,
     VersionNegotiation,
@@ -106,9 +106,8 @@ impl From<neqo_crypto::Error> for Error {
 }
 
 impl From<std::num::TryFromIntError> for Error {
-    fn from(err: std::num::TryFromIntError) -> Self {
-        qinfo!("Type decode to u16 failed {:?}", err);
-        Error::TypeError
+    fn from(_: std::num::TryFromIntError) -> Self {
+        Error::IntegerOverflow
     }
 }
 
