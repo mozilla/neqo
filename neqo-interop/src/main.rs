@@ -154,7 +154,7 @@ struct H9Handler {
 impl Handler for H9Handler {
     fn handle(&mut self, client: &mut Connection) -> bool {
         let mut data = vec![0; 4000];
-        for event in client.events() {
+        while let Some(event) = client.next_event() {
             eprintln!("Event: {:?}", event);
             match event {
                 ConnectionEvent::RecvStreamReadable { stream_id } => {

@@ -561,8 +561,7 @@ mod tests {
         let out = conn_c.process(None, now());
         conn_s.process(out.dgram(), now());
         let mut found_instruction = false;
-        let events = conn_s.events();
-        for e in events {
+        while let Some(e) = conn_s.next_event() {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 let mut buf = [0u8; 100];
                 let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();

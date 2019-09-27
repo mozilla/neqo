@@ -1822,7 +1822,8 @@ impl Connection {
         Ok(())
     }
 
-    /// Get events that indicate state changes on the connection.
+    /// Get all current events. Best used just in debug/testing code, use
+    /// next_event() instead.
     pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
         self.events.events()
     }
@@ -1830,6 +1831,13 @@ impl Connection {
     /// Return true if there are outstanding events.
     pub fn has_events(&self) -> bool {
         self.events.has_events()
+    }
+
+    /// Get events that indicate state changes on the connection. This method
+    /// correctly handles cases where handling one event can obsolete
+    /// previously-queued events, or cause new events to be generated.
+    pub fn next_event(&mut self) -> Option<ConnectionEvent> {
+        self.events.next_event()
     }
 
     fn check_loss_detection_timeout(&mut self, now: Instant) {

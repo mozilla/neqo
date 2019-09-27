@@ -395,8 +395,7 @@ impl Http3Connection {
     // If this return an error the connection must be closed.
     fn check_connection_events(&mut self) -> Res<()> {
         qdebug!([self] "check_connection_events");
-        let events = self.conn.events();
-        for e in events {
+        while let Some(e) = self.conn.next_event() {
             qdebug!([self] "check_connection_events - event {:?}.", e);
             match e {
                 ConnectionEvent::NewStream {
@@ -1196,9 +1195,8 @@ mod tests {
             neqo_trans_conn.process(out.dgram(), now());
         }
 
-        let events = neqo_trans_conn.events();
         let mut connected = false;
-        for e in events {
+        while let Some(e) = neqo_trans_conn.next_event() {
             match e {
                 ConnectionEvent::NewStream {
                     stream_id,
@@ -1245,7 +1243,7 @@ mod tests {
                 }
                 ConnectionEvent::StateChange(State::Connected) => connected = true,
                 ConnectionEvent::StateChange(_) => (),
-                _ => panic!("unexpected event"),
+                _ => panic!("unexpected event {:?}", e),
             }
         }
         assert!(connected);
@@ -1460,9 +1458,8 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::UnknownStreamType.
-        let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             if let ConnectionEvent::SendStreamStopSending {
                 stream_id,
                 app_error,
@@ -1493,9 +1490,8 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::UnknownStreamType.
-        let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             if let ConnectionEvent::SendStreamStopSending {
                 stream_id,
                 app_error,
@@ -1523,9 +1519,8 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::Error::PushRefused.
-        let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             if let ConnectionEvent::SendStreamStopSending {
                 stream_id,
                 app_error,
@@ -1553,9 +1548,8 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::WrongStreamDirection.
-        let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             if let ConnectionEvent::SendStreamStopSending {
                 stream_id,
                 app_error,
@@ -1583,8 +1577,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // find the new request/response stream and send frame v on it.
-        let events = peer_conn.conn.events();
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             if let ConnectionEvent::NewStream {
                 stream_id,
                 stream_type,
@@ -1602,7 +1595,7 @@ mod tests {
         let out = peer_conn.conn.process(out.dgram(), now());
 
         let mut stop_sending_event_found = false;
-        for e in peer_conn.conn.events() {
+        while let Some(e) = peer_conn.conn.next_event() {
             if let ConnectionEvent::SendStreamStopSending {
                 stream_id,
                 app_error,
@@ -1619,7 +1612,7 @@ mod tests {
         // Process reset frame
         hconn.conn.process(out.dgram(), now());
         let mut reset_event_found = false;
-        for e in hconn.conn.events() {
+        while let Some(e) = hconn.conn.next_event() {
             if let ConnectionEvent::RecvStreamReset { app_error, .. } = e {
                 reset_event_found = true;
                 assert_eq!(app_error, err.code());
@@ -1916,8 +1909,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // find the new request/response stream and send response on it.
-        let events = peer_conn.conn.events();
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             match e {
                 ConnectionEvent::NewStream {
                     stream_id,
@@ -1986,8 +1978,7 @@ mod tests {
         }
 
         // find the new request/response stream, check received frames and send a response.
-        let events = peer_conn.conn.events();
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read only the HEADER frame
@@ -2094,8 +2085,7 @@ mod tests {
         }
 
         // find the new request/response stream, check received frames and send a response.
-        let events = peer_conn.conn.events();
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read only the HEADER frame
@@ -2239,8 +2229,7 @@ mod tests {
 
     fn read_request(mut neqo_trans_conn: &mut Connection, request_stream_id: u64) {
         // find the new request/response stream and check request data.
-        let events = neqo_trans_conn.events();
-        for e in events {
+        while let Some(e) = neqo_trans_conn.next_event() {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read only header frame
@@ -2792,8 +2781,7 @@ mod tests {
             .stream_send(peer_conn.control_stream_id, &[0x7, 0x1, 0x8]);
 
         // find the new request/response stream and send frame v on it.
-        let events = peer_conn.conn.events();
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             match e {
                 ConnectionEvent::NewStream { .. } => {}
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
@@ -2882,8 +2870,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // find the new request/response stream and send frame v on it.
-        let events = peer_conn.conn.events();
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             match e {
                 ConnectionEvent::NewStream {
                     stream_id,
