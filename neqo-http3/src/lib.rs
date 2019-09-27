@@ -48,16 +48,17 @@ pub enum Error {
     RequestRejected,
     GeneralProtocolError,
     MalformedFrame(HFrameType),
-    NoMoreData,
-    DecodingFrame,
-    NotEnoughData,
-    Unexpected,
-    InvalidStreamId,
-    Unavailable,
-    AlreadyClosed,
-    // So we can wrap and report these errors.
-    TransportError(neqo_transport::Error),
     QpackError(neqo_qpack::Error),
+
+    // Internal errors from here.
+    AlreadyClosed,
+    DecodingFrame,
+    InvalidStreamId,
+    NoMoreData,
+    NotEnoughData,
+    TransportError(neqo_transport::Error),
+    Unavailable,
+    Unexpected,
 }
 
 impl Error {
@@ -89,16 +90,9 @@ impl Error {
                 0..=0xfe => (*t as neqo_transport::AppError) + 0x100,
                 _ => 0x1ff,
             },
-            // These are all internal errors.
-            Error::NoMoreData
-            | Error::DecodingFrame
-            | Error::NotEnoughData
-            | Error::Unexpected
-            | Error::InvalidStreamId
-            | Error::Unavailable
-            | Error::AlreadyClosed
-            | Error::TransportError(..) => 3,
             Error::QpackError(e) => e.code(),
+            // These are all internal errors.
+            _ => 3,
         }
     }
 

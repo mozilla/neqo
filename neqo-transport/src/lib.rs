@@ -53,26 +53,28 @@ pub enum Error {
     InvalidMigration,
     CryptoError(neqo_crypto::Error),
     CryptoAlert(u8),
-    TypeError,
-    NoMoreData,
-    TooMuchData,
-    UnknownFrameType,
-    InvalidPacket,
-    DecryptError,
-    InvalidStreamId,
-    DecodingFrame,
-    UnexpectedMessage,
-    HandshakeFailed,
-    KeysNotFound,
-    ConnectionState,
+
+    // All internal errors from here.
     AckedUnsentPacket,
-    VersionNegotiation,
-    InvalidResumptionToken,
-    WrongRole,
-    InvalidInput,
+    ConnectionState,
+    DecodingFrame,
+    DecryptError,
+    HandshakeFailed,
     IdleTimeout,
-    PeerError(TransportError),
+    InvalidInput,
+    InvalidPacket,
+    InvalidResumptionToken,
     InvalidRetry,
+    InvalidStreamId,
+    KeysNotFound,
+    NoMoreData,
+    PeerError(TransportError),
+    TooMuchData,
+    TypeError,
+    UnexpectedMessage,
+    UnknownFrameType,
+    VersionNegotiation,
+    WrongRole,
 }
 
 impl Error {
@@ -90,28 +92,8 @@ impl Error {
             Error::InvalidMigration => 12,
             Error::CryptoAlert(a) => 0x100 + u64::from(*a),
             Error::PeerError(a) => *a,
-            // TODO(ekr@rtfm.com): Map these errors.
-            Error::CryptoError(_)
-            | Error::TypeError
-            | Error::NoMoreData
-            | Error::TooMuchData
-            | Error::UnknownFrameType
-            | Error::InvalidPacket
-            | Error::DecryptError
-            | Error::InvalidStreamId
-            | Error::DecodingFrame
-            | Error::UnexpectedMessage
-            | Error::HandshakeFailed
-            | Error::KeysNotFound
-            | Error::ConnectionState
-            | Error::AckedUnsentPacket
-            | Error::VersionNegotiation
-            | Error::WrongRole
-            | Error::InvalidResumptionToken
-            | Error::InvalidInput
-            | Error::InvalidRetry
-            | Error::IdleTimeout
-            | Error::InternalError => 1,
+            // All the rest are internal errors.
+            _ => 1,
         }
     }
 }
