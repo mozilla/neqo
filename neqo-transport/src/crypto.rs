@@ -246,9 +246,9 @@ impl CryptoDxState {
         }
     }
 
-    pub fn new_initial<S: Into<String>>(
+    pub fn new_initial(
         direction: CryptoDxDirection,
-        label: S,
+        label: &str,
         dcid: &[u8],
     ) -> Option<CryptoDxState> {
         const INITIAL_SALT: &[u8] = &[
