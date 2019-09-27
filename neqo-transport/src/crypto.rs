@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use neqo_common::{hex, qdebug, qinfo, qtrace};
 use neqo_crypto::aead::Aead;
-use neqo_crypto::hp::{extract_hp, HpKey};
+use neqo_crypto::hp::HpKey;
 use neqo_crypto::{
     hkdf, Agent, AntiReplay, Cipher, Epoch, SymKey, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
     TLS_VERSION_1_3,
@@ -242,7 +242,7 @@ impl CryptoDxState {
             direction,
             epoch,
             aead: Aead::new(TLS_VERSION_1_3, cipher, secret, "quic ").unwrap(),
-            hpkey: extract_hp(TLS_VERSION_1_3, cipher, secret, "quic hp").unwrap(),
+            hpkey: HpKey::extract(TLS_VERSION_1_3, cipher, secret, "quic hp").unwrap(),
         }
     }
 
