@@ -173,7 +173,7 @@ impl<'a, 'b> PartialEq<Decoder<'b>> for Decoder<'a> {
 }
 
 /// Encoder is good for building data structures.
-#[derive(Default, PartialEq)]
+#[derive(Clone, Default, PartialEq)]
 pub struct Encoder {
     buf: Vec<u8>,
 }
