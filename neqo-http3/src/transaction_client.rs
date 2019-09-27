@@ -294,7 +294,21 @@ impl TransactionClient {
                         break Ok(());
                     }
                 }
-                TransactionRecvState::BlockedDecodingHeaders { .. } => break Ok(()),
+                TransactionRecvState::BlockedDecodingHeaders { ref buf, fin } => {
+                    match decoder.decode_header_block(buf, self.stream_id)? {
+                        Some(headers) => {
+                            self.add_headers(Some(headers))?;
+                            if fin {
+                                self.set_state_to_close_pending();
+                                break Ok(());
+                            }
+                        }
+                        None => {
+                            qdebug!([self] "decoding header is blocked.");
+                            break Ok(());
+                        }
+                    }
+                }
                 TransactionRecvState::WaitingForData => {
                     match self.recv_frame_header(conn)? {
                         None => break Ok(()),
@@ -448,39 +462,20 @@ impl TransactionClient {
                     self.add_headers(Some(headers))?;
                     if fin {
                         self.set_state_to_close_pending();
-                        return Ok(true);
                     }
+                    Ok(fin)
                 }
                 None => {
-                    qdebug!([label] "decoding header is blocked.");
                     let mut tmp: Vec<u8> = Vec::new();
                     mem::swap(&mut tmp, buf);
                     self.recv_state =
                         TransactionRecvState::BlockedDecodingHeaders { buf: tmp, fin };
-                    return Ok(true);
+                    Ok(true)
                 }
-            };
-            Ok(false)
+            }
         } else {
             panic!("This is only called when recv_state is ReadingHeaders.");
         }
-    }
-
-    pub fn unblock(&mut self, decoder: &mut QPackDecoder) -> Res<()> {
-        if let TransactionRecvState::BlockedDecodingHeaders { ref mut buf, fin } = self.recv_state {
-            match decoder.decode_header_block(buf, self.stream_id)? {
-                Some(headers) => {
-                    self.add_headers(Some(headers))?;
-                    if fin {
-                        self.set_state_to_close_pending();
-                    }
-                }
-                None => panic!("We must not be blocked again!"),
-            };
-        } else {
-            panic!("Stream must be in the block state!");
-        }
-        Ok(())
     }
 
     pub fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
