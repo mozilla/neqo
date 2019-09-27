@@ -106,23 +106,3 @@ mod test {
         assert_ne!(random(16), random(16));
     }
 }
-
-/// Generate a randomized buffer.
-pub fn random(size: usize) -> Res<Vec<u8>> {
-    let mut buf = vec![0; size];
-    secstatus_to_res(unsafe { PK11_GenerateRandom(buf.as_mut_ptr(), buf.len().try_into()?) })?;
-    Ok(buf)
-}
-
-#[cfg(test)]
-mod test {
-    use super::random;
-    use test_fixture::fixture_init;
-
-    #[test]
-    fn randomness() {
-        fixture_init();
-        // If this ever fails, there is either a bug, or it's time to buy a lottery ticket.
-        assert_ne!(random(16), random(16));
-    }
-}
