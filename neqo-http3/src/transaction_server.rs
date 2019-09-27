@@ -13,7 +13,7 @@ use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
 use std::mem;
 
-pub type Response = (Vec<Header>, Vec<u8>);
+pub type Response = (Vec<Header>, Vec<u8>, Option<Error>);
 pub type RequestHandler = Box<dyn FnMut(&[Header], bool) -> Response>;
 
 #[derive(PartialEq, Debug)]

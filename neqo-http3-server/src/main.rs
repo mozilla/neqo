@@ -91,6 +91,7 @@ fn http_serve(request_headers: &[Header], _error: bool) -> Response {
             (String::from("content-length"), response.len().to_string()),
         ],
         response,
+        None,
     )
 }
 
