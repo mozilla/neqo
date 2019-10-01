@@ -45,6 +45,7 @@ pub enum Error {
         desc: String,
     },
     OverrunError,
+    SelfEncryptFailure,
     TimeTravelError,
     UnsupportedCipher,
     UnsupportedVersion,

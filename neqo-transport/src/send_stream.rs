@@ -843,7 +843,7 @@ fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> u
 }
 
 #[derive(Debug)]
-pub(crate) struct StreamRecoveryToken {
+pub struct StreamRecoveryToken {
     pub(crate) id: StreamId,
     offset: u64,
     length: usize,

@@ -28,6 +28,7 @@ pub mod hp;
 mod prio;
 mod replay;
 mod secrets;
+pub mod selfencrypt;
 mod ssl;
 mod time;
 

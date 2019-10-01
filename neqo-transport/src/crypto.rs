@@ -29,7 +29,7 @@ use crate::{Error, Res};
 const MAX_AUTH_TAG: usize = 32;
 
 #[derive(Debug)]
-pub(crate) struct Crypto {
+pub struct Crypto {
     pub(crate) tls: Agent,
     pub(crate) streams: [CryptoStream; 4],
     pub(crate) states: [Option<CryptoState>; 4],
@@ -212,13 +212,13 @@ impl ::std::fmt::Display for Crypto {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum CryptoDxDirection {
+pub enum CryptoDxDirection {
     Read,
     Write,
 }
 
 #[derive(Debug)]
-pub(crate) struct CryptoDxState {
+pub struct CryptoDxState {
     pub(crate) direction: CryptoDxDirection,
     pub(crate) epoch: Epoch,
     pub(crate) aead: Aead,
@@ -246,9 +246,9 @@ impl CryptoDxState {
         }
     }
 
-    pub fn new_initial<S: Into<String>>(
+    pub fn new_initial(
         direction: CryptoDxDirection,
-        label: S,
+        label: &str,
         dcid: &[u8],
     ) -> Option<CryptoDxState> {
         const INITIAL_SALT: &[u8] = &[
@@ -323,20 +323,20 @@ impl std::fmt::Display for CryptoDxState {
 }
 
 #[derive(Debug)]
-pub(crate) struct CryptoState {
-    pub(crate) epoch: Epoch,
-    pub(crate) tx: Option<CryptoDxState>,
-    pub(crate) rx: Option<CryptoDxState>,
+pub struct CryptoState {
+    pub epoch: Epoch,
+    pub tx: Option<CryptoDxState>,
+    pub rx: Option<CryptoDxState>,
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct CryptoStream {
-    pub(crate) tx: TxBuffer,
-    pub(crate) rx: RxStreamOrderer,
+pub struct CryptoStream {
+    pub tx: TxBuffer,
+    pub rx: RxStreamOrderer,
 }
 
 #[derive(Debug)]
-pub(crate) struct CryptoRecoveryToken {
+pub struct CryptoRecoveryToken {
     epoch: u16,
     offset: u64,
     length: usize,
