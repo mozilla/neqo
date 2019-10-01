@@ -7,9 +7,9 @@
 use crate::constants::*;
 use crate::err::{Error, Res};
 use crate::p11::{
-    PK11Origin, PK11SymKey, PK11_GetInternalSlot, PK11_ImportSymKey, SECItem, SECItemType, Slot,
-    SymKey, CKA_DERIVE, CKM_INVALID_MECHANISM, CKM_NSS_HKDF_SHA256, CKM_NSS_HKDF_SHA384,
-    CK_ATTRIBUTE_TYPE, CK_MECHANISM_TYPE,
+    random, PK11Origin, PK11SymKey, PK11_GetInternalSlot, PK11_ImportSymKey, SECItem, SECItemType,
+    Slot, SymKey, CKA_DERIVE, CKM_NSS_HKDF_SHA256, CKM_NSS_HKDF_SHA384, CK_ATTRIBUTE_TYPE,
+    CK_MECHANISM_TYPE,
 };
 
 use std::convert::TryFrom;
@@ -34,6 +34,21 @@ experimental_api!(SSL_HkdfExpandLabel(
     secret: *mut *mut PK11SymKey,
 ));
 
+pub fn key_size(version: Version, cipher: Cipher) -> Res<usize> {
+    if version != TLS_VERSION_1_3 {
+        return Err(Error::UnsupportedVersion);
+    }
+    Ok(match cipher {
+        TLS_AES_128_GCM_SHA256 | TLS_CHACHA20_POLY1305_SHA256 => 32,
+        TLS_AES_256_GCM_SHA384 => 48,
+        _ => return Err(Error::UnsupportedCipher),
+    })
+}
+
+pub fn generate_key(version: Version, cipher: Cipher, size: usize) -> Res<SymKey> {
+    import_key(version, cipher, &random(size)?)
+}
+
 /// Import a symmetric key for use with HKDF.
 pub fn import_key(version: Version, cipher: Cipher, buf: &[u8]) -> Res<SymKey> {
     if version != TLS_VERSION_1_3 {
@@ -42,11 +57,8 @@ pub fn import_key(version: Version, cipher: Cipher, buf: &[u8]) -> Res<SymKey> {
     let mech = match cipher {
         TLS_AES_128_GCM_SHA256 | TLS_CHACHA20_POLY1305_SHA256 => CKM_NSS_HKDF_SHA256,
         TLS_AES_256_GCM_SHA384 => CKM_NSS_HKDF_SHA384,
-        _ => CKM_INVALID_MECHANISM,
+        _ => return Err(Error::UnsupportedCipher),
     };
-    if mech == CKM_INVALID_MECHANISM {
-        return Err(Error::UnsupportedCipher);
-    }
     let mut item = SECItem {
         type_: SECItemType::siBuffer,
         data: buf.as_ptr() as *mut c_uchar,
@@ -93,15 +105,14 @@ pub fn extract(
 }
 
 /// Expand a PRK using the HKDF-Expand-Label function defined in RFC 8446.
-pub fn expand_label<S: Into<String>>(
+pub fn expand_label(
     version: Version,
     cipher: Cipher,
     prk: &SymKey,
     handshake_hash: &[u8],
-    label: S,
+    label: &str,
 ) -> Res<SymKey> {
-    let label_str = label.into();
-    let l = label_str.as_bytes();
+    let l = label.as_bytes();
     let mut secret: *mut PK11SymKey = null_mut();
 
     // Note that this doesn't allow for passing null() for the handshake hash.

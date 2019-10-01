@@ -37,47 +37,41 @@ impl Debug for HpKey {
     }
 }
 
-/// QUIC-specific API for extracting a header-protection key.
-pub fn extract_hp<S: Into<String>>(
-    version: Version,
-    cipher: Cipher,
-    prk: &SymKey,
-    label: S,
-) -> Res<HpKey> {
-    let label_str = label.into();
-    let l = label_str.as_bytes();
-    let mut secret: *mut PK11SymKey = null_mut();
-
-    let (mech, key_size) = match cipher {
-        TLS_AES_128_GCM_SHA256 => (CK_MECHANISM_TYPE::from(CKM_AES_ECB), 16),
-        TLS_AES_256_GCM_SHA384 => (CK_MECHANISM_TYPE::from(CKM_AES_ECB), 32),
-        TLS_CHACHA20_POLY1305_SHA256 => (CK_MECHANISM_TYPE::from(CKM_NSS_CHACHA20_CTR), 32),
-        _ => unreachable!(),
-    };
-
-    // Note that this doesn't allow for passing null() for the handshake hash.
-    // A zero-length slice produces an identical result.
-    unsafe {
-        SSL_HkdfExpandLabelWithMech(
-            version,
-            cipher,
-            **prk,
-            null(),
-            0,
-            l.as_ptr() as *const c_char,
-            c_uint::try_from(l.len())?,
-            mech,
-            key_size,
-            &mut secret,
-        )
-    }?;
-    match NonNull::new(secret) {
-        None => Err(Error::HkdfError),
-        Some(p) => Ok(HpKey(SymKey::new(p))),
-    }
-}
-
 impl HpKey {
+    /// QUIC-specific API for extracting a header-protection key.
+    pub fn extract(version: Version, cipher: Cipher, prk: &SymKey, label: &str) -> Res<Self> {
+        let l = label.as_bytes();
+        let mut secret: *mut PK11SymKey = null_mut();
+
+        let (mech, key_size) = match cipher {
+            TLS_AES_128_GCM_SHA256 => (CK_MECHANISM_TYPE::from(CKM_AES_ECB), 16),
+            TLS_AES_256_GCM_SHA384 => (CK_MECHANISM_TYPE::from(CKM_AES_ECB), 32),
+            TLS_CHACHA20_POLY1305_SHA256 => (CK_MECHANISM_TYPE::from(CKM_NSS_CHACHA20_CTR), 32),
+            _ => unreachable!(),
+        };
+
+        // Note that this doesn't allow for passing null() for the handshake hash.
+        // A zero-length slice produces an identical result.
+        unsafe {
+            SSL_HkdfExpandLabelWithMech(
+                version,
+                cipher,
+                **prk,
+                null(),
+                0,
+                l.as_ptr() as *const c_char,
+                c_uint::try_from(l.len())?,
+                mech,
+                key_size,
+                &mut secret,
+            )
+        }?;
+        match NonNull::new(secret) {
+            None => Err(Error::HkdfError),
+            Some(p) => Ok(Self(SymKey::new(p))),
+        }
+    }
+
     /// Generate a header protection mask for QUIC.
     #[allow(clippy::cast_sign_loss)]
     pub fn mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
