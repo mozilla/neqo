@@ -7,8 +7,9 @@ pull_request_rules:
       - label!=work-in-progress
     actions:
       merge:
-        method: merge
+        method: rebase
         strict: smart
+        strict_method: rebase
   - name: remove outdated reviews
     conditions:
       - base=master
