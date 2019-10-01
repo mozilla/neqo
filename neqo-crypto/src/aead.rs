@@ -54,24 +54,22 @@ pub struct Aead {
 }
 
 impl Aead {
-    pub fn new<S: Into<String>>(
-        version: Version,
-        cipher: Cipher,
-        secret: &SymKey,
-        prefix: S,
-    ) -> Res<Self> {
+    pub fn new(version: Version, cipher: Cipher, secret: &SymKey, prefix: &str) -> Res<Self> {
         let s: *mut PK11SymKey = **secret;
         unsafe { Self::from_raw(version, cipher, s, prefix) }
     }
 
-    unsafe fn from_raw<S: Into<String>>(
+    pub fn expansion(&self) -> usize {
+        16
+    }
+
+    unsafe fn from_raw(
         version: Version,
         cipher: Cipher,
         secret: *mut PK11SymKey,
-        prefix: S,
+        prefix: &str,
     ) -> Res<Self> {
-        let prefix_str = prefix.into();
-        let p = prefix_str.as_bytes();
+        let p = prefix.as_bytes();
         let mut ctx: *mut ssl::SSLAeadContext = null_mut();
         SSL_MakeAead(
             version,
@@ -89,6 +87,10 @@ impl Aead {
         }
     }
 
+    /// Decrypt a plaintext.
+    ///
+    /// The space provided in `output` needs to be larger than `input` by
+    /// the value provided in `Aead::expansion`.
     pub fn encrypt<'a>(
         &self,
         count: u64,
@@ -110,9 +112,14 @@ impl Aead {
                 c_uint::try_from(output.len())?,
             )
         }?;
-        Ok(&output[0..(l.try_into().unwrap())])
+        Ok(&output[0..(l.try_into()?)])
     }
 
+    /// Decrypt a ciphertext.
+    ///
+    /// Note that NSS insists upon having extra space available for decryption, so
+    /// the buffer for `output` should be the same length as `input`, even though
+    /// the final result will be shorter.
     pub fn decrypt<'a>(
         &self,
         count: u64,
@@ -134,7 +141,7 @@ impl Aead {
                 c_uint::try_from(output.len())?,
             )
         }?;
-        Ok(&output[0..(l.try_into().unwrap())])
+        Ok(&output[0..(l.try_into()?)])
     }
 }
 

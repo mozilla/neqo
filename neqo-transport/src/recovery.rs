@@ -29,7 +29,7 @@ const INITIAL_RTT: Duration = Duration::from_millis(100);
 const PACKET_THRESHOLD: u64 = 3;
 
 #[derive(Debug)]
-pub(crate) enum RecoveryToken {
+pub enum RecoveryToken {
     Ack(AckToken),
     Stream(StreamRecoveryToken),
     Crypto(CryptoRecoveryToken),
