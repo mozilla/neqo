@@ -282,6 +282,8 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
 }
 
 fn setup_standalone() -> Vec<String> {
+    setup_clang();
+
     println!("cargo:rerun-if-env-changed=NSS_DIR");
     let nss = nss_dir();
     build_nss(nss.clone());
@@ -327,64 +329,50 @@ fn setup_for_gecko() -> Vec<String> {
         println!("cargo:rustc-link-lib=dylib={}", lib);
     }
 
-    match env::var_os("MOZ_TOPOBJDIR").map(PathBuf::from) {
-        Some(path) => {
-            println!(
-                "cargo:rustc-link-search=native={}",
-                path.join("dist").join("bin").to_str().unwrap()
-            );
-            println!(
-                "cargo:rustc-link-search=native={}",
-                path.join("security")
-                    .join("nss")
-                    .join("lib")
-                    .join("nss")
-                    .join("nss_nss3")
-                    .to_str()
-                    .unwrap()
-            );
-            println!(
-                "cargo:rustc-link-search=native={}",
-                path.join("security")
-                    .join("nss")
-                    .join("lib")
-                    .join("ssl")
-                    .join("ssl_ssl3")
-                    .to_str()
-                    .unwrap()
-            );
-            println!(
-                "cargo:rustc-link-search=native={}",
-                path.join("config")
-                    .join("external")
-                    .join("nspr")
-                    .join("pr")
-                    .to_str()
-                    .unwrap()
-            );
+    if let Some(path) = env::var_os("MOZ_TOPOBJDIR").map(PathBuf::from) {
+        println!(
+            "cargo:rustc-link-search=native={}",
+            path.join("dist").join("bin").to_str().unwrap()
+        );
+        let nsslib_path = path.clone().join("security").join("nss").join("lib");
+        println!(
+            "cargo:rustc-link-search=native={}",
+            nsslib_path.join("nss").join("nss_nss3").to_str().unwrap()
+        );
+        println!(
+            "cargo:rustc-link-search=native={}",
+            nsslib_path.join("ssl").join("ssl_ssl3").to_str().unwrap()
+        );
+        println!(
+            "cargo:rustc-link-search=native={}",
+            path.join("config")
+                .join("external")
+                .join("nspr")
+                .join("pr")
+                .to_str()
+                .unwrap()
+        );
 
-            let flags_path = path.join("netwerk/socket/neqo/extra-bindgen-flags");
+        let flags_path = path.join("netwerk/socket/neqo/extra-bindgen-flags");
 
-            println!("cargo:rerun-if-changed={}", flags_path.to_str().unwrap());
-            flags = fs::read_to_string(flags_path)
-                .expect("Failed to read extra-bindgen-flags file")
-                .split_whitespace()
-                .map(|s| s.to_owned())
-                .collect();
+        println!("cargo:rerun-if-changed={}", flags_path.to_str().unwrap());
+        flags = fs::read_to_string(flags_path)
+            .expect("Failed to read extra-bindgen-flags file")
+            .split_whitespace()
+            .map(|s| s.to_owned())
+            .collect();
 
-            flags.push(String::from("-include"));
-            flags.push(
-                path.join("dist")
-                    .join("include")
-                    .join("mozilla-config.h")
-                    .to_str()
-                    .unwrap()
-                    .to_string(),
-            );
-        }
-        None => {
-            println!("cargo:warning={}", "MOZ_TOPOBJDIR should be set by default, otherwise the build is not guaranteed to finish.");
-        }
+        flags.push(String::from("-include"));
+        flags.push(
+            path.join("dist")
+                .join("include")
+                .join("mozilla-config.h")
+                .to_str()
+                .unwrap()
+                .to_string(),
+        );
+    } else {
+        println!("cargo:warning={}", "MOZ_TOPOBJDIR should be set by default, otherwise the build is not guaranteed to finish.");
     }
     flags
 }
@@ -393,7 +381,6 @@ fn main() {
     let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
     } else {
-        setup_clang();
         setup_standalone()
     };
 
