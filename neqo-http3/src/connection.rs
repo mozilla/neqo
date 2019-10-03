@@ -1138,11 +1138,6 @@ mod tests {
         };
     }
 
-    #[derive(PartialEq)]
-    enum Role {
-        Client,
-        Server,
-    }
     use crate::connection::tests::Role::{Client, Server};
 
     // Start a client/server and check setting frame.
