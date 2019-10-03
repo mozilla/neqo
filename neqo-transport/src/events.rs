@@ -55,10 +55,10 @@ impl ConnectionEvents {
         self.insert(ConnectionEvent::AuthenticationNeeded);
     }
 
-    pub fn new_stream(&self, stream_id: StreamId, stream_type: StreamType) {
+    pub fn new_stream(&self, stream_id: StreamId) {
         self.insert(ConnectionEvent::NewStream {
             stream_id: stream_id.as_u64(),
-            stream_type,
+            stream_type: stream_id.stream_type(),
         });
     }
 
