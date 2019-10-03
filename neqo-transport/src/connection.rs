@@ -1636,7 +1636,7 @@ impl Connection {
                     );
 
                     if next_stream_id.is_uni() {
-                        self.events.new_stream(next_stream_id, StreamType::UniDi);
+                        self.events.new_stream(next_stream_id);
                     } else {
                         let send_initial_max_stream_data = self
                             .tps
@@ -1652,7 +1652,7 @@ impl Connection {
                                 self.events.clone(),
                             ),
                         );
-                        self.events.new_stream(next_stream_id, StreamType::BiDi);
+                        self.events.new_stream(next_stream_id);
                     }
 
                     *next_stream_idx += 1;
