@@ -9,7 +9,7 @@
 use neqo_common::{matches, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::transaction_server::Response;
-use neqo_http3::{Header, Http3Connection, Http3Event, Http3State};
+use neqo_http3::{Header, Http3ClientEvent, Http3Connection, Http3State};
 use test_fixture::*;
 
 fn new_stream_callback(request_headers: &[Header], error: bool) -> Response {
@@ -50,7 +50,7 @@ fn connect() -> (Http3Connection, Http3Connection, Option<Datagram>) {
     let out = hconn_s.process(out.dgram(), now()); // Initial + Handshake
     let out = hconn_c.process(out.dgram(), now()); // ACK
     let _ = hconn_s.process(out.dgram(), now()); //consume ACK
-    let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
+    let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
     assert!(hconn_c.events().any(authentication_needed));
     hconn_c.authenticated(AuthenticationStatus::Ok, now());
     let out = hconn_c.process(None, now()); // Handshake

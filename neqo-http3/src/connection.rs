@@ -4,156 +4,30 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use smallvec::SmallVec;
-
-use crate::hframe::{HFrame, HFrameReader, HSettingType, H3_FRAME_TYPE_DATA};
+use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
+use crate::control_stream_local::{ControlStreamLocal, HTTP3_UNI_STREAM_TYPE_CONTROL};
+use crate::control_stream_remote::ControlStreamRemote;
+use crate::hframe::{HFrame, HSettingType, H3_FRAME_TYPE_DATA};
+use crate::stream_type_reader::NewStreamTypeReader;
 use crate::transaction_client::TransactionClient;
 use crate::transaction_server::{RequestHandler, TransactionServer};
 use crate::Header;
-use neqo_common::{
-    qdebug, qerror, qinfo, qwarn, Datagram, Decoder, Encoder, IncrementalDecoder,
-    IncrementalDecoderResult,
-};
+use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{
     AppError, CloseError, Connection, ConnectionEvent, Output, Role, State, StreamType,
 };
-use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::mem;
-use std::rc::Rc;
 use std::time::Instant;
 
 use crate::{Error, Res};
 
-const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 
 const MAX_HEADER_LIST_SIZE_DEFAULT: u64 = u64::max_value();
-
-// The local control stream, responsible for encoding frames and sending them
-#[derive(Default, Debug)]
-struct ControlStreamLocal {
-    stream_id: Option<u64>,
-    buf: Vec<u8>,
-}
-
-impl ControlStreamLocal {
-    pub fn send_frame(&mut self, f: HFrame) {
-        let mut enc = Encoder::default();
-        f.encode(&mut enc);
-        self.buf.append(&mut enc.into());
-    }
-    pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
-        if let Some(stream_id) = self.stream_id {
-            if !self.buf.is_empty() {
-                let sent = conn.stream_send(stream_id, &self.buf[..])?;
-                if sent == self.buf.len() {
-                    self.buf.clear();
-                } else {
-                    let b = self.buf.split_off(sent);
-                    self.buf = b;
-                }
-            }
-            return Ok(());
-        }
-        Ok(())
-    }
-}
-
-// The remote control stream is responsible only for reading frames. The frames are handled by Http3Connection
-#[derive(Debug)]
-struct ControlStreamRemote {
-    stream_id: Option<u64>,
-    frame_reader: HFrameReader,
-    fin: bool,
-}
-
-impl ::std::fmt::Display for ControlStreamRemote {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Http3 remote control stream {:?}", self.stream_id)
-    }
-}
-
-impl ControlStreamRemote {
-    pub fn new() -> ControlStreamRemote {
-        ControlStreamRemote {
-            stream_id: None,
-            frame_reader: HFrameReader::new(),
-            fin: false,
-        }
-    }
-
-    pub fn add_remote_stream(&mut self, stream_id: u64) -> Res<()> {
-        qinfo!([self] "A new control stream {}.", stream_id);
-        if self.stream_id.is_some() {
-            qdebug!([self] "A control stream already exists");
-            return Err(Error::WrongStreamCount);
-        }
-        self.stream_id = Some(stream_id);
-        Ok(())
-    }
-
-    pub fn receive_if_this_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
-        if let Some(id) = self.stream_id {
-            if id == stream_id {
-                self.fin = self.frame_reader.receive(conn, stream_id)?;
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-}
-
-#[derive(Debug)]
-struct NewStreamTypeReader {
-    reader: IncrementalDecoder,
-    fin: bool,
-}
-
-impl NewStreamTypeReader {
-    pub fn new() -> NewStreamTypeReader {
-        NewStreamTypeReader {
-            reader: IncrementalDecoder::decode_varint(),
-            fin: false,
-        }
-    }
-    pub fn get_type(&mut self, conn: &mut Connection, stream_id: u64) -> Option<u64> {
-        // On any error we will only close this stream!
-        loop {
-            let to_read = self.reader.min_remaining();
-            let mut buf = vec![0; to_read];
-            match conn.stream_recv(stream_id, &mut buf[..]) {
-                Ok((_, true)) => {
-                    self.fin = true;
-                    break None;
-                }
-                Ok((0, false)) => {
-                    break None;
-                }
-                Ok((amount, false)) => {
-                    let mut dec = Decoder::from(&buf[..amount]);
-                    match self.reader.consume(&mut dec) {
-                        IncrementalDecoderResult::Uint(v) => {
-                            break Some(v);
-                        }
-                        IncrementalDecoderResult::InProgress => {}
-                        _ => {
-                            break None;
-                        }
-                    }
-                }
-                Err(e) => {
-                    qdebug!([conn] "Error reading stream type for stream {}: {:?}", stream_id, e);
-                    self.fin = true;
-                    break None;
-                }
-            }
-        }
-    }
-}
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub enum Http3State {
@@ -177,7 +51,7 @@ pub struct Http3Connection {
     streams_are_readable: BTreeSet<u64>,
     streams_have_data_to_send: BTreeSet<u64>,
     // Client only
-    events: Http3Events,
+    events: Http3ClientEvents,
     transactions_client: HashMap<u64, TransactionClient>,
     // Server only
     #[allow(clippy::type_complexity)]
@@ -220,7 +94,7 @@ impl Http3Connection {
             settings_received: false,
             streams_are_readable: BTreeSet::new(),
             streams_have_data_to_send: BTreeSet::new(),
-            events: Http3Events::default(),
+            events: Http3ClientEvents::default(),
             handler,
         }
     }
@@ -240,18 +114,10 @@ impl Http3Connection {
 
     fn initialize_http3_connection(&mut self) -> Res<()> {
         qdebug!([self] "initialize_http3_connection");
-        self.create_control_stream()?;
+        self.control_stream_local
+            .create_control_stream(&mut self.conn)?;
         self.create_settings();
         self.create_qpack_streams()?;
-        Ok(())
-    }
-
-    fn create_control_stream(&mut self) -> Res<()> {
-        qdebug!([self] "create_control_stream.");
-        self.control_stream_local.stream_id = Some(self.conn.stream_create(StreamType::UniDi)?);
-        let mut enc = Encoder::default();
-        enc.encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
-        self.control_stream_local.buf.append(&mut enc.into());
         Ok(())
     }
 
@@ -467,7 +333,7 @@ impl Http3Connection {
                         .entry(stream_id)
                         .or_insert_with(NewStreamTypeReader::new);
                     stream_type = ns.get_type(&mut self.conn, stream_id);
-                    fin = ns.fin;
+                    fin = ns.fin();
                 }
 
                 if fin {
@@ -514,7 +380,9 @@ impl Http3Connection {
                 "The remote control stream ({}) is readable.",
                 stream_id
             );
-            while self.control_stream_remote.frame_reader.done() || self.control_stream_remote.fin {
+            while self.control_stream_remote.frame_reader_done()
+                || self.control_stream_remote.recvd_fin()
+            {
                 self.handle_control_frame()?;
                 self.control_stream_remote
                     .receive_if_this_stream(&mut self.conn, stream_id)?;
@@ -537,7 +405,7 @@ impl Http3Connection {
             unblocked_streams = self.qpack_decoder.receive(&mut self.conn, stream_id)?;
         } else if let Some(ns) = self.new_streams.get_mut(&stream_id) {
             let stream_type = ns.get_type(&mut self.conn, stream_id);
-            let fin = ns.fin;
+            let fin = ns.fin();
             if fin {
                 self.new_streams.remove(&stream_id);
             }
@@ -596,7 +464,7 @@ impl Http3Connection {
             // otherwise post reset.
             if app_err == Error::EarlyResponse.code() && !cs.is_sending_closed() {
                 // Remove DataWritable event if any.
-                self.events.remove(&Http3Event::DataWritable {
+                self.events.remove(&Http3ClientEvent::DataWritable {
                     stream_id: stop_stream_id,
                 });
                 self.events.stop_sending(stop_stream_id, app_err);
@@ -857,11 +725,11 @@ impl Http3Connection {
     }
 
     fn handle_control_frame(&mut self) -> Res<()> {
-        if self.control_stream_remote.fin {
+        if self.control_stream_remote.recvd_fin() {
             return Err(Error::ClosedCriticalStream);
         }
-        if self.control_stream_remote.frame_reader.done() {
-            let f = self.control_stream_remote.frame_reader.get_frame()?;
+        if self.control_stream_remote.frame_reader_done() {
+            let f = self.control_stream_remote.get_frame()?;
             qdebug!([self] "Handle a control frame {:?}", f);
             if let HFrame::Settings { .. } = f {
                 if self.settings_received {
@@ -916,7 +784,7 @@ impl Http3Connection {
                 self.events.remove_events_for_stream_id(id);
                 self.events.reset(id, Error::RequestRejected.code())
             }
-            self.events.remove(&Http3Event::RequestsCreatable);
+            self.events.remove(&Http3ClientEvent::RequestsCreatable);
             self.events.goaway_received();
 
             // Actually remove (i.e. don't retain) these streams
@@ -1006,7 +874,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn events(&mut self) -> impl Iterator<Item = Http3Event> {
+    pub fn events(&mut self) -> impl Iterator<Item = Http3ClientEvent> {
         self.events.events()
     }
 
@@ -1017,115 +885,10 @@ impl Http3Connection {
     }
 }
 
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
-pub enum Http3Event {
-    /// Space available in the buffer for an application write to succeed.
-    HeaderReady { stream_id: u64 },
-    /// A stream can accept new data.
-    DataWritable { stream_id: u64 },
-    /// New bytes available for reading.
-    DataReadable { stream_id: u64 },
-    /// Peer reset the stream.
-    Reset { stream_id: u64, error: AppError },
-    /// Peer has send STOP_SENDING with error code EarlyResponse, other error will post a reset event.
-    StopSending { stream_id: u64, error: AppError },
-    /// A new push stream
-    NewPushStream { stream_id: u64 },
-    /// New stream can be created
-    RequestsCreatable,
-    /// Cert authentication needed
-    AuthenticationNeeded,
-    /// Client has received a GOAWAY frame
-    GoawayReceived,
-    /// Connection state change.
-    StateChange(Http3State),
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct Http3Events {
-    events: Rc<RefCell<BTreeSet<Http3Event>>>,
-}
-
-impl Http3Events {
-    pub fn header_ready(&self, stream_id: u64) {
-        self.insert(Http3Event::HeaderReady { stream_id });
-    }
-
-    pub fn data_writable(&self, stream_id: u64) {
-        self.insert(Http3Event::DataWritable { stream_id });
-    }
-
-    pub fn data_readable(&self, stream_id: u64) {
-        self.insert(Http3Event::DataReadable { stream_id });
-    }
-
-    pub fn reset(&self, stream_id: u64, error: AppError) {
-        self.insert(Http3Event::Reset { stream_id, error });
-    }
-
-    pub fn stop_sending(&self, stream_id: u64, error: AppError) {
-        self.insert(Http3Event::StopSending { stream_id, error });
-    }
-
-    pub fn new_push_stream(&self, stream_id: u64) {
-        self.insert(Http3Event::NewPushStream { stream_id });
-    }
-
-    pub fn new_requests_creatable(&self) {
-        self.insert(Http3Event::RequestsCreatable);
-    }
-
-    pub fn authentication_needed(&self) {
-        self.insert(Http3Event::AuthenticationNeeded);
-    }
-
-    pub fn goaway_received(&self) {
-        self.insert(Http3Event::GoawayReceived);
-    }
-
-    pub fn connection_state_change(&self, state: Http3State) {
-        self.insert(Http3Event::StateChange(state));
-    }
-
-    pub fn events(&self) -> impl Iterator<Item = Http3Event> {
-        self.events.replace(BTreeSet::new()).into_iter()
-    }
-
-    fn insert(&self, event: Http3Event) {
-        self.events.borrow_mut().insert(event);
-    }
-
-    fn remove(&self, event: &Http3Event) -> bool {
-        self.events.borrow_mut().remove(event)
-    }
-
-    fn remove_events_for_stream_id(&self, remove_stream_id: u64) {
-        let events_to_remove = self
-            .events
-            .borrow()
-            .iter()
-            .filter(|evt| match evt {
-                Http3Event::HeaderReady { stream_id }
-                | Http3Event::DataWritable { stream_id }
-                | Http3Event::DataReadable { stream_id }
-                | Http3Event::NewPushStream { stream_id }
-                | Http3Event::Reset { stream_id, .. }
-                | Http3Event::StopSending { stream_id, .. } => *stream_id == remove_stream_id,
-                _ => false,
-            })
-            .cloned()
-            .collect::<SmallVec<[_; 8]>>();
-
-        for evt in events_to_remove {
-            self.remove(&evt);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_common::matches;
+    use neqo_common::{matches, Encoder};
     use neqo_transport::State;
     use test_fixture::*;
 
@@ -1171,12 +934,12 @@ mod tests {
             let out = neqo_trans_conn.process(out.dgram(), now());
             assert!(out.as_dgram_ref().is_none());
 
-            let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
+            let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
             assert!(hconn.events().any(authentication_needed));
             hconn.authenticated(AuthenticationStatus::Ok, now());
 
             let out = hconn.process(out.dgram(), now());
-            let connected = |e| matches!(e, Http3Event::StateChange(Http3State::Connected));
+            let connected = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Connected));
             assert!(hconn.events().any(connected));
 
             assert_eq!(hconn.state(), Http3State::Connected);
@@ -1786,7 +1549,7 @@ mod tests {
         assert_eq!(http_events.len(), 2);
         for e in http_events {
             match e {
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let h = hconn.read_response_headers(stream_id);
                     assert_eq!(
@@ -1800,7 +1563,7 @@ mod tests {
                         ))
                     );
                 }
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
                     let (amount, fin) = hconn
@@ -1819,7 +1582,7 @@ mod tests {
         assert_eq!(http_events.len(), 1);
         for e in http_events {
             match e {
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
                     let (amount, fin) = hconn
@@ -1854,7 +1617,7 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let h = hconn.read_response_headers(stream_id);
                     assert_eq!(
@@ -1868,7 +1631,7 @@ mod tests {
                         ))
                     );
                 }
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
                     let (amount, fin) = hconn
@@ -1906,7 +1669,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
-        let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0x64, 0x65, 0x66]);
         assert_eq!(sent, Ok(3));
@@ -1970,7 +1733,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
-        let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, request_body);
         assert_eq!(sent, Ok(request_body.len()));
@@ -2072,7 +1835,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
-        let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(hconn.events().any(data_writable));
 
         // Send the first frame.
@@ -2268,7 +2031,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
-        let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
@@ -2306,7 +2069,7 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::StopSending { stream_id, error } => {
+                Http3ClientEvent::StopSending { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::EarlyResponse.code());
                     // assert that we cannot send any more request data.
@@ -2315,7 +2078,7 @@ mod tests {
                         hconn.send_request_body(request_stream_id, &[0u8; 10])
                     );
                 }
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let h = hconn.read_response_headers(stream_id);
                     assert_eq!(
@@ -2330,7 +2093,7 @@ mod tests {
                     );
                     response_headers = true;
                 }
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
                     let (amount, fin) = hconn
@@ -2370,7 +2133,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
-        let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
@@ -2401,14 +2164,14 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::StopSending { .. } => {
+                Http3ClientEvent::StopSending { .. } => {
                     panic!("We should not get StopSending.");
                 }
-                Http3Event::Reset { stream_id, error } => {
+                Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::RequestRejected.code());
                 }
-                Http3Event::HeaderReady { .. } | Http3Event::DataReadable { .. } => {
+                Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
                 }
                 _ => {}
@@ -2439,7 +2202,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
-        let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
@@ -2463,14 +2226,14 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::StopSending { .. } => {
+                Http3ClientEvent::StopSending { .. } => {
                     panic!("We should not get StopSending.");
                 }
-                Http3Event::Reset { stream_id, error } => {
+                Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::RequestRejected.code());
                 }
-                Http3Event::HeaderReady { .. } | Http3Event::DataReadable { .. } => {
+                Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
                 }
                 _ => {}
@@ -2501,7 +2264,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
-        let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
@@ -2546,14 +2309,14 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::StopSending { .. } => {
+                Http3ClientEvent::StopSending { .. } => {
                     panic!("We should not get StopSending.");
                 }
-                Http3Event::Reset { stream_id, error } => {
+                Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::RequestCancelled.code());
                 }
-                Http3Event::HeaderReady { .. } | Http3Event::DataReadable { .. } => {
+                Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
                 }
                 _ => {}
@@ -2585,7 +2348,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
-        let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
@@ -2624,14 +2387,14 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::StopSending { .. } => {
+                Http3ClientEvent::StopSending { .. } => {
                     panic!("We should not get StopSending.");
                 }
-                Http3Event::Reset { stream_id, error } => {
+                Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::RequestCancelled.code());
                 }
-                Http3Event::HeaderReady { .. } | Http3Event::DataReadable { .. } => {
+                Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
                 }
                 _ => {}
@@ -2661,7 +2424,7 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // Get DataWritable for the request stream so that we can write the request body.
-        let data_writable = |e| matches!(e, Http3Event::DataWritable { .. });
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
         assert!(hconn.events().any(data_writable));
         let sent = hconn.send_request_body(request_stream_id, &[0u8; 10000]);
         assert_eq!(sent, Ok(10000));
@@ -2685,14 +2448,14 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::StopSending { .. } => {
+                Http3ClientEvent::StopSending { .. } => {
                     panic!("We should not get StopSending.");
                 }
-                Http3Event::Reset { stream_id, error } => {
+                Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::RequestCancelled.code());
                 }
-                Http3Event::HeaderReady { .. } | Http3Event::DataReadable { .. } => {
+                Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
                 }
                 _ => {}
@@ -2722,7 +2485,7 @@ mod tests {
 
         let http_events = hconn.events();
         for e in http_events {
-            if let Http3Event::DataReadable { stream_id } = e {
+            if let Http3ClientEvent::DataReadable { stream_id } = e {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
                 let res = hconn.read_response_data(now(), stream_id, &mut buf);
@@ -2830,7 +2593,7 @@ mod tests {
         while !http_events.is_empty() {
             for e in http_events {
                 match e {
-                    Http3Event::HeaderReady { stream_id } => {
+                    Http3ClientEvent::HeaderReady { stream_id } => {
                         let h = hconn.read_response_headers(stream_id);
                         assert_eq!(
                             h,
@@ -2843,7 +2606,7 @@ mod tests {
                             ))
                         );
                     }
-                    Http3Event::DataReadable { stream_id } => {
+                    Http3ClientEvent::DataReadable { stream_id } => {
                         assert!(
                             stream_id == request_stream_id_1 || stream_id == request_stream_id_2
                         );
@@ -2853,7 +2616,7 @@ mod tests {
                             .unwrap();
                         assert_eq!(amount, 3);
                     }
-                    Http3Event::Reset { stream_id, error } => {
+                    Http3ClientEvent::Reset { stream_id, error } => {
                         assert!(stream_id == request_stream_id_3);
                         assert_eq!(error, Error::RequestRejected.code());
                         stream_reset = true;
@@ -2917,7 +2680,7 @@ mod tests {
 
         // Recv HeaderReady wo headers with fin.
         let e = hconn.events().next().unwrap();
-        if let Http3Event::HeaderReady { stream_id } = e {
+        if let Http3ClientEvent::HeaderReady { stream_id } = e {
             assert_eq!(stream_id, request_stream_id);
             let h = hconn.read_response_headers(stream_id);
             assert_eq!(h, Ok((vec![], true)));
@@ -2950,7 +2713,7 @@ mod tests {
 
         // Recv HeaderReady with headers and fin.
         let e = hconn.events().next().unwrap();
-        if let Http3Event::HeaderReady { stream_id } = e {
+        if let Http3ClientEvent::HeaderReady { stream_id } = e {
             assert_eq!(stream_id, request_stream_id);
             let h = hconn.read_response_headers(stream_id);
             assert_eq!(
@@ -2994,7 +2757,7 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let h = hconn.read_response_headers(stream_id);
                     assert_eq!(
@@ -3008,7 +2771,7 @@ mod tests {
                         ))
                     );
                 }
-                Http3Event::DataReadable { .. } => {
+                Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not receive a DataGeadable event!");
                 }
                 _ => {}
@@ -3025,10 +2788,10 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::HeaderReady { .. } => {
+                Http3ClientEvent::HeaderReady { .. } => {
                     panic!("We should not get another HeaderReady!");
                 }
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
                     let res = hconn.read_response_data(now(), stream_id, &mut buf);
@@ -3070,7 +2833,7 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let h = hconn.read_response_headers(stream_id);
                     assert_eq!(
@@ -3084,7 +2847,7 @@ mod tests {
                         ))
                     );
                 }
-                Http3Event::DataReadable { .. } => {
+                Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not receive a DataGeadable event!");
                 }
                 _ => {}
@@ -3119,7 +2882,7 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let h = hconn.read_response_headers(stream_id);
                     assert_eq!(
@@ -3133,7 +2896,7 @@ mod tests {
                         ))
                     );
                 }
-                Http3Event::DataReadable { .. } => {
+                Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not receive a DataGeadable event!");
                 }
                 _ => {}
@@ -3150,10 +2913,10 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::HeaderReady { .. } => {
+                Http3ClientEvent::HeaderReady { .. } => {
                     panic!("We should not get another HeaderReady!");
                 }
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
                     let res = hconn.read_response_data(now(), stream_id, &mut buf);
@@ -3191,7 +2954,7 @@ mod tests {
         let http_events = hconn.events();
         for e in http_events {
             match e {
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let h = hconn.read_response_headers(stream_id);
                     assert_eq!(
@@ -3205,7 +2968,7 @@ mod tests {
                         ))
                     );
                 }
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     let mut buf = [0u8; 100];
                     let res = hconn.read_response_data(now(), stream_id, &mut buf);
@@ -3224,7 +2987,7 @@ mod tests {
 
         // fin wo data should generate DataReadable
         let e = hconn.events().next().unwrap();
-        if let Http3Event::DataReadable { stream_id } = e {
+        if let Http3ClientEvent::DataReadable { stream_id } = e {
             assert_eq!(stream_id, request_stream_id);
             let mut buf = [0u8; 100];
             let res = hconn.read_response_data(now(), stream_id, &mut buf);
@@ -3261,7 +3024,7 @@ mod tests {
 
         // Read first frame
         match hconn.events().nth(1).unwrap() {
-            Http3Event::DataReadable { stream_id } => {
+            Http3ClientEvent::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
                 let (len, fin) = hconn
@@ -3280,7 +3043,7 @@ mod tests {
         // another DataReadable event so that another read_response_data() will happen to
         // pick it up.
         match hconn.events().next().unwrap() {
-            Http3Event::DataReadable { stream_id } => {
+            Http3ClientEvent::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
                 let (len, fin) = hconn
@@ -3331,7 +3094,7 @@ mod tests {
 
         // Read first frame
         match hconn.events().nth(1).unwrap() {
-            Http3Event::DataReadable { stream_id } => {
+            Http3ClientEvent::DataReadable { stream_id } => {
                 assert_eq!(stream_id, request_stream_id);
                 let mut buf = [0u8; 100];
                 let (len, fin) = hconn
@@ -3384,7 +3147,7 @@ mod tests {
         let out = peer_conn.conn.process(None, now());
         let _out = hconn.process(out.dgram(), now());
 
-        let header_ready_event = |e| matches!(e, Http3Event::HeaderReady { .. });
+        let header_ready_event = |e| matches!(e, Http3ClientEvent::HeaderReady { .. });
         assert!(!hconn.events().any(header_ready_event));
 
         // Send encoder instructions to unblock the stream.
@@ -3400,11 +3163,11 @@ mod tests {
         let events = hconn.events();
         for e in events {
             match e {
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
                     recv_header = true;
                 }
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     recv_data = true;
                     assert_eq!(stream_id, request_stream_id);
                 }

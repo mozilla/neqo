@@ -8,7 +8,7 @@
 
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3Connection, Http3Event};
+use neqo_http3::{Header, Http3ClientEvent, Http3Connection};
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, State,
     StreamType,
@@ -288,7 +288,7 @@ impl H3Handler {
         self.h3.process_http3(Instant::now());
         for event in self.h3.events() {
             match event {
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     if !self.streams.contains(&stream_id) {
                         eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
@@ -297,7 +297,7 @@ impl H3Handler {
                     let headers = self.h3.read_response_headers(stream_id);
                     eprintln!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
                         eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;

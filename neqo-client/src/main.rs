@@ -7,7 +7,7 @@
 #![deny(warnings)]
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3Connection, Http3Event, Http3State, Output};
+use neqo_http3::{Header, Http3ClientEvent, Http3Connection, Http3State, Output};
 use neqo_transport::{Connection, FixedConnectionIdManager};
 
 use std::cell::RefCell;
@@ -163,7 +163,7 @@ fn process_loop(
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
     fn handle(&mut self, _args: &Args, client: &mut Http3Connection) -> bool {
-        let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
+        let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
         if client.events().any(authentication_needed) {
             client.authenticated(AuthenticationStatus::Ok, Instant::now());
         }
@@ -183,7 +183,7 @@ impl Handler for PostConnectHandler {
         client.process_http3(Instant::now());
         for event in client.events() {
             match event {
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     if !self.streams.contains(&stream_id) {
                         println!("Data on unexpected stream: {}", stream_id);
                         return false;
@@ -192,7 +192,7 @@ impl Handler for PostConnectHandler {
                     let headers = client.read_response_headers(stream_id);
                     println!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
                         println!("Data on unexpected stream: {}", stream_id);
                         return false;

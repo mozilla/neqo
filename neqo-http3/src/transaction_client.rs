@@ -6,7 +6,7 @@
 
 use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEADERS};
 
-use crate::connection::Http3Events;
+use crate::client_events::Http3ClientEvents;
 use crate::Header;
 use neqo_common::{qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
@@ -166,7 +166,7 @@ pub struct TransactionClient {
     stream_id: u64,
     frame_reader: HFrameReader,
     response_headers_state: ResponseHeadersState,
-    conn_events: Http3Events,
+    conn_events: Http3ClientEvents,
 }
 
 impl TransactionClient {
@@ -177,7 +177,7 @@ impl TransactionClient {
         host: &str,
         path: &str,
         headers: &[Header],
-        conn_events: Http3Events,
+        conn_events: Http3ClientEvents,
     ) -> TransactionClient {
         qinfo!("Create a request stream_id={}", stream_id);
         TransactionClient {
