@@ -4,8 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::Http3State;
-use neqo_transport::AppError;
+use crate::connection::{Http3Events, Http3State};
+use crate::Res;
+use neqo_transport::{AppError, StreamType};
 
 use smallvec::SmallVec;
 use std::cell::RefCell;
@@ -46,16 +47,8 @@ impl Http3ClientEvents {
         self.insert(Http3ClientEvent::HeaderReady { stream_id });
     }
 
-    pub fn data_writable(&self, stream_id: u64) {
-        self.insert(Http3ClientEvent::DataWritable { stream_id });
-    }
-
     pub fn data_readable(&self, stream_id: u64) {
         self.insert(Http3ClientEvent::DataReadable { stream_id });
-    }
-
-    pub fn reset(&self, stream_id: u64, error: AppError) {
-        self.insert(Http3ClientEvent::Reset { stream_id, error });
     }
 
     pub fn stop_sending(&self, stream_id: u64, error: AppError) {
@@ -67,20 +60,8 @@ impl Http3ClientEvents {
     //     self.insert(Http3ClientEvent::NewPushStream { stream_id });
     // }
 
-    pub fn new_requests_creatable(&self) {
-        self.insert(Http3ClientEvent::RequestsCreatable);
-    }
-
-    pub fn authentication_needed(&self) {
-        self.insert(Http3ClientEvent::AuthenticationNeeded);
-    }
-
     pub fn goaway_received(&self) {
         self.insert(Http3ClientEvent::GoawayReceived);
-    }
-
-    pub fn connection_state_change(&self, state: Http3State) {
-        self.insert(Http3ClientEvent::StateChange(state));
     }
 
     pub fn events(&self) -> impl Iterator<Item = Http3ClientEvent> {
@@ -94,8 +75,37 @@ impl Http3ClientEvents {
     pub fn remove(&self, event: &Http3ClientEvent) -> bool {
         self.events.borrow_mut().remove(event)
     }
+}
 
-    pub fn remove_events_for_stream_id(&self, remove_stream_id: u64) {
+impl Http3Events for Http3ClientEvents {
+    fn new() -> Http3ClientEvents {
+        Http3ClientEvents::default()
+    }
+
+    fn data_writable(&self, stream_id: u64) {
+        self.insert(Http3ClientEvent::DataWritable { stream_id });
+    }
+
+    fn reset(&self, stream_id: u64, error: AppError) {
+        self.insert(Http3ClientEvent::Reset { stream_id, error });
+    }
+
+    fn new_requests_creatable(&self, stream_type: StreamType) {
+        if stream_type == StreamType::BiDi {
+            self.insert(Http3ClientEvent::RequestsCreatable);
+        }
+    }
+
+    fn authentication_needed(&self) -> Res<()> {
+        self.insert(Http3ClientEvent::AuthenticationNeeded);
+        Ok(())
+    }
+
+    fn connection_state_change(&self, state: Http3State) {
+        self.insert(Http3ClientEvent::StateChange(state));
+    }
+
+    fn remove_events_for_stream_id(&self, remove_stream_id: u64) {
         let events_to_remove = self
             .events
             .borrow()

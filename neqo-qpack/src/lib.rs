@@ -36,6 +36,7 @@ pub enum Error {
     HeaderLookupError,
     NoMoreData,
     IntegerOverflow,
+    WrongStreamCount,
 
     TransportError(neqo_transport::Error),
 }

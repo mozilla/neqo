@@ -8,7 +8,7 @@
 
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3ClientEvent, Http3Connection};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent};
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, State,
     StreamType,
@@ -227,7 +227,7 @@ impl FromStr for Headers {
 
 struct H3Handler {
     streams: HashSet<u64>,
-    h3: Http3Connection,
+    h3: Http3Client,
     host: String,
     path: String,
 }
@@ -453,7 +453,7 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
 fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), String> {
     let mut hc = H3Handler {
         streams: HashSet::new(),
-        h3: Http3Connection::new(client, 128, 128, None),
+        h3: Http3Client::new_with_conn(client, 128, 128).expect("must succeed"),
         host: String::from(peer.host),
         path: String::from("/"),
     };

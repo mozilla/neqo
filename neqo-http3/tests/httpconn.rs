@@ -9,7 +9,7 @@
 use neqo_common::{matches, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::transaction_server::Response;
-use neqo_http3::{Header, Http3ClientEvent, Http3Connection, Http3State};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Server, Http3State};
 use test_fixture::*;
 
 fn new_stream_callback(request_headers: &[Header], error: bool) -> Response {
@@ -35,14 +35,9 @@ fn new_stream_callback(request_headers: &[Header], error: bool) -> Response {
     )
 }
 
-fn connect() -> (Http3Connection, Http3Connection, Option<Datagram>) {
-    let mut hconn_c = Http3Connection::new(default_client(), 100, 100, None);
-    let mut hconn_s = Http3Connection::new(
-        default_server(),
-        100,
-        100,
-        Some(Box::new(new_stream_callback)),
-    );
+fn connect() -> (Http3Client, Http3Server, Option<Datagram>) {
+    let mut hconn_c = default_http3_client();
+    let mut hconn_s = default_http3_server(Some(Box::new(new_stream_callback)));
 
     assert_eq!(hconn_c.state(), Http3State::Initializing);
     assert_eq!(hconn_s.state(), Http3State::Initializing);
