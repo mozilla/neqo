@@ -73,8 +73,6 @@ impl ConnectionEvents {
     pub fn recv_stream_reset(&self, stream_id: StreamId, app_error: AppError) {
         // If reset, no longer readable.
         self.remove(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
-        // If reset multiple times, just return the last event.
-        self.remove(|evt| matches!(evt, ConnectionEvent::RecvStreamReset { stream_id: x, .. } if *x == stream_id.as_u64()));
 
         self.insert(ConnectionEvent::RecvStreamReset {
             stream_id: stream_id.as_u64(),
@@ -91,8 +89,7 @@ impl ConnectionEvents {
     pub fn send_stream_stop_sending(&self, stream_id: StreamId, app_error: AppError) {
         // If stopped, no longer writable.
         self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamWritable { stream_id: x } if *x == stream_id.as_u64()));
-        // If stopped multiple times, just return the last event.
-        self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamStopSending { stream_id: x, .. } if *x == stream_id.as_u64()));
+
         self.insert(ConnectionEvent::SendStreamStopSending {
             stream_id: stream_id.as_u64(),
             app_error,
@@ -143,9 +140,27 @@ impl ConnectionEvents {
 
     fn insert(&self, event: ConnectionEvent) {
         let mut q = self.events.borrow_mut();
-        if !q.contains(&event) {
-            q.push_back(event);
+
+        // Special-case two enums that are not strictly PartialEq equal but that
+        // we wish to avoid inserting duplicates.
+        if match &event {
+            ConnectionEvent::SendStreamStopSending { stream_id, .. } => q.iter().any(|evt| {
+                matches!(
+		    evt, ConnectionEvent::SendStreamStopSending { stream_id: x, .. }
+		    if *x == *stream_id)
+            }),
+            ConnectionEvent::RecvStreamReset { stream_id, .. } => q.iter().any(|evt| {
+                matches!(
+		    evt, ConnectionEvent::RecvStreamReset { stream_id: x, .. }
+		    if *x == *stream_id)
+            }),
+            _ => q.contains(&event),
+        } {
+            // Already in event list.
+            return;
         }
+
+        q.push_back(event);
     }
 
     fn remove<F>(&self, f: F)
@@ -183,7 +198,15 @@ mod tests {
         evts.send_stream_writable(8.into());
         evts.send_stream_stop_sending(8.into(), 55);
         evts.send_stream_stop_sending(8.into(), 56);
-        assert_eq!(evts.events().count(), 1);
+        let events = evts.events().collect::<Vec<_>>();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0],
+            ConnectionEvent::SendStreamStopSending {
+                stream_id: 8,
+                app_error: 55
+            }
+        );
 
         evts.send_stream_writable(8.into());
         evts.send_stream_writable(8.into());
