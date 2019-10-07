@@ -138,6 +138,7 @@ impl ConnectionEvents {
         self.events.borrow_mut().pop_front()
     }
 
+    #[allow(clippy::block_in_if_condition_stmt)]
     fn insert(&self, event: ConnectionEvent) {
         let mut q = self.events.borrow_mut();
 
