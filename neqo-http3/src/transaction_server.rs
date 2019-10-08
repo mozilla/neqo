@@ -28,6 +28,7 @@ enum TransactionState {
     Closed,
 }
 
+#[derive(Debug)]
 pub struct TransactionServer {
     state: TransactionState,
     stream_id: u64,

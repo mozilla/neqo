@@ -45,6 +45,7 @@ impl ControlStreamRemote {
     pub fn receive_if_this_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         if let Some(id) = self.stream_id {
             if id == stream_id {
+                qdebug!([self] "Receiving data.");
                 self.fin = self.frame_reader.receive(conn, stream_id)?;
                 return Ok(true);
             }

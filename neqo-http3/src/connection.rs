@@ -12,7 +12,7 @@ use crate::server_events::Http3ServerEvents;
 use crate::stream_type_reader::NewStreamTypeReader;
 use crate::transaction_client::TransactionClient;
 use crate::transaction_server::TransactionServer;
-use neqo_common::{qdebug, qerror, qinfo, qwarn, Datagram};
+use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Datagram};
 use neqo_crypto::AntiReplay;
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
@@ -22,6 +22,7 @@ use neqo_transport::{
 };
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
+use std::fmt::Debug;
 use std::mem;
 use std::net::SocketAddr;
 use std::rc::Rc;
@@ -33,8 +34,7 @@ const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 
 const MAX_HEADER_LIST_SIZE_DEFAULT: u64 = u64::max_value();
 
-pub trait Http3Events {
-    fn new() -> Self;
+pub trait Http3Events: Default + Debug {
     fn data_writable(&self, stream_id: u64);
     fn reset(&self, stream_id: u64, error: AppError);
     fn new_requests_creatable(&self, stream_type: StreamType);
@@ -43,7 +43,7 @@ pub trait Http3Events {
     fn remove_events_for_stream_id(&self, remove_stream_id: u64);
 }
 
-pub trait Http3Transaction {
+pub trait Http3Transaction: Debug {
     fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()>;
     fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()>;
     fn has_data_to_send(&self) -> bool;
@@ -54,7 +54,7 @@ pub trait Http3Transaction {
     fn close_send(&mut self, conn: &mut Connection) -> Res<()>;
 }
 
-pub trait Http3Handler<E: Http3Events + Default, T: Http3Transaction> {
+pub trait Http3Handler<E: Http3Events, T: Http3Transaction> {
     fn new() -> Self;
     fn handle_new_bidi_stream(
         &mut self,
@@ -90,7 +90,7 @@ pub enum Http3State {
     Closed(CloseError),
 }
 
-pub struct Http3Connection<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>> {
+pub struct Http3Connection<E: Http3Events, T: Http3Transaction, H: Http3Handler<E, T>> {
     pub state: Http3State,
     pub conn: Connection,
     max_header_list_size: u64,
@@ -129,27 +129,9 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
         if max_table_size > (1 << 30) - 1 {
             panic!("Wrong max_table_size");
         }
-        Ok(Http3Connection {
-            state: Http3State::Initializing,
-            conn: Connection::new_client(
-                server_name,
-                protocols,
-                cid_manager,
-                local_addr,
-                remote_addr,
-            )?,
-            max_header_list_size: MAX_HEADER_LIST_SIZE_DEFAULT,
-            control_stream_local: ControlStreamLocal::default(),
-            control_stream_remote: ControlStreamRemote::new(),
-            new_streams: HashMap::new(),
-            qpack_encoder: QPackEncoder::new(true),
-            qpack_decoder: QPackDecoder::new(max_table_size, max_blocked_streams),
-            settings_received: false,
-            streams_have_data_to_send: BTreeSet::new(),
-            events: E::default(),
-            transactions: HashMap::new(),
-            handler: H::new(),
-        })
+        let conn =
+            Connection::new_client(server_name, protocols, cid_manager, local_addr, remote_addr)?;
+        Http3Connection::new_client_with_conn(conn, max_table_size, max_blocked_streams)
     }
 
     pub fn new_client_with_conn(
@@ -207,8 +189,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     fn initialize_http3_connection(&mut self) -> Res<()> {
         qdebug!([self] "initialize_http3_connection");
-        self.control_stream_local
-            .create_control_stream(&mut self.conn)?;
+        self.control_stream_local.create(&mut self.conn)?;
         self.send_settings();
         self.create_qpack_streams()?;
         Ok(())
@@ -216,7 +197,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     fn send_settings(&mut self) {
         qdebug!([self] "send_settings.");
-        self.control_stream_local.send_frame(HFrame::Settings {
+        self.control_stream_local.enqueue_frame(HFrame::Settings {
             settings: vec![
                 (
                     HSettingType::MaxTableSize,
@@ -231,7 +212,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     fn create_qpack_streams(&mut self) -> Res<()> {
-        qdebug!([self] "create_qpack_streams.");
+        qtrace!([self] "create_qpack_streams.");
         self.qpack_encoder
             .add_send_stream(self.conn.stream_create(StreamType::UniDi)?);
         self.qpack_decoder
@@ -590,17 +571,15 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
             }
             QPACK_UNI_STREAM_TYPE_ENCODER => {
                 qinfo!([self] "A new remote qpack encoder stream {}", stream_id);
-                match self.qpack_decoder.add_recv_stream(stream_id) {
-                    Err(_) => Err(Error::WrongStreamCount),
-                    Ok(()) => Ok(()),
-                }
+                self.qpack_decoder
+                    .add_recv_stream(stream_id)
+                    .map_err(|_| Error::WrongStreamCount)
             }
             QPACK_UNI_STREAM_TYPE_DECODER => {
                 qinfo!([self] "A new remote qpack decoder stream {}", stream_id);
-                match self.qpack_encoder.add_recv_stream(stream_id) {
-                    Err(_) => Err(Error::WrongStreamCount),
-                    Ok(()) => Ok(()),
-                }
+                self.qpack_encoder
+                    .add_recv_stream(stream_id)
+                    .map_err(|_| Error::WrongStreamCount)
             }
             // TODO reserved stream types
             _ => {

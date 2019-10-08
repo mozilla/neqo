@@ -6,7 +6,7 @@
 
 use crate::hframe::HFrame;
 use crate::Res;
-use neqo_common::{qdebug, Encoder};
+use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamType};
 
 pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
@@ -25,14 +25,16 @@ impl ::std::fmt::Display for ControlStreamLocal {
 }
 
 impl ControlStreamLocal {
-    pub fn send_frame(&mut self, f: HFrame) {
+    pub fn enqueue_frame(&mut self, f: HFrame) {
         let mut enc = Encoder::default();
         f.encode(&mut enc);
         self.buf.append(&mut enc.into());
     }
+
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         if let Some(stream_id) = self.stream_id {
             if !self.buf.is_empty() {
+                qtrace!([self] "sending data.");
                 let sent = conn.stream_send(stream_id, &self.buf[..])?;
                 if sent == self.buf.len() {
                     self.buf.clear();
@@ -41,13 +43,12 @@ impl ControlStreamLocal {
                     self.buf = b;
                 }
             }
-            return Ok(());
         }
         Ok(())
     }
 
-    pub fn create_control_stream(&mut self, conn: &mut Connection) -> Res<()> {
-        qdebug!([self] "create_control_stream.");
+    pub fn create(&mut self, conn: &mut Connection) -> Res<()> {
+        qtrace!([self] "Create a control stream.");
         self.stream_id = Some(conn.stream_create(StreamType::UniDi)?);
         let mut enc = Encoder::default();
         enc.encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);

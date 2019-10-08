@@ -78,10 +78,6 @@ impl Http3ClientEvents {
 }
 
 impl Http3Events for Http3ClientEvents {
-    fn new() -> Http3ClientEvents {
-        Http3ClientEvents::default()
-    }
-
     fn data_writable(&self, stream_id: u64) {
         self.insert(Http3ClientEvent::DataWritable { stream_id });
     }

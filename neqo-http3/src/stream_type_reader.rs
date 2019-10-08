@@ -28,27 +28,27 @@ impl NewStreamTypeReader {
             match conn.stream_recv(stream_id, &mut buf[..]) {
                 Ok((_, true)) => {
                     self.fin = true;
-                    break None;
+                    return None;
                 }
                 Ok((0, false)) => {
-                    break None;
+                    return None;
                 }
                 Ok((amount, false)) => {
                     let mut dec = Decoder::from(&buf[..amount]);
                     match self.reader.consume(&mut dec) {
                         IncrementalDecoderResult::Uint(v) => {
-                            break Some(v);
+                            return Some(v);
                         }
                         IncrementalDecoderResult::InProgress => {}
                         _ => {
-                            break None;
+                            return None;
                         }
                     }
                 }
                 Err(e) => {
                     qdebug!([conn] "Error reading stream type for stream {}: {:?}", stream_id, e);
                     self.fin = true;
-                    break None;
+                    return None;
                 }
             }
         }

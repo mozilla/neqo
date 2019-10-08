@@ -161,6 +161,7 @@ enum ResponseHeadersState {
 }
 
 //  This is used for normal request/responses.
+#[derive(Debug)]
 pub struct TransactionClient {
     send_state: TransactionSendState,
     recv_state: TransactionRecvState,
