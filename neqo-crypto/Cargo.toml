@@ -10,7 +10,7 @@ neqo-common = { path = "../neqo-common" }
 log = "0.4.0"
 
 [build-dependencies]
-bindgen = "0.51"
+bindgen = {version = "0.51", default-features = false}
 serde = "1.0"
 serde_derive = "1.0"
 toml = "0.4"
