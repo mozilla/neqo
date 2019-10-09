@@ -1,6 +1,6 @@
 [package]
 name = "neqo-http3"
-version = "0.1.2"
+version = "0.1.3"
 authors = ["draganadamjanovic"]
 edition = "2018"
 
