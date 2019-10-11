@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::agentio::{emit_record, ingest_record, AgentIo, METHODS};
+use crate::agentio::{AgentIo, METHODS};
 pub use crate::agentio::{Record, RecordList};
 use crate::assert_initialized;
 use crate::auth::AuthenticationStatus;
@@ -562,14 +562,7 @@ impl SecretAgent {
     /// Setup to receive records for raw handshake functions.
     fn setup_raw(&mut self) -> Res<Box<RecordList>> {
         self.set_raw(true)?;
-
-        // Setup for accepting records.
-        let mut records = Box::new(RecordList::default());
-        let records_ptr = &mut *records as *mut RecordList as *mut c_void;
-        let rv =
-            unsafe { ssl::SSL_RecordLayerWriteCallback(self.fd, Some(ingest_record), records_ptr) };
-        self.capture_error(rv)?;
-        Ok(records)
+        self.capture_error(RecordList::setup(self.fd))
     }
 
     fn inject_eoed(&mut self) -> Res<()> {
@@ -587,7 +580,7 @@ impl SecretAgent {
                 // It's waiting for EndOfEarlyData, so feed one in.
                 // Note that this is the test that ensures that we only do this for the server.
                 let eoed = Record::new(1, 22, END_OF_EARLY_DATA);
-                self.capture_error(emit_record(self.fd, eoed))?;
+                self.capture_error(eoed.write(self.fd))?;
             }
         }
         self.no_eoed = false;
@@ -618,7 +611,7 @@ impl SecretAgent {
             if rec.epoch == 2 {
                 self.inject_eoed()?;
             }
-            self.capture_error(emit_record(self.fd, rec))?;
+            self.capture_error(rec.write(self.fd))?;
         }
 
         // Drive the handshake once more.

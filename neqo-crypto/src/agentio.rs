@@ -51,7 +51,7 @@ impl Record {
     }
 
     // Shoves this record into the socket, returns true if blocked.
-    fn write(self, fd: *mut ssl::PRFileDesc) -> Res<()> {
+    pub(crate) fn write(self, fd: *mut ssl::PRFileDesc) -> Res<()> {
         qtrace!("write {:?}", self);
         unsafe {
             ssl::SSL_RecordLayerData(
@@ -91,6 +91,30 @@ impl RecordList {
     pub fn remove_eoed(&mut self) {
         self.records.retain(|rec| rec.epoch != 1);
     }
+
+    unsafe extern "C" fn ingest(
+        _fd: *mut ssl::PRFileDesc,
+        epoch: ssl::PRUint16,
+        ct: ssl::SSLContentType::Type,
+        data: *const ssl::PRUint8,
+        len: c_uint,
+        arg: *mut c_void,
+    ) -> ssl::SECStatus {
+        let a = arg as *mut RecordList;
+        let records = a.as_mut().unwrap();
+
+        let slice = std::slice::from_raw_parts(data, len as usize);
+        records.append(epoch, ct, slice);
+        ssl::SECSuccess
+    }
+
+    /// Create a new record list.
+    pub(crate) fn setup(fd: *mut ssl::PRFileDesc) -> Res<Box<RecordList>> {
+        let mut records = Box::new(RecordList::default());
+        let records_ptr = &mut *records as *mut RecordList as *mut c_void;
+        unsafe { ssl::SSL_RecordLayerWriteCallback(fd, Some(RecordList::ingest), records_ptr) }?;
+        Ok(records)
+    }
 }
 
 impl Deref for RecordList {
@@ -115,26 +139,6 @@ impl IntoIterator for RecordList {
     fn into_iter(self) -> Self::IntoIter {
         RecordListIter(self.records.into_iter())
     }
-}
-
-pub unsafe extern "C" fn ingest_record(
-    _fd: *mut ssl::PRFileDesc,
-    epoch: ssl::PRUint16,
-    ct: ssl::SSLContentType::Type,
-    data: *const ssl::PRUint8,
-    len: c_uint,
-    arg: *mut c_void,
-) -> ssl::SECStatus {
-    let a = arg as *mut RecordList;
-    let records = a.as_mut().unwrap();
-
-    let slice = std::slice::from_raw_parts(data, len as usize);
-    records.append(epoch, ct, slice);
-    ssl::SECSuccess
-}
-
-pub fn emit_record(fd: *mut ssl::PRFileDesc, record: Record) -> Res<()> {
-    record.write(fd)
 }
 
 pub struct AgentIoInputContext<'a> {
