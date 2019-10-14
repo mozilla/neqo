@@ -1164,19 +1164,15 @@ impl Connection {
     }
 
     fn set_initial_limits(&mut self) {
-        let swapped = mem::replace(&mut self.tps, Rc::default());
-        {
-            let tph = swapped.borrow();
-            let remote = tph.remote();
-            self.indexes.remote_max_stream_bidi =
-                StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
-            self.indexes.remote_max_stream_uni =
-                StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
-            self.flow_mgr
-                .borrow_mut()
-                .conn_increase_max_credit(remote.get_integer(tp_const::INITIAL_MAX_DATA));
-        }
-        mem::replace(&mut self.tps, swapped);
+        let tps = self.tps.borrow();
+        let remote = tps.remote();
+        self.indexes.remote_max_stream_bidi =
+            StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
+        self.indexes.remote_max_stream_uni =
+            StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
+        self.flow_mgr
+            .borrow_mut()
+            .conn_increase_max_credit(remote.get_integer(tp_const::INITIAL_MAX_DATA));
     }
 
     fn validate_odcid(&self) -> Res<()> {
