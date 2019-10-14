@@ -306,7 +306,6 @@ pub struct Connection {
     connection_ids: HashMap<u64, (Vec<u8>, [u8; 16])>, // (sequence number, (connection id, reset token))
     pub(crate) send_streams: SendStreams,
     pub(crate) recv_streams: RecvStreams,
-    pmtu: usize,
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
     loss_recovery_state: LossRecoveryState,
@@ -422,7 +421,6 @@ impl Connection {
             connection_ids: HashMap::new(),
             send_streams: SendStreams::default(),
             recv_streams: RecvStreams::default(),
-            pmtu: 1280,
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             loss_recovery: LossRecovery::new(),
             loss_recovery_state: LossRecoveryState::default(),
@@ -435,6 +433,14 @@ impl Connection {
     /// Set a local transport parameter, possibly overriding a default value.
     pub fn set_local_tparam(&self, key: u16, value: TransportParameter) {
         self.tps.borrow_mut().local.set(key, value)
+    }
+
+    fn pmtu(&self) -> usize {
+        match &self.paths {
+            Some(path) if path.local.is_ipv4() => 1252,
+            Some(_) => 1232, // IPv6
+            None => 1280,
+        }
     }
 
     /// Set the connection ID that was originally chosen by the client.
@@ -1006,7 +1012,7 @@ impl Connection {
             match &self.state {
                 State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
                     loop {
-                        let remaining = self.pmtu - out_bytes.len() - encoder.len();
+                        let remaining = self.pmtu() - out_bytes.len() - encoder.len();
 
                         // Check sources in turn for available frames
                         if let Some((frame, token)) = self
@@ -1024,8 +1030,8 @@ impl Connection {
                             if let Some(t) = token {
                                 tokens.push(t);
                             }
-                            assert!(encoder.len() <= self.pmtu);
-                            if out_bytes.len() + encoder.len() == self.pmtu {
+                            assert!(encoder.len() <= self.pmtu());
+                            if out_bytes.len() + encoder.len() == self.pmtu() {
                                 // No more space for frames.
                                 break;
                             }
@@ -1111,7 +1117,7 @@ impl Connection {
             let mut packet = encode_packet(tx, &hdr, &encoder);
             dump_packet(self, "TX ->", &hdr, &encoder);
             out_bytes.append(&mut packet);
-            if out_bytes.len() >= self.pmtu {
+            if out_bytes.len() >= self.pmtu() {
                 break;
             }
         }
