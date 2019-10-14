@@ -293,7 +293,7 @@ pub struct Connection {
     /// This object will generate connection IDs for the connection.
     cid_manager: CidMgr,
     /// Network paths.  Right now, this tracks at most one path, so it uses `Option`.
-    paths: Option<Path>,
+    path: Option<Path>,
     /// The connection IDs that we will accept.
     /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
@@ -318,7 +318,7 @@ impl Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_fmt(format_args!(
             "{:?} Connection: {:?} {:?}",
-            self.role, self.state, self.paths
+            self.role, self.state, self.path
         ))
     }
 }
@@ -394,7 +394,7 @@ impl Connection {
         cid_manager: CidMgr,
         anti_replay: Option<&AntiReplay>,
         protocols: &[impl AsRef<str>],
-        paths: Option<Path>,
+        path: Option<Path>,
     ) -> Self {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
@@ -409,7 +409,7 @@ impl Connection {
                 Role::Server => State::WaitInitial,
             },
             cid_manager,
-            paths,
+            path,
             valid_cids: Vec::new(),
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
@@ -436,7 +436,7 @@ impl Connection {
     }
 
     fn pmtu(&self) -> usize {
-        match &self.paths {
+        match &self.path {
             Some(path) if path.local.is_ipv4() => 1252,
             Some(_) => 1232, // IPv6
             None => 1280,
@@ -694,7 +694,7 @@ impl Connection {
     }
 
     fn is_valid_cid(&self, cid: &ConnectionId) -> bool {
-        self.valid_cids.contains(cid) || self.paths.iter().any(|p| p.local_cids.contains(cid))
+        self.valid_cids.contains(cid) || self.path.iter().any(|p| p.local_cids.contains(cid))
     }
 
     fn is_valid_initial(&self, hdr: &PacketHdr) -> bool {
@@ -729,7 +729,7 @@ impl Connection {
             qinfo!([self] "Dropping Retry without a token");
             return Ok(());
         }
-        match self.paths.iter_mut().find(|p| p.remote_cid == *odcid) {
+        match self.path.iter_mut().find(|p| p.remote_cid == *odcid) {
             None => {
                 qinfo!([self] "Ignoring Retry with mismatched ODCID");
                 return Ok(());
@@ -901,11 +901,11 @@ impl Connection {
             // A server needs to accept the client's selected CID during the handshake.
             self.valid_cids.push(hdr.dcid.clone());
             // Install a path.
-            assert!(self.paths.is_none());
+            assert!(self.path.is_none());
             let mut p = Path::new(&d, hdr.scid.unwrap());
             p.local_cids
                 .push(self.cid_manager.borrow_mut().generate_cid());
-            self.paths = Some(p);
+            self.path = Some(p);
 
             // SecretAgentPreinfo::early_data() always returns false for a server,
             // but a non-zero maximum tells us if we are accepting 0-RTT.
@@ -917,7 +917,7 @@ impl Connection {
         } else {
             qdebug!([self] "Changing to use Server CID={}", hdr.scid.as_ref().unwrap());
             let p = self
-                .paths
+                .path
                 .iter_mut()
                 .find(|p| p.received_on(&d))
                 .expect("should have a path for sending Initial");
@@ -928,7 +928,7 @@ impl Connection {
     }
 
     fn process_migrations(&self, d: &Datagram) -> Res<()> {
-        if self.paths.iter().any(|p| p.received_on(&d)) {
+        if self.path.iter().any(|p| p.received_on(&d)) {
             Ok(())
         } else {
             // Right now, we don't support any form of migration.
@@ -956,7 +956,7 @@ impl Connection {
     fn output(&mut self, now: Instant) -> Option<Datagram> {
         let mut out = None;
         // Can't call a method on self while iterating over self.paths
-        let paths = mem::replace(&mut self.paths, Default::default());
+        let paths = mem::replace(&mut self.path, Default::default());
         for p in &paths {
             match self.output_path(&p, now) {
                 Ok(Some(dgram)) => {
@@ -981,7 +981,7 @@ impl Connection {
                 _ => (),
             };
         }
-        self.paths = paths;
+        self.path = paths;
         out
     }
 
