@@ -41,7 +41,7 @@ use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::Stats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::consts as tp_const;
-use crate::tparams::{TransportParameters, TransportParametersHandler};
+use crate::tparams::{TransportParameter, TransportParameters, TransportParametersHandler};
 use crate::tracking::{AckTracker, PNSpace};
 use crate::QUIC_VERSION;
 use crate::{AppError, ConnectionError, Error, Res};
@@ -430,6 +430,11 @@ impl Connection {
             token: None,
             stats: Stats::default(),
         }
+    }
+
+    /// Set a local transport parameter, possibly overriding a default value.
+    pub fn set_local_tparam(&self, key: u16, value: TransportParameter) {
+        self.tps.borrow_mut().local.set(key, value)
     }
 
     /// Set the connection ID that was originally chosen by the client.
@@ -2709,5 +2714,12 @@ mod tests {
 
         assert_eq!(*client.state(), State::Connected);
         assert_eq!(*server.state(), State::Connected);
+    }
+
+    #[test]
+    fn set_local_tparam() {
+        let client = default_client();
+
+        client.set_local_tparam(tp_const::INITIAL_MAX_DATA, TransportParameter::Integer(55))
     }
 }
