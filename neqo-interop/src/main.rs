@@ -523,10 +523,9 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         return match res {
             Err(e) => (test, format!("ERROR: {}", e)),
             Ok(client) => match client.state() {
-                State::Closing {
-                    error: ConnectionError::Transport(Error::VersionNegotiation),
-                    ..
-                } => (test, String::from("OK")),
+                State::Closed(ConnectionError::Transport(Error::VersionNegotiation)) => {
+                    (test, String::from("OK"))
+                }
                 _ => (test, format!("ERROR: Wrong state {:?}", client.state())),
             },
         };
@@ -648,6 +647,11 @@ const PEERS: &[Peer] = &[
         label: "ats",
         host: "quic.ogre.com",
         port: 4433,
+    },
+    Peer {
+        label: "cloudflare",
+        host: "www.cloudflare.com",
+        port: 443,
     },
 ];
 
