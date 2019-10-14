@@ -368,6 +368,7 @@ enum Test {
     H9,
     H3,
     VN,
+    Resume,
 }
 
 impl Test {
@@ -378,12 +379,27 @@ impl Test {
         }
     }
 
+    fn return_resumption_token(&self) -> bool {
+        match self {
+            Test::H9 | Test::H3 => true,
+            _ => false,
+        }
+    }
+
+    fn use_resumption_token(&self) -> bool {
+        match self {
+            Test::Resume => true,
+            _ => false,
+        }
+    }
+
     fn label(&self) -> String {
         String::from(match self {
             Test::Connect => "connect",
             Test::H9 => "h9",
             Test::H3 => "h3",
             Test::VN => "vn",
+            Test::Resume => "resume",
         })
     }
 
@@ -393,6 +409,7 @@ impl Test {
             Test::H9 => vec!['D', 'C'],
             Test::H3 => vec!['3', 'C', 'D'],
             Test::VN => vec!['V'],
+            Test::Resume => vec!['R'],
         }
     }
 }
@@ -506,7 +523,11 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
     Ok(client)
 }
 
-fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
+fn run_test<'t>(
+    peer: &Peer,
+    test: &'t Test,
+    resumable: Option<(&'t Test, Vec<u8>)>,
+) -> (&'t Test, Option<Vec<u8>>, String) {
     let socket = UdpSocket::bind(peer.bind()).expect("Unable to bind UDP socket");
     socket.connect(&peer).expect("Unable to connect UDP socket");
 
@@ -522,7 +543,7 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
     if let Test::VN = test {
         let res = test_vn(&nctx, peer);
         return match res {
-            Err(e) => (test, format!("ERROR: {}", e)),
+            Err(e) => (test, None, format!("ERROR: {}", e)),
             Ok(client) => match client.state() {
                 State::Closed(ConnectionError::Transport(Error::VersionNegotiation)) => {
                     (test, String::from("OK"))
@@ -532,25 +553,35 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         };
     }
 
-    let mut client = match test_connect(&nctx, test, peer) {
+    if test.use_resumption_token() && resumable.is_none() {
+        return (test, None, String::from("Error: No resumption state"));
+    }
+
+    let mut client = match test_connect(&nctx, test, peer, &resumable.unwrap().1) {
         Ok(client) => client,
-        Err(e) => return (test, e),
+        Err(e) => return (test, None, e),
     };
+
+    let resumption_token: Option<Vec<u8>>;
+    if test.return_resumption_token() {
+        resumption_token = client.resumption_token();
+    }
 
     let res = match test {
         Test::Connect => {
-            return (test, String::from("OK"));
+            return (test, None, String::from("OK"));
         }
         Test::H9 => test_h9(&nctx, &mut client),
         Test::H3 => test_h3(&nctx, peer, client),
         Test::VN => unimplemented!(),
+        Test::Resume => unimplemented!(),
     };
 
     if let Err(e) = res {
-        return (test, e);
+        return (test, None, e);
     }
 
-    (test, String::from("OK"))
+    (test, resumption_token, String::from("OK"))
 }
 
 fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
@@ -558,6 +589,7 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
 
     eprintln!("Running tests for {}", peer.label);
 
+    let mut resumable: Option<(&Test, Vec<u8>)>;
     for test in &TESTS {
         if !peer.test_enabled(&test) {
             continue;
@@ -570,10 +602,13 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
             continue;
         }
 
-        match panic::catch_unwind(move || run_test(peer, test)) {
+        match panic::catch_unwind(move || run_test(peer, test, &resumable)) {
             Ok(e) => {
                 eprintln!("Test complete {:?}, {:?}", test, e);
-                results.push(e)
+                if let Some(resumption_token) = e.1 {
+                    resumable = Some((test, resumption_token));
+                }
+                results.push((e.0, e.2))
             }
             Err(_) => {
                 eprintln!("Thread crashed {:?}", test);
