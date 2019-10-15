@@ -7,7 +7,7 @@
 use crate::connection::{Http3Connection, Http3ServerHandler, Http3State};
 use crate::server_events::Http3ServerEvents;
 use crate::transaction_server::{RequestHandler, TransactionServer};
-use neqo_common::{qdebug, Datagram};
+use neqo_common::{qdebug, qtrace, Datagram};
 use neqo_crypto::AntiReplay;
 use neqo_transport::{AppError, Connection, ConnectionIdManager, Output, Role};
 use std::cell::RefCell;
@@ -55,17 +55,17 @@ impl Http3Server {
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
-        qdebug!([self] "Process.");
+        qtrace!([self] "Process.");
         self.base_handler.process(dgram, now)
     }
 
     pub fn process_input(&mut self, dgram: Datagram, now: Instant) {
-        qdebug!([self] "Process input.");
+        qtrace!([self] "Process input.");
         self.base_handler.process_input(dgram, now);
     }
 
     pub fn process_timer(&mut self, now: Instant) {
-        qdebug!([self] "Process timer.");
+        qtrace!([self] "Process timer.");
         self.base_handler.process_timer(now);
     }
 
@@ -74,13 +74,13 @@ impl Http3Server {
     }
 
     pub fn process_http3(&mut self, now: Instant) {
-        qdebug!([self] "Process http3 internal.");
+        qtrace!([self] "Process http3 internal.");
         self.base_handler.process_http3(now);
         self.handle_done_reading_request();
     }
 
     pub fn process_output(&mut self, now: Instant) -> Output {
-        qdebug!([self] "Process output.");
+        qtrace!([self] "Process output.");
         self.base_handler.process_output(now)
     }
 

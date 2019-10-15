@@ -188,7 +188,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     fn initialize_http3_connection(&mut self) -> Res<()> {
-        qdebug!([self] "initialize_http3_connection");
+        qtrace!([self] "Initialize the http3 connection.");
         self.control_stream_local.create(&mut self.conn)?;
         self.send_settings();
         self.create_qpack_streams()?;
@@ -196,8 +196,8 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     fn send_settings(&mut self) {
-        qdebug!([self] "send_settings.");
-        self.control_stream_local.enqueue_frame(HFrame::Settings {
+        qtrace!([self] "Send settings.");
+        self.control_stream_local.queue_frame(HFrame::Settings {
             settings: vec![
                 (
                     HSettingType::MaxTableSize,
@@ -238,7 +238,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
-        qdebug!([self] "Process.");
+        qtrace!([self] "Process.");
         if let Some(d) = dgram {
             self.process_input(d, now);
         }
@@ -247,12 +247,12 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     pub fn process_input(&mut self, dgram: Datagram, now: Instant) {
-        qdebug!([self] "Process input.");
+        qtrace!([self] "Process input.");
         self.conn.process_input(dgram, now);
     }
 
     pub fn process_timer(&mut self, now: Instant) {
-        qdebug!([self] "Process timer.");
+        qtrace!([self] "Process timer.");
         self.conn.process_timer(now);
     }
 
@@ -261,7 +261,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     pub fn process_http3(&mut self, now: Instant) {
-        qdebug!([self] "Process http3 internal.");
+        qtrace!([self] "Process http3 internal.");
         match self.state {
             Http3State::Connected | Http3State::GoingAway => {
                 let res = self.check_connection_events();
@@ -280,7 +280,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     pub fn process_output(&mut self, now: Instant) -> Output {
-        qdebug!([self] "Process output.");
+        qtrace!([self] "Process output.");
         self.conn.process_output(now)
     }
 
@@ -304,10 +304,10 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     // If this return an error the connection must be closed.
     fn check_connection_events(&mut self) -> Res<()> {
-        qdebug!([self] "check_connection_events");
+        qtrace!([self] "Check connection events.");
         let events = self.conn.events();
         for e in events {
-            qdebug!([self] "check_connection_events - event {:?}.", e);
+            qtrace!([self] "check_connection_events - event {:?}.", e);
             match e {
                 ConnectionEvent::NewStream {
                     stream_id,
@@ -396,7 +396,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     fn handle_send_stream_writable(&mut self, stream_id: u64) -> Res<()> {
-        qdebug!([self] "Writable stream {}.", stream_id);
+        qtrace!([self] "Writable stream {}.", stream_id);
 
         if let Some(t) = self.transactions.get_mut(&stream_id) {
             if t.is_state_sending_data() {
@@ -407,7 +407,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     fn handle_stream_readable(&mut self, stream_id: u64) -> Res<()> {
-        qdebug!([self] "Readable stream {}.", stream_id);
+        qtrace!([self] "Readable stream {}.", stream_id);
 
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
@@ -478,7 +478,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     fn handle_stream_reset(&mut self, stream_id: u64, app_err: AppError) -> Res<()> {
-        qdebug!([self] "handle_stream_reset stream_id={} app_err={}", stream_id, app_err);
+        qtrace!([self] "Handle a stream reset stream_id={} app_err={}", stream_id, app_err);
         if let Some(t) = self.transactions.get_mut(&stream_id) {
             // Remove all events for this stream.
             self.events.remove_events_for_stream_id(stream_id);
@@ -534,7 +534,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
         };
 
         if let Some(transaction) = &mut self.transactions.get_mut(&stream_id) {
-            qdebug!([label] "Request/response stream {} is readable.", stream_id);
+            qtrace!([label] "Request/response stream {} is readable.", stream_id);
             match transaction.receive(&mut self.conn, &mut self.qpack_decoder) {
                 Err(e) => {
                     qdebug!([label] "Error {} ocurred", e);
@@ -601,7 +601,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     pub fn stream_reset(&mut self, stream_id: u64, error: AppError) -> Res<()> {
-        qdebug!([self] "reset_stream {}.", stream_id);
+        qtrace!([self] "Reset stream {}.", stream_id);
         let mut transaction = self
             .transactions
             .remove(&stream_id)
@@ -617,7 +617,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
-        qdebug!([self] "close_stream {}.", stream_id);
+        qtrace!([self] "Close stream {}.", stream_id);
         let transaction = self
             .transactions
             .get_mut(&stream_id)
@@ -722,7 +722,7 @@ impl Http3Handler<Http3ClientEvents, TransactionClient> for Http3ClientHandler {
         stop_stream_id: u64,
         app_err: AppError,
     ) -> Res<()> {
-        qdebug!([self] "handle_stream_stop_sending stream_id={} app_err={}", stop_stream_id, app_err);
+        qdebug!([self] "Handle stream_stop_sending stream_id={} app_err={}", stop_stream_id, app_err);
 
         if let Some(t) = transactions.get_mut(&stop_stream_id) {
             // close sending side.

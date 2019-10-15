@@ -25,7 +25,7 @@ impl ::std::fmt::Display for ControlStreamLocal {
 }
 
 impl ControlStreamLocal {
-    pub fn enqueue_frame(&mut self, f: HFrame) {
+    pub fn queue_frame(&mut self, f: HFrame) {
         let mut enc = Encoder::default();
         f.encode(&mut enc);
         self.buf.append(&mut enc.into());

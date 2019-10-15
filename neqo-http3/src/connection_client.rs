@@ -10,7 +10,7 @@ use crate::connection::{Http3ClientHandler, Http3Connection, Http3State, Http3Tr
 use crate::hframe::H3_FRAME_TYPE_DATA;
 use crate::transaction_client::TransactionClient;
 use crate::Header;
-use neqo_common::{qdebug, Datagram};
+use neqo_common::{qdebug, qtrace, Datagram};
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_transport::{AppError, Connection, ConnectionIdManager, Output, Role, StreamType};
 use std::cell::RefCell;
@@ -136,7 +136,7 @@ impl Http3Client {
     }
 
     pub fn send_request_body(&mut self, stream_id: u64, buf: &[u8]) -> Res<usize> {
-        qdebug!([self] "send_request_body from stream {}.", stream_id);
+        qtrace!([self] "send_request_body from stream {}.", stream_id);
         self.base_handler
             .transactions
             .get_mut(&stream_id)
@@ -145,7 +145,7 @@ impl Http3Client {
     }
 
     pub fn read_response_headers(&mut self, stream_id: u64) -> Res<(Vec<Header>, bool)> {
-        qdebug!([self] "read_response_headers from stream {}.", stream_id);
+        qtrace!([self] "read_response_headers from stream {}.", stream_id);
         let transaction = self
             .base_handler
             .transactions
@@ -168,7 +168,7 @@ impl Http3Client {
         stream_id: u64,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        qdebug!([self] "read_data from stream {}.", stream_id);
+        qtrace!([self] "read_data from stream {}.", stream_id);
         let transaction = self
             .base_handler
             .transactions
@@ -206,17 +206,17 @@ impl Http3Client {
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
-        qdebug!([self] "Process.");
+        qtrace!([self] "Process.");
         self.base_handler.process(dgram, now)
     }
 
     pub fn process_input(&mut self, dgram: Datagram, now: Instant) {
-        qdebug!([self] "Process input.");
+        qtrace!([self] "Process input.");
         self.base_handler.process_input(dgram, now);
     }
 
     pub fn process_timer(&mut self, now: Instant) {
-        qdebug!([self] "Process timer.");
+        qtrace!([self] "Process timer.");
         self.base_handler.process_timer(now);
     }
 
@@ -225,13 +225,13 @@ impl Http3Client {
     }
 
     pub fn process_http3(&mut self, now: Instant) {
-        qdebug!([self] "Process http3 internal.");
+        qtrace!([self] "Process http3 internal.");
 
         self.base_handler.process_http3(now);
     }
 
     pub fn process_output(&mut self, now: Instant) -> Output {
-        qdebug!([self] "Process output.");
+        qtrace!([self] "Process output.");
         self.base_handler.process_output(now)
     }
 }
