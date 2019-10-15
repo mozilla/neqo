@@ -9,7 +9,7 @@
 use neqo_common::matches;
 use neqo_common::once::OnceResult;
 use neqo_crypto::{init_db, AntiReplay, AuthenticationStatus};
-use neqo_http3::{transaction_server::RequestHandler, Http3Client, Http3Server};
+use neqo_http3::{Http3Client, Http3Server};
 use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
 
 use std::cell::RefCell;
@@ -137,7 +137,7 @@ pub fn default_http3_client() -> Http3Client {
 }
 
 /// Create a http3 server with default configuration.
-pub fn default_http3_server(handler: Option<RequestHandler>) -> Http3Server {
+pub fn default_http3_server() -> Http3Server {
     fixture_init();
     Http3Server::new(
         DEFAULT_KEYS,
@@ -146,7 +146,6 @@ pub fn default_http3_server(handler: Option<RequestHandler>) -> Http3Server {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         100,
         100,
-        handler,
     )
     .expect("create a default server")
 }
