@@ -58,6 +58,7 @@ pub trait Http3Handler<E: Http3Events, T: Http3Transaction> {
     fn handle_new_bidi_stream(
         &mut self,
         transactions: &mut HashMap<u64, T>,
+        events: &mut E,
         stream_id: u64,
     ) -> Res<()>;
     fn handle_stream_stop_sending(
@@ -283,6 +284,15 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
         self.conn.process_output(now)
     }
 
+    pub fn stream_stop_sending(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
+        self.conn.stream_stop_sending(stream_id, app_error)?;
+        Ok(())
+    }
+
+    pub fn insert_streams_have_data_to_send(&mut self, stream_id: u64) {
+        self.streams_have_data_to_send.insert(stream_id);
+    }
+
     fn process_sending(&mut self) -> Res<()> {
         // check if control stream has data to send.
         self.control_stream_local.send(&mut self.conn)?;
@@ -364,9 +374,11 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     fn handle_new_stream(&mut self, stream_id: u64, stream_type: StreamType) -> Res<()> {
         qdebug!([self] "A new stream: {:?} {}.", stream_type, stream_id);
         match stream_type {
-            StreamType::BiDi => self
-                .handler
-                .handle_new_bidi_stream(&mut self.transactions, stream_id),
+            StreamType::BiDi => self.handler.handle_new_bidi_stream(
+                &mut self.transactions,
+                &mut self.events,
+                stream_id,
+            ),
             StreamType::UniDi => {
                 let stream_type;
                 let fin;
@@ -697,6 +709,7 @@ impl Http3Handler<Http3ClientEvents, TransactionClient> for Http3ClientHandler {
     fn handle_new_bidi_stream(
         &mut self,
         _transactions: &mut HashMap<u64, TransactionClient>,
+        _events: &mut Http3ClientEvents,
         _stream_id: u64,
     ) -> Res<()> {
         qerror!("Client received a new bidirectional stream!");
@@ -804,9 +817,10 @@ impl Http3Handler<Http3ServerEvents, TransactionServer> for Http3ServerHandler {
     fn handle_new_bidi_stream(
         &mut self,
         transactions: &mut HashMap<u64, TransactionServer>,
+        events: &mut Http3ServerEvents,
         stream_id: u64,
     ) -> Res<()> {
-        transactions.insert(stream_id, TransactionServer::new(stream_id));
+        transactions.insert(stream_id, TransactionServer::new(stream_id, events.clone()));
         Ok(())
     }
 

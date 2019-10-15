@@ -8,7 +8,7 @@
 
 use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_http3::{transaction_server::Response, Header, Http3Server, Http3State};
+use neqo_http3::{Http3Server, Http3ServerEvent, Http3State};
 use neqo_transport::{FixedConnectionIdManager, Output};
 
 use std::cell::RefCell;
@@ -66,33 +66,55 @@ impl Args {
     }
 }
 
-fn http_serve(request_headers: &[Header], _error: bool) -> Response {
-    println!("Serve a request");
+fn process_events(conn: &mut Http3Server) {
+    for event in conn.events() {
+        eprintln!("Event: {:?}", event);
+        match event {
+            Http3ServerEvent::Headers {
+                stream_id,
+                headers,
+                fin,
+            } => {
+                println!(
+                    "Headers (stream_id={} fin={}): {:?}",
+                    stream_id, fin, headers
+                );
 
-    println!("Headers: {:?}", request_headers);
+                let default_ret = b"Hello World".to_vec();
 
-    let path_hdr = request_headers.iter().find(|(k, _)| k == ":path");
-
-    let default_ret = b"Hello World".to_vec();
-
-    let response = match path_hdr {
-        Some((_, path)) if !path.is_empty() => {
-            match path.trim_matches(|p| p == '/').parse::<usize>() {
-                Ok(v) => vec![b'a'; v],
-                Err(_) => default_ret,
+                let response = if let Some(hdrs) = headers {
+                    match hdrs.iter().find(|&(k, _)| k == ":path") {
+                        Some((_, path)) if !path.is_empty() => {
+                            match path.trim_matches(|p| p == '/').parse::<usize>() {
+                                Ok(v) => vec![b'a'; v],
+                                Err(_) => default_ret,
+                            }
+                        }
+                        _ => default_ret,
+                    }
+                } else {
+                    default_ret
+                };
+                conn.set_response(
+                    stream_id,
+                    &[
+                        (String::from(":status"), String::from("200")),
+                        (String::from("content-length"), response.len().to_string()),
+                    ],
+                    response,
+                )
+                .unwrap();
             }
+            Http3ServerEvent::Data {
+                stream_id,
+                data,
+                fin,
+            } => {
+                println!("Data (stream_id={} fin={}): {:?}", stream_id, fin, data);
+            }
+            _ => {}
         }
-        _ => default_ret,
-    };
-
-    (
-        vec![
-            (String::from(":status"), String::from("200")),
-            (String::from("content-length"), response.len().to_string()),
-        ],
-        response,
-        None,
-    )
+    }
 }
 
 fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
@@ -226,7 +248,6 @@ fn main() -> Result<(), io::Error> {
                         Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
                         args.max_table_size,
                         args.max_blocked_streams,
-                        Some(Box::new(http_serve)),
                     )
                     .expect("must succeed"),
                     None,
@@ -251,6 +272,7 @@ fn main() -> Result<(), io::Error> {
             }
 
             server.process_http3(Instant::now());
+            process_events(server);
 
             loop {
                 match server.process_output(Instant::now()) {
