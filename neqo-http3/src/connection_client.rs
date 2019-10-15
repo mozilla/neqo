@@ -219,6 +219,10 @@ impl Http3Client {
         self.base_handler.events.next_event()
     }
 
+    pub fn resumption_token(&self) -> Option<Vec<u8>> {
+        self.conn.resumption_token()
+    }
+
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         qtrace!([self], "Process.");
         if let Some(d) = dgram {

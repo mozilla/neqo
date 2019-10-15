@@ -379,13 +379,6 @@ impl Test {
         }
     }
 
-    fn return_resumption_token(&self) -> bool {
-        match self {
-            Test::H9 | Test::H3 => true,
-            _ => false,
-        }
-    }
-
     fn use_resumption_token(&self) -> bool {
         match self {
             Test::Resume => true,
@@ -420,7 +413,12 @@ struct NetworkCtx {
     socket: UdpSocket,
 }
 
-fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connection), String> {
+fn test_connect(
+    nctx: &NetworkCtx,
+    test: &Test,
+    peer: &Peer,
+    resumable: Option<Vec<u8>>,
+) -> Result<(Connection), String> {
     let mut client = Connection::new_client(
         peer.host,
         &test.alpn(),
@@ -429,6 +427,13 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connecti
         nctx.remote_addr,
     )
     .expect("must succeed");
+
+    if resumable.is_some() {
+        let tmp = resumable.as_ref().unwrap();
+        client
+            .set_resumption_token(Instant::now(), &tmp)
+            .expect("Can't set resumption token");
+    }
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     let res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));
@@ -468,7 +473,11 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
     Ok(())
 }
 
-fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), String> {
+fn test_h3(
+    nctx: &NetworkCtx,
+    peer: &Peer,
+    client: Connection,
+) -> Result<(Option<Vec<u8>>), String> {
     let mut hc = H3Handler {
         streams: HashSet::new(),
         h3: Http3Client::new_with_conn(client, 128, 128).expect("must succeed"),
@@ -487,7 +496,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         return Err(format!("ERROR: {}", e));
     }
 
-    Ok(())
+    Ok(hc.h3.resumption_token())
 }
 
 struct VnHandler {}
@@ -526,7 +535,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
 fn run_test<'t>(
     peer: &Peer,
     test: &'t Test,
-    resumable: Option<(&'t Test, Vec<u8>)>,
+    resumable: Option<Vec<u8>>,
 ) -> (&'t Test, Option<Vec<u8>>, String) {
     let socket = UdpSocket::bind(peer.bind()).expect("Unable to bind UDP socket");
     socket.connect(&peer).expect("Unable to connect UDP socket");
@@ -546,9 +555,13 @@ fn run_test<'t>(
             Err(e) => (test, None, format!("ERROR: {}", e)),
             Ok(client) => match client.state() {
                 State::Closed(ConnectionError::Transport(Error::VersionNegotiation)) => {
-                    (test, String::from("OK"))
+                    (test, None, String::from("OK"))
                 }
-                _ => (test, format!("ERROR: Wrong state {:?}", client.state())),
+                _ => (
+                    test,
+                    None,
+                    format!("ERROR: Wrong state {:?}", client.state()),
+                ),
             },
         };
     }
@@ -557,24 +570,24 @@ fn run_test<'t>(
         return (test, None, String::from("Error: No resumption state"));
     }
 
-    let mut client = match test_connect(&nctx, test, peer, &resumable.unwrap().1) {
+    let mut client = match test_connect(&nctx, test, peer, resumable) {
         Ok(client) => client,
         Err(e) => return (test, None, e),
     };
 
-    let resumption_token: Option<Vec<u8>>;
-    if test.return_resumption_token() {
-        resumption_token = client.resumption_token();
-    }
-
-    let res = match test {
-        Test::Connect => {
+    let (res, resumption_token) = match test {
+        Test::Connect | Test::Resume => {
             return (test, None, String::from("OK"));
         }
-        Test::H9 => test_h9(&nctx, &mut client),
-        Test::H3 => test_h3(&nctx, peer, client),
+        Test::H9 => (test_h9(&nctx, &mut client), client.resumption_token()),
+        Test::H3 => {
+            let res = test_h3(&nctx, peer, client);
+            match res {
+                Ok(rt) => (Ok(()), rt),
+                Err(e) => (Err(e), None),
+            }
+        }
         Test::VN => unimplemented!(),
-        Test::Resume => unimplemented!(),
     };
 
     if let Err(e) = res {
@@ -589,7 +602,7 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
 
     eprintln!("Running tests for {}", peer.label);
 
-    let mut resumable: Option<(&Test, Vec<u8>)>;
+    let mut resumable: Option<Vec<u8>> = None;
     for test in &TESTS {
         if !peer.test_enabled(&test) {
             continue;
@@ -602,11 +615,12 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
             continue;
         }
 
-        match panic::catch_unwind(move || run_test(peer, test, &resumable)) {
+        let rtmp = resumable.clone();
+        match panic::catch_unwind(move || run_test(peer, test, rtmp)) {
             Ok(e) => {
-                eprintln!("Test complete {:?}, {:?}", test, e);
+                eprintln!("Test complete {:?} => {:?}", test, e.2);
                 if let Some(resumption_token) = e.1 {
-                    resumable = Some((test, resumption_token));
+                    resumable = Some(resumption_token);
                 }
                 results.push((e.0, e.2))
             }
@@ -644,7 +658,7 @@ const PEERS: &[Peer] = &[
     },
     Peer {
         label: "f5",
-        host: "204.134.187.194",
+        host: "f5quic.com",
         port: 4433,
     },
     Peer {
@@ -684,7 +698,7 @@ const PEERS: &[Peer] = &[
     },
 ];
 
-const TESTS: [Test; 4] = [Test::Connect, Test::H9, Test::H3, Test::VN];
+const TESTS: [Test; 5] = [Test::Connect, Test::H9, Test::H3, Test::VN, Test::Resume];
 
 fn main() {
     let _tests = vec![Test::Connect];
