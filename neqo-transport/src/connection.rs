@@ -41,7 +41,7 @@ use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::Stats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::consts as tp_const;
-use crate::tparams::{TransportParameters, TransportParametersHandler};
+use crate::tparams::{TransportParameter, TransportParameters, TransportParametersHandler};
 use crate::tracking::{AckTracker, PNSpace};
 use crate::QUIC_VERSION;
 use crate::{AppError, ConnectionError, Error, Res};
@@ -306,7 +306,6 @@ pub struct Connection {
     connection_ids: HashMap<u64, (Vec<u8>, [u8; 16])>, // (sequence number, (connection id, reset token))
     pub(crate) send_streams: SendStreams,
     pub(crate) recv_streams: RecvStreams,
-    pmtu: usize,
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
     loss_recovery: LossRecovery,
     loss_recovery_state: LossRecoveryState,
@@ -422,13 +421,25 @@ impl Connection {
             connection_ids: HashMap::new(),
             send_streams: SendStreams::default(),
             recv_streams: RecvStreams::default(),
-            pmtu: 1280,
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             loss_recovery: LossRecovery::new(),
             loss_recovery_state: LossRecoveryState::default(),
             events: ConnectionEvents::default(),
             token: None,
             stats: Stats::default(),
+        }
+    }
+
+    /// Set a local transport parameter, possibly overriding a default value.
+    pub fn set_local_tparam(&self, key: u16, value: TransportParameter) {
+        self.tps.borrow_mut().local.set(key, value)
+    }
+
+    fn pmtu(&self) -> usize {
+        match &self.paths {
+            Some(path) if path.local.is_ipv4() => 1252,
+            Some(_) => 1232, // IPv6
+            None => 1280,
         }
     }
 
@@ -1001,7 +1012,7 @@ impl Connection {
             match &self.state {
                 State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
                     loop {
-                        let remaining = self.pmtu - out_bytes.len() - encoder.len();
+                        let remaining = self.pmtu() - out_bytes.len() - encoder.len();
 
                         // Check sources in turn for available frames
                         if let Some((frame, token)) = self
@@ -1019,8 +1030,8 @@ impl Connection {
                             if let Some(t) = token {
                                 tokens.push(t);
                             }
-                            assert!(encoder.len() <= self.pmtu);
-                            if out_bytes.len() + encoder.len() == self.pmtu {
+                            assert!(encoder.len() <= self.pmtu());
+                            if out_bytes.len() + encoder.len() == self.pmtu() {
                                 // No more space for frames.
                                 break;
                             }
@@ -1106,7 +1117,7 @@ impl Connection {
             let mut packet = encode_packet(tx, &hdr, &encoder);
             dump_packet(self, "TX ->", &hdr, &encoder);
             out_bytes.append(&mut packet);
-            if out_bytes.len() >= self.pmtu {
+            if out_bytes.len() >= self.pmtu() {
                 break;
             }
         }
@@ -1159,19 +1170,15 @@ impl Connection {
     }
 
     fn set_initial_limits(&mut self) {
-        let swapped = mem::replace(&mut self.tps, Rc::default());
-        {
-            let tph = swapped.borrow();
-            let remote = tph.remote();
-            self.indexes.remote_max_stream_bidi =
-                StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
-            self.indexes.remote_max_stream_uni =
-                StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
-            self.flow_mgr
-                .borrow_mut()
-                .conn_increase_max_credit(remote.get_integer(tp_const::INITIAL_MAX_DATA));
-        }
-        mem::replace(&mut self.tps, swapped);
+        let tps = self.tps.borrow();
+        let remote = tps.remote();
+        self.indexes.remote_max_stream_bidi =
+            StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
+        self.indexes.remote_max_stream_uni =
+            StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
+        self.flow_mgr
+            .borrow_mut()
+            .conn_increase_max_credit(remote.get_integer(tp_const::INITIAL_MAX_DATA));
     }
 
     fn validate_odcid(&self) -> Res<()> {
@@ -1636,7 +1643,7 @@ impl Connection {
                     );
 
                     if next_stream_id.is_uni() {
-                        self.events.new_stream(next_stream_id, StreamType::UniDi);
+                        self.events.new_stream(next_stream_id);
                     } else {
                         let send_initial_max_stream_data = self
                             .tps
@@ -1652,7 +1659,7 @@ impl Connection {
                                 self.events.clone(),
                             ),
                         );
-                        self.events.new_stream(next_stream_id, StreamType::BiDi);
+                        self.events.new_stream(next_stream_id);
                     }
 
                     *next_stream_idx += 1;
@@ -1822,7 +1829,8 @@ impl Connection {
         Ok(())
     }
 
-    /// Get events that indicate state changes on the connection.
+    /// Get all current events. Best used just in debug/testing code, use
+    /// next_event() instead.
     pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
         self.events.events()
     }
@@ -1830,6 +1838,13 @@ impl Connection {
     /// Return true if there are outstanding events.
     pub fn has_events(&self) -> bool {
         self.events.has_events()
+    }
+
+    /// Get events that indicate state changes on the connection. This method
+    /// correctly handles cases where handling one event can obsolete
+    /// previously-queued events, or cause new events to be generated.
+    pub fn next_event(&mut self) -> Option<ConnectionEvent> {
+        self.events.next_event()
     }
 
     fn check_loss_detection_timeout(&mut self, now: Instant) {
@@ -2701,5 +2716,12 @@ mod tests {
 
         assert_eq!(*client.state(), State::Connected);
         assert_eq!(*server.state(), State::Connected);
+    }
+
+    #[test]
+    fn set_local_tparam() {
+        let client = default_client();
+
+        client.set_local_tparam(tp_const::INITIAL_MAX_DATA, TransportParameter::Integer(55))
     }
 }

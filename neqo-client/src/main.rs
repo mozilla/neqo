@@ -26,7 +26,7 @@ use url::Url;
     about = "A basic QUIC HTTP/0.9 and HTTP3 client."
 )]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3-22")]
+    #[structopt(short = "a", long, default_value = "h3-23")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP3 no matter what the ALPN says.
@@ -354,7 +354,7 @@ mod old {
     impl HandlerOld for PostConnectHandlerOld {
         fn handle(&mut self, args: &Args, client: &mut Connection) -> bool {
             let mut data = vec![0; 4000];
-            for event in client.events() {
+            while let Some(event) = client.next_event() {
                 match event {
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         if !self.streams.contains(&stream_id) {

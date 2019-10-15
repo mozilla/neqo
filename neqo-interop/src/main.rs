@@ -154,7 +154,7 @@ struct H9Handler {
 impl Handler for H9Handler {
     fn handle(&mut self, client: &mut Connection) -> bool {
         let mut data = vec![0; 4000];
-        for event in client.events() {
+        while let Some(event) = client.next_event() {
             eprintln!("Event: {:?}", event);
             match event {
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
@@ -372,8 +372,8 @@ enum Test {
 impl Test {
     fn alpn(&self) -> Vec<String> {
         match self {
-            Test::H3 => vec![String::from("h3-22")],
-            _ => vec![String::from("hq-22")],
+            Test::H3 => vec![String::from("h3-23")],
+            _ => vec![String::from("hq-23")],
         }
     }
 
@@ -523,10 +523,9 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         return match res {
             Err(e) => (test, format!("ERROR: {}", e)),
             Ok(client) => match client.state() {
-                State::Closing {
-                    error: ConnectionError::Transport(Error::VersionNegotiation),
-                    ..
-                } => (test, String::from("OK")),
+                State::Closed(ConnectionError::Transport(Error::VersionNegotiation)) => {
+                    (test, String::from("OK"))
+                }
                 _ => (test, format!("ERROR: Wrong state {:?}", client.state())),
             },
         };
@@ -648,6 +647,11 @@ const PEERS: &[Peer] = &[
         label: "ats",
         host: "quic.ogre.com",
         port: 4433,
+    },
+    Peer {
+        label: "cloudflare",
+        host: "www.cloudflare.com",
+        port: 443,
     },
 ];
 

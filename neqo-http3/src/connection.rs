@@ -305,8 +305,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     // If this return an error the connection must be closed.
     fn check_connection_events(&mut self) -> Res<()> {
         qtrace!([self] "Check connection events.");
-        let events = self.conn.events();
-        for e in events {
+        while let Some(e) = self.conn.next_event() {
             qtrace!([self] "check_connection_events - event {:?}.", e);
             match e {
                 ConnectionEvent::NewStream {

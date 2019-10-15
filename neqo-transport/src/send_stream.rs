@@ -334,13 +334,10 @@ impl TxBuffer {
 
         // We can drop contig acked range from the buffer
         let new_retirable = self.ranges.acked_from_zero() - self.retired;
-        if let Ok(nr) = usize::try_from(new_retirable) {
-            let keep_len: usize = self.buffered() - nr;
-            self.send_buf.truncate_front(keep_len);
-            self.retired += new_retirable;
-        } else {
-            // FIXME: What do we want to do here ?
-        }
+        let keep_len =
+            self.buffered() - usize::try_from(new_retirable).expect("should fit in usize");
+        self.send_buf.truncate_front(keep_len);
+        self.retired += new_retirable;
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
@@ -749,11 +746,7 @@ impl SendStreams {
 
     pub fn lost(&mut self, token: &StreamRecoveryToken) {
         if let Some(ss) = self.0.get_mut(&token.id) {
-            if let Ok(len) = token.length.try_into() {
-                ss.mark_as_lost(token.offset, len, token.fin);
-            } else {
-                //FIXME: Do we want to log something?
-            }
+            ss.mark_as_lost(token.offset, token.length, token.fin);
         }
     }
 
