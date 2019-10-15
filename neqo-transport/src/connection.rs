@@ -295,6 +295,7 @@ pub struct Connection {
     version: crate::packet::Version,
     role: Role,
     state: State,
+    connect_completed: bool,
     tps: Rc<RefCell<TransportParametersHandler>>,
     /// What we are doing with 0-RTT.
     zero_rtt_state: ZeroRttState,
@@ -416,6 +417,7 @@ impl Connection {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
             },
+            connect_completed: false,
             cid_manager,
             path,
             valid_cids: Vec::new(),
@@ -461,13 +463,12 @@ impl Connection {
 
     /// Access the latest resumption token on the connection.
     pub fn resumption_token(&self) -> Option<Vec<u8>> {
-        if self.state != State::Connected {
+        if !self.connect_completed {
             return None;
         }
         match self.crypto.tls {
             Agent::Client(ref c) => match c.resumption_token() {
                 Some(ref t) => {
-                    qtrace!("TLS token {}", hex(&t));
                     let mut enc = Encoder::default();
                     enc.encode_vvec_with(|enc_inner| {
                         self.tps
@@ -1243,6 +1244,7 @@ impl Connection {
             }
 
             self.validate_odcid()?;
+            self.connect_completed = true;
             self.set_state(State::Connected);
             self.set_initial_limits();
         }
