@@ -183,6 +183,48 @@ fn retry_different_ip() {
 }
 
 #[test]
+fn retry_after_initial() {
+    let mut server = default_server();
+    let mut retry_server = default_server();
+    retry_server.set_retry_required(true);
+    let mut client = default_client();
+
+    let cinit = client.process(None, now()).dgram(); // Initial
+    assert!(cinit.is_some());
+    let server_flight = server.process(cinit.clone(), now()).dgram(); // Initial
+    assert!(server_flight.is_some());
+
+    // We need to have the client just process the Initial.
+    // Rather than try to find the Initial, we can just truncate the Handshake that follows.
+    let si = server_flight.as_ref().unwrap();
+    let truncated = &si[..(si.len() - 1)];
+    let just_initial = Datagram::new(si.source(), si.destination(), truncated);
+    let dgram = client.process(Some(just_initial), now()).dgram();
+    assert!(dgram.is_some());
+    assert!(*client.state() != State::Connected);
+
+    let retry = retry_server.process(cinit, now()).dgram(); // Retry!
+    assert!(retry.is_some());
+    assertions::assert_retry(&retry.as_ref().unwrap());
+
+    // The client should ignore the retry.
+    let junk = client.process(retry, now()).dgram();
+    assert!(junk.is_none());
+
+    // Either way, the client should still be able to process the server flight and connect.
+    let dgram = client.process(server_flight, now()).dgram();
+    assert!(dgram.is_some()); // Drop this one.
+    assert!(test_fixture::maybe_authenticate(&mut client));
+    let dgram = client.process(None, now()).dgram();
+    assert!(dgram.is_some());
+
+    assert_eq!(*client.state(), State::Connected);
+    let dgram = server.process(dgram, now()).dgram(); // (done)
+    assert!(dgram.is_some());
+    connected_server(&mut server);
+}
+
+#[test]
 fn retry_bad_odcid() {
     let mut server = default_server();
     server.set_retry_required(true);
