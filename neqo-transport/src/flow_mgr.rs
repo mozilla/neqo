@@ -205,12 +205,12 @@ impl FlowMgr {
 
     pub(crate) fn lost(
         &mut self,
-        token: FlowControlRecoveryToken,
+        token: &FlowControlRecoveryToken,
         send_streams: &mut SendStreams,
         recv_streams: &mut RecvStreams,
         indexes: &mut StreamIndexes,
     ) {
-        match token {
+        match *token {
             // Always resend ResetStream if lost
             Frame::ResetStream {
                 stream_id,
