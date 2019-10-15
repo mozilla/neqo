@@ -6,7 +6,6 @@
 
 use std::cell::RefCell;
 use std::cmp::min;
-use std::convert::TryInto;
 use std::rc::Rc;
 
 use neqo_common::{hex, qdebug, qinfo, qtrace};
@@ -158,15 +157,6 @@ impl Crypto {
         self.streams[token.epoch as usize]
             .tx
             .mark_as_lost(token.offset, token.length);
-    }
-
-    pub fn retry(&mut self) {
-        let sent = self.streams[0].tx.highest_sent();
-        self.streams[0].tx.mark_as_lost(0, sent.try_into().unwrap());
-
-        for s in &self.streams[1..] {
-            debug_assert_eq!(s.tx.highest_sent(), 0);
-        }
     }
 
     pub fn get_frame(

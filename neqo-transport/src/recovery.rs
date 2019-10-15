@@ -171,12 +171,12 @@ impl LossRecoverySpace {
     }
 
     /// Remove all tracked packets from the space.
-    /// This is called when 0-RTT packets are dropped at a client.
+    /// This is called by a client when 0-RTT packets are dropped and when a Retry is received.
     fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
         // The largest acknowledged or loss_time should still be unset.
         // The client should not have received any ACK frames when it drops 0-RTT.
         assert!(self.largest_acked.is_none());
-        std::mem::replace(&mut self.sent_packets, Default::default())
+        std::mem::replace(&mut self.sent_packets, BTreeMap::default())
             .into_iter()
             .map(|(_, v)| v)
     }
@@ -200,14 +200,11 @@ impl IndexMut<PNSpace> for LossRecoverySpaces {
 }
 
 impl LossRecoverySpaces {
-    fn iter(&self) -> impl Iterator<Item = &PNSpace> {
-        let spaces = &[
-            PNSpace::Initial,
-            PNSpace::Handshake,
-            PNSpace::ApplicationData,
-        ];
-
-        spaces.iter()
+    fn iter(&self) -> impl Iterator<Item = &LossRecoverySpace> {
+        self.0.iter()
+    }
+    fn iter_mut(&mut self) -> impl Iterator<Item = &mut LossRecoverySpace> {
+        self.0.iter_mut()
     }
 }
 
@@ -338,6 +335,15 @@ impl LossRecovery {
         max(rtt * 9 / 8, GRANULARITY)
     }
 
+    /// When receiving a retry, get all the sent packets so that they can be flushed.
+    /// We also need to pretend that they never happened for the purposes of congestion control.
+    pub fn retry(&mut self) -> Vec<SentPacket> {
+        self.spaces
+            .iter_mut()
+            .flat_map(|spc| spc.remove_ignored())
+            .collect()
+    }
+
     pub fn detect_lost_packets(&mut self, pn_space: PNSpace, now: Instant) -> Vec<SentPacket> {
         self.enable_timed_loss_detection = false;
         let loss_delay = self.loss_delay();
@@ -403,7 +409,7 @@ impl LossRecovery {
         let has_ack_eliciting_out = self
             .spaces
             .iter()
-            .flat_map(|spc| self.spaces[*spc].sent_packets.values())
+            .flat_map(|spc| spc.sent_packets.values())
             .any(|sp| sp.ack_eliciting);
 
         qdebug!(
@@ -449,8 +455,7 @@ impl LossRecovery {
             return None;
         }
 
-        self.spaces
-            .iter()
+        PNSpace::iter()
             .map(|spc| (*spc, self.spaces[*spc].earliest_sent_time()))
             .filter_map(|(spc, time)| {
                 // None is ordered less than Some(_). Bad. Filter them out.

@@ -15,6 +15,8 @@ use rand::Rng;
 use neqo_common::{hex, matches, qtrace, Decoder, Encoder};
 use neqo_crypto::Epoch;
 
+use std::convert::TryFrom;
+
 use crate::{Error, Res};
 
 const PACKET_TYPE_INITIAL: u8 = 0x0;
@@ -345,7 +347,10 @@ pub fn decode_packet_hdr(cid_parser: &dyn ConnectionIdDecoder, pd: &[u8]) -> Res
         };
     }
 
-    p.body_len = d!(d.decode_varint()) as usize;
+    p.body_len = usize::try_from(d!(d.decode_varint()))?;
+    if p.body_len > d.remaining() {
+        return Err(Error::InvalidPacket);
+    }
     p.hdr_len = pd.len() - d.remaining();
 
     Ok(p)

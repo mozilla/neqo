@@ -556,13 +556,6 @@ impl SendStream {
         }
     }
 
-    pub fn retry(&mut self) {
-        if let Some(buf) = self.state.tx_buf_mut() {
-            let sent = buf.highest_sent();
-            self.mark_as_lost(0, sent.try_into().unwrap(), true);
-        }
-    }
-
     pub fn final_size(&self) -> Option<u64> {
         self.state.final_size()
     }
@@ -749,12 +742,6 @@ impl SendStreams {
 
     pub fn clear_terminal(&mut self) {
         self.0.retain(|_, stream| !stream.is_terminal())
-    }
-
-    pub(crate) fn retry(&mut self) {
-        for stream in self.0.values_mut() {
-            stream.retry();
-        }
     }
 
     pub(crate) fn get_frame(

@@ -35,7 +35,9 @@ use crate::packet::{
     decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, ConnectionIdDecoder, PacketHdr,
     PacketNumberDecoder, PacketType,
 };
-use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken};
+use crate::recovery::{
+    LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken, SentPacket,
+};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::Stats;
@@ -743,9 +745,8 @@ impl Connection {
             token: token.to_vec(),
             odcid: odcid.clone(),
         });
-        // Reset the crypto streams and any 0-RTT.
-        self.crypto.retry();
-        self.send_streams.retry();
+        let lost_packets = self.loss_recovery.retry();
+        self.handle_lost_packets(lost_packets);
 
         // Switching crypto state here might not happen eventually.
         // https://github.com/quicwg/base-drafts/issues/2823
@@ -1421,6 +1422,28 @@ impl Connection {
         Ok(())
     }
 
+    fn handle_lost_packets<I>(&mut self, lost_packets: I)
+    where
+        I: IntoIterator<Item = SentPacket>,
+    {
+        for lost in lost_packets {
+            for token in lost.tokens {
+                qtrace!([self], "Lost: {:?}", token);
+                match token {
+                    RecoveryToken::Ack(_) => {}
+                    RecoveryToken::Stream(st) => self.send_streams.lost(&st),
+                    RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
+                    RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
+                        ft,
+                        &mut self.send_streams,
+                        &mut self.recv_streams,
+                        &mut self.indexes,
+                    ),
+                }
+            }
+        }
+    }
+
     fn handle_ack(
         &mut self,
         epoch: Epoch,
@@ -1460,22 +1483,7 @@ impl Connection {
                 }
             }
         }
-        for lost in lost_packets {
-            for token in lost.tokens {
-                match token {
-                    RecoveryToken::Ack(_) => {}
-                    RecoveryToken::Stream(st) => self.send_streams.lost(&st),
-                    RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
-                    RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
-                        ft,
-                        &mut self.send_streams,
-                        &mut self.recv_streams,
-                        &mut self.indexes,
-                    ),
-                }
-            }
-        }
-
+        self.handle_lost_packets(lost_packets);
         Ok(())
     }
 
