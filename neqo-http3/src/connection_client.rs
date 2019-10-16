@@ -242,7 +242,9 @@ mod tests {
     use crate::hframe::HFrame;
     use neqo_common::{matches, Encoder};
     use neqo_qpack::encoder::QPackEncoder;
-    use neqo_transport::{CloseError, ConnectionEvent, FixedConnectionIdManager, State};
+    use neqo_transport::{
+        CloseError, ConnectionError, ConnectionEvent, FixedConnectionIdManager, State,
+    };
     use test_fixture::*;
 
     fn assert_closed(hconn: &Http3Client, expected: Error) {
@@ -573,37 +575,16 @@ mod tests {
         }
         // Generate packet with the above bad h3 input
         let out = peer_conn.conn.process(None, now());
-        // Process bad input and generate stop sending frame
+        // Process bad input and close the connection
         let out = hconn.process(out.dgram(), now());
-        // Process stop sending frame and generate an event and a reset frame
-        let out = peer_conn.conn.process(out.dgram(), now());
+        // Process CONNECTION_CLOSE frame.
+        let _ = peer_conn.conn.process(out.dgram(), now());
 
-        let mut stop_sending_event_found = false;
-        for e in peer_conn.conn.events() {
-            if let ConnectionEvent::SendStreamStopSending {
-                stream_id,
-                app_error,
-            } = e
-            {
-                assert_eq!(stream_id, 0);
-                stop_sending_event_found = true;
-                assert_eq!(app_error, err.code());
-            }
-        }
-        assert!(stop_sending_event_found);
-        assert_eq!(hconn.state(), Http3State::Connected);
-
-        // Process reset frame
-        hconn.base_handler.conn.process(out.dgram(), now());
-        let mut reset_event_found = false;
-        for e in hconn.base_handler.conn.events() {
-            if let ConnectionEvent::RecvStreamReset { app_error, .. } = e {
-                reset_event_found = true;
-                assert_eq!(app_error, err.code());
-            }
-        }
-        assert!(reset_event_found);
-        assert_eq!(hconn.state(), Http3State::Connected);
+        assert_closed(&hconn, err);
+        assert_eq!(
+            peer_conn.conn.state(),
+            &State::Closed(ConnectionError::Application(10))
+        );
     }
 
     #[test]
