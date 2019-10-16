@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::connection::{Http3Events, Http3State};
+use crate::Res;
 use neqo_transport::{AppError, StreamType};
 
 use smallvec::SmallVec;
@@ -59,10 +60,6 @@ impl Http3ClientEvents {
     //     self.insert(Http3ClientEvent::NewPushStream { stream_id });
     // }
 
-    pub fn authentication_needed(&self) {
-        self.insert(Http3ClientEvent::AuthenticationNeeded);
-    }
-
     pub fn goaway_received(&self) {
         self.insert(Http3ClientEvent::GoawayReceived);
     }
@@ -93,6 +90,11 @@ impl Http3Events for Http3ClientEvents {
         if stream_type == StreamType::BiDi {
             self.insert(Http3ClientEvent::RequestsCreatable);
         }
+    }
+
+    fn authentication_needed(&self) -> Res<()> {
+        self.insert(Http3ClientEvent::AuthenticationNeeded);
+        Ok(())
     }
 
     fn connection_state_change(&self, state: Http3State) {
