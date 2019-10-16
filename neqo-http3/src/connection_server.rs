@@ -112,7 +112,7 @@ impl Http3Server {
                                 .base_handler
                                 .conn
                                 .stream_stop_sending(*stream_id, e.code());
-                            if e != Error::EarlyResponse {
+                            if e != Error::HttpEarlyResponse {
                                 to_remove.push(*stream_id);
                                 let _ = self
                                     .base_handler
@@ -310,7 +310,7 @@ mod tests {
             .unwrap();
         let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
-        assert_closed(&hconn, Error::ClosedCriticalStream);
+        assert_closed(&hconn, Error::HttpClosedCriticalStream);
     }
 
     // Server: test missing SETTINGS frame
@@ -325,7 +325,7 @@ mod tests {
         assert_eq!(sent, Ok(4));
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
-        assert_closed(&hconn, Error::MissingSettings);
+        assert_closed(&hconn, Error::HttpMissingSettings);
     }
 
     // Server: receiving SETTINGS frame twice causes connection close
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(sent, Ok(8));
         let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
-        assert_closed(&hconn, Error::UnexpectedFrame);
+        assert_closed(&hconn, Error::HttpFrameUnexpected);
     }
 
     fn test_wrong_frame_on_control_stream(v: &[u8]) {
@@ -353,7 +353,7 @@ mod tests {
         let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
-        assert_closed(&hconn, Error::WrongStream);
+        assert_closed(&hconn, Error::HttpFrameUnexpected);
     }
 
     // send DATA frame on a cortrol stream
@@ -395,7 +395,7 @@ mod tests {
         let out = hconn.process(out.dgram(), now());
         peer_conn.conn.process(out.dgram(), now());
 
-        // check for stop-sending with Error::UnknownStreamType.
+        // check for stop-sending with Error::HttpStreamCreationError.
         let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
         for e in events {
@@ -406,7 +406,7 @@ mod tests {
             {
                 stop_sending_event_found = true;
                 assert_eq!(stream_id, new_stream_id);
-                assert_eq!(app_error, Error::UnknownStreamType.code());
+                assert_eq!(app_error, Error::HttpStreamCreationError.code());
             }
         }
         assert!(stop_sending_event_found);
@@ -424,23 +424,6 @@ mod tests {
         let out = peer_conn.conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
         peer_conn.conn.process(out.dgram(), now());
-
-        // check for stop-sending with Error::WrongStreamDirection.
-        let events = peer_conn.conn.events();
-        let mut stop_sending_event_found = false;
-        for e in events {
-            if let ConnectionEvent::SendStreamStopSending {
-                stream_id,
-                app_error,
-            } = e
-            {
-                stop_sending_event_found = true;
-                assert_eq!(stream_id, push_stream_id);
-                assert_eq!(app_error, Error::WrongStreamDirection.code());
-            }
-        }
-        assert!(stop_sending_event_found);
-        assert_eq!(hconn.state(), Http3State::Connected);
+        assert_closed(&hconn, Error::HttpStreamCreationError);
     }
-
 }

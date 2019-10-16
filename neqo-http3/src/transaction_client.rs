@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEADERS};
+use crate::hframe::{HFrame, HFrameReader};
 
 use crate::client_events::Http3ClientEvents;
 use crate::connection::{Http3Events, Http3Transaction};
@@ -244,8 +244,8 @@ impl TransactionClient {
         qdebug!([self] "A new frame has been received: {:?}", frame);
         match frame {
             HFrame::Headers { len } => self.handle_headers_frame(len, fin),
-            HFrame::PushPromise { .. } => Err(Error::UnexpectedFrame),
-            _ => Err(Error::WrongStream),
+            HFrame::PushPromise { .. } => Err(Error::HttpIdError),
+            _ => Err(Error::HttpFrameUnexpected),
         }
     }
 
@@ -254,7 +254,7 @@ impl TransactionClient {
             self.add_headers(None)
         } else {
             if fin {
-                return Err(Error::MalformedFrame(H3_FRAME_TYPE_HEADERS));
+                return Err(Error::HttpFrameError);
             }
             self.recv_state = TransactionRecvState::ReadingHeaders {
                 buf: vec![0; len as usize],
@@ -267,19 +267,19 @@ impl TransactionClient {
     fn handle_frame_in_state_waiting_for_data(&mut self, frame: HFrame, fin: bool) -> Res<()> {
         match frame {
             HFrame::Data { len } => self.handle_data_frame(len, fin),
-            HFrame::PushPromise { .. } => Err(Error::UnexpectedFrame),
+            HFrame::PushPromise { .. } => Err(Error::HttpIdError),
             HFrame::Headers { .. } => {
                 // TODO implement trailers!
-                Err(Error::UnexpectedFrame)
+                Err(Error::HttpFrameUnexpected)
             }
-            _ => Err(Error::WrongStream),
+            _ => Err(Error::HttpFrameUnexpected),
         }
     }
 
     fn handle_data_frame(&mut self, len: u64, fin: bool) -> Res<()> {
         if len > 0 {
             if fin {
-                return Err(Error::MalformedFrame(H3_FRAME_TYPE_HEADERS));
+                return Err(Error::HttpFrameError);
             }
             self.recv_state = TransactionRecvState::ReadingData {
                 remaining_data_len: len as usize,
@@ -290,7 +290,7 @@ impl TransactionClient {
 
     fn add_headers(&mut self, headers: Option<Vec<Header>>) -> Res<()> {
         if self.response_headers_state != ResponseHeadersState::NoHeaders {
-            return Err(Error::InternalError);
+            return Err(Error::HttpInternalError);
         }
         self.response_headers_state = ResponseHeadersState::Ready(headers);
         self.conn_events.header_ready(self.stream_id);
@@ -354,7 +354,7 @@ impl TransactionClient {
             if *offset < buf.len() {
                 if fin {
                     // Malformated frame
-                    return Err(Error::MalformedFrame(H3_FRAME_TYPE_HEADERS));
+                    return Err(Error::HttpFrameError);
                 }
                 return Ok(true);
             }
@@ -428,7 +428,7 @@ impl TransactionClient {
 
                 if fin {
                     if *remaining_data_len > 0 {
-                        return Err(Error::MalformedFrame(H3_FRAME_TYPE_DATA));
+                        return Err(Error::HttpFrameError);
                     }
                     self.recv_state = TransactionRecvState::Closed;
                 } else if *remaining_data_len == 0 {

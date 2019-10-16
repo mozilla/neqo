@@ -156,7 +156,7 @@ impl Http3Transaction for TransactionServer {
                     match self.frame_reader.get_frame()? {
                         HFrame::Headers { len } => self.handle_headers_frame(len)?,
                         _ => {
-                            break { Err(Error::WrongStream) };
+                            break { Err(Error::HttpFrameUnexpected) };
                         }
                     };
                 }
