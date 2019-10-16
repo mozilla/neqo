@@ -93,7 +93,7 @@ impl TryFrom<PRTime> for Time {
     fn try_from(prtime: PRTime) -> Res<Self> {
         let base = get_base();
         if let Some(delta) = prtime.checked_sub(base.prtime) {
-            let d = Duration::from_nanos(delta.try_into()?);
+            let d = Duration::from_micros(delta.try_into()?);
             if let Some(t) = base.instant.checked_add(d) {
                 Ok(Self { t })
             } else {
@@ -111,7 +111,7 @@ impl TryInto<PRTime> for Time {
         let base = get_base();
         // TODO(mt) use checked_duration_since when that is available.
         let delta = self.t.duration_since(base.instant);
-        if let Ok(d) = PRTime::try_from(delta.as_nanos()) {
+        if let Ok(d) = PRTime::try_from(delta.as_micros()) {
             if let Some(v) = d.checked_add(base.prtime) {
                 Ok(v)
             } else {
@@ -146,7 +146,7 @@ impl TryFrom<PRTime> for Interval {
     type Error = Error;
     fn try_from(prtime: PRTime) -> Res<Self> {
         Ok(Self {
-            d: Duration::from_nanos(u64::try_from(prtime)?),
+            d: Duration::from_micros(u64::try_from(prtime)?),
         })
     }
 }
@@ -160,7 +160,7 @@ impl From<Duration> for Interval {
 impl TryInto<PRTime> for Interval {
     type Error = Error;
     fn try_into(self) -> Res<PRTime> {
-        Ok(PRTime::try_from(self.d.as_nanos())?)
+        Ok(PRTime::try_from(self.d.as_micros())?)
     }
 }
 
@@ -172,9 +172,12 @@ mod test {
     fn convert_stable() {
         init();
         let now = Time::from(Instant::now());
-        let pr: PRTime = now.try_into().expect("should convert successfully");
-        let t2 = Time::try_from(pr).expect("should convert back too");
-        assert_eq!(t2, now);
+        let pr: PRTime = now.try_into().expect("convert to PRTime with truncation");
+        let t2 = Time::try_from(pr).expect("convert to Instant");
+        let pr2: PRTime = t2.try_into().expect("convert to PRTime again");
+        assert_eq!(pr, pr2);
+        let t3 = Time::try_from(pr2).expect("convert to Instant again");
+        assert_eq!(t2, t3);
     }
 
     #[test]
@@ -199,7 +202,7 @@ mod test {
     #[test]
     fn overflow_interval() {
         init();
-        let interval = Interval::from(Duration::from_nanos(std::u64::MAX));
+        let interval = Interval::from(Duration::from_micros(std::u64::MAX));
         let res: Res<PRTime> = interval.try_into();
         assert!(res.is_err());
     }
