@@ -26,6 +26,17 @@ pub enum PNSpace {
     ApplicationData = 2,
 }
 
+impl PNSpace {
+    pub fn iter() -> impl Iterator<Item = &'static PNSpace> {
+        const SPACES: &[PNSpace] = &[
+            PNSpace::Initial,
+            PNSpace::Handshake,
+            PNSpace::ApplicationData,
+        ];
+        SPACES.iter()
+    }
+}
+
 impl From<Epoch> for PNSpace {
     fn from(epoch: Epoch) -> Self {
         match epoch {

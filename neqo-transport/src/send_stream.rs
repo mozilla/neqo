@@ -301,25 +301,18 @@ impl TxBuffer {
 
     pub fn next_bytes(&self, _mode: TxMode) -> Option<(u64, &[u8])> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
-        match (usize::try_from(start), usize::try_from(self.retired)) {
-            (Ok(s), Ok(retired)) => {
-                if s == retired + self.buffered() {
-                    return None;
-                }
-                debug_assert!(s >= retired);
-                let buff_off = s - retired;
-                // Unwrap is safe here because we checked if maybe_len.is_some() beforehand
-                if maybe_len.is_some() {
-                    if let Ok(len) = usize::try_from(maybe_len.unwrap()) {
-                        Some((start, &self.send_buf[buff_off..buff_off + len]))
-                    } else {
-                        Some((start, &self.send_buf[buff_off..]))
-                    }
-                } else {
-                    Some((start, &self.send_buf[buff_off..]))
-                }
-            }
-            _ => None,
+
+        if start == self.retired + u64::try_from(self.buffered()).unwrap() {
+            return None;
+        }
+
+        let buff_off = usize::try_from(start - self.retired).unwrap();
+        match maybe_len {
+            Some(len) => Some((
+                start,
+                &self.send_buf[buff_off..buff_off + usize::try_from(len).unwrap()],
+            )),
+            None => Some((start, &self.send_buf[buff_off..])),
         }
     }
 
@@ -563,13 +556,6 @@ impl SendStream {
         }
     }
 
-    pub fn retry(&mut self) {
-        if let Some(buf) = self.state.tx_buf_mut() {
-            let sent = buf.highest_sent();
-            self.mark_as_lost(0, sent.try_into().unwrap(), true);
-        }
-    }
-
     pub fn final_size(&self) -> Option<u64> {
         self.state.final_size()
     }
@@ -756,12 +742,6 @@ impl SendStreams {
 
     pub fn clear_terminal(&mut self) {
         self.0.retain(|_, stream| !stream.is_terminal())
-    }
-
-    pub(crate) fn retry(&mut self) {
-        for stream in self.0.values_mut() {
-            stream.retry();
-        }
     }
 
     pub(crate) fn get_frame(
