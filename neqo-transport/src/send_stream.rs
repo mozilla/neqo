@@ -625,7 +625,7 @@ impl SendStream {
         }
 
         if !matches!(self.state, SendStreamState::Send{..}) {
-            return Err(Error::FinalSizeError)
+            return Err(Error::FinalSizeError);
         }
 
         let can_send_bytes = min(self.avail(), buf.len() as u64);
