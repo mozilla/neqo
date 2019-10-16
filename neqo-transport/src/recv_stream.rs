@@ -506,6 +506,7 @@ impl RecvStream {
         qtrace!("stop_sending called when in state {}", self.state.name());
         match &self.state {
             RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
+                self.state.transition(RecvStreamState::ResetRecvd);
                 self.flow_mgr.borrow_mut().stop_sending(self.stream_id, err)
             }
             RecvStreamState::DataRecvd { .. } => self.state.transition(RecvStreamState::DataRead),

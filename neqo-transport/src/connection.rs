@@ -2732,4 +2732,41 @@ mod tests {
 
         client.set_local_tparam(tp_const::INITIAL_MAX_DATA, TransportParameter::Integer(55))
     }
+
+    #[test]
+    // If we send a stop_sending to the peer, we should not accept more data from the peer.
+    fn do_not_accept_data_after_stop_sending() {
+        // Note that the two servers in this test will get different anti-replay filters.
+        // That's OK because we aren't testing anti-replay.
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        // create a stream
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        client.stream_send(stream_id, &[0x00]).unwrap();
+        let out = client.process(None, now());
+        server.process(out.dgram(), now());
+
+        let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
+        assert!(server.events().any(stream_readable));
+
+        // Send one more packet from client. The packet should arrive after the server
+        // has already requested stop_sending.
+        client.stream_send(stream_id, &[0x00]).unwrap();
+        let out_second_data_frame = client.process(None, now());
+        // Call stop sending.
+        assert_eq!(
+            Ok(()),
+            server.stream_stop_sending(stream_id, Error::NoError.code())
+        );
+
+        // Receive the second data frame. The frame should be ignored and now
+        // DataReadable events should be posted.
+        let out = server.process(out_second_data_frame.dgram(), now());
+        assert!(!server.events().any(stream_readable));
+
+        client.process(out.dgram(), now());
+        assert_eq!(Ok(0), client.stream_send(stream_id, &[0x00]));
+    }
 }
