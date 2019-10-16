@@ -216,7 +216,7 @@ impl HFrameReader {
                     qtrace!([conn] "HFrameReader::receive: stream has been closed");
                     break match self.state {
                         HFrameReaderState::BeforeFrame => Ok(true),
-                        _ => Err(Error::MalformedFrame(0xff)),
+                        _ => Err(Error::HttpFrameError),
                     };
                 }
                 Ok((0, false)) => break Ok(false),
@@ -340,7 +340,7 @@ impl HFrameReader {
                 if self.state == HFrameReaderState::BeforeFrame {
                     break Ok(fin);
                 } else {
-                    break Err(Error::MalformedFrame(0xff));
+                    break Err(Error::HttpFrameError);
                 }
             }
         }
@@ -826,7 +826,7 @@ mod tests {
         let rv = fr.receive(&mut conn_c, stream_id);
 
         match expected_result {
-            FrameReadingTestExpect::Error => assert_eq!(Err(Error::MalformedFrame(255)), rv),
+            FrameReadingTestExpect::Error => assert_eq!(Err(Error::HttpFrameError), rv),
             FrameReadingTestExpect::Incomplete => {
                 assert_eq!(Ok(false), rv);
                 assert_eq!(false, fr.done());

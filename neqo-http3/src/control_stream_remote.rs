@@ -36,7 +36,7 @@ impl ControlStreamRemote {
         qinfo!([self] "A new control stream {}.", stream_id);
         if self.stream_id.is_some() {
             qdebug!([self] "A control stream already exists");
-            return Err(Error::WrongStreamCount);
+            return Err(Error::HttpStreamCreationError);
         }
         self.stream_id = Some(stream_id);
         Ok(())
