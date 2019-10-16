@@ -2767,6 +2767,44 @@ mod tests {
         assert!(!server.events().any(stream_readable));
 
         client.process(out.dgram(), now());
-        assert_eq!(Ok(0), client.stream_send(stream_id, &[0x00]));
+        assert_eq!(Err(Error::FinalSizeError), client.stream_send(stream_id, &[0x00]));
+    }
+
+    #[test]
+    // Server sends stop_sending, the client simultaneous sends reset.
+    fn simultaneous_stop_sending_and_reset() {
+        // Note that the two servers in this test will get different anti-replay filters.
+        // That's OK because we aren't testing anti-replay.
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        // create a stream
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        client.stream_send(stream_id, &[0x00]).unwrap();
+        let out = client.process(None, now());
+        server.process(out.dgram(), now());
+
+        let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
+        assert!(server.events().any(stream_readable));
+
+        // The client resets the stream. The packet with reset should arrive after the server
+        // has already requested stop_sending.
+        client.stream_reset_send(stream_id, Error::NoError.code()).unwrap();
+        let out_reset_frame = client.process(None, now());
+        // Call stop sending.
+        assert_eq!(
+            Ok(()),
+            server.stream_stop_sending(stream_id, Error::NoError.code())
+        );
+
+        // Receive the second data frame. The frame should be ignored and now
+        // DataReadable events should be posted.
+        let out = server.process(out_reset_frame.dgram(), now());
+        assert!(!server.events().any(stream_readable));
+
+        // The client gets the STOP_SENDING frame.
+        client.process(out.dgram(), now());
+        assert_eq!(Err(Error::InvalidStreamId), client.stream_send(stream_id, &[0x00]));
     }
 }
