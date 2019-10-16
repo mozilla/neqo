@@ -16,7 +16,7 @@ use std::rc::Rc;
 use slice_deque::SliceDeque;
 use smallvec::SmallVec;
 
-use neqo_common::{qerror, qinfo, qtrace, qwarn, Encoder};
+use neqo_common::{matches, qerror, qinfo, qtrace, qwarn, Encoder};
 
 use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
@@ -624,9 +624,8 @@ impl SendStream {
             });
         }
 
-        match self.state {
-            SendStreamState::Send { .. } => {}
-            _ => return Err(Error::FinalSizeError),
+        if !matches!(self.state, SendStreamState::Send{..}) {
+            return Err(Error::FinalSizeError)
         }
 
         let can_send_bytes = min(self.avail(), buf.len() as u64);
