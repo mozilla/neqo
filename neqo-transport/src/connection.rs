@@ -2767,7 +2767,10 @@ mod tests {
         assert!(!server.events().any(stream_readable));
 
         client.process(out.dgram(), now());
-        assert_eq!(Err(Error::FinalSizeError), client.stream_send(stream_id, &[0x00]));
+        assert_eq!(
+            Err(Error::FinalSizeError),
+            client.stream_send(stream_id, &[0x00])
+        );
     }
 
     #[test]
@@ -2790,7 +2793,9 @@ mod tests {
 
         // The client resets the stream. The packet with reset should arrive after the server
         // has already requested stop_sending.
-        client.stream_reset_send(stream_id, Error::NoError.code()).unwrap();
+        client
+            .stream_reset_send(stream_id, Error::NoError.code())
+            .unwrap();
         let out_reset_frame = client.process(None, now());
         // Call stop sending.
         assert_eq!(
@@ -2805,6 +2810,9 @@ mod tests {
 
         // The client gets the STOP_SENDING frame.
         client.process(out.dgram(), now());
-        assert_eq!(Err(Error::InvalidStreamId), client.stream_send(stream_id, &[0x00]));
+        assert_eq!(
+            Err(Error::InvalidStreamId),
+            client.stream_send(stream_id, &[0x00])
+        );
     }
 }
