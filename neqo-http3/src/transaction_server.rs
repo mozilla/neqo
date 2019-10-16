@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use crate::connection::Http3Transaction;
 use crate::hframe::{HFrame, HFrameReader};
 use crate::Header;
 use crate::{Error, Res};
@@ -27,6 +28,7 @@ enum TransactionState {
     Closed,
 }
 
+#[derive(Debug)]
 pub struct TransactionServer {
     state: TransactionState,
     stream_id: u64,
@@ -78,7 +80,41 @@ impl TransactionServer {
         self.state = TransactionState::SendingResponse;
     }
 
-    pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
+    fn recv_frame(&mut self, conn: &mut Connection) -> Res<()> {
+        if self.frame_reader.receive(conn, self.stream_id)? {
+            self.state = TransactionState::Closed;
+        }
+        Ok(())
+    }
+
+    fn handle_headers_frame(&mut self, len: u64) -> Res<()> {
+        if self.state == TransactionState::Closed {
+            return Ok(());
+        }
+        if len == 0 {
+            self.state = TransactionState::Error;
+        } else {
+            self.state = TransactionState::ReadingRequestHeaders {
+                buf: vec![0; len as usize],
+                offset: 0,
+            };
+        }
+        Ok(())
+    }
+
+    pub fn done_reading_request(&self) -> bool {
+        self.state == TransactionState::ReadingRequestDone
+    }
+}
+
+impl ::std::fmt::Display for TransactionServer {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "TransactionServer {}", self.stream_id)
+    }
+}
+
+impl Http3Transaction for TransactionServer {
+    fn send(&mut self, conn: &mut Connection, _encoder: &mut QPackEncoder) -> Res<()> {
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
@@ -102,14 +138,7 @@ impl TransactionServer {
         Ok(())
     }
 
-    fn recv_frame(&mut self, conn: &mut Connection) -> Res<()> {
-        if self.frame_reader.receive(conn, self.stream_id)? {
-            self.state = TransactionState::Closed;
-        }
-        Ok(())
-    }
-
-    pub fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
+    fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
@@ -182,31 +211,23 @@ impl TransactionServer {
         }
     }
 
-    fn handle_headers_frame(&mut self, len: u64) -> Res<()> {
-        if self.state == TransactionState::Closed {
-            return Ok(());
-        }
-        if len == 0 {
-            self.state = TransactionState::Error;
-        } else {
-            self.state = TransactionState::ReadingRequestHeaders {
-                buf: vec![0; len as usize],
-                offset: 0,
-            };
-        }
-        Ok(())
+    fn has_data_to_send(&self) -> bool {
+        false
     }
 
-    pub fn done_reading_request(&self) -> bool {
-        self.state == TransactionState::ReadingRequestDone
-    }
-    pub fn is_state_sending(&self) -> bool {
+    fn is_state_sending_data(&self) -> bool {
         self.state == TransactionState::SendingResponse
     }
-}
 
-impl ::std::fmt::Display for TransactionServer {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "TransactionServer {}", self.stream_id)
+    fn reset_receiving_side(&mut self) {}
+
+    fn stop_sending(&mut self) {}
+
+    fn done(&self) -> bool {
+        self.state == TransactionState::Closed
+    }
+
+    fn close_send(&mut self, _conn: &mut Connection) -> Res<()> {
+        Ok(())
     }
 }

@@ -495,15 +495,14 @@ impl QPackEncoder {
             .write_byte(QPACK_UNI_STREAM_TYPE_ENCODER as u8);
     }
 
-    pub fn add_recv_stream(&mut self, stream_id: u64) {
-        if self.remote_stream_id.is_some() {
-            panic!("Adding multiple remote streams");
+    pub fn add_recv_stream(&mut self, stream_id: u64) -> Res<()> {
+        match self.remote_stream_id {
+            Some(_) => Err(Error::WrongStreamCount),
+            None => {
+                self.remote_stream_id = Some(stream_id);
+                Ok(())
+            }
         }
-        self.remote_stream_id = Some(stream_id);
-    }
-
-    pub fn has_recv_stream(&self) -> bool {
-        self.remote_stream_id.is_some()
     }
 }
 

@@ -8,8 +8,8 @@
 
 use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_http3::{transaction_server::Response, Header, Http3Connection, Http3State};
-use neqo_transport::{Connection, FixedConnectionIdManager, Output};
+use neqo_http3::{transaction_server::Response, Header, Http3Server, Http3State};
+use neqo_transport::{FixedConnectionIdManager, Output};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -165,7 +165,7 @@ fn main() -> Result<(), io::Error> {
     }
 
     let buf = &mut [0u8; 2048];
-    let mut connections: HashMap<SocketAddr, (Http3Connection, Option<Timeout>)> = HashMap::new();
+    let mut connections: HashMap<SocketAddr, (Http3Server, Option<Timeout>)> = HashMap::new();
 
     let mut events = Events::with_capacity(1024);
 
@@ -219,18 +219,16 @@ fn main() -> Result<(), io::Error> {
             let (server, svr_timeout) = connections.entry(remote_addr).or_insert_with(|| {
                 println!("New connection from {:?}", remote_addr);
                 (
-                    Http3Connection::new(
-                        Connection::new_server(
-                            &[args.key.clone()],
-                            &[args.alpn.clone()],
-                            &anti_replay,
-                            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-                        )
-                        .expect("must succeed"),
+                    Http3Server::new(
+                        &[args.key.clone()],
+                        &[args.alpn.clone()],
+                        &anti_replay,
+                        Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
                         args.max_table_size,
                         args.max_blocked_streams,
                         Some(Box::new(http_serve)),
-                    ),
+                    )
+                    .expect("must succeed"),
                     None,
                 )
             });

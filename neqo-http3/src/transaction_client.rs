@@ -6,7 +6,8 @@
 
 use crate::hframe::{HFrame, HFrameReader, H3_FRAME_TYPE_DATA, H3_FRAME_TYPE_HEADERS};
 
-use crate::connection::Http3Events;
+use crate::client_events::Http3ClientEvents;
+use crate::connection::{Http3Events, Http3Transaction};
 use crate::Header;
 use neqo_common::{qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
@@ -160,13 +161,14 @@ enum ResponseHeadersState {
 }
 
 //  This is used for normal request/responses.
+#[derive(Debug)]
 pub struct TransactionClient {
     send_state: TransactionSendState,
     recv_state: TransactionRecvState,
     stream_id: u64,
     frame_reader: HFrameReader,
     response_headers_state: ResponseHeadersState,
-    conn_events: Http3Events,
+    conn_events: Http3ClientEvents,
 }
 
 impl TransactionClient {
@@ -177,7 +179,7 @@ impl TransactionClient {
         host: &str,
         path: &str,
         headers: &[Header],
-        conn_events: Http3Events,
+        conn_events: Http3ClientEvents,
     ) -> TransactionClient {
         qinfo!("Create a request stream_id={}", stream_id);
         TransactionClient {
@@ -191,36 +193,6 @@ impl TransactionClient {
             frame_reader: HFrameReader::new(),
             conn_events,
         }
-    }
-
-    pub fn send_request_headers(
-        &mut self,
-        conn: &mut Connection,
-        encoder: &mut QPackEncoder,
-    ) -> Res<()> {
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
-            format!("{}", self)
-        } else {
-            String::new()
-        };
-        if let TransactionSendState::SendingHeaders {
-            ref mut request,
-            fin,
-        } = self.send_state
-        {
-            if request.send(conn, encoder, self.stream_id)? {
-                if fin {
-                    conn.stream_close_send(self.stream_id)?;
-                    self.send_state = TransactionSendState::Closed;
-                    qdebug!([label] "done sending request");
-                } else {
-                    self.send_state = TransactionSendState::SendingData;
-                    self.conn_events.data_writable(self.stream_id);
-                    qdebug!([label] "change to state SendingData");
-                }
-            }
-        }
-        Ok(())
     }
 
     pub fn send_request_body(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
@@ -265,74 +237,6 @@ impl TransactionClient {
                 }
             }
             TransactionSendState::Closed => Err(Error::AlreadyClosed),
-        }
-    }
-
-    pub fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
-            format!("{}", self)
-        } else {
-            String::new()
-        };
-        loop {
-            qdebug!([label] "send_state={:?} recv_state={:?}.", self.send_state, self.recv_state);
-            match self.recv_state {
-                TransactionRecvState::WaitingForResponseHeaders => {
-                    match self.recv_frame_header(conn)? {
-                        None => break Ok(()),
-                        Some((f, fin)) => {
-                            self.handle_frame_in_state_waiting_for_headers(f, fin)?;
-                            if fin {
-                                self.set_state_to_close_pending();
-                                break Ok(());
-                            }
-                        }
-                    };
-                }
-                TransactionRecvState::ReadingHeaders { .. } => {
-                    if self.read_headers_frame_body(conn, decoder)? {
-                        break Ok(());
-                    }
-                }
-                TransactionRecvState::BlockedDecodingHeaders { ref buf, fin } => {
-                    match decoder.decode_header_block(buf, self.stream_id)? {
-                        Some(headers) => {
-                            self.add_headers(Some(headers))?;
-                            if fin {
-                                self.set_state_to_close_pending();
-                                break Ok(());
-                            }
-                        }
-                        None => {
-                            qdebug!([self] "decoding header is blocked.");
-                            break Ok(());
-                        }
-                    }
-                }
-                TransactionRecvState::WaitingForData => {
-                    match self.recv_frame_header(conn)? {
-                        None => break Ok(()),
-                        Some((f, fin)) => {
-                            self.handle_frame_in_state_waiting_for_data(f, fin)?;
-                            if fin {
-                                self.set_state_to_close_pending();
-                                break Ok(());
-                            }
-                        }
-                    };
-                }
-                TransactionRecvState::ReadingData { .. } => {
-                    self.conn_events.data_readable(self.stream_id);
-                    break Ok(());
-                }
-                // TransactionRecvState::ReadingTrailers => break Ok(()),
-                TransactionRecvState::ClosePending => {
-                    panic!("Stream readable after being closed!");
-                }
-                TransactionRecvState::Closed => {
-                    panic!("Stream readable after being closed!");
-                }
-            };
         }
     }
 
@@ -478,40 +382,6 @@ impl TransactionClient {
         }
     }
 
-    pub fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
-        match self.send_state {
-            TransactionSendState::SendingHeaders { ref mut fin, .. } => {
-                *fin = true;
-            }
-            _ => {
-                self.send_state = TransactionSendState::Closed;
-                conn.stream_close_send(self.stream_id)?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn stop_sending(&mut self) {
-        self.send_state = TransactionSendState::Closed;
-    }
-
-    pub fn done(&self) -> bool {
-        self.send_state == TransactionSendState::Closed
-            && self.recv_state == TransactionRecvState::Closed
-    }
-
-    pub fn is_state_sending_data(&self) -> bool {
-        self.send_state == TransactionSendState::SendingData
-    }
-
-    pub fn is_state_sending_headers(&self) -> bool {
-        if let TransactionSendState::SendingHeaders { .. } = self.send_state {
-            true
-        } else {
-            false
-        }
-    }
-
     pub fn is_sending_closed(&self) -> bool {
         match self.send_state {
             TransactionSendState::SendingHeaders { fin, .. } => fin,
@@ -574,14 +444,144 @@ impl TransactionClient {
             _ => Ok((0, false)),
         }
     }
-
-    pub fn reset_receiving_side(&mut self) {
-        self.recv_state = TransactionRecvState::Closed;
-    }
 }
 
 impl ::std::fmt::Display for TransactionClient {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "TransactionClient {}", self.stream_id)
+    }
+}
+
+impl Http3Transaction for TransactionClient {
+    fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
+        };
+        if let TransactionSendState::SendingHeaders {
+            ref mut request,
+            fin,
+        } = self.send_state
+        {
+            if request.send(conn, encoder, self.stream_id)? {
+                if fin {
+                    conn.stream_close_send(self.stream_id)?;
+                    self.send_state = TransactionSendState::Closed;
+                    qdebug!([label] "done sending request");
+                } else {
+                    self.send_state = TransactionSendState::SendingData;
+                    self.conn_events.data_writable(self.stream_id);
+                    qdebug!([label] "change to state SendingData");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
+        };
+        loop {
+            qdebug!([label] "send_state={:?} recv_state={:?}.", self.send_state, self.recv_state);
+            match self.recv_state {
+                TransactionRecvState::WaitingForResponseHeaders => {
+                    match self.recv_frame_header(conn)? {
+                        None => break Ok(()),
+                        Some((f, fin)) => {
+                            self.handle_frame_in_state_waiting_for_headers(f, fin)?;
+                            if fin {
+                                self.set_state_to_close_pending();
+                                break Ok(());
+                            }
+                        }
+                    };
+                }
+                TransactionRecvState::ReadingHeaders { .. } => {
+                    if self.read_headers_frame_body(conn, decoder)? {
+                        break Ok(());
+                    }
+                }
+                TransactionRecvState::BlockedDecodingHeaders { ref buf, fin } => {
+                    match decoder.decode_header_block(buf, self.stream_id)? {
+                        Some(headers) => {
+                            self.add_headers(Some(headers))?;
+                            if fin {
+                                self.set_state_to_close_pending();
+                                break Ok(());
+                            }
+                        }
+                        None => {
+                            qdebug!([self] "decoding header is blocked.");
+                            break Ok(());
+                        }
+                    }
+                }
+                TransactionRecvState::WaitingForData => {
+                    match self.recv_frame_header(conn)? {
+                        None => break Ok(()),
+                        Some((f, fin)) => {
+                            self.handle_frame_in_state_waiting_for_data(f, fin)?;
+                            if fin {
+                                self.set_state_to_close_pending();
+                                break Ok(());
+                            }
+                        }
+                    };
+                }
+                TransactionRecvState::ReadingData { .. } => {
+                    self.conn_events.data_readable(self.stream_id);
+                    break Ok(());
+                }
+                // TransactionRecvState::ReadingTrailers => break Ok(()),
+                TransactionRecvState::ClosePending => {
+                    panic!("Stream readable after being closed!");
+                }
+                TransactionRecvState::Closed => {
+                    panic!("Stream readable after being closed!");
+                }
+            };
+        }
+    }
+
+    fn has_data_to_send(&self) -> bool {
+        if let TransactionSendState::SendingHeaders { .. } = self.send_state {
+            true
+        } else {
+            false
+        }
+    }
+
+    fn is_state_sending_data(&self) -> bool {
+        self.send_state == TransactionSendState::SendingData
+    }
+
+    fn reset_receiving_side(&mut self) {
+        self.recv_state = TransactionRecvState::Closed;
+    }
+
+    fn stop_sending(&mut self) {
+        self.send_state = TransactionSendState::Closed;
+    }
+
+    fn done(&self) -> bool {
+        self.send_state == TransactionSendState::Closed
+            && self.recv_state == TransactionRecvState::Closed
+    }
+
+    fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
+        match self.send_state {
+            TransactionSendState::SendingHeaders { ref mut fin, .. } => {
+                *fin = true;
+            }
+            _ => {
+                self.send_state = TransactionSendState::Closed;
+                conn.stream_close_send(self.stream_id)?;
+            }
+        }
+        Ok(())
     }
 }

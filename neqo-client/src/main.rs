@@ -7,8 +7,8 @@
 #![deny(warnings)]
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3Connection, Http3Event, Http3State, Output};
-use neqo_transport::{Connection, FixedConnectionIdManager};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -86,7 +86,7 @@ impl ToSocketAddrs for Args {
 }
 
 trait Handler {
-    fn handle(&mut self, args: &Args, client: &mut Http3Connection) -> bool;
+    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> bool;
 }
 
 fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) {
@@ -102,10 +102,10 @@ fn process_loop(
     local_addr: &SocketAddr,
     remote_addr: &SocketAddr,
     socket: &UdpSocket,
-    client: &mut Http3Connection,
+    client: &mut Http3Client,
     handler: &mut dyn Handler,
     args: &Args,
-) -> neqo_http3::connection::Http3State {
+) -> neqo_http3::Http3State {
     let buf = &mut [0u8; 2048];
     loop {
         if let Http3State::Closed(..) = client.state() {
@@ -162,8 +162,8 @@ fn process_loop(
 
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
-    fn handle(&mut self, _args: &Args, client: &mut Http3Connection) -> bool {
-        let authentication_needed = |e| matches!(e, Http3Event::AuthenticationNeeded);
+    fn handle(&mut self, _args: &Args, client: &mut Http3Client) -> bool {
+        let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
         if client.events().any(authentication_needed) {
             client.authenticated(AuthenticationStatus::Ok, Instant::now());
         }
@@ -178,12 +178,12 @@ struct PostConnectHandler {
 
 // This is a bit fancier than actually needed.
 impl Handler for PostConnectHandler {
-    fn handle(&mut self, args: &Args, client: &mut Http3Connection) -> bool {
+    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> bool {
         let mut data = vec![0; 4000];
         client.process_http3(Instant::now());
         for event in client.events() {
             match event {
-                Http3Event::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady { stream_id } => {
                     if !self.streams.contains(&stream_id) {
                         println!("Data on unexpected stream: {}", stream_id);
                         return false;
@@ -192,7 +192,7 @@ impl Handler for PostConnectHandler {
                     let headers = client.read_response_headers(stream_id);
                     println!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
-                Http3Event::DataReadable { stream_id } => {
+                Http3ClientEvent::DataReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
                         println!("Data on unexpected stream: {}", stream_id);
                         return false;
@@ -240,19 +240,16 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
 }
 
 fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: SocketAddr) {
-    let mut client = Http3Connection::new(
-        Connection::new_client(
-            args.url.host_str().unwrap(),
-            &args.alpn,
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
-            local_addr,
-            remote_addr,
-        )
-        .expect("must succeed"),
+    let mut client = Http3Client::new(
+        args.url.host_str().unwrap(),
+        &args.alpn,
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+        local_addr,
+        remote_addr,
         args.max_table_size,
         args.max_blocked_streams,
-        None,
-    );
+    )
+    .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     process_loop(
