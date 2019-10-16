@@ -7,7 +7,6 @@
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::{Http3ClientHandler, Http3Connection, Http3State, Http3Transaction};
 
-use crate::hframe::H3_FRAME_TYPE_DATA;
 use crate::transaction_client::TransactionClient;
 use crate::Header;
 use neqo_common::{qdebug, qtrace, Datagram};
@@ -193,7 +192,7 @@ impl Http3Client {
                 Ok((amount, fin))
             }
             Err(e) => {
-                if e == Error::MalformedFrame(H3_FRAME_TYPE_DATA) {
+                if e == Error::HttpFrameError {
                     self.close(now, e.code(), "");
                 }
                 Err(e)
@@ -242,9 +241,7 @@ mod tests {
     use crate::hframe::HFrame;
     use neqo_common::{matches, Encoder};
     use neqo_qpack::encoder::QPackEncoder;
-    use neqo_transport::{
-        CloseError, ConnectionError, ConnectionEvent, FixedConnectionIdManager, State,
-    };
+    use neqo_transport::{CloseError, ConnectionEvent, FixedConnectionIdManager, State};
     use test_fixture::*;
 
     fn assert_closed(hconn: &Http3Client, expected: Error) {
@@ -416,7 +413,7 @@ mod tests {
             .unwrap();
         let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
-        assert_closed(&hconn, Error::ClosedCriticalStream);
+        assert_closed(&hconn, Error::HttpClosedCriticalStream);
     }
 
     // Client: test missing SETTINGS frame
@@ -431,7 +428,7 @@ mod tests {
         assert_eq!(sent, Ok(6));
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
-        assert_closed(&hconn, Error::MissingSettings);
+        assert_closed(&hconn, Error::HttpMissingSettings);
     }
 
     // Client: receiving SETTINGS frame twice causes connection close
@@ -447,7 +444,7 @@ mod tests {
         assert_eq!(sent, Ok(8));
         let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
-        assert_closed(&hconn, Error::UnexpectedFrame);
+        assert_closed(&hconn, Error::HttpFrameUnexpected);
     }
 
     fn test_wrong_frame_on_control_stream(v: &[u8]) {
@@ -459,7 +456,7 @@ mod tests {
         let out = peer_conn.conn.process(None, now());
         hconn.process(out.dgram(), now());
 
-        assert_closed(&hconn, Error::WrongStream);
+        assert_closed(&hconn, Error::HttpFrameUnexpected);
     }
 
     // send DATA frame on a cortrol stream
@@ -501,7 +498,7 @@ mod tests {
         let out = hconn.process(out.dgram(), now());
         peer_conn.conn.process(out.dgram(), now());
 
-        // check for stop-sending with Error::UnknownStreamType.
+        // check for stop-sending with Error::HttpStreamCreationError.
         let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
         for e in events {
@@ -512,7 +509,7 @@ mod tests {
             {
                 stop_sending_event_found = true;
                 assert_eq!(stream_id, new_stream_id);
-                assert_eq!(app_error, Error::UnknownStreamType.code());
+                assert_eq!(app_error, Error::HttpStreamCreationError.code());
             }
         }
         assert!(stop_sending_event_found);
@@ -531,26 +528,11 @@ mod tests {
         let out = hconn.process(out.dgram(), now());
         peer_conn.conn.process(out.dgram(), now());
 
-        // check for stop-sending with Error::Error::PushRefused.
-        let events = peer_conn.conn.events();
-        let mut stop_sending_event_found = false;
-        for e in events {
-            if let ConnectionEvent::SendStreamStopSending {
-                stream_id,
-                app_error,
-            } = e
-            {
-                stop_sending_event_found = true;
-                assert_eq!(stream_id, push_stream_id);
-                assert_eq!(app_error, Error::PushRefused.code());
-            }
-        }
-        assert!(stop_sending_event_found);
-        assert_eq!(hconn.state(), Http3State::Connected);
+        assert_closed(&hconn, Error::HttpIdError);
     }
 
     // Test wrong frame on req/rec stream
-    fn test_wrong_frame_on_request_stream(v: &[u8], err: Error) {
+    fn test_wrong_frame_on_request_stream(v: &[u8]) {
         let (mut hconn, mut peer_conn) = connect();
 
         assert_eq!(
@@ -575,36 +557,32 @@ mod tests {
         }
         // Generate packet with the above bad h3 input
         let out = peer_conn.conn.process(None, now());
-        // Process bad input and close the connection
+        // Process bad input and generate stop sending frame
         let out = hconn.process(out.dgram(), now());
-        // Process CONNECTION_CLOSE frame.
+        // Process stop sending frame and generate an event and a reset frame
         let _ = peer_conn.conn.process(out.dgram(), now());
 
-        assert_closed(&hconn, err);
-        assert_eq!(
-            peer_conn.conn.state(),
-            &State::Closed(ConnectionError::Application(10))
-        );
+        assert_closed(&hconn, Error::HttpFrameUnexpected);
     }
 
     #[test]
     fn test_cancel_push_frame_on_request_stream() {
-        test_wrong_frame_on_request_stream(&[0x3, 0x1, 0x5], Error::WrongStream);
+        test_wrong_frame_on_request_stream(&[0x3, 0x1, 0x5]);
     }
 
     #[test]
     fn test_settings_frame_on_request_stream() {
-        test_wrong_frame_on_request_stream(&[0x4, 0x4, 0x6, 0x4, 0x8, 0x4], Error::WrongStream);
+        test_wrong_frame_on_request_stream(&[0x4, 0x4, 0x6, 0x4, 0x8, 0x4]);
     }
 
     #[test]
     fn test_goaway_frame_on_request_stream() {
-        test_wrong_frame_on_request_stream(&[0x7, 0x1, 0x5], Error::WrongStream);
+        test_wrong_frame_on_request_stream(&[0x7, 0x1, 0x5]);
     }
 
     #[test]
     fn test_max_push_id_frame_on_request_stream() {
-        test_wrong_frame_on_request_stream(&[0xd, 0x1, 0x5], Error::WrongStream);
+        test_wrong_frame_on_request_stream(&[0xd, 0x1, 0x5]);
     }
 
     // Test reading of a slowly streamed frame. bytes are received one by one
@@ -671,7 +649,7 @@ mod tests {
         hconn.process(out.dgram(), now());
 
         // PUSH_PROMISE on a control stream will cause an error
-        assert_closed(&hconn, Error::WrongStream);
+        assert_closed(&hconn, Error::HttpFrameUnexpected);
     }
 
     // We usually send the same request header. This function check if the request has been
@@ -1241,7 +1219,7 @@ mod tests {
             Ok(()),
             peer_conn
                 .conn
-                .stream_stop_sending(request_stream_id, Error::EarlyResponse.code())
+                .stream_stop_sending(request_stream_id, Error::HttpEarlyResponse.code())
         );
 
         // send response - 200  Content-Length: 3
@@ -1266,7 +1244,7 @@ mod tests {
             match e {
                 Http3ClientEvent::StopSending { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(error, Error::EarlyResponse.code());
+                    assert_eq!(error, Error::HttpEarlyResponse.code());
                     // assert that we cannot send any more request data.
                     assert_eq!(
                         Err(Error::AlreadyClosed),
@@ -1343,14 +1321,14 @@ mod tests {
             Ok(()),
             peer_conn
                 .conn
-                .stream_stop_sending(request_stream_id, Error::RequestRejected.code())
+                .stream_stop_sending(request_stream_id, Error::HttpRequestRejected.code())
         );
         // also reset with RequestRejested.
         assert_eq!(
             Ok(()),
             peer_conn
                 .conn
-                .stream_reset_send(request_stream_id, Error::RequestRejected.code())
+                .stream_reset_send(request_stream_id, Error::HttpRequestRejected.code())
         );
 
         let out = peer_conn.conn.process(None, now());
@@ -1364,7 +1342,7 @@ mod tests {
                 }
                 Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(error, Error::RequestRejected.code());
+                    assert_eq!(error, Error::HttpRequestRejected.code());
                 }
                 Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
@@ -1412,7 +1390,7 @@ mod tests {
             Ok(()),
             peer_conn
                 .conn
-                .stream_stop_sending(request_stream_id, Error::RequestRejected.code())
+                .stream_stop_sending(request_stream_id, Error::HttpRequestRejected.code())
         );
 
         let out = peer_conn.conn.process(None, now());
@@ -1426,7 +1404,7 @@ mod tests {
                 }
                 Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(error, Error::RequestRejected.code());
+                    assert_eq!(error, Error::HttpRequestRejected.code());
                 }
                 Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
@@ -1489,13 +1467,13 @@ mod tests {
             Ok(()),
             peer_conn
                 .conn
-                .stream_stop_sending(request_stream_id, Error::RequestCancelled.code())
+                .stream_stop_sending(request_stream_id, Error::HttpRequestCancelled.code())
         );
         assert_eq!(
             Ok(()),
             peer_conn
                 .conn
-                .stream_reset_send(request_stream_id, Error::RequestCancelled.code())
+                .stream_reset_send(request_stream_id, Error::HttpRequestCancelled.code())
         );
 
         let out = peer_conn.conn.process(None, now());
@@ -1509,7 +1487,7 @@ mod tests {
                 }
                 Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(error, Error::RequestCancelled.code());
+                    assert_eq!(error, Error::HttpRequestCancelled.code());
                 }
                 Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
@@ -1573,7 +1551,7 @@ mod tests {
             Ok(()),
             peer_conn
                 .conn
-                .stream_stop_sending(request_stream_id, Error::RequestCancelled.code())
+                .stream_stop_sending(request_stream_id, Error::HttpRequestCancelled.code())
         );
 
         let out = peer_conn.conn.process(None, now());
@@ -1587,7 +1565,7 @@ mod tests {
                 }
                 Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(error, Error::RequestCancelled.code());
+                    assert_eq!(error, Error::HttpRequestCancelled.code());
                 }
                 Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
@@ -1634,7 +1612,7 @@ mod tests {
             Ok(()),
             peer_conn
                 .conn
-                .stream_reset_send(request_stream_id, Error::RequestCancelled.code())
+                .stream_reset_send(request_stream_id, Error::HttpRequestCancelled.code())
         );
 
         let out = peer_conn.conn.process(None, now());
@@ -1648,7 +1626,7 @@ mod tests {
                 }
                 Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(error, Error::RequestCancelled.code());
+                    assert_eq!(error, Error::HttpRequestCancelled.code());
                 }
                 Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
@@ -1685,14 +1663,11 @@ mod tests {
                 let mut buf = [0u8; 100];
                 let res = hconn.read_response_data(now(), stream_id, &mut buf);
                 assert!(res.is_err());
-                assert_eq!(res.unwrap_err(), Error::MalformedFrame(H3_FRAME_TYPE_DATA));
+                assert_eq!(res.unwrap_err(), Error::HttpFrameError);
             }
         }
         assert_closed(&hconn, error);
     }
-
-    use crate::hframe::H3_FRAME_TYPE_DATA;
-    use crate::hframe::H3_FRAME_TYPE_HEADERS;
 
     // Incomplete DATA frame
     #[test]
@@ -1704,7 +1679,7 @@ mod tests {
                 // the data frame is incomplete.
                 0x0, 0x3, 0x61, 0x62,
             ],
-            Error::MalformedFrame(H3_FRAME_TYPE_DATA),
+            Error::HttpFrameError,
         );
     }
 
@@ -1716,13 +1691,13 @@ mod tests {
                 // headers
                 0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01,
             ],
-            Error::MalformedFrame(H3_FRAME_TYPE_HEADERS),
+            Error::HttpFrameError,
         );
     }
 
     #[test]
     fn test_incomplet_unknown_frame() {
-        test_incomplet_frame(&[0x21], Error::MalformedFrame(0xff));
+        test_incomplet_frame(&[0x21], Error::HttpFrameError);
     }
 
     // test goaway
@@ -1813,7 +1788,7 @@ mod tests {
                     }
                     Http3ClientEvent::Reset { stream_id, error } => {
                         assert!(stream_id == request_stream_id_3);
-                        assert_eq!(error, Error::RequestRejected.code());
+                        assert_eq!(error, Error::HttpRequestRejected.code());
                         stream_reset = true;
                     }
                     _ => {}
