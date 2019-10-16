@@ -137,13 +137,6 @@ impl Error {
             _ => Error::InternalError,
         }
     }
-
-    pub fn is_stream_error(&self) -> bool {
-        // TODO(mt): check that these are OK.  They all look fatal to me.
-        *self == Error::UnexpectedFrame
-            || *self == Error::WrongStreamDirection
-            || *self == Error::WrongStream
-    }
 }
 
 impl From<neqo_transport::Error> for Error {

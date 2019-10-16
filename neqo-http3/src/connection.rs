@@ -537,12 +537,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
             match transaction.receive(&mut self.conn, &mut self.qpack_decoder) {
                 Err(e) => {
                     qdebug!([label] "Error {} ocurred", e);
-                    if e.is_stream_error() {
-                        self.transactions.remove(&stream_id);
-                        self.conn.stream_stop_sending(stream_id, e.code())?;
-                    } else {
-                        return Err(e);
-                    }
+                    return Err(e);
                 }
                 Ok(()) => {
                     if transaction.done() {
