@@ -10,7 +10,7 @@ neqo-common = { path = "../neqo-common" }
 derive_more = "0.13"
 lazy_static = "1.0"
 rand = "0.6"
-slice-deque = "0.1.16"
+slice-deque = "0.3"
 log = "0.4.0"
 smallvec = "0.6.6"
 
