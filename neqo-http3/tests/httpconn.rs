@@ -16,34 +16,32 @@ const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];
 fn process_server_events(conn: &mut Http3Server) {
     let mut request_found = false;
     for event in conn.events() {
-        match event {
-            Http3ServerEvent::Headers {
-                stream_id,
+        if let Http3ServerEvent::Headers {
+            stream_id,
+            headers,
+            fin,
+        } = event
+        {
+            assert_eq!(
                 headers,
-                fin,
-            } => {
-                assert_eq!(
-                    headers,
-                    Some(vec![
-                        (String::from(":method"), String::from("GET")),
-                        (String::from(":scheme"), String::from("https")),
-                        (String::from(":authority"), String::from("something.com")),
-                        (String::from(":path"), String::from("/"))
-                    ])
-                );
-                assert_eq!(fin, true);
-                conn.set_response(
-                    stream_id,
-                    &vec![
-                        (String::from(":status"), String::from("200")),
-                        (String::from("content-length"), String::from("3")),
-                    ],
-                    RESPONSE_DATA.to_vec(),
-                )
-                .unwrap();
-                request_found = true;
-            }
-            _ => {}
+                Some(vec![
+                    (String::from(":method"), String::from("GET")),
+                    (String::from(":scheme"), String::from("https")),
+                    (String::from(":authority"), String::from("something.com")),
+                    (String::from(":path"), String::from("/"))
+                ])
+            );
+            assert_eq!(fin, true);
+            conn.set_response(
+                stream_id,
+                &[
+                    (String::from(":status"), String::from("200")),
+                    (String::from("content-length"), String::from("3")),
+                ],
+                RESPONSE_DATA.to_vec(),
+            )
+            .unwrap();
+            request_found = true;
         }
     }
     assert_eq!(request_found, true);

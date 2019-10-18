@@ -174,11 +174,9 @@ impl TransactionServer {
             self.recv_state = TransactionRecvState::ReadingData {
                 remaining_data_len: len as usize,
             };
-        } else {
-            if fin {
-                self.conn_events.data(self.stream_id, Vec::new(), true);
-                self.recv_state = TransactionRecvState::Closed;
-            }
+        } else if fin {
+            self.conn_events.data(self.stream_id, Vec::new(), true);
+            self.recv_state = TransactionRecvState::Closed;
         }
         Ok(())
     }
