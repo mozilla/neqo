@@ -32,22 +32,13 @@ enum TransactionSendState {
     Closed,
 }
 
+#[derive(Debug)]
 pub struct TransactionServer {
     recv_state: TransactionRecvState,
     send_state: TransactionSendState,
     stream_id: u64,
     frame_reader: HFrameReader,
     conn_events: Http3ServerEvents,
-}
-
-impl std::fmt::Debug for TransactionServer {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "TransactionServer: stream_id:{:?} recv_state{:?} send_state:{:?}",
-            self.stream_id, self.recv_state, self.send_state
-        )
-    }
 }
 
 impl TransactionServer {
