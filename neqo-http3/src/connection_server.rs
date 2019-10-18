@@ -575,6 +575,7 @@ mod tests {
         let (mut hconn, mut peer_conn) = connect();
 
         let stream_id = peer_conn.conn.stream_create(StreamType::BiDi).unwrap();
+        // Send only request headers for now.
         peer_conn
             .conn
             .stream_send(stream_id, &REQUEST_WITH_BODY[..20])
@@ -623,14 +624,16 @@ mod tests {
                 _ => {}
             }
         }
+        let out = hconn.process(None, now());
 
+        // Send data.
         peer_conn
             .conn
             .stream_send(stream_id, &REQUEST_WITH_BODY[20..])
             .unwrap();
         peer_conn.conn.stream_close_send(stream_id).unwrap();
 
-        let out = peer_conn.conn.process(None, now());
+        let out = peer_conn.conn.process(out.dgram(), now());
         hconn.process(out.dgram(), now());
 
         for event in hconn.events() {
@@ -645,5 +648,77 @@ mod tests {
             }
         }
         assert_eq!(headers_frames, 1);
+    }
+
+    #[test]
+    fn test_server_request_with_body_server_reset() {
+        let (mut hconn, mut peer_conn) = connect();
+
+        let request_stream_id = peer_conn.conn.stream_create(StreamType::BiDi).unwrap();
+        // Send only request headers for now.
+        peer_conn
+            .conn
+            .stream_send(request_stream_id, &REQUEST_WITH_BODY[..20])
+            .unwrap();
+
+        let out = peer_conn.conn.process(None, now());
+        hconn.process(out.dgram(), now());
+
+        // Check connection event. There should be 1 Header and no data events.
+        // The server will reset the stream.
+        let mut headers_frames = 0;
+        for event in hconn.events() {
+            match event {
+                Http3ServerEvent::Headers {
+                    stream_id,
+                    headers,
+                    fin,
+                } => {
+                    assert_eq!(request_stream_id, stream_id);
+                    assert_eq!(
+                        headers,
+                        Some(vec![
+                            (String::from(":method"), String::from("GET")),
+                            (String::from(":scheme"), String::from("https")),
+                            (String::from(":authority"), String::from("something.com")),
+                            (String::from(":path"), String::from("/"))
+                        ])
+                    );
+                    assert_eq!(fin, false);
+                    headers_frames += 1;
+                    hconn
+                        .stream_reset(stream_id, Error::HttpRequestRejected.code())
+                        .unwrap();
+                }
+                Http3ServerEvent::Data { .. } => {
+                    panic!("We should not have a Data event");
+                }
+                _ => {}
+            }
+        }
+        let out = hconn.process(None, now());
+
+        let out = peer_conn.conn.process(out.dgram(), now());
+        hconn.process(out.dgram(), now());
+
+        // Check that STOP_SENDING and REET has been received.
+        let mut reset = 0;
+        let mut stop_sending = 0;
+        for event in peer_conn.conn.events() {
+            match event {
+                ConnectionEvent::RecvStreamReset { stream_id, .. } => {
+                    assert_eq!(request_stream_id, stream_id);
+                    reset += 1;
+                }
+                ConnectionEvent::SendStreamStopSending { stream_id, .. } => {
+                    assert_eq!(request_stream_id, stream_id);
+                    stop_sending += 1;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(headers_frames, 1);
+        assert_eq!(reset, 1);
+        assert_eq!(stop_sending, 1);
     }
 }
