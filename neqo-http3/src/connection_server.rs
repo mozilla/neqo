@@ -553,7 +553,7 @@ mod tests {
                         hconn
                             .set_response(
                                 stream_id,
-                                &vec![
+                                &[
                                     (String::from(":status"), String::from("200")),
                                     (String::from("content-length"), String::from("3")),
                                 ],
@@ -609,7 +609,7 @@ mod tests {
                     hconn
                         .set_response(
                             stream_id,
-                            &vec![
+                            &[
                                 (String::from(":status"), String::from("200")),
                                 (String::from("content-length"), String::from("3")),
                             ],
@@ -618,7 +618,7 @@ mod tests {
                         .unwrap();
                 }
                 Http3ServerEvent::Data { .. } => {
-                    assert!(false, "We should not have a Data event");
+                    panic!("We should not have a Data event");
                 }
                 _ => {}
             }
@@ -636,10 +636,10 @@ mod tests {
         for event in hconn.events() {
             match event {
                 Http3ServerEvent::Headers { .. } => {
-                    assert!(false, "We should not have a Data event");
+                    panic!("We should not have a Data event");
                 }
                 Http3ServerEvent::Data { .. } => {
-                    assert!(false, "We should not have a Data event");
+                    panic!("We should not have a Data event");
                 }
                 _ => {}
             }
