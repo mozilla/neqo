@@ -6,7 +6,7 @@
 
 use crate::connection::{Http3Events, Http3State};
 use crate::Header;
-use neqo_transport::{AppError, StreamType};
+use neqo_transport::AppError;
 
 use smallvec::SmallVec;
 use std::cell::RefCell;
@@ -69,13 +69,9 @@ impl Http3ServerEvents {
 }
 
 impl Http3Events for Http3ServerEvents {
-    fn data_writable(&self, _stream_id: u64) {}
-
     fn reset(&self, stream_id: u64, error: AppError) {
         self.insert(Http3ServerEvent::Reset { stream_id, error });
     }
-
-    fn new_requests_creatable(&self, _stream_type: StreamType) {}
 
     fn connection_state_change(&self, state: Http3State) {
         self.insert(Http3ServerEvent::StateChange(state));

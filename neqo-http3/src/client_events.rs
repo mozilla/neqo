@@ -46,6 +46,10 @@ impl Http3ClientEvents {
         self.insert(Http3ClientEvent::HeaderReady { stream_id });
     }
 
+    pub fn data_writable(&self, stream_id: u64) {
+        self.insert(Http3ClientEvent::DataWritable { stream_id });
+    }
+
     pub fn data_readable(&self, stream_id: u64) {
         self.insert(Http3ClientEvent::DataReadable { stream_id });
     }
@@ -58,6 +62,12 @@ impl Http3ClientEvents {
     // pub fn new_push_stream(&self, stream_id: u64) {
     //     self.insert(Http3ClientEvent::NewPushStream { stream_id });
     // }
+
+    pub fn new_requests_creatable(&self, stream_type: StreamType) {
+        if stream_type == StreamType::BiDi {
+            self.insert(Http3ClientEvent::RequestsCreatable);
+        }
+    }
 
     pub fn authentication_needed(&self) {
         self.insert(Http3ClientEvent::AuthenticationNeeded);
@@ -81,18 +91,8 @@ impl Http3ClientEvents {
 }
 
 impl Http3Events for Http3ClientEvents {
-    fn data_writable(&self, stream_id: u64) {
-        self.insert(Http3ClientEvent::DataWritable { stream_id });
-    }
-
     fn reset(&self, stream_id: u64, error: AppError) {
         self.insert(Http3ClientEvent::Reset { stream_id, error });
-    }
-
-    fn new_requests_creatable(&self, stream_type: StreamType) {
-        if stream_type == StreamType::BiDi {
-            self.insert(Http3ClientEvent::RequestsCreatable);
-        }
     }
 
     fn connection_state_change(&self, state: Http3State) {

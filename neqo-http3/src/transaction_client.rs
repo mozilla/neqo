@@ -7,7 +7,7 @@
 use crate::hframe::{HFrame, HFrameReader};
 
 use crate::client_events::Http3ClientEvents;
-use crate::connection::{Http3Events, Http3Transaction};
+use crate::connection::Http3Transaction;
 use crate::Header;
 use neqo_common::{qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
