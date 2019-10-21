@@ -591,7 +591,6 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TxMode {
     Normal,
-    #[allow(dead_code)]
     Pto,
 }
 

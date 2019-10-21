@@ -274,7 +274,7 @@ impl IdleTimeout {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum OutputMode {
     CongestionControlled,
-    PTO,
+    ProbeTimeout,
 }
 
 impl Default for OutputMode {
@@ -1059,7 +1059,6 @@ impl Connection {
                                     if let Some(t) = token {
                                         tokens.push(t);
                                     }
-                                    assert!(encoder.len() <= self.pmtu());
                                 } else {
                                     // No more frames to send.
                                     break;
@@ -1068,26 +1067,46 @@ impl Connection {
                             // Don't look at cwnd but make sure we send
                             // something, even if it's old and not lost, or just
                             // a ping.
-                            OutputMode::PTO => {
+                            OutputMode::ProbeTimeout => {
                                 let remaining = self.pmtu() - out_bytes.len() - encoder.len();
                                 if remaining == 0 {
                                     break;
                                 }
 
                                 // Send one packet with some stuff in it
-                                let (frame, token) = self
-                                    .send_streams
-                                    .get_pto_frame(epoch, TxMode::Normal, remaining)
-                                    .unwrap_or((Frame::Padding, None));
-                                ack_eliciting |= frame.ack_eliciting();
-                                frame.marshal(&mut encoder);
-                                if let Some(t) = token {
-                                    tokens.push(t);
-                                }
-                                assert!(encoder.len() <= self.pmtu());
-                                if let Frame::Padding = frame {
-                                    has_padding |= true;
-                                    break;
+                                //
+                                // get_frame(Pto) always will return the same
+                                // thing (it disregards mark_as_sent()) so if we
+                                // wanted to send frames from more than one
+                                // stream we'd need a way for each loop
+                                // iteration to get the next stream, which is
+                                // not implemented.  Only include one frame for
+                                // now.
+                                match self
+                                    .crypto
+                                    .get_frame(epoch, TxMode::Pto, remaining)
+                                    .or_else(|| {
+                                        self.send_streams.get_frame(epoch, TxMode::Pto, remaining)
+                                    }) {
+                                    Some((frame, token)) => {
+                                        ack_eliciting |= frame.ack_eliciting();
+                                        frame.marshal(&mut encoder);
+                                        if let Some(t) = token {
+                                            tokens.push(t);
+                                        }
+                                        break;
+                                    }
+                                    None => {
+                                        let need_to_send_something = epoch == 3
+                                            && out_bytes.is_empty()
+                                            && encoder.is_empty();
+
+                                        if need_to_send_something {
+                                            Frame::Ping.marshal(&mut encoder);
+                                            has_padding |= true;
+                                        }
+                                        break;
+                                    }
                                 }
                             }
                         };
@@ -1116,6 +1135,7 @@ impl Connection {
                 State::Closed { .. } => unimplemented!(),
             }
 
+            assert!(encoder.len() <= self.pmtu());
             if encoder.len() == 0 {
                 continue;
             }
@@ -1167,15 +1187,17 @@ impl Connection {
             if ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
-            self.loss_recovery.on_packet_sent(
-                space,
-                hdr.pn,
-                ack_eliciting,
-                tokens,
-                packet.len(),
-                ack_eliciting || has_padding,
-                now,
-            );
+            if self.output_mode != OutputMode::ProbeTimeout {
+                self.loss_recovery.on_packet_sent(
+                    space,
+                    hdr.pn,
+                    ack_eliciting,
+                    tokens,
+                    packet.len(),
+                    ack_eliciting || has_padding,
+                    now,
+                );
+            }
 
             dump_packet(self, "TX ->", &hdr, &encoder);
             out_bytes.append(&mut packet);
@@ -1185,7 +1207,7 @@ impl Connection {
         }
 
         if out_bytes.is_empty() {
-            assert!(self.output_mode != OutputMode::PTO);
+            assert!(self.output_mode != OutputMode::ProbeTimeout);
             return Ok(None);
         }
 
@@ -1194,7 +1216,7 @@ impl Connection {
             qdebug!([self] "pad Initial to 1200");
             out_bytes.resize(1200, 0);
         }
-        if self.output_mode == OutputMode::PTO {
+        if self.output_mode == OutputMode::ProbeTimeout {
             self.output_mode = OutputMode::CongestionControlled;
         }
         Ok(Some(Datagram::new(path.local, path.remote, out_bytes)))
@@ -1991,7 +2013,7 @@ impl Connection {
                 // so send 2 packets worth
                 // TODO(agrover): else send a single PING frame
 
-                self.output_mode = OutputMode::PTO;
+                self.output_mode = OutputMode::ProbeTimeout;
             }
         }
     }

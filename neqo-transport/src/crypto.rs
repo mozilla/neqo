@@ -79,7 +79,6 @@ impl Crypto {
         };
 
         self.states[0] = Some(CryptoState {
-            epoch: 0,
             tx: CryptoDxState::new_initial(CryptoDxDirection::Write, write_label, dcid),
             rx: CryptoDxState::new_initial(CryptoDxDirection::Read, read_label, dcid),
         });
@@ -130,7 +129,7 @@ impl Crypto {
                 _ => panic!("bad configuration of keys"),
             }
 
-            *cs = Some(CryptoState { epoch, rx, tx });
+            *cs = Some(CryptoState { rx, tx });
         }
 
         Ok(cs.as_mut().unwrap())
@@ -315,7 +314,6 @@ impl std::fmt::Display for CryptoDxState {
 
 #[derive(Debug)]
 pub struct CryptoState {
-    pub epoch: Epoch,
     pub tx: Option<CryptoDxState>,
     pub rx: Option<CryptoDxState>,
 }

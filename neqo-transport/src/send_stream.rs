@@ -299,20 +299,31 @@ impl TxBuffer {
         can_buffer
     }
 
-    pub fn next_bytes(&self, _mode: TxMode) -> Option<(u64, &[u8])> {
-        let (start, maybe_len) = self.ranges.first_unmarked_range();
+    pub fn next_bytes(&self, mode: TxMode) -> Option<(u64, &[u8])> {
+        match mode {
+            TxMode::Normal => {
+                let (start, maybe_len) = self.ranges.first_unmarked_range();
 
-        if start == self.retired + u64::try_from(self.buffered()).unwrap() {
-            return None;
-        }
+                if start == self.retired + u64::try_from(self.buffered()).unwrap() {
+                    return None;
+                }
 
-        let buff_off = usize::try_from(start - self.retired).unwrap();
-        match maybe_len {
-            Some(len) => Some((
-                start,
-                &self.send_buf[buff_off..buff_off + usize::try_from(len).unwrap()],
-            )),
-            None => Some((start, &self.send_buf[buff_off..])),
+                let buff_off = usize::try_from(start - self.retired).unwrap();
+                match maybe_len {
+                    Some(len) => Some((
+                        start,
+                        &self.send_buf[buff_off..buff_off + usize::try_from(len).unwrap()],
+                    )),
+                    None => Some((start, &self.send_buf[buff_off..])),
+                }
+            }
+            TxMode::Pto => {
+                if self.buffered() == 0 {
+                    None
+                } else {
+                    Some((self.retired, &self.send_buf))
+                }
+            }
         }
     }
 
@@ -355,14 +366,6 @@ impl TxBuffer {
 
     pub fn highest_sent(&self) -> u64 {
         self.ranges.highest_offset()
-    }
-
-    fn get_pto_bytes(&self) -> Option<(u64, &[u8])> {
-        if self.buffered() == 0 {
-            None
-        } else {
-            Some((self.retired, &self.send_buf))
-        }
     }
 }
 
@@ -769,59 +772,6 @@ impl SendStreams {
         for (stream_id, stream) in self {
             let fin = stream.final_size();
             if let Some((offset, data)) = stream.next_bytes(mode) {
-                qtrace!(
-                    "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
-                    stream_id.as_u64(),
-                    offset,
-                    offset + data.len() as u64,
-                    epoch,
-                    mode,
-                    remaining
-                );
-                let frame_hdr_len = stream_frame_hdr_len(*stream_id, offset, remaining);
-                let length = min(data.len(), remaining - frame_hdr_len);
-                let fin = match fin {
-                    None => false,
-                    Some(fin) => fin == offset + length as u64,
-                };
-                let frame = Frame::Stream {
-                    fin,
-                    stream_id: stream_id.as_u64(),
-                    offset,
-                    data: data[..length].to_vec(),
-                };
-                stream.mark_as_sent(offset, length, fin);
-                return Some((
-                    frame,
-                    Some(RecoveryToken::Stream(StreamRecoveryToken {
-                        id: *stream_id,
-                        offset,
-                        length,
-                        fin,
-                    })),
-                ));
-            }
-        }
-        None
-    }
-
-    pub(crate) fn get_pto_frame(
-        &mut self,
-        epoch: u16,
-        mode: TxMode,
-        remaining: usize,
-    ) -> Option<(Frame, Option<RecoveryToken>)> {
-        if epoch != 3 && epoch != 1 {
-            return None;
-        }
-
-        for (stream_id, stream) in self {
-            let fin = stream.final_size();
-            let buf = match stream.state.tx_buf_mut() {
-                Some(buf) => buf,
-                None => continue,
-            };
-            if let Some((offset, data)) = buf.get_pto_bytes() {
                 qtrace!(
                     "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
                     stream_id.as_u64(),
