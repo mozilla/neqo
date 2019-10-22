@@ -2929,17 +2929,35 @@ mod tests {
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);;
 
+        // assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
+        // assert_eq!(client.stream_send(6, b"there!").unwrap(), 6);;
+
         let out = client.process(None, now + Duration::from_secs(10));
-        let out = server.process(out.dgram(), now + Duration::from_secs(10));
+        eprintln!("out {:?}", out);
+        let p_len = match out {
+            Output::Datagram(d) => d.len(),
+            _ => unimplemented!(),
+        };
+        let out = client.process(None, now + Duration::from_secs(10));
+        eprintln!("out {:?}", out);
+        let out = client.process(None, now + Duration::from_secs(11));
+        eprintln!("out {:?}", out);
+        assert!(match out {
+            Output::Datagram(d) => d.len() == p_len,
+            _ => false,
+        });
 
-        // Still connected after 69 seconds because idle timer reset by outgoing
-        // packet
-        client.process(out.dgram(), now + Duration::from_secs(69));
-        assert!(matches!(client.state(), State::Connected));
+        //        assert!(false);
+        // let out = server.process(out.dgram(), now + Duration::from_secs(10));
 
-        // Not connected after 70 seconds.
-        client.process_timer(now + Duration::from_secs(70));
-        assert!(matches!(client.state(), State::Closed(_)));
+        // // Still connected after 69 seconds because idle timer reset by outgoing
+        // // packet
+        // client.process(out.dgram(), now + Duration::from_secs(69));
+        // assert!(matches!(client.state(), State::Connected));
+
+        // // Not connected after 70 seconds.
+        // client.process_timer(now + Duration::from_secs(70));
+        // assert!(matches!(client.state(), State::Closed(_)));
     }
 
     #[test]
