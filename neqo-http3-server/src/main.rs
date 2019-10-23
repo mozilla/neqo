@@ -82,19 +82,16 @@ fn process_events(conn: &mut Http3Server) {
 
                 let default_ret = b"Hello World".to_vec();
 
-                let response = if let Some(hdrs) = headers {
-                    match hdrs.iter().find(|&(k, _)| k == ":path") {
-                        Some((_, path)) if !path.is_empty() => {
-                            match path.trim_matches(|p| p == '/').parse::<usize>() {
-                                Ok(v) => vec![b'a'; v],
-                                Err(_) => default_ret,
-                            }
+                let response = match headers.iter().find(|&(k, _)| k == ":path") {
+                    Some((_, path)) if !path.is_empty() => {
+                        match path.trim_matches(|p| p == '/').parse::<usize>() {
+                            Ok(v) => vec![b'a'; v],
+                            Err(_) => default_ret,
                         }
-                        _ => default_ret,
                     }
-                } else {
-                    default_ret
+                    _ => default_ret,
                 };
+
                 conn.set_response(
                     stream_id,
                     &[

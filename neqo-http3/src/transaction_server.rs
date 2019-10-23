@@ -80,7 +80,7 @@ impl TransactionServer {
         if !self.frame_reader.done() {
             Ok((None, fin))
         } else {
-            qdebug!([self] "A new frame has been received.");
+            qinfo!([self] "A new frame has been received.");
             Ok((Some(self.frame_reader.get_frame()?), fin))
         }
     }
@@ -101,21 +101,21 @@ impl TransactionServer {
         } = self.recv_state
         {
             let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[*offset..])?;
-            qtrace!([label] "read_headers: read {} bytes fin={}.", amount, fin);
+            qdebug!([label] "read_headers: read {} bytes fin={}.", amount, fin);
             *offset += amount as usize;
             if *offset < buf.len() {
                 if fin {
-                    // Malformated frame
+                    // Malformed frame
                     return Err(Error::HttpFrameError);
                 }
                 return Ok(true);
             }
 
             // we have read the headers, try decoding them.
-            qdebug!([label] "read_headers: read all headers, try decoding them.");
+            qinfo!([label] "read_headers: read all headers, try decoding them.");
             match decoder.decode_header_block(buf, self.stream_id)? {
                 Some(headers) => {
-                    self.conn_events.headers(self.stream_id, Some(headers), fin);
+                    self.conn_events.headers(self.stream_id, headers, fin);
                     if fin {
                         self.recv_state = TransactionRecvState::Closed;
                     } else {
@@ -145,6 +145,7 @@ impl TransactionServer {
     }
 
     fn handle_frame_in_state_waiting_for_data(&mut self, frame: HFrame, fin: bool) -> Res<()> {
+        qdebug!([self] "A new frame has been received: {:?}", frame);
         match frame {
             HFrame::Data { len } => self.handle_data_frame(len, fin),
             _ => Err(Error::HttpFrameUnexpected),
@@ -152,8 +153,9 @@ impl TransactionServer {
     }
 
     fn handle_headers_frame(&mut self, len: u64, fin: bool) -> Res<()> {
+        qinfo!([self] "A new header frame len={} fin={}", len, fin);
         if len == 0 {
-            self.conn_events.headers(self.stream_id, None, fin);
+            self.conn_events.headers(self.stream_id, Vec::new(), fin);
         } else {
             if fin {
                 return Err(Error::HttpFrameError);
@@ -167,6 +169,7 @@ impl TransactionServer {
     }
 
     fn handle_data_frame(&mut self, len: u64, fin: bool) -> Res<()> {
+        qinfo!([self] "A new data frame len={} fin={}", len, fin);
         if len > 0 {
             if fin {
                 return Err(Error::HttpFrameError);
@@ -190,6 +193,7 @@ impl ::std::fmt::Display for TransactionServer {
 
 impl Http3Transaction for TransactionServer {
     fn send(&mut self, conn: &mut Connection, _encoder: &mut QPackEncoder) -> Res<()> {
+        qtrace!([self] "Sending response.");
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
@@ -197,11 +201,11 @@ impl Http3Transaction for TransactionServer {
         };
         if let TransactionSendState::SendingResponse { ref mut buf } = self.send_state {
             let sent = conn.stream_send(self.stream_id, &buf[..])?;
-            qdebug!([label] "{} bytes sent", sent);
+            qinfo!([label] "{} bytes sent", sent);
             if sent == buf.len() {
                 conn.stream_close_send(self.stream_id)?;
                 self.send_state = TransactionSendState::Closed;
-                qdebug!([label] "done sending request");
+                qinfo!([label] "done sending request");
             } else {
                 let mut b = buf.split_off(sent);
                 mem::swap(buf, &mut b);
@@ -226,7 +230,7 @@ impl Http3Transaction for TransactionServer {
                     match f {
                         None => {
                             if fin {
-                                self.conn_events.headers(self.stream_id, None, true);
+                                self.conn_events.headers(self.stream_id, Vec::new(), true);
                                 self.recv_state = TransactionRecvState::Closed;
                             }
                             return Ok(());
@@ -248,13 +252,13 @@ impl Http3Transaction for TransactionServer {
                 TransactionRecvState::BlockedDecodingHeaders { ref mut buf, fin } => {
                     match decoder.decode_header_block(buf, self.stream_id)? {
                         Some(headers) => {
-                            self.conn_events.headers(self.stream_id, Some(headers), fin);
+                            self.conn_events.headers(self.stream_id, headers, fin);
                             if fin {
                                 return Ok(());
                             }
                         }
                         None => {
-                            qdebug!([self] "decoding header is blocked.");
+                            qinfo!([self] "decoding header is blocked.");
                             return Ok(());
                         }
                     }
