@@ -9,7 +9,7 @@ use crate::connection::{Http3ClientHandler, Http3Connection, Http3State, Http3Tr
 
 use crate::transaction_client::TransactionClient;
 use crate::Header;
-use neqo_common::{qdebug, qtrace, Datagram};
+use neqo_common::{qinfo, qtrace, Datagram};
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_transport::{AppError, Connection, ConnectionIdManager, Output, Role, StreamType};
 use std::cell::RefCell;
@@ -88,7 +88,7 @@ impl Http3Client {
     }
 
     pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
-        qdebug!([self] "Closed.");
+        qinfo!([self] "Close the connection error={} msg={}.", error, msg);
         self.base_handler.close(now, error, msg);
     }
 
@@ -100,7 +100,7 @@ impl Http3Client {
         path: &str,
         headers: &[Header],
     ) -> Res<u64> {
-        qdebug!(
+        qinfo!(
             [self]
             "Fetch method={}, scheme={}, host={}, path={}",
             method,
@@ -125,17 +125,17 @@ impl Http3Client {
     }
 
     pub fn stream_reset(&mut self, stream_id: u64, error: AppError) -> Res<()> {
-        qdebug!([self] "reset_stream {}.", stream_id);
+        qinfo!([self] "reset_stream {} error={}.", stream_id, error);
         self.base_handler.stream_reset(stream_id, error)
     }
 
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
-        qdebug!([self] "close_stream {}.", stream_id);
+        qinfo!([self] "Close senidng side stream={}.", stream_id);
         self.base_handler.stream_close_send(stream_id)
     }
 
     pub fn send_request_body(&mut self, stream_id: u64, buf: &[u8]) -> Res<usize> {
-        qtrace!([self] "send_request_body from stream {}.", stream_id);
+        qinfo!([self] "send_request_body from stream {} sending {} bytes.", stream_id, buf.len());
         self.base_handler
             .transactions
             .get_mut(&stream_id)
@@ -144,7 +144,7 @@ impl Http3Client {
     }
 
     pub fn read_response_headers(&mut self, stream_id: u64) -> Res<(Vec<Header>, bool)> {
-        qtrace!([self] "read_response_headers from stream {}.", stream_id);
+        qinfo!([self] "read_response_headers from stream {}.", stream_id);
         let transaction = self
             .base_handler
             .transactions
@@ -167,7 +167,7 @@ impl Http3Client {
         stream_id: u64,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        qtrace!([self] "read_data from stream {}.", stream_id);
+        qinfo!([self] "read_data from stream {}.", stream_id);
         let transaction = self
             .base_handler
             .transactions

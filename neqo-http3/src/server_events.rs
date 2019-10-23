@@ -18,7 +18,7 @@ pub enum Http3ServerEvent {
     /// Headers are ready.
     Headers {
         stream_id: u64,
-        headers: Option<Vec<Header>>,
+        headers: Vec<Header>,
         fin: bool,
     },
     /// Request data is ready.
@@ -47,7 +47,7 @@ impl Http3ServerEvents {
         self.events.borrow_mut().remove(event)
     }
 
-    pub fn headers(&self, stream_id: u64, headers: Option<Vec<Header>>, fin: bool) {
+    pub fn headers(&self, stream_id: u64, headers: Vec<Header>, fin: bool) {
         self.insert(Http3ServerEvent::Headers {
             stream_id,
             headers,

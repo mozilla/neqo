@@ -8,7 +8,7 @@ use crate::connection::{Http3Connection, Http3ServerHandler, Http3State};
 use crate::server_events::{Http3ServerEvent, Http3ServerEvents};
 use crate::transaction_server::TransactionServer;
 use crate::{Error, Header, Res};
-use neqo_common::{qdebug, qtrace, Datagram};
+use neqo_common::{qdebug, qinfo, qtrace, Datagram};
 use neqo_crypto::AntiReplay;
 use neqo_transport::{AppError, Connection, ConnectionIdManager, Output, Role};
 use std::cell::RefCell;
@@ -80,7 +80,7 @@ impl Http3Server {
     }
 
     pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
-        qdebug!([self] "Closed.");
+        qinfo!([self] "Close connection.");
         self.base_handler.close(now, error, msg);
     }
 
@@ -93,6 +93,7 @@ impl Http3Server {
     }
 
     pub fn set_response(&mut self, stream_id: u64, headers: &[Header], data: Vec<u8>) -> Res<()> {
+        qinfo!([self] "Set new respons for stream {}.", stream_id);
         self.base_handler
             .transactions
             .get_mut(&stream_id)
@@ -104,12 +105,12 @@ impl Http3Server {
     }
 
     pub fn stream_stop_sending(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
-        qtrace!([self] "stop sending stream_id:{} error:{}.", stream_id, app_error);
+        qdebug!([self] "stop sending stream_id:{} error:{}.", stream_id, app_error);
         self.base_handler.stream_stop_sending(stream_id, app_error)
     }
 
     pub fn stream_reset(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
-        qtrace!([self] "reset stream_id:{} error:{}.", stream_id, app_error);
+        qdebug!([self] "reset stream_id:{} error:{}.", stream_id, app_error);
         self.base_handler.stream_reset(stream_id, app_error)
     }
 }
@@ -530,12 +531,12 @@ mod tests {
                 Http3ServerEvent::Headers { headers, fin, .. } => {
                     assert_eq!(
                         headers,
-                        Some(vec![
+                        vec![
                             (String::from(":method"), String::from("GET")),
                             (String::from(":scheme"), String::from("https")),
                             (String::from(":authority"), String::from("something.com")),
                             (String::from(":path"), String::from("/"))
-                        ])
+                        ]
                     );
                     assert_eq!(fin, false);
                     headers_frames += 1;
@@ -595,12 +596,12 @@ mod tests {
                 } => {
                     assert_eq!(
                         headers,
-                        Some(vec![
+                        vec![
                             (String::from(":method"), String::from("GET")),
                             (String::from(":scheme"), String::from("https")),
                             (String::from(":authority"), String::from("something.com")),
                             (String::from(":path"), String::from("/"))
-                        ])
+                        ]
                     );
                     assert_eq!(fin, false);
                     headers_frames += 1;
@@ -677,12 +678,12 @@ mod tests {
                     assert_eq!(request_stream_id, stream_id);
                     assert_eq!(
                         headers,
-                        Some(vec![
+                        vec![
                             (String::from(":method"), String::from("GET")),
                             (String::from(":scheme"), String::from("https")),
                             (String::from(":authority"), String::from("something.com")),
                             (String::from(":path"), String::from("/"))
-                        ])
+                        ]
                     );
                     assert_eq!(fin, false);
                     headers_frames += 1;
