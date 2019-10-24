@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
+use crate::client_events::Http3ClientEvents;
 use crate::control_stream_local::{ControlStreamLocal, HTTP3_UNI_STREAM_TYPE_CONTROL};
 use crate::control_stream_remote::ControlStreamRemote;
 use crate::hframe::{HFrame, HSettingType};
@@ -757,10 +757,6 @@ impl Http3Handler<Http3ClientEvents, TransactionClient> for Http3ClientHandler {
             // If error is Error::EarlyResponse we will post StopSending event,
             // otherwise post reset.
             if app_err == Error::HttpEarlyResponse.code() && !t.is_sending_closed() {
-                // Remove DataWritable event if any.
-                events.remove(&Http3ClientEvent::DataWritable {
-                    stream_id: stop_stream_id,
-                });
                 events.stop_sending(stop_stream_id, app_err);
             }
             // if error is not Error::EarlyResponse we will close receiving part as well.
@@ -796,7 +792,6 @@ impl Http3Handler<Http3ClientEvents, TransactionClient> for Http3ClientHandler {
             events.remove_events_for_stream_id(id);
             events.reset(id, Error::HttpRequestRejected.code())
         }
-        events.remove(&Http3ClientEvent::RequestsCreatable);
         events.goaway_received();
 
         // Actually remove (i.e. don't retain) these streams

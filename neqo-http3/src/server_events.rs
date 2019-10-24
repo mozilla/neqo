@@ -6,11 +6,11 @@
 
 use crate::connection::{Http3Events, Http3State};
 use crate::Header;
+use neqo_common::matches;
 use neqo_transport::AppError;
 
-use smallvec::SmallVec;
 use std::cell::RefCell;
-use std::collections::BTreeSet;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
@@ -35,16 +35,31 @@ pub enum Http3ServerEvent {
 
 #[derive(Debug, Default, Clone)]
 pub struct Http3ServerEvents {
-    events: Rc<RefCell<BTreeSet<Http3ServerEvent>>>,
+    events: Rc<RefCell<VecDeque<Http3ServerEvent>>>,
 }
 
 impl Http3ServerEvents {
     fn insert(&self, event: Http3ServerEvent) {
-        self.events.borrow_mut().insert(event);
+        self.events.borrow_mut().push_back(event);
     }
 
-    pub fn remove(&self, event: &Http3ServerEvent) -> bool {
-        self.events.borrow_mut().remove(event)
+    fn remove<F>(&self, f: F)
+    where
+        F: Fn(&Http3ServerEvent) -> bool,
+    {
+        self.events.borrow_mut().retain(|evt| !f(evt))
+    }
+
+    pub fn events(&self) -> impl Iterator<Item = Http3ServerEvent> {
+        self.events.replace(VecDeque::new()).into_iter()
+    }
+
+    pub fn has_events(&self) -> bool {
+        !self.events.borrow().is_empty()
+    }
+
+    pub fn next_event(&self) -> Option<Http3ServerEvent> {
+        self.events.borrow_mut().pop_front()
     }
 
     pub fn headers(&self, stream_id: u64, headers: Vec<Header>, fin: bool) {
@@ -62,10 +77,6 @@ impl Http3ServerEvents {
             fin,
         });
     }
-
-    pub fn events(&self) -> impl Iterator<Item = Http3ServerEvent> {
-        self.events.replace(BTreeSet::new()).into_iter()
-    }
 }
 
 impl Http3Events for Http3ServerEvents {
@@ -77,20 +88,10 @@ impl Http3Events for Http3ServerEvents {
         self.insert(Http3ServerEvent::StateChange(state));
     }
 
-    fn remove_events_for_stream_id(&self, remove_stream_id: u64) {
-        let events_to_remove = self
-            .events
-            .borrow()
-            .iter()
-            .filter(|evt| match evt {
-                Http3ServerEvent::Reset { stream_id, .. } => *stream_id == remove_stream_id,
-                _ => false,
-            })
-            .cloned()
-            .collect::<SmallVec<[_; 8]>>();
-
-        for evt in events_to_remove {
-            self.remove(&evt);
-        }
+    fn remove_events_for_stream_id(&self, stream_id: u64) {
+        self.remove(|evt| {
+            matches!(evt,
+                Http3ServerEvent::Reset { stream_id: x, .. } if *x == stream_id)
+        });
     }
 }

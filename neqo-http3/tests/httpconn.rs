@@ -15,7 +15,7 @@ const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];
 
 fn process_server_events(conn: &mut Http3Server) {
     let mut request_found = false;
-    for event in conn.events() {
+    while let Some(event) = conn.next_event() {
         if let Http3ServerEvent::Headers {
             stream_id,
             headers,
@@ -50,7 +50,7 @@ fn process_server_events(conn: &mut Http3Server) {
 fn process_client_events(conn: &mut Http3Client) {
     let mut response_header_found = false;
     let mut response_data_found = false;
-    for event in conn.events() {
+    while let Some(event) = conn.next_event() {
         match event {
             Http3ClientEvent::HeaderReady { stream_id } => {
                 let h = conn.read_response_headers(stream_id);
