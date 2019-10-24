@@ -67,7 +67,7 @@ impl Args {
 }
 
 fn process_events(conn: &mut Http3Server) {
-    for event in conn.events() {
+    while let Some(event) = conn.next_event() {
         eprintln!("Event: {:?}", event);
         match event {
             Http3ServerEvent::Headers {

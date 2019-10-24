@@ -88,8 +88,22 @@ impl Http3Server {
         self.base_handler.state.clone()
     }
 
+    /// Get all current events. Best used just in debug/testing code, use
+    /// next_event() instead.
     pub fn events(&mut self) -> impl Iterator<Item = Http3ServerEvent> {
         self.base_handler.events.events()
+    }
+
+    /// Return true if there are outstanding events.
+    pub fn has_events(&self) -> bool {
+        self.base_handler.events.has_events()
+    }
+
+    /// Get events that indicate state changes on the connection. This method
+    /// correctly handles cases where handling one event can obsolete
+    /// previously-queued events, or cause new events to be generated.
+    pub fn next_event(&mut self) -> Option<Http3ServerEvent> {
+        self.base_handler.events.next_event()
     }
 
     pub fn set_response(&mut self, stream_id: u64, headers: &[Header], data: Vec<u8>) -> Res<()> {
@@ -175,9 +189,8 @@ mod tests {
         assert_eq!(hconn.state(), Http3State::Connected);
         neqo_trans_conn.process(out.dgram(), now());
 
-        let events = neqo_trans_conn.events();
         let mut connected = false;
-        for e in events {
+        while let Some(e) = neqo_trans_conn.next_event() {
             match e {
                 ConnectionEvent::NewStream {
                     stream_id,
@@ -371,9 +384,8 @@ mod tests {
         peer_conn.conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::HttpStreamCreationError.
-        let events = peer_conn.conn.events();
         let mut stop_sending_event_found = false;
-        for e in events {
+        while let Some(e) = peer_conn.conn.next_event() {
             if let ConnectionEvent::SendStreamStopSending {
                 stream_id,
                 app_error,
@@ -526,7 +538,7 @@ mod tests {
         // Check connection event. There should be 1 Header and 2 data events.
         let mut headers_frames = 0;
         let mut data_frames = 0;
-        for event in hconn.events() {
+        while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers { headers, fin, .. } => {
                     assert_eq!(
@@ -587,7 +599,7 @@ mod tests {
 
         // Check connection event. There should be 1 Header and no data events.
         let mut headers_frames = 0;
-        for event in hconn.events() {
+        while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers {
                     stream_id,
@@ -637,7 +649,7 @@ mod tests {
         let out = peer_conn.conn.process(out.dgram(), now());
         hconn.process(out.dgram(), now());
 
-        for event in hconn.events() {
+        while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers { .. } => {
                     panic!("We should not have a Data event");
@@ -668,7 +680,7 @@ mod tests {
         // Check connection event. There should be 1 Header and no data events.
         // The server will reset the stream.
         let mut headers_frames = 0;
-        for event in hconn.events() {
+        while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers {
                     stream_id,
@@ -705,7 +717,7 @@ mod tests {
         // Check that STOP_SENDING and REET has been received.
         let mut reset = 0;
         let mut stop_sending = 0;
-        for event in peer_conn.conn.events() {
+        while let Some(event) = peer_conn.conn.next_event() {
             match event {
                 ConnectionEvent::RecvStreamReset { stream_id, .. } => {
                     assert_eq!(request_stream_id, stream_id);

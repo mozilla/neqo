@@ -181,7 +181,7 @@ impl Handler for PostConnectHandler {
     fn handle(&mut self, args: &Args, client: &mut Http3Client) -> bool {
         let mut data = vec![0; 4000];
         client.process_http3(Instant::now());
-        for event in client.events() {
+        while let Some(event) = client.next_event() {
             match event {
                 Http3ClientEvent::HeaderReady { stream_id } => {
                     if !self.streams.contains(&stream_id) {

@@ -286,7 +286,7 @@ impl H3Handler {
     fn handle(&mut self) -> bool {
         let mut data = vec![0; 4000];
         self.h3.process_http3(Instant::now());
-        for event in self.h3.events() {
+        while let Some(event) = self.h3.next_event() {
             match event {
                 Http3ClientEvent::HeaderReady { stream_id } => {
                     if !self.streams.contains(&stream_id) {
