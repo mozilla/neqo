@@ -533,6 +533,7 @@ impl LossRecovery {
         );
 
         let packet_space = &mut self.spaces[pn_space];
+        let largest_acked = packet_space.largest_acked;
 
         // Lost for retrans/CC purposes
         let mut lost_pns = SmallVec::<[_; 8]>::new();
@@ -540,7 +541,6 @@ impl LossRecovery {
         // Lost for we-can-actually-forget-about-it purposes
         let mut really_lost_pns = SmallVec::<[_; 8]>::new();
 
-        let largest_acked = packet_space.largest_acked;
         let current_rtt = self.rtt_vals.rtt();
         for (pn, packet) in packet_space
             .sent_packets

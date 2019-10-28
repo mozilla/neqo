@@ -3012,7 +3012,6 @@ mod tests {
             srv2.dgram(),
             now + Duration::from_secs(10) + Duration::from_millis(40),
         );
-
         // client resends data from pkt0
         assert!(matches!(pkt4, Output::Datagram(_)));
 
@@ -3035,22 +3034,37 @@ mod tests {
         );
         assert!(matches!(pkt5, Output::Callback(_)));
 
+        // PTO expires. No data. Only send PING.
         let pkt6 = client.process(
             None,
             now + Duration::from_secs(10) + Duration::from_millis(110),
         );
-        qerror!(
-            "this should be a PTO w/ping but instead it's a PTO w/all data {:?}",
-            pkt6
-        );
 
-        panic!("what's the deal");
+        // A packet with just a PING is 26 bytes long.
+        assert_eq!(pkt6.as_dgram_ref().unwrap().len(), 26);
+    }
 
-        // // One second later, it should want to send PTO packet
-        // let out = client.process(None, now + Duration::from_secs(11));
-        // // Since only one stream's data was in PTO, should be smaller than
-        // // prev pkt
-        // assert!(out.as_dgram_ref().unwrap().len() < first_pkt_len);
+    #[test]
+    fn do_not_retransmit_acked_data() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        let res = client.process(None, now);
+        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, &vec![0xbb; 2000]).unwrap(), 2000);
+        let pkt0 = client.process(None, now);
+        assert!(matches!(pkt0, Output::Datagram(_)));
+        assert_eq!(pkt0.as_dgram_ref().unwrap().len(), 1305);
+        let pkt1 = client.process(None, now);
+        assert!(matches!(pkt1, Output::Datagram(_)));
+        assert_eq!(pkt1.as_dgram_ref().unwrap().len(), 755);
+        let out = client.process(None, now);
+        assert!(matches!(out, Output::Callback(_)));
     }
 
     #[test]
