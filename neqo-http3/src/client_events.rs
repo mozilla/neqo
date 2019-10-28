@@ -109,6 +109,7 @@ impl Http3ClientEvents {
 
 impl Http3Events for Http3ClientEvents {
     fn reset(&self, stream_id: u64, error: AppError) {
+        self.remove_events_for_stream_id(stream_id);
         self.insert(Http3ClientEvent::Reset { stream_id, error });
     }
 

@@ -382,6 +382,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     fn handle_new_stream(&mut self, stream_id: u64, stream_type: StreamType) -> Res<()> {
         qinfo!([self] "A new stream: {:?} {}.", stream_type, stream_id);
+        assert!(self.state_active());
         match stream_type {
             StreamType::BiDi => self.handler.handle_new_bidi_stream(
                 &mut self.transactions,
@@ -416,6 +417,8 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     fn handle_stream_readable(&mut self, stream_id: u64) -> Res<()> {
         qtrace!([self] "Readable stream {}.", stream_id);
+
+        assert!(self.state_active());
 
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
@@ -487,9 +490,10 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     fn handle_stream_reset(&mut self, stream_id: u64, app_err: AppError) -> Res<()> {
         qinfo!([self] "Handle a stream reset stream_id={} app_err={}", stream_id, app_err);
+
+        assert!(self.state_active());
+
         if let Some(t) = self.transactions.get_mut(&stream_id) {
-            // Remove all events for this stream.
-            self.events.remove_events_for_stream_id(stream_id);
             // Post the reset event.
             self.events.reset(stream_id, app_err);
             // Close both sides of the transaction_client.
@@ -516,6 +520,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     fn handle_connection_closing(&mut self, error_code: CloseError) -> Res<()> {
+        assert!(self.state_active());
         self.events
             .connection_state_change(Http3State::Closing(error_code));
         self.state = Http3State::Closing(error_code);
@@ -535,6 +540,8 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
         } else {
             String::new()
         };
+
+        assert!(self.state_active());
 
         if let Some(transaction) = &mut self.transactions.get_mut(&stream_id) {
             qinfo!([label] "Request/response stream {} is readable.", stream_id);
@@ -589,6 +596,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
         qinfo!([self] "Close connection error {:?} msg={}.", error, msg);
+        assert!(self.state_active());
         self.state = Http3State::Closing(CloseError::Application(error));
         if !self.transactions.is_empty() && (error == 0) {
             qwarn!("close() called when streams still active");
@@ -599,6 +607,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     pub fn stream_reset(&mut self, stream_id: u64, error: AppError) -> Res<()> {
         qinfo!([self] "Reset stream {} error={}.", stream_id, error);
+        assert!(self.state_active());
         let mut transaction = self
             .transactions
             .remove(&stream_id)
@@ -615,6 +624,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
         qinfo!([self] "Close sending side for stream {}.", stream_id);
+        assert!(self.state_active());
         let transaction = self
             .transactions
             .get_mut(&stream_id)
@@ -677,6 +687,13 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
             }
         }
         Ok(())
+    }
+
+    fn state_active(&self) -> bool {
+        match self.state {
+            Http3State::Connected | Http3State::GoingAway => true,
+            _ => false,
+        }
     }
 
     pub fn state(&self) -> Http3State {
@@ -761,7 +778,6 @@ impl Http3Handler<Http3ClientEvents, TransactionClient> for Http3ClientHandler {
             }
             // if error is not Error::EarlyResponse we will close receiving part as well.
             if app_err != Error::HttpEarlyResponse.code() {
-                events.remove_events_for_stream_id(stop_stream_id);
                 events.reset(stop_stream_id, app_err);
                 // The server may close its sending side as well, but just to be sure
                 // we will do it ourselves.
@@ -789,7 +805,6 @@ impl Http3Handler<Http3ClientEvents, TransactionClient> for Http3ClientHandler {
             .filter(|(id, _)| **id >= goaway_stream_id)
             .map(|(id, _)| *id)
         {
-            events.remove_events_for_stream_id(id);
             events.reset(id, Error::HttpRequestRejected.code())
         }
         events.goaway_received();
