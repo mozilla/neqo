@@ -12,7 +12,6 @@ use std::cmp::{max, Ordering};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::{self, Debug};
-use std::mem;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -154,6 +153,14 @@ impl Path {
 
     pub fn received_on(&self, d: &Datagram) -> bool {
         self.local == d.destination() && self.remote == d.source()
+    }
+
+    fn mtu(&self) -> usize {
+        if self.local.is_ipv4() {
+            1252
+        } else {
+            1232 // IPv6
+        }
     }
 }
 
@@ -435,14 +442,6 @@ impl Connection {
     /// Set a local transport parameter, possibly overriding a default value.
     pub fn set_local_tparam(&self, key: u16, value: TransportParameter) {
         self.tps.borrow_mut().local.set(key, value)
-    }
-
-    fn pmtu(&self) -> usize {
-        match &self.path {
-            Some(path) if path.local.is_ipv4() => 1252,
-            Some(_) => 1232, // IPv6
-            None => 1280,
-        }
     }
 
     /// Set the connection ID that was originally chosen by the client.
@@ -956,41 +955,39 @@ impl Connection {
 
     fn output(&mut self, now: Instant) -> Option<Datagram> {
         let mut out = None;
-        // Can't call a method on self while iterating over self.paths
-        let paths = mem::replace(&mut self.path, Default::default());
-        for p in &paths {
-            match self.output_path(&p, now) {
-                Ok(Some(dgram)) => {
-                    out = Some(dgram);
-                    break;
+        if self.path.is_some() {
+            match self.output_path(now) {
+                Ok(res) => {
+                    out = res;
                 }
                 Err(e) => {
                     if !matches!(self.state, State::Closing{..}) {
                         // An error here causes us to transition to closing.
                         self.absorb_error(now, Err(e));
                         // Rerun to give a chance to send a CONNECTION_CLOSE.
-                        out = match self.output_path(&p, now) {
+                        out = match self.output_path(now) {
                             Ok(x) => x,
                             Err(e) => {
                                 qwarn!([self] "two output_path errors in a row: {:?}", e);
                                 None
                             }
                         };
-                        break;
                     }
                 }
-                _ => (),
             };
         }
-        self.path = paths;
         out
     }
 
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
-    fn output_path(&mut self, path: &Path, now: Instant) -> Res<Option<Datagram>> {
+    fn output_path(&mut self, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
         let mut needs_padding = false;
+        let path = self
+            .path
+            .take()
+            .expect("we know we have a path because calling fn checked");
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -1013,7 +1010,7 @@ impl Connection {
             match &self.state {
                 State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
                     loop {
-                        let remaining = self.pmtu() - out_bytes.len() - encoder.len();
+                        let remaining = path.mtu() - out_bytes.len() - encoder.len();
 
                         // Check sources in turn for available frames
                         if let Some((frame, token)) = self
@@ -1031,8 +1028,8 @@ impl Connection {
                             if let Some(t) = token {
                                 tokens.push(t);
                             }
-                            assert!(encoder.len() <= self.pmtu());
-                            if out_bytes.len() + encoder.len() == self.pmtu() {
+                            assert!(encoder.len() <= path.mtu());
+                            if out_bytes.len() + encoder.len() == path.mtu() {
                                 // No more space for frames.
                                 break;
                             }
@@ -1118,21 +1115,24 @@ impl Connection {
             let mut packet = encode_packet(tx, &hdr, &encoder);
             dump_packet(self, "TX ->", &hdr, &encoder);
             out_bytes.append(&mut packet);
-            if out_bytes.len() >= self.pmtu() {
+            if out_bytes.len() >= path.mtu() {
                 break;
             }
         }
 
         if out_bytes.is_empty() {
-            return Ok(None);
+            self.path = Some(path);
+            Ok(None)
+        } else {
+            // Pad Initial packets sent by the client to 1200 bytes.
+            if self.role == Role::Client && needs_padding {
+                qdebug!([self] "pad Initial to 1200");
+                out_bytes.resize(1200, 0);
+            }
+            let ret = Ok(Some(Datagram::new(path.local, path.remote, out_bytes)));
+            self.path = Some(path);
+            ret
         }
-
-        // Pad Initial packets sent by the client to 1200 bytes.
-        if self.role == Role::Client && needs_padding {
-            qdebug!([self] "pad Initial to 1200");
-            out_bytes.resize(1200, 0);
-        }
-        Ok(Some(Datagram::new(path.local, path.remote, out_bytes)))
     }
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
@@ -1930,6 +1930,7 @@ impl ::std::fmt::Display for Connection {
 mod tests {
     use super::*;
     use crate::frame::StreamType;
+    use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
 
     // This is fabulous: because test_fixture uses the public API for Connection,
