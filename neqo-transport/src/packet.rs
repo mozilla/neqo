@@ -32,6 +32,8 @@ const SAMPLE_SIZE: usize = 16;
 
 const AUTH_TAG_LEN: usize = 16;
 
+const MAX_BODY_LEN: usize = 1500;
+
 #[derive(Debug, PartialEq)]
 pub enum PacketType {
     Short,
@@ -148,6 +150,44 @@ impl PacketHdr {
 
     pub fn body_len(&self) -> usize {
         self.body_len
+    }
+
+    // header length plus auth tag
+    pub fn overhead(&self) -> usize {
+        match &self.tipe {
+            PacketType::Short => {
+                let mut enc = Encoder::default();
+                // Leading byte.
+                let pnl = pn_length(self.pn);
+                enc.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | encode_pnl(pnl));
+                enc.encode(&self.dcid.0);
+                enc.encode_uint(pnl, self.pn);
+                enc.len() + AUTH_TAG_LEN
+            }
+            PacketType::VN(_) => encode_packet_vn(&self).len(),
+            PacketType::Retry { .. } => encode_retry(&self).len(),
+            PacketType::Initial(..) | PacketType::ZeroRTT | PacketType::Handshake => {
+                let mut enc = Encoder::default();
+
+                let pnl = pn_length(self.pn);
+                enc.encode_byte(
+                    PACKET_BIT_LONG
+                        | PACKET_BIT_FIXED_QUIC
+                        | self.tipe.code() << 4
+                        | encode_pnl(pnl),
+                );
+                enc.encode_uint(4, self.version.unwrap());
+                enc.encode_vec(1, &*self.dcid);
+                enc.encode_vec(1, &*self.scid.as_ref().unwrap());
+
+                if let PacketType::Initial(token) = &self.tipe {
+                    enc.encode_vvec(&token);
+                }
+                enc.encode_varint((pnl + MAX_BODY_LEN + AUTH_TAG_LEN) as u64);
+                enc.encode_uint(pnl, self.pn);
+                enc.len() + AUTH_TAG_LEN
+            }
+        }
     }
 }
 
@@ -417,7 +457,10 @@ fn encode_packet_short(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> 
     enc.encode(&hdr.dcid.0);
     enc.encode_uint(pnl, hdr.pn);
 
-    encrypt_packet(crypto, hdr, enc, body)
+    eprintln!("A {}", hdr.overhead() + body.len());
+    let x = encrypt_packet(crypto, hdr, enc, body);
+    eprintln!("B {}", x.len());
+    x
 }
 
 pub fn encode_packet_vn(hdr: &PacketHdr) -> Vec<u8> {

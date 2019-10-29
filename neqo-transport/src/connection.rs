@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::{self, Debug};
-use std::mem;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -155,6 +154,14 @@ impl Path {
 
     pub fn received_on(&self, d: &Datagram) -> bool {
         self.local == d.destination() && self.remote == d.source()
+    }
+
+    fn mtu(&self) -> usize {
+        if self.local.is_ipv4() {
+            1252
+        } else {
+            1232 // IPv6
+        }
     }
 }
 
@@ -450,14 +457,6 @@ impl Connection {
     /// Set a local transport parameter, possibly overriding a default value.
     pub fn set_local_tparam(&self, key: u16, value: TransportParameter) {
         self.tps.borrow_mut().local.set(key, value)
-    }
-
-    fn pmtu(&self) -> usize {
-        match &self.path {
-            Some(path) if path.local.is_ipv4() => 1252,
-            Some(_) => 1232, // IPv6
-            None => 1280,
-        }
     }
 
     /// Set the connection ID that was originally chosen by the client.
@@ -873,7 +872,11 @@ impl Connection {
         let largest_acknowledged = self
             .loss_recovery
             .largest_acknowledged_pn(PNSpace::from(hdr.epoch));
-        match self.crypto.obtain_crypto_state(self.role, hdr.epoch) {
+        match self
+            .crypto
+            .states
+            .obtain_crypto_state(self.role, hdr.epoch, &self.crypto.tls)
+        {
             Ok(CryptoState { rx: Some(rx), .. }) => {
                 let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
                 decrypt_packet(rx, pn_decoder, &mut hdr, slc).ok()
@@ -967,42 +970,40 @@ impl Connection {
 
     fn output(&mut self, now: Instant) -> Option<Datagram> {
         let mut out = None;
-        // Can't call a method on self while iterating over self.paths
-        let paths = mem::replace(&mut self.path, Default::default());
-        for p in &paths {
-            match self.output_pkt_for_path(&p, now) {
-                Ok(Some(dgram)) => {
-                    out = Some(dgram);
-                    break;
+        if self.path.is_some() {
+            match self.output_pkt_for_path(now) {
+                Ok(res) => {
+                    out = res;
                 }
                 Err(e) => {
                     if !matches!(self.state, State::Closing{..}) {
                         // An error here causes us to transition to closing.
                         self.absorb_error(now, Err(e));
                         // Rerun to give a chance to send a CONNECTION_CLOSE.
-                        out = match self.output_pkt_for_path(&p, now) {
+                        out = match self.output_pkt_for_path(now) {
                             Ok(x) => x,
                             Err(e) => {
                                 qwarn!([self] "two output_path errors in a row: {:?}", e);
                                 None
                             }
                         };
-                        break;
                     }
                 }
-                _ => (),
             };
         }
-        self.path = paths;
         out
     }
 
     #[allow(clippy::cognitive_complexity)]
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
-    fn output_pkt_for_path(&mut self, path: &Path, now: Instant) -> Res<Option<Datagram>> {
+    fn output_pkt_for_path(&mut self, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
         let mut needs_padding = false;
+        let path = self
+            .path
+            .take()
+            .expect("we know we have a path because calling fn checked");
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -1012,10 +1013,44 @@ impl Connection {
             let mut tokens = Vec::new();
 
             // Ensure we have tx crypto state for this epoch, or skip it.
-            match self.crypto.obtain_crypto_state(self.role, epoch) {
-                Ok(CryptoState { tx: Some(_), .. }) => {}
-                _ => continue,
-            }
+            let tx =
+                match self
+                    .crypto
+                    .states
+                    .obtain_crypto_state(self.role, epoch, &self.crypto.tls)
+                {
+                    Ok(CryptoState { tx: Some(tx), .. }) => tx,
+                    _ => continue,
+                };
+
+            let hdr = PacketHdr::new(
+                0,
+                match epoch {
+                    0 => {
+                        let token = match &self.retry_info {
+                            Some(v) => v.token.clone(),
+                            _ => Vec::new(),
+                        };
+                        PacketType::Initial(token)
+                    }
+                    1 => {
+                        if self.zero_rtt_state == ZeroRttState::Rejected {
+                            continue;
+                        }
+                        //assert!(self.zero_rtt_state != ZeroRttState::Rejected);
+                        self.zero_rtt_state = ZeroRttState::Sending;
+                        PacketType::ZeroRTT
+                    }
+                    2 => PacketType::Handshake,
+                    3 => PacketType::Short,
+                    _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
+                },
+                Some(self.version),
+                path.remote_cid.clone(),
+                path.local_cids.first().cloned(),
+                self.loss_recovery.next_pn(space),
+                epoch,
+            );
 
             let mut ack_eliciting = false;
             let mut has_padding = false;
@@ -1027,30 +1062,35 @@ impl Connection {
                             OutputMode::CongestionControlled => {
                                 let cong_window =
                                     usize::try_from(self.loss_recovery.cwnd()).unwrap();
-                                let remaining =
-                                    min(self.pmtu() - out_bytes.len() - encoder.len(), cong_window);
+                                let remaining = min(
+                                    path.mtu() - out_bytes.len() - encoder.len() - hdr.overhead(),
+                                    cong_window,
+                                );
                                 if remaining == 0 {
                                     break;
                                 }
 
-                                // Check sources in turn for available frames
-                                if let Some((frame, token)) = self
-                                    .acks
-                                    .get_frame(now, epoch)
-                                    .or_else(|| {
-                                        self.crypto.get_frame(epoch, TxMode::Normal, remaining)
-                                    })
-                                    .or_else(|| {
-                                        self.flow_mgr.borrow_mut().get_frame(epoch, remaining)
-                                    })
-                                    .or_else(|| {
-                                        self.send_streams.get_frame(
-                                            epoch,
-                                            TxMode::Normal,
-                                            remaining,
-                                        )
-                                    })
-                                {
+                                // Try to get a frame from frame sources
+                                let mut frame = self.acks.get_frame(now, epoch);
+                                if frame.is_none() {
+                                    frame = self.crypto.streams.get_frame(
+                                        epoch,
+                                        TxMode::Normal,
+                                        remaining,
+                                    )
+                                };
+                                if frame.is_none() {
+                                    frame = self.flow_mgr.borrow_mut().get_frame(epoch, remaining);
+                                }
+                                if frame.is_none() {
+                                    frame = self.send_streams.get_frame(
+                                        epoch,
+                                        TxMode::Normal,
+                                        remaining,
+                                    )
+                                }
+
+                                if let Some((frame, token)) = frame {
                                     ack_eliciting |= frame.ack_eliciting();
                                     if let Frame::Padding = frame {
                                         has_padding |= true;
@@ -1068,7 +1108,7 @@ impl Connection {
                             // something, even if it's old and not lost, or just
                             // a ping.
                             OutputMode::ProbeTimeout => {
-                                let remaining = self.pmtu() - out_bytes.len() - encoder.len();
+                                let remaining = path.mtu() - out_bytes.len() - encoder.len();
                                 if remaining == 0 {
                                     break;
                                 }
@@ -1082,31 +1122,29 @@ impl Connection {
                                 // iteration to get the next stream, which is
                                 // not implemented.  Only include one frame for
                                 // now.
-                                match self
-                                    .crypto
-                                    .get_frame(epoch, TxMode::Pto, remaining)
-                                    .or_else(|| {
+                                let mut frame =
+                                    self.crypto.streams.get_frame(epoch, TxMode::Pto, remaining);
+                                if frame.is_none() {
+                                    frame =
                                         self.send_streams.get_frame(epoch, TxMode::Pto, remaining)
-                                    }) {
-                                    Some((frame, token)) => {
-                                        ack_eliciting |= frame.ack_eliciting();
-                                        frame.marshal(&mut encoder);
-                                        if let Some(t) = token {
-                                            tokens.push(t);
-                                        }
-                                        break;
-                                    }
-                                    None => {
-                                        let need_to_send_something = epoch == 3
-                                            && out_bytes.is_empty()
-                                            && encoder.is_empty();
+                                }
 
-                                        if need_to_send_something {
-                                            Frame::Ping.marshal(&mut encoder);
-                                            has_padding |= true;
-                                        }
-                                        break;
+                                if let Some((frame, token)) = frame {
+                                    ack_eliciting |= frame.ack_eliciting();
+                                    frame.marshal(&mut encoder);
+                                    if let Some(t) = token {
+                                        tokens.push(t);
                                     }
+                                    break;
+                                } else {
+                                    let need_to_send_something =
+                                        epoch == 3 && out_bytes.is_empty() && encoder.is_empty();
+
+                                    if need_to_send_something {
+                                        Frame::Ping.marshal(&mut encoder);
+                                        has_padding |= true;
+                                    }
+                                    break;
                                 }
                             }
                         };
@@ -1135,12 +1173,12 @@ impl Connection {
                 State::Closed { .. } => unimplemented!(),
             }
 
-            assert!(encoder.len() <= self.pmtu());
+            assert!(encoder.len() <= path.mtu());
             if encoder.len() == 0 {
                 continue;
             }
 
-            qdebug!([self] "Need to send a packet");
+            qdebug!("Need to send a packet");
             match epoch {
                 // Packets containing Initial packets need padding.
                 0 => needs_padding = true,
@@ -1148,40 +1186,9 @@ impl Connection {
                 // ...unless they include higher epochs.
                 _ => needs_padding = false,
             }
-            let hdr = PacketHdr::new(
-                0,
-                match epoch {
-                    0 => {
-                        let token = match &self.retry_info {
-                            Some(v) => v.token.clone(),
-                            _ => Vec::new(),
-                        };
-                        PacketType::Initial(token)
-                    }
-                    1 => {
-                        assert!(self.zero_rtt_state != ZeroRttState::Rejected);
-                        self.zero_rtt_state = ZeroRttState::Sending;
-                        PacketType::ZeroRTT
-                    }
-                    2 => PacketType::Handshake,
-                    3 => PacketType::Short,
-                    _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
-                },
-                Some(self.version),
-                path.remote_cid.clone(),
-                path.local_cids.first().cloned(),
-                self.loss_recovery.next_pn(space),
-                epoch,
-            );
+
             self.stats.packets_tx += 1;
 
-            let tx = self
-                .crypto
-                .obtain_crypto_state(self.role, hdr.epoch)
-                .expect("verified above")
-                .tx
-                .as_ref()
-                .expect("verified above");
             let mut packet = encode_packet(tx, &hdr, &encoder);
 
             if self.output_mode != OutputMode::ProbeTimeout {
@@ -1201,25 +1208,30 @@ impl Connection {
 
             dump_packet(self, "TX ->", &hdr, &encoder);
             out_bytes.append(&mut packet);
-            if out_bytes.len() >= self.pmtu() {
+            if out_bytes.len() >= path.mtu() {
                 break;
             }
         }
 
-        if out_bytes.is_empty() {
-            assert!(self.output_mode != OutputMode::ProbeTimeout);
-            return Ok(None);
-        }
-
-        // Pad Initial packets sent by the client to 1200 bytes.
-        if self.role == Role::Client && needs_padding {
-            qdebug!([self] "pad Initial to 1200");
-            out_bytes.resize(1200, 0);
-        }
+        // TODO: why??
         if self.output_mode == OutputMode::ProbeTimeout {
             self.output_mode = OutputMode::CongestionControlled;
         }
-        Ok(Some(Datagram::new(path.local, path.remote, out_bytes)))
+
+        if out_bytes.is_empty() {
+            assert!(self.output_mode != OutputMode::ProbeTimeout);
+            self.path = Some(path);
+            Ok(None)
+        } else {
+            // Pad Initial packets sent by the client to 1200 bytes.
+            if self.role == Role::Client && needs_padding {
+                qdebug!([self] "pad Initial to 1200");
+                out_bytes.resize(1200, 0);
+            }
+            let ret = Ok(Some(Datagram::new(path.local, path.remote, out_bytes)));
+            self.path = Some(path);
+            ret
+        }
     }
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
@@ -1253,7 +1265,7 @@ impl Connection {
         for r in records {
             assert_eq!(r.ct, 22);
             qdebug!([self] "Adding CRYPTO data {:?}", r);
-            self.crypto.streams[r.epoch as usize].tx.send(&r.data);
+            self.crypto.streams.send(r.epoch, &r.data);
         }
     }
 
@@ -1400,11 +1412,10 @@ impl Connection {
                     offset,
                     &data
                 );
-                let rx = &mut self.crypto.streams[epoch as usize].rx;
-                rx.inbound_frame(offset, data)?;
-                if rx.data_ready() {
+                self.crypto.streams.inbound_frame(epoch, offset, data)?;
+                if self.crypto.streams.data_ready(epoch) {
                     let mut buf = Vec::new();
-                    let read = rx.read_to_end(&mut buf)?;
+                    let read = self.crypto.streams.read_to_end(epoch, &mut buf)?;
                     qdebug!("Read {} bytes", read);
                     self.handshake(now, epoch, Some(&buf))?;
                 }
@@ -2027,6 +2038,7 @@ impl ::std::fmt::Display for Connection {
 mod tests {
     use super::*;
     use crate::frame::StreamType;
+    use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
 
     // This is fabulous: because test_fixture uses the public API for Connection,
@@ -3056,13 +3068,13 @@ mod tests {
         assert_eq!(res, Output::Callback(Duration::from_secs(60)));
 
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        assert_eq!(client.stream_send(2, &vec![0xbb; 2000]).unwrap(), 2000);
+        assert_eq!(client.stream_send(2, &[0xbb; 2000]).unwrap(), 2000);
         let pkt0 = client.process(None, now);
         assert!(matches!(pkt0, Output::Datagram(_)));
-        assert_eq!(pkt0.as_dgram_ref().unwrap().len(), 1305);
+        assert_eq!(pkt0.as_dgram_ref().unwrap().len(), 1232);
         let pkt1 = client.process(None, now);
         assert!(matches!(pkt1, Output::Datagram(_)));
-        assert_eq!(pkt1.as_dgram_ref().unwrap().len(), 755);
+        assert_eq!(pkt1.as_dgram_ref().unwrap().len(), 828);
         let out = client.process(None, now);
         assert!(matches!(out, Output::Callback(_)));
     }
