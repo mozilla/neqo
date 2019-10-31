@@ -16,6 +16,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 pub struct Http3Server {
+    conn: Connection,
     base_handler: Http3Connection<Http3ServerEvents, TransactionServer, Http3ServerHandler>,
 }
 
@@ -35,53 +36,51 @@ impl Http3Server {
         max_blocked_streams: u16,
     ) -> Res<Http3Server> {
         Ok(Http3Server {
-            base_handler: Http3Connection::new_server(
-                certs,
-                protocols,
-                anti_replay,
-                cid_manager,
-                max_table_size,
-                max_blocked_streams,
-            )?,
+            conn: Connection::new_server(certs, protocols, anti_replay, cid_manager)?,
+            base_handler: Http3Connection::new(max_table_size, max_blocked_streams)?,
         })
     }
 
     fn role(&self) -> Role {
-        self.base_handler.role()
+        self.conn.role()
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         qtrace!([self], "Process.");
-        self.base_handler.process(dgram, now)
+        if let Some(d) = dgram {
+            self.process_input(d, now);
+        }
+        self.process_http3(now);
+        self.process_output(now)
     }
 
     pub fn process_input(&mut self, dgram: Datagram, now: Instant) {
         qtrace!([self], "Process input.");
-        self.base_handler.process_input(dgram, now);
+        self.conn.process_input(dgram, now);
     }
 
     pub fn process_timer(&mut self, now: Instant) {
         qtrace!([self], "Process timer.");
-        self.base_handler.process_timer(now);
+        self.conn.process_timer(now);
     }
 
     pub fn conn(&mut self) -> &mut Connection {
-        &mut self.base_handler.conn
+        &mut self.conn
     }
 
     pub fn process_http3(&mut self, now: Instant) {
         qtrace!([self], "Process http3 internal.");
-        self.base_handler.process_http3(now);
+        self.base_handler.process_http3(&mut self.conn, now);
     }
 
     pub fn process_output(&mut self, now: Instant) -> Output {
         qtrace!([self], "Process output.");
-        self.base_handler.process_output(now)
+        self.conn.process_output(now)
     }
 
     pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
         qinfo!([self], "Close connection.");
-        self.base_handler.close(now, error, msg);
+        self.base_handler.close(&mut self.conn, now, error, msg);
     }
 
     pub fn state(&self) -> Http3State {
@@ -125,12 +124,14 @@ impl Http3Server {
             stream_id,
             app_error
         );
-        self.base_handler.stream_stop_sending(stream_id, app_error)
+        self.conn.stream_stop_sending(stream_id, app_error)?;
+        Ok(())
     }
 
     pub fn stream_reset(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
         qdebug!([self], "reset stream_id:{} error:{}.", stream_id, app_error);
-        self.base_handler.stream_reset(stream_id, app_error)
+        self.base_handler
+            .stream_reset(&mut self.conn, stream_id, app_error)
     }
 }
 

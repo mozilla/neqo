@@ -17,6 +17,7 @@ mod server_events;
 mod stream_type_reader;
 mod transaction_client;
 pub mod transaction_server;
+//pub mod server;
 
 use neqo_qpack;
 use neqo_transport;
