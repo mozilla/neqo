@@ -457,10 +457,7 @@ fn encode_packet_short(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> 
     enc.encode(&hdr.dcid.0);
     enc.encode_uint(pnl, hdr.pn);
 
-    eprintln!("A {}", hdr.overhead() + body.len());
-    let x = encrypt_packet(crypto, hdr, enc, body);
-    eprintln!("B {}", x.len());
-    x
+    encrypt_packet(crypto, hdr, enc, body)
 }
 
 pub fn encode_packet_vn(hdr: &PacketHdr) -> Vec<u8> {

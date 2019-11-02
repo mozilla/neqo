@@ -387,9 +387,11 @@ impl LossRecovery {
     }
 
     pub fn next_pn(&mut self, pn_space: PNSpace) -> u64 {
-        let val = self.spaces[pn_space].tx_pn;
+        self.spaces[pn_space].tx_pn
+    }
+
+    pub fn inc_pn(&mut self, pn_space: PNSpace) {
         self.spaces[pn_space].tx_pn += 1;
-        val
     }
 
     pub fn increment_pto_count(&mut self) {
@@ -461,17 +463,18 @@ impl LossRecovery {
         let space = &mut self.spaces[pn_space];
         if Some(largest_acked) > space.largest_acked {
             space.largest_acked = Some(largest_acked);
-            space.largest_acked_sent_time = Some(now);
 
             // If the largest acknowledged is newly acked and any newly acked
             // packet was ack-eliciting, update the RTT. (-recovery 5.1)
             let largest_acked_pkt = acked_packets.get(&largest_acked).expect("must be there");
+            space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
             if any_ack_eliciting {
                 let latest_rtt = now - largest_acked_pkt.time_sent;
                 self.rtt_vals.update_rtt(latest_rtt, ack_delay);
             }
         }
         let largest_acked_sent_time = space.largest_acked_sent_time;
+        // ^^ copy into local so self.spaces no longer borrowed
 
         // TODO Process ECN information if present.
 

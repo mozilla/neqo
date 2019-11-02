@@ -893,6 +893,15 @@ mod tests {
 
         let res = rt.first_unmarked_range();
         assert_eq!(res, (0, Some(5)));
+        assert_eq!(
+            rt.used.iter().next().unwrap(),
+            (&5, &(5, RangeState::Acked))
+        );
+        assert_eq!(
+            rt.used.iter().nth(1).unwrap(),
+            (&13, &(2, RangeState::Sent))
+        );
+        assert!(rt.used.iter().nth(2).is_none());
         rt.mark_range(0, 5, RangeState::Sent);
 
         let res = rt.first_unmarked_range();

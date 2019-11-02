@@ -243,12 +243,7 @@ impl std::fmt::Display for CryptoStates {
 
 impl CryptoStates {
     // Get a crypto state, making it if necessary, otherwise return an error.
-    pub fn obtain_crypto_state(
-        &mut self,
-        role: Role,
-        epoch: Epoch,
-        tls: &Agent,
-    ) -> Res<&mut CryptoState> {
+    pub fn obtain(&mut self, role: Role, epoch: Epoch, tls: &Agent) -> Res<&mut CryptoState> {
         #[cfg(debug_assertions)]
         let label = format!("{}", self);
         #[cfg(not(debug_assertions))]
@@ -263,12 +258,11 @@ impl CryptoStates {
                 (1, _) => tls.preinfo()?.early_data_cipher(),
                 (_, None) => tls.preinfo()?.cipher_suite(),
                 (_, Some(info)) => Some(info.cipher_suite()),
-            };
-            if cipher.is_none() {
-                qdebug!([label] "cipher info not available yet");
-                return Err(Error::KeysNotFound);
             }
-            let cipher = cipher.unwrap();
+            .ok_or_else(|| {
+                qdebug!([label] "cipher info not available yet");
+                Error::KeysNotFound
+            })?;
 
             let rx = tls
                 .read_secret(epoch)

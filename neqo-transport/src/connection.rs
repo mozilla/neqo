@@ -875,7 +875,7 @@ impl Connection {
         match self
             .crypto
             .states
-            .obtain_crypto_state(self.role, hdr.epoch, &self.crypto.tls)
+            .obtain(self.role, hdr.epoch, &self.crypto.tls)
         {
             Ok(CryptoState { rx: Some(rx), .. }) => {
                 let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
@@ -1013,15 +1013,14 @@ impl Connection {
             let mut tokens = Vec::new();
 
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let tx =
-                match self
-                    .crypto
-                    .states
-                    .obtain_crypto_state(self.role, epoch, &self.crypto.tls)
-                {
-                    Ok(CryptoState { tx: Some(tx), .. }) => tx,
-                    _ => continue,
-                };
+            let tx = match self
+                .crypto
+                .states
+                .obtain(self.role, epoch, &self.crypto.tls)
+            {
+                Ok(CryptoState { tx: Some(tx), .. }) => tx,
+                _ => continue,
+            };
 
             let hdr = PacketHdr::new(
                 0,
@@ -1037,7 +1036,6 @@ impl Connection {
                         if self.zero_rtt_state == ZeroRttState::Rejected {
                             continue;
                         }
-                        //assert!(self.zero_rtt_state != ZeroRttState::Rejected);
                         self.zero_rtt_state = ZeroRttState::Sending;
                         PacketType::ZeroRTT
                     }
@@ -1188,6 +1186,7 @@ impl Connection {
             }
 
             self.stats.packets_tx += 1;
+            self.loss_recovery.inc_pn(space);
 
             let mut packet = encode_packet(tx, &hdr, &encoder);
 
@@ -2995,14 +2994,9 @@ mod tests {
         assert!(matches!(out, Output::Callback(_)));
 
         // Process these by server, skipping first packet
-        let srv0 = server.process(pkt1.dgram(), now + Duration::from_secs(10));
-        assert!(matches!(srv0, Output::Callback(_)));
-        let srv_pkt1 = server.process(
-            None,
-            now + Duration::from_secs(10) + Duration::from_millis(20),
-        );
-        // ack client pkt 1
-        assert!(matches!(srv_pkt1, Output::Datagram(_)));
+        let srv0_pkt1 = server.process(pkt1.dgram(), now + Duration::from_secs(10));
+        // ooo, ack client pkt 1
+        assert!(matches!(srv0_pkt1, Output::Datagram(_)));
 
         // process pkt2 (no ack yet)
         let srv2 = server.process(
@@ -3027,15 +3021,10 @@ mod tests {
         // client resends data from pkt0
         assert!(matches!(pkt4, Output::Datagram(_)));
 
-        // server sees pkt0 and generates ack
-        let srv3 = server.process(
+        // server sees ooo pkt0 and generates ack
+        let srv_pkt2 = server.process(
             pkt0.dgram(),
             now + Duration::from_secs(10) + Duration::from_millis(40),
-        );
-        assert!(matches!(srv3, Output::Callback(_)));
-        let srv_pkt2 = server.process(
-            None,
-            now + Duration::from_secs(10) + Duration::from_millis(60),
         );
         assert!(matches!(srv_pkt2, Output::Datagram(_)));
 
@@ -3046,7 +3035,7 @@ mod tests {
         );
         assert!(matches!(pkt5, Output::Callback(_)));
 
-        // PTO expires. No data. Only send PING.
+        // PTO expires. No unacked data. Only send PING.
         let pkt6 = client.process(
             None,
             now + Duration::from_secs(10) + Duration::from_millis(110),
@@ -3057,7 +3046,8 @@ mod tests {
     }
 
     #[test]
-    fn do_not_retransmit_acked_data() {
+    // Absent path PTU discovery, max v6 packet size should be 1232.
+    fn verify_pkt_honors_mtu() {
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -3067,16 +3057,12 @@ mod tests {
         let res = client.process(None, now);
         assert_eq!(res, Output::Callback(Duration::from_secs(60)));
 
+        // Try to send a large stream and verify first packet is correctly sized
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_send(2, &[0xbb; 2000]).unwrap(), 2000);
         let pkt0 = client.process(None, now);
         assert!(matches!(pkt0, Output::Datagram(_)));
         assert_eq!(pkt0.as_dgram_ref().unwrap().len(), 1232);
-        let pkt1 = client.process(None, now);
-        assert!(matches!(pkt1, Output::Datagram(_)));
-        assert_eq!(pkt1.as_dgram_ref().unwrap().len(), 828);
-        let out = client.process(None, now);
-        assert!(matches!(out, Output::Callback(_)));
     }
 
     #[test]
