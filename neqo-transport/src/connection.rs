@@ -1052,18 +1052,17 @@ impl Connection {
 
             let mut ack_eliciting = false;
             let mut has_padding = false;
+            let cong_avail = usize::try_from(self.loss_recovery.cwnd_avail()).unwrap();
+
             match &self.state {
                 State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
                     loop {
                         match self.output_mode {
                             // Send as much new data as congestion control allows.
                             OutputMode::CongestionControlled => {
-                                let cong_window =
-                                    usize::try_from(self.loss_recovery.cwnd()).unwrap();
-                                let remaining = min(
-                                    path.mtu() - out_bytes.len() - encoder.len() - hdr.overhead(),
-                                    cong_window,
-                                );
+                                let used = out_bytes.len() + encoder.len() + hdr.overhead();
+                                let remaining =
+                                    min(path.mtu() - used, cong_avail.saturating_sub(used));
                                 if remaining == 0 {
                                     break;
                                 }
@@ -1076,7 +1075,7 @@ impl Connection {
                                         TxMode::Normal,
                                         remaining,
                                     )
-                                };
+                                }
                                 if frame.is_none() {
                                     frame = self.flow_mgr.borrow_mut().get_frame(epoch, remaining);
                                 }
@@ -1206,6 +1205,7 @@ impl Connection {
             }
 
             dump_packet(self, "TX ->", &hdr, &encoder);
+
             out_bytes.append(&mut packet);
             if out_bytes.len() >= path.mtu() {
                 break;
@@ -1456,6 +1456,10 @@ impl Connection {
             Frame::DataBlocked { data_limit } => {
                 // Should never happen since we set data limit to 2^62-1
                 qwarn!([self] "Received DataBlocked with data limit {}", data_limit);
+                // But if it does, open it up a lot
+                self.flow_mgr
+                    .borrow_mut()
+                    .max_data(min(data_limit * 4, 0x3FFF_FFFF_FFFF_FFFE));
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
                 // TODO(agrover@mozilla.com): how should we be using
@@ -2990,7 +2994,6 @@ mod tests {
 
         // Nothing to do, should return callback
         let out = client.process(None, now + Duration::from_secs(10));
-        qerror!("CC {:?}", out);
         assert!(matches!(out, Output::Callback(_)));
 
         // Process these by server, skipping first packet
@@ -3071,6 +3074,61 @@ mod tests {
         let mut server = default_server();
         connect(&mut client, &mut server);
 
-        let _now = now();
+        let now = now();
+
+        // Try to send a lot of data
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, &[0xab; 100_000]).unwrap(), 16383);
+
+        qerror!("client");
+        let mut c_tx_dgrams = Vec::new();
+        loop {
+            let pkt = client.process(None, now);
+            if pkt.as_dgram_ref().is_some() {
+                c_tx_dgrams.push(pkt.dgram().unwrap())
+            } else {
+                assert!(matches!(pkt, Output::Callback(_)));
+                break;
+            }
+        }
+
+        // blocked by conn flow control before cong window
+        assert_eq!(c_tx_dgrams.len(), 10);
+
+        // ACK stuff
+        qerror!("server");
+        let mut s_tx_dgrams = Vec::new();
+        for c_dgram in c_tx_dgrams {
+            if let Output::Datagram(dg) = server.process(Some(c_dgram), now) {
+                s_tx_dgrams.push(dg)
+            }
+        }
+
+        assert_eq!(s_tx_dgrams.len(), 9);
+
+        // Handle acks
+        qerror!("client");
+        let mut c_tx_dgrams: Vec<Datagram> = Vec::new();
+        for s_dgram in s_tx_dgrams {
+            if let Output::Datagram(dg) = client.process(Some(s_dgram), now) {
+                c_tx_dgrams.push(dg)
+            }
+        }
+
+        // Try to send more. Has cwnd opened???
+        assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 16383);
+        loop {
+            let pkt = client.process(None, now);
+            if pkt.as_dgram_ref().is_some() {
+                qerror!("1");
+                c_tx_dgrams.push(pkt.dgram().unwrap())
+            } else {
+                qerror!("2");
+                assert!(matches!(pkt, Output::Callback(_)));
+                break;
+            }
+        }
+
+        assert_eq!(c_tx_dgrams.len(), 99);
     }
 }

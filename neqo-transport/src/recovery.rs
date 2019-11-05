@@ -253,8 +253,10 @@ impl Display for CongestionControl {
 }
 
 impl CongestionControl {
-    fn cwnd(&self) -> u64 {
-        self.congestion_window
+    fn cwnd_avail(&self) -> u64 {
+        // BIF can be higher than cwnd due to PTO packets, which are sent even
+        // if avail is 0, but still count towards BIF.
+        self.congestion_window.saturating_sub(self.bytes_in_flight)
     }
 
     fn on_ack_received(&mut self, pkt: &SentPacket) {
@@ -315,6 +317,7 @@ impl CongestionControl {
 
     fn on_packet_sent(&mut self, size: usize) {
         self.bytes_in_flight += u64::try_from(size).unwrap();
+        assert!(self.bytes_in_flight <= self.congestion_window);
         qdebug!(
             [self],
             "Pkt Sent len {}, bif {}, cwnd {}",
@@ -322,7 +325,6 @@ impl CongestionControl {
             self.bytes_in_flight,
             self.congestion_window
         );
-        assert!(self.bytes_in_flight <= self.congestion_window);
     }
 
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
@@ -339,7 +341,7 @@ impl CongestionControl {
             self.congestion_window /= 2; // kLossReductionFactor = 0.5
             self.congestion_window = max(self.congestion_window, MIN_CONG_WINDOW);
             self.ssthresh = self.congestion_window;
-            qdebug!(
+            qinfo!(
                 [self],
                 "Cong event -> recovery; cwnd {}, ssthresh {}",
                 self.congestion_window,
@@ -382,8 +384,8 @@ impl LossRecovery {
         }
     }
 
-    pub fn cwnd(&self) -> u64 {
-        self.cc.cwnd()
+    pub fn cwnd_avail(&self) -> u64 {
+        self.cc.cwnd_avail()
     }
 
     pub fn next_pn(&mut self, pn_space: PNSpace) -> u64 {
@@ -473,8 +475,8 @@ impl LossRecovery {
                 self.rtt_vals.update_rtt(latest_rtt, ack_delay);
             }
         }
+        // Copy into local so self.spaces no longer borrowed
         let largest_acked_sent_time = space.largest_acked_sent_time;
-        // ^^ copy into local so self.spaces no longer borrowed
 
         // TODO Process ECN information if present.
 
@@ -572,9 +574,6 @@ impl LossRecovery {
             };
 
             if lost && packet.time_declared_lost.is_none() {
-                // TODO
-                // Inform the congestion controller of lost packets.
-
                 // Track declared-lost packets for a little while, maybe they
                 // will still show up?
                 packet.time_declared_lost = Some(now);

@@ -16,7 +16,7 @@ use std::rc::Rc;
 use slice_deque::SliceDeque;
 use smallvec::SmallVec;
 
-use neqo_common::{matches, qerror, qinfo, qtrace, qwarn, Encoder};
+use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn, Encoder};
 
 use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
@@ -772,7 +772,7 @@ impl SendStreams {
         for (stream_id, stream) in self {
             let fin = stream.final_size();
             if let Some((offset, data)) = stream.next_bytes(mode) {
-                qtrace!(
+                qdebug!(
                     "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
                     stream_id.as_u64(),
                     offset,
