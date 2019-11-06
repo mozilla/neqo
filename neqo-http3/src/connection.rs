@@ -8,7 +8,7 @@ use crate::client_events::Http3ClientEvents;
 use crate::control_stream_local::{ControlStreamLocal, HTTP3_UNI_STREAM_TYPE_CONTROL};
 use crate::control_stream_remote::ControlStreamRemote;
 use crate::hframe::{HFrame, HSettingType};
-use crate::server_events::Http3ServerEvents;
+use crate::server_connection_events::Http3ServerConnEvents;
 use crate::stream_type_reader::NewStreamTypeReader;
 use crate::transaction_client::TransactionClient;
 use crate::transaction_server::TransactionServer;
@@ -88,6 +88,7 @@ pub enum Http3State {
     Closed(CloseError),
 }
 
+#[derive(Debug)]
 pub struct Http3Connection<E: Http3Events, T: Http3Transaction, H: Http3Handler<E, T>> {
     pub state: Http3State,
     max_header_list_size: u64,
@@ -114,11 +115,11 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>> ::std
 impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     Http3Connection<E, T, H>
 {
-    pub fn new(max_table_size: u32, max_blocked_streams: u16) -> Res<Self> {
+    pub fn new(max_table_size: u32, max_blocked_streams: u16) -> Self {
         if max_table_size > (1 << 30) - 1 {
             panic!("Wrong max_table_size");
         }
-        Ok(Http3Connection {
+        Http3Connection {
             state: Http3State::Initializing,
             max_header_list_size: MAX_HEADER_LIST_SIZE_DEFAULT,
             control_stream_local: ControlStreamLocal::default(),
@@ -131,7 +132,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
             events: E::default(),
             transactions: HashMap::new(),
             handler: H::new(),
-        })
+        }
     }
 
     fn initialize_http3_connection(&mut self, conn: &mut Connection) -> Res<()> {
@@ -175,6 +176,10 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
             Err(e) => {
                 qinfo!([self], "Connection error: {}.", e);
                 self.close(conn, now, e.code(), &format!("{}", e));
+                self.events
+                    .connection_state_change(Http3State::Closing(CloseError::Application(
+                        e.code(),
+                    )));
                 true
             }
             _ => false,
@@ -202,6 +207,10 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     pub fn insert_streams_have_data_to_send(&mut self, stream_id: u64) {
         self.streams_have_data_to_send.insert(stream_id);
+    }
+
+    pub fn has_data_to_send(&self) -> bool {
+        !self.streams_have_data_to_send.is_empty()
     }
 
     fn process_sending(&mut self, conn: &mut Connection) -> Res<()> {
@@ -772,17 +781,17 @@ impl ::std::fmt::Display for Http3ClientHandler {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Http3ServerHandler {}
 
-impl Http3Handler<Http3ServerEvents, TransactionServer> for Http3ServerHandler {
+impl Http3Handler<Http3ServerConnEvents, TransactionServer> for Http3ServerHandler {
     fn new() -> Self {
         Http3ServerHandler::default()
     }
 
     fn handle_stream_creatable(
         &mut self,
-        _events: &mut Http3ServerEvents,
+        _events: &mut Http3ServerConnEvents,
         _stream_type: StreamType,
     ) -> Res<()> {
         Ok(())
@@ -796,7 +805,7 @@ impl Http3Handler<Http3ServerEvents, TransactionServer> for Http3ServerHandler {
     fn handle_new_bidi_stream(
         &mut self,
         transactions: &mut HashMap<u64, TransactionServer>,
-        events: &mut Http3ServerEvents,
+        events: &mut Http3ServerConnEvents,
         stream_id: u64,
     ) -> Res<()> {
         transactions.insert(stream_id, TransactionServer::new(stream_id, events.clone()));
@@ -806,7 +815,7 @@ impl Http3Handler<Http3ServerEvents, TransactionServer> for Http3ServerHandler {
     fn handle_send_stream_writable(
         &mut self,
         _transactions: &mut HashMap<u64, TransactionServer>,
-        _events: &mut Http3ServerEvents,
+        _events: &mut Http3ServerConnEvents,
         _stream_id: u64,
     ) -> Res<()> {
         Ok(())
@@ -815,7 +824,7 @@ impl Http3Handler<Http3ServerEvents, TransactionServer> for Http3ServerHandler {
     fn handle_goaway(
         &mut self,
         _transactions: &mut HashMap<u64, TransactionServer>,
-        _events: &mut Http3ServerEvents,
+        _events: &mut Http3ServerConnEvents,
         _state: &mut Http3State,
         _goaway_stream_id: u64,
     ) -> Res<()> {
@@ -826,7 +835,7 @@ impl Http3Handler<Http3ServerEvents, TransactionServer> for Http3ServerHandler {
     fn handle_stream_stop_sending(
         &mut self,
         _transactions: &mut HashMap<u64, TransactionServer>,
-        _events: &mut Http3ServerEvents,
+        _events: &mut Http3ServerConnEvents,
         _conn: &mut Connection,
         _stop_stream_id: u64,
         _app_err: AppError,
@@ -840,7 +849,7 @@ impl Http3Handler<Http3ServerEvents, TransactionServer> for Http3ServerHandler {
         Ok(())
     }
 
-    fn handle_authentication_needed(&self, _events: &mut Http3ServerEvents) -> Res<()> {
+    fn handle_authentication_needed(&self, _events: &mut Http3ServerConnEvents) -> Res<()> {
         Err(Error::HttpInternalError)
     }
 }

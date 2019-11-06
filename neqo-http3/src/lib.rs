@@ -9,10 +9,11 @@
 mod client_events;
 mod connection;
 pub mod connection_client;
-pub mod connection_server;
+pub mod server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod hframe;
+mod server_connection_events;
 mod server_events;
 mod stream_type_reader;
 mod transaction_client;
@@ -26,8 +27,8 @@ pub use neqo_transport::Output;
 pub use client_events::Http3ClientEvent;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
-pub use connection_server::Http3Server;
 pub use neqo_qpack::Header;
+pub use server::Http3Server;
 pub use server_events::Http3ServerEvent;
 pub use transaction_server::TransactionServer;
 

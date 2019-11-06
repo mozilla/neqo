@@ -6,7 +6,7 @@
 
 use crate::connection::Http3Transaction;
 use crate::hframe::{HFrame, HFrameReader};
-use crate::server_events::Http3ServerEvents;
+use crate::server_connection_events::Http3ServerConnEvents;
 use crate::Header;
 use crate::{Error, Res};
 use neqo_common::{matches, qdebug, qinfo, qtrace, Encoder};
@@ -38,11 +38,11 @@ pub struct TransactionServer {
     send_state: TransactionSendState,
     stream_id: u64,
     frame_reader: HFrameReader,
-    conn_events: Http3ServerEvents,
+    conn_events: Http3ServerConnEvents,
 }
 
 impl TransactionServer {
-    pub fn new(stream_id: u64, conn_events: Http3ServerEvents) -> TransactionServer {
+    pub fn new(stream_id: u64, conn_events: Http3ServerConnEvents) -> TransactionServer {
         qinfo!("Create a request stream_id={}", stream_id);
         TransactionServer {
             recv_state: TransactionRecvState::WaitingForHeaders,

@@ -26,7 +26,7 @@ pub struct Http3Client {
 
 impl ::std::fmt::Display for Http3Client {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Http3 connection {:?}", self.role())
+        write!(f, "Http3 client")
     }
 }
 
@@ -48,7 +48,7 @@ impl Http3Client {
                 local_addr,
                 remote_addr,
             )?,
-            base_handler: Http3Connection::new(max_table_size, max_blocked_streams)?,
+            base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
         })
     }
 
@@ -59,7 +59,7 @@ impl Http3Client {
     ) -> Res<Http3Client> {
         Ok(Http3Client {
             conn: c,
-            base_handler: Http3Connection::new(max_table_size, max_blocked_streams)?,
+            base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
         })
     }
 
