@@ -355,7 +355,34 @@ impl Connection {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
     ) -> Res<Self> {
-        let dcid = ConnectionId::generate_initial();
+        let dcid = ConnectionId::generate_initial(true);
+        let local_cids = vec![cid_manager.borrow_mut().generate_cid()];
+        let mut c = Self::new(
+            Role::Client,
+            Client::new(server_name)?.into(),
+            cid_manager,
+            None,
+            protocols,
+            Some(Path {
+                local: local_addr,
+                remote: remote_addr,
+                local_cids,
+                remote_cid: dcid.clone(),
+            }),
+        );
+        c.crypto.create_initial_state(Role::Client, &dcid)?;
+        Ok(c)
+    }
+
+    #[cfg(test)]
+    pub fn new_client_fixed_len_dcid(
+        server_name: &str,
+        protocols: &[impl AsRef<str>],
+        cid_manager: CidMgr,
+        local_addr: SocketAddr,
+        remote_addr: SocketAddr,
+    ) -> Res<Self> {
+        let dcid = ConnectionId::generate_initial(false);
         let local_cids = vec![cid_manager.borrow_mut().generate_cid()];
         let mut c = Self::new(
             Role::Client,
@@ -1456,10 +1483,8 @@ impl Connection {
             Frame::DataBlocked { data_limit } => {
                 // Should never happen since we set data limit to 2^62-1
                 qwarn!([self] "Received DataBlocked with data limit {}", data_limit);
-                // But if it does, open it up a lot
-                self.flow_mgr
-                    .borrow_mut()
-                    .max_data(min(data_limit * 4, 0x3FFF_FFFF_FFFF_FFFE));
+                // But if it does, open it up all the way
+                self.flow_mgr.borrow_mut().max_data(0x3FFF_FFFF_FFFF_FFFE);
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
                 // TODO(agrover@mozilla.com): how should we be using
@@ -2052,7 +2077,7 @@ mod tests {
     // These are a direct copy of those functions.
     pub fn default_client() -> Connection {
         fixture_init();
-        Connection::new_client(
+        Connection::new_client_fixed_len_dcid(
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
@@ -3069,18 +3094,20 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cognitive_complexity)]
     fn congestion_control() {
         let mut client = default_client();
         let mut server = default_server();
+        let mut srv_buf = [0; 1_000_000];
         connect(&mut client, &mut server);
 
         let now = now();
 
         // Try to send a lot of data
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        assert_eq!(client.stream_send(2, &[0xab; 100_000]).unwrap(), 16383);
+        assert_eq!(client.stream_send(2, &[0xaa; 100_000]).unwrap(), 16383);
 
-        qerror!("client");
+        qinfo!("client");
         let mut c_tx_dgrams = Vec::new();
         loop {
             let pkt = client.process(None, now);
@@ -3092,43 +3119,94 @@ mod tests {
             }
         }
 
-        // blocked by conn flow control before cong window
-        assert_eq!(c_tx_dgrams.len(), 10);
+        assert_eq!(c_tx_dgrams.len(), 11);
 
-        // ACK stuff
-        qerror!("server");
-        let mut s_tx_dgrams = Vec::new();
+        // Recv all pkts and ACK
+        qinfo!("server");
         for c_dgram in c_tx_dgrams {
-            if let Output::Datagram(dg) = server.process(Some(c_dgram), now) {
-                s_tx_dgrams.push(dg)
-            }
+            server.process_input(c_dgram, now)
+        }
+        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (12261, false));
+        let mut s_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = server.process_output(now) {
+            s_tx_dgrams.push(dg);
         }
 
-        assert_eq!(s_tx_dgrams.len(), 9);
+        // ACK pkts 0-10
+        assert_eq!(s_tx_dgrams.len(), 1);
 
-        // Handle acks
-        qerror!("client");
-        let mut c_tx_dgrams: Vec<Datagram> = Vec::new();
+        // Handle ack, send more
+        qinfo!("client");
         for s_dgram in s_tx_dgrams {
-            if let Output::Datagram(dg) = client.process(Some(s_dgram), now) {
-                c_tx_dgrams.push(dg)
-            }
+            client.process_input(s_dgram, now)
         }
 
-        // Try to send more. Has cwnd opened???
-        assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 16383);
-        loop {
-            let pkt = client.process(None, now);
-            if pkt.as_dgram_ref().is_some() {
-                qerror!("1");
-                c_tx_dgrams.push(pkt.dgram().unwrap())
-            } else {
-                qerror!("2");
-                assert!(matches!(pkt, Output::Callback(_)));
-                break;
-            }
+        assert_eq!(client.stream_send(2, &[0xab; 100_000]).unwrap(), 49152);
+
+        let mut c_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = client.process_output(now) {
+            c_tx_dgrams.push(dg);
         }
 
-        assert_eq!(c_tx_dgrams.len(), 99);
+        assert_eq!(c_tx_dgrams.len(), 21);
+
+        // Recv all pkts and ACK
+        qinfo!("server");
+        for c_dgram in c_tx_dgrams {
+            server.process_input(c_dgram, now)
+        }
+        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (24575, false));
+        let mut s_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = server.process_output(now) {
+            s_tx_dgrams.push(dg);
+        }
+
+        // ACK pkts 0-31
+        assert_eq!(s_tx_dgrams.len(), 1);
+
+        // Handle ack, send more
+        qinfo!("client");
+        for s_dgram in s_tx_dgrams {
+            client.process_input(s_dgram, now)
+        }
+
+        // Cram more into the stream
+        assert_eq!(client.stream_send(2, &[0xab; 100_000]).unwrap(), 36836);
+
+        let mut c_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = client.process_output(now) {
+            c_tx_dgrams.push(dg);
+        }
+
+        assert_eq!(c_tx_dgrams.len(), 41);
+
+        // Packet dropped!
+        qinfo!("server");
+        c_tx_dgrams.remove(10);
+        for c_dgram in c_tx_dgrams {
+            server.process_input(c_dgram, now)
+        }
+        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (11985, false));
+        let mut s_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = server.process_output(now) {
+            s_tx_dgrams.push(dg);
+        }
+
+        // Handle ack, transition slow start -> cong avoidance due to dropped
+        // pkt
+        qinfo!("client");
+        for s_dgram in s_tx_dgrams {
+            client.process_input(s_dgram, now)
+        }
+
+        // Cram more into the stream, but nothing added
+        assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 0);
+
+        let mut c_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = client.process_output(now) {
+            c_tx_dgrams.push(dg);
+        }
+
+        assert_eq!(c_tx_dgrams.len(), 15);
     }
 }
