@@ -798,7 +798,7 @@ impl Connection {
     fn input(&mut self, d: Datagram, now: Instant) -> Res<()> {
         let mut slc = &d[..];
 
-        qinfo!([self] "input {}", hex( &**d));
+        qdebug!([self] "input {}", hex( &**d));
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
@@ -1239,7 +1239,8 @@ impl Connection {
             }
         }
 
-        // TODO: why??
+        // Sent a probe pkt. Another timeout will re-engage ProbeTimeout mode,
+        // but otherwise return to honoring CC.
         if self.output_mode == OutputMode::ProbeTimeout {
             self.output_mode = OutputMode::CongestionControlled;
         }
@@ -3180,9 +3181,11 @@ mod tests {
 
         assert_eq!(c_tx_dgrams.len(), 41);
 
-        // Packet dropped!
+        // Packets lost!
         qinfo!("server");
-        c_tx_dgrams.remove(10);
+        for _ in 0..25 {
+            c_tx_dgrams.remove(10);
+        }
         for c_dgram in c_tx_dgrams {
             server.process_input(c_dgram, now)
         }
@@ -3191,13 +3194,16 @@ mod tests {
         while let Output::Datagram(dg) = server.process_output(now) {
             s_tx_dgrams.push(dg);
         }
+        assert_eq!(s_tx_dgrams.len(), 1);
 
         // Handle ack, transition slow start -> cong avoidance due to dropped
-        // pkt
+        // pkts
         qinfo!("client");
         for s_dgram in s_tx_dgrams {
             client.process_input(s_dgram, now)
         }
+        let cong_cwnd = client.loss_recovery.cwnd();
+        assert_eq!(cong_cwnd, 35116);
 
         // Cram more into the stream, but nothing added
         assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 0);
@@ -3207,6 +3213,62 @@ mod tests {
             c_tx_dgrams.push(dg);
         }
 
-        assert_eq!(c_tx_dgrams.len(), 15);
+        // Constrained by cwnd
+        assert_eq!(c_tx_dgrams.len(), 29);
+        assert_eq!(
+            c_tx_dgrams.iter().map(|dg| dg.len() as u64).sum::<u64>(),
+            cong_cwnd
+        );
+
+        qinfo!("server");
+        for c_dgram in c_tx_dgrams {
+            server.process_input(c_dgram, now)
+        }
+        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (41353, false));
+        let mut s_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = server.process_output(now) {
+            s_tx_dgrams.push(dg);
+        }
+        assert_eq!(s_tx_dgrams.len(), 1);
+
+        // Since last batch was not sent later than cong period start, acking
+        // these should not get us out of congestion avoidance mode.
+        qinfo!("client");
+        for s_dgram in s_tx_dgrams {
+            client.process_input(s_dgram, now)
+        }
+        // cwnd should stay the same.
+        assert_eq!(cong_cwnd, client.loss_recovery.cwnd());
+
+        // Cram more into the stream
+        assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 53338);
+
+        let mut c_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = client.process_output(now + Duration::from_millis(100)) {
+            c_tx_dgrams.push(dg);
+        }
+
+        assert_eq!(c_tx_dgrams.len(), 29);
+
+        qinfo!("server");
+        for c_dgram in c_tx_dgrams {
+            server.process_input(c_dgram, now)
+        }
+        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (34153, false));
+        let mut s_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = server.process_output(now) {
+            s_tx_dgrams.push(dg);
+        }
+        assert_eq!(s_tx_dgrams.len(), 1);
+
+        // These packets were sent after cong period start, so client should no
+        // longer be in congestion recovery and now be in cong avoidance
+        qinfo!("client");
+        for s_dgram in s_tx_dgrams {
+            client.process_input(s_dgram, now + Duration::from_millis(100))
+        }
+
+        // cwnd has only gone up from 35k->36k because of acked packets
+        assert_eq!(client.loss_recovery.cwnd(), 36282);
     }
 }

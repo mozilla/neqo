@@ -253,13 +253,19 @@ impl Display for CongestionControl {
 }
 
 impl CongestionControl {
+    #[cfg(test)]
+    pub fn cwnd(&self) -> u64 {
+        self.congestion_window
+    }
+
     fn cwnd_avail(&self) -> u64 {
         // BIF can be higher than cwnd due to PTO packets, which are sent even
         // if avail is 0, but still count towards BIF.
         self.congestion_window.saturating_sub(self.bytes_in_flight)
     }
 
-    fn on_ack_received(&mut self, pkt: &SentPacket) {
+    // OnPacketAckedCC
+    fn on_packet_acked(&mut self, pkt: &SentPacket) {
         assert!(self.bytes_in_flight >= u64::try_from(pkt.size).unwrap());
         self.bytes_in_flight -= u64::try_from(pkt.size).unwrap();
 
@@ -280,8 +286,9 @@ impl CongestionControl {
             // Congestion avoidance.
             qinfo!(
                 [self],
-                "congestion avoidance; cwnd {}",
-                self.congestion_window
+                "congestion avoidance; cwnd {} ssthresh {}",
+                self.congestion_window,
+                self.ssthresh
             );
             self.congestion_window += u64::try_from(MAX_DATAGRAM_SIZE * pkt.size as usize).unwrap()
                 / self.congestion_window
@@ -310,7 +317,7 @@ impl CongestionControl {
             largest_acked_sent < Some(last_lost_pkt.time_sent - congestion_period)
         };
         if in_persistent_congestion {
-            qinfo!([self], "persisent congestion");
+            qinfo!([self], "persistent congestion");
             self.congestion_window = MIN_CONG_WINDOW;
         }
     }
@@ -382,6 +389,11 @@ impl LossRecovery {
 
             ..LossRecovery::default()
         }
+    }
+
+    #[cfg(test)]
+    pub fn cwnd(&self) -> u64 {
+        self.cc.cwnd()
     }
 
     pub fn cwnd_avail(&self) -> u64 {
@@ -489,8 +501,9 @@ impl LossRecovery {
             .map(|(_k, v)| v)
             .collect::<Vec<_>>();
 
+        // OnPacketAcked
         for pkt in acked_packets.iter().filter(|pkt| pkt.in_flight) {
-            self.cc.on_ack_received(pkt)
+            self.cc.on_packet_acked(pkt)
         }
 
         if !lost_packets.is_empty() {
