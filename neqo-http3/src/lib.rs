@@ -9,10 +9,10 @@
 mod client_events;
 mod connection;
 pub mod connection_client;
-pub mod server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod hframe;
+pub mod server;
 mod server_connection_events;
 mod server_events;
 mod stream_type_reader;
