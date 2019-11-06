@@ -8,7 +8,7 @@
 
 use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_http3::{Http3Server, Http3ServerEvent, Http3State};
+use neqo_http3::{Http3Server, Http3ServerEvent};
 use neqo_transport::{FixedConnectionIdManager, Output};
 
 use std::cell::RefCell;
@@ -24,7 +24,7 @@ use structopt::StructOpt;
 
 use mio::net::UdpSocket;
 use mio::{Events, Poll, PollOpt, Ready, Token};
-use mio_extras::timer::{Builder, Timeout};
+use mio_extras::timer::{Builder, Timeout, Timer};
 
 const TIMER_TOKEN: Token = Token(0xffff_ffff);
 
@@ -66,19 +66,16 @@ impl Args {
     }
 }
 
-fn process_events(conn: &mut Http3Server) {
-    while let Some(event) = conn.next_event() {
+fn process_events(server: &mut Http3Server) {
+    while let Some(event) = server.next_event() {
         eprintln!("Event: {:?}", event);
         match event {
             Http3ServerEvent::Headers {
-                stream_id,
+                mut request,
                 headers,
                 fin,
             } => {
-                println!(
-                    "Headers (stream_id={} fin={}): {:?}",
-                    stream_id, fin, headers
-                );
+                println!("Headers (request={} fin={}): {:?}", request, fin, headers);
 
                 let default_ret = b"Hello World".to_vec();
 
@@ -92,36 +89,65 @@ fn process_events(conn: &mut Http3Server) {
                     _ => default_ret,
                 };
 
-                conn.set_response(
-                    stream_id,
-                    &[
-                        (String::from(":status"), String::from("200")),
-                        (String::from("content-length"), response.len().to_string()),
-                    ],
-                    response,
-                )
-                .unwrap();
+                request
+                    .set_response(
+                        &[
+                            (String::from(":status"), String::from("200")),
+                            (String::from("content-length"), response.len().to_string()),
+                        ],
+                        response,
+                    )
+                    .unwrap();
             }
-            Http3ServerEvent::Data {
-                stream_id,
-                data,
-                fin,
-            } => {
-                println!("Data (stream_id={} fin={}): {:?}", stream_id, fin, data);
+            Http3ServerEvent::Data { request, data, fin } => {
+                println!("Data (request={} fin={}): {:?}", request, fin, data);
             }
             _ => {}
         }
     }
 }
 
-fn emit_packets(socket: &UdpSocket, out_dgrams: &[Datagram]) {
-    for d in out_dgrams {
-        let sent = socket
-            .send_to(d, &d.destination())
-            .expect("Error sending datagram");
-        if sent != d.len() {
-            eprintln!("Unable to send all {} bytes of datagram", d.len());
+fn emit_packets(sockets: &mut Vec<UdpSocket>, out_dgrams: &HashMap<SocketAddr, Vec<Datagram>>) {
+    for s in sockets {
+        if let Some(dgrams) = out_dgrams.get(&s.local_addr().unwrap()) {
+            for d in dgrams {
+                let sent = s
+                    .send_to(d, &d.destination())
+                    .expect("Error sending datagram");
+                if sent != d.len() {
+                    eprintln!("Unable to send all {} bytes of datagram", d.len());
+                }
+            }
         }
+    }
+}
+
+fn process(
+    server: &mut Http3Server,
+    svr_timeout: &mut Option<Timeout>,
+    inx: usize,
+    mut dgram: Option<Datagram>,
+    out_dgrams: &mut Vec<Datagram>,
+    timer: &mut Timer<usize>,
+) {
+    loop {
+        match server.process(dgram, Instant::now()) {
+            Output::Datagram(dgram) => out_dgrams.push(dgram),
+            Output::Callback(new_timeout) => {
+                if let Some(svr_timeout) = svr_timeout {
+                    timer.cancel_timeout(svr_timeout);
+                }
+
+                qinfo!("Setting timeout of {:?} for {}", new_timeout, server);
+                *svr_timeout = Some(timer.set_timeout(new_timeout, inx));
+                break;
+            }
+            Output::None => {
+                qdebug!("Output::None");
+                break;
+            }
+        };
+        dgram = None;
     }
 }
 
@@ -130,8 +156,6 @@ fn main() -> Result<(), io::Error> {
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
-    let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
-        .expect("unable to setup anti-replay");
 
     let poll = Poll::new()?;
 
@@ -142,8 +166,8 @@ fn main() -> Result<(), io::Error> {
     }
 
     let mut sockets = Vec::new();
-
-    let mut timer = Builder::default().build::<SocketAddr>();
+    let mut servers = HashMap::new();
+    let mut timer = Builder::default().build::<usize>();
     poll.register(&timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
 
     for (i, host) in hosts.iter().enumerate() {
@@ -181,25 +205,52 @@ fn main() -> Result<(), io::Error> {
             PollOpt::edge(),
         )?;
         sockets.push(socket);
+        servers.insert(
+            local_addr,
+            (
+                Http3Server::new(
+                    Instant::now(),
+                    &[args.key.clone()],
+                    &[args.alpn.clone()],
+                    AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+                        .expect("unable to setup anti-replay"),
+                    Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+                    args.max_table_size,
+                    args.max_blocked_streams,
+                )
+                .expect("We cannot make a server!"),
+                None,
+            ),
+        );
     }
 
     let buf = &mut [0u8; 2048];
-    let mut connections: HashMap<SocketAddr, (Http3Server, Option<Timeout>)> = HashMap::new();
 
     let mut events = Events::with_capacity(1024);
 
     loop {
         poll.poll(&mut events, None)?;
-        let mut in_dgrams = HashMap::new();
-        let mut out_dgrams = Vec::new();
+        let mut out_dgrams = HashMap::new();
         for event in &events {
             if event.token() == TIMER_TOKEN {
-                while let Some(remote_addr) = timer.poll() {
-                    qinfo!("Timer expired for {:?}", remote_addr);
-                    // Adds an entry to in_dgrams but doesn't add any
-                    // packets. This will cause the Connection to be
-                    // process()ed.
-                    in_dgrams.entry(remote_addr).or_insert_with(Vec::new);
+                while let Some(inx) = timer.poll() {
+                    if let Some(socket) = sockets.get(inx) {
+                        qinfo!("Timer expired for {:?}", socket);
+                        if let Some((server, svr_timeout)) =
+                            servers.get_mut(&socket.local_addr().unwrap())
+                        {
+                            process(
+                                server,
+                                svr_timeout,
+                                inx,
+                                None,
+                                &mut out_dgrams
+                                    .entry(socket.local_addr().unwrap())
+                                    .or_insert_with(Vec::new),
+                                &mut timer,
+                            );
+                        }
+                    }
                 }
             } else if let Some(socket) = sockets.get(event.token().0) {
                 let local_addr = hosts[event.token().0];
@@ -208,7 +259,6 @@ fn main() -> Result<(), io::Error> {
                     continue;
                 }
 
-                // Read all datagrams and group by remote host
                 loop {
                     let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
                         Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => break,
@@ -225,74 +275,27 @@ fn main() -> Result<(), io::Error> {
 
                     if sz == 0 {
                         eprintln!("zero length datagram received?");
-                    } else {
-                        let conn_dgrams = in_dgrams.entry(remote_addr).or_insert_with(Vec::new);
-                        conn_dgrams.push(Datagram::new(remote_addr, local_addr, &buf[..sz]));
+                    } else if let Some((server, svr_timeout)) =
+                        servers.get_mut(&socket.local_addr().unwrap())
+                    {
+                        let out = out_dgrams
+                            .entry(socket.local_addr().unwrap())
+                            .or_insert_with(Vec::new);
+                        process(
+                            server,
+                            svr_timeout,
+                            event.token().0,
+                            Some(Datagram::new(remote_addr, local_addr, &buf[..sz])),
+                            out,
+                            &mut timer,
+                        );
+                        process_events(server);
+                        process(server, svr_timeout, event.token().0, None, out, &mut timer);
                     }
                 }
             }
         }
 
-        // Process each connections' packets
-        for (remote_addr, dgrams) in in_dgrams {
-            let (server, svr_timeout) = connections.entry(remote_addr).or_insert_with(|| {
-                println!("New connection from {:?}", remote_addr);
-                (
-                    Http3Server::new(
-                        &[args.key.clone()],
-                        &[args.alpn.clone()],
-                        &anti_replay,
-                        Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-                        args.max_table_size,
-                        args.max_blocked_streams,
-                    )
-                    .expect("must succeed"),
-                    None,
-                )
-            });
-
-            if dgrams.is_empty() {
-                // timer expired
-                server.process_timer(Instant::now())
-            } else {
-                for dgram in dgrams {
-                    server.process_input(dgram, Instant::now());
-                }
-            }
-            if let Http3State::Closed(e) = server.state() {
-                println!("Closed connection from {:?}: {:?}", remote_addr, e);
-                if let Some(svr_timeout) = svr_timeout {
-                    timer.cancel_timeout(svr_timeout);
-                }
-                connections.remove(&remote_addr);
-                continue;
-            }
-
-            server.process_http3(Instant::now());
-            process_events(server);
-
-            loop {
-                match server.process_output(Instant::now()) {
-                    Output::Datagram(dgram) => out_dgrams.push(dgram),
-                    Output::Callback(new_timeout) => {
-                        if let Some(svr_timeout) = svr_timeout {
-                            timer.cancel_timeout(svr_timeout);
-                        }
-
-                        qinfo!("Setting timeout of {:?} for {:?}", new_timeout, remote_addr);
-                        *svr_timeout = Some(timer.set_timeout(new_timeout, remote_addr));
-                        break;
-                    }
-                    Output::None => {
-                        qdebug!("Output::None");
-                        break;
-                    }
-                };
-            }
-        }
-
-        // TODO: this maybe isn't cool?
-        let first_socket = sockets.first().expect("must have at least one");
-        emit_packets(&first_socket, &out_dgrams);
+        emit_packets(&mut sockets, &out_dgrams);
     }
 }
