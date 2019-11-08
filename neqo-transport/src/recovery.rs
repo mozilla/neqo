@@ -8,6 +8,8 @@
 
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
+use std::fmt::{self, Display};
 use std::ops::{Index, IndexMut};
 use std::time::{Duration, Instant};
 
@@ -19,7 +21,13 @@ use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
 use crate::send_stream::StreamRecoveryToken;
 use crate::tracking::{AckToken, PNSpace};
-use crate::State;
+
+const fn const_max(a: usize, b: usize) -> usize {
+    [a, b][(a < b) as usize]
+}
+const fn const_min(a: usize, b: usize) -> usize {
+    [a, b][(a >= b) as usize]
+}
 
 const GRANULARITY: Duration = Duration::from_millis(20);
 // Defined in -recovery 6.2 as 500ms but using lower value until we have RTT
@@ -27,6 +35,13 @@ const GRANULARITY: Duration = Duration::from_millis(20);
 const INITIAL_RTT: Duration = Duration::from_millis(100);
 
 const PACKET_THRESHOLD: u64 = 3;
+const MAX_DATAGRAM_SIZE: usize = 1200; // per -recovery B.1
+const INITIAL_WINDOW: u64 = const_min(
+    10 * MAX_DATAGRAM_SIZE,
+    const_max(2 * MAX_DATAGRAM_SIZE, 14720),
+) as u64;
+const MIN_CONG_WINDOW: u64 = MAX_DATAGRAM_SIZE as u64 * 2;
+const PERSISTENT_CONG_THRESH: u32 = 3;
 
 #[derive(Debug, Clone)]
 pub enum RecoveryToken {
@@ -39,12 +54,13 @@ pub enum RecoveryToken {
 #[derive(Debug, Clone)]
 pub struct SentPacket {
     ack_eliciting: bool,
-    //in_flight: bool, // TODO needed only for cc
-    //size: u64, // TODO needed only for cc
     time_sent: Instant,
     pub(crate) tokens: Vec<RecoveryToken>,
 
     time_declared_lost: Option<Instant>,
+
+    in_flight: bool,
+    size: usize,
 }
 
 #[derive(Debug, Default)]
@@ -138,6 +154,7 @@ pub(crate) enum LossRecoveryMode {
 pub(crate) struct LossRecoverySpace {
     tx_pn: u64,
     largest_acked: Option<u64>,
+    largest_acked_sent_time: Option<Instant>,
     sent_packets: BTreeMap<u64, SentPacket>,
 }
 
@@ -210,11 +227,151 @@ impl LossRecoverySpaces {
     }
 }
 
+#[derive(Debug)]
+struct CongestionControl {
+    congestion_window: u64, // = kInitialWindow
+    bytes_in_flight: u64,
+    congestion_recovery_start_time: Option<Instant>,
+    ssthresh: u64,
+}
+
+impl Default for CongestionControl {
+    fn default() -> Self {
+        CongestionControl {
+            congestion_window: INITIAL_WINDOW,
+            bytes_in_flight: 0,
+            congestion_recovery_start_time: None,
+            ssthresh: u64::max_value(),
+        }
+    }
+}
+
+impl Display for CongestionControl {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "CongCtrl")
+    }
+}
+
+impl CongestionControl {
+    #[cfg(test)]
+    pub fn cwnd(&self) -> u64 {
+        self.congestion_window
+    }
+
+    fn cwnd_avail(&self) -> u64 {
+        // BIF can be higher than cwnd due to PTO packets, which are sent even
+        // if avail is 0, but still count towards BIF.
+        self.congestion_window.saturating_sub(self.bytes_in_flight)
+    }
+
+    // OnPacketAckedCC
+    fn on_packet_acked(&mut self, pkt: &SentPacket) {
+        assert!(self.bytes_in_flight >= u64::try_from(pkt.size).unwrap());
+        self.bytes_in_flight -= u64::try_from(pkt.size).unwrap();
+
+        if self.in_congestion_recovery(pkt.time_sent) {
+            // Do not increase congestion window in recovery period.
+            return;
+        }
+        if self.app_limited() {
+            // Do not increase congestion_window if application limited.
+            return;
+        }
+
+        if self.congestion_window < self.ssthresh {
+            // Slow start.
+            self.congestion_window += u64::try_from(pkt.size).unwrap();
+            qinfo!([self], "slow start; cwnd {}", self.congestion_window);
+        } else {
+            // Congestion avoidance.
+            qinfo!(
+                [self],
+                "congestion avoidance; cwnd {} ssthresh {}",
+                self.congestion_window,
+                self.ssthresh
+            );
+            self.congestion_window += u64::try_from(MAX_DATAGRAM_SIZE * pkt.size as usize).unwrap()
+                / self.congestion_window
+        }
+    }
+
+    fn on_packets_lost(
+        &mut self,
+        now: Instant,
+        largest_acked_sent: Option<Instant>,
+        pto: Duration,
+        lost_packets: &[SentPacket],
+    ) {
+        for pkt in lost_packets {
+            assert!(self.bytes_in_flight >= u64::try_from(pkt.size).unwrap());
+            self.bytes_in_flight -= u64::try_from(pkt.size).unwrap();
+        }
+
+        qdebug!([self], "Pkts lost {}", lost_packets.len());
+
+        let last_lost_pkt = lost_packets.last().unwrap();
+        self.on_congestion_event(now, last_lost_pkt.time_sent);
+
+        let in_persistent_congestion = {
+            let congestion_period = pto * PERSISTENT_CONG_THRESH;
+            largest_acked_sent < Some(last_lost_pkt.time_sent - congestion_period)
+        };
+        if in_persistent_congestion {
+            qinfo!([self], "persistent congestion");
+            self.congestion_window = MIN_CONG_WINDOW;
+        }
+    }
+
+    fn on_packet_sent(&mut self, size: usize) {
+        self.bytes_in_flight += u64::try_from(size).unwrap();
+        assert!(self.bytes_in_flight <= self.congestion_window);
+        qdebug!(
+            [self],
+            "Pkt Sent len {}, bif {}, cwnd {}",
+            size,
+            self.bytes_in_flight,
+            self.congestion_window
+        );
+    }
+
+    fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
+        self.congestion_recovery_start_time
+            .map(|start| sent_time <= start)
+            .unwrap_or(false)
+    }
+
+    fn on_congestion_event(&mut self, now: Instant, sent_time: Instant) {
+        // Start a new congestion event if packet was sent after the
+        // start of the previous congestion recovery period.
+        if !self.in_congestion_recovery(sent_time) {
+            self.congestion_recovery_start_time = Some(now);
+            self.congestion_window /= 2; // kLossReductionFactor = 0.5
+            self.congestion_window = max(self.congestion_window, MIN_CONG_WINDOW);
+            self.ssthresh = self.congestion_window;
+            qinfo!(
+                [self],
+                "Cong event -> recovery; cwnd {}, ssthresh {}",
+                self.congestion_window,
+                self.ssthresh
+            );
+        } else {
+            qdebug!([self], "Cong event but already in recovery");
+        }
+    }
+
+    fn app_limited(&self) -> bool {
+        //TODO(agrover): how do we get this info??
+        false
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct LossRecovery {
     pto_count: u32,
     time_of_last_sent_ack_eliciting_packet: Option<Instant>,
     rtt_vals: RttVals,
+
+    cc: CongestionControl,
 
     enable_timed_loss_detection: bool,
     spaces: LossRecoverySpaces,
@@ -234,17 +391,28 @@ impl LossRecovery {
         }
     }
 
+    #[cfg(test)]
+    pub fn cwnd(&self) -> u64 {
+        self.cc.cwnd()
+    }
+
+    pub fn cwnd_avail(&self) -> u64 {
+        self.cc.cwnd_avail()
+    }
+
     pub fn next_pn(&mut self, pn_space: PNSpace) -> u64 {
-        let val = self.spaces[pn_space].tx_pn;
+        self.spaces[pn_space].tx_pn
+    }
+
+    pub fn inc_pn(&mut self, pn_space: PNSpace) {
         self.spaces[pn_space].tx_pn += 1;
-        val
     }
 
     pub fn increment_pto_count(&mut self) {
         self.pto_count += 1;
     }
 
-    pub fn largest_acknowledged(&self, pn_space: PNSpace) -> Option<u64> {
+    pub fn largest_acknowledged_pn(&self, pn_space: PNSpace) -> Option<u64> {
         self.spaces[pn_space].largest_acked
     }
 
@@ -256,12 +424,15 @@ impl LossRecovery {
         self.spaces[PNSpace::ApplicationData].remove_ignored()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn on_packet_sent(
         &mut self,
         pn_space: PNSpace,
         packet_number: u64,
         ack_eliciting: bool,
         tokens: Vec<RecoveryToken>,
+        size: usize,
+        in_flight: bool,
         now: Instant,
     ) {
         qdebug!([self] "packet {:?}-{} sent.", pn_space, packet_number);
@@ -272,12 +443,15 @@ impl LossRecovery {
                 ack_eliciting,
                 tokens,
                 time_declared_lost: None,
+                size,
+                in_flight,
             },
         );
         if ack_eliciting {
             self.time_of_last_sent_ack_eliciting_packet = Some(now);
-            // TODO implement cc
-            //     cc.on_packet_sent(sent_bytes)
+        }
+        if in_flight {
+            self.cc.on_packet_sent(size)
         }
     }
 
@@ -307,11 +481,14 @@ impl LossRecovery {
             // If the largest acknowledged is newly acked and any newly acked
             // packet was ack-eliciting, update the RTT. (-recovery 5.1)
             let largest_acked_pkt = acked_packets.get(&largest_acked).expect("must be there");
+            space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
             if any_ack_eliciting {
                 let latest_rtt = now - largest_acked_pkt.time_sent;
                 self.rtt_vals.update_rtt(latest_rtt, ack_delay);
             }
         }
+        // Copy into local so self.spaces no longer borrowed
+        let largest_acked_sent_time = space.largest_acked_sent_time;
 
         // TODO Process ECN information if present.
 
@@ -323,6 +500,20 @@ impl LossRecovery {
             .into_iter()
             .map(|(_k, v)| v)
             .collect::<Vec<_>>();
+
+        // OnPacketAcked
+        for pkt in acked_packets.iter().filter(|pkt| pkt.in_flight) {
+            self.cc.on_packet_acked(pkt)
+        }
+
+        if !lost_packets.is_empty() {
+            self.cc.on_packets_lost(
+                now,
+                largest_acked_sent_time,
+                self.rtt_vals.pto(),
+                &lost_packets,
+            );
+        }
 
         (acked_packets, lost_packets)
     }
@@ -360,6 +551,7 @@ impl LossRecovery {
         );
 
         let packet_space = &mut self.spaces[pn_space];
+        let largest_acked = packet_space.largest_acked;
 
         // Lost for retrans/CC purposes
         let mut lost_pns = SmallVec::<[_; 8]>::new();
@@ -367,7 +559,6 @@ impl LossRecovery {
         // Lost for we-can-actually-forget-about-it purposes
         let mut really_lost_pns = SmallVec::<[_; 8]>::new();
 
-        let largest_acked = packet_space.largest_acked;
         let current_rtt = self.rtt_vals.rtt();
         for (pn, packet) in packet_space
             .sent_packets
@@ -396,9 +587,6 @@ impl LossRecovery {
             };
 
             if lost && packet.time_declared_lost.is_none() {
-                // TODO
-                // Inform the congestion controller of lost packets.
-
                 // Track declared-lost packets for a little while, maybe they
                 // will still show up?
                 packet.time_declared_lost = Some(now);
@@ -436,7 +624,7 @@ impl LossRecovery {
         lost_packets
     }
 
-    pub fn get_timer(&mut self, conn_state: &State) -> LossRecoveryState {
+    pub fn get_timer(&mut self) -> LossRecoveryState {
         qdebug!([self] "get_loss_detection_timer.");
 
         let has_ack_eliciting_out = self
@@ -451,7 +639,7 @@ impl LossRecovery {
             has_ack_eliciting_out,
         );
 
-        if !has_ack_eliciting_out && *conn_state == State::Connected {
+        if !has_ack_eliciting_out {
             return LossRecoveryState::new(LossRecoveryMode::None, None);
         }
 
@@ -514,6 +702,8 @@ mod tests {
     use super::*;
     use std::convert::TryInto;
     use std::time::{Duration, Instant};
+
+    const ON_SENT_SIZE: usize = 100;
 
     fn assert_rtts(
         lr: &LossRecovery,
@@ -587,7 +777,15 @@ mod tests {
 
     fn pace(lr: &mut LossRecovery, count: u64) {
         for pn in 0..count {
-            lr.on_packet_sent(PNSpace::ApplicationData, pn, true, Vec::new(), pn_time(pn));
+            lr.on_packet_sent(
+                PNSpace::ApplicationData,
+                pn,
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+                true,
+                pn_time(pn),
+            );
         }
     }
 
@@ -701,12 +899,22 @@ mod tests {
         // So send two packets with 1/4 RTT between them.  Acknowledge pn 1 after 1 RTT.
         // pn 0 should then be marked lost because it is then outstanding for 5RTT/4
         // the loss time for packets is 9RTT/8.
-        lr.on_packet_sent(PNSpace::ApplicationData, 0, true, Vec::new(), pn_time(0));
+        lr.on_packet_sent(
+            PNSpace::ApplicationData,
+            0,
+            true,
+            Vec::new(),
+            ON_SENT_SIZE,
+            true,
+            pn_time(0),
+        );
         lr.on_packet_sent(
             PNSpace::ApplicationData,
             1,
             true,
             Vec::new(),
+            ON_SENT_SIZE,
+            true,
             pn_time(0) + INITIAL_RTT / 4,
         );
         let (_, lost) = lr.on_ack_received(
@@ -743,7 +951,7 @@ mod tests {
         assert_sent_times(&lr, None, None, Some(pn1_sent_time));
 
         // After time elapses, pn 1 is marked lost.
-        let lr_state = lr.get_timer(&State::Connected);
+        let lr_state = lr.get_timer();
         let pn1_lost_time = pn1_sent_time + (INITIAL_RTT * 9 / 8);
         assert_eq!(lr_state.callback_time, Some(pn1_lost_time));
         match lr_state.mode {

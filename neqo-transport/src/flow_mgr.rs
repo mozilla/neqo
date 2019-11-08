@@ -55,6 +55,11 @@ impl FlowMgr {
     pub fn conn_increase_max_credit(&mut self, new: u64) -> bool {
         if new > self.max_data {
             self.max_data = new;
+
+            // Make a dummy DataBlocked frame so we can remove based on discriminant
+            let frame = Frame::DataBlocked { data_limit: 0 };
+            self.from_conn.remove(&mem::discriminant(&frame));
+
             true
         } else {
             false
@@ -72,6 +77,11 @@ impl FlowMgr {
 
     pub fn path_response(&mut self, data: [u8; 8]) {
         let frame = Frame::PathResponse { data };
+        self.from_conn.insert(mem::discriminant(&frame), frame);
+    }
+
+    pub fn max_data(&mut self, maximum_data: u64) {
+        let frame = Frame::MaxData { maximum_data };
         self.from_conn.insert(mem::discriminant(&frame), frame);
     }
 
@@ -205,12 +215,12 @@ impl FlowMgr {
 
     pub(crate) fn lost(
         &mut self,
-        token: FlowControlRecoveryToken,
+        token: &FlowControlRecoveryToken,
         send_streams: &mut SendStreams,
         recv_streams: &mut RecvStreams,
         indexes: &mut StreamIndexes,
     ) {
-        match token {
+        match *token {
             // Always resend ResetStream if lost
             Frame::ResetStream {
                 stream_id,

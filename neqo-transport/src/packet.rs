@@ -32,6 +32,8 @@ const SAMPLE_SIZE: usize = 16;
 
 const AUTH_TAG_LEN: usize = 16;
 
+const MAX_BODY_LEN: usize = 1500;
+
 #[derive(Debug, PartialEq)]
 pub enum PacketType {
     Short,
@@ -75,11 +77,17 @@ impl ConnectionId {
     }
 
     // Apply a wee bit of greasing here in picking a length between 8 and 20 bytes long.
-    pub fn generate_initial() -> ConnectionId {
+    pub fn generate_initial(rand_len: bool) -> ConnectionId {
         let mut v = [0u8; 1];
         rand::thread_rng().fill(&mut v[..]);
-        // Bias selection toward picking 8 (>50% of the time).
-        let len: usize = ::std::cmp::max(8, 5 + (v[0] & (v[0] >> 4))).into();
+
+        let len = if rand_len {
+            // Bias selection toward picking 8 (>50% of the time).
+            ::std::cmp::max(8, 5 + (v[0] & (v[0] >> 4))).into()
+        } else {
+            8
+        };
+
         ConnectionId::generate(len)
     }
 }
@@ -148,6 +156,44 @@ impl PacketHdr {
 
     pub fn body_len(&self) -> usize {
         self.body_len
+    }
+
+    // header length plus auth tag
+    pub fn overhead(&self) -> usize {
+        match &self.tipe {
+            PacketType::Short => {
+                let mut enc = Encoder::default();
+                // Leading byte.
+                let pnl = pn_length(self.pn);
+                enc.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | encode_pnl(pnl));
+                enc.encode(&self.dcid.0);
+                enc.encode_uint(pnl, self.pn);
+                enc.len() + AUTH_TAG_LEN
+            }
+            PacketType::VN(_) => encode_packet_vn(&self).len(),
+            PacketType::Retry { .. } => encode_retry(&self).len(),
+            PacketType::Initial(..) | PacketType::ZeroRTT | PacketType::Handshake => {
+                let mut enc = Encoder::default();
+
+                let pnl = pn_length(self.pn);
+                enc.encode_byte(
+                    PACKET_BIT_LONG
+                        | PACKET_BIT_FIXED_QUIC
+                        | self.tipe.code() << 4
+                        | encode_pnl(pnl),
+                );
+                enc.encode_uint(4, self.version.unwrap());
+                enc.encode_vec(1, &*self.dcid);
+                enc.encode_vec(1, &*self.scid.as_ref().unwrap());
+
+                if let PacketType::Initial(token) = &self.tipe {
+                    enc.encode_vvec(&token);
+                }
+                enc.encode_varint((pnl + MAX_BODY_LEN + AUTH_TAG_LEN) as u64);
+                enc.encode_uint(pnl, self.pn);
+                enc.len() + AUTH_TAG_LEN
+            }
+        }
     }
 }
 
@@ -695,7 +741,7 @@ mod tests {
     #[test]
     fn generate_initial_cid() {
         for i in 0..100 {
-            let cid = ConnectionId::generate_initial();
+            let cid = ConnectionId::generate_initial(true);
             if !matches!(cid.len(), 8..=20) {
                 panic!("connection ID {:?}", cid);
             }
