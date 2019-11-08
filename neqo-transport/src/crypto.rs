@@ -62,7 +62,7 @@ impl Crypto {
     }
 
     // Create the initial crypto state.
-    pub fn create_initial_state(&mut self, role: Role, dcid: &[u8]) -> CryptoState {
+    pub fn create_initial_state(&mut self, role: Role, dcid: &[u8]) -> Res<()> {
         const CLIENT_INITIAL_LABEL: &str = "client in";
         const SERVER_INITIAL_LABEL: &str = "server in";
 
@@ -78,11 +78,12 @@ impl Crypto {
             Role::Server => (SERVER_INITIAL_LABEL, CLIENT_INITIAL_LABEL),
         };
 
-        CryptoState {
+        self.states[0] = Some(CryptoState {
             epoch: 0,
             tx: CryptoDxState::new_initial(CryptoDxDirection::Write, write_label, dcid),
             rx: CryptoDxState::new_initial(CryptoDxDirection::Read, read_label, dcid),
-        }
+        });
+        Ok(())
     }
 
     // Get a crypto state, making it if necessary, otherwise return an error.
