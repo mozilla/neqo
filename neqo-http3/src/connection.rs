@@ -12,7 +12,7 @@ use crate::server_events::Http3ServerEvents;
 use crate::stream_type_reader::NewStreamTypeReader;
 use crate::transaction_client::TransactionClient;
 use crate::transaction_server::TransactionServer;
-use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn, Datagram};
+use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram};
 use neqo_crypto::AntiReplay;
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
@@ -520,7 +520,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     fn handle_connection_closing(&mut self, error_code: CloseError) -> Res<()> {
-        assert!(self.state_active());
+        assert!(self.state_active() || self.state_closing());
         self.events
             .connection_state_change(Http3State::Closing(error_code));
         self.state = Http3State::Closing(error_code);
@@ -694,6 +694,10 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
             Http3State::Connected | Http3State::GoingAway => true,
             _ => false,
         }
+    }
+
+    fn state_closing(&self) -> bool {
+        matches!(self.state, Http3State::Closing(_))
     }
 
     pub fn state(&self) -> Http3State {
