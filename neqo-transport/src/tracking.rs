@@ -84,12 +84,12 @@ impl PacketRange {
         assert!(!self.contains(pn));
         // Only insert if this is adjacent the current range.
         if (self.largest + 1) == pn {
-            qtrace!([self] "Adding largest {}", pn);
+            qtrace!([self], "Adding largest {}", pn);
             self.largest += 1;
             self.ack_needed = true;
             true
         } else if self.smallest == (pn + 1) {
-            qtrace!([self] "Adding smallest {}", pn);
+            qtrace!([self], "Adding smallest {}", pn);
             self.smallest -= 1;
             self.ack_needed = true;
             true
@@ -100,7 +100,7 @@ impl PacketRange {
 
     /// Maybe merge a lower-numbered range into this.
     pub fn merge_smaller(&mut self, other: &Self) {
-        qinfo!([self] "Merging {}", other);
+        qinfo!([self], "Merging {}", other);
         // This only works if they are immediately adjacent.
         assert_eq!(self.smallest - 1, other.largest);
 
@@ -113,7 +113,7 @@ impl PacketRange {
     /// Requires that other is equal to this, or a larger range.
     pub fn acknowledged(&mut self, other: &Self) {
         if (other.smallest <= self.smallest) && (other.largest >= self.largest) {
-            qinfo!([self] "Acknowledged");
+            qinfo!([self], "Acknowledged");
             self.ack_needed = false;
         }
     }
@@ -212,10 +212,10 @@ impl RecvdPackets {
         if self.ranges.len() > MAX_TRACKED_RANGES {
             let oldest = self.ranges.pop_back().unwrap();
             if oldest.ack_needed {
-                qwarn!([self] "Dropping unacknowledged ACK range: {}", oldest);
+                qwarn!([self], "Dropping unacknowledged ACK range: {}", oldest);
             // TODO(mt) Record some statistics about this so we can tune MAX_TRACKED_RANGES.
             } else {
-                qdebug!([self] "Drop ACK range: {}", oldest);
+                qdebug!([self], "Drop ACK range: {}", oldest);
             }
             self.min_tracked = oldest.largest + 1;
         }

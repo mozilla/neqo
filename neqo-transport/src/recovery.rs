@@ -264,7 +264,7 @@ impl LossRecovery {
         tokens: Vec<RecoveryToken>,
         now: Instant,
     ) {
-        qdebug!([self] "packet {:?}-{} sent.", pn_space, packet_number);
+        qdebug!([self], "packet {:?}-{} sent.", pn_space, packet_number);
         self.spaces[pn_space].sent_packets.insert(
             packet_number,
             SentPacket {
@@ -290,8 +290,12 @@ impl LossRecovery {
         ack_delay: Duration,
         now: Instant,
     ) -> (Vec<SentPacket>, Vec<SentPacket>) {
-        qdebug!([self] "ack received for {:?} - largest_acked={}.",
-                pn_space, largest_acked);
+        qdebug!(
+            [self],
+            "ack received for {:?} - largest_acked={}.",
+            pn_space,
+            largest_acked
+        );
 
         let (acked_packets, any_ack_eliciting) = self.spaces[pn_space].remove_acked(acked_ranges);
         if acked_packets.is_empty() {
@@ -354,9 +358,12 @@ impl LossRecovery {
 
         // Packets sent before this time are deemed lost.
         let lost_deadline = now - loss_delay;
-        qdebug!([self]
+        qdebug!(
+            [self],
             "detect lost packets = now {:?} loss delay {:?} lost_deadline {:?}",
-            now, loss_delay, lost_deadline
+            now,
+            loss_delay,
+            lost_deadline
         );
 
         let packet_space = &mut self.spaces[pn_space];
@@ -437,7 +444,7 @@ impl LossRecovery {
     }
 
     pub fn get_timer(&mut self, conn_state: &State) -> LossRecoveryState {
-        qdebug!([self] "get_loss_detection_timer.");
+        qdebug!([self], "get_loss_detection_timer.");
 
         let has_ack_eliciting_out = self
             .spaces
@@ -445,17 +452,14 @@ impl LossRecovery {
             .flat_map(|spc| spc.sent_packets.values())
             .any(|sp| sp.ack_eliciting);
 
-        qdebug!(
-            [self]
-            "has_ack_eliciting_out={}",
-            has_ack_eliciting_out,
-        );
+        qdebug!([self], "has_ack_eliciting_out={}", has_ack_eliciting_out,);
 
         if !has_ack_eliciting_out && *conn_state == State::Connected {
             return LossRecoveryState::new(LossRecoveryMode::None, None);
         }
 
-        qinfo!([self]
+        qinfo!(
+            [self],
             "sent packets {} {} {}",
             self.spaces[PNSpace::Initial].sent_packets.len(),
             self.spaces[PNSpace::Handshake].sent_packets.len(),
@@ -478,7 +482,12 @@ impl LossRecovery {
             )
         };
 
-        qdebug!([self] "loss_detection_timer mode={:?} timer={:?}", mode, maybe_timer);
+        qdebug!(
+            [self],
+            "loss_detection_timer mode={:?} timer={:?}",
+            mode,
+            maybe_timer
+        );
         LossRecoveryState::new(mode, maybe_timer)
     }
 
