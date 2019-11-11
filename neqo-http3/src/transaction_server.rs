@@ -9,7 +9,7 @@ use crate::hframe::{HFrame, HFrameReader};
 use crate::server_events::Http3ServerEvents;
 use crate::Header;
 use crate::{Error, Res};
-use neqo_common::{qdebug, qinfo, qtrace, Encoder};
+use neqo_common::{matches, qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
@@ -323,11 +323,7 @@ impl Http3Transaction for TransactionServer {
     }
 
     fn has_data_to_send(&self) -> bool {
-        if let TransactionSendState::SendingResponse { .. } = self.send_state {
-            true
-        } else {
-            false
-        }
+        matches!(self.send_state, TransactionSendState::SendingResponse { .. })
     }
 
     fn is_state_sending_data(&self) -> bool {
