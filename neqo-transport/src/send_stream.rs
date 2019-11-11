@@ -606,10 +606,7 @@ impl SendStream {
     }
 
     pub fn is_terminal(&self) -> bool {
-        match self.state {
-            SendStreamState::DataRecvd { .. } | SendStreamState::ResetRecvd => true,
-            _ => false,
-        }
+        matches!(self.state, SendStreamState::DataRecvd { .. } | SendStreamState::ResetRecvd)
     }
 
     pub fn send(&mut self, buf: &[u8]) -> Res<usize> {

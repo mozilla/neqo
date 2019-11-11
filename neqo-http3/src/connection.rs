@@ -690,10 +690,7 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
     }
 
     fn state_active(&self) -> bool {
-        match self.state {
-            Http3State::Connected | Http3State::GoingAway => true,
-            _ => false,
-        }
+        matches!(self.state, Http3State::Connected | Http3State::GoingAway)
     }
 
     fn state_closing(&self) -> bool {
