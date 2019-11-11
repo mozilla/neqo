@@ -1031,7 +1031,6 @@ impl Connection {
                             if let Some(t) = token {
                                 tokens.push(t);
                             }
-                            assert!(encoder.len() <= self.pmtu());
                             if out_bytes.len() + encoder.len() == self.pmtu() {
                                 // No more space for frames.
                                 break;
