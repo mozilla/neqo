@@ -1328,6 +1328,7 @@ impl Connection {
                 stream_id,
                 offset,
                 data,
+                ..
             } => {
                 if let (_, Some(rs)) = self.obtain_stream(stream_id.into())? {
                     rs.inbound_stream_frame(fin, offset, data)?;
