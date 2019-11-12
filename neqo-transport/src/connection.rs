@@ -355,7 +355,7 @@ impl Connection {
                 remote_cid: dcid.clone(),
             }),
         );
-        c.crypto.create_initial_state(Role::Client, &dcid)?;
+        c.crypto.create_initial_state(Role::Client, &dcid);
         Ok(c)
     }
 
@@ -751,7 +751,7 @@ impl Connection {
 
         // Switching crypto state here might not happen eventually.
         // https://github.com/quicwg/base-drafts/issues/2823
-        self.crypto.create_initial_state(self.role, scid)?;
+        self.crypto.create_initial_state(self.role, scid);
         Ok(())
     }
 
@@ -815,7 +815,7 @@ impl Connection {
                         if !self.is_valid_initial(&hdr) {
                             return Ok(());
                         }
-                        self.crypto.create_initial_state(self.role, &hdr.dcid)?;
+                        self.crypto.create_initial_state(self.role, &hdr.dcid);
                     }
                 }
                 State::Handshaking | State::Connected => {
@@ -1010,9 +1010,11 @@ impl Connection {
             let mut tokens = Vec::new();
 
             // Ensure we have tx crypto state for this epoch, or skip it.
-            match self.crypto.obtain_crypto_state(self.role, epoch) {
-                Ok(CryptoState { tx: Some(_), .. }) => {}
-                _ => continue,
+            if !matches!(
+                self.crypto.obtain_crypto_state(self.role, epoch),
+                Ok(CryptoState { tx: Some(_), .. })
+            ) {
+                continue;
             }
 
             let mut ack_eliciting = false;
