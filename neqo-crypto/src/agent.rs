@@ -26,6 +26,7 @@ use std::ffi::CString;
 use std::mem::{self, MaybeUninit};
 use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_uint, c_void};
+use std::pin::Pin;
 use std::ptr::{null, null_mut, NonNull};
 use std::rc::Rc;
 use std::time::Instant;
@@ -197,15 +198,15 @@ pub struct SecretAgent {
     fd: *mut ssl::PRFileDesc,
     secrets: SecretHolder,
     raw: Option<bool>,
-    io: Box<AgentIo>,
+    io: Pin<Box<AgentIo>>,
     state: HandshakeState,
 
     /// Records whether authentication of certificates is required.
-    auth_required: Box<bool>,
+    auth_required: Pin<Box<bool>>,
     /// Records any fatal alert that is sent by the stack.
-    alert: Box<Option<Alert>>,
+    alert: Pin<Box<Option<Alert>>>,
     /// The current time.
-    now: Box<PRTime>,
+    now: Pin<Box<PRTime>>,
 
     extension_handlers: Vec<ExtensionTracker>,
     inf: Option<SecretAgentInfo>,
@@ -220,12 +221,12 @@ impl SecretAgent {
             fd: null_mut(),
             secrets: SecretHolder::default(),
             raw: None,
-            io: Box::new(AgentIo::new()),
+            io: Pin::new(Box::new(AgentIo::new())),
             state: HandshakeState::New,
 
-            auth_required: Box::new(false),
-            alert: Box::new(None),
-            now: Box::new(0),
+            auth_required: Pin::new(Box::new(false)),
+            alert: Pin::new(Box::new(None)),
+            now: Pin::new(Box::new(0)),
 
             extension_handlers: Vec::new(),
             inf: None,
@@ -565,7 +566,7 @@ impl SecretAgent {
     }
 
     /// Setup to receive records for raw handshake functions.
-    fn setup_raw(&mut self) -> Res<Box<RecordList>> {
+    fn setup_raw(&mut self) -> Res<Pin<Box<RecordList>>> {
         self.set_raw(true)?;
         self.capture_error(RecordList::setup(self.fd))
     }
@@ -627,7 +628,7 @@ impl SecretAgent {
             records.remove_eoed();
         }
 
-        Ok(*records)
+        Ok(*Pin::into_inner(records))
     }
 
     // State returns the status of the handshake.
@@ -656,7 +657,7 @@ pub struct Client {
     agent: SecretAgent,
 
     /// Records the last resumption token.
-    resumption: Box<Option<Vec<u8>>>,
+    resumption: Pin<Box<Option<Vec<u8>>>>,
 }
 
 impl Client {
@@ -667,7 +668,7 @@ impl Client {
         agent.ready(false)?;
         let mut client = Self {
             agent,
-            resumption: Box::new(None),
+            resumption: Pin::new(Box::new(None)),
         };
         client.ready()?;
         Ok(client)
@@ -864,7 +865,7 @@ impl Server {
             ssl::SSL_SendSessionTicket(self.fd, extra.as_ptr(), c_uint::try_from(extra.len())?)
         }?;
 
-        Ok(*records)
+        Ok(*Pin::into_inner(records))
     }
 }
 

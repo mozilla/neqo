@@ -16,6 +16,7 @@ use std::fmt;
 use std::mem;
 use std::ops::Deref;
 use std::os::raw::{c_uint, c_void};
+use std::pin::Pin;
 use std::ptr::{null, null_mut};
 use std::vec::Vec;
 
@@ -109,8 +110,8 @@ impl RecordList {
     }
 
     /// Create a new record list.
-    pub(crate) fn setup(fd: *mut ssl::PRFileDesc) -> Res<Box<RecordList>> {
-        let mut records = Box::new(RecordList::default());
+    pub(crate) fn setup(fd: *mut ssl::PRFileDesc) -> Res<Pin<Box<RecordList>>> {
+        let mut records = Pin::new(Box::new(RecordList::default()));
         let records_ptr = &mut *records as *mut RecordList as *mut c_void;
         unsafe { ssl::SSL_RecordLayerWriteCallback(fd, Some(RecordList::ingest), records_ptr) }?;
         Ok(records)
