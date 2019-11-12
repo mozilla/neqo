@@ -201,6 +201,8 @@ impl RecvdPackets {
 
     /// Add the packet to the tracked set.
     pub fn set_received(&mut self, now: Instant, pn: u64, ack_eliciting: bool) {
+        let next_in_order_pn = self.ranges.get(0).map(|pr| pr.largest + 1).unwrap_or(0);
+        qdebug!("next in order pn: {}", next_in_order_pn);
         let i = self.add(pn);
 
         // The new addition was the largest, so update the time we use for calculating ACK delay.
@@ -221,9 +223,12 @@ impl RecvdPackets {
         }
 
         if ack_eliciting {
-            // On the first ack-eliciting packet since sending an ACK, set a delay.
-            // On the second, remove that delay.
-            if self.ack_time.is_none() && self.space == PNSpace::ApplicationData {
+            // Send ACK right away if out-of-order
+            // On the first in-order ack-eliciting packet since sending an ACK,
+            // set a delay. On the second, remove that delay.
+            if pn != next_in_order_pn {
+                self.ack_time = Some(now);
+            } else if self.ack_time.is_none() && self.space == PNSpace::ApplicationData {
                 self.ack_time = Some(now + ACK_DELAY);
             } else {
                 self.ack_time = Some(now);
@@ -502,6 +507,24 @@ mod tests {
 
             // Any packet will be acknowledged straight away.
             rp.set_received(now(), 0, true);
+            assert_eq!(Some(now()), rp.ack_time());
+            assert!(rp.ack_now(now()));
+        }
+    }
+
+    #[test]
+    fn ooo_no_ack_delay() {
+        for space in &[
+            PNSpace::Initial,
+            PNSpace::Handshake,
+            PNSpace::ApplicationData,
+        ] {
+            let mut rp = RecvdPackets::new(*space);
+            assert!(rp.ack_time().is_none());
+            assert!(!rp.ack_now(now()));
+
+            // Any OoO packet will be acknowledged straight away.
+            rp.set_received(now(), 3, true);
             assert_eq!(Some(now()), rp.ack_time());
             assert!(rp.ack_now(now()));
         }

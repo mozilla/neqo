@@ -6,13 +6,11 @@
 
 // The class implementing a QUIC connection.
 
-#![allow(dead_code)]
 use std::cell::RefCell;
 use std::cmp::{max, Ordering};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::{self, Debug};
-use std::mem;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -26,7 +24,7 @@ use neqo_crypto::{
     SecretAgentInfo, Server,
 };
 
-use crate::crypto::Crypto;
+use crate::crypto::{Crypto, CryptoState};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
@@ -154,6 +152,14 @@ impl Path {
 
     pub fn received_on(&self, d: &Datagram) -> bool {
         self.local == d.destination() && self.remote == d.source()
+    }
+
+    fn mtu(&self) -> usize {
+        if self.local.is_ipv4() {
+            1252
+        } else {
+            1232 // IPv6
+        }
     }
 }
 
@@ -349,7 +355,7 @@ impl Connection {
                 remote_cid: dcid.clone(),
             }),
         );
-        c.crypto.states[0] = Some(c.crypto.create_initial_state(Role::Client, &dcid));
+        c.crypto.create_initial_state(Role::Client, &dcid);
         Ok(c)
     }
 
@@ -435,14 +441,6 @@ impl Connection {
     /// Set a local transport parameter, possibly overriding a default value.
     pub fn set_local_tparam(&self, key: u16, value: TransportParameter) {
         self.tps.borrow_mut().local.set(key, value)
-    }
-
-    fn pmtu(&self) -> usize {
-        match &self.path {
-            Some(path) if path.local.is_ipv4() => 1252,
-            Some(_) => 1232, // IPv6
-            None => 1280,
-        }
     }
 
     /// Set the connection ID that was originally chosen by the client.
@@ -626,7 +624,7 @@ impl Connection {
 
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&mut self, now: Instant) -> Duration {
-        self.loss_recovery_state = self.loss_recovery.get_timer(&self.state);
+        self.loss_recovery_state = self.loss_recovery.get_timer();
 
         let mut delays = SmallVec::<[_; 4]>::new();
 
@@ -753,7 +751,7 @@ impl Connection {
 
         // Switching crypto state here might not happen eventually.
         // https://github.com/quicwg/base-drafts/issues/2823
-        self.crypto.states[0] = Some(self.crypto.create_initial_state(self.role, scid));
+        self.crypto.create_initial_state(self.role, scid);
         Ok(())
     }
 
@@ -817,8 +815,7 @@ impl Connection {
                         if !self.is_valid_initial(&hdr) {
                             return Ok(());
                         }
-                        self.crypto.states[0] =
-                            Some(self.crypto.create_initial_state(self.role, &hdr.dcid));
+                        self.crypto.create_initial_state(self.role, &hdr.dcid);
                     }
                 }
                 State::Handshaking | State::Connected => {
@@ -849,7 +846,7 @@ impl Connection {
                 // on the assert for doesn't exist.
                 // OK, we have a valid packet.
                 self.idle_timeout.on_packet_received(now);
-                dump_packet(self, "<- RX", &hdr, &body);
+                dump_packet(self, "-> RX", &hdr, &body);
                 if self.process_packet(&hdr, body, now)? {
                     continue;
                 }
@@ -866,20 +863,17 @@ impl Connection {
         // the rest of the datagram on the floor, but don't generate an error.
         let largest_acknowledged = self
             .loss_recovery
-            .largest_acknowledged(PNSpace::from(hdr.epoch));
+            .largest_acknowledged_pn(PNSpace::from(hdr.epoch));
         if (self.state == State::Handshaking) && (hdr.epoch == 3) {
             // Server has keys for epoch 3 but it is still in state Handshaking -> discharge packet.
             debug_assert_eq!(self.role(), Role::Server);
             return None;
         }
         match self.crypto.obtain_crypto_state(self.role, hdr.epoch) {
-            Ok(cs) => match cs.rx.as_ref() {
-                Some(rx) => {
-                    let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
-                    decrypt_packet(rx, pn_decoder, &mut hdr, slc).ok()
-                }
-                _ => None,
-            },
+            Ok(CryptoState { rx: Some(rx), .. }) => {
+                let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
+                decrypt_packet(rx, pn_decoder, &mut hdr, slc).ok()
+            }
             _ => None,
         }
     }
@@ -978,41 +972,40 @@ impl Connection {
 
     fn output(&mut self, now: Instant) -> Option<Datagram> {
         let mut out = None;
-        // Can't call a method on self while iterating over self.paths
-        let paths = mem::replace(&mut self.path, Default::default());
-        for p in &paths {
-            match self.output_path(&p, now) {
-                Ok(Some(dgram)) => {
-                    out = Some(dgram);
-                    break;
+        if self.path.is_some() {
+            match self.output_pkt_for_path(now) {
+                Ok(res) => {
+                    out = res;
                 }
                 Err(e) => {
                     if !matches!(self.state, State::Closing{..}) {
                         // An error here causes us to transition to closing.
                         self.absorb_error(now, Err(e));
                         // Rerun to give a chance to send a CONNECTION_CLOSE.
-                        out = match self.output_path(&p, now) {
+                        out = match self.output_pkt_for_path(now) {
                             Ok(x) => x,
                             Err(e) => {
                                 qwarn!([self], "two output_path errors in a row: {:?}", e);
                                 None
                             }
                         };
-                        break;
                     }
                 }
-                _ => (),
             };
         }
-        self.path = paths;
         out
     }
 
+    #[allow(clippy::cognitive_complexity)]
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
-    fn output_path(&mut self, path: &Path, now: Instant) -> Res<Option<Datagram>> {
+    fn output_pkt_for_path(&mut self, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
         let mut needs_padding = false;
+        let path = self
+            .path
+            .take()
+            .expect("we know we have a path because calling fn checked");
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -1021,21 +1014,19 @@ impl Connection {
             let mut encoder = Encoder::default();
             let mut tokens = Vec::new();
 
-            // Try to make our own crypo state and if we can't, skip this epoch.
-            match self.crypto.obtain_crypto_state(self.role, epoch) {
-                Ok(cs) => {
-                    if cs.tx.is_none() {
-                        continue;
-                    }
-                }
-                _ => continue,
+            // Ensure we have tx crypto state for this epoch, or skip it.
+            if !matches!(
+                self.crypto.obtain_crypto_state(self.role, epoch),
+                Ok(CryptoState { tx: Some(_), .. })
+            ) {
+                continue;
             }
 
             let mut ack_eliciting = false;
             match &self.state {
                 State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
                     loop {
-                        let remaining = self.pmtu() - out_bytes.len() - encoder.len();
+                        let remaining = path.mtu() - out_bytes.len() - encoder.len();
 
                         // Check sources in turn for available frames
                         if let Some((frame, token)) = self
@@ -1053,7 +1044,7 @@ impl Connection {
                             if let Some(t) = token {
                                 tokens.push(t);
                             }
-                            if out_bytes.len() + encoder.len() == self.pmtu() {
+                            if out_bytes.len() + encoder.len() == path.mtu() {
                                 // No more space for frames.
                                 break;
                             }
@@ -1139,12 +1130,13 @@ impl Connection {
             let mut packet = encode_packet(tx, &hdr, &encoder);
             dump_packet(self, "TX ->", &hdr, &encoder);
             out_bytes.append(&mut packet);
-            if out_bytes.len() >= self.pmtu() {
+            if out_bytes.len() >= path.mtu() {
                 break;
             }
         }
 
         if out_bytes.is_empty() {
+            self.path = Some(path);
             return Ok(None);
         }
 
@@ -1153,7 +1145,9 @@ impl Connection {
             qdebug!([self], "pad Initial to 1200");
             out_bytes.resize(1200, 0);
         }
-        Ok(Some(Datagram::new(path.local, path.remote, out_bytes)))
+        let dgram = Some(Datagram::new(path.local, path.remote, out_bytes));
+        self.path = Some(path);
+        Ok(dgram)
     }
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
@@ -1461,7 +1455,7 @@ impl Connection {
                     RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                     RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                     RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
-                        ft,
+                        &ft,
                         &mut self.send_streams,
                         &mut self.recv_streams,
                         &mut self.indexes,
@@ -1530,7 +1524,7 @@ impl Connection {
                     RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                     RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                     RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
-                        ft,
+                        &ft,
                         &mut self.send_streams,
                         &mut self.recv_streams,
                         &mut self.indexes,
@@ -1926,7 +1920,7 @@ impl Connection {
                             RecoveryToken::Stream(st) => self.send_streams.lost(&st),
                             RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
                             RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
-                                ft,
+                                &ft,
                                 &mut self.send_streams,
                                 &mut self.recv_streams,
                                 &mut self.indexes,
@@ -1969,6 +1963,7 @@ impl ::std::fmt::Display for Connection {
 mod tests {
     use super::*;
     use crate::frame::StreamType;
+    use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
 
     // This is fabulous: because test_fixture uses the public API for Connection,

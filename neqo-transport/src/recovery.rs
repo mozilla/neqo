@@ -19,7 +19,6 @@ use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
 use crate::send_stream::StreamRecoveryToken;
 use crate::tracking::{AckToken, PNSpace};
-use crate::State;
 
 const GRANULARITY: Duration = Duration::from_millis(20);
 // Defined in -recovery 6.2 as 500ms but using lower value until we have RTT
@@ -244,7 +243,7 @@ impl LossRecovery {
         self.pto_count += 1;
     }
 
-    pub fn largest_acknowledged(&self, pn_space: PNSpace) -> Option<u64> {
+    pub fn largest_acknowledged_pn(&self, pn_space: PNSpace) -> Option<u64> {
         self.spaces[pn_space].largest_acked
     }
 
@@ -443,7 +442,7 @@ impl LossRecovery {
         lost_packets
     }
 
-    pub fn get_timer(&mut self, conn_state: &State) -> LossRecoveryState {
+    pub fn get_timer(&mut self) -> LossRecoveryState {
         qdebug!([self], "get_loss_detection_timer.");
 
         let has_ack_eliciting_out = self
@@ -454,7 +453,7 @@ impl LossRecovery {
 
         qdebug!([self], "has_ack_eliciting_out={}", has_ack_eliciting_out,);
 
-        if !has_ack_eliciting_out && *conn_state == State::Connected {
+        if !has_ack_eliciting_out {
             return LossRecoveryState::new(LossRecoveryMode::None, None);
         }
 
@@ -752,7 +751,7 @@ mod tests {
         assert_sent_times(&lr, None, None, Some(pn1_sent_time));
 
         // After time elapses, pn 1 is marked lost.
-        let lr_state = lr.get_timer(&State::Connected);
+        let lr_state = lr.get_timer();
         let pn1_lost_time = pn1_sent_time + (INITIAL_RTT * 9 / 8);
         assert_eq!(lr_state.callback_time, Some(pn1_lost_time));
         match lr_state.mode {
