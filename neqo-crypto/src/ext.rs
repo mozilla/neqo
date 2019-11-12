@@ -15,6 +15,7 @@ use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::ops::DerefMut;
 use std::os::raw::{c_uint, c_void};
+use std::pin::Pin;
 use std::rc::Rc;
 
 experimental_api!(SSL_InstallExtensionHooks(
@@ -54,7 +55,7 @@ pub trait ExtensionHandler {
 
 pub struct ExtensionTracker {
     extension: Extension,
-    handler: Box<Box<Rc<RefCell<dyn ExtensionHandler>>>>,
+    handler: Pin<Box<Box<Rc<RefCell<dyn ExtensionHandler>>>>>,
 }
 
 impl ExtensionTracker {
@@ -113,21 +114,29 @@ impl ExtensionTracker {
         })
     }
 
+    // Use the provided handler to manage an extension.  This is quite unsafe.
+    // The holder of this ExtensionTracker needs to ensure that it lives at
+    // least as long as the file descriptor, as NSS provides no way to remove
+    // an extension handler once it is configured.
     pub unsafe fn new(
         fd: *mut PRFileDesc,
         extension: Extension,
         handler: Rc<RefCell<dyn ExtensionHandler>>,
     ) -> Res<Self> {
         // The ergonomics here aren't great for users of this API, but it's
-        // even worse here. The double box is used to allow us to own a reference
-        // to the handler AND also pass a bare pointer to the inner box to C.
-        // That allows us to create the object in the callback. The inner box prevents
-        // the access in the callback from decrementing the Rc counters when the
-        // duped instance is dropped.  That would result in the object being dropped
-        // in the callbacks (and the UAF that follows).
+        // horrific here. The pinned outer box gives us a stable pointer to the inner
+        // box.  This is the pointer that is passed to NSS.
+        //
+        // The inner box points to the reference-counted object.  This inner box is
+        // what we end up with a reference to in callbacks.  That extra wrapper around
+        // the Rc avoid any touching of reference counts in callbacks, which would
+        // inevitably lead to leaks as we don't control how many times the callback
+        // is invoked.
+        //
+        // This way, only this "outer" code deals with the reference count.
         let mut tracker = Self {
             extension,
-            handler: Box::new(Box::new(handler)),
+            handler: Pin::new(Box::new(Box::new(handler))),
         };
         let p = &mut *tracker.handler as *mut Box<Rc<RefCell<dyn ExtensionHandler>>> as *mut c_void;
         SSL_InstallExtensionHooks(
