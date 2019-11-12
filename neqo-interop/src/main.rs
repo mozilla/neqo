@@ -402,7 +402,7 @@ struct NetworkCtx {
     socket: UdpSocket,
 }
 
-fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<(Connection), String> {
+fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connection, String> {
     let mut client = Connection::new_client(
         peer.host,
         &test.alpn(),
@@ -489,7 +489,7 @@ impl Handler for VnHandler {
         Some(Datagram::new(d.source(), d.destination(), payload))
     }
 }
-fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<(Connection), String> {
+fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
     let mut client = Connection::new_client(
         peer.host,
         &["hq-22"],
