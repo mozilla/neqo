@@ -867,10 +867,10 @@ impl Connection {
         let largest_acknowledged = self
             .loss_recovery
             .largest_acknowledged(PNSpace::from(hdr.epoch));
-        if (self.state == State::Handshaking) && (hdr.epoch == 3)  {
+        if (self.state == State::Handshaking) && (hdr.epoch == 3) {
             // Server has keys for epoch 3 but it is still in state Handshaking -> discharge packet.
-            assert_eq!(self.role(), Role::Server);
-            return None
+            debug_assert_eq!(self.role(), Role::Server);
+            return None;
         }
         match self.crypto.obtain_crypto_state(self.role, hdr.epoch) {
             Ok(cs) => match cs.rx.as_ref() {
@@ -2886,7 +2886,7 @@ mod tests {
 
         // Now stream data gets before client_fin
         let server_out = server.process(client_stream_data.dgram(), now());
-        assert!(server_out.as_dgram_ref().is_none()); // the packet will be discharged...
+        assert!(server_out.as_dgram_ref().is_none()); // the packet will be discarded
 
         assert_eq!(*server.state(), State::Handshaking);
         let server_out = server.process(client_fin.dgram(), now());
