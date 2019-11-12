@@ -570,6 +570,7 @@ pub fn encode_packet(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Ve
 #[allow(unused_variables)]
 mod tests {
     use super::*;
+    use neqo_common::matches;
 
     const TEST_BODY: [u8; 6] = [0x01, 0x23, 0x45, 0x67, 0x89, 0x10];
 

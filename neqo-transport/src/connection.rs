@@ -24,7 +24,7 @@ use neqo_crypto::{
     SecretAgentInfo, Server,
 };
 
-use crate::crypto::{Crypto, CryptoState};
+use crate::crypto::{Crypto, CryptoDxDirection, CryptoDxState, CryptoState};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
@@ -123,12 +123,12 @@ impl PartialOrd for State {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Debug)]
 enum ZeroRttState {
     Init,
-    Enabled,
-    Sending,
-    Accepted,
+    Sending(CryptoDxState),
+    AcceptedClient,
+    AcceptedServer(CryptoDxState),
     Rejected,
 }
 
@@ -880,6 +880,32 @@ impl Connection {
         Ok(frames)
     }
 
+    fn obtain_epoch_rx_crypto_state(&mut self, epoch: Epoch) -> Option<&mut CryptoDxState> {
+        if (self.state == State::Handshaking) && (epoch == 3) && (self.role() == Role::Server) {
+            // We got a packet for epoch 3 but the connection is still in the Handshaking
+            // state -> discharge the packet.
+            // On the server side we have keys for epoch 3 before we enter the epoch,
+            // but we still need to discharge the packet.
+            None
+        } else if epoch != 1 {
+            match self
+                .crypto
+                .states
+                .obtain(self.role, epoch, &self.crypto.tls)
+            {
+                Ok(CryptoState { rx, .. }) => rx.as_mut(),
+                _ => None,
+            }
+        } else if self.role == Role::Server {
+            if let ZeroRttState::AcceptedServer(rx) = &mut self.zero_rtt_state {
+                return Some(rx);
+            }
+            None
+        } else {
+            None
+        }
+    }
+
     fn decrypt_body(&mut self, mut hdr: &mut PacketHdr, slc: &[u8]) -> Option<Vec<u8>> {
         // Decryption failure, or not having keys is not fatal.
         // If the state isn't available, or we can't decrypt the packet, drop
@@ -887,20 +913,8 @@ impl Connection {
         let largest_acknowledged = self
             .loss_recovery
             .largest_acknowledged_pn(PNSpace::from(hdr.epoch));
-        match self
-            .crypto
-            .states
-            .obtain(self.role, hdr.epoch, &self.crypto.tls)
-        {
-            Ok(CryptoState { rx: Some(rx), .. }) => {
-                if (self.state == State::Handshaking) && (hdr.epoch == 3) {
-                    // We got a packet for epoch 3 but it is still in state Handshaking ->
-                    // discharge packet.
-                    // On the server side we have keys for epoch 3 before we enter epoch,
-                    // but we still need to discharge the packet.
-                    debug_assert_eq!(self.role(), Role::Server);
-                    return None;
-                }
+        match self.obtain_epoch_rx_crypto_state(hdr.epoch) {
+            Some(rx) => {
                 let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
                 decrypt_packet(rx, pn_decoder, &mut hdr, slc).ok()
             }
@@ -953,6 +967,27 @@ impl Connection {
         Ok(frames)
     }
 
+    fn get_zero_rtt_crypto(&mut self) -> Option<CryptoDxState> {
+        match self.crypto.tls.preinfo() {
+            Err(_) => None,
+            Ok(preinfo) => {
+                match preinfo.early_data_cipher() {
+                    Some(cipher) => {
+                        match self.role {
+                            Role::Client => self.crypto.tls.write_secret(1).map(|ws| {
+                                CryptoDxState::new(CryptoDxDirection::Write, 1, ws, cipher)
+                            }),
+                            Role::Server => self.crypto.tls.read_secret(1).map(|rs| {
+                                CryptoDxState::new(CryptoDxDirection::Read, 1, rs, cipher)
+                            }),
+                        }
+                    }
+                    None => None,
+                }
+            }
+        }
+    }
+
     fn start_handshake(&mut self, hdr: PacketHdr, d: &Datagram) -> Res<()> {
         if self.role == Role::Server {
             assert!(matches!(hdr.tipe, PacketType::Initial(..)));
@@ -968,7 +1003,13 @@ impl Connection {
             // SecretAgentPreinfo::early_data() always returns false for a server,
             // but a non-zero maximum tells us if we are accepting 0-RTT.
             self.zero_rtt_state = if self.crypto.tls.preinfo()?.max_early_data() > 0 {
-                ZeroRttState::Accepted
+                match self.get_zero_rtt_crypto() {
+                    Some(cs) => ZeroRttState::AcceptedServer(cs),
+                    None => {
+                        debug_assert!(false, "We must have zero-rtt keys.");
+                        ZeroRttState::Rejected
+                    }
+                }
             } else {
                 ZeroRttState::Rejected
             };
@@ -1046,13 +1087,22 @@ impl Connection {
             let mut tokens = Vec::new();
 
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let tx = match self
-                .crypto
-                .states
-                .obtain(self.role, epoch, &self.crypto.tls)
-            {
-                Ok(CryptoState { tx: Some(tx), .. }) => tx,
-                _ => continue,
+            let tx = if epoch == 1 && self.role == Role::Server {
+                continue;
+            } else if epoch == 1 {
+                match &mut self.zero_rtt_state {
+                    ZeroRttState::Sending(tx) => tx,
+                    _ => continue,
+                }
+            } else {
+                match self
+                    .crypto
+                    .states
+                    .obtain(self.role, epoch, &self.crypto.tls)
+                {
+                    Ok(CryptoState { tx: Some(tx), .. }) => tx,
+                    _ => continue,
+                }
             };
 
             let hdr = PacketHdr::new(
@@ -1065,13 +1115,7 @@ impl Connection {
                         };
                         PacketType::Initial(token)
                     }
-                    1 => {
-                        if self.zero_rtt_state == ZeroRttState::Rejected {
-                            continue;
-                        }
-                        self.zero_rtt_state = ZeroRttState::Sending;
-                        PacketType::ZeroRTT
-                    }
+                    1 => PacketType::ZeroRTT,
                     2 => PacketType::Handshake,
                     3 => PacketType::Short,
                     _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
@@ -1220,7 +1264,13 @@ impl Connection {
         self.set_state(State::WaitInitial);
         if self.crypto.tls.preinfo()?.early_data() {
             qdebug!([self], "Enabling 0-RTT");
-            self.zero_rtt_state = ZeroRttState::Enabled;
+            self.zero_rtt_state = match self.get_zero_rtt_crypto() {
+                Some(cs) => ZeroRttState::Sending(cs),
+                None => {
+                    debug_assert!(false, "We must have zero-rtt keys.");
+                    ZeroRttState::Rejected
+                }
+            };
         }
         Ok(())
     }
@@ -1565,7 +1615,7 @@ impl Connection {
 
     /// When the server rejects 0-RTT we need to drop a bunch of stuff.
     fn client_0rtt_rejected(&mut self) {
-        if self.zero_rtt_state != ZeroRttState::Sending {
+        if !matches!(self.zero_rtt_state, ZeroRttState::Sending(..)) {
             return;
         }
 
@@ -1589,6 +1639,7 @@ impl Connection {
         }
         self.send_streams.clear();
         self.recv_streams.clear();
+        self.indexes = StreamIndexes::new();
         self.events.client_0rtt_rejected();
     }
 
@@ -1605,7 +1656,7 @@ impl Connection {
                     } else {
                         self.zero_rtt_state =
                             if self.crypto.tls.info().unwrap().early_data_accepted() {
-                                ZeroRttState::Accepted
+                                ZeroRttState::AcceptedClient
                             } else {
                                 self.client_0rtt_rejected();
                                 ZeroRttState::Rejected
@@ -1674,8 +1725,8 @@ impl Connection {
         &mut self,
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
-        match (&self.state, self.zero_rtt_state) {
-            (State::Connected, _) | (State::Handshaking, ZeroRttState::Accepted) => (),
+        match (&self.state, &self.zero_rtt_state) {
+            (State::Connected, _) | (State::Handshaking, ZeroRttState::AcceptedServer(..)) => (),
             _ => return Err(Error::ConnectionState),
         }
 
@@ -1783,10 +1834,7 @@ impl Connection {
         match self.state {
             State::Closing { .. } | State::Closed { .. } => return Err(Error::ConnectionState),
             State::WaitInitial | State::Handshaking => {
-                if matches!(
-                    self.zero_rtt_state,
-                    ZeroRttState::Init | ZeroRttState::Rejected
-                ) {
+                if !matches!(self.zero_rtt_state, ZeroRttState::Sending(..)) {
                     return Err(Error::ConnectionState);
                 }
             }
@@ -2045,6 +2093,7 @@ impl ::std::fmt::Display for Connection {
 mod tests {
     use super::*;
     use crate::frame::StreamType;
+    use neqo_common::matches;
     use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
 
@@ -2605,14 +2654,34 @@ mod tests {
         assert!(!server.events().any(recvd_stream_evt));
 
         // Client should get a rejection.
-        let _ = client.process(server_hs.dgram(), now());
+        let client_fin = client.process(server_hs.dgram(), now());
         let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
         assert!(client.events().any(recvd_0rtt_reject));
+
+        // Server consume client_fin
+        let server_ack = server.process(client_fin.dgram(), now());
+        assert!(server_ack.as_dgram_ref().is_some());
+        let client_out = client.process(server_ack.dgram(), now());
+        assert!(client_out.as_dgram_ref().is_none());
 
         // ...and the client stream should be gone.
         let res = client.stream_send(stream_id, msg);
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
+
+        // Open a new stream and send data. StreamId should start with 0.
+        let stream_id_after_reject = client.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(stream_id, stream_id_after_reject);
+        let msg = &[1, 2, 3];
+        client.stream_send(stream_id_after_reject, msg).unwrap();
+        let client_after_reject = client.process(None, now());
+        assert!(client_after_reject.as_dgram_ref().is_some());
+
+        // The server should receive new stream
+        let server_out = server.process(client_after_reject.dgram(), now());
+        assert!(server_out.as_dgram_ref().is_some()); // an ack
+        let recvd_stream_evt = |e| matches!(e, ConnectionEvent::NewStream { .. });
+        assert!(server.events().any(recvd_stream_evt));
     }
 
     #[test]
