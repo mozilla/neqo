@@ -61,7 +61,7 @@ impl Http3Server {
         // If we do not that a dgram already try again after process_http3.
         match out {
             Output::Datagram(d) => {
-                qtrace!([self] "Send packet: {:?}", d);
+                qtrace!([self], "Send packet: {:?}", d);
                 Output::Datagram(d)
             }
             _ => self.server.process(None, now),
