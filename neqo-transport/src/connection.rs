@@ -864,6 +864,11 @@ impl Connection {
         let largest_acknowledged = self
             .loss_recovery
             .largest_acknowledged_pn(PNSpace::from(hdr.epoch));
+        if (self.state == State::Handshaking) && (hdr.epoch == 3) {
+            // Server has keys for epoch 3 but it is still in state Handshaking -> discharge packet.
+            debug_assert_eq!(self.role(), Role::Server);
+            return None;
+        }
         match self.crypto.obtain_crypto_state(self.role, hdr.epoch) {
             Ok(CryptoState { rx: Some(rx), .. }) => {
                 let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
@@ -2843,5 +2848,43 @@ mod tests {
             Err(Error::InvalidStreamId),
             client.stream_send(stream_id, &[0x00])
         );
+    }
+
+    #[test]
+    fn test_client_fin_reorder() {
+        let mut client = default_client();
+        let mut server = default_server();
+
+        // Send ClientHello.
+        let client_hs = client.process(None, now());
+        assert!(client_hs.as_dgram_ref().is_some());
+
+        let server_hs = server.process(client_hs.dgram(), now());
+        assert!(server_hs.as_dgram_ref().is_some()); // ServerHello, etc...
+
+        let client_ack = client.process(server_hs.dgram(), now());
+        assert!(client_ack.as_dgram_ref().is_some());
+
+        let server_out = server.process(client_ack.dgram(), now());
+        assert!(server_out.as_dgram_ref().is_none());
+
+        assert!(maybe_authenticate(&mut client));
+        assert_eq!(*client.state(), State::Connected);
+
+        let client_fin = client.process(None, now());
+        assert!(client_fin.as_dgram_ref().is_some());
+
+        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
+        let client_stream_data = client.process(None, now());
+        assert!(client_stream_data.as_dgram_ref().is_some());
+
+        // Now stream data gets before client_fin
+        let server_out = server.process(client_stream_data.dgram(), now());
+        assert!(server_out.as_dgram_ref().is_none()); // the packet will be discarded
+
+        assert_eq!(*server.state(), State::Handshaking);
+        let server_out = server.process(client_fin.dgram(), now());
+        assert!(server_out.as_dgram_ref().is_some());
     }
 }
