@@ -52,14 +52,14 @@ impl FlowMgr {
     }
 
     // Dummy DataBlocked frame for discriminant use below
-    const DB_FRAME: Frame = Frame::DataBlocked { data_limit: 0 };
 
     /// Returns whether max credit was actually increased.
     pub fn conn_increase_max_credit(&mut self, new: u64) -> bool {
         if new > self.max_data {
             self.max_data = new;
 
-            self.from_conn.remove(&mem::discriminant(&Self::DB_FRAME));
+            const DB_FRAME: Frame = Frame::DataBlocked { data_limit: 0 };
+            self.from_conn.remove(&mem::discriminant(&DB_FRAME));
 
             true
         } else {
