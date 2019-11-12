@@ -743,19 +743,22 @@ pub enum ZeroRttCheckResult {
 }
 
 /// A `ZeroRttChecker` is used by the agent to validate the application token (as provided by `send_ticket`)
-pub trait ZeroRttChecker: std::fmt::Debug {
+pub trait ZeroRttChecker: std::fmt::Debug + std::marker::Unpin {
     fn check(&self, token: &[u8]) -> ZeroRttCheckResult;
 }
 
 #[derive(Debug)]
 struct ZeroRttCheckState {
     fd: *mut ssl::PRFileDesc,
-    checker: Box<dyn ZeroRttChecker>,
+    checker: Pin<Box<dyn ZeroRttChecker>>,
 }
 
 impl ZeroRttCheckState {
-    pub fn new(fd: *mut ssl::PRFileDesc, checker: Box<dyn ZeroRttChecker>) -> Box<Self> {
-        Box::new(Self { fd, checker })
+    pub fn new(fd: *mut ssl::PRFileDesc, checker: Box<dyn ZeroRttChecker>) -> Self {
+        Self {
+            fd,
+            checker: Pin::new(checker),
+        }
     }
 }
 
@@ -763,7 +766,7 @@ impl ZeroRttCheckState {
 pub struct Server {
     agent: SecretAgent,
     /// This holds the HRR callback context.
-    zero_rtt_check: Option<Box<ZeroRttCheckState>>,
+    zero_rtt_check: Option<Pin<Box<ZeroRttCheckState>>>,
 }
 
 impl Server {
@@ -842,7 +845,7 @@ impl Server {
         max_early_data: u32,
         checker: Box<dyn ZeroRttChecker>,
     ) -> Res<()> {
-        let mut check_state = ZeroRttCheckState::new(self.agent.fd, checker);
+        let mut check_state = Pin::new(Box::new(ZeroRttCheckState::new(self.agent.fd, checker)));
         let arg = &mut *check_state as *mut ZeroRttCheckState as *mut c_void;
         unsafe {
             ssl::SSL_HelloRetryRequestCallback(self.agent.fd, Some(Self::hello_retry_cb), arg)
