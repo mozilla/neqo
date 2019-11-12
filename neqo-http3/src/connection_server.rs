@@ -142,7 +142,7 @@ impl Http3ServerHandler {
                             .connection_state_change(self.base_handler.state());
                     }
                 }
-                ConnectionEvent::ZeroRttRejected => {}
+                ConnectionEvent::ZeroRttRejected => return Err(Error::HttpInternalError),
             }
         }
         Ok(())
