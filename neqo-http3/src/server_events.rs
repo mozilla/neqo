@@ -94,14 +94,19 @@ impl ClientRequestStream {
         }
     }
     pub fn set_response(&mut self, headers: &[Header], data: Vec<u8>) -> Res<()> {
-        qinfo!([self] "Set new response.");
+        qinfo!([self], "Set new response.");
         self.handler
             .borrow_mut()
             .set_response(self.stream_id, headers, data)
     }
 
     pub fn stream_stop_sending(&mut self, app_error: AppError) -> Res<()> {
-        qdebug!([self] "stop sending stream_id:{} error:{}.", self.stream_id, app_error);
+        qdebug!(
+            [self],
+            "stop sending stream_id:{} error:{}.",
+            self.stream_id,
+            app_error
+        );
         self.conn
             .borrow_mut()
             .stream_stop_sending(self.stream_id, app_error)?;
@@ -109,7 +114,7 @@ impl ClientRequestStream {
     }
 
     pub fn stream_reset(&mut self, app_error: AppError) -> Res<()> {
-        qdebug!([self] "reset error:{}.", app_error);
+        qdebug!([self], "reset error:{}.", app_error);
         self.handler.borrow_mut().stream_reset(
             &mut self.conn.borrow_mut(),
             self.stream_id,
