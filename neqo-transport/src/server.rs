@@ -48,7 +48,7 @@ type CidMgr = Rc<RefCell<dyn ConnectionIdManager>>;
 type ConnectionTableRef = Rc<RefCell<HashMap<ConnectionId, StateRef>>>;
 
 #[derive(Debug)]
-struct ServerConnectionState {
+pub struct ServerConnectionState {
     c: Connection,
     last_timer: Instant,
 }
@@ -470,6 +470,10 @@ impl Server {
             .into_iter()
             .collect()
     }
+
+    pub fn add_to_waiting(&mut self, c: ActiveConnectionRef) {
+        self.waiting.push_back(c.connection());
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -485,6 +489,10 @@ impl ActiveConnectionRef {
     pub fn borrow_mut<'a>(&'a mut self) -> impl DerefMut<Target = Connection> + 'a {
         std::cell::RefMut::map(self.c.borrow_mut(), |c| &mut c.c)
     }
+
+    pub fn connection(&self) -> StateRef {
+        self.c.clone()
+    }
 }
 
 impl std::hash::Hash for ActiveConnectionRef {
@@ -499,6 +507,7 @@ impl PartialEq for ActiveConnectionRef {
         Rc::ptr_eq(&self.c, &other.c)
     }
 }
+
 impl Eq for ActiveConnectionRef {}
 
 struct ServerConnectionIdManager {

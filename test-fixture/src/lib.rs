@@ -140,9 +140,10 @@ pub fn default_http3_client() -> Http3Client {
 pub fn default_http3_server() -> Http3Server {
     fixture_init();
     Http3Server::new(
+        now(),
         DEFAULT_KEYS,
         DEFAULT_ALPN,
-        &anti_replay(),
+        anti_replay(),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         100,
         100,
