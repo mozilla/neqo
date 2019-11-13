@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use std::cell::RefCell;
-use std::cmp::min;
 use std::rc::Rc;
 
 use neqo_common::{hex, qdebug, qinfo, qtrace};
@@ -17,7 +16,7 @@ use neqo_crypto::{
 };
 
 use crate::connection::Role;
-use crate::frame::{crypto_frame_hdr_len, Frame, TxMode};
+use crate::frame::{Frame, TxMode};
 use crate::packet::{CryptoCtx, PacketNumber};
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
@@ -167,12 +166,7 @@ impl Crypto {
     ) -> Option<(Frame, Option<RecoveryToken>)> {
         let tx_stream = &mut self.streams[epoch as usize].tx;
         if let Some((offset, data)) = tx_stream.next_bytes(mode) {
-            let frame_hdr_len = crypto_frame_hdr_len(offset, remaining);
-            let length = min(data.len(), remaining - frame_hdr_len);
-            let frame = Frame::Crypto {
-                offset,
-                data: data[..length].to_vec(),
-            };
+            let (frame, length) = Frame::new_crypto(offset, data, remaining);
             tx_stream.mark_as_sent(offset, length);
 
             qdebug!(

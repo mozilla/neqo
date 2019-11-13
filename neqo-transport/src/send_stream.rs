@@ -16,7 +16,7 @@ use std::rc::Rc;
 use slice_deque::SliceDeque;
 use smallvec::SmallVec;
 
-use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn, Encoder};
+use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn};
 
 use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
@@ -767,30 +767,22 @@ impl SendStreams {
         }
 
         for (stream_id, stream) in self {
-            let fin = stream.final_size();
+            let complete = stream.final_size().is_some();
             if let Some((offset, data)) = stream.next_bytes(mode) {
+                let (frame, length) =
+                    Frame::new_stream(stream_id.as_u64(), offset, data, complete, remaining);
                 qdebug!(
-                    "Stream {} sending bytes {}-{}, epoch {}, mode {:?}, remaining {}",
+                    "Stream {} sending bytes {}-{}, epoch {}, mode {:?}",
                     stream_id.as_u64(),
                     offset,
-                    offset + data.len() as u64,
+                    offset + length as u64,
                     epoch,
                     mode,
-                    remaining
                 );
-                let frame_hdr_len = stream_frame_hdr_len(*stream_id, offset, remaining);
-                let length = min(data.len(), remaining - frame_hdr_len);
-                let fin = match fin {
-                    None => false,
-                    Some(fin) => fin == offset + length as u64,
-                };
-                let frame = Frame::Stream {
-                    fin,
-                    stream_id: stream_id.as_u64(),
-                    offset,
-                    data: data[..length].to_vec(),
-                };
+                let fin = complete && length == data.len();
+                debug_assert!(!fin || matches!(frame, Frame::Stream{fin: true, .. }));
                 stream.mark_as_sent(offset, length, fin);
+
                 return Some((
                     frame,
                     Some(RecoveryToken::Stream(StreamRecoveryToken {
@@ -813,18 +805,6 @@ impl<'a> IntoIterator for &'a mut SendStreams {
     fn into_iter(self) -> IterMut<'a, StreamId, SendStream> {
         self.0.iter_mut()
     }
-}
-
-/// Calculate the frame header size so we know how much data we can fit
-fn stream_frame_hdr_len(stream_id: StreamId, offset: u64, remaining: usize) -> usize {
-    let mut hdr_len = 1; // for frame type
-    hdr_len += Encoder::varint_len(stream_id.as_u64());
-    if offset > 0 {
-        hdr_len += Encoder::varint_len(offset);
-    }
-
-    // We always include a length field.
-    hdr_len + Encoder::varint_len(remaining as u64)
 }
 
 #[derive(Debug, Clone)]
