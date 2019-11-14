@@ -531,13 +531,14 @@ impl<E: Http3Events + Default, T: Http3Transaction, H: Http3Handler<E, T>>
 
     pub fn close(&mut self, conn: &mut Connection, now: Instant, error: AppError, msg: &str) {
         qinfo!([self], "Close connection error {:?} msg={}.", error, msg);
-        assert!(self.state_active());
-        self.state = Http3State::Closing(CloseError::Application(error));
-        if !self.transactions.is_empty() && (error == 0) {
-            qwarn!("close() called when streams still active");
+        if !matches!(self.state, Http3State::Closing(_) | Http3State::Closed(_)) {
+            self.state = Http3State::Closing(CloseError::Application(error));
+            if !self.transactions.is_empty() && (error == 0) {
+                qwarn!("close() called when streams still active");
+            }
+            self.transactions.clear();
+            conn.close(now, error, msg);
         }
-        self.transactions.clear();
-        conn.close(now, error, msg);
     }
 
     pub fn stream_reset(
