@@ -664,6 +664,26 @@ mod tests {
         let out = neqo_trans_conn.process(None, now());
         hconn.process(out.dgram(), now());
 
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x61]);
+        assert_eq!(sent, Ok(1));
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
+
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x62]);
+        assert_eq!(sent, Ok(1));
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
+
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x63]);
+        assert_eq!(sent, Ok(1));
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
+
+        sent = neqo_trans_conn.stream_send(control_stream, &[0x64]);
+        assert_eq!(sent, Ok(1));
+        let out = neqo_trans_conn.process(None, now());
+        hconn.process(out.dgram(), now());
+
         // PUSH_PROMISE on a control stream will cause an error
         assert_closed(&hconn, Error::HttpFrameUnexpected);
     }
