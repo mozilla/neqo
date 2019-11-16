@@ -20,7 +20,7 @@ use smallvec::SmallVec;
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, AuthenticationStatus, Client, Epoch, HandshakeState, Record, RecordList,
+    Agent, AntiReplay, AuthenticationStatus, Client, Epoch, HandshakeState, Record,
     SecretAgentInfo, Server,
 };
 
@@ -532,7 +532,7 @@ impl Connection {
                 enc.encode(extra);
                 let records = s.send_ticket(now, &enc)?;
                 qinfo!([self], "send session ticket {}", hex(&enc));
-                self.buffer_crypto_records(records);
+                self.crypto.buffer_records(records);
                 Ok(())
             }
             Agent::Client(_) => Err(Error::WrongRole),
@@ -1176,15 +1176,6 @@ impl Connection {
         });
     }
 
-    /// Buffer crypto records for sending.
-    fn buffer_crypto_records(&mut self, records: RecordList) {
-        for r in records {
-            assert_eq!(r.ct, 22);
-            qdebug!([self], "Adding CRYPTO data {:?}", r);
-            self.crypto.streams[r.epoch as usize].tx.send(&r.data);
-        }
-    }
-
     fn set_initial_limits(&mut self) {
         let tps = self.tps.borrow();
         let remote = tps.remote();
@@ -1241,7 +1232,7 @@ impl Connection {
                     _ => Error::CryptoError(e),
                 });
             }
-            Ok(msgs) => self.buffer_crypto_records(msgs),
+            Ok(msgs) => self.crypto.buffer_records(msgs),
         }
         if self.crypto.tls.state().connected() {
             qinfo!([self], "TLS handshake completed");
