@@ -11,8 +11,8 @@ use neqo_common::{hex, qdebug, qinfo, qtrace};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hp::HpKey;
 use neqo_crypto::{
-    hkdf, Agent, AntiReplay, Cipher, Epoch, SymKey, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
-    TLS_VERSION_1_3,
+    hkdf, Agent, AntiReplay, Cipher, Epoch, RecordList, SymKey, TLS_AES_128_GCM_SHA256,
+    TLS_AES_256_GCM_SHA384, TLS_VERSION_1_3,
 };
 
 use crate::connection::Role;
@@ -82,6 +82,15 @@ impl Crypto {
             tx: CryptoDxState::new_initial(CryptoDxDirection::Write, write_label, dcid),
             rx: CryptoDxState::new_initial(CryptoDxDirection::Read, read_label, dcid),
         });
+    }
+
+    /// Buffer crypto records for sending.
+    pub fn buffer_records(&mut self, records: RecordList) {
+        for r in records {
+            assert_eq!(r.ct, 22);
+            qdebug!([self], "Adding CRYPTO data {:?}", r);
+            self.streams[r.epoch as usize].tx.send(&r.data);
+        }
     }
 
     // Get a crypto state, making it if necessary, otherwise return an error.
