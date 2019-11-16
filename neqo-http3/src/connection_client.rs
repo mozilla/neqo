@@ -128,7 +128,7 @@ impl Http3Client {
     }
 
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
-        qinfo!([self], "Close senidng side stream={}.", stream_id);
+        qinfo!([self], "Close sending side stream={}.", stream_id);
         self.base_handler
             .stream_close_send(&mut self.conn, stream_id)
     }
