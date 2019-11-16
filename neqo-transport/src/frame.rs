@@ -7,6 +7,7 @@
 // Directly relating to QUIC frames.
 
 use neqo_common::{matches, qdebug, Decoder, Encoder};
+use neqo_crypto::Epoch;
 
 use crate::stream_id::StreamIndex;
 use crate::{AppError, TransportError};
@@ -420,7 +421,7 @@ impl Frame {
     }
 
     pub fn ack_eliciting(&self) -> bool {
-        !matches!(self, Frame::Ack { .. } | Frame::Padding)
+        !matches!(self, Frame::Ack { .. } | Frame::Padding | Frame::ConnectionClose { .. })
     }
 
     /// Converts AckRanges as encoded in a ACK frame (see -transport
@@ -489,6 +490,20 @@ impl Frame {
             )),
             Frame::Padding => None,
             _ => Some(format!("{:?}", self)),
+        }
+    }
+
+    pub fn is_allowed(&self, epoch: Epoch) -> bool {
+        qdebug!("is_allowed {:?} {}", self, epoch);
+        if matches!(self, Frame::Padding | Frame::Ping) {
+            true
+        } else if matches!(self, Frame::Crypto {..} | Frame::Ack {..} | Frame::ConnectionClose { error_code: CloseError::Transport(_), .. })
+        {
+            epoch != 1
+        } else if matches!(self, Frame::NewToken {..} | Frame::ConnectionClose {..}) {
+            epoch >= 3
+        } else {
+            epoch == 1 || epoch >= 3 // Application data
         }
     }
 }

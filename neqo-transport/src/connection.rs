@@ -955,7 +955,7 @@ impl Connection {
     }
 
     // Return whether the packet had ack-eliciting frames.
-    fn input_packet(&mut self, epoch: Epoch, mut d: Decoder, now: Instant) -> Res<(bool)> {
+    fn input_packet(&mut self, epoch: Epoch, mut d: Decoder, now: Instant) -> Res<bool> {
         let mut ack_eliciting = false;
 
         // Handle each frame in the packet
@@ -1278,6 +1278,9 @@ impl Connection {
     }
 
     fn input_frame(&mut self, epoch: Epoch, frame: Frame, now: Instant) -> Res<()> {
+        if !frame.is_allowed(epoch) {
+            return Err(Error::ProtocolViolation);
+        }
         match frame {
             Frame::Padding => {
                 // Ignore
