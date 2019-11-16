@@ -3,7 +3,7 @@ version: 2
 jobs:
   build:
     docker:
-      - image: martinthomson/neqo:latest
+      - image: martinthomson/neqo:test
     working_directory: ~/neqo
     environment:
       NSS_JOBS: 3
