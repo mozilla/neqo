@@ -1208,23 +1208,19 @@ impl Connection {
 
     fn handshake(&mut self, now: Instant, epoch: u16, data: Option<&[u8]>) -> Res<()> {
         qdebug!("Handshake epoch={} data={:0x?}", epoch, data);
-        let mut rec: Option<Record> = None;
 
-        if let Some(d) = data {
-            qdebug!([self], "Handshake received {:0x?} ", d);
-            rec = Some(Record {
-                ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
-                epoch,
-                data: d.to_vec(),
-            });
-        }
+        let rec = data
+            .map(|d| {
+                qdebug!([self], "Handshake received {:0x?} ", d);
+                Some(Record {
+                    ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
+                    epoch,
+                    data: d.to_vec(),
+                })
+            })
+            .unwrap_or(None);
 
-        let m = self.crypto.tls.handshake_raw(now, rec);
-        if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
-            self.events.authentication_needed();
-        }
-
-        match m {
+        match self.crypto.tls.handshake_raw(now, rec) {
             Err(e) => {
                 qwarn!([self], "Handshake failed");
                 return Err(match self.crypto.tls.alert() {
@@ -1234,7 +1230,10 @@ impl Connection {
             }
             Ok(msgs) => self.crypto.buffer_records(msgs),
         }
-        if self.crypto.tls.state().connected() {
+
+        if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
+            self.events.authentication_needed();
+        } else if matches!(self.crypto.tls.state(), HandshakeState::Complete(_)) {
             qinfo!([self], "TLS handshake completed");
 
             if self.crypto.tls.info().map(SecretAgentInfo::alpn).is_none() {
