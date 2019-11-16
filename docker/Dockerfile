@@ -36,6 +36,14 @@ ENV HOSTNAME $USER
 ENV HOME /home/$USER
 ENV SHELL /bin/bash
 
+ENV NSS_DIR=$HOME/nss \
+    NSPR_DIR=$HOME/nspr
+
+RUN set -eux; \
+    hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"; \
+    hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"; \
+    "$NSS_DIR"/build.sh
+
 RUN useradd -d "$HOME" -s "$SHELL" -m "$USER"
 WORKDIR $HOME
 USER $USER
