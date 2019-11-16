@@ -586,9 +586,9 @@ impl SecretAgent {
                 // Note that this is the test that ensures that we only do this for the server.
                 let eoed = Record::new(1, 22, END_OF_EARLY_DATA);
                 self.capture_error(eoed.write(self.fd))?;
+                self.no_eoed = false;
             }
         }
-        self.no_eoed = false;
         Ok(())
     }
 
