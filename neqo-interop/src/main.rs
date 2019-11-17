@@ -653,7 +653,7 @@ const PEERS: &[Peer] = &[
     },
     Peer {
         label: "applequic",
-        host: "31.133.129.48",
+        host: "31.133.135.16",
         port: 8443,
     },
     Peer {
