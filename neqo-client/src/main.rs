@@ -26,7 +26,7 @@ use url::Url;
     about = "A basic QUIC HTTP/0.9 and HTTP3 client."
 )]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3-23")]
+    #[structopt(short = "a", long, default_value = "h3-24")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP3 no matter what the ALPN says.
