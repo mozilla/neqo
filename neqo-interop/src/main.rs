@@ -372,8 +372,8 @@ enum Test {
 impl Test {
     fn alpn(&self) -> Vec<String> {
         match self {
-            Test::H3 => vec![String::from("h3-23")],
-            _ => vec![String::from("hq-23")],
+            Test::H3 => vec![String::from("h3-24")],
+            _ => vec![String::from("hq-24")],
         }
     }
 
