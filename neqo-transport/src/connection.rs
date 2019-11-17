@@ -40,8 +40,9 @@ use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::Stats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
-use crate::tparams::consts as tp_const;
-use crate::tparams::{TransportParameter, TransportParameters, TransportParametersHandler};
+use crate::tparams::{
+    tp_constants, TransportParameter, TransportParameters, TransportParametersHandler,
+};
 use crate::tracking::{AckTracker, PNSpace};
 use crate::QUIC_VERSION;
 use crate::{AppError, ConnectionError, Error, Res};
@@ -378,22 +379,31 @@ impl Connection {
 
     fn set_tp_defaults(tps: &mut TransportParameters) {
         tps.set_integer(
-            tp_const::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            tp_constants::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
             RX_STREAM_DATA_WINDOW,
         );
         tps.set_integer(
-            tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+            tp_constants::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
             RX_STREAM_DATA_WINDOW,
         );
-        tps.set_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI, RX_STREAM_DATA_WINDOW);
-        tps.set_integer(tp_const::INITIAL_MAX_STREAMS_BIDI, LOCAL_STREAM_LIMIT_BIDI);
-        tps.set_integer(tp_const::INITIAL_MAX_STREAMS_UNI, LOCAL_STREAM_LIMIT_UNI);
-        tps.set_integer(tp_const::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
         tps.set_integer(
-            tp_const::IDLE_TIMEOUT,
+            tp_constants::INITIAL_MAX_STREAM_DATA_UNI,
+            RX_STREAM_DATA_WINDOW,
+        );
+        tps.set_integer(
+            tp_constants::INITIAL_MAX_STREAMS_BIDI,
+            LOCAL_STREAM_LIMIT_BIDI,
+        );
+        tps.set_integer(
+            tp_constants::INITIAL_MAX_STREAMS_UNI,
+            LOCAL_STREAM_LIMIT_UNI,
+        );
+        tps.set_integer(tp_constants::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
+        tps.set_integer(
+            tp_constants::IDLE_TIMEOUT,
             LOCAL_IDLE_TIMEOUT.as_millis().try_into().unwrap(),
         );
-        tps.set_empty(tp_const::DISABLE_MIGRATION);
+        tps.set_empty(tp_constants::DISABLE_MIGRATION);
     }
 
     fn new(
@@ -449,7 +459,7 @@ impl Connection {
         self.tps
             .borrow_mut()
             .local
-            .set_bytes(tp_const::ORIGINAL_CONNECTION_ID, odcid.to_vec());
+            .set_bytes(tp_constants::ORIGINAL_CONNECTION_ID, odcid.to_vec());
     }
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
@@ -1183,18 +1193,18 @@ impl Connection {
         let tps = self.tps.borrow();
         let remote = tps.remote();
         self.indexes.remote_max_stream_bidi =
-            StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_BIDI));
+            StreamIndex::new(remote.get_integer(tp_constants::INITIAL_MAX_STREAMS_BIDI));
         self.indexes.remote_max_stream_uni =
-            StreamIndex::new(remote.get_integer(tp_const::INITIAL_MAX_STREAMS_UNI));
+            StreamIndex::new(remote.get_integer(tp_constants::INITIAL_MAX_STREAMS_UNI));
         self.flow_mgr
             .borrow_mut()
-            .conn_increase_max_credit(remote.get_integer(tp_const::INITIAL_MAX_DATA));
+            .conn_increase_max_credit(remote.get_integer(tp_constants::INITIAL_MAX_DATA));
     }
 
     fn validate_odcid(&self) -> Res<()> {
         if let Some(info) = &self.retry_info {
             let tph = self.tps.borrow();
-            let tp = tph.remote().get_bytes(tp_const::ORIGINAL_CONNECTION_ID);
+            let tp = tph.remote().get_bytes(tp_constants::ORIGINAL_CONNECTION_ID);
             if let Some(odcid_tp) = tp {
                 if odcid_tp[..] == info.odcid[..] {
                     Ok(())
@@ -1644,7 +1654,7 @@ impl Connection {
                     self.tps
                         .borrow()
                         .local
-                        .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
+                        .get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
                 } else {
                     if stream_idx > self.indexes.local_max_stream_uni {
                         qwarn!(
@@ -1658,7 +1668,7 @@ impl Connection {
                     self.tps
                         .borrow()
                         .local
-                        .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI)
+                        .get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_UNI)
                 };
 
                 loop {
@@ -1681,7 +1691,7 @@ impl Connection {
                             .tps
                             .borrow()
                             .remote()
-                            .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+                            .get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
                         self.send_streams.insert(
                             next_stream_id,
                             SendStream::new(
@@ -1751,7 +1761,7 @@ impl Connection {
                     .tps
                     .borrow()
                     .remote()
-                    .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_UNI);
+                    .get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_UNI);
 
                 self.send_streams.insert(
                     new_id,
@@ -1786,7 +1796,7 @@ impl Connection {
                     .tps
                     .borrow()
                     .remote()
-                    .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+                    .get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
 
                 self.send_streams.insert(
                     new_id,
@@ -1802,7 +1812,7 @@ impl Connection {
                     .tps
                     .borrow()
                     .local
-                    .get_integer(tp_const::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
+                    .get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
 
                 self.recv_streams.insert(
                     new_id,
@@ -2761,7 +2771,10 @@ mod tests {
     fn set_local_tparam() {
         let client = default_client();
 
-        client.set_local_tparam(tp_const::INITIAL_MAX_DATA, TransportParameter::Integer(55))
+        client.set_local_tparam(
+            tp_constants::INITIAL_MAX_DATA,
+            TransportParameter::Integer(55),
+        )
     }
 
     #[test]
