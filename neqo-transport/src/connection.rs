@@ -864,13 +864,16 @@ impl Connection {
         let largest_acknowledged = self
             .loss_recovery
             .largest_acknowledged_pn(PNSpace::from(hdr.epoch));
-        if (self.state == State::Handshaking) && (hdr.epoch == 3) {
-            // Server has keys for epoch 3 but it is still in state Handshaking -> discharge packet.
-            debug_assert_eq!(self.role(), Role::Server);
-            return None;
-        }
         match self.crypto.obtain_crypto_state(self.role, hdr.epoch) {
             Ok(CryptoState { rx: Some(rx), .. }) => {
+                if (self.state == State::Handshaking) && (hdr.epoch == 3) {
+                    // We got a packet for epoch 3 but it is still in state Handshaking ->
+                    // discharge packet.
+                    // On the server side we have keys for epoch 3 before we enter epoch,
+                    // but we still need to discharge the packet.
+                    debug_assert_eq!(self.role(), Role::Server);
+                    return None;
+                }
                 let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
                 decrypt_packet(rx, pn_decoder, &mut hdr, slc).ok()
             }
