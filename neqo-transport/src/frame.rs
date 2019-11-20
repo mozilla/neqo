@@ -9,7 +9,7 @@
 use neqo_common::{matches, qdebug, Decoder, Encoder};
 use neqo_crypto::Epoch;
 
-use crate::stream_id::StreamIndex;
+use crate::stream_id::{StreamId, StreamIndex};
 use crate::{AppError, TransportError};
 use crate::{ConnectionError, Error, Res};
 
@@ -126,12 +126,12 @@ pub enum Frame {
         ack_ranges: Vec<AckRange>,
     },
     ResetStream {
-        stream_id: u64,
+        stream_id: StreamId,
         application_error_code: AppError,
         final_size: u64,
     },
     StopSending {
-        stream_id: u64,
+        stream_id: StreamId,
         application_error_code: AppError,
     },
     Crypto {
@@ -143,7 +143,7 @@ pub enum Frame {
     },
     Stream {
         fin: bool,
-        stream_id: u64,
+        stream_id: StreamId,
         offset: u64,
         data: Vec<u8>,
         fill: bool,
@@ -152,7 +152,7 @@ pub enum Frame {
         maximum_data: u64,
     },
     MaxStreamData {
-        stream_id: u64,
+        stream_id: StreamId,
         maximum_stream_data: u64,
     },
     MaxStreams {
@@ -163,7 +163,7 @@ pub enum Frame {
         data_limit: u64,
     },
     StreamDataBlocked {
-        stream_id: u64,
+        stream_id: StreamId,
         stream_data_limit: u64,
     },
     StreamsBlocked {
@@ -289,7 +289,7 @@ impl Frame {
         );
         (
             Frame::Stream {
-                stream_id,
+                stream_id: stream_id.into(),
                 offset,
                 data: data[..remaining].to_vec(),
                 fin,
@@ -324,7 +324,7 @@ impl Frame {
                 application_error_code,
                 final_size,
             } => {
-                enc.encode_varint(*stream_id);
+                enc.encode_varint(stream_id.as_u64());
                 enc.encode_varint(*application_error_code);
                 enc.encode_varint(*final_size);
             }
@@ -332,7 +332,7 @@ impl Frame {
                 stream_id,
                 application_error_code,
             } => {
-                enc.encode_varint(*stream_id);
+                enc.encode_varint(stream_id.as_u64());
                 enc.encode_varint(*application_error_code);
             }
             Frame::Crypto { offset, data } => {
@@ -349,7 +349,7 @@ impl Frame {
                 fill,
                 ..
             } => {
-                enc.encode_varint(*stream_id);
+                enc.encode_varint(stream_id.as_u64());
                 if *offset > 0 {
                     enc.encode_varint(*offset);
                 }
@@ -366,7 +366,7 @@ impl Frame {
                 stream_id,
                 maximum_stream_data,
             } => {
-                enc.encode_varint(*stream_id);
+                enc.encode_varint(stream_id.as_u64());
                 enc.encode_varint(*maximum_stream_data);
             }
             Frame::MaxStreams {
@@ -381,7 +381,7 @@ impl Frame {
                 stream_id,
                 stream_data_limit,
             } => {
-                enc.encode_varint(*stream_id);
+                enc.encode_varint(stream_id.as_u64());
                 enc.encode_varint(*stream_data_limit);
             }
             Frame::StreamsBlocked { stream_limit, .. } => {
@@ -482,7 +482,7 @@ impl Frame {
                 fin,
             } => Some(format!(
                 "Stream {{ stream_id: {}, offset: {}, len: {}{} fin: {} }}",
-                stream_id,
+                stream_id.as_u64(),
                 offset,
                 if *fill { ">>" } else { "" },
                 data.len(),
@@ -531,7 +531,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
         FRAME_TYPE_PADDING => Ok(Frame::Padding),
         FRAME_TYPE_PING => Ok(Frame::Ping),
         FRAME_TYPE_RST_STREAM => Ok(Frame::ResetStream {
-            stream_id: dv!(dec),
+            stream_id: dv!(dec).into(),
             application_error_code: d!(dec.decode_varint()),
             final_size: match dec.decode_varint() {
                 Some(v) => v,
@@ -567,7 +567,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
             })
         }
         FRAME_TYPE_STOP_SENDING => Ok(Frame::StopSending {
-            stream_id: dv!(dec),
+            stream_id: dv!(dec).into(),
             application_error_code: d!(dec.decode_varint()),
         }),
         FRAME_TYPE_CRYPTO => {
@@ -600,7 +600,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
             };
             Ok(Frame::Stream {
                 fin: (t & STREAM_FRAME_BIT_FIN) != 0,
-                stream_id: s,
+                stream_id: s.into(),
                 offset: o,
                 data: data.to_vec(), // TODO(mt) unnecessary copy.
                 fill,
@@ -610,7 +610,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
             maximum_data: dv!(dec),
         }),
         FRAME_TYPE_MAX_STREAM_DATA => Ok(Frame::MaxStreamData {
-            stream_id: dv!(dec),
+            stream_id: dv!(dec).into(),
             maximum_stream_data: dv!(dec),
         }),
         FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => Ok(Frame::MaxStreams {
@@ -622,7 +622,7 @@ pub fn decode_frame(dec: &mut Decoder) -> Res<Frame> {
             data_limit: dv!(dec),
         }),
         FRAME_TYPE_STREAM_DATA_BLOCKED => Ok(Frame::StreamDataBlocked {
-            stream_id: dv!(dec),
+            stream_id: dv!(dec).into(),
             stream_data_limit: dv!(dec),
         }),
         FRAME_TYPE_STREAMS_BLOCKED_BIDI | FRAME_TYPE_STREAMS_BLOCKED_UNIDI => {
@@ -732,7 +732,7 @@ mod tests {
     #[test]
     fn test_reset_stream() {
         let f = Frame::ResetStream {
-            stream_id: 0x1234,
+            stream_id: 0x1234.into(),
             application_error_code: 0x77,
             final_size: 0x3456,
         };
@@ -743,7 +743,7 @@ mod tests {
     #[test]
     fn test_stop_sending() {
         let f = Frame::StopSending {
-            stream_id: 63,
+            stream_id: 63.into(),
             application_error_code: 0x77,
         };
 
@@ -774,7 +774,7 @@ mod tests {
         // First, just set the length bit.
         let f = Frame::Stream {
             fin: false,
-            stream_id: 5,
+            stream_id: 5.into(),
             offset: 0,
             data: vec![1, 2, 3],
             fill: false,
@@ -785,7 +785,7 @@ mod tests {
         // Now with offset != 0 and FIN
         let f = Frame::Stream {
             fin: true,
-            stream_id: 5,
+            stream_id: 5.into(),
             offset: 1,
             data: vec![1, 2, 3],
             fill: false,
@@ -795,7 +795,7 @@ mod tests {
         // Now to fill the packet.
         let f = Frame::Stream {
             fin: true,
-            stream_id: 5,
+            stream_id: 5.into(),
             offset: 0,
             data: vec![1, 2, 3],
             fill: true,
@@ -815,7 +815,7 @@ mod tests {
     #[test]
     fn test_max_stream_data() {
         let f = Frame::MaxStreamData {
-            stream_id: 5,
+            stream_id: 5.into(),
             maximum_stream_data: 0x1234,
         };
 
@@ -849,7 +849,7 @@ mod tests {
     #[test]
     fn test_stream_data_blocked() {
         let f = Frame::StreamDataBlocked {
-            stream_id: 5,
+            stream_id: 5.into(),
             stream_data_limit: 0x1234,
         };
 

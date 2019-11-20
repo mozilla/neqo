@@ -1401,8 +1401,6 @@ impl Connection {
                 // TODO(agrover@mozilla.com): how should we be using
                 // currently-unused stream_data_limit?
 
-                let stream_id: StreamId = stream_id.into();
-
                 // Terminate connection with STREAM_STATE_ERROR if send-only
                 // stream (-transport 19.13)
                 if stream_id.is_send_only(self.role()) {
