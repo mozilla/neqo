@@ -195,7 +195,7 @@ impl FlowMgr {
             if self
                 .from_streams
                 .remove(&(
-                    stream_id.into(),
+                    stream_id,
                     mem::discriminant(&Frame::ResetStream {
                         stream_id,
                         application_error_code,
@@ -210,7 +210,7 @@ impl FlowMgr {
                 );
             }
 
-            send_streams.reset_acked(stream_id.into());
+            send_streams.reset_acked(stream_id);
         }
     }
 
@@ -234,8 +234,8 @@ impl FlowMgr {
                     application_error_code,
                     final_size
                 );
-                if send_streams.get(stream_id.into()).is_ok() {
-                    self.stream_reset(stream_id.into(), application_error_code, final_size);
+                if send_streams.get(stream_id).is_ok() {
+                    self.stream_reset(stream_id, application_error_code, final_size);
                 }
             }
             // Resend MaxStreams if lost (with updated value)
@@ -254,9 +254,9 @@ impl FlowMgr {
                 }
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
-                if let Ok(ss) = send_streams.get(stream_id.into()) {
+                if let Ok(ss) = send_streams.get(stream_id) {
                     if ss.credit_avail() == 0 {
-                        self.stream_data_blocked(stream_id.into(), ss.max_stream_data())
+                        self.stream_data_blocked(stream_id, ss.max_stream_data())
                     }
                 }
             }
@@ -276,11 +276,11 @@ impl FlowMgr {
             Frame::StopSending {
                 stream_id,
                 application_error_code,
-            } => self.stop_sending(stream_id.into(), application_error_code),
+            } => self.stop_sending(stream_id, application_error_code),
             // Resend MaxStreamData if not SizeKnown
             // (maybe_send_flowc_update() checks this.)
             Frame::MaxStreamData { stream_id, .. } => {
-                if let Some(rs) = recv_streams.get_mut(&stream_id.into()) {
+                if let Some(rs) = recv_streams.get_mut(&stream_id) {
                     rs.maybe_send_flowc_update()
                 }
             }
