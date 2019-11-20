@@ -2972,4 +2972,153 @@ mod tests {
         let server_out = server.process(client_fin.dgram(), now());
         assert!(server_out.as_dgram_ref().is_some());
     }
+
+    #[test]
+    fn pto_works_basic() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        let res = client.process(None, now);
+        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+
+        // Send data on two streams
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);
+        assert_eq!(client.stream_send(2, b" world").unwrap(), 6);
+
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
+        assert_eq!(client.stream_send(6, b"there!").unwrap(), 6);
+
+        // Send orig pkt
+        let _out = client.process(None, now + Duration::from_secs(10));
+
+        // Nothing to do, should return callback
+        let out = client.process(None, now + Duration::from_secs(10));
+        assert!(matches!(out, Output::Callback(_)));
+
+        // One second later, it should want to send PTO packet
+        let out = client.process(None, now + Duration::from_secs(11));
+
+        let frames = server.test_process_input(out.dgram().unwrap(), now + Duration::from_secs(11));
+
+        assert_eq!(frames[0], (Frame::Ping, 0));
+        assert_eq!(frames[1], (Frame::Ping, 2));
+        assert!(matches!(frames[2], (Frame::Stream { .. }, 3)));
+    }
+
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn pto_works_ping() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        let res = client.process(None, now);
+        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+
+        // Send "zero" pkt
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, b"zero").unwrap(), 4);
+        let pkt0 = client.process(None, now + Duration::from_secs(10));
+        assert!(matches!(pkt0, Output::Datagram(_)));
+
+        // Send "one" pkt
+        assert_eq!(client.stream_send(2, b"one").unwrap(), 3);
+        let pkt1 = client.process(None, now + Duration::from_secs(10));
+
+        // Send "two" pkt
+        assert_eq!(client.stream_send(2, b"two").unwrap(), 3);
+        let pkt2 = client.process(None, now + Duration::from_secs(10));
+
+        // Send "three" pkt
+        assert_eq!(client.stream_send(2, b"three").unwrap(), 5);
+        let pkt3 = client.process(None, now + Duration::from_secs(10));
+
+        // Nothing to do, should return callback
+        let out = client.process(None, now + Duration::from_secs(10));
+        // Check callback delay is what we expect
+        assert!(matches!(out, Output::Callback(x) if x == Duration::from_millis(45)));
+
+        // Process these by server, skipping pkt0
+        let srv0_pkt1 = server.process(pkt1.dgram(), now + Duration::from_secs(10));
+        // ooo, ack client pkt 1
+        assert!(matches!(srv0_pkt1, Output::Datagram(_)));
+
+        // process pkt2 (no ack yet)
+        let srv2 = server.process(
+            pkt2.dgram(),
+            now + Duration::from_secs(10) + Duration::from_millis(20),
+        );
+        assert!(matches!(srv2, Output::Callback(_)));
+
+        // process pkt3 (acked)
+        let srv2 = server.process(
+            pkt3.dgram(),
+            now + Duration::from_secs(10) + Duration::from_millis(20),
+        );
+        // ack client pkt 2 & 3
+        assert!(matches!(srv2, Output::Datagram(_)));
+
+        // client processes ack
+        let pkt4 = client.process(
+            srv2.dgram(),
+            now + Duration::from_secs(10) + Duration::from_millis(40),
+        );
+        // client resends data from pkt0
+        assert!(matches!(pkt4, Output::Datagram(_)));
+
+        // server sees ooo pkt0 and generates ack
+        let srv_pkt2 = server.process(
+            pkt0.dgram(),
+            now + Duration::from_secs(10) + Duration::from_millis(40),
+        );
+        assert!(matches!(srv_pkt2, Output::Datagram(_)));
+
+        // Orig data is acked
+        let pkt5 = client.process(
+            srv_pkt2.dgram(),
+            now + Duration::from_secs(10) + Duration::from_millis(40),
+        );
+        assert!(matches!(pkt5, Output::Callback(_)));
+
+        // PTO expires. No unacked data. Only send PING.
+        let pkt6 = client.process(
+            None,
+            now + Duration::from_secs(10) + Duration::from_millis(110),
+        );
+
+        let frames = server.test_process_input(
+            pkt6.dgram().unwrap(),
+            now + Duration::from_secs(10) + Duration::from_millis(110),
+        );
+
+        assert_eq!(frames[0], (Frame::Ping, 0));
+        assert_eq!(frames[1], (Frame::Ping, 2));
+        assert_eq!(frames[2], (Frame::Ping, 3));
+    }
+
+    #[test]
+    // Absent path PTU discovery, max v6 packet size should be 1232.
+    fn verify_pkt_honors_mtu() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        let res = client.process(None, now);
+        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+
+        // Try to send a large stream and verify first packet is correctly sized
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, &[0xbb; 2000]).unwrap(), 2000);
+        let pkt0 = client.process(None, now);
+        assert!(matches!(pkt0, Output::Datagram(_)));
+        assert_eq!(pkt0.as_dgram_ref().unwrap().len(), 1232);
+    }
 }
