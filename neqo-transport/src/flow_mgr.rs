@@ -96,7 +96,7 @@ impl FlowMgr {
         final_size: u64,
     ) {
         let frame = Frame::ResetStream {
-            stream_id: stream_id.as_u64(),
+            stream_id,
             application_error_code,
             final_size,
         };
@@ -107,7 +107,7 @@ impl FlowMgr {
     /// Indicate to sending remote we are no longer interested in the stream
     pub fn stop_sending(&mut self, stream_id: StreamId, application_error_code: AppError) {
         let frame = Frame::StopSending {
-            stream_id: stream_id.as_u64(),
+            stream_id,
             application_error_code,
         };
         self.from_streams
@@ -117,7 +117,7 @@ impl FlowMgr {
     /// Update sending remote with more credits
     pub fn max_stream_data(&mut self, stream_id: StreamId, maximum_stream_data: u64) {
         let frame = Frame::MaxStreamData {
-            stream_id: stream_id.as_u64(),
+            stream_id,
             maximum_stream_data,
         };
         self.from_streams
@@ -127,7 +127,7 @@ impl FlowMgr {
     /// Indicate to receiving remote we need more credits
     pub fn stream_data_blocked(&mut self, stream_id: StreamId, stream_data_limit: u64) {
         let frame = Frame::StreamDataBlocked {
-            stream_id: stream_id.as_u64(),
+            stream_id,
             stream_data_limit,
         };
         self.from_streams
@@ -187,7 +187,7 @@ impl FlowMgr {
         {
             qinfo!(
                 "Reset received stream={} err={} final_size={}",
-                stream_id,
+                stream_id.as_u64(),
                 application_error_code,
                 final_size
             );
@@ -206,7 +206,7 @@ impl FlowMgr {
             {
                 qinfo!(
                     "Queued ResetStream for {} removed because previous ResetStream was acked",
-                    stream_id
+                    stream_id.as_u64()
                 );
             }
 
@@ -230,7 +230,7 @@ impl FlowMgr {
             } => {
                 qinfo!(
                     "Reset lost stream={} err={} final_size={}",
-                    stream_id,
+                    stream_id.as_u64(),
                     application_error_code,
                     final_size
                 );
