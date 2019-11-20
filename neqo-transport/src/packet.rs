@@ -12,6 +12,7 @@
 use rand::Rng;
 
 use neqo_common::{hex, matches, qtrace, Decoder, Encoder};
+use neqo_crypto::aead::Aead;
 use neqo_crypto::Epoch;
 
 use std::convert::TryFrom;
@@ -155,6 +156,44 @@ impl PacketHdr {
 
     pub fn body_len(&self) -> usize {
         self.body_len
+    }
+
+    // header length plus auth tag
+    pub fn overhead(&self, aead: &Aead, pmtu: usize) -> usize {
+        match &self.tipe {
+            PacketType::Short => {
+                let mut enc = Encoder::default();
+                // Leading byte.
+                let pnl = pn_length(self.pn);
+                enc.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | encode_pnl(pnl));
+                enc.encode(&self.dcid.0);
+                enc.encode_uint(pnl, self.pn);
+                enc.len() + aead.expansion()
+            }
+            PacketType::VN(_) => encode_packet_vn(&self).len(),
+            PacketType::Retry { .. } => encode_retry(&self).len(),
+            PacketType::Initial(..) | PacketType::ZeroRTT | PacketType::Handshake => {
+                let mut enc = Encoder::default();
+
+                let pnl = pn_length(self.pn);
+                enc.encode_byte(
+                    PACKET_BIT_LONG
+                        | PACKET_BIT_FIXED_QUIC
+                        | self.tipe.code() << 4
+                        | encode_pnl(pnl),
+                );
+                enc.encode_uint(4, self.version.unwrap());
+                enc.encode_vec(1, &*self.dcid);
+                enc.encode_vec(1, &*self.scid.as_ref().unwrap());
+
+                if let PacketType::Initial(token) = &self.tipe {
+                    enc.encode_vvec(&token);
+                }
+                enc.encode_varint((pnl + pmtu + aead.expansion()) as u64);
+                enc.encode_uint(pnl, self.pn);
+                enc.len() + aead.expansion()
+            }
+        }
     }
 }
 

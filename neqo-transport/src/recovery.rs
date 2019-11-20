@@ -234,9 +234,11 @@ impl LossRecovery {
     }
 
     pub fn next_pn(&mut self, pn_space: PNSpace) -> u64 {
-        let val = self.spaces[pn_space].tx_pn;
+        self.spaces[pn_space].tx_pn
+    }
+
+    pub fn inc_pn(&mut self, pn_space: PNSpace) {
         self.spaces[pn_space].tx_pn += 1;
-        val
     }
 
     pub fn increment_pto_count(&mut self) {

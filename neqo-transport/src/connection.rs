@@ -321,6 +321,7 @@ pub struct Connection {
     events: ConnectionEvents,
     token: Option<Vec<u8>>,
     stats: Stats,
+    tx_mode: TxMode,
 }
 
 impl Debug for Connection {
@@ -445,6 +446,7 @@ impl Connection {
             events: ConnectionEvents::default(),
             token: None,
             stats: Stats::default(),
+            tx_mode: TxMode::Normal,
         }
     }
 
@@ -885,7 +887,11 @@ impl Connection {
         let largest_acknowledged = self
             .loss_recovery
             .largest_acknowledged_pn(PNSpace::from(hdr.epoch));
-        match self.crypto.obtain_crypto_state(self.role, hdr.epoch) {
+        match self
+            .crypto
+            .states
+            .obtain(self.role, hdr.epoch, &self.crypto.tls)
+        {
             Ok(CryptoState { rx: Some(rx), .. }) => {
                 if (self.state == State::Handshaking) && (hdr.epoch == 3) {
                     // We got a packet for epoch 3 but it is still in state Handshaking ->
@@ -1039,41 +1045,89 @@ impl Connection {
             let mut tokens = Vec::new();
 
             // Ensure we have tx crypto state for this epoch, or skip it.
-            if !matches!(
-                self.crypto.obtain_crypto_state(self.role, epoch),
-                Ok(CryptoState { tx: Some(_), .. })
-            ) {
-                continue;
-            }
+            let tx = match self
+                .crypto
+                .states
+                .obtain(self.role, epoch, &self.crypto.tls)
+            {
+                Ok(CryptoState { tx: Some(tx), .. }) => tx,
+                _ => continue,
+            };
+
+            let hdr = PacketHdr::new(
+                0,
+                match epoch {
+                    0 => {
+                        let token = match &self.retry_info {
+                            Some(v) => v.token.clone(),
+                            _ => Vec::new(),
+                        };
+                        PacketType::Initial(token)
+                    }
+                    1 => {
+                        if self.zero_rtt_state == ZeroRttState::Rejected {
+                            continue;
+                        }
+                        self.zero_rtt_state = ZeroRttState::Sending;
+                        PacketType::ZeroRTT
+                    }
+                    2 => PacketType::Handshake,
+                    3 => PacketType::Short,
+                    _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
+                },
+                Some(self.version),
+                path.remote_cid.clone(),
+                path.local_cids.first().cloned(),
+                self.loss_recovery.next_pn(space),
+                epoch,
+            );
 
             let mut ack_eliciting = false;
+            let tx_mode = self.tx_mode;
+
             match &self.state {
                 State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
                     loop {
-                        let remaining = path.mtu() - out_bytes.len() - encoder.len();
+                        let used =
+                            out_bytes.len() + encoder.len() + hdr.overhead(&tx.aead, path.mtu());
+                        let remaining = path.mtu() - used;
+                        if remaining == 0 {
+                            break;
+                        }
 
-                        // Check sources in turn for available frames
-                        if let Some((frame, token)) = self
-                            .acks
-                            .get_frame(now, epoch)
-                            .or_else(|| self.crypto.get_frame(epoch, TxMode::Normal, remaining))
-                            .or_else(|| self.flow_mgr.borrow_mut().get_frame(epoch, remaining))
-                            .or_else(|| {
-                                self.send_streams
-                                    .get_frame(epoch, TxMode::Normal, remaining)
-                            })
-                        {
+                        // Try to get a frame from frame sources
+                        let mut frame = None;
+                        if self.tx_mode == TxMode::Normal {
+                            frame = self.acks.get_frame(now, epoch);
+                        }
+                        if frame.is_none() {
+                            frame = self.crypto.streams.get_frame(epoch, tx_mode, remaining)
+                        }
+                        if frame.is_none() && self.tx_mode == TxMode::Normal {
+                            frame = self.flow_mgr.borrow_mut().get_frame(epoch, remaining);
+                        }
+                        if frame.is_none() {
+                            frame = self.send_streams.get_frame(epoch, tx_mode, remaining)
+                        }
+                        if frame.is_none() && self.tx_mode == TxMode::Pto {
+                            frame = Some((Frame::Ping, None));
+                        }
+
+                        if let Some((frame, token)) = frame {
                             ack_eliciting |= frame.ack_eliciting();
                             frame.marshal(&mut encoder);
                             if let Some(t) = token {
                                 tokens.push(t);
                             }
-                            if out_bytes.len() + encoder.len() == path.mtu() {
-                                // No more space for frames.
+
+                            // Pto only ever sends one frame, but it ALWAYS
+                            // sends one
+                            if self.tx_mode == TxMode::Pto {
                                 break;
                             }
                         } else {
                             // No more frames to send.
+                            assert_eq!(self.tx_mode, TxMode::Normal);
                             break;
                         }
                     }
@@ -1101,11 +1155,12 @@ impl Connection {
                 State::Closed { .. } => unimplemented!(),
             }
 
+            assert!(encoder.len() <= path.mtu());
             if encoder.len() == 0 {
                 continue;
             }
 
-            qdebug!([self], "Need to send a packet");
+            qdebug!("Need to send a packet");
             match epoch {
                 // Packets containing Initial packets need padding.
                 0 => needs_padding = true,
@@ -1113,65 +1168,48 @@ impl Connection {
                 // ...unless they include higher epochs.
                 _ => needs_padding = false,
             }
-            let hdr = PacketHdr::new(
-                0,
-                match epoch {
-                    0 => {
-                        let token = match &self.retry_info {
-                            Some(v) => v.token.clone(),
-                            _ => Vec::new(),
-                        };
-                        PacketType::Initial(token)
-                    }
-                    1 => {
-                        assert!(self.zero_rtt_state != ZeroRttState::Rejected);
-                        self.zero_rtt_state = ZeroRttState::Sending;
-                        PacketType::ZeroRTT
-                    }
-                    2 => PacketType::Handshake,
-                    3 => PacketType::Short,
-                    _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
-                },
-                Some(self.version),
-                path.remote_cid.clone(),
-                path.local_cids.first().cloned(),
-                self.loss_recovery.next_pn(space),
-                epoch,
-            );
+
             self.stats.packets_tx += 1;
+            self.loss_recovery.inc_pn(space);
 
-            if ack_eliciting {
-                self.idle_timeout.on_packet_sent(now);
-            }
-            self.loss_recovery
-                .on_packet_sent(space, hdr.pn, ack_eliciting, tokens, now);
-
-            let cs = self
-                .crypto
-                .obtain_crypto_state(self.role, hdr.epoch)
-                .unwrap();
-            let tx = cs.tx.as_ref().unwrap();
             let mut packet = encode_packet(tx, &hdr, &encoder);
+
+            if self.tx_mode != TxMode::Pto {
+                if ack_eliciting {
+                    self.idle_timeout.on_packet_sent(now);
+                }
+                self.loss_recovery
+                    .on_packet_sent(space, hdr.pn, ack_eliciting, tokens, now);
+            }
+
             dump_packet(self, "TX ->", &hdr, &encoder);
+
             out_bytes.append(&mut packet);
             if out_bytes.len() >= path.mtu() {
                 break;
             }
         }
 
-        if out_bytes.is_empty() {
-            self.path = Some(path);
-            return Ok(None);
+        // Sent a probe pkt. Another timeout will re-engage ProbeTimeout mode,
+        // but otherwise return to honoring CC.
+        if self.tx_mode == TxMode::Pto {
+            self.tx_mode = TxMode::Normal;
         }
 
-        // Pad Initial packets sent by the client to 1200 bytes.
-        if self.role == Role::Client && needs_padding {
-            qdebug!([self], "pad Initial to 1200");
-            out_bytes.resize(1200, 0);
+        if out_bytes.is_empty() {
+            assert!(self.tx_mode != TxMode::Pto);
+            self.path = Some(path);
+            Ok(None)
+        } else {
+            // Pad Initial packets sent by the client to mtu bytes.
+            if self.role == Role::Client && needs_padding {
+                qdebug!([self], "pad Initial to max_datagram_size");
+                out_bytes.resize(path.mtu(), 0);
+            }
+            let ret = Ok(Some(Datagram::new(path.local, path.remote, out_bytes)));
+            self.path = Some(path);
+            ret
         }
-        let dgram = Some(Datagram::new(path.local, path.remote, out_bytes));
-        self.path = Some(path);
-        Ok(dgram)
     }
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
@@ -1345,11 +1383,10 @@ impl Connection {
                     offset,
                     &data
                 );
-                let rx = &mut self.crypto.streams[epoch as usize].rx;
-                rx.inbound_frame(offset, data)?;
-                if rx.data_ready() {
+                self.crypto.streams.inbound_frame(epoch, offset, data)?;
+                if self.crypto.streams.data_ready(epoch) {
                     let mut buf = Vec::new();
-                    let read = rx.read_to_end(&mut buf)?;
+                    let read = self.crypto.streams.read_to_end(epoch, &mut buf)?;
                     qdebug!("Read {} bytes", read);
                     self.handshake(now, epoch, Some(&buf))?;
                 }
@@ -1469,7 +1506,7 @@ impl Connection {
                 match token {
                     RecoveryToken::Ack(_) => {}
                     RecoveryToken::Stream(st) => self.send_streams.lost(&st),
-                    RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
+                    RecoveryToken::Crypto(ct) => self.crypto.lost(&ct),
                     RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                         &ft,
                         &mut self.send_streams,
@@ -1538,7 +1575,7 @@ impl Connection {
                 match token {
                     RecoveryToken::Ack(_) => {}
                     RecoveryToken::Stream(st) => self.send_streams.lost(&st),
-                    RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
+                    RecoveryToken::Crypto(ct) => self.crypto.lost(&ct),
                     RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                         &ft,
                         &mut self.send_streams,
@@ -1951,7 +1988,7 @@ impl Connection {
                         match token {
                             RecoveryToken::Ack(_) => {} // Do nothing
                             RecoveryToken::Stream(st) => self.send_streams.lost(&st),
-                            RecoveryToken::Crypto(ct) => self.crypto.lost(ct),
+                            RecoveryToken::Crypto(ct) => self.crypto.lost(&ct),
                             RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
                                 &ft,
                                 &mut self.send_streams,
@@ -1981,6 +2018,16 @@ impl Connection {
                 //      SendOnePaddedInitialPacket()
                 // TODO
                 // SendOneOrTwoPackets()
+                // PTO. Send new data if available, else retransmit old data.
+                // If neither is available, send a single PING frame.
+
+                // TODO(agrover): determine if new data is available and if so
+                // send 2 packets worth
+                // TODO(agrover): else determine if old data is available and if
+                // so send 2 packets worth
+                // TODO(agrover): else send a single PING frame
+
+                self.tx_mode = TxMode::Pto;
             }
         }
     }
@@ -2108,7 +2155,7 @@ mod tests {
         let mut client = default_client();
         let out = client.process(None, now());
         assert!(out.as_dgram_ref().is_some());
-        assert_eq!(out.as_dgram_ref().unwrap().len(), 1200);
+        assert_eq!(out.as_dgram_ref().unwrap().len(), 1232);
         qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
@@ -2349,7 +2396,7 @@ mod tests {
         let mut client = default_client();
         let out = client.process(None, now());
         assert!(out.as_dgram_ref().is_some());
-        assert_eq!(out.as_dgram_ref().unwrap().len(), 1200);
+        assert_eq!(out.as_dgram_ref().unwrap().len(), 1232);
         qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
