@@ -7,8 +7,9 @@
 // The class implementing a QUIC connection.
 
 use std::cell::RefCell;
-use std::cmp::{max, Ordering};
+use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
@@ -55,7 +56,7 @@ const NUM_EPOCHS: Epoch = 4;
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
-const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
+const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
 const LOCAL_IDLE_TIMEOUT: Duration = Duration::from_secs(60); // 1 minute
 
@@ -1134,6 +1135,11 @@ impl Connection {
             );
 
             let mut ack_eliciting = false;
+            let mut has_padding = false;
+            let cong_avail = match self.tx_mode {
+                TxMode::Normal => usize::try_from(self.loss_recovery.cwnd_avail()).unwrap(),
+                TxMode::Pto => path.mtu(), // send one packet
+            };
             let tx_mode = self.tx_mode;
 
             match &self.state {
@@ -1141,7 +1147,7 @@ impl Connection {
                     loop {
                         let used =
                             out_bytes.len() + encoder.len() + hdr.overhead(&tx.aead, path.mtu());
-                        let remaining = path.mtu() - used;
+                        let remaining = min(path.mtu() - used, cong_avail.saturating_sub(used));
                         if remaining < 2 {
                             // All useful frames are at least 2 bytes.
                             break;
@@ -1167,6 +1173,9 @@ impl Connection {
 
                         if let Some((frame, token)) = frame {
                             ack_eliciting |= frame.ack_eliciting();
+                            if let Frame::Padding = frame {
+                                has_padding |= true;
+                            }
                             frame.marshal(&mut encoder);
                             if let Some(t) = token {
                                 tokens.push(t);
@@ -1234,8 +1243,15 @@ impl Connection {
                 if ack_eliciting {
                     self.idle_timeout.on_packet_sent(now);
                 }
-                self.loss_recovery
-                    .on_packet_sent(space, hdr.pn, ack_eliciting, tokens, now);
+                self.loss_recovery.on_packet_sent(
+                    space,
+                    hdr.pn,
+                    ack_eliciting,
+                    tokens,
+                    packet.len(),
+                    ack_eliciting || has_padding,
+                    now,
+                );
             }
 
             dump_packet(self, "TX ->", &hdr, &encoder);
@@ -1493,12 +1509,14 @@ impl Connection {
                 }
             }
             Frame::DataBlocked { data_limit } => {
-                // Should never happen since we set data limit to 2^62-1
+                // Should never happen since we set data limit to max
                 qwarn!(
                     [self],
                     "Received DataBlocked with data limit {}",
                     data_limit
                 );
+                // But if it does, open it up all the way
+                self.flow_mgr.borrow_mut().max_data(LOCAL_MAX_DATA);
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
                 // TODO(agrover@mozilla.com): how should we be using
@@ -1568,7 +1586,7 @@ impl Connection {
     {
         for lost in lost_packets {
             for token in lost.tokens {
-                qtrace!([self], "Lost: {:?}", token);
+                qdebug!([self], "Lost: {:?}", token);
                 match token {
                     RecoveryToken::Ack(_) => {}
                     RecoveryToken::Stream(st) => self.send_streams.lost(&st),
