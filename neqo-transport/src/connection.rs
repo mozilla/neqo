@@ -1027,6 +1027,7 @@ impl Connection {
     }
 
     #[allow(clippy::cognitive_complexity)]
+    #[allow(clippy::useless_let_if_seq)]
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
     fn output_pkt_for_path(&mut self, now: Instant) -> Res<Option<Datagram>> {
@@ -1361,7 +1362,7 @@ impl Connection {
                 ..
             } => {
                 // TODO(agrover@mozilla.com): use final_size for connection MaxData calc
-                if let (_, Some(rs)) = self.obtain_stream(stream_id.into())? {
+                if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
                     rs.reset(application_error_code);
                 }
             }
@@ -1370,8 +1371,8 @@ impl Connection {
                 application_error_code,
             } => {
                 self.events
-                    .send_stream_stop_sending(stream_id.into(), application_error_code);
-                if let (Some(ss), _) = self.obtain_stream(stream_id.into())? {
+                    .send_stream_stop_sending(stream_id, application_error_code);
+                if let (Some(ss), _) = self.obtain_stream(stream_id)? {
                     ss.reset(application_error_code);
                 }
             }
@@ -1399,7 +1400,7 @@ impl Connection {
                 data,
                 ..
             } => {
-                if let (_, Some(rs)) = self.obtain_stream(stream_id.into())? {
+                if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
                     rs.inbound_stream_frame(fin, offset, data)?;
                 }
             }
@@ -1408,7 +1409,7 @@ impl Connection {
                 stream_id,
                 maximum_stream_data,
             } => {
-                if let (Some(ss), _) = self.obtain_stream(stream_id.into())? {
+                if let (Some(ss), _) = self.obtain_stream(stream_id)? {
                     ss.set_max_stream_data(maximum_stream_data);
                 }
             }
