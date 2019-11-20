@@ -7,8 +7,9 @@
 // The class implementing a QUIC connection.
 
 use std::cell::RefCell;
-use std::cmp::{max, Ordering};
+use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
@@ -1134,6 +1135,11 @@ impl Connection {
             );
 
             let mut ack_eliciting = false;
+            let mut has_padding = false;
+            let cong_avail = match self.tx_mode {
+                TxMode::Normal => usize::try_from(self.loss_recovery.cwnd_avail()).unwrap(),
+                TxMode::Pto => path.mtu(), // send one packet
+            };
             let tx_mode = self.tx_mode;
 
             match &self.state {
@@ -1141,7 +1147,7 @@ impl Connection {
                     loop {
                         let used =
                             out_bytes.len() + encoder.len() + hdr.overhead(&tx.aead, path.mtu());
-                        let remaining = path.mtu() - used;
+                        let remaining = min(path.mtu() - used, cong_avail.saturating_sub(used));
                         if remaining < 2 {
                             // All useful frames are at least 2 bytes.
                             break;
@@ -1167,6 +1173,9 @@ impl Connection {
 
                         if let Some((frame, token)) = frame {
                             ack_eliciting |= frame.ack_eliciting();
+                            if let Frame::Padding = frame {
+                                has_padding |= true;
+                            }
                             frame.marshal(&mut encoder);
                             if let Some(t) = token {
                                 tokens.push(t);
@@ -1234,8 +1243,15 @@ impl Connection {
                 if ack_eliciting {
                     self.idle_timeout.on_packet_sent(now);
                 }
-                self.loss_recovery
-                    .on_packet_sent(space, hdr.pn, ack_eliciting, tokens, now);
+                self.loss_recovery.on_packet_sent(
+                    space,
+                    hdr.pn,
+                    ack_eliciting,
+                    tokens,
+                    packet.len(),
+                    ack_eliciting || has_padding,
+                    now,
+                );
             }
 
             dump_packet(self, "TX ->", &hdr, &encoder);
@@ -1499,6 +1515,8 @@ impl Connection {
                     "Received DataBlocked with data limit {}",
                     data_limit
                 );
+                // But if it does, open it up all the way
+                self.flow_mgr.borrow_mut().max_data(0x3FFF_FFFF_FFFF_FFFE);
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
                 // TODO(agrover@mozilla.com): how should we be using
@@ -1568,7 +1586,7 @@ impl Connection {
     {
         for lost in lost_packets {
             for token in lost.tokens {
-                qtrace!([self], "Lost: {:?}", token);
+                qdebug!([self], "Lost: {:?}", token);
                 match token {
                     RecoveryToken::Ack(_) => {}
                     RecoveryToken::Stream(st) => self.send_streams.lost(&st),
@@ -2119,14 +2137,23 @@ mod tests {
     // These are a direct copy of those functions.
     pub fn default_client() -> Connection {
         fixture_init();
-        Connection::new_client(
+        let mut c = Connection::new_client(
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
         )
-        .expect("create a default client")
+        .expect("create a default client");
+
+        // limit dcid to a constant value to make testing easier
+        let mut modded_path = c.path.take().unwrap();
+        modded_path.remote_cid.0.truncate(8);
+        let modded_dcid = modded_path.remote_cid.0.clone();
+        assert_eq!(modded_dcid.len(), 8);
+        c.path = Some(modded_path);
+        c.crypto.create_initial_state(Role::Client, &modded_dcid);
+        c
     }
     pub fn default_server() -> Connection {
         fixture_init();
@@ -3229,5 +3256,215 @@ mod tests {
         let pkt0 = client.process(None, now);
         assert!(matches!(pkt0, Output::Datagram(_)));
         assert_eq!(pkt0.as_dgram_ref().unwrap().len(), 1232);
+    }
+
+    #[test]
+    fn cc_slow_start() {
+        let mut client = default_client();
+        let mut server = default_server();
+
+        server.set_local_tparam(
+            tp_constants::INITIAL_MAX_DATA,
+            TransportParameter::Integer(65536),
+        );
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        // Try to send a lot of data
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, &[0xaa; 100_000]).unwrap(), 65535);
+
+        qinfo!("client");
+        let mut c_tx_dgrams = Vec::new();
+        loop {
+            let pkt = client.process(None, now);
+            if pkt.as_dgram_ref().is_some() {
+                c_tx_dgrams.push(pkt.dgram().unwrap())
+            } else {
+                assert!(matches!(pkt, Output::Callback(_)));
+                break;
+            }
+        }
+
+        assert_eq!(c_tx_dgrams.len(), 11);
+    }
+
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn congestion_control() {
+        let mut client = default_client();
+        let mut server = default_server();
+        let mut srv_buf = [0; 1_000_000];
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        // Try to send a lot of data
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, &[0xaa; 100_000]).unwrap(), 16383);
+
+        qinfo!("client");
+        let mut c_tx_dgrams = Vec::new();
+        loop {
+            let pkt = client.process(None, now);
+            if pkt.as_dgram_ref().is_some() {
+                c_tx_dgrams.push(pkt.dgram().unwrap())
+            } else {
+                assert!(matches!(pkt, Output::Callback(_)));
+                break;
+            }
+        }
+
+        assert_eq!(c_tx_dgrams.len(), 11);
+
+        // Recv all pkts and ACK
+        qinfo!("server");
+        for c_dgram in c_tx_dgrams {
+            server.process_input(c_dgram, now)
+        }
+        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (12283, false));
+        let mut s_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = server.process_output(now) {
+            s_tx_dgrams.push(dg);
+        }
+
+        // ACK pkts 0-10
+        assert_eq!(s_tx_dgrams.len(), 1);
+
+        // Handle ack, send more
+        qinfo!("client");
+        for s_dgram in s_tx_dgrams {
+            client.process_input(s_dgram, now)
+        }
+
+        assert_eq!(client.stream_send(2, &[0xab; 100_000]).unwrap(), 49152);
+
+        let mut c_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = client.process_output(now) {
+            c_tx_dgrams.push(dg);
+        }
+
+        assert_eq!(c_tx_dgrams.len(), 21);
+
+        // Recv all pkts and ACK
+        qinfo!("server");
+        for c_dgram in c_tx_dgrams {
+            server.process_input(c_dgram, now)
+        }
+        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (24617, false));
+        let mut s_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = server.process_output(now) {
+            s_tx_dgrams.push(dg);
+        }
+
+        // ACK pkts 0-31
+        assert_eq!(s_tx_dgrams.len(), 1);
+
+        // Handle ack, send more
+        qinfo!("client");
+        for s_dgram in s_tx_dgrams {
+            client.process_input(s_dgram, now)
+        }
+
+        // Cram more into the stream
+        assert_eq!(client.stream_send(2, &[0xab; 100_000]).unwrap(), 36900);
+
+        let mut c_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = client.process_output(now) {
+            c_tx_dgrams.push(dg);
+        }
+
+        assert_eq!(c_tx_dgrams.len(), 41);
+
+        // Packets lost!
+        qinfo!("server");
+        for _ in 0..25 {
+            c_tx_dgrams.remove(10);
+        }
+        for c_dgram in c_tx_dgrams {
+            server.process_input(c_dgram, now)
+        }
+        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (12005, false));
+        let mut s_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = server.process_output(now) {
+            s_tx_dgrams.push(dg);
+        }
+        assert_eq!(s_tx_dgrams.len(), 1);
+
+        // Handle ack, transition slow start -> cong avoidance due to dropped
+        // pkts
+        qinfo!("client");
+        for s_dgram in s_tx_dgrams {
+            client.process_input(s_dgram, now)
+        }
+        let cong_cwnd = client.loss_recovery.cwnd();
+        assert_eq!(cong_cwnd, 35116);
+
+        // Cram more into the stream, but nothing added
+        assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 0);
+
+        let mut c_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = client.process_output(now) {
+            c_tx_dgrams.push(dg);
+        }
+
+        // Constrained by cwnd
+        assert_eq!(c_tx_dgrams.len(), 29);
+        assert_eq!(
+            c_tx_dgrams.iter().map(|dg| dg.len() as u64).sum::<u64>(),
+            cong_cwnd
+        );
+
+        qinfo!("server");
+        for c_dgram in c_tx_dgrams {
+            server.process_input(c_dgram, now)
+        }
+        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (41423, false));
+        let mut s_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = server.process_output(now) {
+            s_tx_dgrams.push(dg);
+        }
+        assert_eq!(s_tx_dgrams.len(), 1);
+
+        // Since last batch was not sent later than cong period start, acking
+        // these should not get us out of congestion avoidance mode.
+        qinfo!("client");
+        for s_dgram in s_tx_dgrams {
+            client.process_input(s_dgram, now)
+        }
+        // cwnd should stay the same.
+        assert_eq!(cong_cwnd, client.loss_recovery.cwnd());
+
+        // Cram more into the stream
+        assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 53428);
+
+        let mut c_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = client.process_output(now + Duration::from_millis(100)) {
+            c_tx_dgrams.push(dg);
+        }
+
+        assert_eq!(c_tx_dgrams.len(), 29);
+
+        qinfo!("server");
+        for c_dgram in c_tx_dgrams {
+            server.process_input(c_dgram, now)
+        }
+        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (34211, false));
+        let mut s_tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = server.process_output(now) {
+            s_tx_dgrams.push(dg);
+        }
+        assert_eq!(s_tx_dgrams.len(), 1);
+
+        // These packets were sent after cong period start, so client should no
+        // longer be in congestion recovery and now be in cong avoidance
+        qinfo!("client");
+        for s_dgram in s_tx_dgrams {
+            client.process_input(s_dgram, now + Duration::from_millis(100))
+        }
+
+        // cwnd has only gone up from 35k->36k because of acked packets
+        assert_eq!(client.loss_recovery.cwnd(), 36282);
     }
 }
