@@ -604,7 +604,7 @@ impl Connection {
 
     /// For use with process().  Errors there can be ignored, but this needs to
     /// ensure that the state is updated.
-    fn absorb_error(&mut self, now: Instant, res: Res<()>) {
+    fn absorb_error<T>(&mut self, now: Instant, res: Res<T>) {
         let _ = self.capture_error(now, 0, res);
     }
 
@@ -630,6 +630,14 @@ impl Connection {
         let res = self.input(dgram, now);
         self.absorb_error(now, res);
         self.cleanup_streams();
+    }
+
+    /// Just like above but returns frames parsed from the datagram
+    #[cfg(test)]
+    pub fn test_process_input(&mut self, dgram: Datagram, now: Instant) -> Vec<(Frame, Epoch)> {
+        let frames = self.input(dgram, now).unwrap();
+        self.cleanup_streams();
+        frames
     }
 
     /// Get the time that we next need to be called back, relative to `now`.
@@ -765,10 +773,11 @@ impl Connection {
         Ok(())
     }
 
-    fn input(&mut self, d: Datagram, now: Instant) -> Res<()> {
+    fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, Epoch)>> {
         let mut slc = &d[..];
+        let mut frames = Vec::new();
 
-        qinfo!([self], "input {}", hex(&**d));
+        qdebug!([self], "input {}", hex(&**d));
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
@@ -782,7 +791,7 @@ impl Connection {
                         hex(slc),
                         e
                     );
-                    return Ok(()); // Drop the remainder of the datagram.
+                    return Ok(frames); // Drop the remainder of the datagram.
                 }
             };
             self.stats.packets_rx += 1;
@@ -794,11 +803,12 @@ impl Connection {
                     return Err(Error::VersionNegotiation);
                 }
                 (PacketType::Retry { odcid, token }, State::WaitInitial, Role::Client) => {
-                    return self.handle_retry(hdr.scid.as_ref().unwrap(), odcid, token);
+                    self.handle_retry(hdr.scid.as_ref().unwrap(), odcid, token)?;
+                    return Ok(frames);
                 }
                 (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {
                     qwarn!("dropping {:?}", hdr.tipe);
-                    return Ok(());
+                    return Ok(frames);
                 }
                 _ => {}
             };
@@ -810,20 +820,20 @@ impl Connection {
                         hdr.version.unwrap(),
                         self.version,
                     );
-                    return Ok(());
+                    return Ok(frames);
                 }
             }
 
             match self.state {
                 State::Init => {
                     qinfo!([self], "Received message while in Init state");
-                    return Ok(());
+                    return Ok(frames);
                 }
                 State::WaitInitial => {
                     qinfo!([self], "Received packet in WaitInitial");
                     if self.role == Role::Server {
                         if !self.is_valid_initial(&hdr) {
-                            return Ok(());
+                            return Ok(frames);
                         }
                         self.crypto.create_initial_state(self.role, &hdr.dcid);
                     }
@@ -831,18 +841,18 @@ impl Connection {
                 State::Handshaking | State::Connected => {
                     if !self.is_valid_cid(&hdr.dcid) {
                         qinfo!([self], "Ignoring packet with CID {:?}", hdr.dcid);
-                        return Ok(());
+                        return Ok(frames);
                     }
                 }
                 State::Closing { .. } => {
                     // Don't bother processing the packet. Instead ask to get a
                     // new close frame.
                     self.flow_mgr.borrow_mut().set_need_close_frame(true);
-                    return Ok(());
+                    return Ok(frames);
                 }
                 State::Closed(..) => {
                     // Do nothing.
-                    return Ok(());
+                    return Ok(frames);
                 }
             }
 
@@ -857,14 +867,14 @@ impl Connection {
                 // OK, we have a valid packet.
                 self.idle_timeout.on_packet_received(now);
                 dump_packet(self, "-> RX", &hdr, &body);
-                if self.process_packet(&hdr, body, now)? {
-                    continue;
+                frames.extend(self.process_packet(&hdr, body, now)?);
+                if matches!(self.state, State::WaitInitial) {
+                    self.start_handshake(hdr, &d)?;
                 }
-                self.start_handshake(hdr, &d)?;
                 self.process_migrations(&d)?;
             }
         }
-        Ok(())
+        Ok(frames)
     }
 
     fn decrypt_body(&mut self, mut hdr: &mut PacketHdr, slc: &[u8]) -> Option<Vec<u8>> {
@@ -892,7 +902,12 @@ impl Connection {
     }
 
     /// Ok(true) if the packet is a duplicate
-    fn process_packet(&mut self, hdr: &PacketHdr, body: Vec<u8>, now: Instant) -> Res<bool> {
+    fn process_packet(
+        &mut self,
+        hdr: &PacketHdr,
+        body: Vec<u8>,
+        now: Instant,
+    ) -> Res<Vec<(Frame, Epoch)>> {
         // TODO(ekr@rtfm.com): Have the server blow away the initial
         // crypto state if this fails? Otherwise, we will get a panic
         // on the assert for doesn't exist.
@@ -900,7 +915,6 @@ impl Connection {
 
         // TODO(ekr@rtfm.com): Filter for valid for this epoch.
 
-        let ack_eliciting = self.input_packet(hdr.epoch, Decoder::from(&body[..]), now)?;
         let space = PNSpace::from(hdr.epoch);
         if self.acks[space].is_duplicate(hdr.pn) {
             qdebug!(
@@ -910,18 +924,29 @@ impl Connection {
                 hdr.pn
             );
             self.stats.dups_rx += 1;
-            Ok(true)
-        } else {
-            self.acks[space].set_received(now, hdr.pn, ack_eliciting);
-            Ok(false)
+            return Ok(vec![]);
         }
+
+        let mut ack_eliciting = false;
+        let mut d = Decoder::from(&body[..]);
+        #[allow(unused_mut)]
+        let mut frames = Vec::new();
+        while d.remaining() > 0 {
+            let f = decode_frame(&mut d)?;
+            if cfg!(test) {
+                frames.push((f.clone(), hdr.epoch));
+            }
+            ack_eliciting |= f.ack_eliciting();
+            let t = f.get_type();
+            let res = self.input_frame(hdr.epoch, f, now);
+            self.capture_error(now, t, res)?;
+        }
+        self.acks[space].set_received(now, hdr.pn, ack_eliciting);
+
+        Ok(frames)
     }
 
     fn start_handshake(&mut self, hdr: PacketHdr, d: &Datagram) -> Res<()> {
-        // No handshake to process.
-        if !matches!(self.state, State::WaitInitial) {
-            return Ok(());
-        }
         if self.role == Role::Server {
             assert!(matches!(hdr.tipe, PacketType::Initial(..)));
             // A server needs to accept the client's selected CID during the handshake.
@@ -967,22 +992,6 @@ impl Connection {
         }
     }
 
-    // Return whether the packet had ack-eliciting frames.
-    fn input_packet(&mut self, epoch: Epoch, mut d: Decoder, now: Instant) -> Res<bool> {
-        let mut ack_eliciting = false;
-
-        // Handle each frame in the packet
-        while d.remaining() > 0 {
-            let f = decode_frame(&mut d)?;
-            ack_eliciting |= f.ack_eliciting();
-            let t = f.get_type();
-            let res = self.input_frame(epoch, f, now);
-            self.capture_error(now, t, res)?;
-        }
-
-        Ok(ack_eliciting)
-    }
-
     fn output(&mut self, now: Instant) -> Option<Datagram> {
         let mut out = None;
         if self.path.is_some() {
@@ -993,7 +1002,8 @@ impl Connection {
                 Err(e) => {
                     if !matches!(self.state, State::Closing{..}) {
                         // An error here causes us to transition to closing.
-                        self.absorb_error(now, Err(e));
+                        let err: Result<Option<Datagram>, Error> = Err(e);
+                        self.absorb_error(now, err);
                         // Rerun to give a chance to send a CONNECTION_CLOSE.
                         out = match self.output_pkt_for_path(now) {
                             Ok(x) => x,
