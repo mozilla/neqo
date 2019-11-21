@@ -602,10 +602,10 @@ impl Connection {
         res
     }
 
-    /// For use with process().  Errors there can be ignored, but this needs to
-    /// ensure that the state is updated.
-    fn absorb_error<T>(&mut self, now: Instant, res: Res<T>) {
-        let _ = self.capture_error(now, 0, res);
+    /// For use with process_input(). Errors there can be ignored, but this
+    /// needs to ensure that the state is updated.
+    fn absorb_error<T>(&mut self, now: Instant, res: Res<T>) -> Option<T> {
+        self.capture_error(now, 0, res).ok()
     }
 
     pub fn process_timer(&mut self, now: Instant) {
@@ -635,7 +635,8 @@ impl Connection {
     /// Just like above but returns frames parsed from the datagram
     #[cfg(test)]
     pub fn test_process_input(&mut self, dgram: Datagram, now: Instant) -> Vec<(Frame, Epoch)> {
-        let frames = self.input(dgram, now).unwrap();
+        let res = self.input(dgram, now);
+        let frames = self.absorb_error(now, res).unwrap_or(Vec::new());
         self.cleanup_streams();
         frames
     }
