@@ -636,7 +636,7 @@ impl Connection {
     #[cfg(test)]
     pub fn test_process_input(&mut self, dgram: Datagram, now: Instant) -> Vec<(Frame, Epoch)> {
         let res = self.input(dgram, now);
-        let frames = self.absorb_error(now, res).unwrap_or(Vec::new());
+        let frames = self.absorb_error(now, res).unwrap_or_default();
         self.cleanup_streams();
         frames
     }
