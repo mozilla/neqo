@@ -1662,6 +1662,11 @@ impl Connection {
                         );
                         return Err(Error::StreamLimitError);
                     }
+                    // From the local perspective, this is a remote- originated BiDi stream. From
+                    // the remote perspective, this is a local-originated BiDi stream. Therefore,
+                    // look at the local transport parameters for the
+                    // INITIAL_MAX_STREAM_DATA_BIDI_REMOTE value to decide how much this endpoint
+                    // will allow its peer to send.
                     self.tps
                         .borrow()
                         .local
@@ -1698,11 +1703,16 @@ impl Connection {
                     if next_stream_id.is_uni() {
                         self.events.new_stream(next_stream_id);
                     } else {
+                        // From the local perspective, this is a remote- originated BiDi stream.
+                        // From the remote perspective, this is a local-originated BiDi stream.
+                        // Therefore, look at the remote's transport parameters for the
+                        // INITIAL_MAX_STREAM_DATA_BIDI_LOCAL value to decide how much this endpoint
+                        // is allowed to send its peer.
                         let send_initial_max_stream_data = self
                             .tps
                             .borrow()
                             .remote()
-                            .get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE);
+                            .get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL);
                         self.send_streams.insert(
                             next_stream_id,
                             SendStream::new(
@@ -1803,6 +1813,10 @@ impl Connection {
                     .remote_next_stream_bidi
                     .to_stream_id(StreamType::BiDi, self.role);
                 self.indexes.remote_next_stream_bidi += 1;
+                // From the local perspective, this is a local- originated BiDi stream. From the
+                // remote perspective, this is a remote-originated BiDi stream. Therefore, look at
+                // the remote transport parameters for the INITIAL_MAX_STREAM_DATA_BIDI_REMOTE value
+                // to decide how much this endpoint is allowed to send its peer.
                 let send_initial_max_stream_data = self
                     .tps
                     .borrow()
@@ -1818,7 +1832,10 @@ impl Connection {
                         self.events.clone(),
                     ),
                 );
-
+                // From the local perspective, this is a local- originated BiDi stream. From the
+                // remote perspective, this is a remote-originated BiDi stream. Therefore, look at
+                // the local transport parameters for the INITIAL_MAX_STREAM_DATA_BIDI_LOCAL value
+                // to decide how much this endpoint will allow its peer to send.
                 let recv_initial_max_stream_data = self
                     .tps
                     .borrow()
