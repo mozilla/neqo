@@ -14,3 +14,10 @@ To run test http 3 programs (neqo-client and neqo-http3-server):
 * `./target/debug/neqo-http3-server [::]:12345 --db ./test-fixture/db`
 * `./target/debug/neqo-client http://127.0.0.1:12345/ --db ./test-fixture/db`
 
+## Faster Builds with Separate NSS/NSPR
+
+You can clone NSS (https://hg.mozilla.org/projects/nss) and NSPR
+(https://hg.mozilla.org/projects/nspr) into the same directory and export an
+enviroment variable called `NSS_DIR` pointing to NSS.  This causes the build to
+use the existing NSS checkout.
+
