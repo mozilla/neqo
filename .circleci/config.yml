@@ -5,8 +5,6 @@ jobs:
     docker:
       - image: martinthomson/neqo:test
     working_directory: ~/neqo
-    environment:
-      NSS_JOBS: 3
 
     steps:
       - checkout
@@ -25,7 +23,7 @@ jobs:
           command: |
             hg -R "$NSS_DIR" pull -u
             hg -R "$NSPR_DIR" pull -u
-            "$NSS_DIR"/build.sh -j "$NSS_JOBS" --static
+            "$NSS_DIR"/build.sh -j "$NSS_JOBS" --static -Ddisable_tests=1
 
       - run:
           name: Check Formatting
