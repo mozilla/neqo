@@ -365,7 +365,7 @@ mod test {
         let v = 9;
         t.add(future, v);
 
-        assert_eq!(Some(v), t.remove(future, |candidate| { *candidate == v }));
+        assert_eq!(Some(v), t.remove(future, |candidate| *candidate == v));
     }
 
     #[test]
@@ -376,9 +376,6 @@ mod test {
         let v = 9;
         t.add(future, v);
 
-        assert_eq!(
-            None,
-            t.remove(too_far_future, |candidate| { *candidate == v })
-        );
+        assert_eq!(None, t.remove(too_far_future, |candidate| *candidate == v));
     }
 }
