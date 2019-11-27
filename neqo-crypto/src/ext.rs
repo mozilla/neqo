@@ -53,9 +53,11 @@ pub trait ExtensionHandler {
     }
 }
 
+type BoxedExtensionHandler = Box<Rc<RefCell<dyn ExtensionHandler>>>;
+
 pub struct ExtensionTracker {
     extension: Extension,
-    handler: Pin<Box<Box<Rc<RefCell<dyn ExtensionHandler>>>>>,
+    handler: Pin<Box<BoxedExtensionHandler>>,
 }
 
 impl ExtensionTracker {
@@ -65,7 +67,7 @@ impl ExtensionTracker {
     where
         F: FnOnce(&mut dyn ExtensionHandler) -> T,
     {
-        let handler_ptr = arg as *mut Box<Rc<RefCell<dyn ExtensionHandler>>>;
+        let handler_ptr = arg as *mut BoxedExtensionHandler;
         let rc = handler_ptr.as_mut().unwrap();
         f(rc.borrow_mut().deref_mut())
     }
@@ -138,7 +140,7 @@ impl ExtensionTracker {
             extension,
             handler: Pin::new(Box::new(Box::new(handler))),
         };
-        let p = &mut *tracker.handler as *mut Box<Rc<RefCell<dyn ExtensionHandler>>> as *mut c_void;
+        let p = &mut *tracker.handler as *mut BoxedExtensionHandler as *mut c_void;
         SSL_InstallExtensionHooks(
             fd,
             extension,
