@@ -11,3 +11,7 @@ neqo-crypto = { path = "../neqo-crypto" }
 neqo-http3 = { path = "../neqo-http3" }
 neqo-transport = { path = "../neqo-transport" }
 log = "0.4.0"
+
+[features]
+default = ["deny-warnings"]
+deny-warnings = []

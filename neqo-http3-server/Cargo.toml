@@ -14,3 +14,7 @@ structopt = "0.2.15"
 mio = "0.6.17"
 mio-extras = "2.0.5"
 log = "0.4.0"
+
+[features]
+default = ["deny-warnings"]
+deny-warnings = []
