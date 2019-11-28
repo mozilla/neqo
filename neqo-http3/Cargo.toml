@@ -16,3 +16,7 @@ smallvec = "1.0.0"
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
+
+[features]
+default = ["deny-warnings"]
+deny-warnings = []

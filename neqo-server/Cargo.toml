@@ -11,3 +11,7 @@ neqo-transport = { path = "./../neqo-transport" }
 neqo-common = { path="./../neqo-common" }
 structopt = "0.2.15"
 regex = "1"
+
+[features]
+default = ["deny-warnings"]
+deny-warnings = []

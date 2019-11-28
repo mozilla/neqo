@@ -5,7 +5,7 @@
 // except according to those terms.
 
 // Tests with the test vectors from the spec.
-#![deny(warnings)]
+#![cfg_attr(feature = "deny-warnings", deny(warnings))]
 use neqo_common::{Datagram, Encoder};
 use neqo_transport::State;
 use test_fixture::*;

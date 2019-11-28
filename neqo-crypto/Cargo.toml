@@ -20,4 +20,6 @@ toml = "0.4"
 test-fixture = { path = "../test-fixture" }
 
 [features]
+default = ["deny-warnings"]
+deny-warnings = []
 gecko = []
