@@ -1092,7 +1092,8 @@ impl Connection {
                         let used =
                             out_bytes.len() + encoder.len() + hdr.overhead(&tx.aead, path.mtu());
                         let remaining = path.mtu() - used;
-                        if remaining == 0 {
+                        if remaining < 2 {
+                            // All useful frames are at least 2 bytes.
                             break;
                         }
 
