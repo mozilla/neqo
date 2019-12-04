@@ -5,9 +5,10 @@
 // except according to those terms.
 
 use crate::connection::Http3State;
+use crate::connection_server::Http3ServerHandler;
 use crate::server_connection_events::Http3ServerConnEvent;
 use crate::server_events::{
-    ClientRequestStream, Http3Handler, Http3ServerEvent, Http3ServerEvents,
+    ClientRequestStream, Http3ServerEvent, Http3ServerEvents,
 };
 use crate::Res;
 use neqo_common::{qtrace, Datagram};
@@ -19,7 +20,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 
-type HandlerRef = Rc<RefCell<Http3Handler>>;
+type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
 
 pub struct Http3Server {
     server: Server,
@@ -93,7 +94,7 @@ impl Http3Server {
         let max_blocked_streams = self.max_blocked_streams;
         for mut conn in active_conns {
             let handler = self.http3_handlers.entry(conn.clone()).or_insert_with(|| {
-                Rc::new(RefCell::new(Http3Handler::new(
+                Rc::new(RefCell::new(Http3ServerHandler::new(
                     max_table_size,
                     max_blocked_streams,
                 )))
