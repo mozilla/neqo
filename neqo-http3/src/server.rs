@@ -7,9 +7,7 @@
 use crate::connection::Http3State;
 use crate::connection_server::Http3ServerHandler;
 use crate::server_connection_events::Http3ServerConnEvent;
-use crate::server_events::{
-    ClientRequestStream, Http3ServerEvent, Http3ServerEvents,
-};
+use crate::server_events::{ClientRequestStream, Http3ServerEvent, Http3ServerEvents};
 use crate::Res;
 use neqo_common::{qtrace, Datagram};
 use neqo_crypto::AntiReplay;
