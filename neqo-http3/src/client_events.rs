@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::{Http3Events, Http3State};
+use crate::connection::Http3State;
 use neqo_common::matches;
 use neqo_transport::{AppError, StreamType};
 
@@ -105,19 +105,17 @@ impl Http3ClientEvents {
     {
         self.events.borrow_mut().retain(|evt| !f(evt))
     }
-}
 
-impl Http3Events for Http3ClientEvents {
-    fn reset(&self, stream_id: u64, error: AppError) {
+    pub fn reset(&self, stream_id: u64, error: AppError) {
         self.remove_events_for_stream_id(stream_id);
         self.insert(Http3ClientEvent::Reset { stream_id, error });
     }
 
-    fn connection_state_change(&self, state: Http3State) {
+    pub fn connection_state_change(&self, state: Http3State) {
         self.insert(Http3ClientEvent::StateChange(state));
     }
 
-    fn remove_events_for_stream_id(&self, stream_id: u64) {
+    pub fn remove_events_for_stream_id(&self, stream_id: u64) {
         self.remove(|evt| {
             matches!(evt,
                 Http3ClientEvent::HeaderReady { stream_id: x }

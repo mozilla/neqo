@@ -5,13 +5,15 @@
 // except according to those terms.
 
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
-use crate::connection::{Http3ClientHandler, Http3Connection, Http3State, Http3Transaction};
-
+use crate::connection::{Http3Connection, Http3State, Http3Transaction};
+use crate::hframe::HFrame;
 use crate::transaction_client::TransactionClient;
 use crate::Header;
-use neqo_common::{qinfo, qtrace, Datagram};
+use neqo_common::{matches, qdebug, qinfo, qtrace, Datagram};
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
-use neqo_transport::{AppError, Connection, ConnectionIdManager, Output, Role, StreamType};
+use neqo_transport::{
+    AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, Role, StreamType,
+};
 use std::cell::RefCell;
 use std::net::SocketAddr;
 use std::rc::Rc;
@@ -21,7 +23,8 @@ use crate::{Error, Res};
 
 pub struct Http3Client {
     conn: Connection,
-    base_handler: Http3Connection<Http3ClientEvents, TransactionClient, Http3ClientHandler>,
+    base_handler: Http3Connection<TransactionClient>,
+    events: Http3ClientEvents,
 }
 
 impl ::std::fmt::Display for Http3Client {
@@ -39,28 +42,20 @@ impl Http3Client {
         remote_addr: SocketAddr,
         max_table_size: u32,
         max_blocked_streams: u16,
-    ) -> Res<Http3Client> {
-        Ok(Http3Client {
-            conn: Connection::new_client(
-                server_name,
-                protocols,
-                cid_manager,
-                local_addr,
-                remote_addr,
-            )?,
-            base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
-        })
+    ) -> Res<Self> {
+        Ok(Http3Client::new_with_conn(
+            Connection::new_client(server_name, protocols, cid_manager, local_addr, remote_addr)?,
+            max_table_size,
+            max_blocked_streams,
+        ))
     }
 
-    pub fn new_with_conn(
-        c: Connection,
-        max_table_size: u32,
-        max_blocked_streams: u16,
-    ) -> Res<Http3Client> {
-        Ok(Http3Client {
+    pub fn new_with_conn(c: Connection, max_table_size: u32, max_blocked_streams: u16) -> Self {
+        Http3Client {
             conn: c,
             base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
-        })
+            events: Http3ClientEvents::default(),
+        }
     }
 
     pub fn role(&self) -> Role {
@@ -86,7 +81,12 @@ impl Http3Client {
 
     pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
         qinfo!([self], "Close the connection error={} msg={}.", error, msg);
-        self.base_handler.close(&mut self.conn, now, error, msg);
+        if !matches!(self.base_handler.state, Http3State::Closing(_)| Http3State::Closed(_)) {
+            self.conn.close(now, error, msg);
+            self.base_handler.close(error);
+            self.events
+                .connection_state_change(self.base_handler.state());
+        }
     }
 
     pub fn fetch(
@@ -108,15 +108,7 @@ impl Http3Client {
         let id = self.conn.stream_create(StreamType::BiDi)?;
         self.base_handler.add_transaction(
             id,
-            TransactionClient::new(
-                id,
-                method,
-                scheme,
-                host,
-                path,
-                headers,
-                self.base_handler.events.clone(),
-            ),
+            TransactionClient::new(id, method, scheme, host, path, headers, self.events.clone()),
         );
         Ok(id)
     }
@@ -124,7 +116,9 @@ impl Http3Client {
     pub fn stream_reset(&mut self, stream_id: u64, error: AppError) -> Res<()> {
         qinfo!([self], "reset_stream {} error={}.", stream_id, error);
         self.base_handler
-            .stream_reset(&mut self.conn, stream_id, error)
+            .stream_reset(&mut self.conn, stream_id, error)?;
+        self.events.remove_events_for_stream_id(stream_id);
+        Ok(())
     }
 
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
@@ -204,19 +198,19 @@ impl Http3Client {
     /// Get all current events. Best used just in debug/testing code, use
     /// next_event() instead.
     pub fn events(&mut self) -> impl Iterator<Item = Http3ClientEvent> {
-        self.base_handler.events.events()
+        self.events.events()
     }
 
     /// Return true if there are outstanding events.
     pub fn has_events(&self) -> bool {
-        self.base_handler.events.has_events()
+        self.events.has_events()
     }
 
     /// Get events that indicate state changes on the connection. This method
     /// correctly handles cases where handling one event can obsolete
     /// previously-queued events, or cause new events to be generated.
     pub fn next_event(&mut self) -> Option<Http3ClientEvent> {
-        self.base_handler.events.next_event()
+        self.events.next_event()
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
@@ -244,13 +238,188 @@ impl Http3Client {
 
     pub fn process_http3(&mut self, now: Instant) {
         qtrace!([self], "Process http3 internal.");
-
-        self.base_handler.process_http3(&mut self.conn, now);
+        match self.base_handler.state() {
+            Http3State::Connected | Http3State::GoingAway => {
+                let res = self.check_connection_events();
+                if self.check_result(now, res) {
+                    return;
+                }
+                let res = self.base_handler.process_sending(&mut self.conn);
+                self.check_result(now, res);
+            }
+            Http3State::Closed { .. } => {}
+            _ => {
+                let res = self.check_connection_events();
+                let _ = self.check_result(now, res);
+            }
+        }
     }
 
     pub fn process_output(&mut self, now: Instant) -> Output {
         qtrace!([self], "Process output.");
         self.conn.process_output(now)
+    }
+
+    // This function takes the provided result and check for an error.
+    // An error results in closing the connection.
+    fn check_result<ERR>(&mut self, now: Instant, res: Res<ERR>) -> bool {
+        match &res {
+            Err(e) => {
+                qinfo!([self], "Connection error: {}.", e);
+                self.close(now, e.code(), &format!("{}", e));
+                true
+            }
+            _ => false,
+        }
+    }
+
+    // If this return an error the connection must be closed.
+    fn check_connection_events(&mut self) -> Res<()> {
+        qtrace!([self], "Check connection events.");
+        while let Some(e) = self.conn.next_event() {
+            qdebug!([self], "check_connection_events - event {:?}.", e);
+            match e {
+                ConnectionEvent::NewStream {
+                    stream_id,
+                    stream_type,
+                } => match stream_type {
+                    StreamType::BiDi => return Err(Error::HttpStreamCreationError),
+                    StreamType::UniDi => {
+                        if self
+                            .base_handler
+                            .handle_new_unidi_stream(&mut self.conn, stream_id)?
+                        {
+                            return Err(Error::HttpIdError);
+                        }
+                    }
+                },
+                ConnectionEvent::SendStreamWritable { stream_id } => {
+                    if let Some(t) = self.base_handler.transactions.get_mut(&stream_id) {
+                        if t.is_state_sending_data() {
+                            self.events.data_writable(stream_id);
+                        }
+                    }
+                }
+                ConnectionEvent::RecvStreamReadable { stream_id } => {
+                    self.handle_stream_readable(stream_id)?
+                }
+                ConnectionEvent::RecvStreamReset {
+                    stream_id,
+                    app_error,
+                } => {
+                    if self.base_handler.handle_stream_reset(
+                        &mut self.conn,
+                        stream_id,
+                        app_error,
+                    )? {
+                        // Post the reset event.
+                        self.events.reset(stream_id, app_error);
+                    }
+                }
+                ConnectionEvent::SendStreamStopSending {
+                    stream_id,
+                    app_error,
+                } => self.handle_stream_stop_sending(stream_id, app_error)?,
+                ConnectionEvent::SendStreamComplete { .. } => {}
+                ConnectionEvent::SendStreamCreatable { stream_type } => {
+                    self.events.new_requests_creatable(stream_type)
+                }
+                ConnectionEvent::AuthenticationNeeded => self.events.authentication_needed(),
+                ConnectionEvent::StateChange(state) => {
+                    if self
+                        .base_handler
+                        .handle_state_change(&mut self.conn, &state)?
+                    {
+                        self.events
+                            .connection_state_change(self.base_handler.state());
+                    }
+                }
+                ConnectionEvent::ZeroRttRejected => {
+                    // TODO(mt) work out what to do here.
+                    // Everything will have to be redone: SETTINGS, qpack streams, and requests.
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_stream_readable(&mut self, stream_id: u64) -> Res<()> {
+        let (push, control_frames) = self
+            .base_handler
+            .handle_stream_readable(&mut self.conn, stream_id)?;
+        if push {
+            return Err(Error::HttpIdError);
+        } else {
+            for f in control_frames.into_iter() {
+                match f {
+                    HFrame::MaxPushId { .. } => Err(Error::HttpFrameUnexpected),
+                    HFrame::Goaway { stream_id } => self.handle_goaway(stream_id),
+                    _ => {
+                        unreachable!(
+                            "we should only put MaxPushId and Goaway into control_frames."
+                        );
+                    }
+                }?;
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_stream_stop_sending(&mut self, stop_stream_id: u64, app_err: AppError) -> Res<()> {
+        qinfo!(
+            [self],
+            "Handle stream_stop_sending stream_id={} app_err={}",
+            stop_stream_id,
+            app_err
+        );
+
+        if let Some(t) = self.base_handler.transactions.get_mut(&stop_stream_id) {
+            // close sending side.
+            t.stop_sending();
+
+            // If error is Error::EarlyResponse we will post StopSending event,
+            // otherwise post reset.
+            if app_err == Error::HttpEarlyResponse.code() && !t.is_sending_closed() {
+                self.events.stop_sending(stop_stream_id, app_err);
+            }
+            // if error is not Error::EarlyResponse we will close receiving part as well.
+            if app_err != Error::HttpEarlyResponse.code() {
+                self.events.reset(stop_stream_id, app_err);
+                // The server may close its sending side as well, but just to be sure
+                // we will do it ourselves.
+                let _ = self.conn.stream_stop_sending(stop_stream_id, app_err);
+                t.reset_receiving_side();
+            }
+            if t.done() {
+                self.base_handler.transactions.remove(&stop_stream_id);
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_goaway(&mut self, goaway_stream_id: u64) -> Res<()> {
+        qinfo!([self], "handle_goaway");
+        // Issue reset events for streams >= goaway stream id
+        for id in self
+            .base_handler
+            .transactions
+            .iter()
+            .filter(|(id, _)| **id >= goaway_stream_id)
+            .map(|(id, _)| *id)
+        {
+            self.events.reset(id, Error::HttpRequestRejected.code())
+        }
+        self.events.goaway_received();
+
+        // Actually remove (i.e. don't retain) these streams
+        self.base_handler
+            .transactions
+            .retain(|id, _| *id < goaway_stream_id);
+
+        if self.base_handler.state == Http3State::Connected {
+            self.base_handler.state = Http3State::GoingAway;
+        }
+        Ok(())
     }
 }
 

@@ -472,6 +472,10 @@ impl TransactionClient {
             _ => Ok((0, false)),
         }
     }
+
+    pub fn is_state_sending_data(&self) -> bool {
+        self.send_state == TransactionSendState::SendingData
+    }
 }
 
 impl ::std::fmt::Display for TransactionClient {
@@ -586,10 +590,6 @@ impl Http3Transaction for TransactionClient {
         } else {
             false
         }
-    }
-
-    fn is_state_sending_data(&self) -> bool {
-        self.send_state == TransactionSendState::SendingData
     }
 
     fn reset_receiving_side(&mut self) {
