@@ -46,6 +46,9 @@ pub struct Args {
     #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "128")]
     max_blocked_streams: u16,
 
+    #[structopt(name = "max-push-streams", short = "p", long, default_value = "0")]
+    max_push_streams: u64,
+
     #[structopt(name = "use-old-http", short = "o", long)]
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
@@ -246,8 +249,11 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
         remote_addr,
-        args.max_table_size,
-        args.max_blocked_streams,
+        (
+            args.max_table_size,
+            args.max_blocked_streams,
+            args.max_push_streams,
+        ),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine

@@ -22,9 +22,19 @@ const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 
 const MAX_HEADER_LIST_SIZE_DEFAULT: u64 = u64::max_value();
 
+// handle_stream_readable will return:
+// 1) is a push stream
+// 2) vec of control frames
+// 3) vec of unblocked_streams(streams are blocked by qpack)
+// It can return only one of this.
+pub struct HandleStreamReadableResult {
+    pub push: bool,
+    pub control_frames: Vec<HFrame>,
+    pub unblocked_streams: Vec<u64>,
+}
+
 pub trait Http3Transaction: Debug {
     fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()>;
-    fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()>;
     fn has_data_to_send(&self) -> bool;
     fn reset_receiving_side(&mut self);
     fn stop_sending(&mut self);
@@ -173,23 +183,15 @@ impl<T: Http3Transaction> Http3Connection<T> {
         &mut self,
         conn: &mut Connection,
         stream_id: u64,
-    ) -> Res<(bool, Vec<HFrame>)> {
+    ) -> Res<Option<HandleStreamReadableResult>> {
         qtrace!([self], "Readable stream {}.", stream_id);
 
         assert!(self.state_active());
 
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
-            format!("{}", self)
-        } else {
-            String::new()
-        };
-
-        let mut push = false;
         let mut unblocked_streams = Vec::new();
+        let mut push = false;
         let mut control_frames = Vec::new();
-        if self.handle_read_stream(conn, stream_id)? {
-            qdebug!([label], "Request/response stream {} read.", stream_id);
-        } else if self
+        if self
             .control_stream_remote
             .receive_if_this_stream(conn, stream_id)?
         {
@@ -231,19 +233,13 @@ impl<T: Http3Transaction> Http3Connection<T> {
                 push = self.decode_new_stream(conn, t, stream_id)?;
             }
         } else {
-            // For a new stream we receive NewStream event and a
-            // RecvStreamReadable event.
-            // In most cases we decode a new stream already on the NewStream
-            // event and remove it from self.new_streams.
-            // Therefore, while processing RecvStreamReadable there will be no
-            // entry for the stream in self.new_streams.
-            qdebug!("Unknown stream.");
+            return Ok(None);
         }
-        for stream_id in unblocked_streams {
-            qinfo!([self], "Stream {} is unblocked", stream_id);
-            self.handle_read_stream(conn, stream_id)?;
-        }
-        Ok((push, control_frames))
+        Ok(Some(HandleStreamReadableResult {
+            push,
+            control_frames,
+            unblocked_streams,
+        }))
     }
 
     pub fn handle_stream_reset(
@@ -251,7 +247,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
         conn: &mut Connection,
         stream_id: u64,
         app_err: AppError,
-    ) -> Res<bool> {
+    ) -> Res<Option<T>> {
         qinfo!(
             [self],
             "Handle a stream reset stream_id={} app_err={}",
@@ -269,10 +265,9 @@ impl<T: Http3Transaction> Http3Connection<T> {
             // it se well, but just to be sure.
             let _ = conn.stream_reset_send(stream_id, app_err);
             // remove the stream
-            self.transactions.remove(&stream_id);
-            Ok(true)
+            Ok(self.transactions.remove(&stream_id))
         } else {
-            Ok(false)
+            Ok(None)
         }
     }
 
@@ -301,38 +296,6 @@ impl<T: Http3Transaction> Http3Connection<T> {
                 }
             }
             _ => Ok(false),
-        }
-    }
-
-    fn handle_read_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
-            format!("{}", self)
-        } else {
-            String::new()
-        };
-
-        assert!(self.state_active());
-
-        if let Some(transaction) = &mut self.transactions.get_mut(&stream_id) {
-            qinfo!(
-                [label],
-                "Request/response stream {} is readable.",
-                stream_id
-            );
-            match transaction.receive(conn, &mut self.qpack_decoder) {
-                Err(e) => {
-                    qerror!([label], "Error {} ocurred", e);
-                    return Err(e);
-                }
-                Ok(()) => {
-                    if transaction.done() {
-                        self.transactions.remove(&stream_id);
-                    }
-                }
-            }
-            Ok(true)
-        } else {
-            Ok(false)
         }
     }
 
@@ -444,8 +407,9 @@ impl<T: Http3Transaction> Http3Connection<T> {
                     self.handle_settings(&settings)?;
                     Ok(None)
                 }
-                HFrame::CancelPush { .. } => Err(Error::HttpFrameUnexpected),
-                HFrame::Goaway { .. } | HFrame::MaxPushId { .. } => Ok(Some(f)),
+                HFrame::CancelPush { .. } | HFrame::Goaway { .. } | HFrame::MaxPushId { .. } => {
+                    Ok(Some(f))
+                }
                 _ => Err(Error::HttpFrameUnexpected),
             };
         }
@@ -482,5 +446,9 @@ impl<T: Http3Transaction> Http3Connection<T> {
             self.streams_have_data_to_send.insert(stream_id);
         }
         self.transactions.insert(stream_id, transaction);
+    }
+
+    pub fn queue_control_frame(&mut self, frame: HFrame) {
+        self.control_stream_local.queue_frame(frame);
     }
 }

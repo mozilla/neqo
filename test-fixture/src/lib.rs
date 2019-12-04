@@ -130,8 +130,7 @@ pub fn default_http3_client() -> Http3Client {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
-        100,
-        100,
+        (100, 100, 0),
     )
     .expect("create a default client")
 }

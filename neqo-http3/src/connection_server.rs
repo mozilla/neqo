@@ -17,6 +17,7 @@ use std::time::Instant;
 pub struct Http3ServerHandler {
     base_handler: Http3Connection<TransactionServer>,
     events: Http3ServerConnEvents,
+    max_push_id: Option<u64>,
 }
 
 impl ::std::fmt::Display for Http3ServerHandler {
@@ -30,6 +31,7 @@ impl Http3ServerHandler {
         Http3ServerHandler {
             base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
             events: Http3ServerConnEvents::default(),
+            max_push_id: None,
         }
     }
     pub fn set_response(&mut self, stream_id: u64, headers: &[Header], data: Vec<u8>) -> Res<()> {
@@ -149,24 +151,53 @@ impl Http3ServerHandler {
     }
 
     fn handle_stream_readable(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
-        let (push, control_frames) = self.base_handler.handle_stream_readable(conn, stream_id)?;
-        if push {
-            return Err(Error::HttpStreamCreationError);
-        } else {
-            for f in control_frames.into_iter() {
-                match f {
-                    HFrame::MaxPushId { .. } => {
-                        // TODO implement push
-                        Ok(())
-                    }
-                    HFrame::Goaway { .. } => Err(Error::HttpFrameUnexpected),
-                    _ => {
-                        unreachable!("we should only put MaxPushId and Goaway into control_frames.")
-                    }
-                }?;
+        if let Some(res) = self.base_handler.handle_stream_readable(conn, stream_id)? {
+            if res.push {
+                return Err(Error::HttpStreamCreationError);
+            } else {
+                for f in res.control_frames.into_iter() {
+                    match f {
+                        HFrame::CancelPush { .. } => {
+                            // TODO
+                            Ok(())
+                        }
+                        HFrame::MaxPushId { push_id } => {
+                            self.max_push_id = Some(push_id);
+                            Ok(())
+                        }
+                        HFrame::Goaway { .. } => Err(Error::HttpFrameUnexpected),
+                        _ => unreachable!(
+                            "we should only put MaxPushId and Goaway into control_frames."
+                        ),
+                    }?;
+                }
+                for stream_id in res.unblocked_streams {
+                    qinfo!([self], "Stream {} is unblocked", stream_id);
+                    self.handle_read_stream(conn, stream_id)?;
+                }
             }
+            Ok(())
+        } else if self.handle_read_stream(conn, stream_id)? {
+            Ok(())
+        } else {
+            // For a new stream we receive NewStream event and a
+            // RecvStreamReadable event.
+            // In most cases we decode a new stream already on the NewStream
+            // event and remove it from self.new_streams.
+            // Therefore, while processing RecvStreamReadable there will be no
+            // entry for the stream in self.new_streams.
+            qdebug!("Unknown stream.");
+            Ok(())
         }
-        Ok(())
+    }
+
+    fn handle_read_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
+        if let Some(transaction) = &mut self.base_handler.transactions.get_mut(&stream_id) {
+            transaction.receive(conn, &mut self.base_handler.qpack_decoder)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     fn handle_stream_stop_sending(

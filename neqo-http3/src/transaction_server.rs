@@ -186,39 +186,8 @@ impl TransactionServer {
         }
         Ok(())
     }
-}
 
-impl ::std::fmt::Display for TransactionServer {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "TransactionServer {}", self.stream_id)
-    }
-}
-
-impl Http3Transaction for TransactionServer {
-    fn send(&mut self, conn: &mut Connection, _encoder: &mut QPackEncoder) -> Res<()> {
-        qtrace!([self], "Sending response.");
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
-            format!("{}", self)
-        } else {
-            String::new()
-        };
-        if let TransactionSendState::SendingResponse { ref mut buf } = self.send_state {
-            let sent = conn.stream_send(self.stream_id, &buf[..])?;
-            qinfo!([label], "{} bytes sent", sent);
-            if sent == buf.len() {
-                conn.stream_close_send(self.stream_id)?;
-                self.send_state = TransactionSendState::Closed;
-                qinfo!([label], "done sending request");
-            } else {
-                let mut b = buf.split_off(sent);
-                mem::swap(buf, &mut b);
-            }
-        }
-
-        Ok(())
-    }
-
-    fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
+    pub fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
@@ -327,6 +296,37 @@ impl Http3Transaction for TransactionServer {
                 }
             };
         }
+    }
+}
+
+impl ::std::fmt::Display for TransactionServer {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "TransactionServer {}", self.stream_id)
+    }
+}
+
+impl Http3Transaction for TransactionServer {
+    fn send(&mut self, conn: &mut Connection, _encoder: &mut QPackEncoder) -> Res<()> {
+        qtrace!([self], "Sending response.");
+        let label = if ::log::log_enabled!(::log::Level::Debug) {
+            format!("{}", self)
+        } else {
+            String::new()
+        };
+        if let TransactionSendState::SendingResponse { ref mut buf } = self.send_state {
+            let sent = conn.stream_send(self.stream_id, &buf[..])?;
+            qinfo!([label], "{} bytes sent", sent);
+            if sent == buf.len() {
+                conn.stream_close_send(self.stream_id)?;
+                self.send_state = TransactionSendState::Closed;
+                qinfo!([label], "done sending request");
+            } else {
+                let mut b = buf.split_off(sent);
+                mem::swap(buf, &mut b);
+            }
+        }
+
+        Ok(())
     }
 
     fn has_data_to_send(&self) -> bool {
