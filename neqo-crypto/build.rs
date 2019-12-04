@@ -181,7 +181,6 @@ fn static_link(nsstarget: &PathBuf) {
         "certdb",
         "certhi",
         "cryptohi",
-        "dbm",
         "freebl",
         "nss_static",
         "nssb",
