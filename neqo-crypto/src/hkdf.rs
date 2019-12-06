@@ -46,7 +46,7 @@ pub fn key_size(version: Version, cipher: Cipher) -> Res<usize> {
 }
 
 pub fn generate_key(version: Version, cipher: Cipher, size: usize) -> Res<SymKey> {
-    import_key(version, cipher, &random(size)?)
+    import_key(version, cipher, &random(size))
 }
 
 /// Import a symmetric key for use with HKDF.

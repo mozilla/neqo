@@ -99,10 +99,13 @@ impl std::fmt::Debug for SymKey {
 }
 
 /// Generate a randomized buffer.
-pub fn random(size: usize) -> Res<Vec<u8>> {
+pub fn random(size: usize) -> Vec<u8> {
     let mut buf = vec![0; size];
-    secstatus_to_res(unsafe { PK11_GenerateRandom(buf.as_mut_ptr(), buf.len().try_into()?) })?;
-    Ok(buf)
+    secstatus_to_res(unsafe {
+        PK11_GenerateRandom(buf.as_mut_ptr(), buf.len().try_into().unwrap())
+    })
+    .unwrap();
+    buf
 }
 
 #[cfg(test)]

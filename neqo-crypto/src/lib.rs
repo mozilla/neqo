@@ -41,7 +41,7 @@ pub use self::agent::{
 pub use self::constants::*;
 pub use self::err::{Error, PRErrorCode, Res};
 pub use self::ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult};
-pub use self::p11::SymKey;
+pub use self::p11::{random, SymKey};
 pub use self::replay::AntiReplay;
 pub use self::secrets::SecretDirection;
 pub use auth::AuthenticationStatus;
