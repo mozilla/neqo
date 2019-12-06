@@ -562,6 +562,7 @@ pub fn encode_packet(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> Ve
 mod tests {
     use super::*;
     use neqo_common::matches;
+    use test_fixture::fixture_init;
 
     const TEST_BODY: [u8; 6] = [0x01, 0x23, 0x45, 0x67, 0x89, 0x10];
 
@@ -712,6 +713,7 @@ mod tests {
 
     #[test]
     fn test_retry() {
+        fixture_init();
         let mut hdr = default_hdr();
         hdr.tipe = PacketType::Retry {
             odcid: ConnectionId(vec![9, 8, 7, 6, 5, 4, 3, 2]),
@@ -729,6 +731,7 @@ mod tests {
 
     #[test]
     fn generate_initial_cid() {
+        fixture_init();
         for i in 0..100 {
             let cid = ConnectionId::generate_initial();
             if !matches!(cid.len(), 8..=20) {
