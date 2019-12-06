@@ -9,11 +9,9 @@
 // A lot of methods and types contain the word Packet
 #![allow(clippy::module_name_repetitions)]
 
-use rand::Rng;
-
 use neqo_common::{hex, matches, qtrace, Decoder, Encoder};
 use neqo_crypto::aead::Aead;
-use neqo_crypto::Epoch;
+use neqo_crypto::{random, Epoch};
 
 use std::convert::{TryFrom, TryInto};
 
@@ -77,15 +75,12 @@ impl std::ops::Deref for ConnectionId {
 impl ConnectionId {
     pub fn generate(len: usize) -> Self {
         assert!(matches!(len, 0..=20));
-        let mut v = vec![0; len];
-        rand::thread_rng().fill(&mut v[..]);
-        Self(v)
+        Self(random(len))
     }
 
     // Apply a wee bit of greasing here in picking a length between 8 and 20 bytes long.
     pub fn generate_initial() -> ConnectionId {
-        let mut v = [0u8; 1];
-        rand::thread_rng().fill(&mut v[..]);
+        let v = random(1);
         // Bias selection toward picking 8 (>50% of the time).
         let len: usize = ::std::cmp::max(8, 5 + (v[0] & (v[0] >> 4))).into();
         ConnectionId::generate(len)
@@ -465,9 +460,8 @@ fn encode_packet_short(crypto: &dyn CryptoCtx, hdr: &PacketHdr, body: &[u8]) -> 
 
 pub fn encode_packet_vn(hdr: &PacketHdr) -> Vec<u8> {
     let mut d = Encoder::default();
-    let mut rand_byte: [u8; 1] = [0; 1];
-    rand::thread_rng().fill(&mut rand_byte);
-    d.encode_byte(PACKET_BIT_LONG | rand_byte[0]);
+    let rand_byte = random(1)[0];
+    d.encode_byte(PACKET_BIT_LONG | rand_byte);
     d.encode_uint(4, 0_u64); // version
     d.encode_vec(1, &hdr.dcid);
     d.encode_vec(1, hdr.scid.as_ref().unwrap());
@@ -535,14 +529,11 @@ fn pn_length(_pn: PacketNumber) -> usize {
 }
 
 pub fn encode_retry(hdr: &PacketHdr) -> Vec<u8> {
-    let mut rand_byte: [u8; 1] = [0; 1];
-    rand::thread_rng().fill(&mut rand_byte);
+    let rand_byte = random(1)[0];
     if let PacketType::Retry { odcid, token } = &hdr.tipe {
         let mut enc = Encoder::default();
-        let b0 = PACKET_BIT_LONG
-            | PACKET_BIT_FIXED_QUIC
-            | (PACKET_TYPE_RETRY << 4)
-            | (rand_byte[0] & 0xf);
+        let b0 =
+            PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | (PACKET_TYPE_RETRY << 4) | (rand_byte & 0xf);
         enc.encode_byte(b0);
         enc.encode_uint(4, hdr.version.unwrap());
         enc.encode_vec(1, &hdr.dcid);
