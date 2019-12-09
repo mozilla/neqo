@@ -22,6 +22,12 @@ const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 
 const MAX_HEADER_LIST_SIZE_DEFAULT: u64 = u64::max_value();
 
+pub(crate) enum HandleReadableOutput {
+    NoOutput,
+    PushStream,
+    ControlFrames(Vec<HFrame>),
+}
+
 pub trait Http3Transaction: Debug {
     fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()>;
     fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()>;
@@ -140,6 +146,9 @@ impl<T: Http3Transaction> Http3Connection<T> {
         Ok(())
     }
 
+    // This function adds a new unidi stream and try to read its type. Http3Connection can handle
+    // a Http3 Control stream, Qpack streams and an unknown stream, but it cannot handle a Push stream.
+    // If a Push stream has been discovered, return true and let the Http3Client/Server handle it.
     pub fn handle_new_unidi_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         qtrace!([self], "A new stream: {}.", stream_id);
         assert!(self.state_active());
@@ -165,15 +174,17 @@ impl<T: Http3Transaction> Http3Connection<T> {
         }
     }
 
-    // There are 2 events that must be return to a client/server handler to properly consumes them:
-    //   1) reading a new stream founds that is a push stream
-    //   2) a control stream has received frames MaxPushId or Goaway which handling is specific to
-    //      the client and server.
-    pub fn handle_stream_readable(
+    // This function handles reading from all streams, i.e. control, qpack, request/response
+    // stream and unidi stream that are still do not have a type.
+    // The function cannot handle:
+    // 1) a Push stream (if a unkown unidi stream is decoded to be a push stream)
+    // 2) frames MaxPushId or Goaway must be handled by Http3Client/Server.
+    // The function returns HandleReadableOutput.
+    pub(crate) fn handle_stream_readable(
         &mut self,
         conn: &mut Connection,
         stream_id: u64,
-    ) -> Res<(bool, Vec<HFrame>)> {
+    ) -> Res<HandleReadableOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
 
         assert!(self.state_active());
@@ -184,11 +195,9 @@ impl<T: Http3Transaction> Http3Connection<T> {
             String::new()
         };
 
-        let mut push = false;
-        let mut unblocked_streams = Vec::new();
-        let mut control_frames = Vec::new();
         if self.handle_read_stream(conn, stream_id)? {
             qdebug!([label], "Request/response stream {} read.", stream_id);
+            Ok(HandleReadableOutput::NoOutput)
         } else if self
             .control_stream_remote
             .receive_if_this_stream(conn, stream_id)?
@@ -198,6 +207,9 @@ impl<T: Http3Transaction> Http3Connection<T> {
                 "The remote control stream ({}) is readable.",
                 stream_id
             );
+
+            let mut control_frames = Vec::new();
+
             while self.control_stream_remote.frame_reader_done()
                 || self.control_stream_remote.recvd_fin()
             {
@@ -207,19 +219,30 @@ impl<T: Http3Transaction> Http3Connection<T> {
                 self.control_stream_remote
                     .receive_if_this_stream(conn, stream_id)?;
             }
+            if control_frames.is_empty() {
+                Ok(HandleReadableOutput::NoOutput)
+            } else {
+                Ok(HandleReadableOutput::ControlFrames(control_frames))
+            }
         } else if self.qpack_encoder.recv_if_encoder_stream(conn, stream_id)? {
             qdebug!(
                 [self],
                 "The qpack encoder stream ({}) is readable.",
                 stream_id
             );
+            Ok(HandleReadableOutput::NoOutput)
         } else if self.qpack_decoder.is_recv_stream(stream_id) {
             qdebug!(
                 [self],
                 "The qpack decoder stream ({}) is readable.",
                 stream_id
             );
-            unblocked_streams = self.qpack_decoder.receive(conn, stream_id)?;
+            let unblocked_streams = self.qpack_decoder.receive(conn, stream_id)?;
+            for stream_id in unblocked_streams {
+                qinfo!([self], "Stream {} is unblocked", stream_id);
+                self.handle_read_stream(conn, stream_id)?;
+            }
+            Ok(HandleReadableOutput::NoOutput)
         } else if let Some(ns) = self.new_streams.get_mut(&stream_id) {
             let stream_type = ns.get_type(conn, stream_id);
             let fin = ns.fin();
@@ -228,8 +251,13 @@ impl<T: Http3Transaction> Http3Connection<T> {
             }
             if let Some(t) = stream_type {
                 self.new_streams.remove(&stream_id);
-                push = self.decode_new_stream(conn, t, stream_id)?;
+                let push = self.decode_new_stream(conn, t, stream_id)?;
+                if push {
+                    return Ok(HandleReadableOutput::PushStream);
+                }
             }
+
+            Ok(HandleReadableOutput::NoOutput)
         } else {
             // For a new stream we receive NewStream event and a
             // RecvStreamReadable event.
@@ -238,12 +266,8 @@ impl<T: Http3Transaction> Http3Connection<T> {
             // Therefore, while processing RecvStreamReadable there will be no
             // entry for the stream in self.new_streams.
             qdebug!("Unknown stream.");
+            Ok(HandleReadableOutput::NoOutput)
         }
-        for stream_id in unblocked_streams {
-            qinfo!([self], "Stream {} is unblocked", stream_id);
-            self.handle_read_stream(conn, stream_id)?;
-        }
-        Ok((push, control_frames))
     }
 
     pub fn handle_stream_reset(
@@ -266,7 +290,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
             t.reset_receiving_side();
             t.stop_sending();
             // close sending side of the transport stream as well. The server may have done
-            // it se well, but just to be sure.
+            // it as well, but just to be sure.
             let _ = conn.stream_reset_send(stream_id, app_err);
             // remove the stream
             self.transactions.remove(&stream_id);
