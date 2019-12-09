@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::{Http3Connection, Http3State, Http3Transaction};
+use crate::connection::{HandleReadableOutput, Http3Connection, Http3State, Http3Transaction};
 use crate::hframe::HFrame;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
 use crate::transaction_server::TransactionServer;
@@ -149,24 +149,25 @@ impl Http3ServerHandler {
     }
 
     fn handle_stream_readable(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
-        let (push, control_frames) = self.base_handler.handle_stream_readable(conn, stream_id)?;
-        if push {
-            return Err(Error::HttpStreamCreationError);
-        } else {
-            for f in control_frames.into_iter() {
-                match f {
-                    HFrame::MaxPushId { .. } => {
-                        // TODO implement push
-                        Ok(())
-                    }
-                    HFrame::Goaway { .. } => Err(Error::HttpFrameUnexpected),
-                    _ => {
-                        unreachable!("we should only put MaxPushId and Goaway into control_frames.")
-                    }
-                }?;
+        match self.base_handler.handle_stream_readable(conn, stream_id)? {
+            HandleReadableOutput::PushStream => Err(Error::HttpStreamCreationError),
+            HandleReadableOutput::ControlFrames(control_frames) => {
+                for f in control_frames.into_iter() {
+                    match f {
+                        HFrame::MaxPushId { .. } => {
+                            // TODO implement push
+                            Ok(())
+                        }
+                        HFrame::Goaway { .. } => Err(Error::HttpFrameUnexpected),
+                        _ => unreachable!(
+                            "we should only put MaxPushId and Goaway into control_frames."
+                        ),
+                    }?;
+                }
+                Ok(())
             }
+            _ => Ok(()),
         }
-        Ok(())
     }
 
     fn handle_stream_stop_sending(

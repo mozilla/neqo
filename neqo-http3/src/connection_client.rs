@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
-use crate::connection::{Http3Connection, Http3State, Http3Transaction};
+use crate::connection::{HandleReadableOutput, Http3Connection, Http3State, Http3Transaction};
 use crate::hframe::HFrame;
 use crate::transaction_client::TransactionClient;
 use crate::Header;
@@ -344,25 +344,27 @@ impl Http3Client {
     }
 
     fn handle_stream_readable(&mut self, stream_id: u64) -> Res<()> {
-        let (push, control_frames) = self
+        match self
             .base_handler
-            .handle_stream_readable(&mut self.conn, stream_id)?;
-        if push {
-            return Err(Error::HttpIdError);
-        } else {
-            for f in control_frames.into_iter() {
-                match f {
-                    HFrame::MaxPushId { .. } => Err(Error::HttpFrameUnexpected),
-                    HFrame::Goaway { stream_id } => self.handle_goaway(stream_id),
-                    _ => {
-                        unreachable!(
-                            "we should only put MaxPushId and Goaway into control_frames."
-                        );
-                    }
-                }?;
+            .handle_stream_readable(&mut self.conn, stream_id)?
+        {
+            HandleReadableOutput::PushStream => Err(Error::HttpIdError),
+            HandleReadableOutput::ControlFrames(control_frames) => {
+                for f in control_frames.into_iter() {
+                    match f {
+                        HFrame::MaxPushId { .. } => Err(Error::HttpFrameUnexpected),
+                        HFrame::Goaway { stream_id } => self.handle_goaway(stream_id),
+                        _ => {
+                            unreachable!(
+                                "we should only put MaxPushId and Goaway into control_frames."
+                            );
+                        }
+                    }?;
+                }
+                Ok(())
             }
+            _ => Ok(()),
         }
-        Ok(())
     }
 
     fn handle_stream_stop_sending(&mut self, stop_stream_id: u64, app_err: AppError) -> Res<()> {
