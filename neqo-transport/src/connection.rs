@@ -611,8 +611,8 @@ impl Connection {
     }
 
     pub fn process_timer(&mut self, now: Instant) {
-        if let State::Closing { error, .. } = self.state().clone() {
-            self.set_state(State::Closed(error));
+        if matches!(self.state(), State::Closing{..} | State::Closed{..}) {
+            qerror!("Timer fired while closing/closed");
             return;
         }
 
@@ -1074,6 +1074,7 @@ impl Connection {
     fn output_pkt_for_path(&mut self, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
         let mut needs_padding = false;
+        let mut close_sent = false;
         let path = self
             .path
             .take()
@@ -1184,18 +1185,22 @@ impl Connection {
                     msg,
                     ..
                 } => {
-                    if epoch != 3 {
-                        continue;
-                    }
-
                     if self.flow_mgr.borrow().need_close_frame() {
-                        self.flow_mgr.borrow_mut().set_need_close_frame(false);
+                        // ConnectionClose frame not allowed for 0RTT
+                        if epoch == 1 {
+                            continue;
+                        }
+                        // ConnectionError::Application only allowed at 1RTT
+                        if epoch != 3 && matches!(error, ConnectionError::Application(_)) {
+                            continue;
+                        }
                         let frame = Frame::ConnectionClose {
                             error_code: error.clone().into(),
                             frame_type: *frame_type,
                             reason_phrase: Vec::from(msg.clone()),
                         };
                         frame.marshal(&mut encoder);
+                        close_sent = true;
                     }
                 }
                 State::Closed { .. } => unimplemented!(),
@@ -1234,6 +1239,10 @@ impl Connection {
             if out_bytes.len() >= path.mtu() {
                 break;
             }
+        }
+
+        if close_sent {
+            self.flow_mgr.borrow_mut().set_need_close_frame(false);
         }
 
         // Sent a probe pkt. Another timeout will re-engage ProbeTimeout mode,
@@ -2092,7 +2101,7 @@ impl ::std::fmt::Display for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frame::StreamType;
+    use crate::frame::{CloseError, StreamType};
     use neqo_common::matches;
     use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
@@ -2274,8 +2283,7 @@ mod tests {
 
         qdebug!("---- client: -> Alert(certificate_revoked)");
         let out = client.process(None, now());
-        // This part of test needs to be adapted when issue #128 is fixed.
-        assert!(out.as_dgram_ref().is_none());
+        assert!(out.as_dgram_ref().is_some());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
 
         qdebug!("---- server: Alert(certificate_revoked)");
@@ -2283,8 +2291,7 @@ mod tests {
         assert!(out.as_dgram_ref().is_none());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
         assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(44)));
-        // This part of test needs to be adapted when issue #128 is fixed.
-        //assert_error(&server, ConnectionError::Transport(Error::PeerError(300)));
+        assert_error(&server, ConnectionError::Transport(Error::PeerError(300)));
     }
 
     #[test]
@@ -2491,6 +2498,32 @@ mod tests {
         client.process_input(out.dgram().unwrap(), now());
         assert_eq!(*client.state(), State::Connected);
         client.resumption_token().expect("should have token")
+    }
+
+    #[test]
+    fn connection_close() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        client.close(now, 42, "");
+
+        let out = client.process(None, now);
+
+        let frames = server.test_process_input(out.dgram().unwrap(), now);
+        assert_eq!(frames.len(), 1);
+        assert!(matches!(
+            frames[0],
+            (
+                Frame::ConnectionClose {
+                    error_code: CloseError::Application(42),
+                    ..
+                },
+                3,
+            )
+        ));
     }
 
     #[test]

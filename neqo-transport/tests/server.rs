@@ -6,7 +6,7 @@
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 
-use neqo_common::{hex, qdebug, qtrace, Datagram, Decoder, Encoder};
+use neqo_common::{hex, matches, qdebug, qtrace, Datagram, Decoder, Encoder};
 use neqo_crypto::{
     aead::Aead,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
@@ -436,11 +436,14 @@ fn mitm_retry() {
     assert!(dgram.is_none());
     assert!(test_fixture::maybe_authenticate(&mut client));
     let dgram = client.process(dgram, now()).dgram();
-    assert!(dgram.is_none());
-    assert_eq!(
+    assert!(dgram.is_some()); // Client sending CLOSE_CONNECTIONs
+    assert!(matches!(
         *client.state(),
-        State::Closed(ConnectionError::Transport(Error::InvalidRetry))
-    );
+        State::Closing{
+            error: ConnectionError::Transport(Error::InvalidRetry),
+            ..
+        }
+    ));
 }
 
 #[test]
