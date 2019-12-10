@@ -611,7 +611,7 @@ impl Connection {
     }
 
     pub fn process_timer(&mut self, now: Instant) {
-        if matches!(self.state(), State::Closing{..}) || matches!(self.state(), State::Closed{..}) {
+        if matches!(self.state(), State::Closing{..} | State::Closed{..}) {
             qerror!("Timer fired while closing/closed");
             return;
         }
