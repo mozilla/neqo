@@ -55,10 +55,7 @@ const NUM_EPOCHS: Epoch = 4;
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
-#[cfg(not(test))]
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
-#[cfg(test)]
-const LOCAL_MAX_DATA: u64 = 0x3FFF; // 16,383
 
 const LOCAL_IDLE_TIMEOUT: Duration = Duration::from_secs(60); // 1 minute
 
@@ -2855,19 +2852,21 @@ mod tests {
     fn max_data() {
         let mut client = default_client();
         let mut server = default_server();
+        server.set_local_tparam(
+            tp_constants::INITIAL_MAX_DATA,
+            TransportParameter::Integer(16383),
+        );
+
         connect(&mut client, &mut server);
 
         let stream_id = client.stream_create(StreamType::UniDi).unwrap();
         assert_eq!(stream_id, 2);
-        assert_eq!(
-            client.stream_avail_send_space(stream_id).unwrap(),
-            LOCAL_MAX_DATA // 16383, when cfg(test)
-        );
+        assert_eq!(client.stream_avail_send_space(stream_id).unwrap(), 16383);
         assert_eq!(
             client
                 .stream_send(stream_id, &[b'a'; RX_STREAM_DATA_WINDOW as usize])
                 .unwrap(),
-            LOCAL_MAX_DATA as usize
+            16383
         );
         let evts = client.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 2); // SendStreamWritable, StateChange(connected)
