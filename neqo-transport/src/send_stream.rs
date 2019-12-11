@@ -776,29 +776,31 @@ impl SendStreams {
         for (stream_id, stream) in self {
             let complete = stream.final_size().is_some();
             if let Some((offset, data)) = stream.next_bytes(mode) {
-                let (frame, length) =
-                    Frame::new_stream(stream_id.as_u64(), offset, data, complete, remaining);
-                qdebug!(
-                    "Stream {} sending bytes {}-{}, epoch {}, mode {:?}",
-                    stream_id.as_u64(),
-                    offset,
-                    offset + length as u64,
-                    epoch,
-                    mode,
-                );
-                let fin = complete && length == data.len();
-                debug_assert!(!fin || matches!(frame, Frame::Stream{fin: true, .. }));
-                stream.mark_as_sent(offset, length, fin);
-
-                return Some((
-                    frame,
-                    Some(RecoveryToken::Stream(StreamRecoveryToken {
-                        id: *stream_id,
+                if let Some((frame, length)) =
+                    Frame::new_stream(stream_id.as_u64(), offset, data, complete, remaining)
+                {
+                    qdebug!(
+                        "Stream {} sending bytes {}-{}, epoch {}, mode {:?}",
+                        stream_id.as_u64(),
                         offset,
-                        length,
-                        fin,
-                    })),
-                ));
+                        offset + length as u64,
+                        epoch,
+                        mode,
+                    );
+                    let fin = complete && length == data.len();
+                    debug_assert!(!fin || matches!(frame, Frame::Stream{fin: true, .. }));
+                    stream.mark_as_sent(offset, length, fin);
+
+                    return Some((
+                        frame,
+                        Some(RecoveryToken::Stream(StreamRecoveryToken {
+                            id: *stream_id,
+                            offset,
+                            length,
+                            fin,
+                        })),
+                    ));
+                }
             }
         }
         None
