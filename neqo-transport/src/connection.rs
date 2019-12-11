@@ -449,7 +449,15 @@ impl Connection {
 
     /// Set a local transport parameter, possibly overriding a default value.
     pub fn set_local_tparam(&self, key: u16, value: TransportParameter) {
-        self.tps.borrow_mut().local.set(key, value)
+        if matches!(
+            (self.role(), self.state()),
+            (Role::Client, State::Init) | (Role::Server, State::WaitInitial)
+        ) {
+            self.tps.borrow_mut().local.set(key, value)
+        } else {
+            qerror!("Cannot set local tparam when not in an initial connection state.");
+            qerror!("Current state: {:?}", self.state());
+        }
     }
 
     /// Set the connection ID that was originally chosen by the client.
