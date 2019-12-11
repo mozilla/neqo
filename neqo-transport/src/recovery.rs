@@ -35,9 +35,10 @@ const GRANULARITY: Duration = Duration::from_millis(20);
 const INITIAL_RTT: Duration = Duration::from_millis(100);
 
 const PACKET_THRESHOLD: u64 = 3;
-const MAX_DATAGRAM_SIZE: usize = 1200; // per -recovery B.1
+pub const MAX_DATAGRAM_SIZE: usize = 1232; // For ipv6, smaller than ipv4 (1252)
+pub const INITIAL_CWND_PKTS: usize = 10;
 const INITIAL_WINDOW: u64 = const_min(
-    10 * MAX_DATAGRAM_SIZE,
+    INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE,
     const_max(2 * MAX_DATAGRAM_SIZE, 14720),
 ) as u64;
 const MIN_CONG_WINDOW: u64 = MAX_DATAGRAM_SIZE as u64 * 2;

@@ -56,7 +56,7 @@ const NUM_EPOCHS: Epoch = 4;
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
-const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFE; // 2^62-1
+const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62
 
 const LOCAL_IDLE_TIMEOUT: Duration = Duration::from_secs(60); // 1 minute
 
@@ -1509,14 +1509,14 @@ impl Connection {
                 }
             }
             Frame::DataBlocked { data_limit } => {
-                // Should never happen since we set data limit to 2^62-1
+                // Should never happen since we set data limit to max
                 qwarn!(
                     [self],
                     "Received DataBlocked with data limit {}",
                     data_limit
                 );
                 // But if it does, open it up all the way
-                self.flow_mgr.borrow_mut().max_data(0x3FFF_FFFF_FFFF_FFFE);
+                self.flow_mgr.borrow_mut().max_data(LOCAL_MAX_DATA);
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
                 // TODO(agrover@mozilla.com): how should we be using
@@ -2125,6 +2125,7 @@ impl ::std::fmt::Display for Connection {
 mod tests {
     use super::*;
     use crate::frame::{CloseError, StreamType};
+    use crate::recovery::{INITIAL_CWND_PKTS, MAX_DATAGRAM_SIZE};
     use neqo_common::matches;
     use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
@@ -3287,7 +3288,13 @@ mod tests {
             }
         }
 
-        assert_eq!(c_tx_dgrams.len(), 11);
+        // Init/Handshake acks have increased cwnd so we actually can send 11
+        // with the last being shorter
+        assert_eq!(c_tx_dgrams.len(), INITIAL_CWND_PKTS + 1);
+        assert_eq!(c_tx_dgrams[0].len(), MAX_DATAGRAM_SIZE);
+        assert_eq!(c_tx_dgrams[9].len(), MAX_DATAGRAM_SIZE);
+        assert_eq!(c_tx_dgrams[10].len(), 630);
+        assert_eq!(client.loss_recovery.cwnd_avail(), 0);
     }
 
     #[test]
