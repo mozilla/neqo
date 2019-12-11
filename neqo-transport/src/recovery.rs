@@ -15,19 +15,12 @@ use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{const_max, const_min, qdebug, qinfo};
 
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
 use crate::send_stream::StreamRecoveryToken;
 use crate::tracking::{AckToken, PNSpace};
-
-const fn const_max(a: usize, b: usize) -> usize {
-    [a, b][(a < b) as usize]
-}
-const fn const_min(a: usize, b: usize) -> usize {
-    [a, b][(a >= b) as usize]
-}
 
 const GRANULARITY: Duration = Duration::from_millis(20);
 // Defined in -recovery 6.2 as 500ms but using lower value until we have RTT

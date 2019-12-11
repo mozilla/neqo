@@ -39,3 +39,10 @@ pub fn hex(buf: &[u8]) -> String {
     }
     ret
 }
+
+pub const fn const_max(a: usize, b: usize) -> usize {
+    [a, b][(a < b) as usize]
+}
+pub const fn const_min(a: usize, b: usize) -> usize {
+    [a, b][(a >= b) as usize]
+}
