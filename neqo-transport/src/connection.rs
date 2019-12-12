@@ -1147,7 +1147,10 @@ impl Connection {
                     loop {
                         let used =
                             out_bytes.len() + encoder.len() + hdr.overhead(&tx.aead, path.mtu());
-                        let remaining = min(path.mtu() - used, cong_avail.saturating_sub(used));
+                        let remaining = min(
+                            path.mtu().saturating_sub(used),
+                            cong_avail.saturating_sub(used),
+                        );
                         if remaining < 2 {
                             // All useful frames are at least 2 bytes.
                             break;
@@ -1259,9 +1262,6 @@ impl Connection {
             dump_packet(self, "TX ->", &hdr, &encoder);
 
             out_bytes.append(&mut packet);
-            if out_bytes.len() >= path.mtu() {
-                break;
-            }
         }
 
         if close_sent {
