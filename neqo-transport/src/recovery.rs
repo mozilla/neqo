@@ -261,7 +261,11 @@ impl Default for CongestionControl {
 
 impl Display for CongestionControl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CongCtrl")
+        write!(
+            f,
+            "CongCtrl {}/{}",
+            self.bytes_in_flight, self.congestion_window
+        )
     }
 }
 
