@@ -3261,7 +3261,65 @@ mod tests {
         assert_eq!(pkt0.as_dgram_ref().unwrap().len(), 1232);
     }
 
+    // Handle sending a bunch of bytes from one connection to another, until
+    // something stops us from sending.
+    fn send_bytes(src: &mut Connection, stream: u64, now: Instant) -> (Vec<Datagram>, usize) {
+        let mut total_bytes_sent: usize = 0;
+        let mut total_dgrams = Vec::new();
+
+        loop {
+            let bytes_sent = src.stream_send(stream, &[0x00; 1_000_000]).unwrap();
+            if bytes_sent == 0 {
+                break;
+            } else {
+            }
+
+            let mut c_tx_dgrams = Vec::new();
+            loop {
+                let pkt = src.process_output(now);
+                if pkt.as_dgram_ref().is_some() {
+                    total_bytes_sent += pkt.as_dgram_ref().unwrap().len();
+                    c_tx_dgrams.push(pkt.dgram().unwrap())
+                } else {
+                    assert!(matches!(pkt, Output::Callback(_)));
+                    break;
+                }
+            }
+            total_dgrams.extend(c_tx_dgrams)
+        }
+
+        (total_dgrams, total_bytes_sent)
+    }
+
+    fn recv_bytes(
+        dest: &mut Connection,
+        stream: u64,
+        mut in_dgrams: Vec<Datagram>,
+        now: Instant,
+    ) -> (Vec<Datagram>, Vec<(Frame, Epoch)>) {
+        let mut srv_buf = [0; 1_000_000];
+        let mut recvd_frames = Vec::new();
+
+        loop {
+            for dgram in in_dgrams.drain(..) {
+                recvd_frames.extend(dest.test_process_input(dgram, now));
+            }
+            let (bytes_read, _fin) = dest.stream_recv(stream, &mut srv_buf).unwrap();
+            if bytes_read == 0 {
+                break;
+            }
+        }
+
+        let mut tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = dest.process_output(now) {
+            tx_dgrams.push(dg);
+        }
+
+        (tx_dgrams, recvd_frames)
+    }
+
     #[test]
+
     fn cc_slow_start() {
         let mut client = default_client();
         let mut server = default_server();
@@ -3276,204 +3334,219 @@ mod tests {
 
         // Try to send a lot of data
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        assert_eq!(client.stream_send(2, &[0xaa; 100_000]).unwrap(), 65535);
+        let (c_tx_dgrams, send_bytes) = send_bytes(&mut client, 2, now);
 
-        qinfo!("client");
-        let mut c_tx_dgrams = Vec::new();
-        loop {
-            let pkt = client.process(None, now);
-            if pkt.as_dgram_ref().is_some() {
-                c_tx_dgrams.push(pkt.dgram().unwrap())
-            } else {
-                assert!(matches!(pkt, Output::Callback(_)));
-                break;
-            }
-        }
-
-        // Init/Handshake acks have increased cwnd so we actually can send 11
-        // with the last being shorter
+        // Init/Handshake acks have increased cwnd by 630 so we actually can
+        // send 11 with the last being shorter
         assert_eq!(c_tx_dgrams.len(), INITIAL_CWND_PKTS + 1);
         assert_eq!(c_tx_dgrams[0].len(), MAX_DATAGRAM_SIZE);
         assert_eq!(c_tx_dgrams[9].len(), MAX_DATAGRAM_SIZE);
         assert_eq!(c_tx_dgrams[10].len(), 630);
         assert_eq!(client.loss_recovery.cwnd_avail(), 0);
+        assert_eq!(send_bytes, (INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE) + 630);
     }
 
     #[test]
-    #[allow(clippy::cognitive_complexity)]
-    fn congestion_control() {
+    /// Verify that CC moves to cong avoidance when a packet is marked lost.
+    fn cc_slow_start_to_cong_avoidance() {
         let mut client = default_client();
         let mut server = default_server();
-        let mut srv_buf = [0; 1_000_000];
         connect(&mut client, &mut server);
 
         let now = now();
 
-        // Try to send a lot of data
-        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        assert_eq!(client.stream_send(2, &[0xaa; 100_000]).unwrap(), 16383);
+        // Create stream 0
+        assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
 
-        qinfo!("client");
-        let mut c_tx_dgrams = Vec::new();
-        loop {
-            let pkt = client.process(None, now);
-            if pkt.as_dgram_ref().is_some() {
-                c_tx_dgrams.push(pkt.dgram().unwrap())
-            } else {
-                assert!(matches!(pkt, Output::Callback(_)));
-                break;
-            }
-        }
+        // Buffer up lot of data and generate packets
+        let (c_tx_dgrams, send_bytes) = send_bytes(&mut client, 0, now);
 
-        assert_eq!(c_tx_dgrams.len(), 11);
+        // Initial/Handshake acks have already increased cwnd so 11 packets are
+        // allowed
+        assert_eq!(c_tx_dgrams.len(), INITIAL_CWND_PKTS + 1);
+        assert_eq!(send_bytes, (INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE) + 630);
 
-        // Recv all pkts and ACK
-        qinfo!("server");
-        for c_dgram in c_tx_dgrams {
-            server.process_input(c_dgram, now)
-        }
-        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (12283, false));
-        let mut s_tx_dgrams = Vec::new();
-        while let Output::Datagram(dg) = server.process_output(now) {
-            s_tx_dgrams.push(dg);
-        }
+        // Server: Receive and generate ack
+        let (s_tx_dgrams, _recvd_frames) = recv_bytes(&mut server, 0, c_tx_dgrams, now);
 
-        // ACK pkts 0-10
         assert_eq!(s_tx_dgrams.len(), 1);
 
-        // Handle ack, send more
-        qinfo!("client");
-        for s_dgram in s_tx_dgrams {
-            client.process_input(s_dgram, now)
-        }
+        // Client: Process ack and packetize more buffered data
+        let (mut c_tx_dgrams, recvd_frames) = recv_bytes(&mut client, 0, s_tx_dgrams, now);
 
-        assert_eq!(client.stream_send(2, &[0xab; 100_000]).unwrap(), 49152);
-
-        let mut c_tx_dgrams = Vec::new();
-        while let Output::Datagram(dg) = client.process_output(now) {
-            c_tx_dgrams.push(dg);
-        }
+        // Verify that server-sent frame was what we thought
+        assert!(matches!(
+            recvd_frames[0],
+            (
+                Frame::Ack {
+                    largest_acknowledged: 10,
+                    ..
+                },
+                3,
+            )
+        ));
 
         assert_eq!(c_tx_dgrams.len(), 21);
 
-        // Recv all pkts and ACK
-        qinfo!("server");
-        for c_dgram in c_tx_dgrams {
-            server.process_input(c_dgram, now)
-        }
-        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (24617, false));
-        let mut s_tx_dgrams = Vec::new();
-        while let Output::Datagram(dg) = server.process_output(now) {
-            s_tx_dgrams.push(dg);
-        }
+        // Server: Receive and generate ack again, but drop first packet
+        c_tx_dgrams.remove(0);
+        assert_eq!(c_tx_dgrams.len(), 20);
+        let (s_tx_dgrams, _recvd_frames) = recv_bytes(&mut server, 0, c_tx_dgrams, now);
 
-        // ACK pkts 0-31
         assert_eq!(s_tx_dgrams.len(), 1);
 
-        // Handle ack, send more
-        qinfo!("client");
-        for s_dgram in s_tx_dgrams {
-            client.process_input(s_dgram, now)
-        }
+        // Client: Process ack and packetize more buffered data
+        let (_c_tx_dgrams, recvd_frames) = recv_bytes(&mut client, 0, s_tx_dgrams, now);
 
-        // Cram more into the stream
-        assert_eq!(client.stream_send(2, &[0xab; 100_000]).unwrap(), 36900);
+        // Verify that server-sent frame was what we thought
+        assert!(matches!(
+            recvd_frames[0],
+            (
+                Frame::Ack {
+                    largest_acknowledged: 31,
+                    ..
+                },
+                3,
+            )
+        ));
 
-        let mut c_tx_dgrams = Vec::new();
-        while let Output::Datagram(dg) = client.process_output(now) {
-            c_tx_dgrams.push(dg);
-        }
-
-        assert_eq!(c_tx_dgrams.len(), 41);
-
-        // Packets lost!
-        qinfo!("server");
-        for _ in 0..25 {
-            c_tx_dgrams.remove(10);
-        }
-        for c_dgram in c_tx_dgrams {
-            server.process_input(c_dgram, now)
-        }
-        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (12005, false));
-        let mut s_tx_dgrams = Vec::new();
-        while let Output::Datagram(dg) = server.process_output(now) {
-            s_tx_dgrams.push(dg);
-        }
-        assert_eq!(s_tx_dgrams.len(), 1);
-
-        // Handle ack, transition slow start -> cong avoidance due to dropped
-        // pkts
-        qinfo!("client");
-        for s_dgram in s_tx_dgrams {
-            client.process_input(s_dgram, now)
-        }
-        let cong_cwnd = client.loss_recovery.cwnd();
-        assert_eq!(cong_cwnd, 35116);
-
-        // Cram more into the stream, but nothing added
-        assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 0);
-
-        let mut c_tx_dgrams = Vec::new();
-        while let Output::Datagram(dg) = client.process_output(now) {
-            c_tx_dgrams.push(dg);
-        }
-
-        // Constrained by cwnd
-        assert_eq!(c_tx_dgrams.len(), 29);
-        assert_eq!(
-            c_tx_dgrams.iter().map(|dg| dg.len() as u64).sum::<u64>(),
-            cong_cwnd
-        );
-
-        qinfo!("server");
-        for c_dgram in c_tx_dgrams {
-            server.process_input(c_dgram, now)
-        }
-        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (41423, false));
-        let mut s_tx_dgrams = Vec::new();
-        while let Output::Datagram(dg) = server.process_output(now) {
-            s_tx_dgrams.push(dg);
-        }
-        assert_eq!(s_tx_dgrams.len(), 1);
-
-        // Since last batch was not sent later than cong period start, acking
-        // these should not get us out of congestion avoidance mode.
-        qinfo!("client");
-        for s_dgram in s_tx_dgrams {
-            client.process_input(s_dgram, now)
-        }
-        // cwnd should stay the same.
-        assert_eq!(cong_cwnd, client.loss_recovery.cwnd());
-
-        // Cram more into the stream
-        assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 53428);
-
-        let mut c_tx_dgrams = Vec::new();
-        while let Output::Datagram(dg) = client.process_output(now + Duration::from_millis(100)) {
-            c_tx_dgrams.push(dg);
-        }
-
-        assert_eq!(c_tx_dgrams.len(), 29);
-
-        qinfo!("server");
-        for c_dgram in c_tx_dgrams {
-            server.process_input(c_dgram, now)
-        }
-        assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (34211, false));
-        let mut s_tx_dgrams = Vec::new();
-        while let Output::Datagram(dg) = server.process_output(now) {
-            s_tx_dgrams.push(dg);
-        }
-        assert_eq!(s_tx_dgrams.len(), 1);
-
-        // These packets were sent after cong period start, so client should no
-        // longer be in congestion recovery and now be in cong avoidance
-        qinfo!("client");
-        for s_dgram in s_tx_dgrams {
-            client.process_input(s_dgram, now + Duration::from_millis(100))
-        }
-
-        // cwnd has only gone up from 35k->36k because of acked packets
-        assert_eq!(client.loss_recovery.cwnd(), 36282);
+        // If we just triggered cong avoidance, these should be equal
+        assert_eq!(client.loss_recovery.cwnd(), client.loss_recovery.ssthresh());
     }
+
+    // #[test]
+    // #[allow(clippy::cognitive_complexity)]
+    // fn cc_slow_start_to_cong_avoidance2() {
+    //     let mut client = default_client();
+    //     let mut server = default_server();
+    //     let mut srv_buf = [0; 1_000_000];
+    //     connect(&mut client, &mut server);
+
+    //     let now = now();
+
+    //     // Create stream 0
+    //     assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
+
+    //     // Buffer up lot of data and generate packets
+    //     let (c_tx_dgrams, send_bytes) = send_bytes(&mut client, 0, now);
+
+    //     // Initial/Handshake acks have already increased cwnd so 11 packets are
+    //     // allowed
+    //     assert_eq!(c_tx_dgrams.len(), INITIAL_CWND_PKTS + 1);
+    //     assert_eq!(send_bytes, (INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE) + 630);
+
+    //     // Server: Receive and generate ack
+    //     let (s_tx_dgrams, _recvd_frames) = recv_bytes(&mut server, 0, c_tx_dgrams, now);
+
+    //     assert_eq!(s_tx_dgrams.len(), 1);
+
+    //     // Client: Process ack and packetize more buffered data
+    //     let (mut c_tx_dgrams, recvd_frames) = recv_bytes(&mut client, 0, s_tx_dgrams, now);
+
+    //     // Verify that server-sent frame was what we thought
+    //     assert!(matches!(
+    //         recvd_frames[0],
+    //         (
+    //             Frame::Ack {
+    //                 largest_acknowledged: 10,
+    //                 ..
+    //             },
+    //             3,
+    //         )
+    //     ));
+
+    //     assert_eq!(c_tx_dgrams.len(), 21);
+
+    //     // Server: Receive and generate ack again, but drop first packet
+    //     c_tx_dgrams.remove(0);
+    //     assert_eq!(c_tx_dgrams.len(), 20);
+    //     let (s_tx_dgrams, _recvd_frames) = recv_bytes(&mut server, 0, c_tx_dgrams, now);
+
+    //     assert_eq!(s_tx_dgrams.len(), 1);
+
+    //     let before_cwnd = client.loss_recovery.cwnd();
+    //     // Client: Process ack and packetize more buffered data
+    //     let (_c_tx_dgrams, recvd_frames) = recv_bytes(&mut client, 0, s_tx_dgrams, now);
+
+    //     // Verify that server-sent frame was what we thought
+    //     assert!(matches!(
+    //         recvd_frames[0],
+    //         (
+    //             Frame::Ack {
+    //                 largest_acknowledged: 31,
+    //                 ..
+    //             },
+    //             3,
+    //         )
+    //     ));
+
+    //     // If we just triggered cong avoidance, these should be equal
+    //     assert_eq!(client.loss_recovery.cwnd(), client.loss_recovery.ssthresh());
+
+    //     // Cram more into the stream, but nothing added
+    //     assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 0);
+
+    //     let mut c_tx_dgrams = Vec::new();
+    //     while let Output::Datagram(dg) = client.process_output(now) {
+    //         c_tx_dgrams.push(dg);
+    //     }
+
+    //     // Constrained by cwnd
+    //     assert_eq!(c_tx_dgrams.len(), 29);
+    //     assert_eq!(
+    //         c_tx_dgrams.iter().map(|dg| dg.len() as u64).sum::<u64>(),
+    //         after_cwnd
+    //     );
+
+    //     qinfo!("server");
+    //     for c_dgram in c_tx_dgrams {
+    //         server.process_input(c_dgram, now)
+    //     }
+    //     assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (41423, false));
+    //     let mut s_tx_dgrams = Vec::new();
+    //     while let Output::Datagram(dg) = server.process_output(now) {
+    //         s_tx_dgrams.push(dg);
+    //     }
+    //     assert_eq!(s_tx_dgrams.len(), 1);
+
+    //     // Since last batch was not sent later than cong period start, acking
+    //     // these should not get us out of congestion avoidance mode.
+    //     qinfo!("client");
+    //     for s_dgram in s_tx_dgrams {
+    //         client.process_input(s_dgram, now)
+    //     }
+    //     // cwnd should stay the same.
+    //     assert_eq!(after_cwnd, client.loss_recovery.cwnd());
+
+    //     // Cram more into the stream
+    //     assert_eq!(client.stream_send(2, &[0xac; 100_000]).unwrap(), 53428);
+
+    //     let mut c_tx_dgrams = Vec::new();
+    //     while let Output::Datagram(dg) = client.process_output(now + Duration::from_millis(100)) {
+    //         c_tx_dgrams.push(dg);
+    //     }
+
+    //     assert_eq!(c_tx_dgrams.len(), 29);
+
+    //     qinfo!("server");
+    //     for c_dgram in c_tx_dgrams {
+    //         server.process_input(c_dgram, now)
+    //     }
+    //     assert_eq!(server.stream_recv(2, &mut srv_buf).unwrap(), (34211, false));
+    //     let mut s_tx_dgrams = Vec::new();
+    //     while let Output::Datagram(dg) = server.process_output(now) {
+    //         s_tx_dgrams.push(dg);
+    //     }
+    //     assert_eq!(s_tx_dgrams.len(), 1);
+
+    //     // These packets were sent after cong period start, so client should no
+    //     // longer be in congestion recovery and now be in cong avoidance
+    //     qinfo!("client");
+    //     for s_dgram in s_tx_dgrams {
+    //         client.process_input(s_dgram, now + Duration::from_millis(100))
+    //     }
+
+    //     // cwnd has only gone up from 35k->36k because of acked packets
+    //     assert_eq!(client.loss_recovery.cwnd(), 36282);
+    // }
 }

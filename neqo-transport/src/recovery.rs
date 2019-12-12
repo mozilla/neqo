@@ -49,7 +49,7 @@ pub enum RecoveryToken {
 pub struct SentPacket {
     ack_eliciting: bool,
     time_sent: Instant,
-    pub(crate) tokens: Vec<RecoveryToken>,
+    pub tokens: Vec<RecoveryToken>,
 
     time_declared_lost: Option<Instant>,
 
@@ -275,6 +275,11 @@ impl CongestionControl {
         self.congestion_window
     }
 
+    #[cfg(test)]
+    pub fn ssthresh(&self) -> u64 {
+        self.ssthresh
+    }
+
     fn cwnd_avail(&self) -> u64 {
         // BIF can be higher than cwnd due to PTO packets, which are sent even
         // if avail is 0, but still count towards BIF.
@@ -411,6 +416,11 @@ impl LossRecovery {
     #[cfg(test)]
     pub fn cwnd(&self) -> u64 {
         self.cc.cwnd()
+    }
+
+    #[cfg(test)]
+    pub fn ssthresh(&self) -> u64 {
+        self.cc.ssthresh()
     }
 
     pub fn cwnd_avail(&self) -> u64 {
