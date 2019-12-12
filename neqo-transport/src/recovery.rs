@@ -286,34 +286,37 @@ impl CongestionControl {
         self.congestion_window.saturating_sub(self.bytes_in_flight)
     }
 
-    // OnPacketAckedCC
-    fn on_packet_acked(&mut self, pkt: &SentPacket) {
-        assert!(self.bytes_in_flight >= u64::try_from(pkt.size).unwrap());
-        self.bytes_in_flight -= u64::try_from(pkt.size).unwrap();
+    // Multi-packet version of OnPacketAckedCC
+    fn on_packets_acked<'a>(&mut self, acked_pkts: impl Iterator<Item = &'a SentPacket>) {
+        for pkt in acked_pkts.filter(|pkt| pkt.in_flight) {
+            assert!(self.bytes_in_flight >= u64::try_from(pkt.size).unwrap());
+            self.bytes_in_flight -= u64::try_from(pkt.size).unwrap();
 
-        if self.in_congestion_recovery(pkt.time_sent) {
-            // Do not increase congestion window in recovery period.
-            return;
-        }
-        if self.app_limited() {
-            // Do not increase congestion_window if application limited.
-            return;
-        }
+            if self.in_congestion_recovery(pkt.time_sent) {
+                // Do not increase congestion window in recovery period.
+                continue;
+            }
+            if self.app_limited() {
+                // Do not increase congestion_window if application limited.
+                continue;
+            }
 
-        if self.congestion_window < self.ssthresh {
-            // Slow start.
-            self.congestion_window += u64::try_from(pkt.size).unwrap();
-            qinfo!([self], "slow start; cwnd {}", self.congestion_window);
-        } else {
-            // Congestion avoidance.
-            qinfo!(
-                [self],
-                "congestion avoidance; cwnd {} ssthresh {}",
-                self.congestion_window,
-                self.ssthresh
-            );
-            self.congestion_window += u64::try_from(MAX_DATAGRAM_SIZE * pkt.size as usize).unwrap()
-                / self.congestion_window
+            if self.congestion_window < self.ssthresh {
+                // Slow start.
+                self.congestion_window += u64::try_from(pkt.size).unwrap();
+                qinfo!([self], "slow start; cwnd {}", self.congestion_window);
+            } else {
+                // Congestion avoidance.
+                qinfo!(
+                    [self],
+                    "congestion avoidance; cwnd {} ssthresh {}",
+                    self.congestion_window,
+                    self.ssthresh
+                );
+                self.congestion_window += u64::try_from(MAX_DATAGRAM_SIZE * pkt.size as usize)
+                    .unwrap()
+                    / self.congestion_window
+            }
         }
     }
 
@@ -324,6 +327,10 @@ impl CongestionControl {
         pto: Duration,
         lost_packets: &[SentPacket],
     ) {
+        if lost_packets.is_empty() {
+            return;
+        }
+
         for pkt in lost_packets {
             assert!(self.bytes_in_flight >= u64::try_from(pkt.size).unwrap());
             self.bytes_in_flight -= u64::try_from(pkt.size).unwrap();
@@ -514,26 +521,20 @@ impl LossRecovery {
 
         self.pto_count = 0;
 
-        let acked_packets = acked_packets
-            .into_iter()
-            .map(|(_k, v)| v)
-            .collect::<Vec<_>>();
+        self.cc
+            .on_packets_acked(acked_packets.iter().map(|(_k, v)| v));
 
-        // OnPacketAcked
-        for pkt in acked_packets.iter().filter(|pkt| pkt.in_flight) {
-            self.cc.on_packet_acked(pkt)
-        }
+        self.cc.on_packets_lost(
+            now,
+            largest_acked_sent_time,
+            self.rtt_vals.pto(),
+            &lost_packets,
+        );
 
-        if !lost_packets.is_empty() {
-            self.cc.on_packets_lost(
-                now,
-                largest_acked_sent_time,
-                self.rtt_vals.pto(),
-                &lost_packets,
-            );
-        }
-
-        (acked_packets, lost_packets)
+        (
+            acked_packets.into_iter().map(|(_, p)| p).collect(),
+            lost_packets,
+        )
     }
 
     fn loss_delay(&self) -> Duration {
@@ -810,14 +811,14 @@ mod tests {
 
     const ACK_DELAY: Duration = ms!(24);
     /// Acknowledge PN with the identified delay.
-    fn ack(lr: &mut LossRecovery, pn: u64, delay: Duration) -> (Vec<SentPacket>, Vec<SentPacket>) {
+    fn ack(lr: &mut LossRecovery, pn: u64, delay: Duration) {
         lr.on_ack_received(
             PNSpace::ApplicationData,
             pn,
             vec![(pn, pn)],
             ACK_DELAY,
             pn_time(pn) + delay,
-        )
+        );
     }
 
     #[test]

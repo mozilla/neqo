@@ -1582,10 +1582,7 @@ impl Connection {
         Ok(())
     }
 
-    fn handle_lost_packets<I>(&mut self, lost_packets: I)
-    where
-        I: IntoIterator<Item = SentPacket>,
-    {
+    fn handle_lost_packets(&mut self, lost_packets: Vec<SentPacket>) {
         for lost in lost_packets {
             for token in lost.tokens {
                 qdebug!([self], "Lost: {:?}", token);
