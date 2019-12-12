@@ -360,7 +360,7 @@ impl CongestionControl {
             self.bytes_in_flight,
             self.congestion_window
         );
-        assert!(self.bytes_in_flight <= self.congestion_window);
+        debug_assert!(self.bytes_in_flight <= self.congestion_window);
     }
 
     fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
