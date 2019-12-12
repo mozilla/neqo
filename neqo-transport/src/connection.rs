@@ -1246,11 +1246,13 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(
                     space,
                     hdr.pn,
-                    ack_eliciting,
-                    tokens,
-                    packet.len(),
-                    ack_eliciting || has_padding,
-                    now,
+                    SentPacket::new(
+                        now,
+                        ack_eliciting,
+                        tokens,
+                        packet.len(),
+                        ack_eliciting || has_padding,
+                    ),
                 );
             }
 

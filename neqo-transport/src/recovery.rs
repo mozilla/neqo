@@ -57,6 +57,25 @@ pub struct SentPacket {
     size: usize,
 }
 
+impl SentPacket {
+    pub fn new(
+        time_sent: Instant,
+        ack_eliciting: bool,
+        tokens: Vec<RecoveryToken>,
+        size: usize,
+        in_flight: bool,
+    ) -> SentPacket {
+        SentPacket {
+            time_sent,
+            ack_eliciting,
+            tokens,
+            time_declared_lost: None,
+            size,
+            in_flight,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct RttVals {
     latest_rtt: Duration,
@@ -418,35 +437,22 @@ impl LossRecovery {
         self.spaces[PNSpace::ApplicationData].remove_ignored()
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn on_packet_sent(
         &mut self,
         pn_space: PNSpace,
         packet_number: u64,
-        ack_eliciting: bool,
-        tokens: Vec<RecoveryToken>,
-        size: usize,
-        in_flight: bool,
-        now: Instant,
+        sent_packet: SentPacket,
     ) {
         qdebug!([self], "packet {:?}-{} sent.", pn_space, packet_number);
-        self.spaces[pn_space].sent_packets.insert(
-            packet_number,
-            SentPacket {
-                time_sent: now,
-                ack_eliciting,
-                tokens,
-                time_declared_lost: None,
-                size,
-                in_flight,
-            },
-        );
-        if ack_eliciting {
-            self.time_of_last_sent_ack_eliciting_packet = Some(now);
+        if sent_packet.ack_eliciting {
+            self.time_of_last_sent_ack_eliciting_packet = Some(sent_packet.time_sent);
         }
-        if in_flight {
-            self.cc.on_packet_sent(size)
+        if sent_packet.in_flight {
+            self.cc.on_packet_sent(sent_packet.size)
         }
+        self.spaces[pn_space]
+            .sent_packets
+            .insert(packet_number, sent_packet);
     }
 
     /// Returns (acked packets, lost packets)
@@ -783,11 +789,7 @@ mod tests {
             lr.on_packet_sent(
                 PNSpace::ApplicationData,
                 pn,
-                true,
-                Vec::new(),
-                ON_SENT_SIZE,
-                true,
-                pn_time(pn),
+                SentPacket::new(pn_time(pn), true, Vec::new(), ON_SENT_SIZE, true),
             );
         }
     }
@@ -905,20 +907,18 @@ mod tests {
         lr.on_packet_sent(
             PNSpace::ApplicationData,
             0,
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-            true,
-            pn_time(0),
+            SentPacket::new(pn_time(0), true, Vec::new(), ON_SENT_SIZE, true),
         );
         lr.on_packet_sent(
             PNSpace::ApplicationData,
             1,
-            true,
-            Vec::new(),
-            ON_SENT_SIZE,
-            true,
-            pn_time(0) + INITIAL_RTT / 4,
+            SentPacket::new(
+                pn_time(0) + INITIAL_RTT / 4,
+                true,
+                Vec::new(),
+                ON_SENT_SIZE,
+                true,
+            ),
         );
         let (_, lost) = lr.on_ack_received(
             PNSpace::ApplicationData,
