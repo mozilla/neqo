@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 
-use neqo_common::{const_max, const_min, qdebug, qinfo};
+use neqo_common::{const_max, const_min, qdebug, qerror, qinfo};
 
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
@@ -34,7 +34,7 @@ const INITIAL_WINDOW: u64 = const_min(
     INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE,
     const_max(2 * MAX_DATAGRAM_SIZE, 14720),
 ) as u64;
-const MIN_CONG_WINDOW: u64 = MAX_DATAGRAM_SIZE as u64 * 2;
+pub const MIN_CONG_WINDOW: u64 = MAX_DATAGRAM_SIZE as u64 * 2;
 const PERSISTENT_CONG_THRESH: u32 = 3;
 
 #[derive(Debug, Clone)]
@@ -343,11 +343,16 @@ impl CongestionControl {
 
         let in_persistent_congestion = {
             let congestion_period = pto * PERSISTENT_CONG_THRESH;
+            qerror!("cong period {:?}", congestion_period);
+            qerror!("LAS {:?}", largest_acked_sent);
+            qerror!("val {:?}", last_lost_pkt.time_sent - congestion_period);
             largest_acked_sent < Some(last_lost_pkt.time_sent - congestion_period)
         };
+        qerror!("PC {}", in_persistent_congestion);
         if in_persistent_congestion {
             qinfo!([self], "persistent congestion");
             self.congestion_window = MIN_CONG_WINDOW;
+            panic!("woohoo");
         }
     }
 
