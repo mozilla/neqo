@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
-use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn};
+use neqo_common::{matches, qdebug, qerror, qinfo, qtrace};
 
 use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
@@ -121,7 +121,7 @@ impl RangeTracker {
             let sub_len = min(*len, tmp_len);
             let remaining_len = len - sub_len;
             if new_state == RangeState::Sent && *state == RangeState::Acked {
-                qwarn!(
+                qinfo!(
                     "Attempted to downgrade overlapping range Acked range {}-{} with Sent {}-{}",
                     off,
                     len,
@@ -222,7 +222,7 @@ impl RangeTracker {
                 // Check for overlap
                 if *cur_off + *cur_len > off {
                     if *cur_state == RangeState::Acked {
-                        qwarn!(
+                        qinfo!(
                             "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
                             cur_off,
                             cur_len,
@@ -237,7 +237,7 @@ impl RangeTracker {
             }
 
             if *cur_state == RangeState::Acked {
-                qwarn!(
+                qinfo!(
                     "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
                     cur_off,
                     cur_len,
@@ -352,10 +352,7 @@ impl TxBuffer {
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
-        assert!(self.ranges.highest_offset() >= offset + len as u64);
-        assert!(offset >= self.retired);
-
-        // Make eligible for sending again
+        debug_assert!(self.ranges.highest_offset() >= offset + len as u64);
         self.ranges.unmark_range(offset, len)
     }
 
