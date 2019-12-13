@@ -1242,22 +1242,20 @@ impl Connection {
 
             let mut packet = encode_packet(tx, &hdr, &encoder);
 
-            if self.tx_mode != TxMode::Pto {
-                if ack_eliciting {
-                    self.idle_timeout.on_packet_sent(now);
-                }
-                self.loss_recovery.on_packet_sent(
-                    space,
-                    hdr.pn,
-                    SentPacket::new(
-                        now,
-                        ack_eliciting,
-                        tokens,
-                        packet.len(),
-                        ack_eliciting || has_padding,
-                    ),
-                );
+            if self.tx_mode != TxMode::Pto || ack_eliciting {
+                self.idle_timeout.on_packet_sent(now);
             }
+
+            let in_flight = match self.tx_mode {
+                TxMode::Pto => false,
+                TxMode::Normal => ack_eliciting || has_padding,
+            };
+
+            self.loss_recovery.on_packet_sent(
+                space,
+                hdr.pn,
+                SentPacket::new(now, ack_eliciting, tokens, packet.len(), in_flight),
+            );
 
             dump_packet(self, "TX ->", &hdr, &encoder);
 
