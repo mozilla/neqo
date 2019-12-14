@@ -117,7 +117,9 @@ impl Http3ServerHandler {
                         }
                     }
                 },
-                ConnectionEvent::SendStreamWritable { .. } => {}
+                ConnectionEvent::SendStreamWritable { stream_id } => {
+                    self.events.data_writable(stream_id)
+                }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     self.handle_stream_readable(conn, stream_id)?
                 }
@@ -133,6 +135,9 @@ impl Http3ServerHandler {
                     stream_id,
                     app_error,
                 } => self.handle_stream_stop_sending(conn, stream_id, app_error),
+                ConnectionEvent::SendStreamBlocked { stream_id } => {
+                    self.events.data_blocked(stream_id)
+                }
                 ConnectionEvent::SendStreamComplete { .. } => {}
                 ConnectionEvent::SendStreamCreatable { .. } => {}
                 ConnectionEvent::AuthenticationNeeded => return Err(Error::HttpInternalError),

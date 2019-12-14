@@ -320,6 +320,9 @@ impl Http3Client {
                     stream_id,
                     app_error,
                 } => self.handle_stream_stop_sending(stream_id, app_error)?,
+                ConnectionEvent::SendStreamBlocked { stream_id } => {
+                    self.events.data_blocked(stream_id)
+                }
                 ConnectionEvent::SendStreamComplete { .. } => {}
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.events.new_requests_creatable(stream_type)

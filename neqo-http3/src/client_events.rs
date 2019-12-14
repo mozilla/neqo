@@ -18,6 +18,8 @@ pub enum Http3ClientEvent {
     HeaderReady { stream_id: u64 },
     /// A stream can accept new data.
     DataWritable { stream_id: u64 },
+    /// A stream has no more send credits available.
+    DataBlocked { stream_id: u64 },
     /// New bytes available for reading.
     DataReadable { stream_id: u64 },
     /// Peer reset the stream.
@@ -48,6 +50,10 @@ impl Http3ClientEvents {
 
     pub fn data_writable(&self, stream_id: u64) {
         self.insert(Http3ClientEvent::DataWritable { stream_id });
+    }
+
+    pub fn data_blocked(&self, stream_id: u64) {
+        self.insert(Http3ClientEvent::DataBlocked { stream_id });
     }
 
     pub fn data_readable(&self, stream_id: u64) {

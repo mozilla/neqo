@@ -34,6 +34,8 @@ pub enum ConnectionEvent {
     RecvStreamReset { stream_id: u64, app_error: AppError },
     /// Peer has sent STOP_SENDING
     SendStreamStopSending { stream_id: u64, app_error: AppError },
+    /// There is no more credit to send on this stream.
+    SendStreamBlocked { stream_id: u64 },
     /// Peer has acked everything sent on the stream.
     SendStreamComplete { stream_id: u64 },
     /// Peer increased MAX_STREAMS
@@ -82,6 +84,12 @@ impl ConnectionEvents {
 
     pub fn send_stream_writable(&self, stream_id: StreamId) {
         self.insert(ConnectionEvent::SendStreamWritable {
+            stream_id: stream_id.as_u64(),
+        });
+    }
+
+    pub fn send_stream_blocked(&self, stream_id: StreamId) {
+        self.insert(ConnectionEvent::SendStreamBlocked {
             stream_id: stream_id.as_u64(),
         });
     }

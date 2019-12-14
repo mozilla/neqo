@@ -525,6 +525,7 @@ impl SendStream {
                 self.flow_mgr
                     .borrow_mut()
                     .stream_data_blocked(self.stream_id, self.max_stream_data);
+                self.conn_events.send_stream_blocked(self.stream_id);
             }
             if self.flow_mgr.borrow().conn_credit_avail() == 0 {
                 self.flow_mgr.borrow_mut().data_blocked();
@@ -962,6 +963,30 @@ mod tests {
         tx.mark_as_acked(0, 100);
         let res = tx.next_bytes(TxMode::Normal);
         assert_eq!(res, None);
+    }
+
+    #[test]
+    fn send_stream_blocked_event_gen() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        flow_mgr.borrow_mut().conn_increase_max_credit(2);
+        let conn_events = ConnectionEvents::default();
+
+        let mut s = SendStream::new(4.into(), 2, flow_mgr.clone(), conn_events.clone());
+
+        // Creating a send stream with the capacity to immediately send data will cause the
+        // generation of a SendStreamWritable event.
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 1);
+        assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
+
+        // writing four bytes when the stream's max_stream_data is two bytes will cause the
+        // generation of a SendStreamBlocked event.
+        assert_eq!(s.send(b"four").unwrap(), 2);
+        s.mark_as_sent(0, 2, false);
+
+        let evts = conn_events.events().collect::<Vec<_>>();
+        assert_eq!(evts.len(), 1);
+        assert!(matches!(evts[0], ConnectionEvent::SendStreamBlocked{..}));
     }
 
     #[test]

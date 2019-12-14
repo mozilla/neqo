@@ -27,6 +27,10 @@ pub enum Http3ServerConnEvent {
         data: Vec<u8>,
         fin: bool,
     },
+    /// A stream can accept new data.
+    DataWritable { stream_id: u64 },
+    /// A stream has no more send credits available.
+    DataBlocked { stream_id: u64 },
     /// Peer reset the stream.
     Reset { stream_id: u64, error: AppError },
     /// Connection state change.
@@ -68,6 +72,14 @@ impl Http3ServerConnEvents {
             headers,
             fin,
         });
+    }
+
+    pub fn data_writable(&self, stream_id: u64) {
+        self.insert(Http3ServerConnEvent::DataWritable { stream_id });
+    }
+
+    pub fn data_blocked(&self, stream_id: u64) {
+        self.insert(Http3ServerConnEvent::DataBlocked { stream_id });
     }
 
     pub fn data(&self, stream_id: u64, data: Vec<u8>, fin: bool) {
