@@ -3287,6 +3287,7 @@ mod tests {
         (total_dgrams, total_bytes_sent)
     }
 
+    // Receive multiple packets and generate an ack-only packet.
     fn server_ack_bytes(
         dest: &mut Connection,
         stream: u64,
@@ -3296,10 +3297,11 @@ mod tests {
         let mut srv_buf = [0; 1_000_000];
         let mut recvd_frames = Vec::new();
 
+        for dgram in in_dgrams.drain(..) {
+            recvd_frames.extend(dest.test_process_input(dgram, now));
+        }
+
         loop {
-            for dgram in in_dgrams.drain(..) {
-                recvd_frames.extend(dest.test_process_input(dgram, now));
-            }
             let (bytes_read, _fin) = dest.stream_recv(stream, &mut srv_buf).unwrap();
             if bytes_read == 0 {
                 break;
