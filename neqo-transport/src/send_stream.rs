@@ -335,8 +335,6 @@ impl TxBuffer {
     }
 
     pub fn mark_as_acked(&mut self, offset: u64, len: usize) {
-        assert!(self.ranges.highest_offset() >= offset + len as u64);
-
         self.ranges.mark_range(offset, len, RangeState::Acked);
 
         // We can drop contig acked range from the buffer
