@@ -1242,7 +1242,7 @@ impl Connection {
 
             let mut packet = encode_packet(tx, &hdr, &encoder);
 
-            if self.tx_mode != TxMode::Pto || ack_eliciting {
+            if self.tx_mode != TxMode::Pto && ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
 
