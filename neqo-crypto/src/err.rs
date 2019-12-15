@@ -69,12 +69,12 @@ impl std::fmt::Display for Error {
 
 impl From<std::num::TryFromIntError> for Error {
     fn from(_: std::num::TryFromIntError) -> Self {
-        Error::IntegerOverflow
+        Self::IntegerOverflow
     }
 }
 impl From<std::ffi::NulError> for Error {
     fn from(_: std::ffi::NulError) -> Self {
-        Error::InternalError
+        Self::InternalError
     }
 }
 
