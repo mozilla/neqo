@@ -13,6 +13,7 @@ mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod hframe;
+mod hsettings_frame;
 pub mod server;
 mod server_connection_events;
 mod server_events;
@@ -65,6 +66,7 @@ pub enum Error {
     TransportError(neqo_transport::Error),
     Unavailable,
     Unexpected,
+    InvalidResumptionToken,
 }
 
 impl Error {

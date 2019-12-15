@@ -6,7 +6,8 @@
 
 use crate::control_stream_local::{ControlStreamLocal, HTTP3_UNI_STREAM_TYPE_CONTROL};
 use crate::control_stream_remote::ControlStreamRemote;
-use crate::hframe::{HFrame, HSettingType};
+use crate::hframe::HFrame;
+use crate::hsettings_frame::{HSetting, HSettingType, HSettings};
 use crate::stream_type_reader::NewStreamTypeReader;
 use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
@@ -19,8 +20,6 @@ use std::mem;
 use crate::{Error, Res};
 
 const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
-
-const MAX_HEADER_LIST_SIZE_DEFAULT: u64 = u64::max_value();
 
 pub(crate) enum HandleReadableOutput {
     NoOutput,
@@ -38,9 +37,23 @@ pub trait Http3Transaction: Debug {
     fn close_send(&mut self, conn: &mut Connection) -> Res<()>;
 }
 
+#[derive(Debug)]
+enum Http3RemoteSettingsState {
+    NotReceived,
+    Received(HSettings),
+    ZeroRtt(HSettings),
+}
+
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone)]
+struct LocalSettings {
+    max_table_size: u32,
+    max_blocked_streams: u16,
+}
+
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub enum Http3State {
     Initializing,
+    ZeroRtt,
     Connected,
     GoingAway,
     Closing(CloseError),
@@ -50,13 +63,13 @@ pub enum Http3State {
 #[derive(Debug)]
 pub struct Http3Connection<T: Http3Transaction> {
     pub state: Http3State,
-    max_header_list_size: u64,
+    local_settings: LocalSettings,
     control_stream_local: ControlStreamLocal,
     control_stream_remote: ControlStreamRemote,
     new_streams: HashMap<u64, NewStreamTypeReader>,
     pub qpack_encoder: QPackEncoder,
     pub qpack_decoder: QPackDecoder,
-    settings_received: bool,
+    settings_state: Http3RemoteSettingsState,
     streams_have_data_to_send: BTreeSet<u64>,
     pub transactions: HashMap<u64, T>,
 }
@@ -74,13 +87,16 @@ impl<T: Http3Transaction> Http3Connection<T> {
         }
         Http3Connection {
             state: Http3State::Initializing,
-            max_header_list_size: MAX_HEADER_LIST_SIZE_DEFAULT,
+            local_settings: LocalSettings {
+                max_table_size,
+                max_blocked_streams,
+            },
             control_stream_local: ControlStreamLocal::default(),
             control_stream_remote: ControlStreamRemote::new(),
             new_streams: HashMap::new(),
             qpack_encoder: QPackEncoder::new(true),
             qpack_decoder: QPackDecoder::new(max_table_size, max_blocked_streams),
-            settings_received: false,
+            settings_state: Http3RemoteSettingsState::NotReceived,
             streams_have_data_to_send: BTreeSet::new(),
             transactions: HashMap::new(),
         }
@@ -98,16 +114,16 @@ impl<T: Http3Transaction> Http3Connection<T> {
     fn send_settings(&mut self) {
         qdebug!([self], "Send settings.");
         self.control_stream_local.queue_frame(HFrame::Settings {
-            settings: vec![
-                (
-                    HSettingType::MaxTableSize,
-                    self.qpack_decoder.get_max_table_size().into(),
-                ),
-                (
-                    HSettingType::BlockedStreams,
-                    self.qpack_decoder.get_blocked_streams().into(),
-                ),
-            ],
+            settings: HSettings::new(&[
+                HSetting {
+                    setting_type: HSettingType::MaxTableCapacity,
+                    value: self.qpack_decoder.get_max_table_size().into(),
+                },
+                HSetting {
+                    setting_type: HSettingType::BlockedStreams,
+                    value: self.qpack_decoder.get_blocked_streams().into(),
+                },
+            ]),
         });
     }
 
@@ -144,6 +160,30 @@ impl<T: Http3Transaction> Http3Connection<T> {
         self.qpack_decoder.send(conn)?;
         self.qpack_encoder.send(conn)?;
         Ok(())
+    }
+
+    pub fn set_resumption_settings(
+        &mut self,
+        conn: &mut Connection,
+        settings: HSettings,
+    ) -> Res<()> {
+        if let Http3State::Initializing = &self.state {
+            self.state = Http3State::ZeroRtt;
+            self.initialize_http3_connection(conn)?;
+            self.set_qpack_settings(&settings)?;
+            self.settings_state = Http3RemoteSettingsState::ZeroRtt(settings);
+            Ok(())
+        } else {
+            Err(Error::Unexpected)
+        }
+    }
+
+    pub fn get_settings(&self) -> Option<HSettings> {
+        if let Http3RemoteSettingsState::Received(settings) = &self.settings_state {
+            Some(settings.clone())
+        } else {
+            None
+        }
     }
 
     // This function adds a new unidi stream and try to read its type. Http3Connection can handle
@@ -303,9 +343,14 @@ impl<T: Http3Transaction> Http3Connection<T> {
     pub fn handle_state_change(&mut self, conn: &mut Connection, state: &State) -> Res<bool> {
         match state {
             State::Connected => {
-                assert_eq!(self.state, Http3State::Initializing);
+                assert!(matches!(
+                    self.state,
+                    Http3State::Initializing | Http3State::ZeroRtt
+                ));
+                if self.state == Http3State::Initializing {
+                    self.initialize_http3_connection(conn)?;
+                }
                 self.state = Http3State::Connected;
-                self.initialize_http3_connection(conn)?;
                 Ok(true)
             }
             State::Closing { error, .. } => {
@@ -325,6 +370,28 @@ impl<T: Http3Transaction> Http3Connection<T> {
                 }
             }
             _ => Ok(false),
+        }
+    }
+
+    pub fn handle_zero_rtt_rejected(&mut self) -> Res<()> {
+        if self.state == Http3State::ZeroRtt {
+            self.state = Http3State::Initializing;
+            self.control_stream_local = ControlStreamLocal::default();
+            self.control_stream_remote = ControlStreamRemote::new();
+            self.new_streams.clear();
+            self.qpack_encoder = QPackEncoder::new(true);
+            self.qpack_decoder = QPackDecoder::new(
+                self.local_settings.max_table_size,
+                self.local_settings.max_blocked_streams,
+            );
+            self.settings_state = Http3RemoteSettingsState::NotReceived;
+            self.streams_have_data_to_send.clear();
+            // TODO: investigate whether this code can automatically retry failed transactions.
+            self.transactions.clear();
+            Ok(())
+        } else {
+            debug_assert!(false, "Zero rtt rejected in the wrong state.");
+            Err(Error::HttpInternalError)
         }
     }
 
@@ -432,7 +499,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
 
     pub fn stream_close_send(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
         qinfo!([self], "Close sending side for stream {}.", stream_id);
-        assert!(self.state_active());
+        assert!(self.state_active() || self.state_zero_rtt());
         let transaction = self
             .transactions
             .get_mut(&stream_id)
@@ -453,19 +520,14 @@ impl<T: Http3Transaction> Http3Connection<T> {
         if self.control_stream_remote.frame_reader_done() {
             let f = self.control_stream_remote.get_frame()?;
             qinfo!([self], "Handle a control frame {:?}", f);
-            if let HFrame::Settings { .. } = f {
-                if self.settings_received {
-                    qerror!([self], "SETTINGS frame already received");
-                    return Err(Error::HttpFrameUnexpected);
-                }
-                self.settings_received = true;
-            } else if !self.settings_received {
-                qerror!([self], "SETTINGS frame not received");
+            if !matches!(f, HFrame::Settings { .. })
+                && !matches!(self.settings_state, Http3RemoteSettingsState::Received{..})
+            {
                 return Err(Error::HttpMissingSettings);
             }
             return match f {
                 HFrame::Settings { settings } => {
-                    self.handle_settings(&settings)?;
+                    self.handle_settings(settings)?;
                     Ok(None)
                 }
                 HFrame::CancelPush { .. } => Err(Error::HttpFrameUnexpected),
@@ -476,25 +538,79 @@ impl<T: Http3Transaction> Http3Connection<T> {
         Ok(None)
     }
 
-    fn handle_settings(&mut self, s: &[(HSettingType, u64)]) -> Res<()> {
-        qinfo!([self], "Handle SETTINGS frame.");
-        for (t, v) in s {
-            qinfo!([self], " {:?} = {:?}", t, v);
-            match t {
-                HSettingType::MaxHeaderListSize => {
-                    self.max_header_list_size = *v;
+    fn set_qpack_settings(&mut self, settings: &[HSetting]) -> Res<()> {
+        for s in settings {
+            qinfo!([self], " {:?} = {:?}", s.setting_type, s.value);
+            match s.setting_type {
+                HSettingType::MaxTableCapacity => self.qpack_encoder.set_max_capacity(s.value)?,
+                HSettingType::BlockedStreams => {
+                    self.qpack_encoder.set_max_blocked_streams(s.value)?
                 }
-                HSettingType::MaxTableSize => self.qpack_encoder.set_max_capacity(*v)?,
-                HSettingType::BlockedStreams => self.qpack_encoder.set_max_blocked_streams(*v)?,
-
                 _ => {}
             }
         }
         Ok(())
     }
 
+    fn handle_settings(&mut self, new_settings: HSettings) -> Res<()> {
+        qinfo!([self], "Handle SETTINGS frame.");
+        match &self.settings_state {
+            Http3RemoteSettingsState::NotReceived => {
+                self.set_qpack_settings(&new_settings)?;
+                self.settings_state = Http3RemoteSettingsState::Received(new_settings);
+                Ok(())
+            }
+            Http3RemoteSettingsState::ZeroRtt(settings) => {
+                let mut qpack_changed = false;
+                for st in &[
+                    HSettingType::MaxHeaderListSize,
+                    HSettingType::MaxTableCapacity,
+                    HSettingType::BlockedStreams,
+                ] {
+                    let zero_rtt_value = settings.get(*st);
+                    let new_value = new_settings.get(*st);
+                    if zero_rtt_value == new_value {
+                        continue;
+                    }
+                    if zero_rtt_value > new_value {
+                        qerror!(
+                            [self],
+                            "The new({}) and the old value({}) of setting {:?} do not match",
+                            new_value,
+                            zero_rtt_value,
+                            st
+                        );
+                        return Err(Error::HttpSettingsError);
+                    }
+
+                    match st {
+                        HSettingType::MaxTableCapacity => {
+                            if zero_rtt_value != 0 {
+                                return Err(Error::HttpSettingsError);
+                            }
+                            qpack_changed = true;
+                        }
+                        HSettingType::BlockedStreams => qpack_changed = true,
+                        _ => (),
+                    }
+                }
+                if qpack_changed {
+                    qdebug!([self], "Settings after zero rtt differ.");
+                    self.set_qpack_settings(&(new_settings))?;
+                }
+                self.settings_state = Http3RemoteSettingsState::Received(new_settings);
+                Ok(())
+            }
+            Http3RemoteSettingsState::Received { .. } => Err(Error::HttpFrameUnexpected),
+        }
+    }
+
     fn state_active(&self) -> bool {
         matches!(self.state, Http3State::Connected | Http3State::GoingAway)
+    }
+
+    fn state_zero_rtt(&self) -> bool {
+        matches!(self.state, Http3State::ZeroRtt)
     }
 
     pub fn state(&self) -> Http3State {

@@ -30,6 +30,8 @@ pub enum Http3ClientEvent {
     RequestsCreatable,
     /// Cert authentication needed
     AuthenticationNeeded,
+    /// Zero Rtt has been rejected.
+    ZeroRttRejected,
     /// Client has received a GOAWAY frame
     GoawayReceived,
     /// Connection state change.
@@ -76,6 +78,10 @@ impl Http3ClientEvents {
 
     pub fn authentication_needed(&self) {
         self.insert(Http3ClientEvent::AuthenticationNeeded);
+    }
+
+    pub fn zero_rtt_rejected(&self) {
+        self.insert(Http3ClientEvent::ZeroRttRejected);
     }
 
     pub fn goaway_received(&self) {
