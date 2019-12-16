@@ -227,7 +227,7 @@ impl RangeTracker {
                             cur_off,
                             cur_len,
                             off,
-                            len
+                            off + len
                         );
                     } else {
                         *cur_len = off - cur_off;
@@ -242,7 +242,7 @@ impl RangeTracker {
                     cur_off,
                     cur_len,
                     off,
-                    len
+                    off + len
                 );
                 continue;
             }
