@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 
-use neqo_common::{const_max, const_min, qdebug, qerror, qinfo};
+use neqo_common::{const_max, const_min, qdebug, qinfo};
 
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
@@ -324,7 +324,7 @@ impl CongestionControl {
             return;
         }
 
-        for pkt in lost_packets {
+        for pkt in lost_packets.iter().filter(|pkt| pkt.in_flight) {
             assert!(self.bytes_in_flight >= u64::try_from(pkt.size).unwrap());
             self.bytes_in_flight -= u64::try_from(pkt.size).unwrap();
         }
@@ -336,25 +336,32 @@ impl CongestionControl {
 
         let in_persistent_congestion = {
             let congestion_period = pto * PERSISTENT_CONG_THRESH;
-            qerror!("cong period {:?}", congestion_period);
-            qerror!("LAS {:?}", largest_acked_sent);
-            qerror!("val {:?}", last_lost_pkt.time_sent - congestion_period);
-            largest_acked_sent < Some(last_lost_pkt.time_sent - congestion_period)
+
+            match largest_acked_sent {
+                Some(las) => las < last_lost_pkt.time_sent - congestion_period,
+                None => {
+                    // Nothing has ever been acked. Could still be PC.
+                    let first_lost_pkt_sent = lost_packets.first().unwrap().time_sent;
+                    last_lost_pkt.time_sent - first_lost_pkt_sent > congestion_period
+                }
+            }
         };
-        qerror!("PC {}", in_persistent_congestion);
         if in_persistent_congestion {
             qinfo!([self], "persistent congestion");
             self.congestion_window = MIN_CONG_WINDOW;
-            panic!("woohoo");
         }
     }
 
-    fn on_packet_sent(&mut self, size: usize) {
-        self.bytes_in_flight += u64::try_from(size).unwrap();
+    fn on_packet_sent(&mut self, pkt: &SentPacket) {
+        if !pkt.in_flight {
+            return;
+        }
+
+        self.bytes_in_flight += u64::try_from(pkt.size).unwrap();
         qdebug!(
             [self],
             "Pkt Sent len {}, bif {}, cwnd {}",
-            size,
+            pkt.size,
             self.bytes_in_flight,
             self.congestion_window
         );
@@ -466,9 +473,8 @@ impl LossRecovery {
         if sent_packet.ack_eliciting {
             self.time_of_last_sent_ack_eliciting_packet = Some(sent_packet.time_sent);
         }
-        if sent_packet.in_flight {
-            self.cc.on_packet_sent(sent_packet.size)
-        }
+        self.cc.on_packet_sent(&sent_packet);
+
         self.spaces[pn_space]
             .sent_packets
             .insert(packet_number, sent_packet);
@@ -498,6 +504,7 @@ impl LossRecovery {
 
         // Track largest PN acked per space
         let space = &mut self.spaces[pn_space];
+        let prev_largest_acked_sent_time = space.largest_acked_sent_time;
         if Some(largest_acked) > space.largest_acked {
             space.largest_acked = Some(largest_acked);
 
@@ -510,8 +517,6 @@ impl LossRecovery {
                 self.rtt_vals.update_rtt(latest_rtt, ack_delay);
             }
         }
-        // Copy into local so self.spaces no longer borrowed
-        let largest_acked_sent_time = space.largest_acked_sent_time;
 
         // TODO Process ECN information if present.
 
@@ -524,7 +529,7 @@ impl LossRecovery {
 
         self.cc.on_packets_lost(
             now,
-            largest_acked_sent_time,
+            prev_largest_acked_sent_time,
             self.rtt_vals.pto(),
             &lost_packets,
         );
