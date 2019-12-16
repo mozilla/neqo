@@ -263,8 +263,8 @@ impl Display for CongestionControl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "CongCtrl {}/{}",
-            self.bytes_in_flight, self.congestion_window
+            "CongCtrl {}/{} ssthresh {}",
+            self.bytes_in_flight, self.congestion_window, self.ssthresh
         )
     }
 }
@@ -302,20 +302,13 @@ impl CongestionControl {
             }
 
             if self.congestion_window < self.ssthresh {
-                // Slow start.
                 self.congestion_window += u64::try_from(pkt.size).unwrap();
-                qinfo!([self], "slow start; cwnd {}", self.congestion_window);
+                qinfo!([self], "slow start");
             } else {
-                // Congestion avoidance.
-                qinfo!(
-                    [self],
-                    "congestion avoidance; cwnd {} ssthresh {}",
-                    self.congestion_window,
-                    self.ssthresh
-                );
                 self.congestion_window += u64::try_from(MAX_DATAGRAM_SIZE * pkt.size as usize)
                     .unwrap()
-                    / self.congestion_window
+                    / self.congestion_window;
+                qinfo!([self], "congestion avoidance");
             }
         }
     }
