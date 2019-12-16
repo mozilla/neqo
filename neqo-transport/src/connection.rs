@@ -2122,6 +2122,7 @@ impl ::std::fmt::Display for Connection {
 mod tests {
     use super::*;
     use crate::frame::{CloseError, StreamType};
+    use crate::recovery::{INITIAL_CWND_PKTS, MAX_DATAGRAM_SIZE, MIN_CONG_WINDOW};
     use neqo_common::matches;
     use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
@@ -2134,14 +2135,23 @@ mod tests {
     // These are a direct copy of those functions.
     pub fn default_client() -> Connection {
         fixture_init();
-        Connection::new_client(
+        let mut c = Connection::new_client(
             test_fixture::DEFAULT_SERVER_NAME,
             test_fixture::DEFAULT_ALPN,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
         )
-        .expect("create a default client")
+        .expect("create a default client");
+
+        // limit dcid to a constant value to make testing easier
+        let mut modded_path = c.path.take().unwrap();
+        modded_path.remote_cid.0.truncate(8);
+        let modded_dcid = modded_path.remote_cid.0.clone();
+        assert_eq!(modded_dcid.len(), 8);
+        c.path = Some(modded_path);
+        c.crypto.create_initial_state(Role::Client, &modded_dcid);
+        c
     }
     pub fn default_server() -> Connection {
         fixture_init();
@@ -3244,5 +3254,425 @@ mod tests {
         let pkt0 = client.process(None, now);
         assert!(matches!(pkt0, Output::Datagram(_)));
         assert_eq!(pkt0.as_dgram_ref().unwrap().len(), 1232);
+    }
+
+    // Handle sending a bunch of bytes from one connection to another, until
+    // something stops us from sending.
+    fn client_send_bytes(
+        src: &mut Connection,
+        stream: u64,
+        now: Instant,
+    ) -> (Vec<Datagram>, usize) {
+        let mut total_bytes_sent: usize = 0;
+        let mut total_dgrams = Vec::new();
+
+        loop {
+            let bytes_sent = src.stream_send(stream, &[0x00; 1_000_000]).unwrap();
+            if bytes_sent == 0 {
+                break;
+            }
+        }
+
+        loop {
+            let pkt = src.process_output(now);
+            if pkt.as_dgram_ref().is_some() {
+                total_bytes_sent += pkt.as_dgram_ref().unwrap().len();
+                total_dgrams.push(pkt.dgram().unwrap())
+            } else {
+                assert!(matches!(pkt, Output::Callback(_)));
+                break;
+            }
+        }
+
+        (total_dgrams, total_bytes_sent)
+    }
+
+    // Receive multiple packets and generate an ack-only packet.
+    fn server_ack_bytes(
+        dest: &mut Connection,
+        stream: u64,
+        mut in_dgrams: Vec<Datagram>,
+        now: Instant,
+    ) -> (Datagram, Vec<(Frame, Epoch)>) {
+        let mut srv_buf = [0; 1_000_000];
+        let mut recvd_frames = Vec::new();
+
+        for dgram in in_dgrams.drain(..) {
+            recvd_frames.extend(dest.test_process_input(dgram, now));
+        }
+
+        loop {
+            let (bytes_read, _fin) = dest.stream_recv(stream, &mut srv_buf).unwrap();
+            if bytes_read == 0 {
+                break;
+            }
+        }
+
+        let mut tx_dgrams = Vec::new();
+        while let Output::Datagram(dg) = dest.process_output(now) {
+            tx_dgrams.push(dg);
+        }
+
+        assert_eq!(tx_dgrams.len(), 1);
+
+        (tx_dgrams.pop().unwrap(), recvd_frames)
+    }
+
+    #[test]
+    /// Verify initial CWND is honored.
+    fn cc_slow_start() {
+        let mut client = default_client();
+        let mut server = default_server();
+
+        server.set_local_tparam(
+            tp_constants::INITIAL_MAX_DATA,
+            TransportParameter::Integer(65536),
+        );
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        // Try to send a lot of data
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        let (c_tx_dgrams, client_send_bytes) = client_send_bytes(&mut client, 2, now);
+
+        // Init/Handshake acks have increased cwnd by 630 so we actually can
+        // send 11 with the last being shorter
+        assert_eq!(c_tx_dgrams.len(), INITIAL_CWND_PKTS + 1);
+        assert_eq!(c_tx_dgrams[0].len(), MAX_DATAGRAM_SIZE);
+        assert_eq!(c_tx_dgrams[9].len(), MAX_DATAGRAM_SIZE);
+        assert_eq!(c_tx_dgrams[10].len(), 630);
+        assert_eq!(client.loss_recovery.cwnd_avail(), 0);
+        assert_eq!(
+            client_send_bytes,
+            (INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE) + 630
+        );
+    }
+
+    #[test]
+    /// Verify that CC moves to cong avoidance when a packet is marked lost.
+    fn cc_slow_start_to_cong_avoidance_recovery_period() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        // Create stream 0
+        assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
+
+        // Buffer up lot of data and generate packets
+        let (c_tx_dgrams, sent_bytes) = client_send_bytes(&mut client, 0, now);
+
+        // Initial/Handshake acks have already increased cwnd so 11 packets are
+        // allowed
+        assert_eq!(c_tx_dgrams.len(), INITIAL_CWND_PKTS + 1);
+        assert_eq!(sent_bytes, (INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE) + 630);
+
+        // Server: Receive and generate ack
+        let (s_tx_dgram, _recvd_frames) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        // Client: Process ack
+        let recvd_frames = client.test_process_input(s_tx_dgram, now);
+
+        // Verify that server-sent frame was what we thought
+        assert!(matches!(
+            recvd_frames[0],
+            (
+                Frame::Ack {
+                    largest_acknowledged: 10,
+                    ..
+                },
+                3,
+            )
+        ));
+
+        // Client: send more
+        let (mut c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+
+        assert_eq!(c_tx_dgrams.len(), 21);
+
+        // Server: Receive and generate ack again, but drop first packet
+        c_tx_dgrams.remove(0);
+        assert_eq!(c_tx_dgrams.len(), 20);
+        let (s_tx_dgram, _recvd_frames) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        // Client: Process ack
+        let recvd_frames = client.test_process_input(s_tx_dgram, now);
+
+        // Verify that server-sent frame was what we thought
+        assert!(matches!(
+            recvd_frames[0],
+            (
+                Frame::Ack {
+                    largest_acknowledged: 31,
+                    ..
+                },
+                3,
+            )
+        ));
+
+        // If we just triggered cong avoidance, these should be equal
+        assert_eq!(client.loss_recovery.cwnd(), client.loss_recovery.ssthresh());
+    }
+
+    #[test]
+    /// Verify that CC stays in recovery period when packet sent before start of
+    /// recovery period is acked.
+    fn cc_cong_avoidance_recovery_period_unchanged() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        // Create stream 0
+        assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
+
+        // Buffer up lot of data and generate packets
+        let (mut c_tx_dgrams, _client_send_bytes) = client_send_bytes(&mut client, 0, now);
+
+        // Drop 0th packet. When acked, this should put client into CARP.
+        c_tx_dgrams.remove(0);
+        assert_eq!(c_tx_dgrams.len(), 10);
+
+        let c_tx_dgrams2 = c_tx_dgrams.split_off(5);
+
+        // Server: Receive and generate ack
+        let (s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        client.test_process_input(s_tx_dgram, now);
+
+        // If we just triggered cong avoidance, these should be equal
+        let cwnd1 = client.loss_recovery.cwnd();
+        assert_eq!(cwnd1, client.loss_recovery.ssthresh());
+
+        // Generate ACK for more received packets
+        let (s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams2, now);
+
+        // ACK more packets but they were sent before end of recovery period
+        client.test_process_input(s_tx_dgram, now);
+
+        // cwnd should not have changed since ACKed packets were sent before
+        // recovery period expired
+        let cwnd2 = client.loss_recovery.cwnd();
+        assert_eq!(cwnd1, cwnd2);
+    }
+
+    #[test]
+    /// Verify that CC moves out of recovery period when packet sent after start
+    /// of recovery period is acked.
+    fn cc_cong_avoidance_recovery_period_to_cong_avoidance() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let mut now = now();
+
+        // Create stream 0
+        assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
+
+        // Buffer up lot of data and generate packets
+        let (mut c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+
+        // Drop 0th packet. When acked, this should put client into CARP.
+        c_tx_dgrams.remove(0);
+
+        // Server: Receive and generate ack
+        let (s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        // Client: Process ack
+        client.test_process_input(s_tx_dgram, now);
+
+        // Should be in CARP now.
+        let cwnd1 = client.loss_recovery.cwnd();
+
+        now += Duration::from_secs(10); // Time passes. CARP -> CA
+
+        // Client: Send more data
+        let (mut c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+
+        // Only sent 2 packets, to generate an ack but also keep cwnd increase
+        // small
+        c_tx_dgrams.truncate(2);
+
+        // Generate ACK
+        let (s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        client.test_process_input(s_tx_dgram, now);
+
+        // ACK of pkts sent after start of recovery period should have caused
+        // exit from recovery period to just regular congestion avoidance. cwnd
+        // should now be a little higher but not as high as acked pkts during
+        // slow-start would cause it to be.
+        let cwnd2 = client.loss_recovery.cwnd();
+        assert!(cwnd2 > cwnd1);
+        assert!(cwnd2 < cwnd1 + 500);
+    }
+
+    #[test]
+    /// Verify transition to persistent congestion state if conditions are met.
+    fn cc_slow_start_to_persistent_congestion_no_acks() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let mut now = now();
+
+        // Create stream 0
+        assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
+
+        // Buffer up lot of data and generate packets
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 11);
+
+        // Server: Receive and generate ack
+        now += Duration::from_millis(100);
+        let (_s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        // ACK lost.
+
+        now += Duration::from_secs(1);
+        client.process_timer(now); // Should enter PTO mode
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
+
+        now += Duration::from_secs(1);
+        client.process_timer(now); // Should enter PTO mode
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
+
+        now += Duration::from_secs(1);
+        client.process_timer(now); // Should enter PTO mode
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
+
+        // Generate ACK
+        let (s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        // In PC now.
+        client.test_process_input(s_tx_dgram, now);
+
+        assert_eq!(client.loss_recovery.cwnd(), MIN_CONG_WINDOW);
+    }
+
+    #[test]
+    /// Verify transition to persistent congestion state if conditions are met.
+    fn cc_slow_start_to_persistent_congestion_some_acks() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let mut now = now();
+
+        // Create stream 0
+        assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
+
+        // Buffer up lot of data and generate packets
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 11);
+
+        // Server: Receive and generate ack
+        now += Duration::from_millis(100);
+        let (s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        now += Duration::from_millis(100);
+        client.test_process_input(s_tx_dgram, now);
+
+        // send bytes that will be lost
+        let (_c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        now += Duration::from_millis(100);
+        // Not received.
+        // let (s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        now += Duration::from_secs(1);
+        client.process_timer(now); // Should enter PTO mode
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
+
+        now += Duration::from_secs(1);
+        client.process_timer(now); // Should enter PTO mode
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
+
+        now += Duration::from_secs(1);
+        client.process_timer(now); // Should enter PTO mode
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
+
+        // Generate ACK
+        let (s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        // In PC now.
+        client.test_process_input(s_tx_dgram, now);
+
+        assert_eq!(client.loss_recovery.cwnd(), MIN_CONG_WINDOW);
+    }
+
+    #[test]
+    /// Verify persistent congestion moves to slow start after recovery period
+    /// ends.
+    fn cc_persistent_congestion_to_slow_start() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let mut now = now();
+
+        // Create stream 0
+        assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
+
+        // Buffer up lot of data and generate packets
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 11);
+
+        // Server: Receive and generate ack
+        now += Duration::from_millis(100);
+        let (_s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        // ACK lost.
+
+        now += Duration::from_secs(1);
+        client.process_timer(now); // Should enter PTO mode
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
+
+        now += Duration::from_secs(1);
+        client.process_timer(now); // Should enter PTO mode
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
+
+        now += Duration::from_secs(1);
+        client.process_timer(now); // Should enter PTO mode
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
+
+        // Generate ACK
+        let (s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        // In PC now.
+        client.test_process_input(s_tx_dgram, now);
+
+        assert_eq!(client.loss_recovery.cwnd(), MIN_CONG_WINDOW);
+
+        // New part of test starts here
+
+        now += Duration::from_millis(100);
+
+        // Send packets from after start of CARP
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 2);
+
+        // Server: Receive and generate ack
+        now += Duration::from_millis(100);
+        let (s_tx_dgram, _) = server_ack_bytes(&mut server, 0, c_tx_dgrams, now);
+
+        // No longer in CARP. (pkts acked from after start of CARP)
+        // Should be in slow start now.
+        client.test_process_input(s_tx_dgram, now);
+
+        // ACKing 2 packets should let client send 4.
+        let (c_tx_dgrams, _) = client_send_bytes(&mut client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 4);
     }
 }
