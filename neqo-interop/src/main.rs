@@ -8,7 +8,7 @@
 
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3Client, Http3ClientEvent};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters};
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, State,
     StreamType,
@@ -453,7 +453,14 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
 fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), String> {
     let mut hc = H3Handler {
         streams: HashSet::new(),
-        h3: Http3Client::new_with_conn(client, 128, 128),
+        h3: Http3Client::new_with_conn(
+            client,
+            Http3Parameters {
+                max_table_capacity: 128,
+                max_blocked_streams: 128,
+                max_concurent_push_streams: 0,
+            },
+        ),
         host: String::from(peer.host),
         path: String::from("/"),
     };

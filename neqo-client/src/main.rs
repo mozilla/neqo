@@ -7,7 +7,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output};
 use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
@@ -40,11 +40,19 @@ pub struct Args {
     #[structopt(short = "h", long, number_of_values = 2)]
     header: Vec<String>,
 
-    #[structopt(name = "max-table-size", short = "t", long, default_value = "128")]
-    max_table_size: u32,
+    #[structopt(name = "max-table-capacity", short = "t", long, default_value = "128")]
+    max_table_capacity: u32,
 
     #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "128")]
     max_blocked_streams: u16,
+
+    #[structopt(
+        name = "max-concurent_push-streams",
+        short = "p",
+        long,
+        default_value = "0"
+    )]
+    max_concurent_push_streams: u64,
 
     #[structopt(name = "use-old-http", short = "o", long)]
     /// Use http 0.9 instead of HTTP/3
@@ -246,8 +254,11 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
         remote_addr,
-        args.max_table_size,
-        args.max_blocked_streams,
+        Http3Parameters {
+            max_table_capacity: args.max_table_capacity,
+            max_blocked_streams: args.max_blocked_streams,
+            max_concurent_push_streams: args.max_concurent_push_streams,
+        },
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine

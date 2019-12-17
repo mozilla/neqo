@@ -9,7 +9,7 @@
 use neqo_common::matches;
 use neqo_common::once::OnceResult;
 use neqo_crypto::{init_db, AntiReplay, AuthenticationStatus};
-use neqo_http3::{Http3Client, Http3Server};
+use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
 
 use std::cell::RefCell;
@@ -130,8 +130,11 @@ pub fn default_http3_client() -> Http3Client {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
-        100,
-        100,
+        Http3Parameters {
+            max_table_capacity: 100,
+            max_blocked_streams: 100,
+            max_concurent_push_streams: 0,
+        },
     )
     .expect("create a default client")
 }

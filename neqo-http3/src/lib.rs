@@ -14,6 +14,8 @@ mod control_stream_local;
 mod control_stream_remote;
 pub mod hframe;
 mod hsettings_frame;
+mod push_control;
+mod response_stream;
 pub mod server;
 mod server_connection_events;
 mod server_events;
@@ -28,7 +30,7 @@ pub use neqo_transport::Output;
 
 pub use client_events::Http3ClientEvent;
 pub use connection::Http3State;
-pub use connection_client::Http3Client;
+pub use connection_client::{Http3Client, Http3Parameters};
 pub use neqo_qpack::Header;
 pub use server::Http3Server;
 pub use server_events::Http3ServerEvent;

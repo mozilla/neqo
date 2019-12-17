@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use crate::connection::Http3State;
-use neqo_common::matches;
+use neqo_common::{matches, qtrace};
 use neqo_transport::{AppError, StreamType};
 
 use std::cell::RefCell;
@@ -14,18 +14,50 @@ use std::rc::Rc;
 
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub enum Http3ClientEvent {
-    /// Space available in the buffer for an application write to succeed.
-    HeaderReady { stream_id: u64 },
+    /// Headers available for reading
+    HeaderReady {
+        stream_id: u64,
+    },
     /// A stream can accept new data.
-    DataWritable { stream_id: u64 },
+    DataWritable {
+        stream_id: u64,
+    },
     /// New bytes available for reading.
-    DataReadable { stream_id: u64 },
+    DataReadable {
+        stream_id: u64,
+    },
     /// Peer reset the stream.
-    Reset { stream_id: u64, error: AppError },
+    Reset {
+        stream_id: u64,
+        error: AppError,
+    },
     /// Peer has send STOP_SENDING with error code EarlyResponse, other error will post a reset event.
-    StopSending { stream_id: u64, error: AppError },
-    ///A new push stream
-    NewPushStream { stream_id: u64 },
+    StopSending {
+        stream_id: u64,
+        error: AppError,
+    },
+    /// A new push promise and assotiated headers
+    Push {
+        push_id: u64,
+        ref_stream_id: u64,
+        headers: Vec<u8>,
+    },
+    /// Duplicate push, push_id now referse to request ref_stream_id as well.
+    PushDuplicate {
+        push_id: u64,
+        ref_stream_id: u64,
+    },
+    /// Header on a pushed stream are ready to be read
+    PushHeaderReady {
+        push_id: u64,
+    },
+    /// New bytes available on a push stream for reading.
+    PushDataReadable {
+        push_id: u64,
+    },
+    PushCancelled {
+        push_id: u64,
+    },
     /// New stream can be created
     RequestsCreatable,
     /// Cert authentication needed
@@ -65,10 +97,32 @@ impl Http3ClientEvents {
         self.insert(Http3ClientEvent::StopSending { stream_id, error });
     }
 
-    // TODO: implement push.
-    // pub fn new_push_stream(&self, stream_id: u64) {
-    //     self.insert(Http3ClientEvent::NewPushStream { stream_id });
-    // }
+    pub fn push(&self, push_id: u64, ref_stream_id: u64, headers: Vec<u8>) {
+        self.insert(Http3ClientEvent::Push {
+            push_id,
+            ref_stream_id,
+            headers,
+        });
+    }
+
+    pub fn push_duplicate(&self, push_id: u64, ref_stream_id: u64) {
+        self.insert(Http3ClientEvent::PushDuplicate {
+            push_id,
+            ref_stream_id,
+        });
+    }
+
+    pub fn push_header_ready(&self, push_id: u64) {
+        self.insert(Http3ClientEvent::PushHeaderReady { push_id });
+    }
+
+    pub fn push_data_readable(&self, push_id: u64) {
+        self.insert(Http3ClientEvent::PushDataReadable { push_id });
+    }
+
+    pub fn push_cancelled(&self, push_id: u64) {
+        self.insert(Http3ClientEvent::PushCancelled { push_id });
+    }
 
     pub fn new_requests_creatable(&self, stream_type: StreamType) {
         if stream_type == StreamType::BiDi {
@@ -127,9 +181,30 @@ impl Http3ClientEvents {
                 Http3ClientEvent::HeaderReady { stream_id: x }
                 | Http3ClientEvent::DataWritable { stream_id: x }
                 | Http3ClientEvent::DataReadable { stream_id: x }
-                | Http3ClientEvent::NewPushStream { stream_id: x }
+                | Http3ClientEvent::Push { ref_stream_id: x, .. }
                 | Http3ClientEvent::Reset { stream_id: x, .. }
                 | Http3ClientEvent::StopSending { stream_id: x, .. } if *x == stream_id)
+        });
+    }
+
+    pub fn has_push(&self, push_id: u64) -> bool {
+        for iter in self.events.borrow().iter() {
+            qtrace!("has_push: {:?}", iter);
+            if matches!(iter, Http3ClientEvent::Push{push_id:x, ..} if *x == push_id) {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn remove_events_for_push_id(&self, push_id: u64) {
+        self.remove(|evt| {
+            matches!(evt,
+                Http3ClientEvent::Push{push_id:x, ..}
+                | Http3ClientEvent::PushDuplicate{push_id:x, ..}
+                | Http3ClientEvent::PushHeaderReady{push_id:x, ..}
+                | Http3ClientEvent::PushDataReadable{push_id:x, ..}
+                | Http3ClientEvent::PushCancelled{push_id:x, ..} if *x == push_id)
         });
     }
 }
