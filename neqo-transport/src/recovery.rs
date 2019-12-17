@@ -185,8 +185,9 @@ impl LossRecoverySpace {
         earliest
     }
 
-    // Remove all the acked packets.
-    fn remove_acked(&mut self, acked_ranges: Vec<(u64, u64)>) -> (BTreeMap<u64, SentPacket>, bool) {
+    // Remove all the acked packets. Returns them in ascending order -- largest
+    // (i.e. highest PN) acked packet is last.
+    fn remove_acked(&mut self, acked_ranges: Vec<(u64, u64)>) -> (Vec<SentPacket>, bool) {
         let mut acked_packets = BTreeMap::new();
         let mut eliciting = false;
         for (end, start) in acked_ranges {
@@ -199,7 +200,10 @@ impl LossRecoverySpace {
                 }
             }
         }
-        (acked_packets, eliciting)
+        (
+            acked_packets.into_iter().map(|(_k, v)| v).collect(),
+            eliciting,
+        )
     }
 
     /// Remove all tracked packets from the space.
@@ -254,7 +258,7 @@ impl Default for CongestionControl {
             congestion_window: INITIAL_WINDOW,
             bytes_in_flight: 0,
             congestion_recovery_start_time: None,
-            ssthresh: u64::max_value(),
+            ssthresh: std::u64::MAX,
         }
     }
 }
@@ -287,8 +291,8 @@ impl CongestionControl {
     }
 
     // Multi-packet version of OnPacketAckedCC
-    fn on_packets_acked<'a>(&mut self, acked_pkts: impl Iterator<Item = &'a SentPacket>) {
-        for pkt in acked_pkts.filter(|pkt| pkt.in_flight) {
+    fn on_packets_acked(&mut self, acked_pkts: &[SentPacket]) {
+        for pkt in acked_pkts.iter().filter(|pkt| pkt.in_flight) {
             assert!(self.bytes_in_flight >= u64::try_from(pkt.size).unwrap());
             self.bytes_in_flight -= u64::try_from(pkt.size).unwrap();
 
@@ -510,7 +514,7 @@ impl LossRecovery {
 
             // If the largest acknowledged is newly acked and any newly acked
             // packet was ack-eliciting, update the RTT. (-recovery 5.1)
-            let largest_acked_pkt = acked_packets.get(&largest_acked).expect("must be there");
+            let largest_acked_pkt = acked_packets.last().expect("must be there");
             space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
             if any_ack_eliciting {
                 let latest_rtt = now - largest_acked_pkt.time_sent;
@@ -524,8 +528,7 @@ impl LossRecovery {
 
         self.pto_count = 0;
 
-        self.cc
-            .on_packets_acked(acked_packets.iter().map(|(_k, v)| v));
+        self.cc.on_packets_acked(&acked_packets);
 
         self.cc.on_packets_lost(
             now,
@@ -534,10 +537,7 @@ impl LossRecovery {
             &lost_packets,
         );
 
-        (
-            acked_packets.into_iter().map(|(_, p)| p).collect(),
-            lost_packets,
-        )
+        (acked_packets, lost_packets)
     }
 
     fn loss_delay(&self) -> Duration {
