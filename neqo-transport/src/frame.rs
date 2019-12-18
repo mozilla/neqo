@@ -262,12 +262,16 @@ impl Frame {
         data: &[u8],
         fin: bool,
         space: usize,
-    ) -> (Frame, usize) {
-        let mut remaining = space - 1 - Encoder::varint_len(stream_id);
+    ) -> Option<(Frame, usize)> {
+        let mut remaining = space.saturating_sub(1 + Encoder::varint_len(stream_id));
         if offset > 0 {
-            remaining -= Encoder::varint_len(offset);
+            remaining = remaining.saturating_sub(Encoder::varint_len(offset));
         }
         let (fin, fill) = if data.len() > remaining {
+            if remaining == 0 {
+                return None;
+            }
+
             // More data than fits, fill the packet and negate |fin|.
             (false, true)
         } else if data.len() == remaining {
@@ -287,7 +291,7 @@ impl Frame {
             fin,
             remaining
         );
-        (
+        Some((
             Frame::Stream {
                 stream_id: stream_id.into(),
                 offset,
@@ -296,7 +300,7 @@ impl Frame {
                 fill,
             },
             remaining,
-        )
+        ))
     }
 
     pub fn marshal(&self, enc: &mut Encoder) {
