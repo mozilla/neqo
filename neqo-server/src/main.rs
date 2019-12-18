@@ -157,6 +157,7 @@ fn main() {
                 &args.alpn,
                 &anti_replay,
                 Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+                None,
             )
             .expect("can't create connection")
         });

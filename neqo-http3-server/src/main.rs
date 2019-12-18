@@ -5,29 +5,34 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![allow(clippy::option_option)]
 #![warn(clippy::use_self)]
-
-use neqo_common::{qdebug, qinfo, Datagram};
-use neqo_crypto::{init_db, AntiReplay};
-use neqo_http3::{Http3Server, Http3ServerEvent};
-use neqo_transport::{FixedConnectionIdManager, Output};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io;
+use std::fs::OpenOptions;
+use std::io::{self, Write};
+use std::mem;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use structopt::StructOpt;
-
 use mio::net::UdpSocket;
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
+use qlog::Qlog;
+use structopt::StructOpt;
+
+use neqo_common::{self as common, qdebug, qinfo, Datagram, Role};
+use neqo_crypto::{init_db, AntiReplay};
+use neqo_http3::{Http3Server, Http3ServerEvent, Http3State};
+use neqo_transport::{ConnectionId, FixedConnectionIdManager, Output};
 
 const TIMER_TOKEN: Token = Token(0xffff_ffff);
+
+type Res<T> = Result<T, io::Error>;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-http3-server", about = "A basic HTTP3 server.")]
@@ -55,6 +60,10 @@ struct Args {
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.
     alpn: String,
+
+    #[structopt(name = "qlog-dir", long)]
+    /// Enable QLOG logging and QLOG traces to this directory
+    qlog_dir: Option<PathBuf>,
 }
 
 impl Args {
@@ -67,7 +76,15 @@ impl Args {
     }
 }
 
-fn process_events(server: &mut Http3Server) {
+pub fn cid_to_string(cid: &ConnectionId) -> String {
+    let mut ret = String::with_capacity(cid.len() * 2);
+    for b in cid.iter() {
+        ret.push_str(&format!("{:02x}", b));
+    }
+    ret
+}
+
+fn process_events(server: &mut Http3Server, qlog_output_path: &Option<&Path>) -> Res<()> {
     while let Some(event) = server.next_event() {
         eprintln!("Event: {:?}", event);
         match event {
@@ -103,9 +120,57 @@ fn process_events(server: &mut Http3Server) {
             Http3ServerEvent::Data { request, data, fin } => {
                 println!("Data (request={} fin={}): {:?}", request, fin, data);
             }
+            Http3ServerEvent::StateChange {
+                mut conn,
+                state: Http3State::Closed(_),
+            } => {
+                if let Some(qlog_output_path) = qlog_output_path {
+                    // Construct path "<out_dir>/<cid>.qlog"
+                    let mut full_path = qlog_output_path.to_path_buf();
+                    let filename: PathBuf =
+                        cid_to_string(&conn.borrow().path().unwrap().local_cid()).into();
+                    full_path.push(filename);
+                    full_path.set_extension("qlog");
+
+                    if let Some(n_qlog) = conn.borrow_mut().qlog() {
+                        // Make qlog structs. Swap out events from conn, to
+                        // avoid maybe a costly clone().
+                        let mut qlog = Qlog {
+                            qlog_version: qlog::QLOG_VERSION.into(),
+                            title: None,
+                            description: None,
+                            summary: None,
+                            traces: Vec::new(),
+                        };
+
+                        let mut trace = common::qlog::new_trace(Role::Server);
+
+                        mem::swap(&mut trace.events, &mut n_qlog.borrow_mut().trace.events);
+                        qlog.traces.push(trace);
+                        let data = serde_json::to_string_pretty(&qlog)?;
+
+                        eprintln!("Writing QLOG to {}", full_path.display());
+                        match OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .truncate(true)
+                            .open(&full_path)
+                        {
+                            Ok(mut f) => {
+                                f.write_all(data.as_bytes()).unwrap();
+                            }
+
+                            Err(e) => {
+                                eprintln!("Could not open qlog: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
+    Ok(())
 }
 
 fn emit_packets(sockets: &mut Vec<UdpSocket>, out_dgrams: &HashMap<SocketAddr, Vec<Datagram>>) {
@@ -153,7 +218,7 @@ fn process(
 }
 
 fn main() -> Result<(), io::Error> {
-    let args = Args::from_args();
+    let mut args = Args::from_args();
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
@@ -229,6 +294,8 @@ fn main() -> Result<(), io::Error> {
 
     let mut events = Events::with_capacity(1024);
 
+    let qlog_output_path = args.qlog_dir.take();
+
     loop {
         poll.poll(&mut events, None)?;
         let mut out_dgrams = HashMap::new();
@@ -290,7 +357,7 @@ fn main() -> Result<(), io::Error> {
                             out,
                             &mut timer,
                         );
-                        process_events(server);
+                        process_events(server, &qlog_output_path.as_ref().map(|x| &**x))?;
                         process(server, svr_timeout, event.token().0, None, out, &mut timer);
                     }
                 }

@@ -434,6 +434,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
+        None,
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -522,6 +523,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
+        None,
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
