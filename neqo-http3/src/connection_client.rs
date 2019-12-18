@@ -10,10 +10,12 @@ use crate::hframe::HFrame;
 use crate::hsettings_frame::HSettings;
 use crate::transaction_client::TransactionClient;
 use crate::Header;
-use neqo_common::{hex, matches, qdebug, qinfo, qtrace, Datagram, Decoder, Encoder};
+use neqo_common::{
+    hex, matches, qdebug, qinfo, qtrace, Datagram, Decoder, Encoder, NeqoQlogRef, Role,
+};
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_transport::{
-    AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, Role, StreamType,
+    AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, StreamType,
 };
 use std::cell::RefCell;
 use std::net::SocketAddr;
@@ -35,6 +37,7 @@ impl ::std::fmt::Display for Http3Client {
 }
 
 impl Http3Client {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         server_name: &str,
         protocols: &[impl AsRef<str>],
@@ -43,9 +46,17 @@ impl Http3Client {
         remote_addr: SocketAddr,
         max_table_size: u32,
         max_blocked_streams: u16,
+        log: Option<NeqoQlogRef>,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
-            Connection::new_client(server_name, protocols, cid_manager, local_addr, remote_addr)?,
+            Connection::new_client(
+                server_name,
+                protocols,
+                cid_manager,
+                local_addr,
+                remote_addr,
+                log,
+            )?,
             max_table_size,
             max_blocked_streams,
         ))
@@ -489,6 +500,7 @@ mod tests {
             loopback(),
             100,
             100,
+            None,
         )
         .expect("create a default client")
     }
@@ -2620,6 +2632,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+            None,
         )
         .unwrap();
 

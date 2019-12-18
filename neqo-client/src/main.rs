@@ -5,9 +5,17 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![allow(clippy::option_option)]
 #![warn(clippy::use_self)]
 
-use neqo_common::{hex, matches, Datagram};
+use qlog::Qlog;
+use serde_json;
+
+use neqo_common::{
+    self as common, hex,
+    log::{NeqoQlog, NeqoQlogRef},
+    matches, Datagram, Role,
+};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_transport::FixedConnectionIdManager;
@@ -30,6 +38,7 @@ use url::{Origin, Url};
 pub enum ClientError {
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
+    SerdeJson(serde_json::error::Error),
 }
 
 impl From<io::Error> for ClientError {
@@ -44,7 +53,15 @@ impl From<neqo_http3::Error> for ClientError {
     }
 }
 
+impl From<serde_json::error::Error> for ClientError {
+    fn from(err: serde_json::error::Error) -> Self {
+        Self::SerdeJson(err)
+    }
+}
+
 type Res<T> = Result<T, ClientError>;
+
+const DEFAULT_QLOG_OUTPUT: &str = "output.qlog";
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -79,6 +96,10 @@ pub struct Args {
     #[structopt(name = "output-read-data", long)]
     /// Output received data to stdout
     output_read_data: bool,
+
+    #[structopt(long)]
+    /// Output QLOG trace to a file.
+    qlog: Option<Option<PathBuf>>,
 
     #[structopt(name = "output-dir", long)]
     /// Save contents of fetched URLs to a directory
@@ -270,6 +291,7 @@ fn client(
     remote_addr: SocketAddr,
     origin: &str,
     urls: &[Url],
+    log: NeqoQlogRef,
 ) -> Res<()> {
     let mut client = Http3Client::new(
         origin,
@@ -279,6 +301,7 @@ fn client(
         remote_addr,
         args.max_table_size,
         args.max_blocked_streams,
+        Some(Rc::clone(&log)),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -355,6 +378,12 @@ fn client(
 
 fn main() -> Res<()> {
     init();
+
+    let qtrace: NeqoQlogRef = Rc::new(RefCell::new(NeqoQlog::new(
+        Instant::now(),
+        common::qlog::new_trace(Role::Client),
+    )));
+
     let mut args = Args::from_args();
 
     if args.qns_mode {
@@ -415,9 +444,42 @@ fn main() -> Res<()> {
                 remote_addr,
                 &format!("{}", host),
                 &urls,
+                Rc::clone(&qtrace),
             )?;
         } else {
             old::old_client(&args, socket, local_addr, remote_addr, &urls)?;
+        }
+    }
+
+    if let Some(output_qlog) = args.qlog {
+        let mut qlog = Qlog {
+            qlog_version: qlog::QLOG_VERSION.into(),
+            title: None,
+            description: None,
+            summary: None,
+            traces: Vec::new(),
+        };
+
+        let owned_trace = qtrace.borrow().trace.clone();
+
+        qlog.traces.push(owned_trace);
+
+        let qlogpath = output_qlog.unwrap_or_else(|| DEFAULT_QLOG_OUTPUT.into());
+
+        match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&qlogpath)
+        {
+            Ok(mut f) => {
+                eprintln!("Writing QLOG to {}", qlogpath.display());
+                let data = serde_json::to_string_pretty(&qlog)?;
+                f.write_all(data.as_bytes())?;
+            }
+            Err(e) => {
+                eprintln!("Could not open qlog: {}", e);
+            }
         }
     }
 
@@ -579,6 +641,7 @@ mod old {
                 Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
                 local_addr,
                 remote_addr,
+                None,
             )
             .expect("must succeed");
             // Temporary here to help out the type inference engine
