@@ -20,6 +20,7 @@ mod flow_mgr;
 mod frame;
 mod packet;
 mod path;
+mod qlog;
 mod recovery;
 mod recv_stream;
 mod send_stream;
@@ -29,8 +30,8 @@ mod stream_id;
 pub mod tparams;
 mod tracking;
 
-pub use self::cid::ConnectionIdManager;
-pub use self::connection::{Connection, FixedConnectionIdManager, Output, Role, State};
+pub use self::cid::{ConnectionId, ConnectionIdManager};
+pub use self::connection::{Connection, FixedConnectionIdManager, Output, State};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;

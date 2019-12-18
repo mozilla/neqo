@@ -4,10 +4,31 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use env_logger::Builder;
+use std::cell::RefCell;
 use std::io::Write;
+use std::rc::Rc;
 use std::sync::Once;
 use std::time::Instant;
+
+use env_logger::Builder;
+use qlog::Trace;
+
+pub struct NeqoQlog {
+    pub trace: Trace,
+    pub zero_time: Instant,
+}
+
+impl NeqoQlog {
+    #[must_use]
+    pub fn new(now: Instant, trace: Trace) -> Self {
+        Self {
+            trace,
+            zero_time: now,
+        }
+    }
+}
+
+pub type NeqoQlogRef = Rc<RefCell<NeqoQlog>>;
 
 static INIT_ONCE: Once = Once::new();
 
@@ -38,7 +59,7 @@ pub fn init() {
 }
 
 #[macro_export]
-macro_rules! qlog {
+macro_rules! log_invoke {
     ($lvl:expr, $ctx:expr, $($arg:tt)*) => ( {
         ::neqo_common::log::init();
         ::log::log!($lvl, "[{}] {}", $ctx, format!($($arg)*));
@@ -46,26 +67,26 @@ macro_rules! qlog {
 }
 #[macro_export]
 macro_rules! qerror {
-    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::qlog!(::log::Level::Error, $ctx, $($arg)*););
+    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::log_invoke!(::log::Level::Error, $ctx, $($arg)*););
     ($($arg:tt)*) => ( { ::neqo_common::log::init(); ::log::log!(::log::Level::Error, $($arg)*); } );
 }
 #[macro_export]
 macro_rules! qwarn {
-    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::qlog!(::log::Level::Warn, $ctx, $($arg)*););
+    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::log_invoke!(::log::Level::Warn, $ctx, $($arg)*););
     ($($arg:tt)*) => ( { ::neqo_common::log::init(); ::log::log!(::log::Level::Warn, $($arg)*); } );
 }
 #[macro_export]
 macro_rules! qinfo {
-    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::qlog!(::log::Level::Info, $ctx, $($arg)*););
+    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::log_invoke!(::log::Level::Info, $ctx, $($arg)*););
     ($($arg:tt)*) => ( { ::neqo_common::log::init(); ::log::log!(::log::Level::Info, $($arg)*); } );
 }
 #[macro_export]
 macro_rules! qdebug {
-    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::qlog!(::log::Level::Debug, $ctx, $($arg)*););
+    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::log_invoke!(::log::Level::Debug, $ctx, $($arg)*););
     ($($arg:tt)*) => ( { ::neqo_common::log::init(); ::log::log!(::log::Level::Debug, $($arg)*); } );
 }
 #[macro_export]
 macro_rules! qtrace {
-    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::qlog!(::log::Level::Trace, $ctx, $($arg)*););
+    ([$ctx:expr], $($arg:tt)*) => (::neqo_common::log_invoke!(::log::Level::Trace, $ctx, $($arg)*););
     ($($arg:tt)*) => ( { ::neqo_common::log::init(); ::log::log!(::log::Level::Trace, $($arg)*); } );
 }

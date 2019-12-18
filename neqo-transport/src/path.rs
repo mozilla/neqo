@@ -94,4 +94,14 @@ impl Path {
     pub fn datagram<V: Into<Vec<u8>>>(&self, payload: V) -> Datagram {
         Datagram::new(self.local, self.remote, payload)
     }
+
+    /// Get local socketaddr
+    pub fn local_sock(&self) -> &SocketAddr {
+        &self.local
+    }
+
+    /// Get remote socketaddr
+    pub fn remote_sock(&self) -> &SocketAddr {
+        &self.remote
+    }
 }
