@@ -468,7 +468,6 @@ impl<T: Http3Transaction> Http3Connection<T> {
 
     pub fn close(&mut self, error: AppError) {
         qinfo!([self], "Close connection error {:?}.", error);
-        assert!(self.state_active());
         self.state = Http3State::Closing(CloseError::Application(error));
         if !self.transactions.is_empty() && (error == 0) {
             qwarn!("close() called when streams still active");
