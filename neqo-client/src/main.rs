@@ -5,17 +5,31 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![allow(clippy::option_option)]
 #![warn(clippy::use_self)]
 
-use neqo_common::{hex, matches, Datagram};
+use qlog::{CommonFields, Configuration, Qlog, TimeUnits, Trace, VantagePoint, VantagePointType};
+use serde_json;
+
+use chrono::offset::Utc;
+use chrono::DateTime;
+use std::time::SystemTime;
+
+use neqo_common::{
+    hex,
+    log::{NeqoQlog, NeqoQlogRef},
+    matches, Datagram,
+};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::io::{self, ErrorKind};
+use std::fs::OpenOptions;
+use std::io::{self, ErrorKind, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
 use std::time::Instant;
@@ -55,6 +69,10 @@ pub struct Args {
     #[structopt(name = "omit-read-data", long)]
     /// Do not print received data
     omit_read_data: bool,
+
+    #[structopt(long, default_value = "output.qlg")]
+    /// Output QLOG trace to a file.
+    qlog: Option<Option<PathBuf>>,
 }
 
 impl Args {
@@ -239,7 +257,13 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
         .collect()
 }
 
-fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: SocketAddr) {
+fn client(
+    args: &Args,
+    socket: UdpSocket,
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
+    log: NeqoQlogRef,
+) {
     let mut client = Http3Client::new(
         args.url.host_str().unwrap(),
         &args.alpn,
@@ -248,6 +272,7 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         remote_addr,
         args.max_table_size,
         args.max_blocked_streams,
+        Some(Rc::clone(&log)),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -288,8 +313,47 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
     );
 }
 
-fn main() {
+fn init_qlog_trace() -> qlog::Trace {
+    Trace {
+        vantage_point: VantagePoint {
+            name: Some("neqo-client".into()),
+            ty: VantagePointType::Client,
+            flow: None,
+        },
+        title: Some("neqo-client trace".to_string()),
+        description: Some("Example qlog trace description".to_string()),
+        configuration: Some(Configuration {
+            time_offset: Some("0".into()),
+            time_units: Some(TimeUnits::Us),
+            original_uris: None,
+        }),
+        common_fields: Some(CommonFields {
+            group_id: None,
+            protocol_type: None,
+            reference_time: Some({
+                let system_time = SystemTime::now();
+                let datetime: DateTime<Utc> = system_time.into();
+                datetime.to_rfc3339()
+            }),
+        }),
+        event_fields: vec![
+            "relative_time".to_string(),
+            "category".to_string(),
+            "event".to_string(),
+            "data".to_string(),
+        ],
+        events: Vec::new(),
+    }
+}
+
+fn main() -> Result<(), std::io::Error> {
     init();
+
+    let qtrace: NeqoQlogRef = Rc::new(RefCell::new(NeqoQlog::new(
+        Instant::now(),
+        init_qlog_trace(),
+    )));
+
     let args = Args::from_args();
 
     let remote_addr = match args.remote_addr() {
@@ -313,10 +377,39 @@ fn main() {
     println!("Client connecting: {:?} -> {:?}", local_addr, remote_addr);
 
     if args.use_old_http {
-        old::old_client(args, socket, local_addr, remote_addr)
+        old::old_client(&args, socket, local_addr, remote_addr)
     } else {
-        client(args, socket, local_addr, remote_addr)
+        client(&args, socket, local_addr, remote_addr, Rc::clone(&qtrace))
     }
+
+    if let Some(output_qlog) = args.qlog {
+        let mut qlog = Qlog {
+            qlog_version: "draft-00".into(),
+            title: None,
+            description: None,
+            summary: None,
+            traces: Vec::new(),
+        };
+
+        let owned_trace = qtrace.borrow().trace.clone();
+
+        qlog.traces.push(owned_trace);
+
+        let qlogpath = output_qlog.unwrap_or_else(|| "output.qlg".into());
+
+        match OpenOptions::new().write(true).create(true).open(&qlogpath) {
+            Ok(mut f) => {
+                eprintln!("Writing QLOG to {}", qlogpath.display());
+                let data = serde_json::to_string_pretty(&qlog)?;
+                f.write_all(data.as_bytes())?;
+            }
+            Err(e) => {
+                eprintln!("Could not open qlog: {}", e);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 mod old {
@@ -435,7 +528,7 @@ mod old {
     }
 
     pub fn old_client(
-        args: Args,
+        args: &Args,
         socket: UdpSocket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
@@ -451,6 +544,7 @@ mod old {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
             local_addr,
             remote_addr,
+            None,
         )
         .expect("must succeed");
         // Temporary here to help out the type inference engine

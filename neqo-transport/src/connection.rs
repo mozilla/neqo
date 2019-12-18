@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 
-use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
+use neqo_common::{
+    hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder, NeqoQlogRef,
+};
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
     Agent, AntiReplay, AuthenticationStatus, Client, HandshakeState, Record, SecretAgentInfo,
@@ -32,6 +34,7 @@ use crate::flow_mgr::FlowMgr;
 use crate::frame::{AckRange, Frame, FrameType, StreamType, TxMode};
 use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
 use crate::path::Path;
+use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams};
@@ -349,6 +352,7 @@ pub struct Connection {
     events: ConnectionEvents,
     token: Option<Vec<u8>>,
     stats: Stats,
+    qlog: Option<NeqoQlogRef>,
 }
 
 impl Debug for Connection {
@@ -369,6 +373,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
+        qlog: Option<NeqoQlogRef>,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let scid = cid_manager.borrow_mut().generate_cid();
@@ -379,6 +384,7 @@ impl Connection {
             None,
             protocols,
             Some(Path::new(local_addr, remote_addr, scid, dcid.clone())),
+            qlog,
         );
         c.crypto.states.init(Role::Client, &dcid);
         c.retry_info = Some(RetryInfo::new(dcid));
@@ -391,6 +397,7 @@ impl Connection {
         protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
         cid_manager: CidMgr,
+        qlog: Option<NeqoQlogRef>,
     ) -> Res<Self> {
         Ok(Self::new(
             Role::Server,
@@ -399,6 +406,7 @@ impl Connection {
             Some(anti_replay),
             protocols,
             None,
+            qlog,
         ))
     }
 
@@ -438,6 +446,7 @@ impl Connection {
         anti_replay: Option<&AntiReplay>,
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
+        qlog: Option<NeqoQlogRef>,
     ) -> Self {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
@@ -469,6 +478,7 @@ impl Connection {
             events: ConnectionEvents::default(),
             token: None,
             stats: Stats::default(),
+            qlog,
         }
     }
 
@@ -905,6 +915,7 @@ impl Connection {
                     payload.pn(),
                     &payload[..],
                 );
+                qlog::packet_received(&self.qlog, now, &payload);
                 frames.extend(self.process_packet(&payload, now)?);
                 if matches!(self.state, State::WaitInitial) {
                     self.start_handshake(&packet, &d)?;
@@ -1337,6 +1348,8 @@ impl Connection {
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self], "client_start");
+        qlog::client_connection_started(&self.qlog, now, self.path.as_ref().unwrap());
+
         self.handshake(now, PNSpace::Initial, None)?;
         self.set_state(State::WaitInitial);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.role)? {
@@ -2141,6 +2154,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
+            None,
         )
         .expect("create a default client")
     }
@@ -2151,6 +2165,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+            None,
         )
         .expect("create a default server")
     }
@@ -2457,6 +2472,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
             loopback(),
             loopback(),
+            None,
         )
         .unwrap();
         let mut server = default_server();
@@ -2685,6 +2701,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+            None,
         )
         .unwrap();
 
@@ -2955,6 +2972,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
+            None,
         )
         .expect("create a server");
 

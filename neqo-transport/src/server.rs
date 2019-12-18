@@ -335,6 +335,7 @@ impl Server {
             &self.protocols,
             &self.anti_replay,
             cid_mgr.clone(),
+            None,
         );
         if let Ok(mut c) = sconn {
             if let Some(odcid) = odcid {

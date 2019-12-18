@@ -20,6 +20,7 @@ mod flow_mgr;
 mod frame;
 mod packet;
 mod path;
+mod qlog;
 mod recovery;
 mod recv_stream;
 mod send_stream;
