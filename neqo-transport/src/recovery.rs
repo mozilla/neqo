@@ -8,7 +8,6 @@
 
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::ops::{Index, IndexMut};
 use std::time::{Duration, Instant};
@@ -30,11 +29,11 @@ const INITIAL_RTT: Duration = Duration::from_millis(100);
 const PACKET_THRESHOLD: u64 = 3;
 pub const MAX_DATAGRAM_SIZE: usize = 1232; // For ipv6, smaller than ipv4 (1252)
 pub const INITIAL_CWND_PKTS: usize = 10;
-const INITIAL_WINDOW: u64 = const_min(
+const INITIAL_WINDOW: usize = const_min(
     INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE,
     const_max(2 * MAX_DATAGRAM_SIZE, 14720),
-) as u64;
-pub const MIN_CONG_WINDOW: u64 = MAX_DATAGRAM_SIZE as u64 * 2;
+);
+pub const MIN_CONG_WINDOW: usize = MAX_DATAGRAM_SIZE * 2;
 const PERSISTENT_CONG_THRESH: u32 = 3;
 
 #[derive(Debug, Clone)]
@@ -246,10 +245,10 @@ impl LossRecoverySpaces {
 
 #[derive(Debug)]
 struct CongestionControl {
-    congestion_window: u64, // = kInitialWindow
-    bytes_in_flight: u64,
+    congestion_window: usize, // = kInitialWindow
+    bytes_in_flight: usize,
     congestion_recovery_start_time: Option<Instant>,
-    ssthresh: u64,
+    ssthresh: usize,
 }
 
 impl Default for CongestionControl {
@@ -258,7 +257,7 @@ impl Default for CongestionControl {
             congestion_window: INITIAL_WINDOW,
             bytes_in_flight: 0,
             congestion_recovery_start_time: None,
-            ssthresh: std::u64::MAX,
+            ssthresh: std::usize::MAX,
         }
     }
 }
@@ -275,16 +274,16 @@ impl Display for CongestionControl {
 
 impl CongestionControl {
     #[cfg(test)]
-    pub fn cwnd(&self) -> u64 {
+    pub fn cwnd(&self) -> usize {
         self.congestion_window
     }
 
     #[cfg(test)]
-    pub fn ssthresh(&self) -> u64 {
+    pub fn ssthresh(&self) -> usize {
         self.ssthresh
     }
 
-    fn cwnd_avail(&self) -> u64 {
+    fn cwnd_avail(&self) -> usize {
         // BIF can be higher than cwnd due to PTO packets, which are sent even
         // if avail is 0, but still count towards BIF.
         self.congestion_window.saturating_sub(self.bytes_in_flight)
@@ -293,8 +292,8 @@ impl CongestionControl {
     // Multi-packet version of OnPacketAckedCC
     fn on_packets_acked(&mut self, acked_pkts: &[SentPacket]) {
         for pkt in acked_pkts.iter().filter(|pkt| pkt.in_flight) {
-            assert!(self.bytes_in_flight >= u64::try_from(pkt.size).unwrap());
-            self.bytes_in_flight -= u64::try_from(pkt.size).unwrap();
+            assert!(self.bytes_in_flight >= pkt.size);
+            self.bytes_in_flight -= pkt.size;
 
             if self.in_congestion_recovery(pkt.time_sent) {
                 // Do not increase congestion window in recovery period.
@@ -306,12 +305,10 @@ impl CongestionControl {
             }
 
             if self.congestion_window < self.ssthresh {
-                self.congestion_window += u64::try_from(pkt.size).unwrap();
+                self.congestion_window += pkt.size;
                 qinfo!([self], "slow start");
             } else {
-                self.congestion_window += u64::try_from(MAX_DATAGRAM_SIZE * pkt.size as usize)
-                    .unwrap()
-                    / self.congestion_window;
+                self.congestion_window += (MAX_DATAGRAM_SIZE * pkt.size) / self.congestion_window;
                 qinfo!([self], "congestion avoidance");
             }
         }
@@ -329,8 +326,8 @@ impl CongestionControl {
         }
 
         for pkt in lost_packets.iter().filter(|pkt| pkt.in_flight) {
-            assert!(self.bytes_in_flight >= u64::try_from(pkt.size).unwrap());
-            self.bytes_in_flight -= u64::try_from(pkt.size).unwrap();
+            assert!(self.bytes_in_flight >= pkt.size);
+            self.bytes_in_flight -= pkt.size;
         }
 
         qdebug!([self], "Pkts lost {}", lost_packets.len());
@@ -361,7 +358,7 @@ impl CongestionControl {
             return;
         }
 
-        self.bytes_in_flight += u64::try_from(pkt.size).unwrap();
+        self.bytes_in_flight += pkt.size;
         qdebug!(
             [self],
             "Pkt Sent len {}, bif {}, cwnd {}",
@@ -430,16 +427,16 @@ impl LossRecovery {
     }
 
     #[cfg(test)]
-    pub fn cwnd(&self) -> u64 {
+    pub fn cwnd(&self) -> usize {
         self.cc.cwnd()
     }
 
     #[cfg(test)]
-    pub fn ssthresh(&self) -> u64 {
+    pub fn ssthresh(&self) -> usize {
         self.cc.ssthresh()
     }
 
-    pub fn cwnd_avail(&self) -> u64 {
+    pub fn cwnd_avail(&self) -> usize {
         self.cc.cwnd_avail()
     }
 
