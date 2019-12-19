@@ -191,7 +191,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     // If a Push stream has been discovered, return true and let the Http3Client/Server handle it.
     pub fn handle_new_unidi_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         qtrace!([self], "A new stream: {}.", stream_id);
-        assert!(self.state_active());
+        debug_assert!(self.state_active());
         let stream_type;
         let fin;
         {
@@ -227,7 +227,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     ) -> Res<HandleReadableOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
 
-        assert!(self.state_active());
+        debug_assert!(self.state_active());
 
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
@@ -323,7 +323,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
             app_err
         );
 
-        assert!(self.state_active());
+        debug_assert!(self.state_active());
 
         if let Some(t) = self.transactions.get_mut(&stream_id) {
             // Close both sides of the transaction_client.
@@ -343,7 +343,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     pub fn handle_state_change(&mut self, conn: &mut Connection, state: &State) -> Res<bool> {
         match state {
             State::Connected => {
-                assert!(matches!(
+                debug_assert!(matches!(
                     self.state,
                     Http3State::Initializing | Http3State::ZeroRtt
                 ));
@@ -402,7 +402,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
             String::new()
         };
 
-        assert!(self.state_active());
+        debug_assert!(self.state_active());
 
         if let Some(transaction) = &mut self.transactions.get_mut(&stream_id) {
             qinfo!(
@@ -482,7 +482,6 @@ impl<T: Http3Transaction> Http3Connection<T> {
         error: AppError,
     ) -> Res<()> {
         qinfo!([self], "Reset stream {} error={}.", stream_id, error);
-        assert!(self.state_active());
         let mut transaction = self
             .transactions
             .remove(&stream_id)
@@ -498,7 +497,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
 
     pub fn stream_close_send(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
         qinfo!([self], "Close sending side for stream {}.", stream_id);
-        assert!(self.state_active() || self.state_zero_rtt());
+        debug_assert!(self.state_active() || self.state_zero_rtt());
         let transaction = self
             .transactions
             .get_mut(&stream_id)
