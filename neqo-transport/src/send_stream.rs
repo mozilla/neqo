@@ -350,7 +350,6 @@ impl TxBuffer {
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
-        debug_assert!(self.ranges.highest_offset() >= offset + len as u64);
         self.ranges.unmark_range(offset, len)
     }
 
