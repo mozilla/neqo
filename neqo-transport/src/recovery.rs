@@ -291,7 +291,11 @@ impl CongestionControl {
 
     // Multi-packet version of OnPacketAckedCC
     fn on_packets_acked(&mut self, acked_pkts: &[SentPacket]) {
-        for pkt in acked_pkts.iter().filter(|pkt| pkt.in_flight) {
+        for pkt in acked_pkts
+            .iter()
+            .filter(|pkt| pkt.in_flight)
+            .filter(|pkt| pkt.time_declared_lost.is_none())
+        {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
 
