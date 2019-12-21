@@ -13,7 +13,7 @@ use crate::stream_id::{StreamId, StreamIndex};
 use crate::{AppError, TransportError};
 use crate::{ConnectionError, Error, Res};
 
-use std::cmp::min;
+use std::cmp::{min, Ordering};
 use std::convert::TryFrom;
 
 #[allow(clippy::module_name_repetitions)]
@@ -263,44 +263,74 @@ impl Frame {
         fin: bool,
         space: usize,
     ) -> Option<(Frame, usize)> {
-        let mut remaining = space.saturating_sub(1 + Encoder::varint_len(stream_id));
+        let mut overhead = 1 + Encoder::varint_len(stream_id);
         if offset > 0 {
-            remaining = remaining.saturating_sub(Encoder::varint_len(offset));
+            overhead += Encoder::varint_len(offset);
         }
-        let (fin, fill) = if data.len() > remaining {
-            if remaining == 0 {
-                return None;
-            }
+        let data_len = min(data.len(), space);
+        overhead += Encoder::varint_len(u64::try_from(data_len).unwrap());
 
-            // More data than fits, fill the packet and negate |fin|.
-            (false, true)
-        } else if data.len() == remaining {
-            // Exact fit, fill the packet, keep |fin|.
-            (fin, true)
-        } else {
-            // Too small, so include a length.
-            let data_len = min(remaining - 1, data.len());
-            remaining -= Encoder::varint_len(u64::try_from(data_len).unwrap());
-            remaining = min(data.len(), remaining);
-            // In case the added length causes this to spill over, check |fin| again.
-            (fin && remaining == data.len(), false)
-        };
         qdebug!(
-            "Frame::new_stream fill {} fin {} data {}",
-            fill,
-            fin,
-            remaining
+            "Frame::new_stream space {} off {} overhead {} datalen {} fin {}",
+            space,
+            offset,
+            overhead,
+            data.len(),
+            fin
         );
-        Some((
-            Frame::Stream {
-                stream_id: stream_id.into(),
-                offset,
-                data: data[..remaining].to_vec(),
-                fin,
-                fill,
-            },
-            remaining,
-        ))
+
+        if data.is_empty() && !fin {
+            qdebug!("Frame::new_stream -> None, data.is_empty() && !fin");
+            return None;
+        }
+
+        match space.cmp(&overhead) {
+            // No room.
+            Ordering::Less => {
+                qdebug!("Frame::new_stream -> None, Ordering::Less");
+                None
+            }
+            // Only room if no data.
+            Ordering::Equal => {
+                if data.is_empty() && fin {
+                    qdebug!("Frame::new_stream -> Some, Ordering::Equal");
+                    Some((
+                        Frame::Stream {
+                            stream_id: stream_id.into(),
+                            offset,
+                            data: Vec::new(),
+                            fin: true,
+                            fill: false,
+                        },
+                        0,
+                    ))
+                } else {
+                    qdebug!("Frame::new_stream -> None, Ordering::Equal");
+                    None
+                }
+            }
+            // Room.
+            Ordering::Greater => {
+                let data_len = min(space - overhead, data.len());
+                let keep_fin = data.len() == data_len;
+
+                qdebug!(
+                    "Frame::new_stream -> Some, Ordering::Greater data_len {}",
+                    data_len
+                );
+
+                Some((
+                    Frame::Stream {
+                        stream_id: stream_id.into(),
+                        offset,
+                        data: data[..data_len].to_vec(),
+                        fin: fin && keep_fin,
+                        fill: false,
+                    },
+                    data_len,
+                ))
+            }
+        }
     }
 
     pub fn marshal(&self, enc: &mut Encoder) {
@@ -996,5 +1026,77 @@ mod tests {
         let res = Frame::decode_ack_frame(7, 2, vec![AckRange { gap: 0, range: 3 }]);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), vec![(7, 5), (3, 0)]);
+    }
+
+    #[test]
+    #[allow(clippy::cognitive_complexity)]
+    fn new_frame() {
+        // Require either FIN or the frame to include some data.
+
+        // Empty data
+        assert!(Frame::new_stream(0, 10, &[], false, 2).is_none());
+        assert!(Frame::new_stream(0, 10, &[], false, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[], false, 4).is_none());
+        assert!(Frame::new_stream(0, 10, &[], false, 5).is_none());
+        assert!(Frame::new_stream(0, 10, &[], false, 100).is_none());
+
+        assert!(Frame::new_stream(0, 10, &[], true, 2).is_none());
+        assert!(Frame::new_stream(0, 10, &[], true, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[], true, 4).is_some());
+        assert!(Frame::new_stream(0, 10, &[], true, 5).is_some());
+        assert!(Frame::new_stream(0, 10, &[], true, 100).is_some());
+
+        // Add minimum data
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], false, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], false, 4).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 4).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], false, 5).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 5).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], false, 100).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 100).is_some());
+
+        // Try more data
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 3).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 4).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 4).is_none());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 5).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 5).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 100).is_some());
+
+        // Fin falls off if last byte not included
+        let f = Frame::new_stream(0, 10, &[0x42; 100], true, 100).unwrap().0;
+        assert!(matches!(f, Frame::Stream { fin, .. } if !fin));
+
+        // But not if last byte included.
+        let f = Frame::new_stream(0, 10, &[0x42; 100], true, 200).unwrap().0;
+        assert!(match f {
+            Frame::Stream { fin, .. } if fin => true,
+            _ => false,
+        });
+        assert!(matches!(f, Frame::Stream { fin, .. } if fin));
+
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 1000).is_some());
+        assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 1000).is_some());
+
+        // Try biggest varints
+        const BIG: u64 = (1 << 62) - 1;
+
+        assert!(Frame::new_stream(BIG, BIG, &[], false, 16).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[], true, 16).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[], false, 17).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[], true, 17).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[], false, 18).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[], true, 18).is_some());
+
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], false, 17).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], true, 17).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], false, 18).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], true, 18).is_none());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], false, 19).is_some());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], true, 19).is_some());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], false, 100).is_some());
+        assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], true, 100).is_some());
     }
 }
