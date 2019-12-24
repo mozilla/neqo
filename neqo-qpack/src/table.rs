@@ -72,7 +72,7 @@ impl HeaderTable {
             capacity: 0,
             used: 0,
             base: 0,
-            acked_inserts_cnt: if encoder { 0 } else { std::u64::MAX },
+            acked_inserts_cnt: 0,
         }
     }
 
@@ -164,8 +164,10 @@ impl HeaderTable {
     pub fn evict_to(&mut self, reduce: u64) -> bool {
         while (!self.dynamic.is_empty()) && self.used > reduce {
             if let Some(e) = self.dynamic.back() {
-                if !e.can_reduce(self.acked_inserts_cnt) {
-                    return false;
+                if let QPackSide::Encoder = self.qpack_side {
+                    if !e.can_reduce(self.acked_inserts_cnt) {
+                        return false;
+                    }
                 }
                 self.used -= e.size();
                 self.dynamic.pop_back();
