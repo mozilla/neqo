@@ -912,7 +912,7 @@ mod tests {
         flow_mgr.borrow_mut().conn_increase_max_credit(4096);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(4.into(), 1024, flow_mgr.clone(), conn_events.clone());
+        let mut s = SendStream::new(4.into(), 1024, Rc::clone(&flow_mgr), conn_events);
 
         let res = s.send(&[4; 100]).unwrap();
         assert_eq!(res, 100);
@@ -966,7 +966,7 @@ mod tests {
         flow_mgr.borrow_mut().conn_increase_max_credit(2);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(4.into(), 0, flow_mgr.clone(), conn_events.clone());
+        let mut s = SendStream::new(4.into(), 0, Rc::clone(&flow_mgr), conn_events.clone());
 
         // Stream is initially blocked (conn:2, stream:0)
         // and will not accept data.
@@ -1030,7 +1030,7 @@ mod tests {
         flow_mgr.borrow_mut().conn_increase_max_credit(2);
         let conn_events = ConnectionEvents::default();
 
-        let _s = SendStream::new(4.into(), 100, flow_mgr.clone(), conn_events.clone());
+        let _s = SendStream::new(4.into(), 100, flow_mgr, conn_events.clone());
 
         // Creating a new stream with conn and stream credits should result in
         // an event.

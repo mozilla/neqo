@@ -852,6 +852,7 @@ mod tests {
 
     // if we read more than done_state bytes HFrameReader will be in done state.
     fn test_complete_and_incomplete_frame(buf: &[u8], done_state: usize) {
+        use std::cmp::Ordering;
         // Let's consume partial frames. It is enough to test partal frames
         // up to 10 byte. 10 byte is greater than frame type and frame
         // length and bit of data.
@@ -869,23 +870,19 @@ mod tests {
             test_reading_frame(
                 &buf[..i],
                 FrameReadingTestSend::DataWithFin,
-                if i == done_state {
-                    FrameReadingTestExpect::FrameAndStreamComplete
-                } else if i > done_state {
-                    FrameReadingTestExpect::FrameComplete
-                } else {
-                    FrameReadingTestExpect::Error
+                match i.cmp(&done_state) {
+                    Ordering::Greater => FrameReadingTestExpect::FrameComplete,
+                    Ordering::Equal => FrameReadingTestExpect::FrameAndStreamComplete,
+                    Ordering::Less => FrameReadingTestExpect::Error,
                 },
             );
             test_reading_frame(
                 &buf[..i],
                 FrameReadingTestSend::DataThenFin,
-                if i == done_state {
-                    FrameReadingTestExpect::FrameAndStreamComplete
-                } else if i > done_state {
-                    FrameReadingTestExpect::FrameComplete
-                } else {
-                    FrameReadingTestExpect::Error
+                match i.cmp(&done_state) {
+                    Ordering::Greater => FrameReadingTestExpect::FrameComplete,
+                    Ordering::Equal => FrameReadingTestExpect::FrameAndStreamComplete,
+                    Ordering::Less => FrameReadingTestExpect::Error,
                 },
             );
         }

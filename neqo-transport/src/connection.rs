@@ -2514,7 +2514,7 @@ mod tests {
         assert_eq!(0, client.stats().dups_rx);
 
         qdebug!("---- Dup, ignored");
-        let out = client.process(out_to_rep.dgram().clone(), now());
+        let out = client.process(out_to_rep.dgram(), now());
         assert!(out.as_dgram_ref().is_none());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
 
