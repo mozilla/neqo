@@ -90,7 +90,7 @@ fn http_serve(server: &mut Connection, stream: u64) {
     server
         .stream_recv(stream, &mut data)
         .expect("Read should succeed");
-    let msg = String::from_utf8(data.clone()).unwrap();
+    let msg = String::from_utf8(data).unwrap();
     let re = Regex::new(r"GET +/(\d*)(\r)?\n").unwrap();
     let m = re.captures(&msg);
     if m.is_none() {
