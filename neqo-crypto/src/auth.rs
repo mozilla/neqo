@@ -34,6 +34,7 @@ pub enum AuthenticationStatus {
 }
 
 impl Into<PRErrorCode> for AuthenticationStatus {
+    #[must_use]
     fn into(self) -> PRErrorCode {
         match self {
             Self::Ok => 0,
@@ -67,6 +68,7 @@ impl Into<PRErrorCode> for AuthenticationStatus {
 // Note that this mapping should be removed after gecko eventually learns how to
 // map into the enumerated type.
 impl From<PRErrorCode> for AuthenticationStatus {
+    #[must_use]
     fn from(v: PRErrorCode) -> Self {
         match v {
             0 => Self::Ok,
