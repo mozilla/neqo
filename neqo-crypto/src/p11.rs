@@ -39,6 +39,7 @@ macro_rules! scoped_ptr {
 
         impl Deref for $scoped {
             type Target = *mut $target;
+            #[must_use]
             fn deref(&self) -> &*mut $target {
                 &self.ptr
             }

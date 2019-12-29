@@ -135,7 +135,7 @@ pub fn init_db<P: Into<PathBuf>>(dir: P) {
             ))
             .expect("SSL_ConfigServerSessionIDCache failed");
 
-            NssLoaded::Db(path.to_path_buf().into_boxed_path())
+            NssLoaded::Db(path.into_boxed_path())
         });
     }
 }

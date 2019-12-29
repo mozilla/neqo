@@ -27,6 +27,7 @@ pub enum SecretDirection {
 }
 
 impl From<SSLSecretDirection::Type> for SecretDirection {
+    #[must_use]
     fn from(dir: SSLSecretDirection::Type) -> Self {
         match dir {
             SSLSecretDirection::ssl_secret_read => Self::Read,

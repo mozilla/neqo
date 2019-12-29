@@ -731,6 +731,7 @@ impl Client {
 
 impl Deref for Client {
     type Target = SecretAgent;
+    #[must_use]
     fn deref(&self) -> &SecretAgent {
         &self.agent
     }
@@ -887,6 +888,7 @@ impl Server {
 
 impl Deref for Server {
     type Target = SecretAgent;
+    #[must_use]
     fn deref(&self) -> &SecretAgent {
         &self.agent
     }
@@ -907,6 +909,7 @@ pub enum Agent {
 
 impl Deref for Agent {
     type Target = SecretAgent;
+    #[must_use]
     fn deref(&self) -> &SecretAgent {
         match self {
             Self::Client(c) => &*c,
@@ -925,12 +928,14 @@ impl DerefMut for Agent {
 }
 
 impl From<Client> for Agent {
+    #[must_use]
     fn from(c: Client) -> Self {
         Self::Client(c)
     }
 }
 
 impl From<Server> for Agent {
+    #[must_use]
     fn from(s: Server) -> Self {
         Self::Server(s)
     }
