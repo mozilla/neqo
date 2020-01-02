@@ -281,50 +281,35 @@ impl Frame {
             // More data than fits, fill the packet and negate |fin|.
             (false, true)
         } else if data.len() == (space - overhead) {
-            if data.is_empty() && !fin {
-                // Do not frame unless space for some data or includes FIN
-                qdebug!(
-                    "Frame::new_stream -> None; hdrlen {} == space {} and !fin",
-                    overhead,
-                    space
-                );
-            }
             // Exact fit, fill the packet, keep |fin|.
             (fin, true)
         } else {
             // Too small, so include a length.
             let data_len = min(space - overhead - 1, data.len());
             overhead += Encoder::varint_len(u64::try_from(data_len).unwrap());
-            if overhead > space {
-                // Not even enough space for length field
-                qdebug!(
-                    "Frame::new_stream -> None; hdrlen w/len {} > space {}",
-                    overhead,
-                    space
-                );
-                return None;
-            }
-            if overhead == space && !fin {
-                // Do not frame unless space for some data or includes FIN
-                qdebug!(
-                    "Frame::new_stream -> None; hdrlen w/len {} == space {} and !fin",
-                    overhead,
-                    space
-                );
-                return None;
-            }
-            // Either space for some data or fin=true.
 
             // If all data isn't going to make it in the frame, don't keep fin.
             let keep_fin = data.is_empty() || data.len() <= (space - overhead);
             (fin && keep_fin, false)
         };
+
+        if overhead > space || (overhead == space && !fin) {
+            qdebug!(
+                "Frame::new_stream -> None; ovr {} space {} fin {}",
+                overhead,
+                space,
+                fin
+            );
+            return None;
+        }
+
         let data_len = min(data.len(), space - overhead);
         if data_len == 0 && !fin {
             // Do not frame unless space for some data or includes FIN
             qdebug!("Frame::new_stream -> None; data_len == 0 and !fin");
             return None;
         }
+
         qdebug!(
             "Frame::new_stream fill {} fin {} data {} space {} ovr {}",
             fill,
@@ -333,6 +318,7 @@ impl Frame {
             space,
             overhead
         );
+
         Some((
             Frame::Stream {
                 stream_id: stream_id.into(),
