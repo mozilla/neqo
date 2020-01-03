@@ -13,7 +13,7 @@ use crate::stream_id::{StreamId, StreamIndex};
 use crate::{AppError, TransportError};
 use crate::{ConnectionError, Error, Res};
 
-use std::cmp::min;
+use std::cmp::{min, Ordering};
 use std::convert::TryFrom;
 
 #[allow(clippy::module_name_repetitions)]
@@ -268,45 +268,34 @@ impl Frame {
             overhead += Encoder::varint_len(offset);
         }
 
+        let (fin, fill) = match (data.len() + overhead).cmp(&space) {
+            // More data than fits, fill the packet and negate |fin|.
+            Ordering::Greater => (false, true),
+            // Exact fit, fill the packet, keep |fin|.
+            Ordering::Equal => (fin, true),
+            // Too small, so include a length.
+            Ordering::Less => {
+                let data_len = min(space.saturating_sub(overhead + 1), data.len());
+                overhead += Encoder::varint_len(u64::try_from(data_len).unwrap());
+
+                // If all data isn't going to make it in the frame, don't keep fin.
+                let keep_fin = data.len() + overhead <= space;
+                (fin && keep_fin, false)
+            }
+        };
+
         if overhead > space {
             qdebug!(
-                "Frame::new_stream -> None; hdrlen {} > space {}",
+                "Frame::new_stream -> None; ovr {} > space {}",
                 overhead,
                 space
             );
             return None;
         }
 
-        let (fin, fill) = if data.len() > (space - overhead) {
-            // More data than fits, fill the packet and negate |fin|.
-            (false, true)
-        } else if data.len() == (space - overhead) {
-            // Exact fit, fill the packet, keep |fin|.
-            (fin, true)
-        } else {
-            // Too small, so include a length.
-            let data_len = min(space - overhead - 1, data.len());
-            overhead += Encoder::varint_len(u64::try_from(data_len).unwrap());
-
-            // If all data isn't going to make it in the frame, don't keep fin.
-            let keep_fin = data.is_empty() || data.len() <= (space - overhead);
-            (fin && keep_fin, false)
-        };
-
-        if overhead > space || (overhead == space && !fin) {
-            qdebug!(
-                "Frame::new_stream -> None; ovr {} space {} fin {}",
-                overhead,
-                space,
-                fin
-            );
-            return None;
-        }
-
         let data_len = min(data.len(), space - overhead);
         if data_len == 0 && !fin {
-            // Do not frame unless space for some data or includes FIN
-            qdebug!("Frame::new_stream -> None; data_len == 0 and !fin");
+            qdebug!("Frame::new_stream -> None; no data, no fin");
             return None;
         }
 
@@ -1027,23 +1016,26 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::cognitive_complexity)]
-    fn new_frame() {
-        // Require either FIN or the frame to include some data.
-
-        // Empty data
+    fn new_stream_empty() {
+        // Stream frames with empty data and no fin never work.
         assert!(Frame::new_stream(0, 10, &[], false, 2).is_none());
         assert!(Frame::new_stream(0, 10, &[], false, 3).is_none());
         assert!(Frame::new_stream(0, 10, &[], false, 4).is_none());
         assert!(Frame::new_stream(0, 10, &[], false, 5).is_none());
         assert!(Frame::new_stream(0, 10, &[], false, 100).is_none());
 
+        // Empty data with fin is only a problem if there is no space.
+        assert!(Frame::new_stream(0, 0, &[], true, 1).is_none());
+        assert!(Frame::new_stream(0, 0, &[], true, 2).is_some());
         assert!(Frame::new_stream(0, 10, &[], true, 2).is_none());
         assert!(Frame::new_stream(0, 10, &[], true, 3).is_some());
         assert!(Frame::new_stream(0, 10, &[], true, 4).is_some());
         assert!(Frame::new_stream(0, 10, &[], true, 5).is_some());
         assert!(Frame::new_stream(0, 10, &[], true, 100).is_some());
+    }
 
+    #[test]
+    fn new_stream_minimum() {
         // Add minimum data
         assert!(Frame::new_stream(0, 10, &[0x42; 1], false, 3).is_none());
         assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 3).is_none());
@@ -1053,7 +1045,10 @@ mod tests {
         assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 5).is_some());
         assert!(Frame::new_stream(0, 10, &[0x42; 1], false, 100).is_some());
         assert!(Frame::new_stream(0, 10, &[0x42; 1], true, 100).is_some());
+    }
 
+    #[test]
+    fn new_stream_more() {
         // Try more data
         assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 3).is_none());
         assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 3).is_none());
@@ -1066,9 +1061,12 @@ mod tests {
 
         assert!(Frame::new_stream(0, 10, &[0x42; 100], false, 1000).is_some());
         assert!(Frame::new_stream(0, 10, &[0x42; 100], true, 1000).is_some());
+    }
 
-        // Try biggest varints
-        const BIG: u64 = (1 << 62) - 1;
+    #[test]
+    fn new_stream_big_id() {
+        // A value that encodes to the largest varint.
+        const BIG: u64 = 1 << 30;
 
         assert!(Frame::new_stream(BIG, BIG, &[], false, 16).is_none());
         assert!(Frame::new_stream(BIG, BIG, &[], true, 16).is_none());
@@ -1085,5 +1083,76 @@ mod tests {
         assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], true, 19).is_some());
         assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], false, 100).is_some());
         assert!(Frame::new_stream(BIG, BIG, &[0x42; 1], true, 100).is_some());
+    }
+
+    #[test]
+    fn new_stream_16384() {
+        // 16383/16384 is an odd boundary in STREAM frame construction.
+        // That is the boundary where a length goes from 2 bytes to 4 bytes.
+        // If the data fits in the available space, then it is simple:
+        let r = Frame::new_stream(0, 0, &[0x43; 16384], true, 16386);
+        let (f, used) = r.expect("Fit frame");
+        assert_eq!(used, 16384);
+        if let Frame::Stream {
+            fin, fill, data, ..
+        } = f
+        {
+            assert_eq!(data.len(), 16384);
+            assert!(fin);
+            assert!(fill);
+        } else {
+            panic!("Wrong frame type");
+        }
+
+        // However, if there is one extra byte of space, we will try to add a length.
+        // That length will then make the frame to be too large and the data will be
+        // truncated.  The frame could carry one more byte of data, but it's a corner
+        // case we don't want to address as it should be rare (if not impossible).
+        let r = Frame::new_stream(0, 0, &[0x43; 16384], true, 16387);
+        let (f, used) = r.expect("a frame");
+        assert_eq!(used, 16381);
+        if let Frame::Stream {
+            fin, fill, data, ..
+        } = f
+        {
+            assert_eq!(data.len(), 16381);
+            assert!(!fin);
+            assert!(!fill);
+        } else {
+            panic!("Wrong frame type");
+        }
+    }
+
+    #[test]
+    fn new_stream_64() {
+        // Unlike 16383/16384, the boundary at 63/64 is easy because the difference
+        // is just one byte.  We lose just the last byte when there is more space.
+        let r = Frame::new_stream(0, 0, &[0x43; 64], true, 66);
+        let (f, used) = r.expect("Fit frame");
+        assert_eq!(used, 64);
+        if let Frame::Stream {
+            fin, fill, data, ..
+        } = f
+        {
+            assert_eq!(data.len(), 64);
+            assert!(fin);
+            assert!(fill);
+        } else {
+            panic!("Wrong frame type");
+        }
+
+        let r = Frame::new_stream(0, 0, &[0x43; 64], true, 67);
+        let (f, used) = r.expect("a frame");
+        assert_eq!(used, 63);
+        if let Frame::Stream {
+            fin, fill, data, ..
+        } = f
+        {
+            assert_eq!(data.len(), 63);
+            assert!(!fin);
+            assert!(!fill);
+        } else {
+            panic!("Wrong frame type");
+        }
     }
 }
