@@ -18,7 +18,7 @@ To run test http 3 programs (neqo-client and neqo-http3-server):
 
 You can clone NSS (https://hg.mozilla.org/projects/nss) and NSPR
 (https://hg.mozilla.org/projects/nspr) into the same directory and export an
-enviroment variable called `NSS_DIR` pointing to NSS.  This causes the build to
+environment variable called `NSS_DIR` pointing to NSS.  This causes the build to
 use the existing NSS checkout.  However, in order to run anything that depends
 on NSS, you need to set `$\[DY]LD\_LIBRARY\_PATH` to point to
 `$NSS_DIR/../dist/Debug/lib`.
