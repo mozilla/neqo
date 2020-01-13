@@ -1075,6 +1075,25 @@ impl Connection {
         out
     }
 
+    fn highest_epoch_with_keys(&mut self) -> u16 {
+        for epoch in (0..NUM_EPOCHS).rev() {
+            // Ensure we have tx crypto state for this epoch, or skip it.
+            if epoch == 1 {
+                continue;
+            } else {
+                match self
+                    .crypto
+                    .states
+                    .obtain(self.role, epoch, &self.crypto.tls)
+                {
+                    Ok(CryptoState { tx: Some(_), .. }) => return epoch,
+                    _ => continue,
+                }
+            }
+        }
+        0
+    }
+
     #[allow(clippy::cognitive_complexity)]
     #[allow(clippy::useless_let_if_seq)]
     /// Build a datagram, possibly from multiple packets (for different PN
@@ -1083,6 +1102,8 @@ impl Connection {
         let mut out_bytes = Vec::new();
         let mut needs_padding = false;
         let mut close_sent = false;
+        let mut frame_sent = false;
+        let highest_epoch_with_keys = self.highest_epoch_with_keys();
         let path = self
             .path
             .take()
@@ -1172,11 +1193,17 @@ impl Connection {
                         if frame.is_none() {
                             frame = self.send_streams.get_frame(epoch, tx_mode, remaining)
                         }
-                        if frame.is_none() && self.tx_mode == TxMode::Pto {
+
+                        if frame.is_none()
+                            && self.tx_mode == TxMode::Pto
+                            && !frame_sent
+                            && (highest_epoch_with_keys == epoch)
+                        {
                             frame = Some((Frame::Ping, None));
                         }
 
                         if let Some((frame, token)) = frame {
+                            frame_sent = true;
                             ack_eliciting |= frame.ack_eliciting();
                             if let Frame::Padding = frame {
                                 has_padding |= true;
@@ -1193,7 +1220,6 @@ impl Connection {
                             }
                         } else {
                             // No more frames to send.
-                            assert_eq!(self.tx_mode, TxMode::Normal);
                             break;
                         }
                     }
@@ -1267,6 +1293,8 @@ impl Connection {
         if close_sent {
             self.flow_mgr.borrow_mut().set_need_close_frame(false);
         }
+
+        assert!(frame_sent | (self.tx_mode == TxMode::Normal));
 
         // Sent a probe pkt. Another timeout will re-engage ProbeTimeout mode,
         // but otherwise return to honoring CC.
@@ -3149,10 +3177,7 @@ mod tests {
         let out = client.process(None, now + Duration::from_secs(11));
 
         let frames = server.test_process_input(out.dgram().unwrap(), now + Duration::from_secs(11));
-
-        assert_eq!(frames[0], (Frame::Ping, 0));
-        assert_eq!(frames[1], (Frame::Ping, 2));
-        assert!(matches!(frames[2], (Frame::Stream { .. }, 3)));
+        assert!(matches!(frames[0], (Frame::Stream { .. }, 3)));
     }
 
     #[test]
@@ -3243,9 +3268,7 @@ mod tests {
             now + Duration::from_secs(10) + Duration::from_millis(110),
         );
 
-        assert_eq!(frames[0], (Frame::Ping, 0));
-        assert_eq!(frames[1], (Frame::Ping, 2));
-        assert_eq!(frames[2], (Frame::Ping, 3));
+        assert_eq!(frames[0], (Frame::Ping, 3));
     }
 
     #[test]
