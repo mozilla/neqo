@@ -363,7 +363,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
             }
             State::Closed(error) => {
                 if !matches!(self.state, Http3State::Closed(_)) {
-                    self.state = Http3State::Closing(error.clone().into());
+                    self.state = Http3State::Closed(error.clone().into());
                     Ok(true)
                 } else {
                     Ok(false)
