@@ -1279,8 +1279,8 @@ impl Connection {
             self.path = Some(path);
             Ok(None)
         } else {
-            // Pad Initial packets sent by the client to mtu bytes.
-            if self.role == Role::Client && needs_padding {
+            // Pad Initial packets sent by the client to mtu bytes, if necessary.
+            if self.role == Role::Client && needs_padding && out_bytes.len() < path.mtu() {
                 qdebug!([self], "pad Initial to max_datagram_size");
                 out_bytes.resize(path.mtu(), 0);
             }
