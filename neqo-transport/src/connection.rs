@@ -1075,6 +1075,46 @@ impl Connection {
         out
     }
 
+    /// Build a long-header packet with nothing but PADDING frames to fill 
+    /// _size_ bytes and use the "Initial secret" encryption level to protect.
+    fn get_padding_packet(
+        &mut self,
+        size: usize,
+        path: &Path,
+    ) -> Vec<u8> {
+        let initial_epoch = 0;
+        let mut encoder = Encoder::default();
+        let padding_frame = Frame::Padding;
+        let pn_space = PNSpace::from(0);
+        let token = match &self.retry_info {
+            Some(v) => v.token.clone(),
+            _ => Vec::new(),
+        };
+        let tx = match self.crypto.states.obtain(self.role, 0, &self.crypto.tls) {
+            Ok(CryptoState { tx: Some(tx), .. }) => Ok(tx),
+            _ => Err(()),
+        }
+        .expect("There is always an encryption context when the situation calls for padding.");
+
+        let padding_hdr = PacketHdr::new(
+            0,
+            PacketType::Initial(token),
+            Some(self.version),
+            path.remote_cid.clone(),
+            path.local_cids.first().cloned(),
+            self.loss_recovery.next_pn(pn_space),
+            initial_epoch,
+        );
+
+        (0..size).for_each(|_| padding_frame.marshal(&mut encoder));
+
+        let padding_packet = encode_packet(tx, &padding_hdr, &encoder);
+
+        dump_packet(self, "TX ->", &padding_hdr, &encoder);
+
+        padding_packet
+    }
+
     #[allow(clippy::cognitive_complexity)]
     #[allow(clippy::useless_let_if_seq)]
     /// Build a datagram, possibly from multiple packets (for different PN
@@ -1282,7 +1322,29 @@ impl Connection {
             // Pad Initial packets sent by the client to mtu bytes.
             if self.role == Role::Client && needs_padding {
                 qdebug!([self], "pad Initial to max_datagram_size");
-                out_bytes.resize(path.mtu(), 0);
+                let mut padding_packet =
+                    self.get_padding_packet(path.mtu().saturating_sub(out_bytes.len()), &path);
+                let pkn = self.loss_recovery.next_pn(PNSpace::from(0));
+                let ack_eliciting = Frame::Padding.ack_eliciting();
+                let in_flight = match self.tx_mode {
+                    TxMode::Pto => false,
+                    TxMode::Normal => true,
+                };
+
+                self.stats.packets_tx += 1;
+                self.loss_recovery.inc_pn(PNSpace::from(0));
+                self.loss_recovery.on_packet_sent(
+                    PNSpace::from(0),
+                    pkn,
+                    SentPacket::new(
+                        now,
+                        ack_eliciting,
+                        Vec::new(),
+                        padding_packet.len(),
+                        in_flight,
+                    ),
+                );
+                out_bytes.append(&mut padding_packet);
             }
             let ret = Ok(Some(Datagram::new(path.local, path.remote, out_bytes)));
             self.path = Some(path);
