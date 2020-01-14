@@ -11,8 +11,8 @@ neqo-transport = { version = "0.1", path = "./../neqo-transport" }
 neqo-common = { version="0.1", path="./../neqo-common" }
 neqo-http3 = { version = "0.1", path = "./../neqo-http3" }
 
-structopt = "0.2.15"
-lazy_static = "1.3.0"
+structopt = "0.3.7"
+lazy_static = "1.4.0"
 
 [features]
 default = ["deny-warnings"]
