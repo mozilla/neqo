@@ -77,6 +77,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
+        None,
     )
     .expect("create a default client")
 }
@@ -90,6 +91,7 @@ pub fn default_server() -> Connection {
         DEFAULT_ALPN,
         &anti_replay(),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+        None,
     )
     .expect("create a default server")
 }
@@ -141,6 +143,7 @@ pub fn default_http3_client() -> Http3Client {
         loopback(),
         100,
         100,
+        None,
     )
     .expect("create a default client")
 }
