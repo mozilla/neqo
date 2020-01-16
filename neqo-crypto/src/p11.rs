@@ -80,6 +80,7 @@ impl SymKey {
 }
 
 impl Clone for SymKey {
+    #[must_use]
     fn clone(&self) -> Self {
         let ptr = unsafe { PK11_ReferenceSymKey(self.ptr) };
         assert!(!ptr.is_null());
