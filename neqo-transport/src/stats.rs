@@ -15,4 +15,6 @@ pub struct Stats {
     pub packets_tx: u64,
     /// Duplicate packets received
     pub dups_rx: u64,
+    /// Dropped packets
+    pub dropped_rx: u64,
 }

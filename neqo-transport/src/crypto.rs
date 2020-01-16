@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use neqo_common::{hex, qdebug, qinfo, qtrace};
+use neqo_common::{hex, matches, qdebug, qinfo, qtrace};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hp::HpKey;
 use neqo_crypto::{
@@ -22,6 +22,7 @@ use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
 use crate::tparams::{TpZeroRttChecker, TransportParametersHandler};
+use crate::tracking::PNSpace;
 use crate::{Error, Res};
 
 const MAX_AUTH_TAG: usize = 32;
@@ -30,7 +31,7 @@ const MAX_AUTH_TAG: usize = 32;
 pub struct Crypto {
     pub(crate) tls: Agent,
     pub(crate) streams: CryptoStreams,
-    pub(crate) states: CryptoStates,
+    pub(crate) states: [CryptoState; 4],
 }
 
 impl Crypto {
@@ -60,6 +61,63 @@ impl Crypto {
         })
     }
 
+    pub fn obtain(&mut self, role: Role, epoch: Epoch) -> Res<&mut CryptoState> {
+        // Try to get CryptoState if it is not initialized and we have keys.
+        self.try_to_get_crypto_state(role, epoch)?;
+
+        if matches!(self.states[epoch as usize], CryptoState::Active{..}) {
+            Ok(&mut self.states[epoch as usize])
+        } else {
+            Err(Error::KeysNotFound)
+        }
+    }
+
+    pub fn try_to_get_crypto_state(&mut self, role: Role, epoch: Epoch) -> Res<()> {
+        if !matches!(self.states[epoch as usize], CryptoState::NoInit) {
+            return Ok(());
+        }
+
+        #[cfg(debug_assertions)]
+        let label = format!("{}", self);
+        #[cfg(not(debug_assertions))]
+        let label = "";
+
+        qtrace!([label], "Build crypto state for epoch {}", epoch);
+        assert!(epoch != 0 && epoch != 1); // The state for 0 is made directly. The state for 1 is never used, it is handle differently.
+
+        let cipher = match self.tls.info() {
+            None => self.tls.preinfo()?.cipher_suite(),
+            Some(info) => Some(info.cipher_suite()),
+        }
+        .ok_or_else(|| {
+            qdebug!([label], "cipher info not available yet");
+            Error::KeysNotFound
+        })?;
+
+        let rx = self
+            .tls
+            .read_secret(epoch)
+            .map(|rs| CryptoDxState::new(CryptoDxDirection::Read, epoch, rs, cipher));
+        let tx = self
+            .tls
+            .write_secret(epoch)
+            .map(|ws| CryptoDxState::new(CryptoDxDirection::Write, epoch, ws, cipher));
+
+        // Validate the key setup.
+        match (&rx, &tx, role, epoch) {
+            (Some(_), Some(_), _, _) => {}
+            (None, None, _, _) => {
+                qdebug!([label], "Keying material not available for epoch {}", epoch);
+                return Err(Error::KeysNotFound);
+            }
+            _ => panic!("bad configuration of keys"),
+        }
+
+        self.states[epoch as usize] = CryptoState::Active { rx, tx };
+        self.streams.streams[epoch as usize] = Some(Default::default());
+        Ok(())
+    }
+
     // Create the initial crypto state.
     pub fn create_initial_state(&mut self, role: Role, dcid: &[u8]) {
         const CLIENT_INITIAL_LABEL: &str = "client in";
@@ -77,10 +135,16 @@ impl Crypto {
             Role::Server => (SERVER_INITIAL_LABEL, CLIENT_INITIAL_LABEL),
         };
 
-        self.states.states[0] = Some(CryptoState {
+        if self.streams.streams[0].is_none() {
+            // If this is the first call create streams as well.
+            // For retry we do not want to create a new stream as well.
+            self.streams.streams[0] = Some(Default::default());
+        }
+
+        self.states[0] = CryptoState::Active {
             tx: CryptoDxState::new_initial(CryptoDxDirection::Write, write_label, dcid),
             rx: CryptoDxState::new_initial(CryptoDxDirection::Read, read_label, dcid),
-        });
+        };
     }
 
     /// Buffer crypto records for sending.
@@ -88,6 +152,7 @@ impl Crypto {
         for r in records {
             assert_eq!(r.ct, 22);
             qdebug!([self], "Adding CRYPTO data {:?}", r);
+            assert!(r.epoch != 1);
             self.streams.send(r.epoch, &r.data);
         }
     }
@@ -110,6 +175,33 @@ impl Crypto {
             token.length
         );
         self.streams.lost(token);
+    }
+
+    fn epoch(&self, pn_space: PNSpace) -> Epoch {
+        match pn_space {
+            PNSpace::Initial => 0,
+            PNSpace::Handshake => 2,
+            PNSpace::ApplicationData => 3, // 0RTT keys are stored differently, so this epoch will always be 3.
+        }
+    }
+
+    pub fn is_discarded(&self, pn_space: PNSpace) -> bool {
+        let epoch = self.epoch(pn_space);
+        assert!(
+            (matches!(
+                self.states[epoch as usize],
+                CryptoState::Discarded | CryptoState::NoInit
+            ) && self.streams.streams[epoch as usize].is_none())
+                || (matches!(self.states[epoch as usize], CryptoState::Active{..})
+                    && self.streams.streams[epoch as usize].is_some())
+        );
+        matches!(self.states[epoch as usize], CryptoState::Discarded)
+    }
+
+    pub fn discard(&mut self, pn_space: PNSpace) {
+        let epoch = self.epoch(pn_space);
+        self.states[epoch as usize] = CryptoState::Discarded;
+        self.streams.streams[epoch as usize] = None;
     }
 }
 
@@ -230,69 +322,19 @@ impl std::fmt::Display for CryptoDxState {
     }
 }
 
-#[derive(Debug, Default)]
-pub struct CryptoState {
-    pub tx: Option<CryptoDxState>,
-    pub rx: Option<CryptoDxState>,
+#[derive(Debug)]
+pub enum CryptoState {
+    NoInit,
+    Active {
+        tx: Option<CryptoDxState>,
+        rx: Option<CryptoDxState>,
+    },
+    Discarded,
 }
 
-#[derive(Debug, Default)]
-pub struct CryptoStates {
-    pub states: [Option<CryptoState>; 4],
-}
-
-impl std::fmt::Display for CryptoStates {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "CryptoStates")
-    }
-}
-
-impl CryptoStates {
-    // Get a crypto state, making it if necessary, otherwise return an error.
-    pub fn obtain(&mut self, role: Role, epoch: Epoch, tls: &Agent) -> Res<&mut CryptoState> {
-        #[cfg(debug_assertions)]
-        let label = format!("{}", self);
-        #[cfg(not(debug_assertions))]
-        let label = "";
-
-        let cs = &mut self.states[epoch as usize];
-        if cs.is_none() {
-            qtrace!([label], "Build crypto state for epoch {}", epoch);
-            assert!(epoch != 0); // This state is made directly.
-
-            let cipher = match (epoch, tls.info()) {
-                (1, _) => tls.preinfo()?.early_data_cipher(),
-                (_, None) => tls.preinfo()?.cipher_suite(),
-                (_, Some(info)) => Some(info.cipher_suite()),
-            }
-            .ok_or_else(|| {
-                qdebug!([label], "cipher info not available yet");
-                Error::KeysNotFound
-            })?;
-
-            let rx = tls
-                .read_secret(epoch)
-                .map(|rs| CryptoDxState::new(CryptoDxDirection::Read, epoch, rs, cipher));
-            let tx = tls
-                .write_secret(epoch)
-                .map(|ws| CryptoDxState::new(CryptoDxDirection::Write, epoch, ws, cipher));
-
-            // Validate the key setup.
-            match (&rx, &tx, role, epoch) {
-                (None, Some(_), Role::Client, 1)
-                | (Some(_), None, Role::Server, 1)
-                | (Some(_), Some(_), _, _) => {}
-                (None, None, _, _) => {
-                    qdebug!([label], "Keying material not available for epoch {}", epoch);
-                    return Err(Error::KeysNotFound);
-                }
-                _ => panic!("bad configuration of keys"),
-            }
-
-            *cs = Some(CryptoState { rx, tx });
-        }
-
-        Ok(cs.as_mut().unwrap())
+impl Default for CryptoState {
+    fn default() -> Self {
+        CryptoState::NoInit
     }
 }
 
@@ -304,44 +346,76 @@ pub struct CryptoStream {
 
 #[derive(Debug, Default)]
 pub struct CryptoStreams {
-    streams: [CryptoStream; 4],
+    streams: [Option<CryptoStream>; 4],
 }
 
 impl CryptoStreams {
     pub fn send(&mut self, epoch: u16, data: &[u8]) {
-        self.streams[epoch as usize].tx.send(data);
+        if let Some(stream) = &mut self.streams[epoch as usize] {
+            stream.tx.send(data);
+        } else {
+            debug_assert!(false);
+        }
     }
 
     pub fn inbound_frame(&mut self, epoch: u16, offset: u64, data: Vec<u8>) -> Res<()> {
-        self.streams[epoch as usize].rx.inbound_frame(offset, data)
+        if let Some(stream) = &mut self.streams[epoch as usize] {
+            stream.rx.inbound_frame(offset, data)
+        } else {
+            debug_assert!(false);
+            Err(Error::KeysDiscarded)
+        }
     }
 
     pub fn data_ready(&self, epoch: u16) -> bool {
-        self.streams[epoch as usize].rx.data_ready()
+        if let Some(stream) = &self.streams[epoch as usize] {
+            stream.rx.data_ready()
+        } else {
+            debug_assert!(false);
+            false
+        }
     }
 
     pub fn read_to_end(&mut self, epoch: u16, buf: &mut Vec<u8>) -> Res<u64> {
-        self.streams[epoch as usize].rx.read_to_end(buf)
+        if let Some(stream) = &mut self.streams[epoch as usize] {
+            stream.rx.read_to_end(buf)
+        } else {
+            debug_assert!(false);
+            Err(Error::KeysDiscarded)
+        }
     }
 
     pub fn acked(&mut self, token: CryptoRecoveryToken) {
-        self.streams[token.epoch as usize]
-            .tx
-            .mark_as_acked(token.offset, token.length)
+        if let Some(stream) = &mut self.streams[token.epoch as usize] {
+            stream.tx.mark_as_acked(token.offset, token.length);
+        } else {
+            debug_assert!(false);
+        }
     }
 
     pub fn lost(&mut self, token: &CryptoRecoveryToken) {
-        self.streams[token.epoch as usize]
-            .tx
-            .mark_as_lost(token.offset, token.length)
+        if let Some(stream) = &mut self.streams[token.epoch as usize] {
+            stream.tx.mark_as_lost(token.offset, token.length);
+        } else {
+            debug_assert!(false);
+        }
     }
 
     pub fn sent(&mut self, epoch: u16, offset: u64, length: usize) {
-        self.streams[epoch as usize].tx.mark_as_sent(offset, length)
+        if let Some(stream) = &mut self.streams[epoch as usize] {
+            stream.tx.mark_as_sent(offset, length);
+        } else {
+            debug_assert!(false);
+        }
     }
 
     pub fn next_bytes(&self, epoch: u16, mode: TxMode) -> Option<(u64, &[u8])> {
-        self.streams[epoch as usize].tx.next_bytes(mode)
+        if let Some(stream) = &self.streams[epoch as usize] {
+            stream.tx.next_bytes(mode)
+        } else {
+            debug_assert!(false);
+            None
+        }
     }
 
     pub fn get_frame(
@@ -350,7 +424,10 @@ impl CryptoStreams {
         mode: TxMode,
         remaining: usize,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        if let Some((offset, data)) = self.next_bytes(epoch, mode) {
+        if epoch == 1 {
+            // 0Rtt epoch does not have crypto streams
+            None
+        } else if let Some((offset, data)) = self.next_bytes(epoch, mode) {
             let (frame, length) = Frame::new_crypto(offset, data, remaining);
             self.sent(epoch, offset, length);
 

@@ -784,6 +784,14 @@ impl Connection {
         Ok(())
     }
 
+    fn discard_keys(&mut self, pn_space: PNSpace) {
+        if self.crypto.is_discarded(pn_space) {
+            return;
+        }
+        self.loss_recovery.remove_state_for_pn_space(pn_space);
+        self.crypto.discard(pn_space);
+    }
+
     fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, Epoch)>> {
         let mut slc = &d[..];
         let mut frames = Vec::new();
@@ -802,6 +810,7 @@ impl Connection {
                         hex(slc),
                         e
                     );
+                    self.stats.dropped_rx += 1;
                     return Ok(frames); // Drop the remainder of the datagram.
                 }
             };
@@ -819,6 +828,7 @@ impl Connection {
                 }
                 (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {
                     qwarn!("dropping {:?}", hdr.tipe);
+                    self.stats.dropped_rx += 1;
                     return Ok(frames);
                 }
                 _ => {}
@@ -831,6 +841,7 @@ impl Connection {
                         hdr.version.unwrap(),
                         self.version,
                     );
+                    self.stats.dropped_rx += 1;
                     return Ok(frames);
                 }
             }
@@ -838,12 +849,14 @@ impl Connection {
             match self.state {
                 State::Init => {
                     qinfo!([self], "Received message while in Init state");
+                    self.stats.dropped_rx += 1;
                     return Ok(frames);
                 }
                 State::WaitInitial => {
                     qinfo!([self], "Received packet in WaitInitial");
                     if self.role == Role::Server {
                         if !self.is_valid_initial(&hdr) {
+                            self.stats.dropped_rx += 1;
                             return Ok(frames);
                         }
                         self.crypto.create_initial_state(self.role, &hdr.dcid);
@@ -852,7 +865,12 @@ impl Connection {
                 State::Handshaking | State::Connected => {
                     if !self.is_valid_cid(&hdr.dcid) {
                         qinfo!([self], "Ignoring packet with CID {:?}", hdr.dcid);
+                        self.stats.dropped_rx += 1;
                         return Ok(frames);
+                    }
+                    if self.role == Role::Server && matches!(hdr.tipe, PacketType::Handshake {..}) {
+                        // Server has received a Handshake packet -> discard Initial keys and states
+                        self.discard_keys(PNSpace::Initial);
                     }
                 }
                 State::Closing { .. } => {
@@ -863,6 +881,7 @@ impl Connection {
                 }
                 State::Closed(..) => {
                     // Do nothing.
+                    self.stats.dropped_rx += 1;
                     return Ok(frames);
                 }
             }
@@ -883,6 +902,8 @@ impl Connection {
                     self.start_handshake(hdr, &d)?;
                 }
                 self.process_migrations(&d)?;
+            } else {
+                self.stats.dropped_rx += 1;
             }
         }
         Ok(frames)
@@ -896,12 +917,8 @@ impl Connection {
             // but we still need to discharge the packet.
             None
         } else if epoch != 1 {
-            match self
-                .crypto
-                .states
-                .obtain(self.role, epoch, &self.crypto.tls)
-            {
-                Ok(CryptoState { rx, .. }) => rx.as_mut(),
+            match self.crypto.obtain(self.role, epoch) {
+                Ok(CryptoState::Active { rx, .. }) => rx.as_mut(),
                 _ => None,
             }
         } else if self.role == Role::Server {
@@ -1075,6 +1092,22 @@ impl Connection {
         out
     }
 
+    fn obtain_epoch_tx_crypto_state(&mut self, epoch: Epoch) -> Res<&mut CryptoDxState> {
+        if epoch == 1 && self.role == Role::Server {
+            Err(Error::KeysNotFound)
+        } else if epoch == 1 {
+            match &mut self.zero_rtt_state {
+                ZeroRttState::Sending(tx) => Ok(tx),
+                _ => Err(Error::KeysNotFound),
+            }
+        } else {
+            match self.crypto.obtain(self.role, epoch) {
+                Ok(CryptoState::Active { tx: Some(tx), .. }) => Ok(tx),
+                _ => Err(Error::KeysNotFound),
+            }
+        }
+    }
+
     #[allow(clippy::cognitive_complexity)]
     #[allow(clippy::useless_let_if_seq)]
     /// Build a datagram, possibly from multiple packets (for different PN
@@ -1096,23 +1129,9 @@ impl Connection {
             let mut tokens = Vec::new();
 
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let tx = if epoch == 1 && self.role == Role::Server {
+            if self.obtain_epoch_tx_crypto_state(epoch).is_err() {
                 continue;
-            } else if epoch == 1 {
-                match &mut self.zero_rtt_state {
-                    ZeroRttState::Sending(tx) => tx,
-                    _ => continue,
-                }
-            } else {
-                match self
-                    .crypto
-                    .states
-                    .obtain(self.role, epoch, &self.crypto.tls)
-                {
-                    Ok(CryptoState { tx: Some(tx), .. }) => tx,
-                    _ => continue,
-                }
-            };
+            }
 
             let hdr = PacketHdr::new(
                 0,
@@ -1147,8 +1166,12 @@ impl Connection {
             match &self.state {
                 State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
                     loop {
-                        let used =
-                            out_bytes.len() + encoder.len() + hdr.overhead(&tx.aead, path.mtu());
+                        let used = out_bytes.len()
+                            + encoder.len()
+                            + hdr.overhead(
+                                &self.obtain_epoch_tx_crypto_state(epoch)?.aead,
+                                path.mtu(),
+                            );
                         let remaining = min(
                             path.mtu().saturating_sub(used),
                             cong_avail.saturating_sub(used),
@@ -1242,7 +1265,8 @@ impl Connection {
             self.stats.packets_tx += 1;
             self.loss_recovery.inc_pn(space);
 
-            let mut packet = encode_packet(tx, &hdr, &encoder);
+            let mut packet =
+                encode_packet(self.obtain_epoch_tx_crypto_state(epoch)?, &hdr, &encoder);
 
             if self.tx_mode != TxMode::Pto && ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
@@ -1262,6 +1286,11 @@ impl Connection {
             dump_packet(self, "TX ->", &hdr, &encoder);
 
             out_bytes.append(&mut packet);
+
+            if self.role == Role::Client && space == PNSpace::Handshake {
+                // Client can send Handshake packets -> discard Initial keys and states
+                self.discard_keys(PNSpace::Initial);
+            }
         }
 
         if close_sent {
@@ -1374,7 +1403,15 @@ impl Connection {
                     _ => Error::CryptoError(e),
                 });
             }
-            Ok(msgs) => self.crypto.buffer_records(msgs),
+            Ok(msgs) => {
+                // Make sure we have built handshake keys.
+                if matches!(self.crypto.states[2], CryptoState::NoInit) {
+                    if self.crypto.try_to_get_crypto_state(self.role, 2).is_err() {
+                        qdebug!("We do not have keys for handshake epoch");
+                    }
+                }
+                self.crypto.buffer_records(msgs)
+            }
         }
 
         if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
@@ -1651,23 +1688,9 @@ impl Connection {
         }
 
         // Tell 0-RTT packets that they were "lost".
-        // TODO(mt) remove these from "bytes in flight" when we
-        // have a congestion controller.
-        for dropped in self.loss_recovery.drop_0rtt() {
-            for token in dropped.tokens {
-                match token {
-                    RecoveryToken::Ack(_) => {}
-                    RecoveryToken::Stream(st) => self.send_streams.lost(&st),
-                    RecoveryToken::Crypto(ct) => self.crypto.lost(&ct),
-                    RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
-                        &ft,
-                        &mut self.send_streams,
-                        &mut self.recv_streams,
-                        &mut self.indexes,
-                    ),
-                }
-            }
-        }
+        let dropped = self.loss_recovery.drop_0rtt();
+        self.handle_lost_packets(&dropped);
+
         self.send_streams.clear();
         self.recv_streams.clear();
         self.indexes = StreamIndexes::new();
@@ -2518,9 +2541,11 @@ mod tests {
         assert!(out.as_dgram_ref().is_none());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
 
-        // Four packets total received, two of them are dups
+        // Four packets total received, 1 of them is a dup and one has been dropped because Initial keys
+        // are dropped.
         assert_eq!(4, client.stats().packets_rx);
-        assert_eq!(2, client.stats().dups_rx);
+        assert_eq!(1, client.stats().dups_rx);
+        assert_eq!(1, client.stats().dropped_rx);
     }
 
     fn exchange_ticket(client: &mut Connection, server: &mut Connection) -> Vec<u8> {
@@ -3150,9 +3175,8 @@ mod tests {
 
         let frames = server.test_process_input(out.dgram().unwrap(), now + Duration::from_secs(11));
 
-        assert_eq!(frames[0], (Frame::Ping, 0));
-        assert_eq!(frames[1], (Frame::Ping, 2));
-        assert!(matches!(frames[2], (Frame::Stream { .. }, 3)));
+        assert_eq!(frames[0], (Frame::Ping, 2));
+        assert!(matches!(frames[1], (Frame::Stream { .. }, 3)));
     }
 
     #[test]
@@ -3243,9 +3267,8 @@ mod tests {
             now + Duration::from_secs(10) + Duration::from_millis(110),
         );
 
-        assert_eq!(frames[0], (Frame::Ping, 0));
-        assert_eq!(frames[1], (Frame::Ping, 2));
-        assert_eq!(frames[2], (Frame::Ping, 3));
+        assert_eq!(frames[0], (Frame::Ping, 2));
+        assert_eq!(frames[1], (Frame::Ping, 3));
     }
 
     #[test]
@@ -3693,5 +3716,61 @@ mod tests {
         // ACKing 2 packets should let client send 4.
         let c_tx_dgrams = send_bytes(&mut client, 0, now);
         assert_eq!(c_tx_dgrams.len(), 4);
+    }
+
+    fn check_discarded(peer: &mut Connection, pkt: Option<Datagram>, dropped: u64, dups: u64) {
+        let dropped_before = peer.stats.dropped_rx;
+        let dups_before = peer.stats.dups_rx;
+        let out = peer.process(pkt, now());
+        assert!(out.as_dgram_ref().is_none());
+        assert_eq!(dropped, peer.stats.dropped_rx - dropped_before);
+        assert_eq!(dups, peer.stats.dups_rx - dups_before);
+    }
+
+    #[test]
+    fn discarded_initial_keys() {
+        qdebug!("---- client: generate CH");
+        let mut client = default_client();
+        let init_pkt_c = client.process(None, now()).dgram();
+        assert!(init_pkt_c.is_some());
+        assert_eq!(init_pkt_c.as_ref().unwrap().len(), 1232);
+
+        qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+        let mut server = default_server();
+        let init_pkt_s = server.process(init_pkt_c.clone(), now()).dgram();
+        assert!(init_pkt_s.is_some());
+
+        qdebug!("---- client: cert verification");
+        let out = client.process(init_pkt_s.clone(), now()).dgram();
+        assert!(out.is_some());
+
+        // The client has received handshake packet. It will remove the Initial keys.
+        // We will check this by processing init_pkt_s a second time.
+        // The initial packet should be dropped. The packet contains a Handshake packet as well, which
+        // will be marked as dup.
+        check_discarded(&mut client, init_pkt_s.clone(), 1, 1);
+
+        assert!(maybe_authenticate(&mut client));
+
+        // The server has not removed the Initial keys yet, because it has not yet received a Handshake
+        // packet from the client.
+        // We will check this by processing init_pkt_c a second time.
+        // The dropped packet is padding. The Initial packet has been mark dup.
+        check_discarded(&mut server, init_pkt_c.clone(), 1, 1);
+
+        qdebug!("---- client: SH..FIN -> FIN");
+        let out = client.process(None, now()).dgram();
+        assert!(out.is_some());
+
+        // The server will process the first Handshake packet.
+        // After this the Initial keys will be dropped.
+        let out = server.process(out, now()).dgram();
+        assert!(out.is_some());
+
+        // Check that the Initial keys are dropped at the server
+        // We will check this by processing init_pkt_c a third time.
+        // The Initial packet has been dropped and padding that follows it.
+        // There is no dups, everything has been dropped.
+        check_discarded(&mut server, init_pkt_c, 1, 0);
     }
 }
