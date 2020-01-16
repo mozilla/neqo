@@ -169,8 +169,9 @@ fn dynamic_link_both(extra_libs: &[&str]) {
 
 fn static_link(nsstarget: &PathBuf) {
     let lib_dir = nsstarget.join("lib");
+    // Include a RPATH directive to make debugging easier.
     println!(
-        "cargo:rustc-link-search=native={}",
+        "cargo:rustc-cdylib-link-arg=-Wl,-rpath,{}",
         lib_dir.to_str().unwrap()
     );
     let mut static_libs = vec![
@@ -228,7 +229,6 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
 
     let mut builder = Builder::default().header(header);
     builder = builder.generate_comments(false);
-    builder = builder.derive_debug(false); // https://github.com/rust-lang/rust-bindgen/issues/372
 
     builder = builder.clang_arg("-v");
 
