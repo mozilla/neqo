@@ -79,6 +79,14 @@ impl SymKey {
     }
 }
 
+impl Clone for SymKey {
+    fn clone(&self) -> Self {
+        let ptr = unsafe { PK11_ReferenceSymKey(self.ptr) };
+        assert!(!ptr.is_null());
+        Self { ptr }
+    }
+}
+
 impl std::fmt::Debug for SymKey {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         if let Ok(b) = self.as_bytes() {
