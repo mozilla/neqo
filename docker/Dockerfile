@@ -8,7 +8,7 @@ LABEL maintainer="Martin Thomson <mt@lowentropy.net>"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates coreutils curl git make mercurial ssh \
-    build-essential clang gyp ninja-build pkg-config zlib1g-dev \
+    build-essential clang libclang-dev gyp ninja-build pkg-config zlib1g-dev \
  && apt-get autoremove -y && apt-get clean -y \
  && rm -rf /var/lib/apt/lists/*
 
