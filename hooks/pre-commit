@@ -8,7 +8,7 @@
 root="$(git rev-parse --show-toplevel 2>/dev/null)"
 
 # Some sanity checking.
-hash rustfmt || exit 1
+hash cargo || exit 1
 [[ -n "$root" ]] || exit 1
 
 # Installation.
@@ -23,19 +23,8 @@ if [[ "$1" == "install" ]]; then
     exit
 fi
 
-# Check rustfmt.
-err=0
-files=($(git diff --name-only --cached))
-tmp=$(mktemp)
-trap 'rm -f "$tmp"' ERR EXIT
-for f in "${files[@]}"; do
-    if [[ "${f##*.}" == "rs" ]]; then
-        git show :"$f" > "$tmp"
-        if ! cat "$tmp" | rustfmt | diff -q "$tmp" - >/dev/null; then
-            [ "$err" -eq 0 ] && echo "Formatting errors found in:" 1>&2
-            echo "  $f" 1>&2
-            err=1
-        fi
-    fi
-done
-exit "$err"
+# Check formatting.
+trap 'git stash pop -q' EXIT
+git stash push -k -u -q -m "pre-commit stash"
+cargo fmt -- --check -l
+exit $?
