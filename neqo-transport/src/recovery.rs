@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 
-use neqo_common::{const_max, const_min, qdebug, qinfo};
+use neqo_common::{const_max, const_min, qdebug, qinfo, qtrace};
 
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
@@ -184,6 +184,10 @@ impl LossRecoverySpace {
         earliest
     }
 
+    pub fn get_largest_acked(&self) -> Option<u64> {
+        self.largest_acked
+    }
+
     // Remove all the acked packets. Returns them in ascending order -- largest
     // (i.e. highest PN) acked packet is last.
     fn remove_acked(&mut self, acked_ranges: Vec<(u64, u64)>) -> (Vec<SentPacket>, bool) {
@@ -206,11 +210,9 @@ impl LossRecoverySpace {
     }
 
     /// Remove all tracked packets from the space.
-    /// This is called by a client when 0-RTT packets are dropped and when a Retry is received.
+    /// This is called by a client when 0-RTT packets are dropped, when a Retry is received
+    /// and when keys are dropped.
     fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
-        // The largest acknowledged or loss_time should still be unset.
-        // The client should not have received any ACK frames when it drops 0-RTT.
-        assert!(self.largest_acked.is_none());
         std::mem::replace(&mut self.sent_packets, BTreeMap::default())
             .into_iter()
             .map(|(_, v)| v)
@@ -357,6 +359,14 @@ impl CongestionControl {
         }
     }
 
+    fn discard(&mut self, pkt: &SentPacket) {
+        if pkt.in_flight {
+            assert!(self.bytes_in_flight >= pkt.size);
+            self.bytes_in_flight -= pkt.size;
+            qtrace!([self], "Ignore pkt with size {}", pkt.size);
+        }
+    }
+
     fn on_packet_sent(&mut self, pkt: &SentPacket) {
         if !pkt.in_flight {
             return;
@@ -464,8 +474,19 @@ impl LossRecovery {
         self.rtt_vals.pto()
     }
 
-    pub fn drop_0rtt(&mut self) -> impl Iterator<Item = SentPacket> {
-        self.spaces[PNSpace::ApplicationData].remove_ignored()
+    pub fn drop_0rtt(&mut self) -> Vec<SentPacket> {
+        // The largest acknowledged or loss_time should still be unset.
+        // The client should not have received any ACK frames when it drops 0-RTT.
+        assert!(self.spaces[PNSpace::ApplicationData]
+            .get_largest_acked()
+            .is_none());
+        self.spaces[PNSpace::ApplicationData]
+            .remove_ignored()
+            .map(|p| {
+                self.cc.discard(&p);
+                p
+            })
+            .collect()
     }
 
     pub fn on_packet_sent(
@@ -555,9 +576,23 @@ impl LossRecovery {
     /// When receiving a retry, get all the sent packets so that they can be flushed.
     /// We also need to pretend that they never happened for the purposes of congestion control.
     pub fn retry(&mut self) -> Vec<SentPacket> {
+        let cc = &mut self.cc;
         self.spaces
             .iter_mut()
             .flat_map(|spc| spc.remove_ignored())
+            .map(|p| {
+                cc.discard(&p);
+                p
+            })
+            .collect()
+    }
+
+    pub fn remove_state_for_pn_space(&mut self, pn_space: PNSpace) {
+        self.spaces[pn_space]
+            .remove_ignored()
+            .map(|p| {
+                self.cc.discard(&p);
+            })
             .collect()
     }
 
