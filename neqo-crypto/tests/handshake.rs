@@ -30,10 +30,7 @@ fn handshake(now: Instant, client: &mut SecretAgent, server: &mut SecretAgent) {
     let mut a = client;
     let mut b = server;
     let mut records = a.handshake_raw(now, None).unwrap();
-    let is_done = |agent: &mut SecretAgent| match *agent.state() {
-        HandshakeState::Complete(_) | HandshakeState::Failed(_) => true,
-        _ => false,
-    };
+    let is_done = |agent: &mut SecretAgent| agent.state().is_final();
     while !is_done(b) {
         records = match forward_records(now, &mut b, records) {
             Ok(r) => r,
@@ -56,8 +53,8 @@ pub fn connect_at(now: Instant, client: &mut SecretAgent, server: &mut SecretAge
     handshake(now, client, server);
     qinfo!("client: {:?}", client.state());
     qinfo!("server: {:?}", server.state());
-    assert!(client.state().connected());
-    assert!(server.state().connected());
+    assert!(client.state().is_connected());
+    assert!(server.state().is_connected());
 }
 
 pub fn connect(client: &mut SecretAgent, server: &mut SecretAgent) {
@@ -66,8 +63,8 @@ pub fn connect(client: &mut SecretAgent, server: &mut SecretAgent) {
 
 pub fn connect_fail(client: &mut SecretAgent, server: &mut SecretAgent) {
     handshake(now(), client, server);
-    assert!(!client.state().connected());
-    assert!(!server.state().connected());
+    assert!(!client.state().is_connected());
+    assert!(!server.state().is_connected());
 }
 
 #[derive(Clone, Copy, Debug)]

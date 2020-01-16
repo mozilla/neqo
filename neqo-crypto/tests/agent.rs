@@ -48,7 +48,7 @@ fn basic() {
     // Calling handshake() again indicates that we're happy with the cert.
     let bytes = client.handshake(now(), &[]).expect("send CF");
     assert!(!bytes.is_empty());
-    assert!(client.state().connected());
+    assert!(client.state().is_connected());
 
     let client_info = client.info().expect("got info");
     assert_eq!(TLS_VERSION_1_3, client_info.version());
@@ -56,7 +56,7 @@ fn basic() {
 
     let bytes = server.handshake(now(), &bytes[..]).expect("finish");
     assert!(bytes.is_empty());
-    assert!(server.state().connected());
+    assert!(server.state().is_connected());
 
     let server_info = server.info().expect("got info");
     assert_eq!(TLS_VERSION_1_3, server_info.version());
@@ -112,11 +112,11 @@ fn raw() {
     // Calling handshake() again indicates that we're happy with the cert.
     let client_records = client.handshake_raw(now(), None).expect("send CF");
     assert!(!client_records.is_empty());
-    assert!(client.state().connected());
+    assert!(client.state().is_connected());
 
     let server_records = forward_records(now(), &mut server, client_records).expect("finish");
     assert!(server_records.is_empty());
-    assert!(server.state().connected());
+    assert!(server.state().is_connected());
 
     // The client should have one certificate for the server.
     let mut certs = client.peer_certificate().unwrap();

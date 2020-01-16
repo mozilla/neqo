@@ -19,7 +19,7 @@ use crate::secrets::SecretHolder;
 use crate::ssl::{self, PRBool};
 use crate::time::{PRTime, Time};
 
-use neqo_common::{qdebug, qinfo, qwarn};
+use neqo_common::{matches, qdebug, qinfo, qwarn};
 use std::cell::RefCell;
 use std::convert::{TryFrom, TryInto};
 use std::ffi::CString;
@@ -43,11 +43,13 @@ pub enum HandshakeState {
 
 impl HandshakeState {
     #[must_use]
-    pub fn connected(&self) -> bool {
-        match self {
-            Self::Complete(_) => true,
-            _ => false,
-        }
+    pub fn is_connected(&self) -> bool {
+        matches!(self, Self::Complete(_))
+    }
+
+    #[must_use]
+    pub fn is_final(&self) -> bool {
+        matches!(self, Self::Complete(_) | Self::Failed(_))
     }
 }
 
@@ -123,7 +125,7 @@ impl SecretAgentPreInfo {
     }
     #[must_use]
     pub fn max_early_data(&self) -> usize {
-        self.info.maxEarlyDataSize as usize
+        usize::try_from(self.info.maxEarlyDataSize).unwrap()
     }
     #[must_use]
     pub fn alpn(&self) -> Option<&String> {
