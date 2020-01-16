@@ -29,11 +29,12 @@ experimental_api!(SSL_HkdfExpandLabelWithMech(
     secret: *mut *mut PK11SymKey,
 ));
 
+#[derive(Clone)]
 pub struct HpKey(SymKey);
 
 impl Debug for HpKey {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("HP Key")
+        write!(f, "HP-{:?}", self.0)
     }
 }
 
