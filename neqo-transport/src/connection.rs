@@ -21,18 +21,18 @@ use smallvec::SmallVec;
 use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder};
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, AuthenticationStatus, Client, Epoch, HandshakeState, Record,
-    SecretAgentInfo, Server,
+    Agent, AntiReplay, AuthenticationStatus, Client, HandshakeState, Record, SecretAgentInfo,
+    Server,
 };
 
-use crate::crypto::{Crypto, CryptoDxDirection, CryptoDxState, CryptoState};
+use crate::crypto::Crypto;
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{AckRange, Frame, FrameType, StreamType, TxMode};
 use crate::packet::{
-    decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, ConnectionIdDecoder, PacketHdr,
-    PacketNumberDecoder, PacketType,
+    decode_packet_hdr, decrypt_packet_body, decrypt_packet_hdr, encode_packet, ConnectionId,
+    ConnectionIdDecoder, HeaderProtectionMask, PacketHdr, PacketType,
 };
 use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
@@ -48,8 +48,6 @@ use crate::{AppError, ConnectionError, Error, Res};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
-
-const NUM_EPOCHS: Epoch = 4;
 
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
@@ -122,9 +120,9 @@ impl PartialOrd for State {
 #[derive(Debug)]
 enum ZeroRttState {
     Init,
-    Sending(CryptoDxState),
+    Sending,
     AcceptedClient,
-    AcceptedServer(CryptoDxState),
+    AcceptedServer,
     Rejected,
 }
 
@@ -322,10 +320,11 @@ pub struct Connection {
 
 impl Debug for Connection {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_fmt(format_args!(
+        write!(
+            f,
             "{:?} Connection: {:?} {:?}",
             self.role, self.state, self.path
-        ))
+        )
     }
 }
 
@@ -353,7 +352,7 @@ impl Connection {
                 remote_cid: dcid.clone(),
             }),
         );
-        c.crypto.create_initial_state(Role::Client, &dcid);
+        c.crypto.states.init(Role::Client, &dcid);
         Ok(c)
     }
 
@@ -569,7 +568,7 @@ impl Connection {
     /// Call by application when the peer cert has been verified
     pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
         self.crypto.tls.authenticated(status);
-        let res = self.handshake(now, 0, None);
+        let res = self.handshake(now, PNSpace::Initial, None);
         self.absorb_error(now, res);
     }
 
@@ -622,6 +621,9 @@ impl Connection {
             return;
         }
 
+        let res = self.crypto.states.check_key_update(now);
+        self.absorb_error(now, res);
+
         if self.idle_timeout.expired(now) {
             qinfo!("idle timeout expired");
             self.set_state(State::Closed(ConnectionError::Transport(
@@ -642,7 +644,7 @@ impl Connection {
 
     /// Just like above but returns frames parsed from the datagram
     #[cfg(test)]
-    pub fn test_process_input(&mut self, dgram: Datagram, now: Instant) -> Vec<(Frame, Epoch)> {
+    pub fn test_process_input(&mut self, dgram: Datagram, now: Instant) -> Vec<(Frame, PNSpace)> {
         let res = self.input(dgram, now);
         let frames = self.absorb_error(now, res).unwrap_or_default();
         self.cleanup_streams();
@@ -665,6 +667,10 @@ impl Connection {
 
         if let Some(idle_time) = self.idle_timeout.as_instant() {
             delays.push(idle_time);
+        }
+
+        if let Some(key_update_time) = self.crypto.states.update_time() {
+            delays.push(key_update_time);
         }
 
         // Should always at least have idle timeout, once connected
@@ -750,15 +756,18 @@ impl Connection {
         qdebug!([self], "received Retry");
         if self.retry_info.is_some() {
             qinfo!([self], "Dropping extra Retry");
+            self.stats.dropped_rx += 1;
             return Ok(());
         }
         if token.is_empty() {
             qinfo!([self], "Dropping Retry without a token");
+            self.stats.dropped_rx += 1;
             return Ok(());
         }
         match self.path.iter_mut().find(|p| p.remote_cid == *odcid) {
             None => {
                 qinfo!([self], "Ignoring Retry with mismatched ODCID");
+                self.stats.dropped_rx += 1;
                 return Ok(());
             }
             Some(path) => {
@@ -778,19 +787,16 @@ impl Connection {
 
         // Switching crypto state here might not happen eventually.
         // https://github.com/quicwg/base-drafts/issues/2823
-        self.crypto.create_initial_state(self.role, scid);
+        self.crypto.states.init(self.role, scid);
         Ok(())
     }
 
-    fn discard_keys(&mut self, pn_space: PNSpace) {
-        if self.crypto.is_discarded(pn_space) {
-            return;
-        }
-        self.loss_recovery.remove_state_for_pn_space(pn_space);
-        self.crypto.discard(pn_space);
+    fn discard_keys(&mut self, space: PNSpace) {
+        self.loss_recovery.discard(space);
+        self.crypto.discard(space);
     }
 
-    fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, Epoch)>> {
+    fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, PNSpace)>> {
         let mut slc = &d[..];
         let mut frames = Vec::new();
 
@@ -857,7 +863,7 @@ impl Connection {
                             self.stats.dropped_rx += 1;
                             return Ok(frames);
                         }
-                        self.crypto.create_initial_state(self.role, &hdr.dcid);
+                        self.crypto.states.init(self.role, &hdr.dcid);
                     }
                 }
                 State::Handshaking | State::Connected => {
@@ -886,9 +892,9 @@ impl Connection {
 
             qdebug!([self], "Received unverified packet {:?}", hdr);
 
-            let body = self.decrypt_body(&mut hdr, slc);
+            let body = self.decrypt_packet(&mut hdr, slc, now);
             slc = &slc[hdr.hdr_len + hdr.body_len()..];
-            if let Some(body) = body {
+            if let Ok(body) = body {
                 // TODO(ekr@rtfm.com): Have the server blow away the initial
                 // crypto state if this fails? Otherwise, we will get a panic
                 // on the assert for doesn't exist.
@@ -901,47 +907,49 @@ impl Connection {
                 }
                 self.process_migrations(&d)?;
             } else {
+                // Decryption failure, or not having keys is not fatal.
+                // If the state isn't available, or we can't decrypt the packet, drop
+                // the rest of the datagram on the floor, but don't generate an error.
                 self.stats.dropped_rx += 1;
             }
         }
         Ok(frames)
     }
 
-    fn obtain_epoch_rx_crypto_state(&mut self, epoch: Epoch) -> Option<&mut CryptoDxState> {
-        if (self.state == State::Handshaking) && (epoch == 3) && (self.role() == Role::Server) {
-            // We got a packet for epoch 3 but the connection is still in the Handshaking
-            // state -> discharge the packet.
-            // On the server side we have keys for epoch 3 before we enter the epoch,
-            // but we still need to discharge the packet.
-            None
-        } else if epoch != 1 {
-            match self.crypto.obtain(self.role, epoch) {
-                Ok(CryptoState::Active { rx, .. }) => rx.as_mut(),
-                _ => None,
+    /// Decrypt a packet and - if successful - return the body.
+    fn decrypt_packet(
+        &mut self,
+        mut hdr: &mut PacketHdr,
+        slc: &[u8],
+        now: Instant,
+    ) -> Res<Vec<u8>> {
+        let space = hdr.tipe.space();
+        // This has to work in two stages because we need to remove header protection
+        // before picking the keys to use.
+        if let Some(rx) = self.crypto.states.rx_hp(space) {
+            // Note that this will dump early, which creates a side-channel.
+            // This is OK in this case because we the only reason this can
+            // fail is if the cryptographic module is bad or the packet is
+            // too small (which is public information).
+            let (hdrbytes, body) = decrypt_packet_hdr(rx, &mut hdr, slc)?;
+            qtrace!([rx], "decoded header: {:?}", hdr);
+            if let Some(rx) = self.crypto.states.rx(space, hdr.tipe.key_phase()) {
+                let res = decrypt_packet_body(rx, hdr.pn, &hdrbytes, body);
+                if res.is_ok() {
+                    // If this is the first packet ever successfully decrypted
+                    // using `rx`, make sure to initiate a key update.
+                    if rx.needs_update() {
+                        let pto = self.loss_recovery.pto();
+                        self.crypto.states.key_update_received(now + pto)?;
+                    }
+                }
+                self.crypto.states.check_pn_overlap()?;
+                res
+            } else {
+                Err(Error::DecryptError)
             }
-        } else if self.role == Role::Server {
-            if let ZeroRttState::AcceptedServer(rx) = &mut self.zero_rtt_state {
-                return Some(rx);
-            }
-            None
         } else {
-            None
-        }
-    }
-
-    fn decrypt_body(&mut self, mut hdr: &mut PacketHdr, slc: &[u8]) -> Option<Vec<u8>> {
-        // Decryption failure, or not having keys is not fatal.
-        // If the state isn't available, or we can't decrypt the packet, drop
-        // the rest of the datagram on the floor, but don't generate an error.
-        let largest_acknowledged = self
-            .loss_recovery
-            .largest_acknowledged_pn(PNSpace::from(hdr.epoch));
-        match self.obtain_epoch_rx_crypto_state(hdr.epoch) {
-            Some(rx) => {
-                let pn_decoder = PacketNumberDecoder::new(largest_acknowledged);
-                decrypt_packet(rx, pn_decoder, &mut hdr, slc).ok()
-            }
-            _ => None,
+            Err(Error::DecryptError)
         }
     }
 
@@ -951,7 +959,7 @@ impl Connection {
         hdr: &PacketHdr,
         body: Vec<u8>,
         now: Instant,
-    ) -> Res<Vec<(Frame, Epoch)>> {
+    ) -> Res<Vec<(Frame, PNSpace)>> {
         // TODO(ekr@rtfm.com): Have the server blow away the initial
         // crypto state if this fails? Otherwise, we will get a panic
         // on the assert for doesn't exist.
@@ -959,14 +967,9 @@ impl Connection {
 
         // TODO(ekr@rtfm.com): Filter for valid for this epoch.
 
-        let space = PNSpace::from(hdr.epoch);
+        let space = hdr.tipe.space();
         if self.acks[space].is_duplicate(hdr.pn) {
-            qdebug!(
-                [self],
-                "Received duplicate packet epoch={} pn={}",
-                hdr.epoch,
-                hdr.pn
-            );
+            qdebug!([self], "Duplicate packet from {} pn={}", space, hdr.pn);
             self.stats.dups_rx += 1;
             return Ok(vec![]);
         }
@@ -978,37 +981,16 @@ impl Connection {
         while d.remaining() > 0 {
             let f = Frame::decode(&mut d)?;
             if cfg!(test) {
-                frames.push((f.clone(), hdr.epoch));
+                frames.push((f.clone(), space));
             }
             ack_eliciting |= f.ack_eliciting();
             let t = f.get_type();
-            let res = self.input_frame(hdr.epoch, f, now);
+            let res = self.input_frame(&hdr.tipe, f, now);
             self.capture_error(now, t, res)?;
         }
         self.acks[space].set_received(now, hdr.pn, ack_eliciting);
 
         Ok(frames)
-    }
-
-    fn get_zero_rtt_crypto(&mut self) -> Option<CryptoDxState> {
-        match self.crypto.tls.preinfo() {
-            Err(_) => None,
-            Ok(preinfo) => {
-                match preinfo.early_data_cipher() {
-                    Some(cipher) => {
-                        match self.role {
-                            Role::Client => self.crypto.tls.write_secret(1).map(|ws| {
-                                CryptoDxState::new(CryptoDxDirection::Write, 1, ws, cipher)
-                            }),
-                            Role::Server => self.crypto.tls.read_secret(1).map(|rs| {
-                                CryptoDxState::new(CryptoDxDirection::Read, 1, rs, cipher)
-                            }),
-                        }
-                    }
-                    None => None,
-                }
-            }
-        }
     }
 
     fn start_handshake(&mut self, hdr: PacketHdr, d: &Datagram) -> Res<()> {
@@ -1023,18 +1005,12 @@ impl Connection {
                 .push(self.cid_manager.borrow_mut().generate_cid());
             self.path = Some(p);
 
-            // SecretAgentPreinfo::early_data() always returns false for a server,
-            // but a non-zero maximum tells us if we are accepting 0-RTT.
-            self.zero_rtt_state = if self.crypto.tls.preinfo()?.max_early_data() > 0 {
-                match self.get_zero_rtt_crypto() {
-                    Some(cs) => ZeroRttState::AcceptedServer(cs),
-                    None => {
-                        debug_assert!(false, "We must have zero-rtt keys.");
-                        ZeroRttState::Rejected
-                    }
+            self.zero_rtt_state = match self.crypto.enable_0rtt(self.role) {
+                Ok(true) => {
+                    qdebug!([self], "Accepted 0-RTT");
+                    ZeroRttState::AcceptedServer
                 }
-            } else {
-                ZeroRttState::Rejected
+                _ => ZeroRttState::Rejected,
             };
         } else {
             qdebug!(
@@ -1074,22 +1050,6 @@ impl Connection {
         }
     }
 
-    fn obtain_epoch_tx_crypto_state(&mut self, epoch: Epoch) -> Res<&mut CryptoDxState> {
-        if epoch == 1 && self.role == Role::Server {
-            Err(Error::KeysNotFound)
-        } else if epoch == 1 {
-            match &mut self.zero_rtt_state {
-                ZeroRttState::Sending(tx) => Ok(tx),
-                _ => Err(Error::KeysNotFound),
-            }
-        } else {
-            match self.crypto.obtain(self.role, epoch) {
-                Ok(CryptoState::Active { tx: Some(tx), .. }) => Ok(tx),
-                _ => Err(Error::KeysNotFound),
-            }
-        }
-    }
-
     #[allow(clippy::cognitive_complexity)]
     #[allow(clippy::useless_let_if_seq)]
     /// Build a datagram, possibly from multiple packets (for different PN
@@ -1101,36 +1061,40 @@ impl Connection {
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
-        for epoch in 0..NUM_EPOCHS {
-            let space = PNSpace::from(epoch);
+        for space in PNSpace::iter() {
             let mut encoder = Encoder::default();
             let mut tokens = Vec::new();
 
             // Ensure we have tx crypto state for this epoch, or skip it.
-            if self.obtain_epoch_tx_crypto_state(epoch).is_err() {
+            let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
+                tx_state
+            } else {
                 continue;
-            }
+            };
 
             let hdr = PacketHdr::new(
                 0,
-                match epoch {
-                    0 => {
+                match space {
+                    PNSpace::Initial => {
                         let token = match &self.retry_info {
                             Some(v) => v.token.clone(),
                             _ => Vec::new(),
                         };
                         PacketType::Initial(token)
                     }
-                    1 => PacketType::ZeroRTT,
-                    2 => PacketType::Handshake,
-                    3 => PacketType::Short,
-                    _ => unimplemented!(), // TODO(ekr@rtfm.com): Key Update.
+                    PNSpace::Handshake => PacketType::Handshake,
+                    PNSpace::ApplicationData => {
+                        if tx.is_0rtt() {
+                            PacketType::ZeroRTT
+                        } else {
+                            PacketType::Short(tx.key_phase())
+                        }
+                    }
                 },
                 Some(self.version),
                 path.remote_cid.clone(),
                 path.local_cids.first().cloned(),
-                self.loss_recovery.next_pn(space),
-                epoch,
+                tx.next_pn(),
             );
 
             let mut ack_eliciting = false;
@@ -1146,10 +1110,7 @@ impl Connection {
                     loop {
                         let used = out_bytes.len()
                             + encoder.len()
-                            + hdr.overhead(
-                                &self.obtain_epoch_tx_crypto_state(epoch)?.aead,
-                                path.mtu(),
-                            );
+                            + hdr.overhead(tx.expansion(), path.mtu());
                         let remaining = min(
                             path.mtu().saturating_sub(used),
                             cong_avail.saturating_sub(used),
@@ -1162,16 +1123,16 @@ impl Connection {
                         // Try to get a frame from frame sources
                         let mut frame = None;
                         if self.tx_mode == TxMode::Normal {
-                            frame = self.acks.get_frame(now, epoch);
+                            frame = self.acks.get_frame(now, *space);
                         }
-                        if frame.is_none() {
-                            frame = self.crypto.streams.get_frame(epoch, tx_mode, remaining)
+                        if frame.is_none() && !tx.is_0rtt() {
+                            frame = self.crypto.streams.get_frame(*space, tx_mode, remaining)
                         }
                         if frame.is_none() && self.tx_mode == TxMode::Normal {
-                            frame = self.flow_mgr.borrow_mut().get_frame(epoch, remaining);
+                            frame = self.flow_mgr.borrow_mut().get_frame(*space, remaining);
                         }
                         if frame.is_none() {
-                            frame = self.send_streams.get_frame(epoch, tx_mode, remaining)
+                            frame = self.send_streams.get_frame(*space, tx_mode, remaining)
                         }
                         if frame.is_none() && self.tx_mode == TxMode::Pto {
                             frame = Some((Frame::Ping, None));
@@ -1207,11 +1168,13 @@ impl Connection {
                 } => {
                     if self.flow_mgr.borrow().need_close_frame() {
                         // ConnectionClose frame not allowed for 0RTT
-                        if epoch == 1 {
+                        if matches!(hdr.tipe, PacketType::ZeroRTT) {
                             continue;
                         }
                         // ConnectionError::Application only allowed at 1RTT
-                        if epoch != 3 && matches!(error, ConnectionError::Application(_)) {
+                        if *space != PNSpace::ApplicationData
+                            && matches!(error, ConnectionError::Application(_))
+                        {
                             continue;
                         }
                         let frame = Frame::ConnectionClose {
@@ -1231,20 +1194,17 @@ impl Connection {
                 continue;
             }
 
-            qdebug!("Need to send a packet");
-            match epoch {
+            qdebug!("Need to send a packet: {:?}", hdr);
+            match hdr.tipe {
                 // Packets containing Initial packets need padding.
-                0 => needs_padding = true,
-                1 => (),
+                PacketType::Initial(_) => needs_padding = true,
+                PacketType::ZeroRTT => (),
                 // ...unless they include higher epochs.
                 _ => needs_padding = false,
             }
 
             self.stats.packets_tx += 1;
-            self.loss_recovery.inc_pn(space);
-
-            let mut packet =
-                encode_packet(self.obtain_epoch_tx_crypto_state(epoch)?, &hdr, &encoder);
+            let mut packet = encode_packet(tx, &hdr, &encoder);
 
             if self.tx_mode != TxMode::Pto && ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
@@ -1256,7 +1216,7 @@ impl Connection {
             };
 
             self.loss_recovery.on_packet_sent(
-                space,
+                *space,
                 hdr.pn,
                 SentPacket::new(now, ack_eliciting, tokens, packet.len(), in_flight),
             );
@@ -1265,7 +1225,7 @@ impl Connection {
 
             out_bytes.append(&mut packet);
 
-            if self.role == Role::Client && space == PNSpace::Handshake {
+            if self.role == Role::Client && *space == PNSpace::Handshake {
                 // Client can send Handshake packets -> discard Initial keys and states
                 self.discard_keys(PNSpace::Initial);
             }
@@ -1294,20 +1254,34 @@ impl Connection {
         }
     }
 
+    pub fn initiate_key_update(&mut self) -> Res<()> {
+        // TODO(mt): this needs to be confirmed, not connected.
+        if self.state == State::Connected {
+            let la = self
+                .loss_recovery
+                .largest_acknowledged_pn(PNSpace::ApplicationData);
+            qinfo!([self], "Initiating key update");
+            self.crypto.states.initiate_key_update(la)
+        } else {
+            Err(Error::NotConnected)
+        }
+    }
+
+    #[cfg(test)]
+    pub fn get_epochs(&self) -> (Option<usize>, Option<usize>) {
+        self.crypto.states.get_epochs()
+    }
+
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self], "client_start");
-        self.handshake(now, 0, None)?;
+        self.handshake(now, PNSpace::Initial, None)?;
         self.set_state(State::WaitInitial);
-        if self.crypto.tls.preinfo()?.early_data() {
-            qdebug!([self], "Enabling 0-RTT");
-            self.zero_rtt_state = match self.get_zero_rtt_crypto() {
-                Some(cs) => ZeroRttState::Sending(cs),
-                None => {
-                    debug_assert!(false, "We must have zero-rtt keys.");
-                    ZeroRttState::Rejected
-                }
-            };
-        }
+        self.zero_rtt_state = if self.crypto.enable_0rtt(self.role)? {
+            qdebug!([self], "Enabled 0-RTT");
+            ZeroRttState::Sending
+        } else {
+            ZeroRttState::Init
+        };
         Ok(())
     }
 
@@ -1356,19 +1330,20 @@ impl Connection {
         }
     }
 
-    fn handshake(&mut self, now: Instant, epoch: u16, data: Option<&[u8]>) -> Res<()> {
-        qdebug!("Handshake epoch={} data={:0x?}", epoch, data);
+    fn handshake(&mut self, now: Instant, space: PNSpace, data: Option<&[u8]>) -> Res<()> {
+        qdebug!("Handshake space={} data={:0x?}", space, data);
 
-        let rec = data
-            .map(|d| {
-                qdebug!([self], "Handshake received {:0x?} ", d);
-                Some(Record {
-                    ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
-                    epoch,
-                    data: d.to_vec(),
-                })
+        let rec = if let Some(d) = data {
+            qdebug!([self], "Handshake received {:0x?} ", d);
+            Some(Record {
+                ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
+                epoch: space.into(),
+                data: d.to_vec(),
             })
-            .unwrap_or(None);
+        } else {
+            None
+        };
+        let try_update = rec.is_some();
 
         match self.crypto.tls.handshake_raw(now, rec) {
             Err(e) => {
@@ -1378,31 +1353,25 @@ impl Connection {
                     _ => Error::CryptoError(e),
                 });
             }
-            Ok(msgs) => {
-                // Make sure we have built handshake keys.
-                if matches!(self.crypto.states[2], CryptoState::NoInit)
-                    && self.crypto.try_to_get_crypto_state(self.role, 2).is_err()
-                {
-                    qdebug!("We do not have keys for handshake epoch");
-                }
-                self.crypto.buffer_records(msgs)
-            }
+            Ok(msgs) => self.crypto.buffer_records(msgs),
         }
 
-        if *self.crypto.tls.state() == HandshakeState::AuthenticationPending {
-            self.events.authentication_needed();
-        } else if matches!(self.crypto.tls.state(), HandshakeState::Complete(_)) {
-            qinfo!([self], "TLS handshake completed");
-
-            if self.crypto.tls.info().map(SecretAgentInfo::alpn).is_none() {
-                qwarn!([self], "No ALPN. Closing connection.");
-                // 120 = no_application_protocol
-                return Err(Error::CryptoAlert(120));
+        match self.crypto.tls.state() {
+            HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
+            HandshakeState::AuthenticationPending => self.events.authentication_needed(),
+            HandshakeState::Complete(_) => {
+                if self.state != State::Connected {
+                    self.set_connected(now)?;
+                }
             }
-
-            self.validate_odcid()?;
-            self.set_state(State::Connected);
-            self.set_initial_limits();
+            _ => {
+                unreachable!("Crypto state should not be new or failed after successful handshake")
+            }
+        }
+        // There is a chance that this could be called less often, but getting the
+        // conditions right is a little tricky, so call it on every  CRYPTO frame.
+        if try_update {
+            self.crypto.install_keys(self.role);
         }
         Ok(())
     }
@@ -1425,8 +1394,8 @@ impl Connection {
         }
     }
 
-    fn input_frame(&mut self, epoch: Epoch, frame: Frame, now: Instant) -> Res<()> {
-        if !frame.is_allowed(epoch) {
+    fn input_frame(&mut self, ptype: &PacketType, frame: Frame, now: Instant) -> Res<()> {
+        if !frame.is_allowed(ptype) {
             return Err(Error::ProtocolViolation);
         }
         match frame {
@@ -1443,7 +1412,7 @@ impl Connection {
                 ack_ranges,
             } => {
                 self.handle_ack(
-                    epoch,
+                    ptype.space(),
                     largest_acknowledged,
                     ack_delay,
                     first_ack_range,
@@ -1472,19 +1441,20 @@ impl Connection {
                 }
             }
             Frame::Crypto { offset, data } => {
+                let space = ptype.space();
                 qdebug!(
                     [self],
-                    "Crypto frame on epoch={} offset={}, data={:0x?}",
-                    epoch,
+                    "Crypto frame on space={} offset={}, data={:0x?}",
+                    space,
                     offset,
                     &data
                 );
-                self.crypto.streams.inbound_frame(epoch, offset, data)?;
-                if self.crypto.streams.data_ready(epoch) {
+                self.crypto.streams.inbound_frame(space, offset, data)?;
+                if self.crypto.streams.data_ready(space) {
                     let mut buf = Vec::new();
-                    let read = self.crypto.streams.read_to_end(epoch, &mut buf)?;
+                    let read = self.crypto.streams.read_to_end(space, &mut buf)?;
                     qdebug!("Read {} bytes", read);
-                    self.handshake(now, epoch, Some(&buf))?;
+                    self.handshake(now, space, Some(&buf))?;
                 }
             }
             Frame::NewToken { token } => self.token = Some(token),
@@ -1615,7 +1585,7 @@ impl Connection {
 
     fn handle_ack(
         &mut self,
-        epoch: Epoch,
+        space: PNSpace,
         largest_acknowledged: u64,
         ack_delay: u64,
         first_ack_range: u64,
@@ -1624,8 +1594,8 @@ impl Connection {
     ) -> Res<()> {
         qinfo!(
             [self],
-            "Rx ACK epoch={}, largest_acked={}, first_ack_range={}, ranges={:?}",
-            epoch,
+            "Rx ACK space={}, largest_acked={}, first_ack_range={}, ranges={:?}",
+            space,
             largest_acknowledged,
             first_ack_range,
             ack_ranges
@@ -1634,7 +1604,7 @@ impl Connection {
         let acked_ranges =
             Frame::decode_ack_frame(largest_acknowledged, first_ack_range, ack_ranges)?;
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
-            PNSpace::from(epoch),
+            space,
             largest_acknowledged,
             acked_ranges,
             Duration::from_millis(ack_delay),
@@ -1658,9 +1628,10 @@ impl Connection {
 
     /// When the server rejects 0-RTT we need to drop a bunch of stuff.
     fn client_0rtt_rejected(&mut self) {
-        if !matches!(self.zero_rtt_state, ZeroRttState::Sending(..)) {
+        if !matches!(self.zero_rtt_state, ZeroRttState::Sending) {
             return;
         }
+        qdebug!([self], "0-RTT rejected");
 
         // Tell 0-RTT packets that they were "lost".
         let dropped = self.loss_recovery.drop_0rtt();
@@ -1669,7 +1640,38 @@ impl Connection {
         self.send_streams.clear();
         self.recv_streams.clear();
         self.indexes = StreamIndexes::new();
+        self.crypto.states.discard_0rtt_keys();
         self.events.client_0rtt_rejected();
+    }
+
+    fn set_connected(&mut self, now: Instant) -> Res<()> {
+        qinfo!([self], "TLS connection complete");
+        if self.crypto.tls.info().map(SecretAgentInfo::alpn).is_none() {
+            qwarn!([self], "No ALPN. Closing connection.");
+            // 120 = no_application_protocol
+            return Err(Error::CryptoAlert(120));
+        }
+        if self.role == Role::Server {
+            // Remove the randomized client CID from the list of acceptable CIDs.
+            assert_eq!(1, self.valid_cids.len());
+            self.valid_cids.clear();
+        } else {
+            self.zero_rtt_state = if self.crypto.tls.info().unwrap().early_data_accepted() {
+                ZeroRttState::AcceptedClient
+            } else {
+                self.client_0rtt_rejected();
+                ZeroRttState::Rejected
+            };
+        }
+
+        // Setting application keys has to occur after 0-RTT rejection.
+        let pto = self.loss_recovery.pto();
+        self.crypto.set_application_keys(now + pto)?;
+        self.validate_odcid()?;
+        self.set_initial_limits();
+        self.set_state(State::Connected);
+        qinfo!([self], "Connection established");
+        Ok(())
     }
 
     fn set_state(&mut self, state: State) {
@@ -1677,21 +1679,6 @@ impl Connection {
             qinfo!([self], "State change from {:?} -> {:?}", self.state, state);
             self.state = state.clone();
             match &self.state {
-                State::Connected => {
-                    if self.role == Role::Server {
-                        // Remove the randomized client CID from the list of acceptable CIDs.
-                        assert_eq!(1, self.valid_cids.len());
-                        self.valid_cids.clear();
-                    } else {
-                        self.zero_rtt_state =
-                            if self.crypto.tls.info().unwrap().early_data_accepted() {
-                                ZeroRttState::AcceptedClient
-                            } else {
-                                self.client_0rtt_rejected();
-                                ZeroRttState::Rejected
-                            }
-                    }
-                }
                 State::Closing { .. } => {
                     self.send_streams.clear();
                     self.recv_streams.clear();
@@ -1755,7 +1742,7 @@ impl Connection {
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
         match (&self.state, &self.zero_rtt_state) {
-            (State::Connected, _) | (State::Handshaking, ZeroRttState::AcceptedServer(..)) => (),
+            (State::Connected, _) | (State::Handshaking, ZeroRttState::AcceptedServer) => (),
             _ => return Err(Error::ConnectionState),
         }
 
@@ -1863,7 +1850,7 @@ impl Connection {
         match self.state {
             State::Closing { .. } | State::Closed { .. } => return Err(Error::ConnectionState),
             State::WaitInitial | State::Handshaking => {
-                if !matches!(self.zero_rtt_state, ZeroRttState::Sending(..)) {
+                if !matches!(self.zero_rtt_state, ZeroRttState::Sending) {
                     return Err(Error::ConnectionState);
                 }
             }
@@ -2150,7 +2137,7 @@ mod tests {
         let modded_dcid = modded_path.remote_cid.0.clone();
         assert_eq!(modded_dcid.len(), 8);
         c.path = Some(modded_path);
-        c.crypto.create_initial_state(Role::Client, &modded_dcid);
+        c.crypto.states.init(Role::Client, &modded_dcid);
         c
     }
     pub fn default_server() -> Connection {
@@ -2553,7 +2540,7 @@ mod tests {
                     error_code: CloseError::Application(42),
                     ..
                 },
-                3,
+                PNSpace::ApplicationData,
             )
         ));
     }
@@ -2744,7 +2731,7 @@ mod tests {
 
         // The server should receive new stream
         let server_out = server.process(client_after_reject.dgram(), now());
-        assert!(server_out.as_dgram_ref().is_some()); // an ack
+        assert!(server_out.as_dgram_ref().is_none()); // suppress the ack
         let recvd_stream_evt = |e| matches!(e, ConnectionEvent::NewStream { .. });
         assert!(server.events().any(recvd_stream_evt));
     }
@@ -3150,8 +3137,11 @@ mod tests {
 
         let frames = server.test_process_input(out.dgram().unwrap(), now + Duration::from_secs(11));
 
-        assert_eq!(frames[0], (Frame::Ping, 2));
-        assert!(matches!(frames[1], (Frame::Stream { .. }, 3)));
+        assert_eq!(frames[0], (Frame::Ping, PNSpace::Handshake));
+        assert!(matches!(
+            frames[1],
+            (Frame::Stream { .. }, PNSpace::ApplicationData)
+        ));
     }
 
     #[test]
@@ -3242,8 +3232,8 @@ mod tests {
             now + Duration::from_secs(10) + Duration::from_millis(110),
         );
 
-        assert_eq!(frames[0], (Frame::Ping, 2));
-        assert_eq!(frames[1], (Frame::Ping, 3));
+        assert_eq!(frames[0], (Frame::Ping, PNSpace::Handshake));
+        assert_eq!(frames[1], (Frame::Ping, PNSpace::ApplicationData));
     }
 
     #[test]
@@ -3395,7 +3385,7 @@ mod tests {
                     largest_acknowledged: INITIAL_CWND_PKTS_U64,
                     ..
                 },
-                3,
+                PNSpace::ApplicationData,
             )
         ));
 
@@ -3419,7 +3409,7 @@ mod tests {
                     largest_acknowledged: 31,
                     ..
                 },
-                3,
+                PNSpace::ApplicationData,
             )
         ));
 
@@ -3693,10 +3683,10 @@ mod tests {
         assert_eq!(c_tx_dgrams.len(), 4);
     }
 
-    fn check_discarded(peer: &mut Connection, pkt: Option<Datagram>, dropped: u64, dups: u64) {
+    fn check_discarded(peer: &mut Connection, pkt: Datagram, dropped: usize, dups: usize) {
         let dropped_before = peer.stats.dropped_rx;
         let dups_before = peer.stats.dups_rx;
-        let out = peer.process(pkt, now());
+        let out = peer.process(Some(pkt), now());
         assert!(out.as_dgram_ref().is_none());
         assert_eq!(dropped, peer.stats.dropped_rx - dropped_before);
         assert_eq!(dups, peer.stats.dups_rx - dups_before);
@@ -3723,7 +3713,7 @@ mod tests {
         // We will check this by processing init_pkt_s a second time.
         // The initial packet should be dropped. The packet contains a Handshake packet as well, which
         // will be marked as dup.
-        check_discarded(&mut client, init_pkt_s, 1, 1);
+        check_discarded(&mut client, init_pkt_s.unwrap(), 1, 1);
 
         assert!(maybe_authenticate(&mut client));
 
@@ -3731,7 +3721,7 @@ mod tests {
         // packet from the client.
         // We will check this by processing init_pkt_c a second time.
         // The dropped packet is padding. The Initial packet has been mark dup.
-        check_discarded(&mut server, init_pkt_c.clone(), 1, 1);
+        check_discarded(&mut server, init_pkt_c.clone().unwrap(), 1, 1);
 
         qdebug!("---- client: SH..FIN -> FIN");
         let out = client.process(None, now()).dgram();
@@ -3746,6 +3736,153 @@ mod tests {
         // We will check this by processing init_pkt_c a third time.
         // The Initial packet has been dropped and padding that follows it.
         // There is no dups, everything has been dropped.
-        check_discarded(&mut server, init_pkt_c, 1, 0);
+        check_discarded(&mut server, init_pkt_c.unwrap(), 1, 0);
+    }
+
+    /// Send something on a stream from `sender` to `receiver`.
+    /// Return the resulting datagram.
+    fn send_something(sender: &mut Connection, now: Instant) -> Datagram {
+        let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
+        assert!(sender.stream_send(stream_id, b"data").is_ok());
+        assert!(sender.stream_close_send(stream_id).is_ok());
+        let dgram = sender.process(None, now).dgram();
+        dgram.expect("should have something to send")
+    }
+
+    /// Send something on a stream from `sender` to `receiver`.
+    /// Return any ACK that might result.
+    fn send_and_receive(
+        sender: &mut Connection,
+        receiver: &mut Connection,
+        now: Instant,
+    ) -> Option<Datagram> {
+        let dgram = send_something(sender, now);
+        receiver.process(Some(dgram), now).dgram()
+    }
+
+    #[test]
+    fn key_update_client() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+        let mut now = now();
+
+        // Both client and server should be idle now.
+        assert_eq!(
+            Output::Callback(LOCAL_IDLE_TIMEOUT),
+            client.process(None, now)
+        );
+        assert_eq!(
+            Output::Callback(LOCAL_IDLE_TIMEOUT),
+            server.process(None, now)
+        );
+        assert_eq!(client.get_epochs(), (Some(3), Some(3))); // (write, read)
+        assert_eq!(server.get_epochs(), (Some(3), Some(3)));
+
+        // TODO(mt) this needs to wait for handshake confirmation,
+        // but for now, we can do this immediately.
+        let res = client.initiate_key_update();
+        assert!(res.is_ok());
+        let res = client.initiate_key_update();
+        assert!(res.is_err());
+
+        // Initiating an update should only increase the write epoch.
+        assert_eq!(
+            Output::Callback(LOCAL_IDLE_TIMEOUT),
+            client.process(None, now)
+        );
+        assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+
+        // Send something to propagate the update.
+        assert!(send_and_receive(&mut client, &mut server, now).is_none());
+
+        // The server should now be waiting to discharge read keys.
+        assert_eq!(server.get_epochs(), (Some(4), Some(3)));
+        let res = server.process(None, now);
+        if let Output::Callback(t) = res {
+            assert!(t < LOCAL_IDLE_TIMEOUT);
+        } else {
+            panic!("server should now be waiting to clear keys");
+        }
+
+        // Without having had time to purge old keys, more updates are blocked.
+        // The spec would permits it at this point, but we are more conservative.
+        assert!(client.initiate_key_update().is_err());
+        // The server can't update until it receives an ACK for a packet.
+        assert!(server.initiate_key_update().is_err());
+
+        // Waiting now for at least a PTO should cause the server to drop old keys.
+        // But at this point the client hasn't received a key update from the server.
+        // It will be stuck with old keys.
+        now += Duration::from_secs(1);
+        client.process_timer(now);
+        assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+        server.process_timer(now);
+        assert_eq!(server.get_epochs(), (Some(4), Some(4)));
+
+        // Even though the server has updated, it hasn't received an ACK yet.
+        assert!(server.initiate_key_update().is_err());
+
+        // Now get an ACK from the server.
+        let dgram = send_and_receive(&mut client, &mut server, now);
+        assert!(dgram.is_some());
+        let res = client.process(dgram, now);
+        // This is the first packet that the client has received from the server
+        // with new keys, so its read timer just started.
+        if let Output::Callback(t) = res {
+            assert!(t < LOCAL_IDLE_TIMEOUT);
+        } else {
+            panic!("client should now be waiting to clear keys");
+        }
+
+        assert!(client.initiate_key_update().is_err());
+        assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+        // The server can't update until it gets something from the client.
+        assert!(server.initiate_key_update().is_err());
+
+        now += Duration::from_secs(1);
+        client.process_timer(now);
+        assert_eq!(client.get_epochs(), (Some(4), Some(4)));
+    }
+
+    #[test]
+    fn key_update_consecutive() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+        let now = now();
+
+        assert!(server.initiate_key_update().is_ok());
+        assert_eq!(server.get_epochs(), (Some(4), Some(3)));
+
+        // Server sends something.
+        // Send twice and drop the first to induce an ACK from the client.
+        let _ = send_something(&mut server, now); // Drop this.
+
+        // Another packet from the server will cause the client to ACK and update keys.
+        let dgram = send_and_receive(&mut server, &mut client, now);
+        assert!(dgram.is_some());
+        assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+
+        // Have the server process the ACK.
+        if let Output::Callback(_) = server.process(dgram, now) {
+            assert_eq!(server.get_epochs(), (Some(4), Some(3)));
+            // Now move the server temporarily into the future so that it
+            // rotates the keys.  Don't do this at home folks.
+            server.process_timer(now + Duration::from_secs(1));
+            assert_eq!(server.get_epochs(), (Some(4), Some(4)));
+        } else {
+            panic!("server should have a timer set");
+        }
+
+        // Now update keys on the server again.
+        assert!(server.initiate_key_update().is_ok());
+        assert_eq!(server.get_epochs(), (Some(5), Some(4)));
+
+        let dgram = send_something(&mut server, now);
+
+        // However, as the server didn't wait long enough to update again, the
+        // client hasn't rotated its keys, so the packet gets dropped.
+        check_discarded(&mut client, dgram, 1, 0);
     }
 }

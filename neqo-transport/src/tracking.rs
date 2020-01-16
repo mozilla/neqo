@@ -13,7 +13,7 @@ use std::ops::{Index, IndexMut};
 use std::time::{Duration, Instant};
 
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};
-use neqo_crypto::constants::Epoch;
+use neqo_crypto::{Epoch, TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::frame::{AckRange, Frame};
 use crate::recovery::RecoveryToken;
@@ -41,8 +41,8 @@ impl PNSpace {
 impl From<Epoch> for PNSpace {
     fn from(epoch: Epoch) -> Self {
         match epoch {
-            0 => Self::Initial,
-            2 => Self::Handshake,
+            TLS_EPOCH_INITIAL => Self::Initial,
+            TLS_EPOCH_HANDSHAKE => Self::Handshake,
             _ => Self::ApplicationData,
         }
     }
@@ -76,6 +76,27 @@ impl SentPacket {
             size,
             in_flight,
         }
+    }
+}
+
+impl Into<Epoch> for PNSpace {
+    fn into(self) -> Epoch {
+        match self {
+            Self::Initial => TLS_EPOCH_INITIAL,
+            Self::Handshake => TLS_EPOCH_HANDSHAKE,
+            // Our epoch progresses forward, but the TLS epoch is fixed to 3.
+            Self::ApplicationData => TLS_EPOCH_APPLICATION_DATA,
+        }
+    }
+}
+
+impl std::fmt::Display for PNSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Initial => "in",
+            Self::Handshake => "hs",
+            Self::ApplicationData => "ap",
+        })
     }
 }
 
@@ -234,7 +255,7 @@ impl RecvdPackets {
     /// Add the packet to the tracked set.
     pub fn set_received(&mut self, now: Instant, pn: u64, ack_eliciting: bool) {
         let next_in_order_pn = self.ranges.front().map_or(0, |pr| pr.largest + 1);
-        qdebug!("next in order pn: {}", next_in_order_pn);
+        qdebug!([self], "next in order pn: {}", next_in_order_pn);
         let i = self.add(pn);
 
         // The new addition was the largest, so update the time we use for calculating ACK delay.
@@ -300,7 +321,7 @@ impl RecvdPackets {
 
 impl ::std::fmt::Display for RecvdPackets {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Recvd{:?}", self.space)
+        write!(f, "Recvd-{}", self.space)
     }
 }
 
@@ -335,9 +356,9 @@ impl AckTracker {
     pub(crate) fn get_frame(
         &mut self,
         now: Instant,
-        epoch: Epoch,
+        pn_space: PNSpace,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        let space = &mut self[PNSpace::from(epoch)];
+        let space = &mut self[pn_space];
 
         // Check that we aren't delaying ACKs.
         if !space.ack_now(now) {
@@ -388,7 +409,7 @@ impl AckTracker {
             Some((
                 ack,
                 Some(RecoveryToken::Ack(AckToken {
-                    space: PNSpace::from(epoch),
+                    space: pn_space,
                     ranges,
                 })),
             ))

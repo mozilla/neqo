@@ -22,6 +22,7 @@ use crate::flow_mgr::FlowMgr;
 use crate::frame::{Frame, TxMode};
 use crate::recovery::RecoveryToken;
 use crate::stream_id::StreamId;
+use crate::tracking::PNSpace;
 use crate::{AppError, Error, Res};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -743,11 +744,11 @@ impl SendStreams {
 
     pub(crate) fn get_frame(
         &mut self,
-        epoch: u16,
+        space: PNSpace,
         mode: TxMode,
         remaining: usize,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        if epoch != 3 && epoch != 1 {
+        if space != PNSpace::ApplicationData {
             return None;
         }
 
@@ -758,11 +759,11 @@ impl SendStreams {
                     Frame::new_stream(stream_id.as_u64(), offset, data, complete, remaining)
                 {
                     qdebug!(
-                        "Stream {} sending bytes {}-{}, epoch {}, mode {:?}",
+                        "Stream {} sending bytes {}-{}, space {:?}, mode {:?}",
                         stream_id.as_u64(),
                         offset,
                         offset + length as u64,
-                        epoch,
+                        space,
                         mode,
                     );
                     let fin = complete && length == data.len();

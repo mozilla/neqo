@@ -7,8 +7,8 @@
 // Directly relating to QUIC frames.
 
 use neqo_common::{matches, qdebug, Decoder, Encoder};
-use neqo_crypto::Epoch;
 
+use crate::packet::PacketType;
 use crate::stream_id::{StreamId, StreamIndex};
 use crate::{AppError, TransportError};
 use crate::{ConnectionError, Error, Res};
@@ -43,6 +43,7 @@ const FRAME_TYPE_PATH_CHALLENGE: FrameType = 0x1a;
 const FRAME_TYPE_PATH_RESPONSE: FrameType = 0x1b;
 const FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: FrameType = 0x1c;
 const FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: FrameType = 0x1d;
+// const FRAME_TYPE_HANDSHAKE_DONE: FrameType = 0x1e;
 
 const STREAM_FRAME_BIT_FIN: u64 = 0x01;
 const STREAM_FRAME_BIT_LEN: u64 = 0x02;
@@ -514,17 +515,17 @@ impl Frame {
         }
     }
 
-    pub fn is_allowed(&self, epoch: Epoch) -> bool {
-        qdebug!("is_allowed {:?} {}", self, epoch);
+    pub fn is_allowed(&self, ptype: &PacketType) -> bool {
+        qdebug!("is_allowed {:?} {:?}", self, ptype);
         if matches!(self, Self::Padding | Self::Ping) {
             true
         } else if matches!(self, Self::Crypto {..} | Self::Ack {..} | Self::ConnectionClose { error_code: CloseError::Transport(_), .. })
         {
-            epoch != 1
+            !matches!(ptype, PacketType::ZeroRTT)
         } else if matches!(self, Self::NewToken {..} | Self::ConnectionClose {..}) {
-            epoch >= 3
+            matches!(ptype, PacketType::Short(_))
         } else {
-            epoch == 1 || epoch >= 3 // Application data
+            matches!(ptype, PacketType::ZeroRTT | PacketType::Short(_))
         }
     }
 
