@@ -1262,6 +1262,7 @@ impl Connection {
             }
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
+            qlog::packet_sent(&self.qlog, now, pt, pn, &builder[payload_start..]);
 
             qdebug!("Need to send a packet: {:?}", pt);
 
