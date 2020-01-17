@@ -167,13 +167,7 @@ fn dynamic_link_both(extra_libs: &[&str]) {
     }
 }
 
-fn static_link(nsstarget: &PathBuf) {
-    let lib_dir = nsstarget.join("lib");
-    // Include a RPATH directive to make debugging easier.
-    println!(
-        "cargo:rustc-cdylib-link-arg=-Wl,-rpath,{}",
-        lib_dir.to_str().unwrap()
-    );
+fn static_link() {
     let mut static_libs = vec![
         "certdb",
         "certhi",
@@ -299,9 +293,8 @@ fn setup_standalone() -> Vec<String> {
         "cargo:rustc-link-search=native={}",
         nsslibdir.to_str().unwrap()
     );
-
     if is_debug() {
-        static_link(&nsstarget);
+        static_link();
     } else {
         dynamic_link();
     }
