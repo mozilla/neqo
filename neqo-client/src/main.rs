@@ -397,7 +397,12 @@ fn main() -> Result<(), std::io::Error> {
 
         let qlogpath = output_qlog.unwrap_or_else(|| "output.qlg".into());
 
-        match OpenOptions::new().write(true).create(true).open(&qlogpath) {
+        match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&qlogpath)
+        {
             Ok(mut f) => {
                 eprintln!("Writing QLOG to {}", qlogpath.display());
                 let data = serde_json::to_string_pretty(&qlog)?;
