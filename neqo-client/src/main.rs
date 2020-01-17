@@ -70,7 +70,7 @@ pub struct Args {
     /// Do not print received data
     omit_read_data: bool,
 
-    #[structopt(long, default_value = "output.qlg")]
+    #[structopt(long, default_value = "output.qlog")]
     /// Output QLOG trace to a file.
     qlog: Option<Option<PathBuf>>,
 }
