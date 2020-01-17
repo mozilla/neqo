@@ -384,7 +384,7 @@ fn main() -> Result<(), std::io::Error> {
 
     if let Some(output_qlog) = args.qlog {
         let mut qlog = Qlog {
-            qlog_version: "draft-00".into(),
+            qlog_version: qlog::QLOG_VERSION.into(),
             title: None,
             description: None,
             summary: None,
