@@ -1080,13 +1080,30 @@ impl Connection {
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
     fn output_pkt_for_path(&mut self, now: Instant) -> Res<Option<Datagram>> {
-        let mut out_bytes = Vec::new();
+        // A data structure used solely within this function to hold a representation
+        // of a packet that is pending transmission in the next datagram. We cannot
+        // encode the constructed packet at each epoch immediately because, depending
+        // on the ultimate size of the datagram and the current state of the connection,
+        // we may need to pad an Initial packet.
+        struct PendingPacket {
+            epoch: Epoch,
+            space: PNSpace,
+            hdr: PacketHdr,
+            encoder: Encoder,
+            tokens: Vec<RecoveryToken>,
+            ack_eliciting: bool,
+            has_padding: bool,
+        }
+
+        let mut pending_packet_length = 0;
         let mut needs_padding = false;
         let mut close_sent = false;
         let path = self
             .path
             .take()
             .expect("we know we have a path because calling fn checked");
+        let mut pending_packets = Vec::new();
+        pending_packets.resize_with(NUM_EPOCHS as usize, || None);
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -1147,8 +1164,9 @@ impl Connection {
             match &self.state {
                 State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
                     loop {
-                        let used =
-                            out_bytes.len() + encoder.len() + hdr.overhead(&tx.aead, path.mtu());
+                        let used = pending_packet_length
+                            + encoder.len()
+                            + hdr.overhead(&tx.aead, path.mtu());
                         let remaining = min(
                             path.mtu().saturating_sub(used),
                             cong_avail.saturating_sub(used),
@@ -1239,29 +1257,88 @@ impl Connection {
                 _ => needs_padding = false,
             }
 
+            pending_packet_length += encoder.len() + hdr.overhead(&tx.aead, path.mtu());
+            pending_packets[epoch as usize] = Some(PendingPacket {
+                epoch,
+                space,
+                tokens,
+                hdr,
+                encoder,
+                ack_eliciting,
+                has_padding,
+            });
+        }
+
+        let mut datagram_bytes = Vec::new();
+        for pending_packet in pending_packets {
+            // Check if there is a pending packet in this datagram for this epoch.
+            if pending_packet.is_none() {
+                continue;
+            }
+            let mut pending_packet = pending_packet.unwrap();
+
+            // Assert that we have tx crypto state for this epoch.
+            let tx = if pending_packet.epoch == 1 && self.role == Role::Server {
+                Err(())
+            } else if pending_packet.epoch == 1 {
+                match &mut self.zero_rtt_state {
+                    ZeroRttState::Sending(tx) => Ok(tx),
+                    _ => Err(()),
+                }
+            } else {
+                match self
+                    .crypto
+                    .states
+                    .obtain(self.role, pending_packet.epoch, &self.crypto.tls)
+                {
+                    Ok(CryptoState { tx: Some(tx), .. }) => Ok(tx),
+                    _ => Err(()),
+                }
+            }
+            .expect("Having created a packet for this epoch, there must be a valid crypto state.");
+
+            // If (a) we are a client, (b) this is an initial packet, (c) the datagram is not at least
+            // path.mtu() bytes long, and (d) we need padding, add it.
+            if self.role == Role::Client
+                && pending_packet.epoch == 0
+                && pending_packet_length < path.mtu()
+                && needs_padding
+            {
+                let amt_padding_needed = path.mtu().saturating_sub(pending_packet_length);
+                (0..amt_padding_needed)
+                    .for_each(|_| Frame::Padding.marshal(&mut pending_packet.encoder))
+            }
+
             self.stats.packets_tx += 1;
-            self.loss_recovery.inc_pn(space);
+            self.loss_recovery.inc_pn(pending_packet.space);
 
-            let mut packet = encode_packet(tx, &hdr, &encoder);
+            let mut encoded_packet =
+                encode_packet(tx, &pending_packet.hdr, &pending_packet.encoder);
 
-            if self.tx_mode != TxMode::Pto && ack_eliciting {
+            if self.tx_mode != TxMode::Pto && pending_packet.ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
 
             let in_flight = match self.tx_mode {
                 TxMode::Pto => false,
-                TxMode::Normal => ack_eliciting || has_padding,
+                TxMode::Normal => pending_packet.ack_eliciting || pending_packet.has_padding,
             };
 
             self.loss_recovery.on_packet_sent(
-                space,
-                hdr.pn,
-                SentPacket::new(now, ack_eliciting, tokens, packet.len(), in_flight),
+                pending_packet.space,
+                pending_packet.hdr.pn,
+                SentPacket::new(
+                    now,
+                    pending_packet.ack_eliciting,
+                    pending_packet.tokens,
+                    encoded_packet.len(),
+                    in_flight,
+                ),
             );
 
-            dump_packet(self, "TX ->", &hdr, &encoder);
+            dump_packet(self, "TX ->", &pending_packet.hdr, &pending_packet.encoder);
 
-            out_bytes.append(&mut packet);
+            datagram_bytes.append(&mut encoded_packet);
         }
 
         if close_sent {
@@ -1274,17 +1351,12 @@ impl Connection {
             self.tx_mode = TxMode::Normal;
         }
 
-        if out_bytes.is_empty() {
+        if datagram_bytes.is_empty() {
             assert!(self.tx_mode != TxMode::Pto);
             self.path = Some(path);
             Ok(None)
         } else {
-            // Pad Initial packets sent by the client to mtu bytes.
-            if self.role == Role::Client && needs_padding {
-                qdebug!([self], "pad Initial to max_datagram_size");
-                out_bytes.resize(path.mtu(), 0);
-            }
-            let ret = Ok(Some(Datagram::new(path.local, path.remote, out_bytes)));
+            let ret = Ok(Some(Datagram::new(path.local, path.remote, datagram_bytes)));
             self.path = Some(path);
             ret
         }
