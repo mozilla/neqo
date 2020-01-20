@@ -1405,10 +1405,10 @@ impl Connection {
             }
             Ok(msgs) => {
                 // Make sure we have built handshake keys.
-                if matches!(self.crypto.states[2], CryptoState::NoInit) {
-                    if self.crypto.try_to_get_crypto_state(self.role, 2).is_err() {
-                        qdebug!("We do not have keys for handshake epoch");
-                    }
+                if matches!(self.crypto.states[2], CryptoState::NoInit)
+                    && self.crypto.try_to_get_crypto_state(self.role, 2).is_err()
+                {
+                    qdebug!("We do not have keys for handshake epoch");
                 }
                 self.crypto.buffer_records(msgs)
             }
