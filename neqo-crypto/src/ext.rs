@@ -140,16 +140,17 @@ impl ExtensionTracker {
         // This way, only this "outer" code deals with the reference count.
         let mut tracker = Self {
             extension,
-            handler: Pin::new(Box::new(Box::new(handler))),
+            handler: Box::pin(Box::new(handler)),
         };
-        let p = &mut *tracker.handler as *mut BoxedExtensionHandler as *mut c_void;
+        let pin = Pin::as_mut(&mut tracker.handler);
+        let ptr = Pin::get_unchecked_mut(pin) as *mut BoxedExtensionHandler as *mut c_void;
         SSL_InstallExtensionHooks(
             fd,
             extension,
             Some(Self::extension_writer),
-            p,
+            ptr,
             Some(Self::extension_handler),
-            p,
+            ptr,
         )?;
         Ok(tracker)
     }

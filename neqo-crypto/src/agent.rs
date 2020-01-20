@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+pub use crate::agentio::{as_c_void, Record, RecordList};
 use crate::agentio::{AgentIo, METHODS};
-pub use crate::agentio::{Record, RecordList};
 use crate::assert_initialized;
 use crate::auth::AuthenticationStatus;
 pub use crate::cert::CertificateInfo;
@@ -227,24 +227,24 @@ pub struct SecretAgent {
 
 impl SecretAgent {
     fn new() -> Res<Self> {
-        let mut agent = Self {
-            fd: null_mut(),
+        let mut io = Box::pin(AgentIo::new());
+        let fd = Self::create_fd(io.as_mut())?;
+        Ok(Self {
+            fd,
             secrets: SecretHolder::default(),
             raw: None,
-            io: Pin::new(Box::new(AgentIo::new())),
+            io,
             state: HandshakeState::New,
 
-            auth_required: Pin::new(Box::new(false)),
-            alert: Pin::new(Box::new(None)),
-            now: Pin::new(Box::new(0)),
+            auth_required: Box::pin(false),
+            alert: Box::pin(None),
+            now: Box::pin(0),
 
             extension_handlers: Vec::new(),
             inf: None,
 
             no_eoed: false,
-        };
-        agent.create_fd()?;
-        Ok(agent)
+        })
     }
 
     // Create a new SSL file descriptor.
@@ -254,7 +254,7 @@ impl SecretAgent {
     // minimal, but it means that the two forms need casts to translate
     // between them.  ssl::PRFileDesc is left as an opaque type, as the
     // ssl::SSL_* APIs only need an opaque type.
-    fn create_fd(&mut self) -> Res<()> {
+    fn create_fd(io: Pin<&mut AgentIo>) -> Res<*mut ssl::PRFileDesc> {
         assert_initialized();
         let label = CString::new("sslwrapper")?;
         let id = unsafe { prio::PR_GetUniqueIdentity(label.as_ptr()) };
@@ -264,15 +264,14 @@ impl SecretAgent {
             return Err(Error::CreateSslSocket);
         }
         let fd = unsafe {
-            (*base_fd).secret = &mut *self.io as *mut AgentIo as *mut _;
+            (*base_fd).secret = Pin::into_inner(io) as *mut AgentIo as *mut _;
             ssl::SSL_ImportFD(null_mut(), base_fd as *mut ssl::PRFileDesc)
         };
         if fd.is_null() {
             unsafe { prio::PR_Close(base_fd) };
             return Err(Error::CreateSslSocket);
         }
-        self.fd = fd;
-        Ok(())
+        Ok(fd)
     }
 
     unsafe extern "C" fn auth_complete_hook(
@@ -322,7 +321,7 @@ impl SecretAgent {
             ssl::SSL_AuthCertificateHook(
                 self.fd,
                 Some(Self::auth_complete_hook),
-                &mut *self.auth_required as *mut bool as *mut c_void,
+                as_c_void(&mut self.auth_required),
             )
         })?;
 
@@ -330,18 +329,12 @@ impl SecretAgent {
             ssl::SSL_AlertSentCallback(
                 self.fd,
                 Some(Self::alert_sent_cb),
-                &mut *self.alert as *mut Option<Alert> as *mut c_void,
+                as_c_void(&mut self.alert),
             )
         })?;
 
         // TODO(mt) move to time.rs so we can remove PRTime definition from nss_ssl bindings.
-        unsafe {
-            ssl::SSL_SetTimeFunc(
-                self.fd,
-                Some(Self::time_func),
-                &mut *self.now as *mut PRTime as *mut c_void,
-            )
-        }?;
+        unsafe { ssl::SSL_SetTimeFunc(self.fd, Some(Self::time_func), as_c_void(&mut self.now)) }?;
 
         self.configure()?;
         secstatus_to_res(unsafe { ssl::SSL_ResetHandshake(self.fd, is_server as ssl::PRBool) })
@@ -706,7 +699,7 @@ impl Client {
         agent.ready(false)?;
         let mut client = Self {
             agent,
-            resumption: Pin::new(Box::new(None)),
+            resumption: Box::pin(None),
         };
         client.ready()?;
         Ok(client)
@@ -728,11 +721,12 @@ impl Client {
     }
 
     fn ready(&mut self) -> Res<()> {
+        let fd = self.fd;
         unsafe {
             ssl::SSL_SetResumptionTokenCallback(
-                self.fd,
+                fd,
                 Some(Self::resumption_token_cb),
-                &mut *self.resumption as *mut Option<Vec<u8>> as *mut c_void,
+                as_c_void(&mut self.resumption),
             )
         }
     }
@@ -885,8 +879,8 @@ impl Server {
         max_early_data: u32,
         checker: Box<dyn ZeroRttChecker>,
     ) -> Res<()> {
-        let mut check_state = Pin::new(Box::new(ZeroRttCheckState::new(self.agent.fd, checker)));
-        let arg = &mut *check_state as *mut ZeroRttCheckState as *mut c_void;
+        let mut check_state = Box::pin(ZeroRttCheckState::new(self.agent.fd, checker));
+        let arg = as_c_void(&mut check_state);
         unsafe {
             ssl::SSL_HelloRetryRequestCallback(self.agent.fd, Some(Self::hello_retry_cb), arg)
         }?;
