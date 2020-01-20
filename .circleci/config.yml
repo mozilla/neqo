@@ -17,6 +17,40 @@ jobs:
             rustc --version
             cargo --version
             rustfmt --version
+            cargo clippy --version
+
+      - restore_cache:
+          name: "Restoring cache - Git"
+          keys:
+            - vtest-git-{{ .Branch }}-{{ .Revision }}
+            - vtest-git-{{ .Branch }}
+            - vtest-git-master
+            - vtest-git-
+
+      - restore_cache:
+          name: "Restoring cache - NSS and NSPR"
+          keys:
+            - vtest-nss-nspr-{{ epoch }}
+            - vtest-nss-nspr-
+
+      - restore_cache:
+          name: "Restoring cache - Rust"
+          keys:
+            - vtest-rust-{{ .Branch }}-{{ .Revision }}
+            - vtest-rust-{{ .Branch }}
+            - vtest-rust-master
+            - vtest-rust-
+
+      # Workaround for https://discuss.circleci.com/t/22437
+      - run:
+          name: Tag Checkout
+          command: |
+            if [ -n "$CIRCLE_TAG" ] && [ -d .git ]; then
+              remote=$(echo "$CIRCLE_REPOSITORY_URL" | \
+                       sed -e 's,/^git.github.com:,https://github.com/,')
+              git fetch -f "$remote" "refs/tags/$CIRCLE_TAG:refs/tags/$CIRCLE_TAG" || \
+                (echo 'Removing .git cache for tag build'; rm -rf .git)
+            fi
 
       - run:
           name: Update NSS/NSPR
@@ -40,3 +74,28 @@ jobs:
       - run:
           name: Test
           command: cargo test -v
+
+      - run:
+          name: "Prepare for Caching"
+          command: "git gc --auto"
+
+      - save_cache:
+          name: "Saving Cache - Git"
+          key: vtest-git-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ~/neqo/.git
+
+      - save_cache:
+          name: "Saving Cache - NSS and NSPR"
+          key: vtest-nss-nspr-{{ epoch }}
+          paths:
+            - ~/nss
+            - ~/nspr
+            - ~/dist
+
+      - save_cache:
+          name: "Saving Cache - Rust"
+          key: vtest-rust-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ~/.cargo
+            - ~/neqo/target
