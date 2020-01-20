@@ -22,16 +22,16 @@ jobs:
       - restore_cache:
           name: "Restoring cache - Git"
           keys:
-            - vtest-git-{{ .Branch }}-{{ .Revision }}
-            - vtest-git-{{ .Branch }}
-            - vtest-git-master
-            - vtest-git-
+            - v1-git-{{ .Branch }}-{{ .Revision }}
+            - v1-git-{{ .Branch }}
+            - v1-git-master
+            - v1-git-
 
       - restore_cache:
           name: "Restoring cache - NSS and NSPR"
           keys:
-            - vtest-nss-nspr-{{ epoch }}
-            - vtest-nss-nspr-
+            - v1-nss-nspr-{{ epoch }}
+            - v1-nss-nspr-
 
       # Workaround for https://discuss.circleci.com/t/22437
       - run:
@@ -73,13 +73,13 @@ jobs:
 
       - save_cache:
           name: "Saving Cache - Git"
-          key: vtest-git-{{ .Branch }}-{{ .Revision }}
+          key: v1-git-{{ .Branch }}-{{ .Revision }}
           paths:
             - ~/neqo/.git
 
       - save_cache:
           name: "Saving Cache - NSS and NSPR"
-          key: vtest-nss-nspr-{{ epoch }}
+          key: v1-nss-nspr-{{ epoch }}
           paths:
             - ~/nss
             - ~/nspr
