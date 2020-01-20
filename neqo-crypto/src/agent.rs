@@ -644,6 +644,20 @@ impl SecretAgent {
         Ok(*Pin::into_inner(records))
     }
 
+    pub fn close(&mut self) {
+        if let Some(true) = self.raw {
+            // Need to hold the record list in scope until the close is done.
+            let _records = self.setup_raw().expect("Can only close");
+            unsafe { prio::PR_Close(self.fd as *mut prio::PRFileDesc) };
+        } else {
+            // Need to hold the IO wrapper in scope until the close is done.
+            let _io = self.io.wrap(&[]);
+            unsafe { prio::PR_Close(self.fd as *mut prio::PRFileDesc) };
+        };
+        let _output = self.io.take_output();
+        self.fd = null_mut();
+    }
+
     // State returns the status of the handshake.
     #[must_use]
     pub fn state(&self) -> &HandshakeState {
@@ -656,6 +670,12 @@ impl SecretAgent {
     #[must_use]
     pub fn write_secret(&self, epoch: Epoch) -> Option<&p11::SymKey> {
         self.secrets.write().get(epoch)
+    }
+}
+
+impl Drop for SecretAgent {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 
