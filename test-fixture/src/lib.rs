@@ -160,6 +160,7 @@ pub fn default_http3_server() -> Http3Server {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         100,
         100,
+        None,
     )
     .expect("create a default server")
 }

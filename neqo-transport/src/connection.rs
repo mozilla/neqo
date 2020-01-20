@@ -1449,11 +1449,17 @@ impl Connection {
                 unreachable!("Crypto state should not be new or failed after successful handshake")
             }
         }
+
         // There is a chance that this could be called less often, but getting the
         // conditions right is a little tricky, so call it on every  CRYPTO frame.
         if try_update {
             self.crypto.install_keys(self.role);
         }
+
+        if let Role::Server = self.role() {
+            qlog::server_connection_started(&self.qlog, now, self.path.as_ref().unwrap());
+        }
+
         Ok(())
     }
 

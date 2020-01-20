@@ -21,31 +21,12 @@ use crate::packet::{DecryptedPacket, PacketNumber, PacketType};
 use crate::path::Path;
 use crate::QUIC_VERSION;
 
-pub fn client_connection_started(qlog: &Option<NeqoQlogRef>, now: Instant, path: &Path) {
-    if let Some(qlog) = qlog {
-        let mut qlog = qlog.borrow_mut();
-        let elapsed = now.duration_since(qlog.zero_time);
+pub fn server_connection_started(qlog: &Option<NeqoQlogRef>, now: Instant, path: &Path) {
+    connection_started(qlog, now, path)
+}
 
-        qlog.trace.push_connectivity_event(
-            format!("{}", elapsed.as_micros()),
-            ConnectivityEventType::ConnectionStarted,
-            EventData::ConnectionStarted {
-                ip_version: if path.local_sock().ip().is_ipv4() {
-                    "ipv4".into()
-                } else {
-                    "ipv6".into()
-                },
-                src_ip: format!("{}", path.local_sock().ip()),
-                dst_ip: format!("{}", path.remote_sock().ip()),
-                protocol: Some("QUIC".into()),
-                src_port: path.local_sock().port().into(),
-                dst_port: path.remote_sock().port().into(),
-                quic_version: Some(format!("{:x}", QUIC_VERSION)),
-                src_cid: Some(format!("{}", path.local_cid())),
-                dst_cid: Some(format!("{}", path.remote_cid())),
-            },
-        )
-    }
+pub fn client_connection_started(qlog: &Option<NeqoQlogRef>, now: Instant, path: &Path) {
+    connection_started(qlog, now, path);
 }
 
 pub fn packet_sent(
@@ -304,5 +285,32 @@ fn pkt_type_to_qlog_pkt_type(ptype: &PacketType) -> qlog::PacketType {
         PacketType::Retry => qlog::PacketType::Retry,
         PacketType::VersionNegotiation => qlog::PacketType::VersionNegotiation,
         PacketType::OtherVersion => qlog::PacketType::Unknown,
+    }
+}
+
+fn connection_started(qlog: &Option<NeqoQlogRef>, now: Instant, path: &Path) {
+    if let Some(qlog) = qlog {
+        let mut qlog = qlog.borrow_mut();
+        let elapsed = now.duration_since(qlog.zero_time);
+
+        qlog.trace.push_connectivity_event(
+            format!("{}", elapsed.as_micros()),
+            ConnectivityEventType::ConnectionStarted,
+            EventData::ConnectionStarted {
+                ip_version: if path.local_sock().ip().is_ipv4() {
+                    "ipv4".into()
+                } else {
+                    "ipv6".into()
+                },
+                src_ip: format!("{}", path.local_sock().ip()),
+                dst_ip: format!("{}", path.remote_sock().ip()),
+                protocol: Some("QUIC".into()),
+                src_port: path.local_sock().port().into(),
+                dst_port: path.remote_sock().port().into(),
+                quic_version: Some(format!("{:x}", QUIC_VERSION)),
+                src_cid: Some(format!("{}", path.local_cid())),
+                dst_cid: Some(format!("{}", path.remote_cid())),
+            },
+        )
     }
 }
