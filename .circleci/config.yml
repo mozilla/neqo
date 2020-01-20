@@ -33,14 +33,6 @@ jobs:
             - vtest-nss-nspr-{{ epoch }}
             - vtest-nss-nspr-
 
-      - restore_cache:
-          name: "Restoring cache - Rust"
-          keys:
-            - vtest-rust-{{ .Branch }}-{{ .Revision }}
-            - vtest-rust-{{ .Branch }}
-            - vtest-rust-master
-            - vtest-rust-
-
       # Workaround for https://discuss.circleci.com/t/22437
       - run:
           name: Tag Checkout
@@ -92,10 +84,3 @@ jobs:
             - ~/nss
             - ~/nspr
             - ~/dist
-
-      - save_cache:
-          name: "Saving Cache - Rust"
-          key: vtest-rust-{{ .Branch }}-{{ .Revision }}
-          paths:
-            - ~/.cargo
-            - ~/neqo/target
