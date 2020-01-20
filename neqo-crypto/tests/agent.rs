@@ -353,3 +353,21 @@ fn reject_zero_rtt() {
     assert!(!client.info().unwrap().early_data_accepted());
     assert!(!server.info().unwrap().early_data_accepted());
 }
+
+#[test]
+fn close() {
+    let mut client = Client::new("server.example").expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    connect(&mut client, &mut server);
+    client.close();
+    server.close();
+}
+
+#[test]
+fn close_client_twice() {
+    let mut client = Client::new("server.example").expect("should create client");
+    let mut server = Server::new(&["key"]).expect("should create server");
+    connect(&mut client, &mut server);
+    client.close();
+    client.close(); // Should be a noop.
+}
