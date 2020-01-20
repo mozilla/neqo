@@ -5,16 +5,26 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![allow(clippy::option_option)]
 #![warn(clippy::use_self)]
 
-use neqo_common::{qdebug, qinfo, Datagram};
+use chrono::offset::Utc;
+use chrono::DateTime;
+use qlog::{CommonFields, Configuration, Qlog, TimeUnits, Trace, VantagePoint, VantagePointType};
+use std::time::SystemTime;
+
+use neqo_common::{
+    log::{NeqoQlog, NeqoQlogRef},
+    qdebug, qinfo, Datagram,
+};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Server, Http3ServerEvent};
 use neqo_transport::{FixedConnectionIdManager, Output};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::io;
+use std::fs::OpenOptions;
+use std::io::{self, Write};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
@@ -55,6 +65,10 @@ struct Args {
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.
     alpn: String,
+
+    #[structopt(long, default_value = "output.qlog")]
+    /// Output QLOG trace to a file.
+    qlog: Option<Option<PathBuf>>,
 }
 
 impl Args {
@@ -152,6 +166,39 @@ fn process(
     }
 }
 
+fn init_qlog_trace() -> qlog::Trace {
+    Trace {
+        vantage_point: VantagePoint {
+            name: Some("neqo-server".into()),
+            ty: VantagePointType::Server,
+            flow: None,
+        },
+        title: Some("neqo-http3-server trace".to_string()),
+        description: Some("Example qlog trace description".to_string()),
+        configuration: Some(Configuration {
+            time_offset: Some("0".into()),
+            time_units: Some(TimeUnits::Us),
+            original_uris: None,
+        }),
+        common_fields: Some(CommonFields {
+            group_id: None,
+            protocol_type: None,
+            reference_time: Some({
+                let system_time = SystemTime::now();
+                let datetime: DateTime<Utc> = system_time.into();
+                datetime.to_rfc3339()
+            }),
+        }),
+        event_fields: vec![
+            "relative_time".to_string(),
+            "category".to_string(),
+            "event".to_string(),
+            "data".to_string(),
+        ],
+        events: Vec::new(),
+    }
+}
+
 fn main() -> Result<(), io::Error> {
     let args = Args::from_args();
     assert!(!args.key.is_empty(), "Need at least one key");
@@ -165,6 +212,12 @@ fn main() -> Result<(), io::Error> {
         eprintln!("No valid hosts defined");
         exit(1);
     }
+
+    let qtrace: NeqoQlogRef = Rc::new(RefCell::new(NeqoQlog::new(
+        Instant::now(),
+        init_qlog_trace(),
+    )));
+    let mut qtrace_last_flush_time = Instant::now();
 
     let mut sockets = Vec::new();
     let mut servers = HashMap::new();
@@ -218,6 +271,7 @@ fn main() -> Result<(), io::Error> {
                     Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
                     args.max_table_size,
                     args.max_blocked_streams,
+                    Some(Rc::clone(&qtrace)),
                 )
                 .expect("We cannot make a server!"),
                 None,
@@ -228,6 +282,21 @@ fn main() -> Result<(), io::Error> {
     let buf = &mut [0u8; 2048];
 
     let mut events = Events::with_capacity(1024);
+
+    let (mut qlog, qlog_output_path) = if let Some(output_path) = &args.qlog {
+        (
+            Some(Qlog {
+                qlog_version: qlog::QLOG_VERSION.into(),
+                title: None,
+                description: None,
+                summary: None,
+                traces: Vec::new(),
+            }),
+            Some(output_path.clone().unwrap()),
+        )
+    } else {
+        (None, None)
+    };
 
     loop {
         poll.poll(&mut events, None)?;
@@ -298,5 +367,31 @@ fn main() -> Result<(), io::Error> {
         }
 
         emit_packets(&mut sockets, &out_dgrams);
+
+        // Consider the time since we last wrote the trace to disk. If it has been more than 5 seconds,
+        // flush it. NB: This is a demonstration implementation. The performance overhead for logging
+        // traces in this manner is not suitable for production.
+        if Instant::now() - qtrace_last_flush_time > Duration::from_secs(5) {
+            if let (Some(qlog), Some(qlog_output_path)) = (&mut qlog, &qlog_output_path) {
+                match OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&qlog_output_path)
+                {
+                    Ok(mut f) => {
+                        eprintln!("Writing QLOG to {}", qlog_output_path.display());
+                        qlog.traces.push(qtrace.borrow().trace.clone());
+                        let data = serde_json::to_string_pretty(&qlog)?;
+                        f.write_all(data.as_bytes())?;
+                        qlog.traces.pop();
+                    }
+                    Err(e) => {
+                        eprintln!("Could not open qlog: {}", e);
+                    }
+                }
+            }
+            qtrace_last_flush_time = Instant::now();
+        }
     }
 }
