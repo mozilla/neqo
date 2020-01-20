@@ -4,10 +4,10 @@ jobs:
   build:
     docker:
       - image: martinthomson/neqo:latest
-    working_directory: ~/neqo
+    working_directory: /home/neqo/neqo
     environment:
       NSS_JOBS: 3
-      LD_LIBRARY_PATH: $NSS_DIR/../dist/Debug/lib
+      LD_LIBRARY_PATH: /home/neqo/dist/Debug/lib
 
     steps:
       - checkout
