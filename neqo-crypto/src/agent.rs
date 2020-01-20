@@ -645,6 +645,10 @@ impl SecretAgent {
     }
 
     pub fn close(&mut self) {
+        // It should be safe to close multiple times.
+        if self.fd.is_null() {
+            return;
+        }
         if let Some(true) = self.raw {
             // Need to hold the record list in scope until the close is done.
             let _records = self.setup_raw().expect("Can only close");
