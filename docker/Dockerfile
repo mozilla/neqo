@@ -37,7 +37,6 @@ USER $USER
 
 ENV NSS_DIR=$HOME/nss \
     NSPR_DIR=$HOME/nspr \
-    NSS_JOBS=3 \
     LD_LIBRARY_PATH=$HOME/dist/Debug/lib
 
 RUN set -eux; \

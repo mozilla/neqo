@@ -5,6 +5,8 @@ jobs:
     docker:
       - image: martinthomson/neqo:latest
     working_directory: ~/neqo
+    environment:
+      NSS_JOBS: 3
 
     steps:
       - checkout
