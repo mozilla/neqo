@@ -42,6 +42,5 @@ ENV NSS_DIR=$HOME/nss \
 
 RUN set -eux; \
     hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"; \
-    hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"; \
-    rm -rf "$NSS_DIR"/tests "$NSS_DIR"/gtests "$NSS_DIR"/automation "$NSS_DIR"/fuzz
+    hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
 RUN "$NSS_DIR"/build.sh -j "$NSS_JOBS" --static -Ddisable_tests=1
