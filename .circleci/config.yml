@@ -7,7 +7,7 @@ jobs:
     working_directory: ~/neqo
     environment:
       NSS_JOBS: 3
-      LD_LIBRARY_PATH: ~/dist/Debug/lib
+      LD_LIBRARY_PATH: $NSS_DIR/../dist/Debug/lib
 
     steps:
       - checkout
