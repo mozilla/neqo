@@ -34,7 +34,7 @@ experimental_api!(SSL_HkdfExpandLabel(
     secret: *mut *mut PK11SymKey,
 ));
 
-pub fn key_size(version: Version, cipher: Cipher) -> Res<usize> {
+fn key_size(version: Version, cipher: Cipher) -> Res<usize> {
     if version != TLS_VERSION_1_3 {
         return Err(Error::UnsupportedVersion);
     }
@@ -45,8 +45,8 @@ pub fn key_size(version: Version, cipher: Cipher) -> Res<usize> {
     })
 }
 
-pub fn generate_key(version: Version, cipher: Cipher, size: usize) -> Res<SymKey> {
-    import_key(version, cipher, &random(size))
+pub fn generate_key(version: Version, cipher: Cipher) -> Res<SymKey> {
+    import_key(version, cipher, &random(key_size(version, cipher)?))
 }
 
 /// Import a symmetric key for use with HKDF.

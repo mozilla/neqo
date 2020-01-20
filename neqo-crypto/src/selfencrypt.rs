@@ -28,8 +28,7 @@ impl SelfEncrypt {
     const SALT_LENGTH: usize = 16;
 
     pub fn new(version: Version, cipher: Cipher) -> Res<Self> {
-        let sz = hkdf::key_size(version, cipher)?;
-        let key = hkdf::generate_key(version, cipher, sz)?;
+        let key = hkdf::generate_key(version, cipher)?;
         Ok(Self {
             version,
             cipher,
@@ -48,8 +47,7 @@ impl SelfEncrypt {
 
     /// Rotate keys.  This causes any previous key that is being held to be replaced by the current key.
     pub fn rotate(&mut self) -> Res<()> {
-        let sz = hkdf::key_size(self.version, self.cipher)?;
-        let new_key = hkdf::generate_key(self.version, self.cipher, sz)?;
+        let new_key = hkdf::generate_key(self.version, self.cipher)?;
         self.old_key = Some(mem::replace(&mut self.key, new_key));
         let (kid, _) = self.key_id.overflowing_add(1);
         self.key_id = kid;
