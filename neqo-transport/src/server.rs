@@ -7,7 +7,8 @@
 // This file implements a server that can handle multiple connections.
 
 use neqo_common::{
-    hex, matches, qerror, qinfo, qtrace, qwarn, timer::Timer, Datagram, Decoder, Encoder,
+    hex, log::NeqoQlogRef, matches, qerror, qinfo, qtrace, qwarn, timer::Timer, Datagram, Decoder,
+    Encoder,
 };
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
@@ -196,6 +197,7 @@ pub struct Server {
     /// Whether a Retry packet will be sent in response to new
     /// Initial packets.
     retry: RetryToken,
+    qlog: Option<NeqoQlogRef>,
 }
 
 impl Server {
@@ -212,6 +214,7 @@ impl Server {
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
         cid_manager: CidMgr,
+        qlog: Option<NeqoQlogRef>,
     ) -> Res<Self> {
         Ok(Self {
             certs: certs.iter().map(|x| String::from(x.as_ref())).collect(),
@@ -223,6 +226,7 @@ impl Server {
             waiting: VecDeque::default(),
             timers: Timer::new(now, TIMER_GRANULARITY, TIMER_CAPACITY),
             retry: RetryToken::new(now)?,
+            qlog,
         })
     }
 
@@ -335,7 +339,7 @@ impl Server {
             &self.protocols,
             &self.anti_replay,
             cid_mgr.clone(),
-            None,
+            self.qlog.clone(),
         );
         if let Ok(mut c) = sconn {
             if let Some(odcid) = odcid {

@@ -25,7 +25,11 @@ use mio_extras::timer::{Builder, Timeout, Timer};
 use qlog::Qlog;
 use structopt::StructOpt;
 
-use neqo_common::{self as common, qdebug, qinfo, Datagram, Role};
+use neqo_common::{
+    self as common,
+    log::{NeqoQlog, NeqoQlogRef},
+    qdebug, qinfo, Datagram, Role,
+};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Server, Http3ServerEvent, Http3State};
 use neqo_transport::{ConnectionId, FixedConnectionIdManager, Output};
@@ -231,6 +235,11 @@ fn main() -> Result<(), io::Error> {
         exit(1);
     }
 
+    let qtrace: NeqoQlogRef = Rc::new(RefCell::new(NeqoQlog::new(
+        Instant::now(),
+        common::qlog::new_trace(Role::Server),
+    )));
+
     let mut sockets = Vec::new();
     let mut servers = HashMap::new();
     let mut timer = Builder::default().build::<usize>();
@@ -283,6 +292,7 @@ fn main() -> Result<(), io::Error> {
                     Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
                     args.max_table_size,
                     args.max_blocked_streams,
+                    Some(Rc::clone(&qtrace)),
                 )
                 .expect("We cannot make a server!"),
                 None,

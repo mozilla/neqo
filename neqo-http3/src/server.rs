@@ -9,6 +9,7 @@ use crate::connection_server::Http3ServerHandler;
 use crate::server_connection_events::Http3ServerConnEvent;
 use crate::server_events::{ClientRequestStream, Http3ServerEvent, Http3ServerEvents};
 use crate::Res;
+use neqo_common::log::NeqoQlogRef;
 use neqo_common::{qtrace, Datagram};
 use neqo_crypto::AntiReplay;
 use neqo_transport::server::{ActiveConnectionRef, Server};
@@ -35,6 +36,7 @@ impl ::std::fmt::Display for Http3Server {
 }
 
 impl Http3Server {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         now: Instant,
         certs: &[impl AsRef<str>],
@@ -43,9 +45,10 @@ impl Http3Server {
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
         max_table_size: u32,
         max_blocked_streams: u16,
+        qlog: Option<NeqoQlogRef>,
     ) -> Res<Self> {
         Ok(Self {
-            server: Server::new(now, certs, protocols, anti_replay, cid_manager)?,
+            server: Server::new(now, certs, protocols, anti_replay, cid_manager, qlog)?,
             max_table_size,
             max_blocked_streams,
             http3_handlers: HashMap::new(),
@@ -180,6 +183,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
             100,
             100,
+            None,
         )
         .expect("create a default server")
     }
