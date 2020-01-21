@@ -3748,7 +3748,7 @@ mod tests {
         // We will check this by processing init_pkt_s a second time.
         // The initial packet should be dropped. The packet contains a Handshake packet as well, which
         // will be marked as dup.
-        check_discarded(&mut client, init_pkt_s.clone(), 1, 1);
+        check_discarded(&mut client, init_pkt_s, 1, 1);
 
         assert!(maybe_authenticate(&mut client));
 
