@@ -34,9 +34,7 @@ use crate::packet::{
     decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, ConnectionIdDecoder, PacketHdr,
     PacketNumberDecoder, PacketType,
 };
-use crate::recovery::{
-    LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken, SentPacket,
-};
+use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::Stats;
@@ -44,7 +42,7 @@ use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::{
     tp_constants, TransportParameter, TransportParameters, TransportParametersHandler,
 };
-use crate::tracking::{AckTracker, PNSpace};
+use crate::tracking::{AckTracker, PNSpace, SentPacket};
 use crate::QUIC_VERSION;
 use crate::{AppError, ConnectionError, Error, Res};
 
@@ -2146,8 +2144,8 @@ impl ::std::fmt::Display for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cc::{INITIAL_CWND_PKTS, MAX_DATAGRAM_SIZE, MIN_CONG_WINDOW};
     use crate::frame::{CloseError, StreamType};
-    use crate::recovery::{INITIAL_CWND_PKTS, MAX_DATAGRAM_SIZE, MIN_CONG_WINDOW};
     use neqo_common::matches;
     use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
