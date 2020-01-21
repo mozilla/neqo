@@ -54,8 +54,7 @@ pub struct Aead {
 }
 
 // TODO(mt) move unused_self once https://github.com/rust-lang/rust-clippy/issues/5053 is fixed
-// TODO(mt) remove unknown_clippy_lints once we are on 1.40 consistently
-#[allow(clippy::unused_self, clippy::unknown_clippy_lints)]
+#[allow(clippy::unused_self)]
 impl Aead {
     pub fn new(version: Version, cipher: Cipher, secret: &SymKey, prefix: &str) -> Res<Self> {
         let s: *mut PK11SymKey = **secret;
