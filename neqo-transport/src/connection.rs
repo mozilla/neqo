@@ -568,7 +568,7 @@ impl Connection {
     /// Call by application when the peer cert has been verified
     pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
         self.crypto.tls.authenticated(status);
-        let res = self.handshake(now, PNSpace::Initial, None);
+        let res = self.handshake(now, PNSpace::Handshake, None);
         self.absorb_error(now, res);
     }
 

@@ -21,9 +21,9 @@ use crate::recovery::RecoveryToken;
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PNSpace {
-    Initial = 0,
-    Handshake = 1,
-    ApplicationData = 2,
+    Initial,
+    Handshake,
+    ApplicationData,
 }
 
 #[allow(clippy::use_self)] // https://github.com/rust-lang/rust-clippy/issues/3410
