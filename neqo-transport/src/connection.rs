@@ -1333,16 +1333,14 @@ impl Connection {
     fn handshake(&mut self, now: Instant, space: PNSpace, data: Option<&[u8]>) -> Res<()> {
         qdebug!("Handshake space={} data={:0x?}", space, data);
 
-        let rec = if let Some(d) = data {
+        let rec = data.map(|d| {
             qdebug!([self], "Handshake received {:0x?} ", d);
-            Some(Record {
+            Record {
                 ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
                 epoch: space.into(),
                 data: d.to_vec(),
-            })
-        } else {
-            None
-        };
+            }
+        });
         let try_update = rec.is_some();
 
         match self.crypto.tls.handshake_raw(now, rec) {
