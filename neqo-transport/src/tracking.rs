@@ -47,6 +47,37 @@ impl From<Epoch> for PNSpace {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SentPacket {
+    pub ack_eliciting: bool,
+    pub time_sent: Instant,
+    pub tokens: Vec<RecoveryToken>,
+
+    pub time_declared_lost: Option<Instant>,
+
+    pub in_flight: bool,
+    pub size: usize,
+}
+
+impl SentPacket {
+    pub fn new(
+        time_sent: Instant,
+        ack_eliciting: bool,
+        tokens: Vec<RecoveryToken>,
+        size: usize,
+        in_flight: bool,
+    ) -> SentPacket {
+        SentPacket {
+            time_sent,
+            ack_eliciting,
+            tokens,
+            time_declared_lost: None,
+            size,
+            in_flight,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PacketRange {
     largest: u64,

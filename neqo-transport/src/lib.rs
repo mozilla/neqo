@@ -9,6 +9,7 @@
 use neqo_common::qinfo;
 use neqo_crypto;
 
+mod cc;
 mod connection;
 mod crypto;
 mod dump;
