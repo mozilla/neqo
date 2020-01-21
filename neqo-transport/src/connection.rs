@@ -1064,30 +1064,14 @@ impl Connection {
     }
 
     fn output(&mut self, now: Instant) -> Option<Datagram> {
-        let mut out = None;
-        if self.path.is_some() {
-            match self.output_pkt_for_path(now) {
-                Ok(res) => {
-                    out = res;
-                }
-                Err(e) => {
-                    if !matches!(self.state, State::Closing{..}) {
-                        // An error here causes us to transition to closing.
-                        let err: Result<Option<Datagram>, Error> = Err(e);
-                        self.absorb_error(now, err);
-                        // Rerun to give a chance to send a CONNECTION_CLOSE.
-                        out = match self.output_pkt_for_path(now) {
-                            Ok(x) => x,
-                            Err(e) => {
-                                qwarn!([self], "two output_path errors in a row: {:?}", e);
-                                None
-                            }
-                        };
-                    }
-                }
-            };
+        if let Some(mut path) = self.path.take() {
+            let res = self.output_path(&mut path, now);
+            let out = self.absorb_error(now, res).unwrap_or(None);
+            self.path = Some(path);
+            out
+        } else {
+            None
         }
-        out
     }
 
     fn obtain_epoch_tx_crypto_state(&mut self, epoch: Epoch) -> Res<&mut CryptoDxState> {
@@ -1110,14 +1094,10 @@ impl Connection {
     #[allow(clippy::useless_let_if_seq)]
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
-    fn output_pkt_for_path(&mut self, now: Instant) -> Res<Option<Datagram>> {
+    fn output_path(&mut self, path: &mut Path, now: Instant) -> Res<Option<Datagram>> {
         let mut out_bytes = Vec::new();
         let mut needs_padding = false;
         let mut close_sent = false;
-        let path = self
-            .path
-            .take()
-            .expect("we know we have a path because calling fn checked");
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -1303,7 +1283,6 @@ impl Connection {
 
         if out_bytes.is_empty() {
             assert!(self.tx_mode != TxMode::Pto);
-            self.path = Some(path);
             Ok(None)
         } else {
             // Pad Initial packets sent by the client to mtu bytes.
@@ -1311,9 +1290,7 @@ impl Connection {
                 qdebug!([self], "pad Initial to max_datagram_size");
                 out_bytes.resize(path.mtu(), 0);
             }
-            let ret = Ok(Some(Datagram::new(path.local, path.remote, out_bytes)));
-            self.path = Some(path);
-            ret
+            Ok(Some(Datagram::new(path.local, path.remote, out_bytes)))
         }
     }
 
