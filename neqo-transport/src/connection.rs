@@ -1664,7 +1664,7 @@ impl Connection {
 
         // Setting application keys has to occur after 0-RTT rejection.
         let pto = self.loss_recovery.pto();
-        self.crypto.set_application_keys(now + pto)?;
+        self.crypto.install_application_keys(now + pto)?;
         self.validate_odcid()?;
         self.set_initial_limits();
         self.set_state(State::Connected);

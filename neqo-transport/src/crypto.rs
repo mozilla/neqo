@@ -11,7 +11,7 @@ use std::ops::{Index, IndexMut, Range};
 use std::rc::Rc;
 use std::time::Instant;
 
-use neqo_common::{hex, matches, qdebug, qinfo, qtrace};
+use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hp::HpKey;
 use neqo_crypto::{
@@ -91,27 +91,29 @@ impl Crypto {
     }
 
     pub fn install_keys(&mut self, role: Role) {
-        // There are no direct events to drive the installation of these keys, so we
-        // attempt to set them each time new CRYPTO frames arrive.
-        qtrace!([self], "Attempt to install keys");
-        if !self.tls.state().is_final() && self.states.handshake.is_none() {
-            if let Err(e) = self.set_handshake_keys() {
-                qdebug!([self], "unable to set handshake keys yet: {:?}", e);
-                return;
-            }
+        if self.tls.state().is_final() {
+            return;
+        }
+        // These functions only work once, but will usually return KeysNotFound.
+        // Anything else is unusual and worth logging.
+        if let Err(e) = self.install_handshake_keys() {
+            qerror!([self], "Error installing handshake keys: {:?}", e);
         }
         if role == Role::Server {
-            if let Err(e) = self.set_application_write_key() {
-                qdebug!([self], "unable to set application key yet: {:?}", e);
+            if let Err(e) = self.install_application_write_key() {
+                qerror!([self], "Error installing application write key: {:?}", e);
             }
         }
     }
 
-    fn set_handshake_keys(&mut self) -> Res<()> {
-        let write_secret = self
-            .tls
-            .write_secret(TLS_EPOCH_HANDSHAKE)
-            .ok_or(Error::KeysNotFound)?;
+    fn install_handshake_keys(&mut self) -> Res<()> {
+        qtrace!([self], "Attempt to install handshake keys");
+        let write_secret = if let Some(secret) = self.tls.write_secret(TLS_EPOCH_HANDSHAKE) {
+            secret
+        } else {
+            // No keys is fine.
+            return Ok(());
+        };
         let read_secret = self
             .tls
             .read_secret(TLS_EPOCH_HANDSHAKE)
@@ -123,31 +125,31 @@ impl Crypto {
         .ok_or(Error::KeysNotFound)?;
         self.states
             .set_handshake_keys(&write_secret, &read_secret, cipher);
-        qdebug!([self], "handshake keys installed");
+        qdebug!([self], "Handshake keys installed");
         Ok(())
     }
 
-    fn set_application_write_key(&mut self) -> Res<()> {
-        if self.states.app_write.is_none() {
-            let write_secret = self
-                .tls
-                .write_secret(TLS_EPOCH_APPLICATION_DATA)
-                .ok_or(Error::KeysNotFound)?;
-            self.states
-                .set_application_write_key(write_secret.clone())?;
+    fn install_application_write_key(&mut self) -> Res<()> {
+        qtrace!([self], "Attempt to install application write key");
+        if let Some(secret) = self.tls.write_secret(TLS_EPOCH_APPLICATION_DATA) {
+            self.states.set_application_write_key(secret)?;
+            qdebug!([self], "Application write key installed");
         }
-        qdebug!([self], "application write key installed");
         Ok(())
     }
 
-    pub fn set_application_keys(&mut self, expire_0rtt: Instant) -> Res<()> {
-        self.set_application_write_key()?;
+    pub fn install_application_keys(&mut self, expire_0rtt: Instant) -> Res<()> {
+        if let Err(e) = self.install_application_write_key() {
+            if e != Error::KeysNotFound {
+                return Err(e);
+            }
+        }
         let read_secret = self
             .tls
             .read_secret(TLS_EPOCH_APPLICATION_DATA)
             .ok_or(Error::KeysNotFound)?;
         self.states
-            .set_application_read_key(read_secret.clone(), expire_0rtt)?;
+            .set_application_read_key(read_secret, expire_0rtt)?;
         qdebug!([self], "application read keys installed");
         Ok(())
     }
