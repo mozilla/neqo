@@ -228,7 +228,7 @@ pub struct SecretAgent {
 impl SecretAgent {
     fn new() -> Res<Self> {
         let mut io = Box::pin(AgentIo::new());
-        let fd = Self::create_fd(io.as_mut())?;
+        let fd = Self::create_fd(&mut io)?;
         Ok(Self {
             fd,
             secrets: SecretHolder::default(),
@@ -254,7 +254,7 @@ impl SecretAgent {
     // minimal, but it means that the two forms need casts to translate
     // between them.  ssl::PRFileDesc is left as an opaque type, as the
     // ssl::SSL_* APIs only need an opaque type.
-    fn create_fd(io: Pin<&mut AgentIo>) -> Res<*mut ssl::PRFileDesc> {
+    fn create_fd(io: &mut Pin<Box<AgentIo>>) -> Res<*mut ssl::PRFileDesc> {
         assert_initialized();
         let label = CString::new("sslwrapper")?;
         let id = unsafe { prio::PR_GetUniqueIdentity(label.as_ptr()) };
@@ -264,7 +264,7 @@ impl SecretAgent {
             return Err(Error::CreateSslSocket);
         }
         let fd = unsafe {
-            (*base_fd).secret = Pin::into_inner(io) as *mut AgentIo as *mut _;
+            (*base_fd).secret = as_c_void(io) as *mut _;
             ssl::SSL_ImportFD(null_mut(), base_fd as *mut ssl::PRFileDesc)
         };
         if fd.is_null() {
