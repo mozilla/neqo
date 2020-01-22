@@ -26,6 +26,7 @@ pub enum PNSpace {
     ApplicationData = 2,
 }
 
+#[allow(clippy::use_self)] // https://github.com/rust-lang/rust-clippy/issues/3410
 impl PNSpace {
     pub fn iter() -> impl Iterator<Item = &'static PNSpace> {
         const SPACES: &[PNSpace] = &[
@@ -40,9 +41,9 @@ impl PNSpace {
 impl From<Epoch> for PNSpace {
     fn from(epoch: Epoch) -> Self {
         match epoch {
-            0 => PNSpace::Initial,
-            2 => PNSpace::Handshake,
-            _ => PNSpace::ApplicationData,
+            0 => Self::Initial,
+            2 => Self::Handshake,
+            _ => Self::ApplicationData,
         }
     }
 }
@@ -66,8 +67,8 @@ impl SentPacket {
         tokens: Vec<RecoveryToken>,
         size: usize,
         in_flight: bool,
-    ) -> SentPacket {
-        SentPacket {
+    ) -> Self {
+        Self {
             time_sent,
             ack_eliciting,
             tokens,

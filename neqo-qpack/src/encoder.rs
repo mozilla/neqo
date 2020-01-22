@@ -51,8 +51,8 @@ pub struct QPackEncoder {
 }
 
 impl QPackEncoder {
-    pub fn new(use_huffman: bool) -> QPackEncoder {
-        QPackEncoder {
+    pub fn new(use_huffman: bool) -> Self {
+        Self {
             table: HeaderTable::new(true),
             send_buf: QPData::default(),
             max_entries: 0,

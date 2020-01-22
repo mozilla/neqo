@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![warn(clippy::use_self)]
 
 use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};

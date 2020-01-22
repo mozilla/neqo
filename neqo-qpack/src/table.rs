@@ -61,8 +61,8 @@ pub struct HeaderTable {
 }
 
 impl HeaderTable {
-    pub fn new(encoder: bool) -> HeaderTable {
-        HeaderTable {
+    pub fn new(encoder: bool) -> Self {
+        Self {
             qpack_side: if encoder {
                 QPackSide::Encoder
             } else {

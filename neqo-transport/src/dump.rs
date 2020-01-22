@@ -8,7 +8,7 @@
 // e.g. "RUST_LOG=neqo_transport::dump neqo-client ..."
 
 use crate::connection::Connection;
-use crate::frame::decode_frame;
+use crate::frame::Frame;
 use crate::packet::PacketHdr;
 use neqo_common::{qdebug, Decoder};
 
@@ -17,7 +17,7 @@ pub fn dump_packet(conn: &Connection, dir: &str, hdr: &PacketHdr, payload: &[u8]
     let mut s = String::from("");
     let mut d = Decoder::from(payload);
     while d.remaining() > 0 {
-        let f = match decode_frame(&mut d) {
+        let f = match Frame::decode(&mut d) {
             Ok(f) => f,
             Err(_) => {
                 s.push_str(" [broken]...");

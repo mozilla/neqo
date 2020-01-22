@@ -42,17 +42,17 @@ pub enum PacketType {
 
 impl Default for PacketType {
     fn default() -> Self {
-        PacketType::Short
+        Self::Short
     }
 }
 
 impl PacketType {
     fn code(&self) -> u8 {
         match self {
-            PacketType::Initial(..) => PACKET_TYPE_INITIAL,
-            PacketType::ZeroRTT => PACKET_TYPE_0RTT,
-            PacketType::Handshake => PACKET_TYPE_HANDSHAKE,
-            PacketType::Retry { .. } => PACKET_TYPE_RETRY,
+            Self::Initial(..) => PACKET_TYPE_INITIAL,
+            Self::ZeroRTT => PACKET_TYPE_0RTT,
+            Self::Handshake => PACKET_TYPE_HANDSHAKE,
+            Self::Retry { .. } => PACKET_TYPE_RETRY,
             _ => panic!("shouldn't be here"),
         }
     }
@@ -79,11 +79,11 @@ impl ConnectionId {
     }
 
     // Apply a wee bit of greasing here in picking a length between 8 and 20 bytes long.
-    pub fn generate_initial() -> ConnectionId {
+    pub fn generate_initial() -> Self {
         let v = random(1);
         // Bias selection toward picking 8 (>50% of the time).
         let len: usize = ::std::cmp::max(8, 5 + (v[0] & (v[0] >> 4))).into();
-        ConnectionId::generate(len)
+        Self::generate(len)
     }
 }
 
@@ -100,8 +100,8 @@ impl ::std::fmt::Display for ConnectionId {
 }
 
 impl From<&[u8]> for ConnectionId {
-    fn from(buf: &[u8]) -> ConnectionId {
-        ConnectionId(Vec::from(buf))
+    fn from(buf: &[u8]) -> Self {
+        Self(Vec::from(buf))
     }
 }
 
@@ -588,7 +588,7 @@ mod tests {
                 *i ^= AEAD_MASK;
             }
             let pt_len = pt.len() - AUTH_TAG_LEN;
-            let at = TestFixture::auth_tag(hdr, &pt[0..pt_len]);
+            let at = Self::auth_tag(hdr, &pt[0..pt_len]);
             for i in 0..16 {
                 if at[i] != pt[pt_len + i] {
                     return Err(Error::DecryptError);
@@ -598,7 +598,7 @@ mod tests {
         }
 
         fn aead_encrypt(&self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-            let tag = TestFixture::auth_tag(hdr, body);
+            let tag = Self::auth_tag(hdr, body);
             let mut enc = Encoder::with_capacity(body.len() + tag.len());
             enc.encode(body);
             enc.encode(&tag);

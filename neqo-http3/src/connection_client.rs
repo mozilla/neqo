@@ -44,7 +44,7 @@ impl Http3Client {
         max_table_size: u32,
         max_blocked_streams: u16,
     ) -> Res<Self> {
-        Ok(Http3Client::new_with_conn(
+        Ok(Self::new_with_conn(
             Connection::new_client(server_name, protocols, cid_manager, local_addr, remote_addr)?,
             max_table_size,
             max_blocked_streams,
@@ -52,7 +52,7 @@ impl Http3Client {
     }
 
     pub fn new_with_conn(c: Connection, max_table_size: u32, max_blocked_streams: u16) -> Self {
-        Http3Client {
+        Self {
             conn: c,
             base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
             events: Http3ClientEvents::default(),

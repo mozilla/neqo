@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![warn(clippy::pedantic)]
 
 use neqo_common::matches;
 use neqo_common::once::OnceResult;
@@ -35,18 +36,20 @@ pub fn fixture_init() {
 pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 
 fn earlier() -> Instant {
-    fixture_init();
     static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
+    fixture_init();
     *unsafe { BASE_TIME.call_once(Instant::now) }
 }
 
 /// The current time for the test.  Which is in the future,
-/// because 0-RTT tests need to run at least ANTI_REPLAY_WINDOW in the past.
+/// because 0-RTT tests need to run at least `ANTI_REPLAY_WINDOW` in the past.
+#[must_use]
 pub fn now() -> Instant {
     earlier().checked_add(ANTI_REPLAY_WINDOW).unwrap()
 }
 
 // Create a default anti-replay context.
+#[must_use]
 pub fn anti_replay() -> AntiReplay {
     AntiReplay::new(earlier(), ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay")
 }
@@ -57,6 +60,7 @@ pub const LONG_CERT_KEYS: &[&str] = &["A long cert"];
 pub const DEFAULT_ALPN: &[&str] = &["alpn"];
 
 /// Create a default socket address.
+#[must_use]
 pub fn loopback() -> SocketAddr {
     // These could be const functions, but they aren't...
     let localhost_v6 = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
@@ -64,6 +68,7 @@ pub fn loopback() -> SocketAddr {
 }
 
 /// Create a transport client with default configuration.
+#[must_use]
 pub fn default_client() -> Connection {
     fixture_init();
     Connection::new_client(
@@ -77,6 +82,7 @@ pub fn default_client() -> Connection {
 }
 
 /// Create a transport server with default configuration.
+#[must_use]
 pub fn default_server() -> Connection {
     fixture_init();
     Connection::new_server(
@@ -88,8 +94,9 @@ pub fn default_server() -> Connection {
     .expect("create a default server")
 }
 
-/// If state is AuthenticationNeeded call authenticated(). This funstion will consume
-/// all outstanding events on the connection.
+/// If state is `AuthenticationNeeded` call `authenticated()`.
+/// This funstion will consume all outstanding events on the connection.
+#[must_use]
 pub fn maybe_authenticate(conn: &mut Connection) -> bool {
     let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
     if conn.events().any(authentication_needed) {
@@ -112,6 +119,7 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     }
 }
 
+#[must_use]
 pub fn connect() -> (Connection, Connection) {
     let mut client = default_client();
     let mut server = default_server();
@@ -122,6 +130,7 @@ pub fn connect() -> (Connection, Connection) {
 }
 
 /// Create a http3 client with default configuration.
+#[must_use]
 pub fn default_http3_client() -> Http3Client {
     fixture_init();
     Http3Client::new(
@@ -137,6 +146,7 @@ pub fn default_http3_client() -> Http3Client {
 }
 
 /// Create a http3 server with default configuration.
+#[must_use]
 pub fn default_http3_server() -> Http3Server {
     fixture_init();
     Http3Server::new(

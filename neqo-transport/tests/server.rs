@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![warn(clippy::pedantic)]
 
 use neqo_common::{hex, matches, qdebug, qtrace, Datagram, Decoder, Encoder};
 use neqo_crypto::{
@@ -319,6 +320,7 @@ fn client_initial_aead_and_hp(dcid: &[u8]) -> (Aead, HpKey) {
 // at least 8 bytes long.  Otherwise, the second Initial won't have a
 // long enough connection ID.
 #[test]
+#[allow(clippy::shadow_unrelated)]
 fn mitm_retry() {
     let mut client = default_client();
     let mut retry_server = default_server();
