@@ -880,9 +880,12 @@ impl Server {
         checker: Box<dyn ZeroRttChecker>,
     ) -> Res<()> {
         let mut check_state = Box::pin(ZeroRttCheckState::new(self.agent.fd, checker));
-        let arg = as_c_void(&mut check_state);
         unsafe {
-            ssl::SSL_HelloRetryRequestCallback(self.agent.fd, Some(Self::hello_retry_cb), arg)
+            ssl::SSL_HelloRetryRequestCallback(
+                self.agent.fd,
+                Some(Self::hello_retry_cb),
+                as_c_void(&mut check_state),
+            )
         }?;
         unsafe { ssl::SSL_SetMaxEarlyDataSize(self.agent.fd, max_early_data) }?;
         self.zero_rtt_check = Some(check_state);

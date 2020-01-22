@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use crate::agentio::as_c_void;
 use crate::constants::*;
 use crate::err::Res;
 use crate::ssl::{
@@ -142,15 +143,13 @@ impl ExtensionTracker {
             extension,
             handler: Box::pin(Box::new(handler)),
         };
-        let pin = Pin::as_mut(&mut tracker.handler);
-        let ptr = Pin::get_unchecked_mut(pin) as *mut BoxedExtensionHandler as *mut c_void;
         SSL_InstallExtensionHooks(
             fd,
             extension,
             Some(Self::extension_writer),
-            ptr,
+            as_c_void(&mut tracker.handler),
             Some(Self::extension_handler),
-            ptr,
+            as_c_void(&mut tracker.handler),
         )?;
         Ok(tracker)
     }

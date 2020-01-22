@@ -118,8 +118,9 @@ impl RecordList {
     /// Create a new record list.
     pub(crate) fn setup(fd: *mut ssl::PRFileDesc) -> Res<Pin<Box<Self>>> {
         let mut records = Box::pin(Self::default());
-        let p = as_c_void(&mut records);
-        unsafe { ssl::SSL_RecordLayerWriteCallback(fd, Some(Self::ingest), p) }?;
+        unsafe {
+            ssl::SSL_RecordLayerWriteCallback(fd, Some(Self::ingest), as_c_void(&mut records))
+        }?;
         Ok(records)
     }
 }
