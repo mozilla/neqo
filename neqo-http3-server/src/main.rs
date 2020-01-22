@@ -205,23 +205,20 @@ fn main() -> Result<(), io::Error> {
             PollOpt::edge(),
         )?;
         sockets.push(socket);
-        servers.insert(
-            local_addr,
-            (
-                Http3Server::new(
-                    Instant::now(),
-                    &[args.key.clone()],
-                    &[args.alpn.clone()],
-                    AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
-                        .expect("unable to setup anti-replay"),
-                    Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-                    args.max_table_size,
-                    args.max_blocked_streams,
-                )
-                .expect("We cannot make a server!"),
-                None,
-            ),
-        );
+        let http3_server = Http3Server::new(
+            Instant::now(),
+            &[args.key.clone()],
+            &[args.alpn.clone()],
+            AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+                .expect("unable to setup anti-replay"),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+            args.max_table_size,
+            args.max_blocked_streams,
+        )
+        .expect("We cannot make a server!");
+        http3_server.listen();
+
+        servers.insert(local_addr, (http3_server, None));
     }
 
     let buf = &mut [0u8; 2048];

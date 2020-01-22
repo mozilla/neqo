@@ -53,6 +53,11 @@ impl Http3Server {
         })
     }
 
+    pub fn listen(&self) {
+        qtrace!([self], "Listening for client connections");
+        self.server.listen();
+    }
+
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         qtrace!([self], "Process.");
         let out = self.server.process(dgram, now);

@@ -438,6 +438,10 @@ impl Server {
         }
     }
 
+    pub fn listen(&self) {
+        qtrace!([self], "Listening for client connections");
+    }
+
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         let out = if let Some(d) = dgram {
             self.process_input(d, now)
