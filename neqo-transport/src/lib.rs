@@ -36,7 +36,7 @@ pub use self::frame::StreamType;
 pub use self::tparams::{tp_constants, TransportParameter};
 
 /// The supported version of the QUIC protocol.
-pub const QUIC_VERSION: u32 = 0xff00_0018;
+pub const QUIC_VERSION: u32 = 0xff00_0000 + 25;
 
 type TransportError = u64;
 
