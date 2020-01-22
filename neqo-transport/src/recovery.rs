@@ -90,8 +90,8 @@ pub(crate) struct LossRecoveryState {
 }
 
 impl LossRecoveryState {
-    fn new(mode: LossRecoveryMode, callback_time: Option<Instant>) -> LossRecoveryState {
-        LossRecoveryState {
+    fn new(mode: LossRecoveryMode, callback_time: Option<Instant>) -> Self {
+        Self {
             mode,
             callback_time,
         }
@@ -107,8 +107,8 @@ impl LossRecoveryState {
 }
 
 impl Default for LossRecoveryState {
-    fn default() -> LossRecoveryState {
-        LossRecoveryState {
+    fn default() -> Self {
+        Self {
             mode: LossRecoveryMode::None,
             callback_time: None,
         }
@@ -218,8 +218,8 @@ pub(crate) struct LossRecovery {
 }
 
 impl LossRecovery {
-    pub fn new() -> LossRecovery {
-        LossRecovery {
+    pub fn new() -> Self {
+        Self {
             rtt_vals: RttVals {
                 min_rtt: Duration::from_secs(u64::max_value()),
                 max_ack_delay: Duration::from_millis(25),
@@ -227,7 +227,7 @@ impl LossRecovery {
                 ..RttVals::default()
             },
 
-            ..LossRecovery::default()
+            ..Self::default()
         }
     }
 

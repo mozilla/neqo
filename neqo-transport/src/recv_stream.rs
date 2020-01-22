@@ -275,6 +275,8 @@ impl RxStreamOrderer {
 
 /// QUIC receiving states, based on -transport 3.2.
 #[derive(Debug, PartialEq)]
+#[allow(dead_code)]
+// Because a dead_code warning is easier than clippy::unused_self, see https://github.com/rust-lang/rust/issues/68408
 enum RecvStreamState {
     Recv {
         recv_buf: RxStreamOrderer,
@@ -295,7 +297,7 @@ enum RecvStreamState {
 
 impl RecvStreamState {
     fn new(max_bytes: u64) -> Self {
-        RecvStreamState::Recv {
+        Self::Recv {
             recv_buf: RxStreamOrderer::new(),
             max_bytes,
             max_stream_data: max_bytes,
@@ -304,26 +306,26 @@ impl RecvStreamState {
 
     fn name(&self) -> &str {
         match self {
-            RecvStreamState::Recv { .. } => "Recv",
-            RecvStreamState::SizeKnown { .. } => "SizeKnown",
-            RecvStreamState::DataRecvd { .. } => "DataRecvd",
-            RecvStreamState::DataRead => "DataRead",
-            RecvStreamState::ResetRecvd => "ResetRecvd",
+            Self::Recv { .. } => "Recv",
+            Self::SizeKnown { .. } => "SizeKnown",
+            Self::DataRecvd { .. } => "DataRecvd",
+            Self::DataRead => "DataRead",
+            Self::ResetRecvd => "ResetRecvd",
         }
     }
 
     fn recv_buf(&self) -> Option<&RxStreamOrderer> {
         match self {
-            RecvStreamState::Recv { recv_buf, .. }
-            | RecvStreamState::SizeKnown { recv_buf, .. }
-            | RecvStreamState::DataRecvd { recv_buf } => Some(recv_buf),
-            RecvStreamState::DataRead | RecvStreamState::ResetRecvd => None,
+            Self::Recv { recv_buf, .. }
+            | Self::SizeKnown { recv_buf, .. }
+            | Self::DataRecvd { recv_buf } => Some(recv_buf),
+            Self::DataRead | Self::ResetRecvd => None,
         }
     }
 
     fn final_size(&self) -> Option<u64> {
         match self {
-            RecvStreamState::SizeKnown { final_size, .. } => Some(*final_size),
+            Self::SizeKnown { final_size, .. } => Some(*final_size),
             _ => None,
         }
     }

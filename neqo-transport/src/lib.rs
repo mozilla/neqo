@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![warn(clippy::use_self)]
 
 use neqo_common::qinfo;
 use neqo_crypto;
@@ -83,18 +84,18 @@ pub enum Error {
 impl Error {
     pub fn code(&self) -> TransportError {
         match self {
-            Error::NoError => 0,
-            Error::ServerBusy => 2,
-            Error::FlowControlError => 3,
-            Error::StreamLimitError => 4,
-            Error::StreamStateError => 5,
-            Error::FinalSizeError => 6,
-            Error::FrameEncodingError => 7,
-            Error::TransportParameterError => 8,
-            Error::ProtocolViolation => 10,
-            Error::InvalidMigration => 12,
-            Error::CryptoAlert(a) => 0x100 + u64::from(*a),
-            Error::PeerError(a) => *a,
+            Self::NoError => 0,
+            Self::ServerBusy => 2,
+            Self::FlowControlError => 3,
+            Self::StreamLimitError => 4,
+            Self::StreamStateError => 5,
+            Self::FinalSizeError => 6,
+            Self::FrameEncodingError => 7,
+            Self::TransportParameterError => 8,
+            Self::ProtocolViolation => 10,
+            Self::InvalidMigration => 12,
+            Self::CryptoAlert(a) => 0x100 + u64::from(*a),
+            Self::PeerError(a) => *a,
             // All the rest are internal errors.
             _ => 1,
         }
@@ -104,20 +105,20 @@ impl Error {
 impl From<neqo_crypto::Error> for Error {
     fn from(err: neqo_crypto::Error) -> Self {
         qinfo!("Crypto operation failed {:?}", err);
-        Error::CryptoError(err)
+        Self::CryptoError(err)
     }
 }
 
 impl From<std::num::TryFromIntError> for Error {
     fn from(_: std::num::TryFromIntError) -> Self {
-        Error::IntegerOverflow
+        Self::IntegerOverflow
     }
 }
 
 impl ::std::error::Error for Error {
     fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
         match self {
-            Error::CryptoError(e) => Some(e),
+            Self::CryptoError(e) => Some(e),
             _ => None,
         }
     }
@@ -140,7 +141,7 @@ pub enum ConnectionError {
 impl ConnectionError {
     pub fn app_code(&self) -> Option<AppError> {
         match self {
-            ConnectionError::Application(e) => Some(*e),
+            Self::Application(e) => Some(*e),
             _ => None,
         }
     }
@@ -149,8 +150,8 @@ impl ConnectionError {
 impl From<CloseError> for ConnectionError {
     fn from(err: CloseError) -> Self {
         match err {
-            CloseError::Transport(c) => ConnectionError::Transport(Error::PeerError(c)),
-            CloseError::Application(c) => ConnectionError::Application(c),
+            CloseError::Transport(c) => Self::Transport(Error::PeerError(c)),
+            CloseError::Application(c) => Self::Application(c),
         }
     }
 }

@@ -36,8 +36,8 @@ struct Request {
 }
 
 impl Request {
-    pub fn new(method: &str, scheme: &str, host: &str, path: &str, headers: &[Header]) -> Request {
-        let mut r = Request {
+    pub fn new(method: &str, scheme: &str, host: &str, path: &str, headers: &[Header]) -> Self {
+        let mut r = Self {
             method: method.to_owned(),
             scheme: scheme.to_owned(),
             host: host.to_owned(),
@@ -180,9 +180,9 @@ impl TransactionClient {
         path: &str,
         headers: &[Header],
         conn_events: Http3ClientEvents,
-    ) -> TransactionClient {
+    ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
-        TransactionClient {
+        Self {
             send_state: TransactionSendState::SendingHeaders {
                 request: Request::new(method, scheme, host, path, headers),
                 fin: false,

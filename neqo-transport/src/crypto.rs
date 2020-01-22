@@ -40,7 +40,7 @@ impl Crypto {
         protocols: &[impl AsRef<str>],
         tphandler: Rc<RefCell<TransportParametersHandler>>,
         anti_replay: Option<&AntiReplay>,
-    ) -> Res<Crypto> {
+    ) -> Res<Self> {
         agent.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
         agent.enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])?;
         agent.set_alpn(protocols)?;
@@ -54,7 +54,7 @@ impl Crypto {
             )?,
         }
         agent.extension_handler(0xffa5, tphandler)?;
-        Ok(Crypto {
+        Ok(Self {
             tls: agent,
             streams: Default::default(),
             states: Default::default(),
@@ -231,14 +231,14 @@ impl CryptoDxState {
         epoch: Epoch,
         secret: &SymKey,
         cipher: Cipher,
-    ) -> CryptoDxState {
+    ) -> Self {
         qinfo!(
             "Making {:?} {} CryptoDxState, cipher={}",
             direction,
             epoch,
             cipher
         );
-        CryptoDxState {
+        Self {
             direction,
             epoch,
             aead: Aead::new(TLS_VERSION_1_3, cipher, secret, "quic ").unwrap(),
@@ -246,11 +246,7 @@ impl CryptoDxState {
         }
     }
 
-    pub fn new_initial(
-        direction: CryptoDxDirection,
-        label: &str,
-        dcid: &[u8],
-    ) -> Option<CryptoDxState> {
+    pub fn new_initial(direction: CryptoDxDirection, label: &str, dcid: &[u8]) -> Option<Self> {
         const INITIAL_SALT: &[u8] = &[
             0xc3, 0xee, 0xf7, 0x12, 0xc7, 0x2e, 0xbb, 0x5a, 0x11, 0xa7, 0xd2, 0x43, 0x2b, 0xb4,
             0x63, 0x65, 0xbe, 0xf9, 0xf5, 0x02,
@@ -273,7 +269,7 @@ impl CryptoDxState {
         let secret =
             hkdf::expand_label(TLS_VERSION_1_3, cipher, &initial_secret, &[], label).unwrap();
 
-        Some(CryptoDxState::new(direction, 0, &secret, cipher))
+        Some(Self::new(direction, 0, &secret, cipher))
     }
 }
 
@@ -334,7 +330,7 @@ pub enum CryptoState {
 
 impl Default for CryptoState {
     fn default() -> Self {
-        CryptoState::NoInit
+        Self::NoInit
     }
 }
 

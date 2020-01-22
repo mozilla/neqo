@@ -32,7 +32,7 @@ pub struct CongestionControl {
 
 impl Default for CongestionControl {
     fn default() -> Self {
-        CongestionControl {
+        Self {
             congestion_window: INITIAL_WINDOW,
             bytes_in_flight: 0,
             congestion_recovery_start_time: None,

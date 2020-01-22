@@ -84,7 +84,7 @@ struct RetryToken {
 
 impl RetryToken {
     fn new(now: Instant) -> Res<Self> {
-        Ok(RetryToken {
+        Ok(Self {
             require_retry: false,
             self_encrypt: SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256)?,
             start_time: now,
@@ -124,7 +124,7 @@ impl RetryToken {
         let end_millis = u32::try_from(end.duration_since(self.start_time).as_millis())?;
         token.encode_uint(4, end_millis);
         token.encode(dcid);
-        let peer_addr = RetryToken::encode_peer_address(peer_address);
+        let peer_addr = Self::encode_peer_address(peer_address);
         Ok(self.self_encrypt.seal(&peer_addr, &token)?)
     }
 
@@ -140,7 +140,7 @@ impl RetryToken {
         peer_address: SocketAddr,
         now: Instant,
     ) -> Option<ConnectionId> {
-        let peer_addr = RetryToken::encode_peer_address(peer_address);
+        let peer_addr = Self::encode_peer_address(peer_address);
         let data = if let Ok(d) = self.self_encrypt.open(&peer_addr, token) {
             d
         } else {

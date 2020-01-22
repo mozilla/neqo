@@ -1,4 +1,5 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![warn(clippy::pedantic)]
 
 use neqo_crypto::*;
 
@@ -63,7 +64,7 @@ fn basic() {
     assert_eq!(TLS_AES_128_GCM_SHA256, server_info.cipher_suite());
 }
 
-fn check_client_preinfo(client_preinfo: SecretAgentPreInfo) {
+fn check_client_preinfo(client_preinfo: &SecretAgentPreInfo) {
     assert_eq!(client_preinfo.version(), None);
     assert_eq!(client_preinfo.cipher_suite(), None);
     assert_eq!(client_preinfo.early_data(), false);
@@ -72,7 +73,7 @@ fn check_client_preinfo(client_preinfo: SecretAgentPreInfo) {
     assert_eq!(client_preinfo.alpn(), None);
 }
 
-fn check_server_preinfo(server_preinfo: SecretAgentPreInfo) {
+fn check_server_preinfo(server_preinfo: &SecretAgentPreInfo) {
     assert_eq!(server_preinfo.version(), Some(TLS_VERSION_1_3));
     assert_eq!(server_preinfo.cipher_suite(), Some(TLS_AES_128_GCM_SHA256));
     assert_eq!(server_preinfo.early_data(), false);
@@ -93,14 +94,14 @@ fn raw() {
     assert!(!client_records.is_empty());
     assert_eq!(*client.state(), HandshakeState::InProgress);
 
-    check_client_preinfo(client.preinfo().expect("get preinfo"));
+    check_client_preinfo(&client.preinfo().expect("get preinfo"));
 
     let server_records =
         forward_records(now(), &mut server, client_records).expect("read CH, send SH");
     assert!(!server_records.is_empty());
     assert_eq!(*server.state(), HandshakeState::InProgress);
 
-    check_server_preinfo(server.preinfo().expect("get preinfo"));
+    check_server_preinfo(&server.preinfo().expect("get preinfo"));
 
     let client_records = forward_records(now(), &mut client, server_records).expect("send CF");
     assert!(client_records.is_empty());

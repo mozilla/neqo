@@ -86,9 +86,9 @@ pub struct QPackDecoder {
 }
 
 impl QPackDecoder {
-    pub fn new(max_table_size: u32, max_blocked_streams: u16) -> QPackDecoder {
+    pub fn new(max_table_size: u32, max_blocked_streams: u16) -> Self {
         qdebug!("Decoder: creating a new qpack decoder.");
-        QPackDecoder {
+        Self {
             state: QPackDecoderState::ReadInstruction,
             table: HeaderTable::new(false),
             increment: 0,

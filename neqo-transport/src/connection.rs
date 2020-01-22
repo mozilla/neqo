@@ -29,7 +29,7 @@ use crate::crypto::{Crypto, CryptoDxDirection, CryptoDxState, CryptoState};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
-use crate::frame::{decode_frame, AckRange, Frame, FrameType, StreamType, TxMode};
+use crate::frame::{AckRange, Frame, FrameType, StreamType, TxMode};
 use crate::packet::{
     decode_packet_hdr, decrypt_packet, encode_packet, ConnectionId, ConnectionIdDecoder, PacketHdr,
     PacketNumberDecoder, PacketType,
@@ -68,8 +68,8 @@ pub enum Role {
 impl Role {
     pub fn remote(self) -> Self {
         match self {
-            Role::Client => Role::Server,
-            Role::Server => Role::Client,
+            Self::Client => Self::Server,
+            Self::Server => Self::Client,
         }
     }
 }
@@ -104,17 +104,17 @@ impl PartialOrd for State {
             return Some(Ordering::Equal);
         }
         Some(match (self, other) {
-            (State::Init, _) => Ordering::Less,
-            (_, State::Init) => Ordering::Greater,
-            (State::WaitInitial, _) => Ordering::Less,
-            (_, State::WaitInitial) => Ordering::Greater,
-            (State::Handshaking, _) => Ordering::Less,
-            (_, State::Handshaking) => Ordering::Greater,
-            (State::Connected, _) => Ordering::Less,
-            (_, State::Connected) => Ordering::Greater,
-            (State::Closing { .. }, _) => Ordering::Less,
-            (_, State::Closing { .. }) => Ordering::Greater,
-            (State::Closed(_), _) => unreachable!(),
+            (Self::Init, _) => Ordering::Less,
+            (_, Self::Init) => Ordering::Greater,
+            (Self::WaitInitial, _) => Ordering::Less,
+            (_, Self::WaitInitial) => Ordering::Greater,
+            (Self::Handshaking, _) => Ordering::Less,
+            (_, Self::Handshaking) => Ordering::Greater,
+            (Self::Connected, _) => Ordering::Less,
+            (_, Self::Connected) => Ordering::Greater,
+            (Self::Closing { .. }, _) => Ordering::Less,
+            (_, Self::Closing { .. }) => Ordering::Greater,
+            (Self::Closed(_), _) => unreachable!(),
         })
     }
 }
@@ -177,7 +177,7 @@ impl Output {
     /// Convert into an `Option<Datagram>`.
     pub fn dgram(self) -> Option<Datagram> {
         match self {
-            Output::Datagram(dg) => Some(dg),
+            Self::Datagram(dg) => Some(dg),
             _ => None,
         }
     }
@@ -185,7 +185,7 @@ impl Output {
     /// Get a reference to the Datagram, if any.
     pub fn as_dgram_ref(&self) -> Option<&Datagram> {
         match self {
-            Output::Datagram(dg) => Some(dg),
+            Self::Datagram(dg) => Some(dg),
             _ => None,
         }
     }
@@ -237,15 +237,15 @@ enum IdleTimeout {
 
 impl Default for IdleTimeout {
     fn default() -> Self {
-        IdleTimeout::Init
+        Self::Init
     }
 }
 
 impl IdleTimeout {
     pub fn as_instant(&self) -> Option<Instant> {
         match self {
-            IdleTimeout::Init => None,
-            IdleTimeout::PacketReceived(t) | IdleTimeout::AckElicitingPacketSent(t) => Some(*t),
+            Self::Init => None,
+            Self::PacketReceived(t) | Self::AckElicitingPacketSent(t) => Some(*t),
         }
     }
 
@@ -253,15 +253,15 @@ impl IdleTimeout {
         // Only reset idle timeout if we've received a packet since the last
         // time we reset the timeout here.
         match self {
-            IdleTimeout::AckElicitingPacketSent(_) => {}
-            IdleTimeout::Init | IdleTimeout::PacketReceived(_) => {
-                *self = IdleTimeout::AckElicitingPacketSent(now + LOCAL_IDLE_TIMEOUT);
+            Self::AckElicitingPacketSent(_) => {}
+            Self::Init | Self::PacketReceived(_) => {
+                *self = Self::AckElicitingPacketSent(now + LOCAL_IDLE_TIMEOUT);
             }
         }
     }
 
     fn on_packet_received(&mut self, now: Instant) {
-        *self = IdleTimeout::PacketReceived(now + LOCAL_IDLE_TIMEOUT);
+        *self = Self::PacketReceived(now + LOCAL_IDLE_TIMEOUT);
     }
 
     pub fn expired(&self, now: Instant) -> bool {
@@ -976,7 +976,7 @@ impl Connection {
         #[allow(unused_mut)]
         let mut frames = Vec::new();
         while d.remaining() > 0 {
-            let f = decode_frame(&mut d)?;
+            let f = Frame::decode(&mut d)?;
             if cfg!(test) {
                 frames.push((f.clone(), hdr.epoch));
             }
@@ -2114,7 +2114,7 @@ impl Connection {
 
 impl ::std::fmt::Display for Connection {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{:?} {:p}", self.role, self as *const Connection)
+        write!(f, "{:?} {:p}", self.role, self as *const Self)
     }
 }
 
