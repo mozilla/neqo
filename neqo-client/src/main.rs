@@ -10,6 +10,7 @@
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_transport::stream_id::StreamId;
 use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
@@ -191,7 +192,7 @@ impl Handler for PostConnectHandler {
                         return false;
                     }
 
-                    let headers = client.read_response_headers(stream_id);
+                    let headers = client.read_response_headers(StreamId(stream_id));
                     println!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
@@ -201,7 +202,7 @@ impl Handler for PostConnectHandler {
                     }
 
                     let (sz, fin) = client
-                        .read_response_data(Instant::now(), stream_id, &mut data)
+                        .read_response_data(Instant::now(), StreamId(stream_id), &mut data)
                         .expect("Read should succeed");
                     if args.omit_read_data {
                         println!("READ[{}]: {} bytes", stream_id, sz);
@@ -276,7 +277,7 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         return;
     }
     let client_stream_id = client_stream_id.unwrap();
-    let _ = client.stream_close_send(client_stream_id);
+    let _ = client.stream_close_send(StreamId(client_stream_id));
 
     let mut h2 = PostConnectHandler::default();
     h2.streams.insert(client_stream_id);

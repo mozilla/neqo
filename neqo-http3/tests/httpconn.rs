@@ -9,6 +9,7 @@
 use neqo_common::{matches, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{Http3Client, Http3ClientEvent, Http3Server, Http3ServerEvent, Http3State};
+use neqo_transport::stream_id::StreamId;
 use test_fixture::*;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];
@@ -53,6 +54,7 @@ fn process_client_events(conn: &mut Http3Client) {
     while let Some(event) = conn.next_event() {
         match event {
             Http3ClientEvent::HeaderReady { stream_id } => {
+                let stream_id = StreamId(stream_id);
                 let h = conn.read_response_headers(stream_id);
                 assert_eq!(
                     h,
@@ -68,6 +70,7 @@ fn process_client_events(conn: &mut Http3Client) {
             }
             Http3ClientEvent::DataReadable { stream_id } => {
                 let mut buf = [0u8; 100];
+                let stream_id = StreamId(stream_id);
                 let (amount, fin) = conn.read_response_data(now(), stream_id, &mut buf).unwrap();
                 assert_eq!(fin, true);
                 assert_eq!(amount, RESPONSE_DATA.len());
@@ -119,6 +122,7 @@ fn test_fetch() {
         .fetch("GET", "https", "something.com", "/", &[])
         .unwrap();
     assert_eq!(req, 0);
+    let req = StreamId(req);
     hconn_c.stream_close_send(req).unwrap();
     let out = hconn_c.process(dgram, now());
     eprintln!("-----server");

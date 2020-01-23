@@ -23,7 +23,7 @@ mod recv_stream;
 mod send_stream;
 pub mod server;
 mod stats;
-mod stream_id;
+pub mod stream_id;
 mod tparams;
 mod tracking;
 

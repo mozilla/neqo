@@ -10,6 +10,7 @@
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent};
+use neqo_transport::stream_id::StreamId;
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, State,
     StreamType,
@@ -295,7 +296,7 @@ impl H3Handler {
                         return false;
                     }
 
-                    let headers = self.h3.read_response_headers(stream_id);
+                    let headers = self.h3.read_response_headers(StreamId(stream_id));
                     eprintln!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
@@ -306,7 +307,7 @@ impl H3Handler {
 
                     let (_sz, fin) = self
                         .h3
-                        .read_response_data(Instant::now(), stream_id, &mut data)
+                        .read_response_data(Instant::now(), StreamId(stream_id), &mut data)
                         .expect("Read should succeed");
                     eprintln!(
                         "READ[{}]: {}",
@@ -463,7 +464,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         .h3
         .fetch("GET", "https", &hc.host, &hc.path, &[])
         .unwrap();
-    let _ = hc.h3.stream_close_send(client_stream_id);
+    let _ = hc.h3.stream_close_send(StreamId(client_stream_id));
 
     hc.streams.insert(client_stream_id);
     if let Err(e) = process_loop_h3(nctx, &mut hc, Duration::new(5, 0)) {

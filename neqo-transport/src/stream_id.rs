@@ -37,8 +37,20 @@ impl StreamIndexes {
     }
 }
 
+impl Default for StreamIndexes {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Display for StreamId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_u64())
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash)]
-pub struct StreamId(u64);
+pub struct StreamId(pub u64);
 
 impl StreamId {
     pub fn is_bidi(self) -> bool {
