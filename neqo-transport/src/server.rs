@@ -15,10 +15,10 @@ use neqo_crypto::{
     AntiReplay,
 };
 
-use crate::connection::{Connection, ConnectionIdManager, Output, State};
+use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager};
+use crate::connection::{Connection, Output, State};
 use crate::packet::{
-    decode_packet_hdr, encode_packet_vn, encode_retry, ConnectionId, ConnectionIdDecoder,
-    PacketHdr, PacketType, Version,
+    decode_packet_hdr, encode_packet_vn, encode_retry, PacketHdr, PacketType, Version,
 };
 use crate::{Res, QUIC_VERSION};
 

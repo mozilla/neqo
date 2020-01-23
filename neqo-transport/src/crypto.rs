@@ -22,7 +22,7 @@ use neqo_crypto::{
 
 use crate::connection::Role;
 use crate::frame::{Frame, TxMode};
-use crate::packet::{HeaderProtectionMask, PacketNumber, Protector, Unprotector};
+use crate::packet::PacketNumber;
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
@@ -291,11 +291,6 @@ impl CryptoDxState {
         self.epoch & 1 != 1
     }
 
-    #[must_use]
-    pub fn expansion(&self) -> usize {
-        self.aead.expansion()
-    }
-
     /// This is a continuation of a previous, so adjust the range accordingly.
     /// Fail if the two ranges overlap.  Do nothing if the directions don't match.
     pub fn continuation(&mut self, prev: &Self) -> Res<()> {
@@ -359,39 +354,19 @@ impl CryptoDxState {
             self.epoch == usize::from(TLS_EPOCH_APPLICATION_DATA)
         }
     }
-}
 
-impl HeaderProtectionMask for CryptoDxState {
-    fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
+    pub fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
         let mask = self.hpkey.mask(sample)?;
         qdebug!([self], "HP sample={} mask={}", hex(sample), hex(&mask));
         Ok(mask)
     }
 
-    fn next_pn(&self) -> PacketNumber {
+    #[must_use]
+    pub fn next_pn(&self) -> PacketNumber {
         self.used_pn.end
     }
-}
 
-impl Unprotector for CryptoDxState {
-    fn decrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-        debug_assert_eq!(self.direction, CryptoDxDirection::Read);
-        qinfo!(
-            [self],
-            "decrypt pn={} hdr={} body={}",
-            pn,
-            hex(hdr),
-            hex(body)
-        );
-        let mut out = vec![0; body.len()];
-        let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
-        self.used(pn)?;
-        Ok(res.to_vec())
-    }
-}
-
-impl Protector for CryptoDxState {
-    fn encrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    pub fn encrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qdebug!(
             [self],
@@ -407,6 +382,26 @@ impl Protector for CryptoDxState {
 
         qdebug!([self], "encrypt ct={}", hex(res));
         debug_assert_eq!(pn, self.next_pn());
+        self.used(pn)?;
+        Ok(res.to_vec())
+    }
+
+    #[must_use]
+    pub fn expansion(&self) -> usize {
+        self.aead.expansion()
+    }
+
+    pub fn decrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+        debug_assert_eq!(self.direction, CryptoDxDirection::Read);
+        qinfo!(
+            [self],
+            "decrypt pn={} hdr={} body={}",
+            pn,
+            hex(hdr),
+            hex(body)
+        );
+        let mut out = vec![0; body.len()];
+        let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
         self.used(pn)?;
         Ok(res.to_vec())
     }

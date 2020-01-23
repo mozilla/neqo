@@ -333,6 +333,11 @@ impl Encoder {
         self.buf[start..].rotate_right(count);
         self
     }
+
+    /// Truncate the encoder to the given size.
+    pub fn truncate(&mut self, len: usize) {
+        self.buf.truncate(len);
+    }
 }
 
 impl Debug for Encoder {

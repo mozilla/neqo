@@ -11,6 +11,7 @@ use neqo_common::qinfo;
 use neqo_crypto;
 
 mod cc;
+mod cid;
 mod connection;
 mod crypto;
 mod dump;
@@ -18,6 +19,7 @@ mod events;
 mod flow_mgr;
 mod frame;
 mod packet;
+mod packet2;
 mod recovery;
 mod recv_stream;
 mod send_stream;
@@ -27,16 +29,16 @@ mod stream_id;
 mod tparams;
 mod tracking;
 
-pub use self::connection::{
-    Connection, ConnectionIdManager, FixedConnectionIdManager, Output, Role, State,
-};
+pub use self::cid::ConnectionIdManager;
+pub use self::connection::{Connection, FixedConnectionIdManager, Output, Role, State};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
 pub use self::tparams::{tp_constants, TransportParameter};
 
 /// The supported version of the QUIC protocol.
-pub const QUIC_VERSION: u32 = 0xff00_0018;
+pub type Version = u32;
+pub const QUIC_VERSION: Version = 0xff00_0018;
 
 type TransportError = u64;
 
