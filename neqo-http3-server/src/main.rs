@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![allow(clippy::option_option)]
 #![warn(clippy::use_self)]
 
 use chrono::offset::Utc;
