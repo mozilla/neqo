@@ -655,18 +655,20 @@ impl SecretAgent {
         self.fd = null_mut();
     }
 
-    // State returns the status of the handshake.
+    /// State returns the status of the handshake.
     #[must_use]
     pub fn state(&self) -> &HandshakeState {
         &self.state
     }
+    /// Take a read secret.  This will only return a non-`None` value once.
     #[must_use]
-    pub fn read_secret(&self, epoch: Epoch) -> Option<&p11::SymKey> {
-        self.secrets.read().get(epoch)
+    pub fn read_secret(&mut self, epoch: Epoch) -> Option<p11::SymKey> {
+        self.secrets.take_read(epoch)
     }
+    /// Take a write secret.
     #[must_use]
-    pub fn write_secret(&self, epoch: Epoch) -> Option<&p11::SymKey> {
-        self.secrets.write().get(epoch)
+    pub fn write_secret(&mut self, epoch: Epoch) -> Option<p11::SymKey> {
+        self.secrets.take_write(epoch)
     }
 }
 

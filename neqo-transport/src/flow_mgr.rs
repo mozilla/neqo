@@ -11,13 +11,13 @@ use std::collections::HashMap;
 use std::mem;
 
 use neqo_common::{qinfo, qtrace, qwarn, Encoder};
-use neqo_crypto::Epoch;
 
 use crate::frame::{Frame, StreamType};
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RecvStreams;
 use crate::send_stream::SendStreams;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
+use crate::tracking::PNSpace;
 use crate::AppError;
 
 pub type FlowControlRecoveryToken = Frame;
@@ -291,10 +291,10 @@ impl FlowMgr {
 
     pub(crate) fn get_frame(
         &mut self,
-        epoch: Epoch,
+        space: PNSpace,
         remaining: usize,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        if epoch != 3 {
+        if space != PNSpace::ApplicationData {
             return None;
         }
 

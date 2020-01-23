@@ -70,8 +70,14 @@ pub enum Error {
     InvalidResumptionToken,
     InvalidRetry,
     InvalidStreamId,
+    // Packet protection keys aren't available yet, or they have been discarded.
     KeysNotFound,
+    // An attempt to update keys can be blocked if
+    // a packet sent with the current keys hasn't been acknowledged.
+    KeyUpdateBlocked,
     NoMoreData,
+    NotConnected,
+    PacketNumberOverlap,
     PeerError(TransportError),
     TooMuchData,
     UnexpectedMessage,

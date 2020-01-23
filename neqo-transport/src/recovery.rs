@@ -124,7 +124,6 @@ pub(crate) enum LossRecoveryMode {
 
 #[derive(Debug, Default)]
 pub(crate) struct LossRecoverySpace {
-    tx_pn: u64,
     largest_acked: Option<u64>,
     largest_acked_sent_time: Option<Instant>,
     sent_packets: BTreeMap<u64, SentPacket>,
@@ -243,14 +242,6 @@ impl LossRecovery {
 
     pub fn cwnd_avail(&self) -> usize {
         self.cc.cwnd_avail()
-    }
-
-    pub fn next_pn(&mut self, pn_space: PNSpace) -> u64 {
-        self.spaces[pn_space].tx_pn
-    }
-
-    pub fn inc_pn(&mut self, pn_space: PNSpace) {
-        self.spaces[pn_space].tx_pn += 1;
     }
 
     pub fn increment_pto_count(&mut self) {
@@ -378,13 +369,11 @@ impl LossRecovery {
             .collect()
     }
 
-    pub fn remove_state_for_pn_space(&mut self, pn_space: PNSpace) {
-        self.spaces[pn_space]
-            .remove_ignored()
-            .map(|p| {
-                self.cc.discard(&p);
-            })
-            .collect()
+    /// Discard state for a given packet number space.
+    pub fn discard(&mut self, pn_space: PNSpace) {
+        for p in self.spaces[pn_space].remove_ignored() {
+            self.cc.discard(&p);
+        }
     }
 
     /// Detect packets whose contents may need to be retransmitted.

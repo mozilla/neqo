@@ -244,7 +244,6 @@ impl Server {
             hdr.scid.as_ref().unwrap().clone(),
             Some(hdr.dcid.clone()),
             0, // unused
-            0, // unused
         ));
         Datagram::new(received.destination(), received.source(), vn)
     }
@@ -334,7 +333,6 @@ impl Server {
                     hdr.scid.as_ref().unwrap().clone(),
                     Some(self.cid_manager.borrow_mut().generate_cid()),
                     0, // Packet number
-                    0, // Epoch
                 ));
                 let retry = Datagram::new(dgram.destination(), dgram.source(), payload);
                 Some(retry)
@@ -394,7 +392,7 @@ impl Server {
             return self.process_connection(c, Some(dgram), now);
         }
 
-        if hdr.tipe == PacketType::Short {
+        if matches!(hdr.tipe, PacketType::Short(_)) {
             // TODO send a stateless reset here.
             qtrace!([self], "Short header packet for an unknown connection");
             return None;
