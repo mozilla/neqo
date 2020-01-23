@@ -395,7 +395,7 @@ fn main() -> Result<(), std::io::Error> {
 
         qlog.traces.push(owned_trace);
 
-        let qlogpath = output_qlog.unwrap_or_else(|| "output.qlg".into());
+        let qlogpath = output_qlog.unwrap();
 
         match OpenOptions::new()
             .write(true)

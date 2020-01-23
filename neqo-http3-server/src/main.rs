@@ -291,7 +291,7 @@ fn main() -> Result<(), io::Error> {
                 summary: None,
                 traces: Vec::new(),
             }),
-            Some(output_path.clone().unwrap_or_else(|| "output.qlog".into())),
+            Some(output_path.clone().unwrap()),
         )
     } else {
         (None, None)
