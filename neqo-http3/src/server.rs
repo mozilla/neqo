@@ -36,6 +36,7 @@ impl ::std::fmt::Display for Http3Server {
 }
 
 impl Http3Server {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         now: Instant,
         certs: &[impl AsRef<str>],
