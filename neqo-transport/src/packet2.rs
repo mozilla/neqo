@@ -5,13 +5,11 @@
 // except according to those terms.
 
 // Encoding and decoding packets off the wire.
-#![allow(dead_code)] // TODO(mt) remove
-
 use crate::cid::ConnectionId;
 use crate::crypto::CryptoDxState;
 use crate::{Error, Res, QUIC_VERSION};
 
-use neqo_common::{hex, qdebug, qtrace, Encoder};
+use neqo_common::{hex, qdebug, Encoder};
 use neqo_crypto::{aead::Aead, hkdf, random, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
 use std::cell::RefCell;
@@ -32,6 +30,7 @@ const SAMPLE_SIZE: usize = 16;
 pub type PacketNumber = u64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // TODO(mt) remove when adding parsing
 pub enum PacketType {
     VersionNegotiation,
     Initial,
@@ -180,7 +179,12 @@ impl PacketBuilder {
         }
         let hdr = &self.encoder[self.header.clone()];
         let body = &self.encoder[self.header.end..];
-        qdebug!("Build pn={} hdr={} body={}", self.pn, hex(hdr), hex(body));
+        qdebug!(
+            "Packet build pn={} hdr={} body={}",
+            self.pn,
+            hex(hdr),
+            hex(body)
+        );
         let ciphertext = crypto.encrypt(self.pn, hdr, body)?;
 
         // Calculate the mask.
@@ -188,7 +192,6 @@ impl PacketBuilder {
         assert!(offset + SAMPLE_SIZE <= ciphertext.len());
         let sample = &ciphertext[offset..offset + SAMPLE_SIZE];
         let mask = crypto.compute_mask(sample)?;
-        qtrace!("mask={}", hex(&mask));
 
         // Apply the mask.
         self.encoder[self.header.start] ^= mask[0] & self.offsets.first_byte_mask;
@@ -199,7 +202,7 @@ impl PacketBuilder {
         // Finally, cut off the plaintext and add back the ciphertext.
         self.encoder.truncate(self.header.end);
         self.encoder.encode(&ciphertext);
-        qdebug!("Built {}", hex(&self.encoder));
+        qdebug!("Packet built {}", hex(&self.encoder));
         Ok(self.encoder)
     }
 
