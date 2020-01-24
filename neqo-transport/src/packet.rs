@@ -9,8 +9,7 @@
 // A lot of methods and types contain the word Packet
 #![allow(clippy::module_name_repetitions)]
 
-use neqo_common::{hex, matches, qtrace, Decoder, Encoder};
-use neqo_crypto::random;
+use neqo_common::{hex, matches, qtrace, Decoder};
 
 use std::convert::TryFrom;
 
@@ -23,9 +22,6 @@ const PACKET_TYPE_INITIAL: u8 = 0x0;
 const PACKET_TYPE_0RTT: u8 = 0x01;
 const PACKET_TYPE_HANDSHAKE: u8 = 0x2;
 const PACKET_TYPE_RETRY: u8 = 0x03;
-
-const PACKET_BIT_LONG: u8 = 0x80;
-const PACKET_BIT_FIXED_QUIC: u8 = 0x40;
 
 const SAMPLE_SIZE: usize = 16;
 
@@ -89,29 +85,6 @@ pub struct PacketHdr {
 }
 
 impl PacketHdr {
-    // Similar names are allowed here because
-    // dcid and scid are defined and commonly used in the spec.
-    #[allow(clippy::similar_names)]
-    pub fn new(
-        tbyte: u8,
-        tipe: PacketType,
-        version: Option<Version>,
-        dcid: ConnectionId,
-        scid: Option<ConnectionId>,
-        pn: PacketNumber,
-    ) -> Self {
-        Self {
-            tbyte,
-            tipe,
-            version,
-            dcid,
-            scid,
-            pn,
-            hdr_len: 0,
-            body_len: 0,
-        }
-    }
-
     pub fn body_len(&self) -> usize {
         self.body_len
     }
@@ -274,8 +247,10 @@ pub fn decode_packet_hdr(cid_parser: &dyn ConnectionIdDecoder, pd: &[u8]) -> Res
             PACKET_TYPE_0RTT => PacketType::ZeroRTT,
             PACKET_TYPE_HANDSHAKE => PacketType::Handshake,
             PACKET_TYPE_RETRY => {
-                let odcid = ConnectionId(d!(d.decode_vec(1)).to_vec()); // TODO(mt) unnecessary copy
-                let token = d.decode_remainder().to_vec(); // TODO(mt) unnecessary copy
+                // let odcid = ConnectionId(d!(d.decode_vec(1)).to_vec()); // TODO(mt) unnecessary copy
+                let odcid = ConnectionId::from(&[][..]);
+                let mut token = d.decode_remainder().to_vec(); // TODO(mt) unnecessary copy
+                token.truncate(token.len() - 16); // TODO(mt) check the tag
                 p.tipe = PacketType::Retry { odcid, token };
                 return Ok(p);
             }
@@ -351,41 +326,6 @@ pub fn decrypt_packet_body(
     body: &[u8],
 ) -> Res<Vec<u8>> {
     Ok(crypto.decrypt(pn, hdrbytes, body)?)
-}
-
-pub fn encode_packet_vn(hdr: &PacketHdr) -> Vec<u8> {
-    let mut d = Encoder::default();
-    let rand_byte = random(1)[0];
-    d.encode_byte(PACKET_BIT_LONG | rand_byte);
-    d.encode_uint(4, 0_u64); // version
-    d.encode_vec(1, &hdr.dcid);
-    d.encode_vec(1, hdr.scid.as_ref().unwrap());
-    if let PacketType::VN(vers) = &hdr.tipe {
-        for ver in vers {
-            d.encode_uint(4, *ver);
-        }
-    } else {
-        panic!("wrong packet type");
-    }
-    d.into()
-}
-
-pub fn encode_retry(hdr: &PacketHdr) -> Vec<u8> {
-    let rand_byte = random(1)[0];
-    if let PacketType::Retry { odcid, token } = &hdr.tipe {
-        let mut enc = Encoder::default();
-        let b0 =
-            PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | (PACKET_TYPE_RETRY << 4) | (rand_byte & 0xf);
-        enc.encode_byte(b0);
-        enc.encode_uint(4, hdr.version.unwrap());
-        enc.encode_vec(1, &hdr.dcid);
-        enc.encode_vec(1, &hdr.scid.as_ref().unwrap());
-        enc.encode_vec(1, odcid);
-        enc.encode(token);
-        enc.into()
-    } else {
-        unreachable!()
-    }
 }
 
 #[cfg(disabled)]

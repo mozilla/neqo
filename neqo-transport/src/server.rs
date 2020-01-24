@@ -17,9 +17,8 @@ use neqo_crypto::{
 
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager};
 use crate::connection::{Connection, Output, State};
-use crate::packet::{
-    decode_packet_hdr, encode_packet_vn, encode_retry, PacketHdr, PacketType, Version,
-};
+use crate::packet::{decode_packet_hdr, PacketHdr, PacketType, Version};
+use crate::packet2::PacketBuilder;
 use crate::{Res, QUIC_VERSION};
 
 use std::cell::RefCell;
@@ -236,15 +235,7 @@ impl Server {
     }
 
     fn create_vn(&self, hdr: &PacketHdr, received: Datagram) -> Datagram {
-        let vn = encode_packet_vn(&PacketHdr::new(
-            0,
-            // Actual version we support and a greased value.
-            PacketType::VN(vec![self.version, 0xaaba_cada]),
-            Some(0),
-            hdr.scid.as_ref().unwrap().clone(),
-            Some(hdr.dcid.clone()),
-            0, // unused
-        ));
+        let vn = PacketBuilder::version_negotiation(hdr.scid.as_ref().unwrap(), &hdr.dcid);
         Datagram::new(received.destination(), received.source(), vn)
     }
 
@@ -323,19 +314,19 @@ impl Server {
                     qerror!([self], "unable to generate token, dropping packet");
                     return None;
                 };
-                let payload = encode_retry(&PacketHdr::new(
-                    0, // tbyte (unused on encode)
-                    PacketType::Retry {
-                        odcid: hdr.dcid.clone(),
-                        token,
-                    },
-                    Some(self.version),
-                    hdr.scid.as_ref().unwrap().clone(),
-                    Some(self.cid_manager.borrow_mut().generate_cid()),
-                    0, // Packet number
-                ));
-                let retry = Datagram::new(dgram.destination(), dgram.source(), payload);
-                Some(retry)
+                let packet = PacketBuilder::retry(
+                    hdr.scid.as_ref().unwrap(),
+                    &self.cid_manager.borrow_mut().generate_cid(),
+                    &token,
+                    &hdr.dcid,
+                );
+                if let Ok(p) = packet {
+                    let retry = Datagram::new(dgram.destination(), dgram.source(), p);
+                    Some(retry)
+                } else {
+                    qerror!([self], "unable to encode retry, dropping packet");
+                    None
+                }
             }
         }
     }

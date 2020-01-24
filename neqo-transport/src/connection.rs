@@ -241,6 +241,15 @@ struct RetryInfo {
     odcid: ConnectionId,
 }
 
+impl RetryInfo {
+    fn new(odcid: ConnectionId) -> Self {
+        Self {
+            token: Vec::new(),
+            odcid,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 /// There's a little bit of different behavior for resetting idle timeout. See
 /// -transport 10.2 ("Idle Timeout").
@@ -413,6 +422,7 @@ impl Connection {
             }),
         );
         c.crypto.states.init(Role::Client, &dcid);
+        c.retry_info = Some(RetryInfo::new(dcid));
         Ok(c)
     }
 
@@ -463,7 +473,7 @@ impl Connection {
     }
 
     fn new(
-        r: Role,
+        role: Role,
         agent: Agent,
         cid_manager: CidMgr,
         anti_replay: Option<&AntiReplay>,
@@ -477,8 +487,8 @@ impl Connection {
 
         Self {
             version: QUIC_VERSION,
-            role: r,
-            state: match r {
+            role,
+            state: match role {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
             },
@@ -818,9 +828,10 @@ impl Connection {
         }
     }
 
-    fn handle_retry(&mut self, scid: &ConnectionId, odcid: &ConnectionId, token: &[u8]) -> Res<()> {
+    fn handle_retry(&mut self, scid: &ConnectionId, token: &[u8]) -> Res<()> {
         qdebug!([self], "received Retry");
-        if self.retry_info.is_some() {
+        debug_assert!(self.retry_info.is_some());
+        if !self.retry_info.as_ref().unwrap().token.is_empty() {
             qinfo!([self], "Dropping extra Retry");
             self.stats.dropped_rx += 1;
             return Ok(());
@@ -830,24 +841,14 @@ impl Connection {
             self.stats.dropped_rx += 1;
             return Ok(());
         }
-        match self.path.iter_mut().find(|p| p.remote_cid == *odcid) {
-            None => {
-                qinfo!([self], "Ignoring Retry with mismatched ODCID");
-                self.stats.dropped_rx += 1;
-                return Ok(());
-            }
-            Some(path) => {
-                path.remote_cid = scid.clone();
-            }
-        }
-        qinfo!(
-            [self],
-            "Valid Retry received, restarting with provided token"
-        );
-        self.retry_info = Some(RetryInfo {
-            token: token.to_vec(),
-            odcid: odcid.clone(),
-        });
+        // TODO(mt) validate the packet using our saved ODCID.
+        if let Some(p) = &mut self.path {
+            p.remote_cid = scid.clone();
+        } else {
+            return Err(Error::InternalError);
+        };
+        self.retry_info.as_mut().unwrap().token = token.to_vec();
+        qinfo!([self], "Valid Retry received, token={}", hex(token));
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
@@ -892,8 +893,8 @@ impl Connection {
                     )));
                     return Err(Error::VersionNegotiation);
                 }
-                (PacketType::Retry { odcid, token }, State::WaitInitial, Role::Client) => {
-                    self.handle_retry(hdr.scid.as_ref().unwrap(), odcid, token)?;
+                (PacketType::Retry { token, .. }, State::WaitInitial, Role::Client) => {
+                    self.handle_retry(hdr.scid.as_ref().unwrap(), token)?;
                     return Ok(frames);
                 }
                 (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {
@@ -1445,20 +1446,26 @@ impl Connection {
             .conn_increase_max_credit(remote.get_integer(tp_constants::INITIAL_MAX_DATA));
     }
 
-    fn validate_odcid(&self) -> Res<()> {
-        if let Some(info) = &self.retry_info {
-            let tph = self.tps.borrow();
-            let tp = tph.remote().get_bytes(tp_constants::ORIGINAL_CONNECTION_ID);
-            if let Some(odcid_tp) = tp {
-                if odcid_tp[..] == info.odcid[..] {
-                    Ok(())
+    fn validate_odcid(&mut self) -> Res<()> {
+        // Here we drop our Retry state then validate it.
+        if let Some(info) = self.retry_info.take() {
+            if info.token.is_empty() {
+                Ok(())
+            } else {
+                let tph = self.tps.borrow();
+                let tp = tph.remote().get_bytes(tp_constants::ORIGINAL_CONNECTION_ID);
+                if let Some(odcid_tp) = tp {
+                    if odcid_tp[..] == info.odcid[..] {
+                        Ok(())
+                    } else {
+                        Err(Error::InvalidRetry)
+                    }
                 } else {
                     Err(Error::InvalidRetry)
                 }
-            } else {
-                Err(Error::InvalidRetry)
             }
         } else {
+            debug_assert_eq!(self.role, Role::Server);
             Ok(())
         }
     }

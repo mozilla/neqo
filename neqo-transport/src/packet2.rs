@@ -9,10 +9,12 @@
 
 use crate::cid::ConnectionId;
 use crate::crypto::CryptoDxState;
-use crate::{Res, QUIC_VERSION};
+use crate::{Error, Res, QUIC_VERSION};
 
 use neqo_common::{hex, qdebug, qtrace, Encoder};
+use neqo_crypto::{aead::Aead, hkdf, random, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
+use std::cell::RefCell;
 use std::iter::ExactSizeIterator;
 use std::ops::{Deref, DerefMut, Range};
 
@@ -52,6 +54,25 @@ impl PacketType {
     }
 }
 
+/// The AEAD used for Retry is fixed, so use this.
+fn make_retry_aead() -> Aead {
+    #[cfg(debug_assertions)]
+    ::neqo_crypto::assert_initialized();
+
+    let secret = hkdf::import_key(
+        TLS_VERSION_1_3,
+        TLS_AES_128_GCM_SHA256,
+        &[
+            0x65, 0x6e, 0x61, 0xe3, 0x36, 0xae, 0x94, 0x17, 0xf7, 0xf0, 0xed, 0xd8, 0xd7, 0x8d,
+            0x46, 0x1e, 0x2a, 0xa7, 0x08, 0x4a, 0xba, 0x7a, 0x14, 0xc1, 0xe9, 0xf7, 0x26, 0xd5,
+            0x57, 0x09, 0x16, 0x9a,
+        ],
+    )
+    .unwrap();
+    Aead::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic ").unwrap()
+}
+thread_local!(static RETRY_AEAD: RefCell<Aead> = RefCell::new(make_retry_aead()));
+
 struct PacketBuilderoffsets {
     /// The bits of the first octet that need masking.
     first_byte_mask: u8,
@@ -74,6 +95,7 @@ impl PacketBuilder {
     /// Start building a long header packet.
     pub fn short(mut encoder: Encoder, key_phase: bool, dcid: &ConnectionId) -> Self {
         let header_start = encoder.len();
+        // TODO(mt) randomize the spin bit
         encoder.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | (u8::from(key_phase) << 2));
         encoder.encode(&dcid);
         Self {
@@ -164,6 +186,7 @@ impl PacketBuilder {
 
         // Calculate the mask.
         let offset = 4 - self.offsets.pn.len();
+        assert!(offset + SAMPLE_SIZE <= ciphertext.len());
         let sample = &ciphertext[offset..offset + SAMPLE_SIZE];
         let mask = crypto.compute_mask(sample)?;
         qtrace!("mask={}", hex(&mask));
@@ -192,6 +215,58 @@ impl PacketBuilder {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.encoder.len() == self.header.end
+    }
+
+    /// Make a retry packet.
+    /// As this is a simple packet, this is just an associated function.
+    /// As Retry is odd (it has to be constructed with leading bytes),
+    /// this returns a Vec<u8> rather than building on an encoder.
+    pub fn retry(
+        dcid: &ConnectionId,
+        scid: &ConnectionId,
+        token: &[u8],
+        odcid: &ConnectionId,
+    ) -> Res<Vec<u8>> {
+        let mut encoder = Encoder::default();
+        encoder.encode_vec(1, odcid);
+        let start = encoder.len();
+        encoder.encode_byte(
+            PACKET_BIT_LONG
+                | PACKET_BIT_FIXED_QUIC
+                | (PACKET_TYPE_RETRY << 4)
+                | (random(1)[0] & 0xf),
+        );
+        encoder.encode_uint(4, QUIC_VERSION);
+        encoder.encode_vec(1, dcid);
+        encoder.encode_vec(1, scid);
+        encoder.encode(token);
+        let tag = RETRY_AEAD
+            .try_with(|aead| -> Res<Vec<u8>> {
+                let mut buf = vec![0; aead.borrow().expansion()];
+                Ok(aead.borrow().encrypt(0, &encoder, &[], &mut buf)?.to_vec())
+            })
+            .map_err(|_| Error::InternalError)??;
+        encoder.encode(&tag);
+        let mut complete: Vec<u8> = encoder.into();
+        Ok(complete.split_off(start))
+    }
+
+    /// Make a Version Negotiation packet.
+    pub fn version_negotiation(dcid: &ConnectionId, scid: &ConnectionId) -> Vec<u8> {
+        let mut encoder = Encoder::default();
+        let mut grease = random(5);
+        // This will not include the "QUIC bit" sometimes.  Intentionally.
+        encoder.encode_byte(PACKET_BIT_LONG | (grease[4] & 0x7f));
+        encoder.encode(&[0; 4]); // Zero version == VN.
+        encoder.encode_vec(1, dcid);
+        encoder.encode_vec(1, scid);
+        encoder.encode_uint(4, QUIC_VERSION);
+        // Add a greased version, using the randomness already generated.
+        for i in 0..4 {
+            grease[i] = grease[i] & 0xf0 | 0x0a;
+        }
+        encoder.encode(&grease[0..4]);
+        encoder.into()
     }
 }
 
@@ -222,10 +297,17 @@ mod tests {
     use neqo_common::Encoder;
     use test_fixture::fixture_init;
 
+    const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
+    const SERVER_CID: &[u8] = &[0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
+
+    /// In most of these tests, anything will do.  This is that "anything".
+    fn default_protector() -> CryptoDxState {
+        fixture_init();
+        CryptoDxState::new_initial(CryptoDxDirection::Write, "server in", CLIENT_CID)
+    }
+
     #[test]
-    fn build_sample() {
-        const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
-        const SERVER_CID: &[u8] = &[0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
+    fn sample_server_initial() {
         const SAMPLE_PAYLOAD: &[u8] = &[
             0x0d, 0x00, 0x00, 0x00, 0x00, 0x18, 0x41, 0x0a, 0x02, 0x00, 0x00, 0x56, 0x03, 0x03,
             0xee, 0xfc, 0xe7, 0xf7, 0xb3, 0x7b, 0xa1, 0xd1, 0x63, 0x2e, 0x96, 0x67, 0x78, 0x25,
@@ -252,9 +334,7 @@ mod tests {
             0x84, 0x07, 0xf0, 0x9e, 0xfd, 0xa4, 0xa3, 0x08,
         ];
 
-        fixture_init();
-        let mut prot =
-            CryptoDxState::new_initial(CryptoDxDirection::Write, "server in", CLIENT_CID);
+        let mut prot = default_protector();
 
         // The spec uses PN=1, but our crypto refuses to skip packet numbers.
         // So burn an encryption:
@@ -272,5 +352,118 @@ mod tests {
         builder.encode(&SAMPLE_PAYLOAD);
         let packet = builder.build(&mut prot).expect("build");
         assert_eq!(&packet[..], EXPECTED);
+    }
+
+    #[test]
+    fn build_short() {
+        let mut builder =
+            PacketBuilder::short(Encoder::new(), true, &ConnectionId::from(SERVER_CID));
+        builder.pn(0, 1);
+        builder.encode(&[0; 3]); // Enough payload for sampling.
+        let packet = builder.build(&mut default_protector()).expect("build");
+        assert_eq!(packet.len(), 29);
+    }
+
+    #[test]
+    fn build_two() {
+        let mut prot = default_protector();
+        let mut builder = PacketBuilder::long(
+            Encoder::new(),
+            PacketType::Handshake,
+            &ConnectionId::from(SERVER_CID),
+            &ConnectionId::from(CLIENT_CID),
+        );
+        builder.pn(0, 1);
+        builder.encode(&[0; 3]);
+        let encoder = builder.build(&mut prot).expect("build");
+        assert_eq!(encoder.len(), 45);
+        let first = encoder.clone();
+
+        let mut builder = PacketBuilder::short(encoder, false, &ConnectionId::from(SERVER_CID));
+        builder.pn(1, 3);
+        builder.encode(&[0]); // Minimal size (packet number is big enough).
+        let encoder = builder.build(&mut prot).expect("build");
+        assert_eq!(
+            &first[..],
+            &encoder[..first.len()],
+            "the first packet should be a prefix"
+        );
+        assert_eq!(encoder.len(), 45 + 29);
+    }
+
+    #[test]
+    fn build_abort() {
+        let mut builder = PacketBuilder::long(
+            Encoder::new(),
+            PacketType::Initial,
+            &ConnectionId::from(&[][..]),
+            &ConnectionId::from(SERVER_CID),
+        );
+        builder.initial_token(&[]);
+        builder.pn(1, 2);
+        let encoder = builder.abort();
+        assert!(encoder.is_empty());
+    }
+
+    #[test]
+    fn build_retry() {
+        const EXPECTED: &[u8] = &[
+            0xff, 0xff, 0x00, 0x00, 0x18, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62,
+            0xb5, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x43, 0xe0, 0x42, 0xc5, 0xcc, 0x3c, 0x5d, 0xa7,
+            0x31, 0xee, 0xc9, 0xa9, 0xbc, 0x3c, 0xab,
+            0x32,
+            // Draft-25 values:
+            // 0xff, 0xff, 0x00, 0x00, 0x19, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x1e, 0x5e, 0xc5, 0xb0, 0x14, 0xcb, 0xb1, 0xf0, 0xfd, 0x93, 0xdf, 0x40, 0x48, 0xc4, 0x46, 0xa6,
+        ];
+
+        fixture_init();
+        let retry = PacketBuilder::retry(
+            &ConnectionId::from(&[][..]),
+            &ConnectionId::from(SERVER_CID),
+            b"token",
+            &ConnectionId::from(CLIENT_CID),
+        )
+        .unwrap();
+
+        // The builder adds randomness, which makes expectations hard.
+        // So only do a full check when that randomness matches up.
+        if retry[0] == EXPECTED[0] {
+            assert_eq!(&retry, &EXPECTED);
+        } else {
+            // Otherwise, just check that the header is OK.
+            assert_eq!(retry[0] & 0xf0, 0xf0);
+            let header_range = 1..retry.len() - 16;
+            assert_eq!(&retry[header_range.clone()], &EXPECTED[header_range]);
+        }
+    }
+
+    #[test]
+    fn build_retry_multiple() {
+        // Run the build_retry test a few times.
+        // This increases the chance that the full comparison happens.
+        for _ in 0..32 {
+            build_retry();
+        }
+    }
+
+    #[test]
+    fn build_vn() {
+        const EXPECTED: &[u8] = &[
+            0x80, 0x00, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
+            0x08, 0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0xff, 0x00, 0x00, 0x18, 0x0a,
+            0x0a, 0x0a, 0x0a,
+        ];
+
+        fixture_init();
+        let mut vn = PacketBuilder::version_negotiation(
+            &ConnectionId::from(SERVER_CID),
+            &ConnectionId::from(CLIENT_CID),
+        );
+        // Erase randomness from greasing...
+        vn[0] &= 0x80;
+        for i in (vn.len() - 4)..vn.len() {
+            vn[i] &= 0x0f;
+        }
+        assert_eq!(&vn, &EXPECTED);
     }
 }
