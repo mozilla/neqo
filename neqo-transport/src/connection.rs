@@ -1213,8 +1213,7 @@ impl Connection {
             {
                 continue;
             }
-            let (_, _, mut builder) =
-                Connection::build_packet_header(path, *space, encoder, tx, &None);
+            let (_, _, mut builder) = Self::build_packet_header(path, *space, encoder, tx, &None);
             let frame = Frame::ConnectionClose {
                 error_code: error.clone().into(),
                 frame_type,
@@ -1231,7 +1230,67 @@ impl Connection {
         Ok(Some(Datagram::new(path.local, path.remote, encoder)))
     }
 
+    /// Add frames to the provided builder and
+    /// return whether any of them were ACK eliciting.
     #[allow(clippy::useless_let_if_seq)]
+    fn add_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        space: PNSpace,
+        limit: usize,
+        now: Instant,
+    ) -> (Vec<RecoveryToken>, bool) {
+        let mut tokens = Vec::new();
+        let mut ack_eliciting = false;
+        // All useful frames are at least 2 bytes.
+        while builder.len() + 2 < limit {
+            let remaining = limit - builder.len();
+            // Try to get a frame from frame sources
+            let mut frame = None;
+            if self.tx_mode == TxMode::Normal {
+                frame = self.acks.get_frame(now, space);
+            }
+            if frame.is_none() && space == PNSpace::ApplicationData && self.role == Role::Server {
+                frame = self.state_signaling.send_done();
+            }
+            if frame.is_none() {
+                frame = self
+                    .crypto
+                    .streams
+                    .get_frame(space, self.tx_mode, remaining)
+            }
+            if frame.is_none() && self.tx_mode == TxMode::Normal {
+                frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
+            }
+            if frame.is_none() {
+                frame = self.send_streams.get_frame(space, self.tx_mode, remaining);
+            }
+
+            if let Some((frame, token)) = frame {
+                ack_eliciting |= frame.ack_eliciting();
+                debug_assert_ne!(frame, Frame::Padding);
+                frame.marshal(builder);
+                if let Some(t) = token {
+                    tokens.push(t);
+                }
+            } else {
+                if self.tx_mode == TxMode::Pto {
+                    // Add a PING.
+                    builder.encode_varint(Frame::Ping.get_type());
+                    ack_eliciting = true;
+                }
+                return (tokens, ack_eliciting);
+            }
+
+            // PTO only ever sends one frame and they always elicit ACKs.
+            if self.tx_mode == TxMode::Pto {
+                debug_assert!(ack_eliciting);
+                return (tokens, true);
+            }
+        }
+        (tokens, ack_eliciting)
+    }
+
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
     fn output_path(&mut self, path: &mut Path, now: Instant) -> Res<Option<Datagram>> {
@@ -1241,8 +1300,6 @@ impl Connection {
         // packets can go in a single datagram
         let mut encoder = Encoder::with_capacity(path.mtu());
         for space in PNSpace::iter() {
-            let mut tokens = Vec::new();
-
             // Ensure we have tx crypto state for this epoch, or skip it.
             let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
                 tx_state
@@ -1252,84 +1309,30 @@ impl Connection {
 
             let header_start = encoder.len();
             let (pt, pn, mut builder) =
-                Connection::build_packet_header(path, *space, encoder, tx, &self.retry_info);
+                Self::build_packet_header(path, *space, encoder, tx, &self.retry_info);
+            let payload_start = builder.len();
 
-            let mut ack_eliciting = false;
-            let mut has_padding = false;
+            // Work out how much space we have in the congestion window.
             let cong_avail = match self.tx_mode {
                 TxMode::Normal => usize::try_from(self.loss_recovery.cwnd_avail()).unwrap(),
-                TxMode::Pto => path.mtu(), // send one packet
+                TxMode::Pto => path.mtu(), // Always send one packet
             };
-            let tx_mode = self.tx_mode;
-
-            loop {
-                let used = builder.len() + tx.expansion();
-                let remaining = min(
-                    path.mtu().saturating_sub(used),
-                    cong_avail.saturating_sub(used),
-                );
-                if remaining < 2 {
-                    // All useful frames are at least 2 bytes.
-                    break;
-                }
-
-                // Try to get a frame from frame sources
-                let mut frame = None;
-                if self.tx_mode == TxMode::Normal {
-                    frame = self.acks.get_frame(now, *space);
-                }
-                if frame.is_none()
-                    && *space == PNSpace::ApplicationData
-                    && self.role == Role::Server
-                {
-                    frame = self.state_signaling.send_done();
-                }
-                // TODO(mt) we might not need to check for 0-RTT here because
-                // we should never have CRYPTO to send in application space when
-                // there is only 0-RTT keys available.
-                if frame.is_none() && !tx.is_0rtt() {
-                    frame = self.crypto.streams.get_frame(*space, tx_mode, remaining)
-                }
-                if frame.is_none() && self.tx_mode == TxMode::Normal {
-                    frame = self.flow_mgr.borrow_mut().get_frame(*space, remaining);
-                }
-                if frame.is_none() {
-                    frame = self.send_streams.get_frame(*space, tx_mode, remaining);
-                }
-                if frame.is_none() && self.tx_mode == TxMode::Pto {
-                    frame = Some((Frame::Ping, None));
-                }
-
-                if let Some((frame, token)) = frame {
-                    ack_eliciting |= frame.ack_eliciting();
-                    if let Frame::Padding = frame {
-                        has_padding |= true;
-                    }
-                    frame.marshal(&mut builder);
-                    if let Some(t) = token {
-                        tokens.push(t);
-                    }
-
-                    // Pto only ever sends one frame, but it ALWAYS
-                    // sends one
-                    if self.tx_mode == TxMode::Pto {
-                        break;
-                    }
-                } else {
-                    // No more frames to send.
-                    assert_eq!(self.tx_mode, TxMode::Normal);
-                    break;
-                }
+            let limit = min(path.mtu(), cong_avail);
+            if builder.len() + tx.expansion() > limit {
+                // No space for a packet of this type in the congestion window.
+                encoder = builder.abort();
+                continue;
             }
+            let limit = limit - tx.expansion();
 
+            let (tokens, ack_eliciting) = self.add_frames(&mut builder, *space, limit, now);
             if builder.is_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
                 continue;
             }
 
-            // TODO(mt) work out a replacement that doesn't borrow too much.
-            // dump_packet(self, "TX ->", pn, pt, &encoder[payload_start..]);
+            dump_packet(self, "TX ->", pn, pt, &builder[payload_start..]);
 
             qdebug!("Need to send a packet: {:?}", pt);
             match pt {
@@ -1341,16 +1344,18 @@ impl Connection {
             }
 
             self.stats.packets_tx += 1;
-            encoder = builder.build(tx)?;
+            encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
             assert!(encoder.len() <= path.mtu());
 
             if self.tx_mode != TxMode::Pto && ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
 
+            // Normal packets are in flight if they include PADDING frames,
+            // but we don't send those.
             let in_flight = match self.tx_mode {
                 TxMode::Pto => false,
-                TxMode::Normal => ack_eliciting || has_padding,
+                TxMode::Normal => ack_eliciting,
             };
 
             let sent = SentPacket::new(

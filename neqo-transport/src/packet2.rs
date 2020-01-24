@@ -43,7 +43,7 @@ pub enum PacketType {
 
 impl PacketType {
     #[must_use]
-    fn code(&self) -> u8 {
+    fn code(self) -> u8 {
         match self {
             Self::Initial => PACKET_TYPE_INITIAL,
             Self::ZeroRtt => PACKET_TYPE_0RTT,
@@ -174,7 +174,6 @@ impl PacketBuilder {
     }
 
     /// Build the packet and return the encoder.
-    #[must_use]
     pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder> {
         if self.offsets.len > 0 {
             self.write_len(crypto.expansion());
@@ -193,7 +192,7 @@ impl PacketBuilder {
 
         // Apply the mask.
         self.encoder[self.header.start] ^= mask[0] & self.offsets.first_byte_mask;
-        for (i, j) in (1..self.offsets.pn.len() + 1).zip(self.offsets.pn) {
+        for (i, j) in (1..=self.offsets.pn.len()).zip(self.offsets.pn) {
             self.encoder[j] ^= mask[i];
         }
 
@@ -262,8 +261,8 @@ impl PacketBuilder {
         encoder.encode_vec(1, scid);
         encoder.encode_uint(4, QUIC_VERSION);
         // Add a greased version, using the randomness already generated.
-        for i in 0..4 {
-            grease[i] = grease[i] & 0xf0 | 0x0a;
+        for g in &mut grease[0..4] {
+            *g = *g & 0xf0 | 0x0a;
         }
         encoder.encode(&grease[0..4]);
         encoder.into()
@@ -460,9 +459,10 @@ mod tests {
             &ConnectionId::from(CLIENT_CID),
         );
         // Erase randomness from greasing...
+        assert_eq!(vn.len(), EXPECTED.len());
         vn[0] &= 0x80;
-        for i in (vn.len() - 4)..vn.len() {
-            vn[i] &= 0x0f;
+        for v in vn.iter_mut().skip(EXPECTED.len() - 4) {
+            *v &= 0x0f;
         }
         assert_eq!(&vn, &EXPECTED);
     }
