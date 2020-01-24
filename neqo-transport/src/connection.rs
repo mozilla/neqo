@@ -306,6 +306,10 @@ enum StateSignaling {
 
 impl StateSignaling {
     pub fn handshake_done(&mut self) {
+        if *self != Self::Idle {
+            debug_assert!(false, "StateSignaling must be in Idle state.");
+            return;
+        }
         *self = Self::HandshakeDone
     }
 
@@ -327,6 +331,7 @@ impl StateSignaling {
     }
 
     pub fn close_sent(&mut self) {
+        debug_assert!(self.closing());
         *self = Self::CloseSent
     }
 }
@@ -1310,9 +1315,17 @@ impl Connection {
 
             out_bytes.append(&mut packet);
 
-            if self.role == Role::Client && *space == PNSpace::Handshake {
+            if *space == PNSpace::Handshake && self.role == Role::Client {
                 // Client can send Handshake packets -> discard Initial keys and states
                 self.discard_keys(PNSpace::Initial);
+            }
+
+            if *space == PNSpace::Handshake
+                && self.role == Role::Server
+                && self.state == State::Confirmed
+            {
+                // We could discard handshake keys in set_state, but we are waiting to send an ack.
+                self.discard_keys(PNSpace::Handshake);
             }
         }
 
@@ -1639,7 +1652,7 @@ impl Connection {
                     return Err(Error::ProtocolViolation);
                 }
                 self.set_state(State::Confirmed);
-                // TODO(mt): discard Handshake state
+                self.discard_keys(PNSpace::Handshake);
             }
         };
 
@@ -3363,8 +3376,18 @@ mod tests {
 
         now += Duration::from_millis(10);
         // Server receives the first packet.
+        // The output will be a Handshake packet with an ack and a app pn space packet with
+        // HANDSHAKE_DONE.
         let pkt = server.process(pkt1, now).dgram();
         assert!(pkt.is_some());
+
+        // Check that the second packet(pkt2) has a Handshake and an app pn space packet.
+        // The server has discarded the Handshake keys already, therefore the handshake packet
+        // will be dropped.
+        let dropped_before = server.stats().dropped_rx;
+        let frames = server.test_process_input(pkt2.unwrap(), now);
+        assert_eq!(1, server.stats().dropped_rx - dropped_before);
+        assert!(matches!(frames[0], (Frame::Ping, PNSpace::ApplicationData)));
 
         now += Duration::from_millis(10);
         // Client receive ack for the first packet
@@ -3377,21 +3400,22 @@ mod tests {
         let out = client.process(None, now).dgram();
         assert!(out.is_some());
         let out = client.process(None, now);
-        // Return PTO timer for the retransmitted packet.
-        // pto=117.5ms, the second handshake packet was sent 40ms ago. The timer will be 77.5ms.
-        assert_eq!(out, Output::Callback(Duration::from_micros(77_500)));
+        // The handshake keys are discarded
+        // Return PTO timer for an app pn space packet (when the Handshake PTO timer has expired,
+        // a PING in the app pn space has been send as well).
+        // pto=142.5ms, the PTO packet was sent 40ms ago. The timer will be 102.5ms.
+        assert_eq!(out, Output::Callback(Duration::from_micros(102_500)));
 
-        // Let PTO expire. We will send a PING
-        now += Duration::from_micros(77_500);
+        // Let PTO expire. We will send a PING only in the APP pn space, the client has discarded
+        // Handshshake keys.
+        now += Duration::from_micros(102_500);
         let out = client.process(None, now).dgram();
         assert!(out.is_some());
 
         now += Duration::from_millis(10);
         let frames = server.test_process_input(out.unwrap(), now);
 
-        // We send packet in all packet number spaces >= the packet number space for which PTO has expired.
-        assert_eq!(frames[0], (Frame::Ping, PNSpace::Handshake));
-        assert_eq!(frames[1], (Frame::Ping, PNSpace::ApplicationData));
+        assert_eq!(frames[0], (Frame::Ping, PNSpace::ApplicationData));
     }
 
     #[test]
