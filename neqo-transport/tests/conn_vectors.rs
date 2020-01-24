@@ -6,6 +6,8 @@
 
 // Tests with the test vectors from the spec.
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![warn(clippy::pedantic)]
+
 use neqo_common::{Datagram, Encoder};
 use neqo_transport::State;
 use test_fixture::*;

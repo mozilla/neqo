@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![warn(clippy::use_self)]
 
 use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
@@ -60,8 +61,8 @@ struct Timer {
     end: Instant,
 }
 impl Timer {
-    pub fn new(timeout: Duration) -> Timer {
-        Timer {
+    pub fn new(timeout: Duration) -> Self {
+        Self {
             end: Instant::now() + timeout,
         }
     }
@@ -201,7 +202,7 @@ impl FromStr for Headers {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut res = Headers { h: Vec::new() };
+        let mut res = Self { h: Vec::new() };
         let h1: Vec<&str> = s
             .trim_matches(|p| p == '[' || p == ']')
             .split(')')
@@ -372,26 +373,26 @@ enum Test {
 impl Test {
     fn alpn(&self) -> Vec<String> {
         match self {
-            Test::H3 => vec![String::from("h3-24")],
+            Self::H3 => vec![String::from("h3-24")],
             _ => vec![String::from("hq-24")],
         }
     }
 
     fn label(&self) -> String {
         String::from(match self {
-            Test::Connect => "connect",
-            Test::H9 => "h9",
-            Test::H3 => "h3",
-            Test::VN => "vn",
+            Self::Connect => "connect",
+            Self::H9 => "h9",
+            Self::H3 => "h3",
+            Self::VN => "vn",
         })
     }
 
     fn letters(&self) -> Vec<char> {
         match self {
-            Test::Connect => vec!['H'],
-            Test::H9 => vec!['D', 'C'],
-            Test::H3 => vec!['3', 'C', 'D'],
-            Test::VN => vec!['V'],
+            Self::Connect => vec!['H'],
+            Self::H9 => vec!['D', 'C'],
+            Self::H3 => vec!['3', 'C', 'D'],
+            Self::VN => vec!['V'],
         }
     }
 }

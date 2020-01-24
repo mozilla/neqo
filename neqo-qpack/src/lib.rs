@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
+#![warn(clippy::use_self)]
 
 pub mod decoder;
 pub mod encoder;
@@ -51,7 +52,7 @@ impl Error {
 impl ::std::error::Error for Error {
     fn source(&self) -> Option<&(dyn ::std::error::Error + 'static)> {
         match self {
-            Error::TransportError(e) => Some(e),
+            Self::TransportError(e) => Some(e),
             _ => None,
         }
     }
@@ -65,6 +66,6 @@ impl ::std::fmt::Display for Error {
 
 impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
-        Error::TransportError(err)
+        Self::TransportError(err)
     }
 }

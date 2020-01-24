@@ -84,7 +84,7 @@ struct RetryToken {
 
 impl RetryToken {
     fn new(now: Instant) -> Res<Self> {
-        Ok(RetryToken {
+        Ok(Self {
             require_retry: false,
             self_encrypt: SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256)?,
             start_time: now,
@@ -124,7 +124,7 @@ impl RetryToken {
         let end_millis = u32::try_from(end.duration_since(self.start_time).as_millis())?;
         token.encode_uint(4, end_millis);
         token.encode(dcid);
-        let peer_addr = RetryToken::encode_peer_address(peer_address);
+        let peer_addr = Self::encode_peer_address(peer_address);
         Ok(self.self_encrypt.seal(&peer_addr, &token)?)
     }
 
@@ -140,7 +140,7 @@ impl RetryToken {
         peer_address: SocketAddr,
         now: Instant,
     ) -> Option<ConnectionId> {
-        let peer_addr = RetryToken::encode_peer_address(peer_address);
+        let peer_addr = Self::encode_peer_address(peer_address);
         let data = if let Ok(d) = self.self_encrypt.open(&peer_addr, token) {
             d
         } else {
@@ -244,7 +244,6 @@ impl Server {
             hdr.scid.as_ref().unwrap().clone(),
             Some(hdr.dcid.clone()),
             0, // unused
-            0, // unused
         ));
         Datagram::new(received.destination(), received.source(), vn)
     }
@@ -334,7 +333,6 @@ impl Server {
                     hdr.scid.as_ref().unwrap().clone(),
                     Some(self.cid_manager.borrow_mut().generate_cid()),
                     0, // Packet number
-                    0, // Epoch
                 ));
                 let retry = Datagram::new(dgram.destination(), dgram.source(), payload);
                 Some(retry)
@@ -394,7 +392,7 @@ impl Server {
             return self.process_connection(c, Some(dgram), now);
         }
 
-        if hdr.tipe == PacketType::Short {
+        if matches!(hdr.tipe, PacketType::Short(_)) {
             // TODO send a stateless reset here.
             qtrace!([self], "Short header packet for an unknown connection");
             return None;

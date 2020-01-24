@@ -170,12 +170,7 @@ fn dynamic_link_both(extra_libs: &[&str]) {
     }
 }
 
-fn static_link(nsstarget: &PathBuf) {
-    let lib_dir = nsstarget.join("lib");
-    println!(
-        "cargo:rustc-link-search=native={}",
-        lib_dir.to_str().unwrap()
-    );
+fn static_link() {
     let mut static_libs = vec![
         "certdb",
         "certhi",
@@ -231,7 +226,6 @@ fn build_bindings(base: &str, bindings: &Bindings, flags: &[String], gecko: bool
 
     let mut builder = Builder::default().header(header);
     builder = builder.generate_comments(false);
-    builder = builder.derive_debug(false); // https://github.com/rust-lang/rust-bindgen/issues/372
 
     builder = builder.clang_arg("-v");
 
@@ -302,9 +296,8 @@ fn setup_standalone() -> Vec<String> {
         "cargo:rustc-link-search=native={}",
         nsslibdir.to_str().unwrap()
     );
-
     if is_debug() {
-        static_link(&nsstarget);
+        static_link();
     } else {
         dynamic_link();
     }

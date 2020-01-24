@@ -85,7 +85,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
         if max_table_size > (1 << 30) - 1 {
             panic!("Wrong max_table_size");
         }
-        Http3Connection {
+        Self {
             state: Http3State::Initializing,
             local_settings: LocalSettings {
                 max_table_size,
