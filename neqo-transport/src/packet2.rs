@@ -9,7 +9,7 @@ use crate::cid::ConnectionId;
 use crate::crypto::CryptoDxState;
 use crate::{Error, Res, QUIC_VERSION};
 
-use neqo_common::{hex, qdebug, Encoder};
+use neqo_common::{hex, qdebug, qerror, Encoder};
 use neqo_crypto::{aead::Aead, hkdf, random, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
 use std::cell::RefCell;
@@ -247,7 +247,10 @@ impl PacketBuilder {
                 let mut buf = vec![0; aead.borrow().expansion()];
                 Ok(aead.borrow().encrypt(0, &encoder, &[], &mut buf)?.to_vec())
             })
-            .map_err(|_| Error::InternalError)??;
+            .map_err(|e| {
+                qerror!("Unable to access Retry AEAD: {:?}", e);
+                Error::InternalError
+            })??;
         encoder.encode(&tag);
         let mut complete: Vec<u8> = encoder.into();
         Ok(complete.split_off(start))
@@ -264,7 +267,7 @@ impl PacketBuilder {
         encoder.encode_vec(1, scid);
         encoder.encode_uint(4, QUIC_VERSION);
         // Add a greased version, using the randomness already generated.
-        for g in &mut grease[0..4] {
+        for g in &mut grease[..4] {
             *g = *g & 0xf0 | 0x0a;
         }
         encoder.encode(&grease[0..4]);
@@ -290,6 +293,36 @@ impl Into<Encoder> for PacketBuilder {
     fn into(self) -> Encoder {
         self.encoder
     }
+}
+
+/// Validate the given packet as though it were a retry.
+pub fn is_valid_retry(packet: &[u8], odcid: &ConnectionId) -> bool {
+    let expansion = if let Ok(ex) = RETRY_AEAD.try_with(|aead| aead.borrow().expansion()) {
+        ex
+    } else {
+        qerror!("Unable to access Retry AEAD");
+        return false;
+    };
+    if packet.len() <= expansion {
+        return false;
+    }
+    let (header, tag) = packet.split_at(packet.len() - expansion);
+    let mut encoder = Encoder::with_capacity(packet.len());
+    encoder.encode_vec(1, odcid);
+    encoder.encode(header);
+    RETRY_AEAD
+        .try_with(|aead| -> bool {
+            let mut buf = vec![0; expansion];
+            if let Ok(v) = aead.borrow().decrypt(0, &encoder, tag, &mut buf) {
+                v.is_empty()
+            } else {
+                false
+            }
+        })
+        .unwrap_or_else(|e| {
+            qerror!("Unable to access Retry AEAD: {:?}", e);
+            false
+        })
 }
 
 #[cfg(test)]
@@ -427,6 +460,8 @@ mod tests {
         )
         .unwrap();
 
+        assert!(is_valid_retry(EXPECTED, &ConnectionId::from(CLIENT_CID)));
+
         // The builder adds randomness, which makes expectations hard.
         // So only do a full check when that randomness matches up.
         if retry[0] == EXPECTED[0] {
@@ -446,6 +481,14 @@ mod tests {
         for _ in 0..32 {
             build_retry();
         }
+    }
+
+    /// Check some packets that are clearly not valid Retry packets.
+    #[test]
+    fn invalid_retry() {
+        fixture_init();
+        assert!(!is_valid_retry(&[], &ConnectionId::from(CLIENT_CID)));
+        assert!(!is_valid_retry(&[0; 17], &ConnectionId::from(CLIENT_CID)));
     }
 
     #[test]

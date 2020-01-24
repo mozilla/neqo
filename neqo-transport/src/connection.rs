@@ -34,7 +34,7 @@ use crate::frame::{AckRange, Frame, FrameType, StreamType, TxMode};
 use crate::packet::{
     decode_packet_hdr, decrypt_packet_body, decrypt_packet_hdr, PacketHdr, PacketType,
 };
-use crate::packet2::{PacketBuilder, PacketNumber, PacketType as PT2};
+use crate::packet2::{is_valid_retry, PacketBuilder, PacketNumber, PacketType as PT2};
 use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams};
@@ -828,7 +828,7 @@ impl Connection {
         }
     }
 
-    fn handle_retry(&mut self, scid: &ConnectionId, token: &[u8]) -> Res<()> {
+    fn handle_retry(&mut self, scid: &ConnectionId, token: &[u8], packet: &[u8]) -> Res<()> {
         qdebug!([self], "received Retry");
         debug_assert!(self.retry_info.is_some());
         if !self.retry_info.as_ref().unwrap().token.is_empty() {
@@ -841,10 +841,15 @@ impl Connection {
             self.stats.dropped_rx += 1;
             return Ok(());
         }
-        // TODO(mt) validate the packet using our saved ODCID.
+        if !is_valid_retry(packet, &self.retry_info.as_ref().unwrap().odcid) {
+            qinfo!([self], "Dropping Retry with bad integrity tag");
+            self.stats.dropped_rx += 1;
+            return Ok(());
+        }
         if let Some(p) = &mut self.path {
             p.remote_cid = scid.clone();
         } else {
+            qinfo!([self], "No path, but we received a Retry");
             return Err(Error::InternalError);
         };
         self.retry_info.as_mut().unwrap().token = token.to_vec();
@@ -894,7 +899,7 @@ impl Connection {
                     return Err(Error::VersionNegotiation);
                 }
                 (PacketType::Retry { token, .. }, State::WaitInitial, Role::Client) => {
-                    self.handle_retry(hdr.scid.as_ref().unwrap(), token)?;
+                    self.handle_retry(hdr.scid.as_ref().unwrap(), token, slc)?;
                     return Ok(frames);
                 }
                 (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {

@@ -231,7 +231,6 @@ fn retry_after_initial() {
     connected_server(&mut server);
 }
 
-#[cfg(disabled)] // TODO(mt) validate Retry
 #[test]
 fn retry_bad_integrity() {
     let mut server = default_server();
@@ -246,8 +245,9 @@ fn retry_bad_integrity() {
     let retry = &dgram.as_ref().unwrap();
     assertions::assert_retry(retry);
 
-    retry[retry.len() - 1] ^= 0x45; // damage the auth tag
-    let tweaked_packet = Datagram::new(retry.source(), retry.destination(), tweaked_retry);
+    let mut tweaked = retry.to_vec();
+    tweaked[retry.len() - 1] ^= 0x45; // damage the auth tag
+    let tweaked_packet = Datagram::new(retry.source(), retry.destination(), tweaked);
 
     // The client should ignore this packet.
     let dgram = client.process(Some(tweaked_packet), now()).dgram();
