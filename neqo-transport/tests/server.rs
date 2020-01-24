@@ -43,7 +43,7 @@ fn default_server() -> Server {
 fn connected_server(server: &mut Server) -> ActiveConnectionRef {
     let server_connections = server.active_connections();
     assert_eq!(server_connections.len(), 1);
-    assert_eq!(*server_connections[0].borrow().state(), State::Connected);
+    assert_eq!(*server_connections[0].borrow().state(), State::Confirmed);
     server_connections[0].clone()
 }
 
@@ -68,7 +68,13 @@ fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef 
     assert!(dgram.is_some());
     assert_eq!(*client.state(), State::Connected);
     let dgram = server.process(dgram, now()).dgram();
-    assert!(dgram.is_some()); // ACK + NST
+    assert!(dgram.is_some()); // ACK + HANDSHAKE_DONE + NST
+
+    // Have the client process the HANDSHAKE_DONE.
+    let dgram = client.process(dgram, now()).dgram();
+    assert!(dgram.is_none());
+    assert_eq!(*client.state(), State::Confirmed);
+
     connected_server(server)
 }
 
@@ -495,8 +501,12 @@ fn closed() {
     let mut client = default_client();
     connect(&mut client, &mut server);
 
+    // The server will have sent a few things, so it will be on PTO.
     let res = server.process(None, now());
-    assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+    assert!(res.callback() > Duration::new(0, 0));
+    // The client will be on the delayed ACK timer.
+    let res = client.process(None, now());
+    assert!(res.callback() > Duration::new(0, 0));
 
     qtrace!("60s later");
     let res = server.process(None, now() + Duration::from_secs(60));

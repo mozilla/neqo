@@ -43,7 +43,7 @@ const FRAME_TYPE_PATH_CHALLENGE: FrameType = 0x1a;
 const FRAME_TYPE_PATH_RESPONSE: FrameType = 0x1b;
 const FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: FrameType = 0x1c;
 const FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: FrameType = 0x1d;
-// const FRAME_TYPE_HANDSHAKE_DONE: FrameType = 0x1e;
+const FRAME_TYPE_HANDSHAKE_DONE: FrameType = 0x1e;
 
 const STREAM_FRAME_BIT_FIN: u64 = 0x01;
 const STREAM_FRAME_BIT_LEN: u64 = 0x02;
@@ -191,6 +191,7 @@ pub enum Frame {
         frame_type: u64,
         reason_phrase: Vec<u8>,
     },
+    HandshakeDone,
 }
 
 impl Frame {
@@ -235,6 +236,7 @@ impl Frame {
             Self::ConnectionClose { error_code, .. } => {
                 FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT + error_code.frame_type_bit()
             }
+            Self::HandshakeDone => FRAME_TYPE_HANDSHAKE_DONE,
         }
     }
 
@@ -439,6 +441,7 @@ impl Frame {
                 enc.encode_varint(*frame_type);
                 enc.encode_vvec(reason_phrase);
             }
+            Self::HandshakeDone => (),
         }
     }
 
@@ -688,6 +691,7 @@ impl Frame {
                     reason_phrase: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
                 })
             }
+            FRAME_TYPE_HANDSHAKE_DONE => Ok(Self::HandshakeDone),
             _ => Err(Error::UnknownFrameType),
         }
     }

@@ -33,6 +33,7 @@ pub enum RecoveryToken {
     Stream(StreamRecoveryToken),
     Crypto(CryptoRecoveryToken),
     Flow(FlowControlRecoveryToken),
+    HandshakeDone,
 }
 
 #[derive(Debug, Default)]

@@ -37,8 +37,6 @@ pub struct FlowMgr {
 
     used_data: u64,
     max_data: u64,
-
-    need_close_frame: bool,
 }
 
 impl FlowMgr {
@@ -164,14 +162,6 @@ impl FlowMgr {
         } else {
             None
         }
-    }
-
-    pub fn need_close_frame(&self) -> bool {
-        self.need_close_frame
-    }
-
-    pub fn set_need_close_frame(&mut self, new: bool) {
-        self.need_close_frame = new
     }
 
     pub(crate) fn acked(

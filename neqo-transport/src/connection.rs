@@ -85,6 +85,7 @@ pub enum State {
     WaitInitial,
     Handshaking,
     Connected,
+    Confirmed,
     Closing {
         error: ConnectionError,
         frame_type: FrameType,
@@ -92,6 +93,13 @@ pub enum State {
         timeout: Instant,
     },
     Closed(ConnectionError),
+}
+
+impl State {
+    #[must_use]
+    pub fn connected(&self) -> bool {
+        matches!(self, Self::Connected | Self::Confirmed)
+    }
 }
 
 // Implement Ord so that we can enforce monotonic state progression.
@@ -110,6 +118,8 @@ impl PartialOrd for State {
             (_, Self::Handshaking) => Ordering::Greater,
             (Self::Connected, _) => Ordering::Less,
             (_, Self::Connected) => Ordering::Greater,
+            (Self::Confirmed, _) => Ordering::Less,
+            (_, Self::Confirmed) => Ordering::Greater,
             (Self::Closing { .. }, _) => Ordering::Less,
             (_, Self::Closing { .. }) => Ordering::Greater,
             (Self::Closed(_), _) => unreachable!(),
@@ -173,6 +183,7 @@ pub enum Output {
 
 impl Output {
     /// Convert into an `Option<Datagram>`.
+    #[must_use]
     pub fn dgram(self) -> Option<Datagram> {
         match self {
             Self::Datagram(dg) => Some(dg),
@@ -185,6 +196,15 @@ impl Output {
         match self {
             Self::Datagram(dg) => Some(dg),
             _ => None,
+        }
+    }
+
+    /// Ask how long the caller should wait before calling back.
+    #[must_use]
+    pub fn callback(&self) -> Duration {
+        match self {
+            Self::Callback(t) => *t,
+            _ => Duration::new(0, 0),
         }
     }
 }
@@ -271,6 +291,48 @@ impl IdleTimeout {
     }
 }
 
+/// StateManagement manages whether we need to send HANDSHAKE_DONE and CONNECTION_CLOSE.
+/// Valid state transitions are:
+/// * Idle -> HandshakeDone: at the server when the handshake completes
+/// * HandshakeDone -> Idle: when a HANDSHAKE_DONE frame is sent
+/// * Idle/HandshakeDone -> ConnectionClose: when closing
+/// * ConnectionClose -> CloseSent: after sending CONNECTION_CLOSE
+/// * CloseSent -> ConnectionClose: any time a new CONNECTION_CLOSE is needed
+#[derive(Debug, Clone, PartialEq)]
+enum StateSignaling {
+    Idle,
+    HandshakeDone,
+    ConnectionClose,
+    CloseSent,
+}
+
+impl StateSignaling {
+    pub fn handshake_done(&mut self) {
+        *self = Self::HandshakeDone
+    }
+
+    pub fn send_done(&mut self) -> Option<(Frame, Option<RecoveryToken>)> {
+        if *self == Self::HandshakeDone {
+            *self = Self::Idle;
+            Some((Frame::HandshakeDone, Some(RecoveryToken::HandshakeDone)))
+        } else {
+            None
+        }
+    }
+
+    pub fn closing(&self) -> bool {
+        *self == Self::ConnectionClose
+    }
+
+    pub fn close(&mut self) {
+        *self = Self::ConnectionClose
+    }
+
+    pub fn close_sent(&mut self) {
+        *self = Self::CloseSent
+    }
+}
+
 /// A QUIC Connection
 ///
 /// First, create a new connection using `new_client()` or `new_server()`.
@@ -310,6 +372,7 @@ pub struct Connection {
     pub(crate) send_streams: SendStreams,
     pub(crate) recv_streams: RecvStreams,
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
+    state_signaling: StateSignaling,
     loss_recovery: LossRecovery,
     loss_recovery_state: LossRecoveryState,
     events: ConnectionEvents,
@@ -436,6 +499,7 @@ impl Connection {
             send_streams: SendStreams::default(),
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
+            state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(),
             loss_recovery_state: LossRecoveryState::default(),
             events: ConnectionEvents::default(),
@@ -478,7 +542,7 @@ impl Connection {
 
     /// Access the latest resumption token on the connection.
     pub fn resumption_token(&self) -> Option<Vec<u8>> {
-        if self.state != State::Connected {
+        if !self.state.connected() {
             return None;
         }
         match self.crypto.tls {
@@ -653,23 +717,28 @@ impl Connection {
 
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&mut self, now: Instant) -> Duration {
+        qtrace!([self], "Get callback delay");
         self.loss_recovery_state = self.loss_recovery.get_timer();
 
         let mut delays = SmallVec::<[_; 4]>::new();
 
         if let Some(lr_time) = self.loss_recovery_state.callback_time() {
+            qtrace!([self], "Loss recovery timer {:?}", lr_time);
             delays.push(lr_time);
         }
 
         if let Some(ack_time) = self.acks.ack_time() {
+            qtrace!([self], "Delayed ACK timer {:?}", ack_time);
             delays.push(ack_time);
         }
 
         if let Some(idle_time) = self.idle_timeout.as_instant() {
+            qtrace!([self], "Idle timer {:?}", idle_time);
             delays.push(idle_time);
         }
 
         if let Some(key_update_time) = self.crypto.states.update_time() {
+            qtrace!([self], "Key update timer {:?}", key_update_time);
             delays.push(key_update_time);
         }
 
@@ -866,7 +935,7 @@ impl Connection {
                         self.crypto.states.init(self.role, &hdr.dcid);
                     }
                 }
-                State::Handshaking | State::Connected => {
+                State::Handshaking | State::Connected | State::Confirmed => {
                     if !self.is_valid_cid(&hdr.dcid) {
                         qinfo!([self], "Ignoring packet with CID {:?}", hdr.dcid);
                         self.stats.dropped_rx += 1;
@@ -880,7 +949,7 @@ impl Connection {
                 State::Closing { .. } => {
                     // Don't bother processing the packet. Instead ask to get a
                     // new close frame.
-                    self.flow_mgr.borrow_mut().set_need_close_frame(true);
+                    self.state_signaling.close();
                     return Ok(frames);
                 }
                 State::Closed(..) => {
@@ -1106,7 +1175,11 @@ impl Connection {
             let tx_mode = self.tx_mode;
 
             match &self.state {
-                State::Init | State::WaitInitial | State::Handshaking | State::Connected => {
+                State::Init
+                | State::WaitInitial
+                | State::Handshaking
+                | State::Connected
+                | State::Confirmed => {
                     loop {
                         let used = out_bytes.len()
                             + encoder.len()
@@ -1125,6 +1198,12 @@ impl Connection {
                         if self.tx_mode == TxMode::Normal {
                             frame = self.acks.get_frame(now, *space);
                         }
+                        if frame.is_none()
+                            && *space == PNSpace::ApplicationData
+                            && self.role == Role::Server
+                        {
+                            frame = self.state_signaling.send_done();
+                        }
                         if frame.is_none() && !tx.is_0rtt() {
                             frame = self.crypto.streams.get_frame(*space, tx_mode, remaining)
                         }
@@ -1132,7 +1211,7 @@ impl Connection {
                             frame = self.flow_mgr.borrow_mut().get_frame(*space, remaining);
                         }
                         if frame.is_none() {
-                            frame = self.send_streams.get_frame(*space, tx_mode, remaining)
+                            frame = self.send_streams.get_frame(*space, tx_mode, remaining);
                         }
                         if frame.is_none() && self.tx_mode == TxMode::Pto {
                             frame = Some((Frame::Ping, None));
@@ -1166,7 +1245,7 @@ impl Connection {
                     msg,
                     ..
                 } => {
-                    if self.flow_mgr.borrow().need_close_frame() {
+                    if self.state_signaling.closing() {
                         // ConnectionClose frame not allowed for 0RTT
                         if matches!(hdr.tipe, PacketType::ZeroRTT) {
                             continue;
@@ -1232,7 +1311,7 @@ impl Connection {
         }
 
         if close_sent {
-            self.flow_mgr.borrow_mut().set_need_close_frame(false);
+            self.state_signaling.close_sent();
         }
 
         // Sent a probe pkt. Another timeout will re-engage ProbeTimeout mode,
@@ -1255,8 +1334,7 @@ impl Connection {
     }
 
     pub fn initiate_key_update(&mut self) -> Res<()> {
-        // TODO(mt): this needs to be confirmed, not connected.
-        if self.state == State::Connected {
+        if self.state == State::Confirmed {
             let la = self
                 .loss_recovery
                 .largest_acknowledged_pn(PNSpace::ApplicationData);
@@ -1358,7 +1436,7 @@ impl Connection {
             HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
             HandshakeState::AuthenticationPending => self.events.authentication_needed(),
             HandshakeState::Complete(_) => {
-                if self.state != State::Connected {
+                if !self.state.connected() {
                     self.set_connected(now)?;
                 }
             }
@@ -1557,6 +1635,13 @@ impl Connection {
                 );
                 self.set_state(State::Closed(error_code.into()));
             }
+            Frame::HandshakeDone => {
+                if self.role == Role::Server {
+                    return Err(Error::ProtocolViolation);
+                }
+                self.set_state(State::Confirmed);
+                // TODO(mt): discard Handshake state
+            }
         };
 
         Ok(())
@@ -1576,6 +1661,7 @@ impl Connection {
                         &mut self.recv_streams,
                         &mut self.indexes,
                     ),
+                    RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
                 }
             }
         }
@@ -1617,6 +1703,7 @@ impl Connection {
                     RecoveryToken::Flow(ft) => {
                         self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
                     }
+                    RecoveryToken::HandshakeDone => (),
                 }
             }
         }
@@ -1668,6 +1755,10 @@ impl Connection {
         self.validate_odcid()?;
         self.set_initial_limits();
         self.set_state(State::Connected);
+        if self.role == Role::Server {
+            self.state_signaling.handshake_done();
+            self.set_state(State::Confirmed);
+        }
         qinfo!([self], "Connection established");
         Ok(())
     }
@@ -1680,7 +1771,7 @@ impl Connection {
                 State::Closing { .. } => {
                     self.send_streams.clear();
                     self.recv_streams.clear();
-                    self.flow_mgr.borrow_mut().set_need_close_frame(true);
+                    self.state_signaling.close();
                 }
                 State::Closed(..) => {
                     // Equivalent to spec's "draining" state -- never send anything.
@@ -1739,9 +1830,13 @@ impl Connection {
         &mut self,
         stream_id: StreamId,
     ) -> Res<(Option<&mut SendStream>, Option<&mut RecvStream>)> {
-        match (&self.state, &self.zero_rtt_state) {
-            (State::Connected, _) | (State::Handshaking, ZeroRttState::AcceptedServer) => (),
-            _ => return Err(Error::ConnectionState),
+        if !self.state.connected()
+            && !matches!(
+                (&self.state, &self.zero_rtt_state),
+                (State::Handshaking, ZeroRttState::AcceptedServer)
+            )
+        {
+            return Err(Error::ConnectionState);
         }
 
         // May require creating new stream(s)
@@ -2047,21 +2142,7 @@ impl Connection {
                 let packets = self.loss_recovery.detect_lost_packets(pn_space, now);
 
                 qinfo!("lost packets: {}", packets.len());
-                for lost in packets {
-                    for token in lost.tokens {
-                        match token {
-                            RecoveryToken::Ack(_) => {} // Do nothing
-                            RecoveryToken::Stream(st) => self.send_streams.lost(&st),
-                            RecoveryToken::Crypto(ct) => self.crypto.lost(&ct),
-                            RecoveryToken::Flow(ft) => self.flow_mgr.borrow_mut().lost(
-                                &ft,
-                                &mut self.send_streams,
-                                &mut self.recv_streams,
-                                &mut self.indexes,
-                            ),
-                        }
-                    }
-                }
+                self.handle_lost_packets(&packets);
             }
             LossRecoveryMode::PTO => {
                 qinfo!(
@@ -2253,19 +2334,19 @@ mod tests {
         let out = client.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_some());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
+        assert_eq!(*client.state(), State::Connected);
 
         qdebug!("---- server: FIN -> ACKS");
         let out = server.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_some());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
+        assert_eq!(*server.state(), State::Confirmed);
 
         qdebug!("---- client: ACKS -> 0");
         let out = client.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_none());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
-
-        assert_eq!(*client.state(), State::Connected);
-        assert_eq!(*server.state(), State::Connected);
+        assert_eq!(*client.state(), State::Confirmed);
     }
 
     #[test]
@@ -2350,9 +2431,9 @@ mod tests {
         qdebug!("---- server");
         let out = server.process(out.dgram(), now());
         assert!(out.as_dgram_ref().is_some());
-        assert_eq!(*server.state(), State::Connected);
+        assert_eq!(*server.state(), State::Confirmed);
         qdebug!("Output={:0x?}", out.as_dgram_ref());
-        // ACKs
+        // ACK and HANDSHAKE_DONE
         // -->> nothing
 
         qdebug!("---- client");
@@ -2375,6 +2456,7 @@ mod tests {
             out = client.process(None, now());
         }
         assert_eq!(datagrams.len(), 4);
+        assert_eq!(*client.state(), State::Confirmed);
 
         qdebug!("---- server");
         let mut expect_ack = false;
@@ -2384,7 +2466,7 @@ mod tests {
             qdebug!("Output={:0x?}", out.as_dgram_ref());
             expect_ack = !expect_ack;
         }
-        assert_eq!(*server.state(), State::Connected);
+        assert_eq!(*server.state(), State::Confirmed);
 
         let mut buf = vec![0; 4000];
 
@@ -2414,8 +2496,7 @@ mod tests {
         let mut b = server;
         let mut datagram = None;
         let is_done = |c: &mut Connection| match c.state() {
-            // TODO(mt): Finish on Closed and not Closing.
-            State::Connected | State::Closing { .. } | State::Closed(..) => true,
+            State::Confirmed | State::Closing { .. } | State::Closed(..) => true,
             _ => false,
         };
         while !is_done(a) {
@@ -2429,13 +2510,12 @@ mod tests {
 
     fn connect(client: &mut Connection, server: &mut Connection) {
         handshake(client, server);
-        assert_eq!(*client.state(), State::Connected);
-        assert_eq!(*server.state(), State::Connected);
+        assert_eq!(*client.state(), State::Confirmed);
+        assert_eq!(*server.state(), State::Confirmed);
     }
 
     fn assert_error(c: &Connection, err: ConnectionError) {
         match c.state() {
-            // TODO(mt): Finish on Closed and not Closing.
             State::Closing { error, .. } | State::Closed(error) => {
                 assert_eq!(*error, err);
             }
@@ -2510,10 +2590,10 @@ mod tests {
 
     fn exchange_ticket(client: &mut Connection, server: &mut Connection) -> Vec<u8> {
         server.send_ticket(now(), &[]).expect("can send ticket");
-        let out = server.process_output(now());
-        assert!(out.as_dgram_ref().is_some());
-        client.process_input(out.dgram().unwrap(), now());
-        assert_eq!(*client.state(), State::Connected);
+        let ticket = server.process_output(now()).dgram();
+        assert!(ticket.is_some());
+        client.process_input(ticket.unwrap(), now());
+        assert_eq!(*client.state(), State::Confirmed);
         client.resumption_token().expect("should have token")
     }
 
@@ -2756,11 +2836,36 @@ mod tests {
         assert!(client.events().any(stream_readable));
     }
 
+    /// Getting the client and server to reach an idle state is surprisingly hard.
+    /// The server sends HANDSHAKE_DONE at the end of the handshake, and the client
+    /// doesn't immediately acknowledge it.
+
+    /// Force the client to send an ACK by having the server send two packets out
+    /// of order.
+    fn connect_force_idle(client: &mut Connection, server: &mut Connection) {
+        connect(client, server);
+        let p1 = send_something(server, now());
+        let p2 = send_something(server, now());
+        client.process_input(p2, now());
+        // Now the client really wants to send an ACK, but hold it back.
+        let ack = client.process(Some(p1), now()).dgram();
+        assert!(ack.is_some());
+        // Now the server has its ACK and both should be idle.
+        assert_eq!(
+            server.process(ack, now()),
+            Output::Callback(LOCAL_IDLE_TIMEOUT)
+        );
+        assert_eq!(
+            client.process_output(now()),
+            Output::Callback(LOCAL_IDLE_TIMEOUT)
+        );
+    }
+
     #[test]
     fn idle_timeout() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
+        connect_force_idle(&mut client, &mut server);
 
         let now = now();
 
@@ -2769,7 +2874,7 @@ mod tests {
 
         // Still connected after 59 seconds. Idle timer not reset
         client.process(None, now + Duration::from_secs(59));
-        assert!(matches!(client.state(), State::Connected));
+        assert!(matches!(client.state(), State::Confirmed));
 
         client.process_timer(now + Duration::from_secs(60));
 
@@ -2781,7 +2886,7 @@ mod tests {
     fn idle_send_packet1() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
+        connect_force_idle(&mut client, &mut server);
 
         let now = now();
 
@@ -2797,7 +2902,7 @@ mod tests {
         // Still connected after 69 seconds because idle timer reset by outgoing
         // packet
         client.process(out.dgram(), now + Duration::from_secs(69));
-        assert!(matches!(client.state(), State::Connected));
+        assert!(matches!(client.state(), State::Confirmed));
 
         // Not connected after 70 seconds.
         client.process_timer(now + Duration::from_secs(70));
@@ -2808,7 +2913,7 @@ mod tests {
     fn idle_send_packet2() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
+        connect_force_idle(&mut client, &mut server);
 
         let now = now();
 
@@ -2825,7 +2930,7 @@ mod tests {
 
         // Still connected after 69 seconds.
         client.process(None, now + Duration::from_secs(69));
-        assert!(matches!(client.state(), State::Connected));
+        assert!(matches!(client.state(), State::Confirmed));
 
         // Not connected after 70 seconds because timer not reset by second
         // outgoing packet
@@ -2837,7 +2942,7 @@ mod tests {
     fn idle_recv_packet() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
+        connect_force_idle(&mut client, &mut server);
 
         let now = now();
 
@@ -2857,11 +2962,11 @@ mod tests {
         // Still connected after 79 seconds because idle timer reset by received
         // packet
         client.process(out.dgram(), now + Duration::from_secs(20));
-        assert!(matches!(client.state(), State::Connected));
+        assert!(matches!(client.state(), State::Confirmed));
 
         // Still connected after 79 seconds.
         client.process_timer(now + Duration::from_secs(79));
-        assert!(matches!(client.state(), State::Connected));
+        assert!(matches!(client.state(), State::Confirmed));
 
         // Not connected after 80 seconds.
         client.process_timer(now + Duration::from_secs(80));
@@ -2968,7 +3073,7 @@ mod tests {
         let _ = server.process(client4.dgram(), now());
 
         assert_eq!(*client.state(), State::Connected);
-        assert_eq!(*server.state(), State::Connected);
+        assert_eq!(*server.state(), State::Confirmed);
     }
 
     #[test]
@@ -3108,7 +3213,7 @@ mod tests {
     fn pto_works_basic() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
+        connect_force_idle(&mut client, &mut server);
 
         let now = now();
 
@@ -3147,7 +3252,7 @@ mod tests {
     fn pto_works_ping() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
+        connect_force_idle(&mut client, &mut server);
 
         let now = now();
 
@@ -3239,7 +3344,7 @@ mod tests {
     fn verify_pkt_honors_mtu() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
+        connect_force_idle(&mut client, &mut server);
 
         let now = now();
 
@@ -3762,7 +3867,7 @@ mod tests {
     fn key_update_client() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
+        connect_force_idle(&mut client, &mut server);
         let mut now = now();
 
         // Both client and server should be idle now.
@@ -3882,5 +3987,45 @@ mod tests {
         // However, as the server didn't wait long enough to update again, the
         // client hasn't rotated its keys, so the packet gets dropped.
         check_discarded(&mut client, dgram, 1, 0);
+    }
+
+    // Key updates can't be initiated too early.
+    #[test]
+    fn key_update_before_confirmed() {
+        let mut client = default_client();
+        assert!(client.initiate_key_update().is_err());
+        let mut server = default_server();
+        assert!(server.initiate_key_update().is_err());
+
+        // Client Initial
+        let dgram = client.process(None, now()).dgram();
+        assert!(dgram.is_some());
+        assert!(client.initiate_key_update().is_err());
+
+        // Server Initial + Handshake
+        let dgram = server.process(dgram, now()).dgram();
+        assert!(dgram.is_some());
+        assert!(server.initiate_key_update().is_err());
+
+        // Client Handshake
+        client.process_input(dgram.unwrap(), now());
+        assert!(client.initiate_key_update().is_err());
+
+        assert!(maybe_authenticate(&mut client));
+        assert!(client.initiate_key_update().is_err());
+
+        let dgram = client.process(None, now()).dgram();
+        assert!(dgram.is_some());
+        assert!(client.initiate_key_update().is_err());
+
+        // Server HANDSHAKE_DONE
+        let dgram = server.process(dgram, now()).dgram();
+        assert!(dgram.is_some());
+        assert!(server.initiate_key_update().is_ok());
+
+        // Client receives HANDSHAKE_DONE
+        let dgram = client.process(dgram, now()).dgram();
+        assert!(dgram.is_none());
+        assert!(client.initiate_key_update().is_ok());
     }
 }
