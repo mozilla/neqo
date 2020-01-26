@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use std::cell::RefCell;
+use std::fmt;
 use std::io::Write;
 use std::rc::Rc;
 use std::sync::Once;
@@ -25,6 +26,12 @@ impl NeqoQlog {
             trace,
             zero_time: now,
         }
+    }
+}
+
+impl fmt::Debug for NeqoQlog {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "NeqoQlog with zero time of {:?}", self.zero_time)
     }
 }
 
