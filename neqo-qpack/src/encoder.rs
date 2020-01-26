@@ -10,19 +10,13 @@ use crate::huffman::encode_huffman;
 use crate::qpack_helper::read_prefixed_encoded_int_with_connection;
 use crate::qpack_send_buf::QPData;
 use crate::table::HeaderTable;
+use crate::DecoderInstructions;
 use crate::Header;
 use crate::{Error, Res};
 use neqo_common::{qdebug, qtrace};
 use neqo_transport::Connection;
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
-
-#[derive(Debug)]
-enum DecoderInstructions {
-    InsertCountIncrement,
-    HeaderAck,
-    StreamCancellation,
-}
 
 fn get_instruction(b: u8) -> DecoderInstructions {
     if (b & 0xc0) == 0 {

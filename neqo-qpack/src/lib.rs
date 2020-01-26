@@ -26,6 +26,29 @@ enum QPackSide {
     Decoder,
 }
 
+// Will be used by qlog code.
+#[allow(dead_code)]
+pub enum QpackInstructions {
+    Decoder(DecoderInstructions),
+    Encoder(EncoderInstructions),
+}
+#[derive(Debug)]
+pub enum DecoderInstructions {
+    InsertCountIncrement,
+    HeaderAck,
+    StreamCancellation,
+}
+
+// Will be used by qlog code.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum EncoderInstructions {
+    SetDynamicTableCapacity,
+    InsertWithNameReference,
+    InsertWithoutNameReference,
+    Duplicate,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     DecompressionFailed,
