@@ -9,7 +9,7 @@ use crate::control_stream_remote::ControlStreamRemote;
 use crate::hframe::HFrame;
 use crate::hsettings_frame::{HSetting, HSettingType, HSettings};
 use crate::stream_type_reader::NewStreamTypeReader;
-use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn};
+use neqo_common::{log::NeqoQlogRef, matches, qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{AppError, CloseError, Connection, State, StreamType};
@@ -72,6 +72,7 @@ pub struct Http3Connection<T: Http3Transaction> {
     settings_state: Http3RemoteSettingsState,
     streams_have_data_to_send: BTreeSet<u64>,
     pub transactions: HashMap<u64, T>,
+    log: Option<NeqoQlogRef>,
 }
 
 impl<T: Http3Transaction> ::std::fmt::Display for Http3Connection<T> {
@@ -81,7 +82,7 @@ impl<T: Http3Transaction> ::std::fmt::Display for Http3Connection<T> {
 }
 
 impl<T: Http3Transaction> Http3Connection<T> {
-    pub fn new(max_table_size: u64, max_blocked_streams: u16) -> Self {
+    pub fn new(max_table_size: u64, max_blocked_streams: u16, log: Option<NeqoQlogRef>) -> Self {
         if max_table_size > (1 << 30) - 1 {
             panic!("Wrong max_table_size");
         }
@@ -99,6 +100,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_have_data_to_send: BTreeSet::new(),
             transactions: HashMap::new(),
+            log,
         }
     }
 
