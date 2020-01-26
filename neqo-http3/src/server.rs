@@ -27,6 +27,7 @@ pub struct Http3Server {
     max_blocked_streams: u16,
     http3_handlers: HashMap<ActiveConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
+    log: Option<NeqoQlogRef>,
 }
 
 impl ::std::fmt::Display for Http3Server {
@@ -45,14 +46,15 @@ impl Http3Server {
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
         max_table_size: u32,
         max_blocked_streams: u16,
-        qlog: Option<NeqoQlogRef>,
+        log: Option<NeqoQlogRef>,
     ) -> Res<Self> {
         Ok(Self {
-            server: Server::new(now, certs, protocols, anti_replay, cid_manager, qlog)?,
+            server: Server::new(now, certs, protocols, anti_replay, cid_manager, log.clone())?,
             max_table_size,
             max_blocked_streams,
             http3_handlers: HashMap::new(),
             events: Http3ServerEvents::default(),
+            log,
         })
     }
 
@@ -94,10 +96,12 @@ impl Http3Server {
         let max_table_size = self.max_table_size;
         let max_blocked_streams = self.max_blocked_streams;
         for mut conn in active_conns {
+            let log = self.log.clone();
             let handler = self.http3_handlers.entry(conn.clone()).or_insert_with(|| {
                 Rc::new(RefCell::new(Http3ServerHandler::new(
                     max_table_size,
                     max_blocked_streams,
+                    log,
                 )))
             });
 
