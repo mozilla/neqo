@@ -56,17 +56,23 @@ impl Http3Client {
                 cid_manager,
                 local_addr,
                 remote_addr,
-                log,
+                log.clone(),
             )?,
             max_table_size,
             max_blocked_streams,
+            log,
         ))
     }
 
-    pub fn new_with_conn(c: Connection, max_table_size: u64, max_blocked_streams: u16) -> Self {
+    pub fn new_with_conn(
+        c: Connection,
+        max_table_size: u64,
+        max_blocked_streams: u16,
+        log: Option<NeqoQlogRef>,
+    ) -> Self {
         Self {
             conn: c,
-            base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
+            base_handler: Http3Connection::new(max_table_size, max_blocked_streams, log),
             events: Http3ClientEvents::default(),
         }
     }
