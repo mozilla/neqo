@@ -12,7 +12,7 @@ use crate::reader::ReceiverConnWrapper;
 use crate::table::HeaderTable;
 use crate::Header;
 use crate::{Error, Res};
-use neqo_common::qdebug;
+use neqo_common::{log::NeqoQlogRef, qdebug};
 use neqo_transport::Connection;
 use std::convert::TryInto;
 
@@ -30,11 +30,11 @@ pub struct QPackDecoder {
     max_table_size: u64,
     max_blocked_streams: usize,
     blocked_streams: Vec<(u64, u64)>, //stream_id and requested inserts count.
+    log: Option<NeqoQlogRef>,
 }
 
 impl QPackDecoder {
-    #[must_use]
-    pub fn new(max_table_size: u64, max_blocked_streams: u16) -> Self {
+    pub fn new(max_table_size: u64, max_blocked_streams: u16, log: Option<NeqoQlogRef>) -> Self {
         qdebug!("Decoder: creating a new qpack decoder.");
         Self {
             instruction_reader: EncoderInstructionReader::new(),
@@ -47,6 +47,7 @@ impl QPackDecoder {
             max_table_size,
             max_blocked_streams: max_blocked_streams.try_into().unwrap(),
             blocked_streams: Vec::new(),
+            log,
         }
     }
 
@@ -255,7 +256,7 @@ mod tests {
         let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create a decoder
-        let mut decoder = QPackDecoder::new(300, 100);
+        let mut decoder = QPackDecoder::new(300, 100, None);
         decoder.add_send_stream(send_stream_id);
 
         TestDecoder {
