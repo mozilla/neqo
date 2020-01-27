@@ -10,7 +10,7 @@ use crate::qpack_send_buf::QPData;
 use crate::table::{HeaderTable, LookupResult};
 use crate::Header;
 use crate::{Error, Res};
-use neqo_common::{qdebug, qtrace};
+use neqo_common::{log::NeqoQlogRef, qdebug, qtrace};
 use neqo_transport::Connection;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryInto;
@@ -52,10 +52,11 @@ pub struct QPackEncoder {
     unacked_header_blocks: HashMap<u64, VecDeque<HashSet<u64>>>,
     blocked_stream_cnt: u16,
     use_huffman: bool,
+    log: Option<NeqoQlogRef>,
 }
 
 impl QPackEncoder {
-    pub fn new(use_huffman: bool) -> Self {
+    pub fn new(use_huffman: bool, log: Option<NeqoQlogRef>) -> Self {
         Self {
             table: HeaderTable::new(true),
             send_buf: QPData::default(),
@@ -69,6 +70,7 @@ impl QPackEncoder {
             unacked_header_blocks: HashMap::new(),
             blocked_stream_cnt: 0,
             use_huffman,
+            log,
         }
     }
 
@@ -612,7 +614,7 @@ mod tests {
         let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create an encoder
-        let mut encoder = QPackEncoder::new(huffman);
+        let mut encoder = QPackEncoder::new(huffman, None);
         encoder.add_send_stream(send_stream_id);
 
         TestEncoder {
