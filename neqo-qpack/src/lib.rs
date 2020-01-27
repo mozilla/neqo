@@ -12,6 +12,7 @@ pub mod encoder;
 pub mod huffman;
 mod huffman_decode_helper;
 pub mod huffman_table;
+mod qlog;
 pub mod qpack_helper;
 mod qpack_send_buf;
 mod static_table;
