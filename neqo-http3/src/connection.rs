@@ -95,8 +95,8 @@ impl<T: Http3Transaction> Http3Connection<T> {
             control_stream_local: ControlStreamLocal::default(),
             control_stream_remote: ControlStreamRemote::new(),
             new_streams: HashMap::new(),
-            qpack_encoder: QPackEncoder::new(true),
-            qpack_decoder: QPackDecoder::new(max_table_size, max_blocked_streams),
+            qpack_encoder: QPackEncoder::new(true, log.clone()),
+            qpack_decoder: QPackDecoder::new(max_table_size, max_blocked_streams, log.clone()),
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_have_data_to_send: BTreeSet::new(),
             transactions: HashMap::new(),
@@ -382,10 +382,11 @@ impl<T: Http3Transaction> Http3Connection<T> {
             self.control_stream_local = ControlStreamLocal::default();
             self.control_stream_remote = ControlStreamRemote::new();
             self.new_streams.clear();
-            self.qpack_encoder = QPackEncoder::new(true);
+            self.qpack_encoder = QPackEncoder::new(true, self.log.clone());
             self.qpack_decoder = QPackDecoder::new(
                 self.local_settings.max_table_size,
                 self.local_settings.max_blocked_streams,
+                self.log.clone(),
             );
             self.settings_state = Http3RemoteSettingsState::NotReceived;
             self.streams_have_data_to_send.clear();
