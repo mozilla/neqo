@@ -7,6 +7,7 @@
 use crate::decoder_instructions::{DecoderInstruction, DecoderInstructionReader};
 use crate::encoder_instructions::EncoderInstruction;
 use crate::header_block::HeaderEncoder;
+use crate::qlog;
 use crate::qpack_send_buf::QPData;
 use crate::reader::ReceiverConnWrapper;
 use crate::table::{HeaderTable, LookupResult};
@@ -16,6 +17,7 @@ use neqo_common::{log::NeqoQlogRef, qdebug, qtrace};
 use neqo_transport::Connection;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryInto;
+use std::time::Instant;
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
 
@@ -165,6 +167,13 @@ impl QPackEncoder {
         qdebug!([self], "call intruction {:?}", instruction);
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
+                qlog::qpack_read_insert_count_increment_instruction(
+                    &self.log,
+                    Instant::now(),
+                    increment,
+                    &increment.to_be_bytes(),
+                );
+
                 self.insert_count_instruction(increment)
             }
             DecoderInstruction::HeaderAck { stream_id } => self.header_ack(stream_id),
