@@ -550,7 +550,7 @@ mod tests {
             },
             conn: default_server(),
             control_stream_id: None,
-            encoder: QPackEncoder::new(true),
+            encoder: QPackEncoder::new(true, None),
         }
     }
 

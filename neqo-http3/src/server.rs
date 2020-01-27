@@ -314,7 +314,7 @@ mod tests {
             &[0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64],
         );
         assert_eq!(sent, Ok(9));
-        let mut encoder = QPackEncoder::new(true);
+        let mut encoder = QPackEncoder::new(true, None);
         encoder.add_send_stream(neqo_trans_conn.stream_create(StreamType::UniDi).unwrap());
         encoder.send(&mut neqo_trans_conn).unwrap();
         let decoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
