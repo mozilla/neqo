@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::huffman::encode_huffman;
+use crate::qlog;
 use crate::qpack_helper::read_prefixed_encoded_int_with_connection;
 use crate::qpack_send_buf::QPData;
 use crate::table::{HeaderTable, LookupResult};
@@ -14,6 +15,7 @@ use neqo_common::{log::NeqoQlogRef, qdebug, qtrace};
 use neqo_transport::Connection;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryInto;
+use std::time::Instant;
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
 
@@ -244,6 +246,12 @@ impl QPackEncoder {
             qdebug!([self], "call intruction {:?}", inst);
             match inst {
                 DecoderInstructions::InsertCountIncrement => {
+                    qlog::qpack_read_insert_count_increment_instruction(
+                        &self.log,
+                        Instant::now(),
+                        self.instruction_reader_value,
+                        &self.instruction_reader_value.to_be_bytes(),
+                    );
                     self.insert_count_instruction(self.instruction_reader_value)?
                 }
                 DecoderInstructions::HeaderAck => self.header_ack(self.instruction_reader_value)?,
