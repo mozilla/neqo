@@ -6,18 +6,22 @@
 
 // Functions that handle capturing QLOG traces.
 
-use std::time::Instant;
-
 use neqo_common::NeqoQlogRef;
 use qlog::{
     EventCategory, EventData::QpackInstructionReceived, EventField,
     QPackInstruction::InsertCountIncrementInstruction, QpackInstructionTypeName,
 };
+use std::fmt::LowerHex;
+use std::time::Instant;
 
-fn slice_to_string<T: ToString>(slice: &[T]) -> String {
-    slice
-        .iter()
-        .fold("".to_string(), |acc, x| acc + &x.to_string())
+fn slice_to_hex_string<T: LowerHex>(slice: &[T]) -> String {
+    if slice.is_empty() {
+        "0x0".to_string()
+    } else {
+        slice
+            .iter()
+            .fold("0x".to_string(), |acc, x| acc + &format!("{:x}", x))
+    }
 }
 
 pub fn qpack_read_insert_count_increment_instruction(
@@ -35,12 +39,26 @@ pub fn qpack_read_insert_count_increment_instruction(
                 increment,
             },
             byte_length: Some(8.to_string()),
-            raw: Some(slice_to_string(data)),
+            raw: Some(slice_to_hex_string(data)),
         };
         qlog.trace.events.push(vec![
             EventField::Category(EventCategory::Qpack),
             EventField::RelativeTime(format!("{}", elapsed.as_micros())),
             EventField::Data(instruction_received_data),
         ]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_slice_to_hex_string() {
+        let s = slice_to_hex_string(&vec![10, 9, 8]);
+        assert_eq!(r#"0xa98"#, s);
+        let s = slice_to_hex_string(&Vec::<u8>::new());
+        assert_eq!(r#"0x0"#, s);
+        let s = slice_to_hex_string(&vec![128]);
+        assert_eq!(r#"0x80"#, s);
     }
 }
