@@ -25,7 +25,7 @@ use neqo_crypto::{
     Server,
 };
 
-use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager};
+use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
 use crate::crypto::{Crypto, CryptoDxState};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
@@ -34,7 +34,7 @@ use crate::frame::{AckRange, Frame, FrameType, StreamType, TxMode};
 use crate::packet::{
     decode_packet_hdr, decrypt_packet_body, decrypt_packet_hdr, PacketHdr, PacketType,
 };
-use crate::packet2::{is_valid_retry, PacketBuilder, PacketNumber, PacketType as PT2};
+use crate::packet2::{PacketBuilder, PacketNumber, PacketType as PT2, PublicPacket};
 use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams};
@@ -223,8 +223,8 @@ impl FixedConnectionIdManager {
     }
 }
 impl ConnectionIdDecoder for FixedConnectionIdManager {
-    fn decode_cid(&self, dec: &mut Decoder) -> Option<ConnectionId> {
-        dec.decode(self.len).map(ConnectionId::from)
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        dec.decode(self.len).map(ConnectionIdRef::from)
     }
 }
 impl ConnectionIdManager for FixedConnectionIdManager {
@@ -828,7 +828,7 @@ impl Connection {
         }
     }
 
-    fn handle_retry(&mut self, scid: &ConnectionId, token: &[u8], packet: &[u8]) -> Res<()> {
+    fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
         qdebug!([self], "received Retry");
         debug_assert!(self.retry_info.is_some());
         if !self.retry_info.as_ref().unwrap().token.is_empty() {
@@ -836,30 +836,35 @@ impl Connection {
             self.stats.dropped_rx += 1;
             return Ok(());
         }
-        if token.is_empty() {
+        if packet.token().is_empty() {
             qinfo!([self], "Dropping Retry without a token");
             self.stats.dropped_rx += 1;
             return Ok(());
         }
-        if !is_valid_retry(packet, &self.retry_info.as_ref().unwrap().odcid) {
+        if !packet.is_valid_retry(&self.retry_info.as_ref().unwrap().odcid) {
             qinfo!([self], "Dropping Retry with bad integrity tag");
             self.stats.dropped_rx += 1;
             return Ok(());
         }
         if let Some(p) = &mut self.path {
-            p.remote_cid = scid.clone();
+            // At this point, we shouldn't have a remote connection ID for the path.
+            p.remote_cid = ConnectionId::from(packet.scid());
         } else {
             qinfo!([self], "No path, but we received a Retry");
             return Err(Error::InternalError);
         };
-        self.retry_info.as_mut().unwrap().token = token.to_vec();
-        qinfo!([self], "Valid Retry received, token={}", hex(token));
+        self.retry_info.as_mut().unwrap().token = packet.token().to_vec();
+        qinfo!(
+            [self],
+            "Valid Retry received, token={}",
+            hex(packet.token())
+        );
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
         // Switching crypto state here might not happen eventually.
         // https://github.com/quicwg/base-drafts/issues/2823
-        self.crypto.states.init(self.role, scid);
+        self.crypto.states.init(self.role, packet.scid());
         Ok(())
     }
 
@@ -890,6 +895,13 @@ impl Connection {
                     return Ok(frames); // Drop the remainder of the datagram.
                 }
             };
+            let packet = match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
+                Ok((packet, _remainder)) => packet,
+                Err(e) => {
+                    qinfo!([self], "Garbage packet: {} {}", e, hex(slc));
+                    return Ok(frames);
+                }
+            }; // TODO(mt) use in place of res, and allow errors
             self.stats.packets_rx += 1;
             match (&hdr.tipe, &self.state, &self.role) {
                 (PacketType::VN(_), State::WaitInitial, Role::Client) => {
@@ -898,8 +910,8 @@ impl Connection {
                     )));
                     return Err(Error::VersionNegotiation);
                 }
-                (PacketType::Retry { token, .. }, State::WaitInitial, Role::Client) => {
-                    self.handle_retry(hdr.scid.as_ref().unwrap(), token, slc)?;
+                (PacketType::Retry { .. }, State::WaitInitial, Role::Client) => {
+                    self.handle_retry(packet)?;
                     return Ok(frames);
                 }
                 (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {
@@ -2284,11 +2296,11 @@ mod tests {
 
         // limit dcid to a constant value to make testing easier
         let mut modded_path = c.path.take().unwrap();
-        modded_path.remote_cid.0.truncate(8);
-        let modded_dcid = modded_path.remote_cid.0.clone();
-        assert_eq!(modded_dcid.len(), 8);
+        let mut modded_cid = modded_path.remote_cid.to_vec();
+        modded_cid.truncate(8);
+        modded_path.remote_cid = ConnectionId::from(&modded_cid[..]);
         c.path = Some(modded_path);
-        c.crypto.states.init(Role::Client, &modded_dcid);
+        c.crypto.states.init(Role::Client, &modded_cid);
         c
     }
     pub fn default_server() -> Connection {

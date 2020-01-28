@@ -74,7 +74,7 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decodes arbitrary data.
-    pub fn decode(&mut self, n: usize) -> Option<&[u8]> {
+    pub fn decode(&mut self, n: usize) -> Option<&'a [u8]> {
         if self.remaining() < n {
             return None;
         }
@@ -114,13 +114,13 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decodes the rest of the buffer.  Infallible.
-    pub fn decode_remainder(&mut self) -> &[u8] {
+    pub fn decode_remainder(&mut self) -> &'a [u8] {
         let res = &self.buf[self.offset..];
         self.offset = self.buf.len();
         res
     }
 
-    fn decode_checked(&mut self, n: Option<u64>) -> Option<&[u8]> {
+    fn decode_checked(&mut self, n: Option<u64>) -> Option<&'a [u8]> {
         let len = match n {
             Some(l) => l,
             _ => return None,
@@ -136,13 +136,13 @@ impl<'a> Decoder<'a> {
     }
 
     /// Decodes a TLS-style length-prefixed buffer.
-    pub fn decode_vec(&mut self, n: usize) -> Option<&[u8]> {
+    pub fn decode_vec(&mut self, n: usize) -> Option<&'a [u8]> {
         let len = self.decode_uint(n);
         self.decode_checked(len)
     }
 
     /// Decodes a QUIC varint-length-prefixed buffer.
-    pub fn decode_vvec(&mut self) -> Option<&[u8]> {
+    pub fn decode_vvec(&mut self) -> Option<&'a [u8]> {
         let len = self.decode_varint();
         self.decode_checked(len)
     }

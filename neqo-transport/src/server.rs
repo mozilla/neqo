@@ -15,7 +15,7 @@ use neqo_crypto::{
     AntiReplay,
 };
 
-use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager};
+use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
 use crate::connection::{Connection, Output, State};
 use crate::packet::{decode_packet_hdr, PacketHdr, PacketType, Version};
 use crate::packet2::PacketBuilder;
@@ -506,7 +506,7 @@ struct ServerConnectionIdManager {
 }
 
 impl ConnectionIdDecoder for ServerConnectionIdManager {
-    fn decode_cid(&self, dec: &mut Decoder) -> Option<ConnectionId> {
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
         self.cid_manager.borrow_mut().decode_cid(dec)
     }
 }

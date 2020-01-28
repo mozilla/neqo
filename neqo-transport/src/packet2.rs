@@ -5,11 +5,11 @@
 // except according to those terms.
 
 // Encoding and decoding packets off the wire.
-use crate::cid::ConnectionId;
+use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef};
 use crate::crypto::CryptoDxState;
 use crate::{Error, Res, QUIC_VERSION};
 
-use neqo_common::{hex, qdebug, qerror, Encoder};
+use neqo_common::{hex, qdebug, qerror, Decoder, Encoder};
 use neqo_crypto::{aead::Aead, hkdf, random, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
 use std::cell::RefCell;
@@ -47,7 +47,7 @@ impl PacketType {
             Self::Initial => PACKET_TYPE_INITIAL,
             Self::ZeroRtt => PACKET_TYPE_0RTT,
             Self::Handshake => PACKET_TYPE_HANDSHAKE,
-            Self::Retry { .. } => PACKET_TYPE_RETRY,
+            Self::Retry => PACKET_TYPE_RETRY,
             _ => panic!("shouldn't be here"),
         }
     }
@@ -71,6 +71,13 @@ fn make_retry_aead() -> Aead {
     Aead::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic ").unwrap()
 }
 thread_local!(static RETRY_AEAD: RefCell<Aead> = RefCell::new(make_retry_aead()));
+fn retry_expansion() -> usize {
+    if let Ok(ex) = RETRY_AEAD.try_with(|aead| aead.borrow().expansion()) {
+        ex
+    } else {
+        panic!("Unable to access Retry AEAD")
+    }
+}
 
 struct PacketBuilderoffsets {
     /// The bits of the first octet that need masking.
@@ -241,6 +248,7 @@ impl PacketBuilder {
         encoder.encode_uint(4, QUIC_VERSION);
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
+        debug_assert_ne!(token.len(), 0);
         encoder.encode(token);
         let tag = RETRY_AEAD
             .try_with(|aead| -> Res<Vec<u8>> {
@@ -295,40 +303,176 @@ impl Into<Encoder> for PacketBuilder {
     }
 }
 
-/// Validate the given packet as though it were a retry.
-pub fn is_valid_retry(packet: &[u8], odcid: &ConnectionId) -> bool {
-    let expansion = if let Ok(ex) = RETRY_AEAD.try_with(|aead| aead.borrow().expansion()) {
-        ex
-    } else {
-        qerror!("Unable to access Retry AEAD");
-        return false;
-    };
-    if packet.len() <= expansion {
-        return false;
+/// PublicPacket holds information from packets that is public only.  This allows for
+/// processing of packets prior to decryption.
+#[allow(dead_code)]
+pub struct PublicPacket<'a> {
+    /// The packet type.
+    packet_type: PacketType,
+    /// The recovered destination connection ID.
+    dcid: ConnectionIdRef<'a>,
+    /// The source connection ID, if this is a long header packet.
+    scid: Option<ConnectionIdRef<'a>>,
+    /// Any token that is included in the packet (Retry always has a token; Initial sometimes does).
+    /// This is empty when there is no token.
+    token: &'a [u8],
+    /// A reference to the entire packet, including the header.
+    data: &'a [u8],
+}
+
+#[allow(dead_code)]
+impl<'a> PublicPacket<'a> {
+    fn opt<T>(v: Option<T>) -> Res<T> {
+        if let Some(v) = v {
+            Ok(v)
+        } else {
+            Err(Error::NoMoreData)
+        }
     }
-    let (header, tag) = packet.split_at(packet.len() - expansion);
-    let mut encoder = Encoder::with_capacity(packet.len());
-    encoder.encode_vec(1, odcid);
-    encoder.encode(header);
-    RETRY_AEAD
-        .try_with(|aead| -> bool {
-            let mut buf = vec![0; expansion];
-            if let Ok(v) = aead.borrow().decrypt(0, &encoder, tag, &mut buf) {
-                v.is_empty()
-            } else {
-                false
+
+    /// Decode the type-specific portions of a long header.
+    /// This includes reading the length and the remainder of the packet.
+    fn decode_type_specific(decoder: &mut Decoder<'a>, packet_type: PacketType) -> Res<&'a [u8]> {
+        if packet_type == PacketType::Retry {
+            let expansion = retry_expansion();
+            let token = Self::opt(decoder.decode(decoder.remaining() - expansion))?;
+            if token.is_empty() {
+                return Err(Error::InvalidPacket);
             }
-        })
-        .unwrap_or_else(|e| {
-            qerror!("Unable to access Retry AEAD: {:?}", e);
-            false
-        })
+            Self::opt(decoder.decode(expansion))?;
+            return Ok(token);
+        }
+        let token = if packet_type == PacketType::Initial {
+            Self::opt(decoder.decode_vvec())?
+        } else {
+            &[]
+        };
+        let _encrypted_part = Self::opt(decoder.decode_vvec())?;
+        Ok(token)
+    }
+
+    /// Decode the common parts of a packet.  This provides minimal parsing and validation.
+    /// Returns a tuple of a `PublicPacket` and a slice with any remainder from the datagram.
+    pub fn decode(data: &'a [u8], dcid_decoder: &dyn ConnectionIdDecoder) -> Res<(Self, &'a [u8])> {
+        let mut decoder = Decoder::new(data);
+        let first = Self::opt(decoder.decode_byte())?;
+
+        if first & 0x80 == PACKET_BIT_SHORT {
+            return if first & 0x40 == PACKET_BIT_FIXED_QUIC {
+                Ok((
+                    Self {
+                        packet_type: PacketType::Short,
+                        dcid: Self::opt(dcid_decoder.decode_cid(&mut decoder))?,
+                        scid: None,
+                        token: &[],
+                        data,
+                    },
+                    &[],
+                ))
+            } else {
+                Err(Error::InvalidPacket)
+            };
+        }
+
+        // Generic long header.
+        let v = Self::opt(decoder.decode_uint(4))?;
+        let dcid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
+        let scid = ConnectionIdRef::from(Self::opt(decoder.decode_vec(1))?);
+
+        // Version negotiation.
+        if v == 0 {
+            return Ok((
+                Self {
+                    packet_type: PacketType::VersionNegotiation,
+                    dcid,
+                    scid: Some(scid),
+                    token: &[],
+                    data,
+                },
+                &[],
+            ));
+        }
+
+        // Check that this is a long header from this version.
+        if (v != u64::from(QUIC_VERSION)) || (first & 0x40 != PACKET_BIT_FIXED_QUIC) {
+            return Err(Error::InvalidPacket);
+        }
+        let packet_type = match (first >> 4) & 3 {
+            PACKET_TYPE_INITIAL => PacketType::Initial,
+            PACKET_TYPE_0RTT => PacketType::ZeroRtt,
+            PACKET_TYPE_HANDSHAKE => PacketType::Handshake,
+            PACKET_TYPE_RETRY => PacketType::Retry,
+            _ => unreachable!(),
+        };
+
+        // The type-specific code includes a token.  This consumes the remainder of the packet.
+        let token = Self::decode_type_specific(&mut decoder, packet_type)?;
+        let end = data.len() - decoder.remaining();
+        let (data, remainder) = data.split_at(end);
+        Ok((
+            Self {
+                packet_type,
+                dcid,
+                scid: Some(scid),
+                token,
+                data,
+            },
+            remainder,
+        ))
+    }
+
+    /// Validate the given packet as though it were a retry.
+    pub fn is_valid_retry(&self, odcid: &ConnectionId) -> bool {
+        if self.packet_type != PacketType::Retry {
+            return false;
+        }
+        let expansion = retry_expansion();
+        if self.data.len() <= expansion {
+            return false;
+        }
+        let (header, tag) = self.data.split_at(self.data.len() - expansion);
+        let mut encoder = Encoder::with_capacity(self.data.len());
+        encoder.encode_vec(1, odcid);
+        encoder.encode(header);
+        RETRY_AEAD
+            .try_with(|aead| -> bool {
+                let mut buf = vec![0; expansion];
+                if let Ok(v) = aead.borrow().decrypt(0, &encoder, tag, &mut buf) {
+                    v.is_empty()
+                } else {
+                    false
+                }
+            })
+            .unwrap_or_else(|e| {
+                qerror!("Unable to access Retry AEAD: {:?}", e);
+                false
+            })
+    }
+
+    pub fn dcid(&self) -> &ConnectionIdRef<'a> {
+        &self.dcid
+    }
+
+    pub fn scid(&self) -> &ConnectionIdRef<'a> {
+        self.scid
+            .as_ref()
+            .expect("should only be called for long header packets")
+    }
+
+    pub fn token(&self) -> &'a [u8] {
+        self.token
+    }
+
+    pub fn data(&self) -> &'a [u8] {
+        self.data
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::crypto::{CryptoDxDirection, CryptoDxState};
+    use crate::FixedConnectionIdManager;
     use neqo_common::Encoder;
     use test_fixture::fixture_init;
 
@@ -440,17 +584,17 @@ mod tests {
         assert!(encoder.is_empty());
     }
 
+    const SAMPLE_RETRY: &[u8] = &[
+        0xff, 0xff, 0x00, 0x00, 0x18, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
+        0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x43, 0xe0, 0x42, 0xc5, 0xcc, 0x3c, 0x5d, 0xa7, 0x31, 0xee,
+        0xc9, 0xa9, 0xbc, 0x3c, 0xab,
+        0x32,
+        // Draft-25 values:
+        // 0xff, 0xff, 0x00, 0x00, 0x19, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x1e, 0x5e, 0xc5, 0xb0, 0x14, 0xcb, 0xb1, 0xf0, 0xfd, 0x93, 0xdf, 0x40, 0x48, 0xc4, 0x46, 0xa6,
+    ];
+
     #[test]
     fn build_retry() {
-        const EXPECTED: &[u8] = &[
-            0xff, 0xff, 0x00, 0x00, 0x18, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62,
-            0xb5, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x43, 0xe0, 0x42, 0xc5, 0xcc, 0x3c, 0x5d, 0xa7,
-            0x31, 0xee, 0xc9, 0xa9, 0xbc, 0x3c, 0xab,
-            0x32,
-            // Draft-25 values:
-            // 0xff, 0xff, 0x00, 0x00, 0x19, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x1e, 0x5e, 0xc5, 0xb0, 0x14, 0xcb, 0xb1, 0xf0, 0xfd, 0x93, 0xdf, 0x40, 0x48, 0xc4, 0x46, 0xa6,
-        ];
-
         fixture_init();
         let retry = PacketBuilder::retry(
             &ConnectionId::from(&[][..]),
@@ -460,17 +604,20 @@ mod tests {
         )
         .unwrap();
 
-        assert!(is_valid_retry(EXPECTED, &ConnectionId::from(CLIENT_CID)));
+        let (packet, remainder) =
+            PublicPacket::decode(&retry, &FixedConnectionIdManager::new(5)).unwrap();
+        assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
+        assert!(remainder.is_empty());
 
         // The builder adds randomness, which makes expectations hard.
         // So only do a full check when that randomness matches up.
-        if retry[0] == EXPECTED[0] {
-            assert_eq!(&retry, &EXPECTED);
+        if retry[0] == SAMPLE_RETRY[0] {
+            assert_eq!(&retry, &SAMPLE_RETRY);
         } else {
             // Otherwise, just check that the header is OK.
             assert_eq!(retry[0] & 0xf0, 0xf0);
             let header_range = 1..retry.len() - 16;
-            assert_eq!(&retry[header_range.clone()], &EXPECTED[header_range]);
+            assert_eq!(&retry[header_range.clone()], &SAMPLE_RETRY[header_range]);
         }
     }
 
@@ -487,29 +634,64 @@ mod tests {
     #[test]
     fn invalid_retry() {
         fixture_init();
-        assert!(!is_valid_retry(&[], &ConnectionId::from(CLIENT_CID)));
-        assert!(!is_valid_retry(&[0; 17], &ConnectionId::from(CLIENT_CID)));
+        let cid_mgr = FixedConnectionIdManager::new(5);
+        let odcid = ConnectionId::from(CLIENT_CID);
+
+        assert!(PublicPacket::decode(&[], &cid_mgr).is_err());
+
+        let (packet, remainder) = PublicPacket::decode(SAMPLE_RETRY, &cid_mgr).unwrap();
+        assert!(remainder.is_empty());
+        assert!(packet.is_valid_retry(&odcid));
+
+        let mut damaged_retry = SAMPLE_RETRY.to_vec();
+        let last = damaged_retry.len() - 1;
+        damaged_retry[last] ^= 66;
+        let (packet, remainder) = PublicPacket::decode(&damaged_retry, &cid_mgr).unwrap();
+        assert!(remainder.is_empty());
+        assert!(!packet.is_valid_retry(&odcid));
+
+        damaged_retry.truncate(last);
+        let (packet, remainder) = PublicPacket::decode(&damaged_retry, &cid_mgr).unwrap();
+        assert!(remainder.is_empty());
+        assert!(!packet.is_valid_retry(&odcid));
+
+        // An invalid token should be rejected sooner.
+        damaged_retry.truncate(last - 4);
+        assert!(PublicPacket::decode(&damaged_retry, &cid_mgr).is_err());
+
+        damaged_retry.truncate(last - 1);
+        assert!(PublicPacket::decode(&damaged_retry, &cid_mgr).is_err());
     }
+
+    const SAMPLE_VN: &[u8] = &[
+        0x80, 0x00, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x08,
+        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0xff, 0x00, 0x00, 0x18, 0x0a, 0x0a, 0x0a,
+        0x0a,
+    ];
 
     #[test]
     fn build_vn() {
-        const EXPECTED: &[u8] = &[
-            0x80, 0x00, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
-            0x08, 0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0xff, 0x00, 0x00, 0x18, 0x0a,
-            0x0a, 0x0a, 0x0a,
-        ];
-
         fixture_init();
         let mut vn = PacketBuilder::version_negotiation(
             &ConnectionId::from(SERVER_CID),
             &ConnectionId::from(CLIENT_CID),
         );
         // Erase randomness from greasing...
-        assert_eq!(vn.len(), EXPECTED.len());
+        assert_eq!(vn.len(), SAMPLE_VN.len());
         vn[0] &= 0x80;
-        for v in vn.iter_mut().skip(EXPECTED.len() - 4) {
+        for v in vn.iter_mut().skip(SAMPLE_VN.len() - 4) {
             *v &= 0x0f;
         }
-        assert_eq!(&vn, &EXPECTED);
+        assert_eq!(&vn, &SAMPLE_VN);
+    }
+
+    #[test]
+    fn parse_vn() {
+        let (packet, remainder) =
+            PublicPacket::decode(SAMPLE_VN, &FixedConnectionIdManager::new(5)).unwrap();
+        assert!(remainder.is_empty());
+        assert_eq!(&packet.dcid[..], SERVER_CID);
+        assert!(packet.scid.is_some());
+        assert_eq!(&packet.scid.unwrap()[..], CLIENT_CID);
     }
 }

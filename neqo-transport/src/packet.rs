@@ -214,7 +214,7 @@ pub fn decode_packet_hdr(cid_parser: &dyn ConnectionIdDecoder, pd: &[u8]) -> Res
         // Short Header.
         p.tipe = PacketType::Short((p.tbyte & 4) != 0);
         let cid = d!(cid_parser.decode_cid(&mut d));
-        p.dcid = ConnectionId(cid.to_vec()); // TODO(mt) unnecessary copy
+        p.dcid = ConnectionId::from(&cid); // TODO(mt) unnecessary copy
         p.hdr_len = pd.len() - d.remaining();
         p.body_len = d.remaining();
         return Ok(p);
@@ -222,8 +222,8 @@ pub fn decode_packet_hdr(cid_parser: &dyn ConnectionIdDecoder, pd: &[u8]) -> Res
 
     let version = d!(d.decode_uint(4)) as u32;
     p.version = Some(version);
-    p.dcid = ConnectionId(d!(d.decode_vec(1)).to_vec());
-    p.scid = Some(ConnectionId(d!(d.decode_vec(1)).to_vec()));
+    p.dcid = ConnectionId::from(d!(d.decode_vec(1)));
+    p.scid = Some(ConnectionId::from(d!(d.decode_vec(1))));
 
     if version == 0 {
         let mut vns = vec![];

@@ -12,20 +12,14 @@ use neqo_crypto::random;
 use std::cmp::max;
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
-pub struct ConnectionId(pub Vec<u8>);
-
-impl std::ops::Deref for ConnectionId {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+pub struct ConnectionId {
+    pub(crate) cid: Vec<u8>,
 }
 
 impl ConnectionId {
     pub fn generate(len: usize) -> Self {
         assert!(matches!(len, 0..=20));
-        Self(random(len))
+        Self { cid: random(len) }
     }
 
     // Apply a wee bit of greasing here in picking a length between 8 and 20 bytes long.
@@ -35,28 +29,80 @@ impl ConnectionId {
         let len: usize = max(8, 5 + (v[0] & (v[0] >> 4))).into();
         Self::generate(len)
     }
-}
 
-impl ::std::fmt::Debug for ConnectionId {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "CID {}", hex(&self.0))
-    }
-}
-
-impl ::std::fmt::Display for ConnectionId {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{}", hex(&self.0))
+    pub fn as_ref(&self) -> ConnectionIdRef {
+        ConnectionIdRef::from(&self.cid[..])
     }
 }
 
 impl From<&[u8]> for ConnectionId {
     fn from(buf: &[u8]) -> Self {
-        Self(Vec::from(buf))
+        Self {
+            cid: Vec::from(buf),
+        }
+    }
+}
+
+impl<'a> From<&ConnectionIdRef<'a>> for ConnectionId {
+    fn from(cidref: &ConnectionIdRef<'a>) -> Self {
+        Self {
+            cid: Vec::from(cidref.cid),
+        }
+    }
+}
+
+impl std::ops::Deref for ConnectionId {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.cid
+    }
+}
+
+impl ::std::fmt::Debug for ConnectionId {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "CID {}", hex(&self.cid))
+    }
+}
+
+impl ::std::fmt::Display for ConnectionId {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "{}", hex(&self.cid))
+    }
+}
+
+pub struct ConnectionIdRef<'a> {
+    cid: &'a [u8],
+}
+
+impl<'a> ::std::fmt::Debug for ConnectionIdRef<'a> {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "CID {}", hex(&self.cid))
+    }
+}
+
+impl<'a> ::std::fmt::Display for ConnectionIdRef<'a> {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "{}", hex(&self.cid))
+    }
+}
+
+impl<'a> From<&'a [u8]> for ConnectionIdRef<'a> {
+    fn from(cid: &'a [u8]) -> Self {
+        Self { cid }
+    }
+}
+
+impl<'a> std::ops::Deref for ConnectionIdRef<'a> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.cid
     }
 }
 
 pub trait ConnectionIdDecoder {
-    fn decode_cid(&self, dec: &mut Decoder) -> Option<ConnectionId>;
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>>;
 }
 
 pub trait ConnectionIdManager: ConnectionIdDecoder {
