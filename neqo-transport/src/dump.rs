@@ -9,7 +9,7 @@
 
 use crate::connection::Connection;
 use crate::frame::Frame;
-use crate::packet2::{PacketNumber, PacketType};
+use crate::packet::{PacketNumber, PacketType};
 use neqo_common::{qdebug, Decoder};
 
 #[allow(clippy::module_name_repetitions)]

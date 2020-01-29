@@ -19,7 +19,6 @@ mod events;
 mod flow_mgr;
 mod frame;
 mod packet;
-mod packet2;
 mod recovery;
 mod recv_stream;
 mod send_stream;

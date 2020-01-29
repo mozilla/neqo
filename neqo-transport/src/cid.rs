@@ -9,6 +9,7 @@
 use neqo_common::{hex, matches, Decoder};
 use neqo_crypto::random;
 
+use std::borrow::Borrow;
 use std::cmp::max;
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
@@ -32,6 +33,12 @@ impl ConnectionId {
 
     pub fn as_ref(&self) -> ConnectionIdRef {
         ConnectionIdRef::from(&self.cid[..])
+    }
+}
+
+impl Borrow<[u8]> for ConnectionId {
+    fn borrow(&self) -> &[u8] {
+        &self.cid
     }
 }
 
@@ -71,6 +78,13 @@ impl ::std::fmt::Display for ConnectionId {
     }
 }
 
+impl<'a> PartialEq<ConnectionIdRef<'a>> for ConnectionId {
+    fn eq(&self, other: &ConnectionIdRef<'a>) -> bool {
+        &self.cid[..] == other.cid
+    }
+}
+
+#[derive(Hash, Eq, PartialEq)]
 pub struct ConnectionIdRef<'a> {
     cid: &'a [u8],
 }
@@ -98,6 +112,12 @@ impl<'a> std::ops::Deref for ConnectionIdRef<'a> {
 
     fn deref(&self) -> &Self::Target {
         &self.cid
+    }
+}
+
+impl<'a> PartialEq<ConnectionId> for ConnectionIdRef<'a> {
+    fn eq(&self, other: &ConnectionId) -> bool {
+        self.cid == &other.cid[..]
     }
 }
 

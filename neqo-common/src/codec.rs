@@ -29,6 +29,11 @@ impl<'a> Decoder<'a> {
         self.buf.len() - self.offset
     }
 
+    /// The number of bytes from the underlying slice that have been decoded.
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
     /// Skip n bytes.  Panics if `n` is too large.
     pub fn skip(&mut self, n: usize) {
         assert!(self.remaining() >= n);

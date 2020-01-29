@@ -31,10 +31,7 @@ use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{AckRange, Frame, FrameType, StreamType, TxMode};
-use crate::packet::{
-    decode_packet_hdr, decrypt_packet_body, decrypt_packet_hdr, PacketHdr, PacketType,
-};
-use crate::packet2::{PacketBuilder, PacketNumber, PacketType as PT2, PublicPacket};
+use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
 use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams};
@@ -44,7 +41,6 @@ use crate::tparams::{
     tp_constants, TransportParameter, TransportParameters, TransportParametersHandler,
 };
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
-use crate::QUIC_VERSION;
 use crate::{AppError, ConnectionError, Error, Res};
 
 #[derive(Debug, Default)]
@@ -355,7 +351,6 @@ impl StateSignaling {
 /// After the connection is closed (either by calling `close()` or by the
 /// remote) continue processing until `state()` returns `Closed`.
 pub struct Connection {
-    version: crate::packet::Version,
     role: Role,
     state: State,
     tps: Rc<RefCell<TransportParametersHandler>>,
@@ -486,7 +481,6 @@ impl Connection {
             .expect("TLS should be configured successfully");
 
         Self {
-            version: QUIC_VERSION,
             role,
             state: match role {
                 Role::Client => State::Init,
@@ -802,30 +796,10 @@ impl Connection {
         self.process_output(now)
     }
 
-    fn is_valid_cid(&self, cid: &ConnectionId) -> bool {
-        self.valid_cids.contains(cid) || self.path.iter().any(|p| p.local_cids.contains(cid))
-    }
-
-    fn is_valid_initial(&self, hdr: &PacketHdr) -> bool {
-        if let PacketType::Initial(token) = &hdr.tipe {
-            // Server checks the token, so if we have one,
-            // assume that the DCID is OK.
-            if hdr.dcid.len() < 8 {
-                if token.is_empty() {
-                    qinfo!([self], "Drop Initial with short DCID");
-                    false
-                } else {
-                    qinfo!([self], "Initial received with token, assuming OK");
-                    true
-                }
-            } else {
-                // This is the normal path. Don't log.
-                true
-            }
-        } else {
-            qdebug!([self], "Dropping non-Initial packet");
-            false
-        }
+    fn is_valid_cid(&self, cid: &ConnectionIdRef) -> bool {
+        let check = |c| c == cid;
+        self.valid_cids.iter().any(check)
+            || self.path.iter().any(|p| p.local_cids.iter().any(check))
     }
 
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
@@ -881,58 +855,34 @@ impl Connection {
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
-            let res = decode_packet_hdr(self.cid_manager.borrow().as_decoder(), slc);
-            let mut hdr = match res {
-                Ok(h) => h,
-                Err(e) => {
-                    qinfo!(
-                        [self],
-                        "Received indecipherable packet header {} {}",
-                        hex(slc),
-                        e
-                    );
-                    self.stats.dropped_rx += 1;
-                    return Ok(frames); // Drop the remainder of the datagram.
-                }
-            };
-            let packet = match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
-                Ok((packet, _remainder)) => packet,
-                Err(e) => {
-                    qinfo!([self], "Garbage packet: {} {}", e, hex(slc));
-                    return Ok(frames);
-                }
-            }; // TODO(mt) use in place of res, and allow errors
+            let (packet, remainder) =
+                match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
+                    Ok((packet, remainder)) => (packet, remainder),
+                    Err(e) => {
+                        qinfo!([self], "Garbage packet: {} {}", e, hex(slc));
+                        self.stats.dropped_rx += 1;
+                        return Ok(frames);
+                    }
+                }; // TODO(mt) use in place of res, and allow errors
             self.stats.packets_rx += 1;
-            match (&hdr.tipe, &self.state, &self.role) {
-                (PacketType::VN(_), State::WaitInitial, Role::Client) => {
+            match (packet.packet_type(), &self.state, &self.role) {
+                (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
                     self.set_state(State::Closed(ConnectionError::Transport(
                         Error::VersionNegotiation,
                     )));
                     return Err(Error::VersionNegotiation);
                 }
-                (PacketType::Retry { .. }, State::WaitInitial, Role::Client) => {
+                (PacketType::Retry, State::WaitInitial, Role::Client) => {
                     self.handle_retry(packet)?;
                     return Ok(frames);
                 }
-                (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {
-                    qwarn!("dropping {:?}", hdr.tipe);
+                (PacketType::VersionNegotiation, ..) | (PacketType::Retry, ..) => {
+                    qwarn!("dropping {:?}", packet.packet_type());
                     self.stats.dropped_rx += 1;
                     return Ok(frames);
                 }
                 _ => {}
             };
-
-            if let Some(version) = hdr.version {
-                if version != self.version {
-                    qwarn!(
-                        "Dropping packet from version {:x} (self.version={:x})",
-                        hdr.version.unwrap(),
-                        self.version,
-                    );
-                    self.stats.dropped_rx += 1;
-                    return Ok(frames);
-                }
-            }
 
             match self.state {
                 State::Init => {
@@ -943,20 +893,20 @@ impl Connection {
                 State::WaitInitial => {
                     qinfo!([self], "Received packet in WaitInitial");
                     if self.role == Role::Server {
-                        if !self.is_valid_initial(&hdr) {
+                        if !packet.is_valid_initial() {
                             self.stats.dropped_rx += 1;
                             return Ok(frames);
                         }
-                        self.crypto.states.init(self.role, &hdr.dcid);
+                        self.crypto.states.init(self.role, &packet.dcid());
                     }
                 }
                 State::Handshaking | State::Connected | State::Confirmed => {
-                    if !self.is_valid_cid(&hdr.dcid) {
-                        qinfo!([self], "Ignoring packet with CID {:?}", hdr.dcid);
+                    if !self.is_valid_cid(packet.dcid()) {
+                        qinfo!([self], "Ignoring packet with CID {:?}", packet.dcid());
                         self.stats.dropped_rx += 1;
                         return Ok(frames);
                     }
-                    if self.role == Role::Server && matches!(hdr.tipe, PacketType::Handshake {..}) {
+                    if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
                         // Server has received a Handshake packet -> discard Initial keys and states
                         self.discard_keys(PNSpace::Initial);
                     }
@@ -974,27 +924,27 @@ impl Connection {
                 }
             }
 
-            qdebug!([self], "Received unverified packet {:?}", hdr);
+            qdebug!([self], "Received unverified packet {:?}", packet);
 
-            let body = self.decrypt_packet(&mut hdr, slc, now);
-            slc = &slc[hdr.hdr_len + hdr.body_len()..];
-            if let Ok(body) = body {
+            let pto = self.loss_recovery.pto();
+            let payload = packet.decrypt(&mut self.crypto.states, now + pto);
+            slc = remainder;
+            if let Ok(payload) = payload {
                 // TODO(ekr@rtfm.com): Have the server blow away the initial
                 // crypto state if this fails? Otherwise, we will get a panic
                 // on the assert for doesn't exist.
                 // OK, we have a valid packet.
                 self.idle_timeout.on_packet_received(now);
-                let pt = match hdr.tipe {
-                    PacketType::Initial(_) => PT2::Initial,
-                    PacketType::Handshake => PT2::Handshake,
-                    PacketType::ZeroRTT => PT2::ZeroRtt,
-                    PacketType::Short(_) => PT2::Short,
-                    _ => unreachable!(),
-                };
-                dump_packet(self, "-> RX", hdr.pn, pt, &body);
-                frames.extend(self.process_packet(&hdr, body, now)?);
+                dump_packet(
+                    self,
+                    "-> RX",
+                    payload.pn(),
+                    payload.packet_type(),
+                    &payload[..],
+                );
+                frames.extend(self.process_packet(&payload, now)?);
                 if matches!(self.state, State::WaitInitial) {
-                    self.start_handshake(hdr, &d)?;
+                    self.start_handshake(&packet, &d)?;
                 }
                 self.process_migrations(&d)?;
             } else {
@@ -1007,48 +957,10 @@ impl Connection {
         Ok(frames)
     }
 
-    /// Decrypt a packet and - if successful - return the body.
-    fn decrypt_packet(
-        &mut self,
-        mut hdr: &mut PacketHdr,
-        slc: &[u8],
-        now: Instant,
-    ) -> Res<Vec<u8>> {
-        let space = hdr.tipe.space();
-        // This has to work in two stages because we need to remove header protection
-        // before picking the keys to use.
-        if let Some(rx) = self.crypto.states.rx_hp(space) {
-            // Note that this will dump early, which creates a side-channel.
-            // This is OK in this case because we the only reason this can
-            // fail is if the cryptographic module is bad or the packet is
-            // too small (which is public information).
-            let (hdrbytes, body) = decrypt_packet_hdr(rx, &mut hdr, slc)?;
-            qtrace!([rx], "decoded header: {:?}", hdr);
-            if let Some(rx) = self.crypto.states.rx(space, hdr.tipe.key_phase()) {
-                let res = decrypt_packet_body(rx, hdr.pn, &hdrbytes, body);
-                if res.is_ok() {
-                    // If this is the first packet ever successfully decrypted
-                    // using `rx`, make sure to initiate a key update.
-                    if rx.needs_update() {
-                        let pto = self.loss_recovery.pto();
-                        self.crypto.states.key_update_received(now + pto)?;
-                    }
-                }
-                self.crypto.states.check_pn_overlap()?;
-                res
-            } else {
-                Err(Error::DecryptError)
-            }
-        } else {
-            Err(Error::DecryptError)
-        }
-    }
-
     /// Ok(true) if the packet is a duplicate
     fn process_packet(
         &mut self,
-        hdr: &PacketHdr,
-        body: Vec<u8>,
+        packet: &DecryptedPacket,
         now: Instant,
     ) -> Res<Vec<(Frame, PNSpace)>> {
         // TODO(ekr@rtfm.com): Have the server blow away the initial
@@ -1058,15 +970,15 @@ impl Connection {
 
         // TODO(ekr@rtfm.com): Filter for valid for this epoch.
 
-        let space = hdr.tipe.space();
-        if self.acks[space].is_duplicate(hdr.pn) {
-            qdebug!([self], "Duplicate packet from {} pn={}", space, hdr.pn);
+        let space = PNSpace::from(packet.packet_type());
+        if self.acks[space].is_duplicate(packet.pn()) {
+            qdebug!([self], "Duplicate packet from {} pn={}", space, packet.pn());
             self.stats.dups_rx += 1;
             return Ok(vec![]);
         }
 
         let mut ack_eliciting = false;
-        let mut d = Decoder::from(&body[..]);
+        let mut d = Decoder::from(&packet[..]);
         #[allow(unused_mut)]
         let mut frames = Vec::new();
         while d.remaining() > 0 {
@@ -1076,22 +988,22 @@ impl Connection {
             }
             ack_eliciting |= f.ack_eliciting();
             let t = f.get_type();
-            let res = self.input_frame(&hdr.tipe, f, now);
+            let res = self.input_frame(packet.packet_type(), f, now);
             self.capture_error(now, t, res)?;
         }
-        self.acks[space].set_received(now, hdr.pn, ack_eliciting);
+        self.acks[space].set_received(now, packet.pn(), ack_eliciting);
 
         Ok(frames)
     }
 
-    fn start_handshake(&mut self, hdr: PacketHdr, d: &Datagram) -> Res<()> {
+    fn start_handshake(&mut self, packet: &PublicPacket, d: &Datagram) -> Res<()> {
         if self.role == Role::Server {
-            assert!(matches!(hdr.tipe, PacketType::Initial(..)));
+            assert_eq!(packet.packet_type(), PacketType::Initial);
             // A server needs to accept the client's selected CID during the handshake.
-            self.valid_cids.push(hdr.dcid.clone());
+            self.valid_cids.push(ConnectionId::from(packet.dcid()));
             // Install a path.
             assert!(self.path.is_none());
-            let mut p = Path::new(&d, hdr.scid.unwrap());
+            let mut p = Path::new(&d, ConnectionId::from(packet.scid()));
             p.local_cids
                 .push(self.cid_manager.borrow_mut().generate_cid());
             self.path = Some(p);
@@ -1104,17 +1016,13 @@ impl Connection {
                 _ => ZeroRttState::Rejected,
             };
         } else {
-            qdebug!(
-                [self],
-                "Changing to use Server CID={}",
-                hdr.scid.as_ref().unwrap()
-            );
+            qdebug!([self], "Changing to use Server CID={}", packet.scid());
             let p = self
                 .path
                 .iter_mut()
                 .find(|p| p.received_on(&d))
                 .expect("should have a path for sending Initial");
-            p.remote_cid = hdr.scid.unwrap();
+            p.remote_cid = ConnectionId::from(packet.scid());
         }
         self.set_state(State::Handshaking);
         Ok(())
@@ -1165,19 +1073,19 @@ impl Connection {
         encoder: Encoder,
         tx: &CryptoDxState,
         retry_info: &Option<RetryInfo>,
-    ) -> (PT2, PacketNumber, PacketBuilder) {
+    ) -> (PacketType, PacketNumber, PacketBuilder) {
         let pt = match space {
-            PNSpace::Initial => PT2::Initial,
-            PNSpace::Handshake => PT2::Handshake,
+            PNSpace::Initial => PacketType::Initial,
+            PNSpace::Handshake => PacketType::Handshake,
             PNSpace::ApplicationData => {
                 if tx.is_0rtt() {
-                    PT2::ZeroRtt
+                    PacketType::ZeroRtt
                 } else {
-                    PT2::Short
+                    PacketType::Short
                 }
             }
         };
-        let mut builder = if pt == PT2::Short {
+        let mut builder = if pt == PacketType::Short {
             PacketBuilder::short(encoder, tx.key_phase(), &path.remote_cid)
         } else {
             PacketBuilder::long(
@@ -1187,7 +1095,7 @@ impl Connection {
                 path.local_cids.first().unwrap(),
             )
         };
-        if pt == PT2::Initial {
+        if pt == PacketType::Initial {
             builder.initial_token(if let Some(info) = retry_info {
                 &info.token
             } else {
@@ -1354,8 +1262,8 @@ impl Connection {
             qdebug!("Need to send a packet: {:?}", pt);
             match pt {
                 // Packets containing Initial packets need padding.
-                PT2::Initial => needs_padding = true,
-                PT2::ZeroRtt => (),
+                PacketType::Initial => needs_padding = true,
+                PacketType::ZeroRtt => (),
                 // ...unless they include higher epochs.
                 _ => needs_padding = false,
             }
@@ -1554,7 +1462,7 @@ impl Connection {
         }
     }
 
-    fn input_frame(&mut self, ptype: &PacketType, frame: Frame, now: Instant) -> Res<()> {
+    fn input_frame(&mut self, ptype: PacketType, frame: Frame, now: Instant) -> Res<()> {
         if !frame.is_allowed(ptype) {
             return Err(Error::ProtocolViolation);
         }
@@ -1572,7 +1480,7 @@ impl Connection {
                 ack_ranges,
             } => {
                 self.handle_ack(
-                    ptype.space(),
+                    PNSpace::from(ptype),
                     largest_acknowledged,
                     ack_delay,
                     first_ack_range,
@@ -1601,7 +1509,7 @@ impl Connection {
                 }
             }
             Frame::Crypto { offset, data } => {
-                let space = ptype.space();
+                let space = PNSpace::from(ptype);
                 qdebug!(
                     [self],
                     "Crypto frame on space={} offset={}, data={:0x?}",

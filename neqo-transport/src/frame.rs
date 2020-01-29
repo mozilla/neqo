@@ -518,17 +518,17 @@ impl Frame {
         }
     }
 
-    pub fn is_allowed(&self, ptype: &PacketType) -> bool {
-        qdebug!("is_allowed {:?} {:?}", self, ptype);
+    pub fn is_allowed(&self, pt: PacketType) -> bool {
+        qdebug!("is_allowed {:?} {:?}", self, pt);
         if matches!(self, Self::Padding | Self::Ping) {
             true
         } else if matches!(self, Self::Crypto {..} | Self::Ack {..} | Self::ConnectionClose { error_code: CloseError::Transport(_), .. })
         {
-            !matches!(ptype, PacketType::ZeroRTT)
+            pt != PacketType::ZeroRtt
         } else if matches!(self, Self::NewToken {..} | Self::ConnectionClose {..}) {
-            matches!(ptype, PacketType::Short(_))
+            pt == PacketType::Short
         } else {
-            matches!(ptype, PacketType::ZeroRTT | PacketType::Short(_))
+            pt == PacketType::ZeroRtt || pt == PacketType::Short
         }
     }
 
