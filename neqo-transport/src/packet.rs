@@ -31,6 +31,7 @@ const PACKET_BIT_KEY_PHASE: u8 = 0x04;
 const PACKET_BIT_FIXED_QUIC: u8 = 0x40;
 
 const SAMPLE_SIZE: usize = 16;
+const SAMPLE_OFFSET: usize = 4;
 
 pub type PacketNumber = u64;
 
@@ -200,7 +201,7 @@ impl PacketBuilder {
         let ciphertext = crypto.encrypt(self.pn, hdr, body)?;
 
         // Calculate the mask.
-        let offset = 4 - self.offsets.pn.len();
+        let offset = SAMPLE_OFFSET - self.offsets.pn.len();
         assert!(offset + SAMPLE_SIZE <= ciphertext.len());
         let sample = &ciphertext[offset..offset + SAMPLE_SIZE];
         let mask = crypto.compute_mask(sample)?;
@@ -367,6 +368,9 @@ impl<'a> PublicPacket<'a> {
         if first & 0x80 == PACKET_BIT_SHORT {
             return if first & 0x40 == PACKET_BIT_FIXED_QUIC {
                 let dcid = Self::opt(dcid_decoder.decode_cid(&mut decoder))?;
+                if decoder.remaining() < SAMPLE_OFFSET + SAMPLE_SIZE {
+                    return Err(Error::InvalidPacket);
+                }
                 let header_len = decoder.offset();
                 Ok((
                     Self {
@@ -522,9 +526,12 @@ impl<'a> PublicPacket<'a> {
         assert_ne!(self.packet_type, PacketType::Retry);
         assert_ne!(self.packet_type, PacketType::VersionNegotiation);
 
-        qtrace!("unmask hdr={}", hex(&self.data[..self.header_len + 4]));
+        qtrace!(
+            "unmask hdr={}",
+            hex(&self.data[..self.header_len + SAMPLE_OFFSET])
+        );
 
-        let sample_offset = self.header_len + 4;
+        let sample_offset = self.header_len + SAMPLE_OFFSET;
         let mask = if let Some(sample) = self.data.get(sample_offset..(sample_offset + SAMPLE_SIZE))
         {
             crypto.compute_mask(sample)
@@ -647,7 +654,7 @@ mod tests {
     const SERVER_CID: &[u8] = &[0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
 
     /// This is a connection ID manager, which is only used for decoding short header packets.
-    fn default_cid_mgr() -> FixedConnectionIdManager {
+    fn cid_mgr() -> FixedConnectionIdManager {
         FixedConnectionIdManager::new(SERVER_CID.len())
     }
 
@@ -704,7 +711,7 @@ mod tests {
         0x4c, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x55, 0x80, 0x33, 0xda, 0x1a, 0x01,
         0x19, 0x47, 0x57, 0xe2, 0x23, 0xcf, 0xe8, 0xde, 0x58, 0xce, 0x8b, 0xab, 0xc5, 0x19,
     ];
-    const SAMPLE_SHORT_PAYLOAD: &[u8] = &[0;3];
+    const SAMPLE_SHORT_PAYLOAD: &[u8] = &[0; 3];
 
     #[test]
     fn build_short() {
@@ -713,25 +720,47 @@ mod tests {
             PacketBuilder::short(Encoder::new(), true, &ConnectionId::from(SERVER_CID));
         builder.pn(0, 1);
         builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
-        let packet = builder.build(&mut CryptoDxState::test_default()).expect("build");
+        let packet = builder
+            .build(&mut CryptoDxState::test_default())
+            .expect("build");
         assert_eq!(&packet[..], SAMPLE_SHORT);
     }
 
     #[test]
     fn decode_short() {
-        let (packet, remainder) = PublicPacket::decode(SAMPLE_SHORT, &default_cid_mgr()).unwrap();
+        let (packet, remainder) = PublicPacket::decode(SAMPLE_SHORT, &cid_mgr()).unwrap();
         assert_eq!(packet.packet_type(), PacketType::Short);
         assert!(remainder.is_empty());
-        let decrypted = packet.decrypt(&mut CryptoStates::test_default(), now()).unwrap();
+        let decrypted = packet
+            .decrypt(&mut CryptoStates::test_default(), now())
+            .unwrap();
         assert_eq!(&decrypted[..], SAMPLE_SHORT_PAYLOAD);
     }
 
+    /// By telling the decoder that the connection ID is shorter than it really is, we get a decryption error.
     #[test]
     fn decode_short_bad_cid() {
-        let (packet, remainder) = PublicPacket::decode(SAMPLE_SHORT, &FixedConnectionIdManager::new(SERVER_CID.len() - 1)).unwrap();
+        fixture_init();
+        let (packet, remainder) = PublicPacket::decode(
+            SAMPLE_SHORT,
+            &FixedConnectionIdManager::new(SERVER_CID.len() - 1),
+        )
+        .unwrap();
         assert_eq!(packet.packet_type(), PacketType::Short);
         assert!(remainder.is_empty());
-        assert!(packet.decrypt(&mut CryptoStates::test_default(), now()).is_err());
+        assert!(packet
+            .decrypt(&mut CryptoStates::test_default(), now())
+            .is_err());
+    }
+
+    /// Saying that the connection ID is longer causes the initial decode to fail.
+    #[test]
+    fn decode_short_long_cid() {
+        assert!(PublicPacket::decode(
+            SAMPLE_SHORT,
+            &FixedConnectionIdManager::new(SERVER_CID.len() + 1)
+        )
+        .is_err());
     }
 
     #[test]
@@ -791,7 +820,7 @@ mod tests {
         fixture_init();
         let retry = PacketBuilder::retry(&[], SERVER_CID, RETRY_TOKEN, CLIENT_CID).unwrap();
 
-        let (packet, remainder) = PublicPacket::decode(&retry, &default_cid_mgr()).unwrap();
+        let (packet, remainder) = PublicPacket::decode(&retry, &cid_mgr()).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
         assert!(remainder.is_empty());
 

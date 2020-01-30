@@ -778,7 +778,8 @@ impl CryptoStates {
             CryptoDxAppData {
                 dx,
                 cipher: TLS_AES_128_GCM_SHA256,
-                next_secret: hkdf::import_key(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &[0xaa; 32]).unwrap(),
+                next_secret: hkdf::import_key(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &[0xaa; 32])
+                    .unwrap(),
             }
         };
         Self {
