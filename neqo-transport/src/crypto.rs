@@ -405,6 +405,13 @@ impl CryptoDxState {
         self.used(pn)?;
         Ok(res.to_vec())
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_default() -> Self {
+        // This matches the value in packet.rs
+        const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
+        Self::new_initial(CryptoDxDirection::Write, "server in", CLIENT_CID)
+    }
 }
 
 impl std::fmt::Display for CryptoDxState {
@@ -442,7 +449,7 @@ impl IndexMut<CryptoDxDirection> for CryptoState {
 /// `CryptoDxAppData` wraps the state necessary for one direction of application data keys.
 /// This includes the secret needed to generate the next set of keys.
 #[derive(Debug)]
-struct CryptoDxAppData {
+pub(crate) struct CryptoDxAppData {
     dx: CryptoDxState,
     cipher: Cipher,
     // Not the secret used to create `self.dx`, but the one needed for the next iteration.
@@ -760,6 +767,30 @@ impl CryptoStates {
             next_dx.continuation(&self.app_read.as_ref().unwrap().dx)?;
         }
         Ok(())
+    }
+
+    /// Make some state for removing protection in tests.
+    #[cfg(test)]
+    pub(crate) fn test_default() -> Self {
+        let read = || {
+            let mut dx = CryptoDxState::test_default();
+            dx.direction = CryptoDxDirection::Read;
+            CryptoDxAppData {
+                dx,
+                cipher: TLS_AES_128_GCM_SHA256,
+                next_secret: hkdf::import_key(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &[0xaa; 32]).unwrap(),
+            }
+        };
+        Self {
+            initial: None,
+            handshake: None,
+            zero_rtt: None,
+            cipher: TLS_AES_128_GCM_SHA256,
+            app_write: None,
+            app_read: Some(read()),
+            app_read_next: Some(read()),
+            read_update_time: None,
+        }
     }
 }
 

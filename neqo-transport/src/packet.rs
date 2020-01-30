@@ -533,18 +533,17 @@ impl<'a> PublicPacket<'a> {
         }?;
 
         // Un-mask the leading byte.
-        let first = self.data[0]
-            ^ (mask[0]
-                & if self.packet_type == PacketType::Short {
-                    0x1f
-                } else {
-                    0x0f
-                });
-        let pn_len = usize::from((first & 0x3) + 1);
+        let bits = if self.packet_type == PacketType::Short {
+            0x1f
+        } else {
+            0x0f
+        };
+        let first_byte = self.data[0] ^ (mask[0] & bits);
+        let pn_len = usize::from((first_byte & 0x3) + 1);
 
         // Make a copy of the header to work on.
         let mut hdrbytes = self.data[..self.header_len + pn_len].to_vec();
-        hdrbytes[0] = first;
+        hdrbytes[0] = first_byte;
 
         // Unmask the PN.
         let mut pn_encoded: u64 = 0;
@@ -557,7 +556,7 @@ impl<'a> PublicPacket<'a> {
         qtrace!("unmasked hdr={}", hex(&hdrbytes));
 
         let key_phase = self.packet_type == PacketType::Short
-            && (first & PACKET_BIT_KEY_PHASE) == PACKET_BIT_KEY_PHASE;
+            && (first_byte & PACKET_BIT_KEY_PHASE) == PACKET_BIT_KEY_PHASE;
         let pn = Self::decode_pn(crypto.next_pn(), pn_encoded, pn_len);
         Ok((
             key_phase,
@@ -639,18 +638,17 @@ impl Deref for DecryptedPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::{CryptoDxDirection, CryptoDxState};
+    use crate::crypto::{CryptoDxState, CryptoStates};
     use crate::FixedConnectionIdManager;
     use neqo_common::Encoder;
-    use test_fixture::fixture_init;
+    use test_fixture::{fixture_init, now};
 
     const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
     const SERVER_CID: &[u8] = &[0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
 
-    /// In most of these tests, anything will do.  This is that "anything".
-    fn default_protector() -> CryptoDxState {
-        fixture_init();
-        CryptoDxState::new_initial(CryptoDxDirection::Write, "server in", CLIENT_CID)
+    /// This is a connection ID manager, which is only used for decoding short header packets.
+    fn default_cid_mgr() -> FixedConnectionIdManager {
+        FixedConnectionIdManager::new(SERVER_CID.len())
     }
 
     #[test]
@@ -681,7 +679,8 @@ mod tests {
             0x84, 0x07, 0xf0, 0x9e, 0xfd, 0xa4, 0xa3, 0x08,
         ];
 
-        let mut prot = default_protector();
+        fixture_init();
+        let mut prot = CryptoDxState::test_default();
 
         // The spec uses PN=1, but our crypto refuses to skip packet numbers.
         // So burn an encryption:
@@ -701,19 +700,44 @@ mod tests {
         assert_eq!(&packet[..], EXPECTED);
     }
 
+    const SAMPLE_SHORT: &[u8] = &[
+        0x4c, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x55, 0x80, 0x33, 0xda, 0x1a, 0x01,
+        0x19, 0x47, 0x57, 0xe2, 0x23, 0xcf, 0xe8, 0xde, 0x58, 0xce, 0x8b, 0xab, 0xc5, 0x19,
+    ];
+    const SAMPLE_SHORT_PAYLOAD: &[u8] = &[0;3];
+
     #[test]
     fn build_short() {
+        fixture_init();
         let mut builder =
             PacketBuilder::short(Encoder::new(), true, &ConnectionId::from(SERVER_CID));
         builder.pn(0, 1);
-        builder.encode(&[0; 3]); // Enough payload for sampling.
-        let packet = builder.build(&mut default_protector()).expect("build");
-        assert_eq!(packet.len(), 29);
+        builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
+        let packet = builder.build(&mut CryptoDxState::test_default()).expect("build");
+        assert_eq!(&packet[..], SAMPLE_SHORT);
+    }
+
+    #[test]
+    fn decode_short() {
+        let (packet, remainder) = PublicPacket::decode(SAMPLE_SHORT, &default_cid_mgr()).unwrap();
+        assert_eq!(packet.packet_type(), PacketType::Short);
+        assert!(remainder.is_empty());
+        let decrypted = packet.decrypt(&mut CryptoStates::test_default(), now()).unwrap();
+        assert_eq!(&decrypted[..], SAMPLE_SHORT_PAYLOAD);
+    }
+
+    #[test]
+    fn decode_short_bad_cid() {
+        let (packet, remainder) = PublicPacket::decode(SAMPLE_SHORT, &FixedConnectionIdManager::new(SERVER_CID.len() - 1)).unwrap();
+        assert_eq!(packet.packet_type(), PacketType::Short);
+        assert!(remainder.is_empty());
+        assert!(packet.decrypt(&mut CryptoStates::test_default(), now()).is_err());
     }
 
     #[test]
     fn build_two() {
-        let mut prot = default_protector();
+        fixture_init();
+        let mut prot = CryptoDxState::test_default();
         let mut builder = PacketBuilder::long(
             Encoder::new(),
             PacketType::Handshake,
@@ -760,14 +784,14 @@ mod tests {
         // Draft-25 values:
         // 0xff, 0xff, 0x00, 0x00, 0x19, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x1e, 0x5e, 0xc5, 0xb0, 0x14, 0xcb, 0xb1, 0xf0, 0xfd, 0x93, 0xdf, 0x40, 0x48, 0xc4, 0x46, 0xa6,
     ];
+    const RETRY_TOKEN: &[u8] = b"token";
 
     #[test]
     fn build_retry() {
         fixture_init();
-        let retry = PacketBuilder::retry(&[], SERVER_CID, b"token", CLIENT_CID).unwrap();
+        let retry = PacketBuilder::retry(&[], SERVER_CID, RETRY_TOKEN, CLIENT_CID).unwrap();
 
-        let (packet, remainder) =
-            PublicPacket::decode(&retry, &FixedConnectionIdManager::new(5)).unwrap();
+        let (packet, remainder) = PublicPacket::decode(&retry, &default_cid_mgr()).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
         assert!(remainder.is_empty());
 
@@ -781,6 +805,18 @@ mod tests {
             let header_range = 1..retry.len() - 16;
             assert_eq!(&retry[header_range.clone()], &SAMPLE_RETRY[header_range]);
         }
+    }
+
+    #[test]
+    fn decode_retry() {
+        fixture_init();
+        let (packet, remainder) =
+            PublicPacket::decode(SAMPLE_RETRY, &FixedConnectionIdManager::new(5)).unwrap();
+        assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
+        assert!(packet.dcid().is_empty());
+        assert_eq!(&packet.scid()[..], SERVER_CID);
+        assert_eq!(packet.token(), RETRY_TOKEN);
+        assert!(remainder.is_empty());
     }
 
     #[test]
