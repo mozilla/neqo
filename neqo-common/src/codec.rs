@@ -30,6 +30,7 @@ impl<'a> Decoder<'a> {
     }
 
     /// The number of bytes from the underlying slice that have been decoded.
+    #[must_use]
     pub fn offset(&self) -> usize {
         self.offset
     }
