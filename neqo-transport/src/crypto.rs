@@ -775,21 +775,25 @@ impl CryptoStates {
         let read = || {
             let mut dx = CryptoDxState::test_default();
             dx.direction = CryptoDxDirection::Read;
-            CryptoDxAppData {
-                dx,
-                cipher: TLS_AES_128_GCM_SHA256,
-                next_secret: hkdf::import_key(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &[0xaa; 32])
-                    .unwrap(),
-            }
+            dx
+        };
+        let app_read = || CryptoDxAppData {
+            dx: read(),
+            cipher: TLS_AES_128_GCM_SHA256,
+            next_secret: hkdf::import_key(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &[0xaa; 32])
+                .unwrap(),
         };
         Self {
-            initial: None,
+            initial: Some(CryptoState {
+                tx: CryptoDxState::test_default(),
+                rx: read(),
+            }),
             handshake: None,
             zero_rtt: None,
             cipher: TLS_AES_128_GCM_SHA256,
             app_write: None,
-            app_read: Some(read()),
-            app_read_next: Some(read()),
+            app_read: Some(app_read()),
+            app_read_next: Some(app_read()),
             read_update_time: None,
         }
     }
