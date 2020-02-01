@@ -14,6 +14,8 @@ use qlog::{
 use std::fmt::LowerHex;
 use std::time::Instant;
 
+// TODO(hawkinsw@obs.cr): There is a copy of this in neqo-transports/src/qlog.rs.
+// Refactor both uses into something in neqo-common.
 fn slice_to_hex_string<T: LowerHex>(slice: &[T]) -> String {
     if slice.is_empty() {
         "0x0".to_string()
@@ -54,11 +56,11 @@ mod tests {
     use super::*;
     #[test]
     fn test_slice_to_hex_string() {
-        let s = slice_to_hex_string(&vec![10, 9, 8]);
+        let s = slice_to_hex_string(&[10, 9, 8]);
         assert_eq!(r#"0xa98"#, s);
         let s = slice_to_hex_string(&Vec::<u8>::new());
         assert_eq!(r#"0x0"#, s);
-        let s = slice_to_hex_string(&vec![128]);
+        let s = slice_to_hex_string(&[128]);
         assert_eq!(r#"0x80"#, s);
     }
 }
