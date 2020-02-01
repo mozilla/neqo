@@ -39,6 +39,8 @@ pub use self::tparams::{tp_constants, TransportParameter};
 pub type Version = u32;
 pub const QUIC_VERSION: Version = 0xff00_0018;
 
+const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60); // 1 minute
+
 type TransportError = u64;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]

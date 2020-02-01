@@ -4,6 +4,10 @@ jobs:
   build:
     docker:
       - image: martinthomson/neqo:latest
+    working_directory: /home/neqo/neqo
+    environment:
+      NSS_JOBS: 3
+      LD_LIBRARY_PATH: /home/neqo/dist/Debug/lib
 
     steps:
       - checkout
@@ -16,6 +20,39 @@ jobs:
             rustc --version
             cargo --version
             rustfmt --version
+            cargo clippy --version
+
+      - restore_cache:
+          name: "Restoring cache - Git"
+          keys:
+            - v1-git-{{ .Branch }}-{{ .Revision }}
+            - v1-git-{{ .Branch }}
+            - v1-git-master
+            - v1-git-
+
+      - restore_cache:
+          name: "Restoring cache - NSS and NSPR"
+          keys:
+            - v1-nss-nspr-{{ epoch }}
+            - v1-nss-nspr-
+
+      # Workaround for https://discuss.circleci.com/t/22437
+      - run:
+          name: Tag Checkout
+          command: |
+            if [ -n "$CIRCLE_TAG" ] && [ -d .git ]; then
+              remote=$(echo "$CIRCLE_REPOSITORY_URL" | \
+                       sed -e 's,/^git.github.com:,https://github.com/,')
+              git fetch -f "$remote" "refs/tags/$CIRCLE_TAG:refs/tags/$CIRCLE_TAG" || \
+                (echo 'Removing .git cache for tag build'; rm -rf .git)
+            fi
+
+      - run:
+          name: Update NSS/NSPR
+          command: |
+            hg -R "$NSS_DIR" pull -u
+            hg -R "$NSPR_DIR" pull -u
+            "$NSS_DIR"/build.sh -j "$NSS_JOBS" --static -Ddisable_tests=1
 
       - run:
           name: Check Formatting
@@ -23,12 +60,30 @@ jobs:
 
       - run:
           name: Build
-          command: NSS_JOBS=3 cargo build -v --all-targets --tests
+          command: cargo build -v --all-targets --tests
 
       - run:
           name: Clippy
-          command: NSS_JOBS=3 cargo clippy -v --all-targets --tests
+          command: cargo clippy -v --all-targets --tests
 
       - run:
           name: Test
           command: cargo test -v
+
+      - run:
+          name: "Prepare for Caching"
+          command: "git gc --auto"
+
+      - save_cache:
+          name: "Saving Cache - Git"
+          key: v1-git-{{ .Branch }}-{{ .Revision }}
+          paths:
+            - ~/neqo/.git
+
+      - save_cache:
+          name: "Saving Cache - NSS and NSPR"
+          key: v1-nss-nspr-{{ epoch }}
+          paths:
+            - ~/nss
+            - ~/nspr
+            - ~/dist

@@ -20,7 +20,7 @@ use crate::packet::{PacketNumber, PacketType};
 use crate::recovery::RecoveryToken;
 
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq)]
 pub enum PNSpace {
     Initial,
     Handshake,

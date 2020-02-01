@@ -10,7 +10,6 @@ use std::cell::RefCell;
 use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
 use std::rc::Rc;
@@ -32,7 +31,7 @@ use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{AckRange, Frame, FrameType, StreamType, TxMode};
 use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
-use crate::recovery::{LossRecovery, LossRecoveryMode, LossRecoveryState, RecoveryToken};
+use crate::recovery::{LossRecovery, RecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::Stats;
@@ -41,7 +40,7 @@ use crate::tparams::{
     tp_constants, TransportParameter, TransportParameters, TransportParametersHandler,
 };
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
-use crate::{AppError, ConnectionError, Error, Res};
+use crate::{AppError, ConnectionError, Error, Res, LOCAL_IDLE_TIMEOUT};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -50,8 +49,6 @@ pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
-
-const LOCAL_IDLE_TIMEOUT: Duration = Duration::from_secs(60); // 1 minute
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 /// Client or Server.
@@ -310,6 +307,10 @@ enum StateSignaling {
 
 impl StateSignaling {
     pub fn handshake_done(&mut self) {
+        if *self != Self::Idle {
+            debug_assert!(false, "StateSignaling must be in Idle state.");
+            return;
+        }
         *self = Self::HandshakeDone
     }
 
@@ -331,6 +332,7 @@ impl StateSignaling {
     }
 
     pub fn close_sent(&mut self) {
+        debug_assert!(self.closing());
         *self = Self::CloseSent
     }
 }
@@ -375,11 +377,9 @@ pub struct Connection {
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
     state_signaling: StateSignaling,
     loss_recovery: LossRecovery,
-    loss_recovery_state: LossRecoveryState,
     events: ConnectionEvents,
     token: Option<Vec<u8>>,
     stats: Stats,
-    tx_mode: TxMode,
 }
 
 impl Debug for Connection {
@@ -462,7 +462,7 @@ impl Connection {
         tps.set_integer(tp_constants::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
         tps.set_integer(
             tp_constants::IDLE_TIMEOUT,
-            LOCAL_IDLE_TIMEOUT.as_millis().try_into().unwrap(),
+            u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
         );
         tps.set_empty(tp_constants::DISABLE_MIGRATION);
     }
@@ -502,11 +502,9 @@ impl Connection {
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(),
-            loss_recovery_state: LossRecoveryState::default(),
             events: ConnectionEvents::default(),
             token: None,
             stats: Stats::default(),
-            tx_mode: TxMode::Normal,
         }
     }
 
@@ -694,8 +692,8 @@ impl Connection {
             self.set_state(State::Closed(ConnectionError::Transport(
                 Error::IdleTimeout,
             )));
-        } else {
-            self.check_loss_detection_timeout(now);
+        } else if let Some(packets) = self.loss_recovery.check_loss_detection_timeout(now) {
+            self.handle_lost_packets(&packets);
         }
     }
 
@@ -719,11 +717,9 @@ impl Connection {
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&mut self, now: Instant) -> Duration {
         qtrace!([self], "Get callback delay");
-        self.loss_recovery_state = self.loss_recovery.get_timer();
-
         let mut delays = SmallVec::<[_; 4]>::new();
 
-        if let Some(lr_time) = self.loss_recovery_state.callback_time() {
+        if let Some(lr_time) = self.loss_recovery.calculate_timer() {
             qtrace!([self], "Loss recovery timer {:?}", lr_time);
             delays.push(lr_time);
         }
@@ -1162,6 +1158,7 @@ impl Connection {
         &mut self,
         builder: &mut PacketBuilder,
         space: PNSpace,
+        tx_mode: TxMode,
         limit: usize,
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool) {
@@ -1172,7 +1169,7 @@ impl Connection {
             let remaining = limit - builder.len();
             // Try to get a frame from frame sources
             let mut frame = None;
-            if self.tx_mode == TxMode::Normal {
+            if tx_mode == TxMode::Normal {
                 frame = self.acks.get_frame(now, space);
             }
             if frame.is_none() && space == PNSpace::ApplicationData && self.role == Role::Server {
@@ -1182,13 +1179,13 @@ impl Connection {
                 frame = self
                     .crypto
                     .streams
-                    .get_frame(space, self.tx_mode, remaining)
+                    .get_frame(space, tx_mode, remaining)
             }
-            if frame.is_none() && self.tx_mode == TxMode::Normal {
+            if frame.is_none() && tx_mode == TxMode::Normal {
                 frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
             }
             if frame.is_none() {
-                frame = self.send_streams.get_frame(space, self.tx_mode, remaining);
+                frame = self.send_streams.get_frame(space, tx_mode, remaining);
             }
 
             if let Some((frame, token)) = frame {
@@ -1199,7 +1196,7 @@ impl Connection {
                     tokens.push(t);
                 }
             } else {
-                if self.tx_mode == TxMode::Pto {
+                if tx_mode == TxMode::Pto {
                     // Add a PING.
                     builder.encode_varint(Frame::Ping.get_type());
                     ack_eliciting = true;
@@ -1208,7 +1205,7 @@ impl Connection {
             }
 
             // PTO only ever sends one frame and they always elicit ACKs.
-            if self.tx_mode == TxMode::Pto {
+            if tx_mode == TxMode::Pto {
                 debug_assert!(ack_eliciting);
                 return (tokens, true);
             }
@@ -1221,10 +1218,29 @@ impl Connection {
     fn output_path(&mut self, path: &mut Path, now: Instant) -> Res<Option<Datagram>> {
         let mut needs_padding = false;
 
+        // Check whether we are sending packets in PTO mode.
+        let (tx_mode, cong_avail, min_pn_space) =
+            if let Some((min_pto_pn_space, can_send)) = self.loss_recovery.get_pto_state() {
+                if !can_send {
+                    return Ok(None);
+                }
+                (TxMode::Pto, path.mtu(), min_pto_pn_space)
+            } else {
+                (
+                    TxMode::Normal,
+                    usize::try_from(self.loss_recovery.cwnd_avail()).unwrap(),
+                    PNSpace::Initial,
+                )
+            };
+
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         let mut encoder = Encoder::with_capacity(path.mtu());
         for space in PNSpace::iter() {
+            if *space < min_pn_space {
+                continue;
+            }
+
             // Ensure we have tx crypto state for this epoch, or skip it.
             let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
                 tx_state
@@ -1238,10 +1254,6 @@ impl Connection {
             let payload_start = builder.len();
 
             // Work out how much space we have in the congestion window.
-            let cong_avail = match self.tx_mode {
-                TxMode::Normal => usize::try_from(self.loss_recovery.cwnd_avail()).unwrap(),
-                TxMode::Pto => path.mtu(), // Always send one packet
-            };
             let limit = min(path.mtu(), cong_avail);
             if builder.len() + tx.expansion() > limit {
                 // No space for a packet of this type in the congestion window.
@@ -1250,7 +1262,7 @@ impl Connection {
             }
             let limit = limit - tx.expansion();
 
-            let (tokens, ack_eliciting) = self.add_frames(&mut builder, *space, limit, now);
+            let (tokens, ack_eliciting) = self.add_frames(&mut builder, *space, tx_mode, limit, now);
             if builder.is_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
@@ -1272,13 +1284,13 @@ impl Connection {
             encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
             assert!(encoder.len() <= path.mtu());
 
-            if self.tx_mode != TxMode::Pto && ack_eliciting {
+            if tx_mode != TxMode::Pto && ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
 
             // Normal packets are in flight if they include PADDING frames,
             // but we don't send those.
-            let in_flight = match self.tx_mode {
+            let in_flight = match tx_mode {
                 TxMode::Pto => false,
                 TxMode::Normal => ack_eliciting,
             };
@@ -1292,20 +1304,22 @@ impl Connection {
             );
             self.loss_recovery.on_packet_sent(*space, pn, sent);
 
-            if self.role == Role::Client && *space == PNSpace::Handshake {
+            if *space == PNSpace::Handshake && self.role == Role::Client {
                 // Client can send Handshake packets -> discard Initial keys and states
                 self.discard_keys(PNSpace::Initial);
             }
-        }
 
-        // Sent a probe pkt. Another timeout will re-engage ProbeTimeout mode,
-        // but otherwise return to honoring CC.
-        if self.tx_mode == TxMode::Pto {
-            self.tx_mode = TxMode::Normal;
+            if *space == PNSpace::Handshake
+                && self.role == Role::Server
+                && self.state == State::Confirmed
+            {
+                // We could discard handshake keys in set_state, but we are waiting to send an ack.
+                self.discard_keys(PNSpace::Handshake);
+            }
         }
 
         if encoder.len() == 0 {
-            assert!(self.tx_mode != TxMode::Pto);
+            assert!(tx_mode != TxMode::Pto);
             Ok(None)
         } else {
             debug_assert!(encoder.len() <= path.mtu());
@@ -1632,7 +1646,7 @@ impl Connection {
                     return Err(Error::ProtocolViolation);
                 }
                 self.set_state(State::Confirmed);
-                // TODO(mt): discard Handshake state
+                self.discard_keys(PNSpace::Handshake);
             }
         };
 
@@ -2107,66 +2121,6 @@ impl Connection {
     /// previously-queued events, or cause new events to be generated.
     pub fn next_event(&mut self) -> Option<ConnectionEvent> {
         self.events.next_event()
-    }
-
-    fn check_loss_detection_timeout(&mut self, now: Instant) {
-        qdebug!([self], "check_loss_timeouts");
-
-        if matches!(self.loss_recovery_state.mode(), LossRecoveryMode::None) {
-            // LR not the active timer
-            return;
-        }
-
-        if self.loss_recovery_state.callback_time() > Some(now) {
-            // LR timer, but hasn't expired.
-            return;
-        }
-
-        // Timer expired and LR was active timer.
-        match &mut self.loss_recovery_state.mode() {
-            LossRecoveryMode::None => unreachable!(),
-            LossRecoveryMode::LostPackets => {
-                // Time threshold loss detection
-                let (pn_space, _) = self
-                    .loss_recovery
-                    .get_earliest_loss_time()
-                    .expect("must be sent packets if in LostPackets mode");
-                let packets = self.loss_recovery.detect_lost_packets(pn_space, now);
-
-                qinfo!("lost packets: {}", packets.len());
-                self.handle_lost_packets(&packets);
-            }
-            LossRecoveryMode::PTO => {
-                qinfo!(
-                    [self],
-                    "check_loss_detection_timeout -send_one_or_two_packets"
-                );
-                self.loss_recovery.increment_pto_count();
-                // TODO
-                // if (has unacknowledged crypto data):
-                //   RetransmitUnackedCryptoData()
-                // else if (endpoint is client without 1-RTT keys):
-                //   // Client sends an anti-deadlock packet: Initial is padded
-                //   // to earn more anti-amplification credit,
-                //   // a Handshake packet proves address ownership.
-                //   if (has Handshake keys):
-                //      SendOneHandshakePacket()
-                //    else:
-                //      SendOnePaddedInitialPacket()
-                // TODO
-                // SendOneOrTwoPackets()
-                // PTO. Send new data if available, else retransmit old data.
-                // If neither is available, send a single PING frame.
-
-                // TODO(agrover): determine if new data is available and if so
-                // send 2 packets worth
-                // TODO(agrover): else determine if old data is available and if
-                // so send 2 packets worth
-                // TODO(agrover): else send a single PING frame
-
-                self.tx_mode = TxMode::Pto;
-            }
-        }
     }
 }
 
@@ -2991,7 +2945,7 @@ mod tests {
             client
                 .stream_send(stream_id, &[b'a'; RX_STREAM_DATA_WINDOW as usize])
                 .unwrap(),
-            SMALL_MAX_DATA.try_into().unwrap()
+            usize::try_from(SMALL_MAX_DATA).unwrap()
         );
         let evts = client.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 2); // SendStreamWritable, StateChange(connected)
@@ -3232,9 +3186,8 @@ mod tests {
 
         let frames = server.test_process_input(out.dgram().unwrap(), now + Duration::from_secs(11));
 
-        assert_eq!(frames[0], (Frame::Ping, PNSpace::Handshake));
         assert!(matches!(
-            frames[1],
+            frames[0],
             (Frame::Stream { .. }, PNSpace::ApplicationData)
         ));
     }
@@ -3327,8 +3280,257 @@ mod tests {
             now + Duration::from_secs(10) + Duration::from_millis(110),
         );
 
-        assert_eq!(frames[0], (Frame::Ping, PNSpace::Handshake));
-        assert_eq!(frames[1], (Frame::Ping, PNSpace::ApplicationData));
+        assert_eq!(frames[0], (Frame::Ping, PNSpace::ApplicationData));
+    }
+
+    #[test]
+    fn pto_initial() {
+        let mut now = now();
+
+        qdebug!("---- client: generate CH");
+        let mut client = default_client();
+        let pkt1 = client.process(None, now).dgram();
+        assert!(pkt1.is_some());
+        assert_eq!(pkt1.clone().unwrap().len(), 1232);
+
+        let out = client.process(None, now);
+        assert_eq!(out, Output::Callback(Duration::from_millis(120)));
+
+        // Resend initial after PTO.
+        now += Duration::from_millis(120);
+        let pkt2 = client.process(None, now).dgram();
+        assert!(pkt2.is_some());
+        assert_eq!(pkt2.unwrap().len(), 1232);
+
+        let out = client.process(None, now);
+        // PTO has doubled.
+        assert_eq!(out, Output::Callback(Duration::from_millis(240)));
+
+        // Server process the first initial pkt.
+        let mut server = default_server();
+        let out = server.process(pkt1, now).dgram();
+        assert!(out.is_some());
+
+        // Client receives ack for the first initial packet as well a Handshake packet.
+        // After the handshake packet the initial keys and the crypto stream for the initial
+        // packet number space will be discarded.
+        // Here only an ack for the Handshake packet will be sent.
+        now += Duration::from_millis(10);
+        let out = client.process(out, now).dgram();
+        assert!(out.is_some());
+
+        // We do not have PTO for the resent initial packet any more, because keys are discarded.
+        // The timeout will be an idle time out of 60s
+        let out = client.process(None, now);
+        assert_eq!(out, Output::Callback(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn pto_handshake() {
+        let mut now = now();
+        // start handshake
+        let mut client = default_client();
+        let mut server = default_server();
+
+        let pkt = client.process(None, now).dgram();
+        let out = client.process(None, now);
+        assert_eq!(out, Output::Callback(Duration::from_millis(120)));
+
+        now += Duration::from_millis(10);
+        let pkt = server.process(pkt, now).dgram();
+
+        now += Duration::from_millis(10);
+        let pkt = client.process(pkt, now).dgram();
+
+        let out = client.process(None, now);
+        assert_eq!(out, Output::Callback(Duration::from_secs(60)));
+
+        now += Duration::from_millis(10);
+        let pkt = server.process(pkt, now).dgram();
+        assert!(pkt.is_none());
+
+        now += Duration::from_millis(10);
+        client.authenticated(AuthenticationStatus::Ok, now);
+
+        qdebug!("---- client: SH..FIN -> FIN");
+        let pkt1 = client.process(None, now).dgram();
+        assert!(pkt1.is_some());
+
+        let out = client.process(None, now);
+        assert_eq!(out, Output::Callback(Duration::from_millis(60)));
+
+        // Wait for PTO o expire and resend a handshake packet
+        now += Duration::from_millis(60);
+        let pkt2 = client.process(None, now).dgram();
+        assert!(pkt2.is_some());
+
+        // PTO has been doubled.
+        let out = client.process(None, now);
+        assert_eq!(out, Output::Callback(Duration::from_millis(120)));
+
+        now += Duration::from_millis(10);
+        // Server receives the first packet.
+        // The output will be a Handshake packet with an ack and a app pn space packet with
+        // HANDSHAKE_DONE.
+        let pkt = server.process(pkt1, now).dgram();
+        assert!(pkt.is_some());
+
+        // Check that the second packet(pkt2) has a Handshake and an app pn space packet.
+        // The server has discarded the Handshake keys already, therefore the handshake packet
+        // will be dropped.
+        let dropped_before = server.stats().dropped_rx;
+        let frames = server.test_process_input(pkt2.unwrap(), now);
+        assert_eq!(1, server.stats().dropped_rx - dropped_before);
+        assert!(matches!(frames[0], (Frame::Ping, PNSpace::ApplicationData)));
+
+        now += Duration::from_millis(10);
+        // Client receive ack for the first packet
+        let out = client.process(pkt, now);
+        // Ack delay timer for the packet carrying HANDSHAKE_DONE.
+        assert_eq!(out, Output::Callback(Duration::from_millis(20)));
+
+        // Let the ack timer expire.
+        now += Duration::from_millis(20);
+        let out = client.process(None, now).dgram();
+        assert!(out.is_some());
+        let out = client.process(None, now);
+        // The handshake keys are discarded
+        // Return PTO timer for an app pn space packet (when the Handshake PTO timer has expired,
+        // a PING in the app pn space has been send as well).
+        // pto=142.5ms, the PTO packet was sent 40ms ago. The timer will be 102.5ms.
+        assert_eq!(out, Output::Callback(Duration::from_micros(102_500)));
+
+        // Let PTO expire. We will send a PING only in the APP pn space, the client has discarded
+        // Handshshake keys.
+        now += Duration::from_micros(102_500);
+        let out = client.process(None, now).dgram();
+        assert!(out.is_some());
+
+        now += Duration::from_millis(10);
+        let frames = server.test_process_input(out.unwrap(), now);
+
+        assert_eq!(frames[0], (Frame::Ping, PNSpace::ApplicationData));
+    }
+
+    #[test]
+    fn test_pto_handshake_and_app_data() {
+        let mut now = now();
+        qdebug!("---- client: generate CH");
+        let mut client = default_client();
+        let pkt = client.process(None, now);
+
+        now += Duration::from_millis(10);
+        qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+        let mut server = default_server();
+        let pkt = server.process(pkt.dgram(), now);
+
+        now += Duration::from_millis(10);
+        qdebug!("---- client: cert verification");
+        let pkt = client.process(pkt.dgram(), now);
+
+        now += Duration::from_millis(10);
+        let _pkt = server.process(pkt.dgram(), now);
+
+        now += Duration::from_millis(10);
+        client.authenticated(AuthenticationStatus::Ok, now);
+
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, b"zero").unwrap(), 4);
+        qdebug!("---- client: SH..FIN -> FIN and 1RTT packet");
+        let pkt1 = client.process(None, now).dgram();
+        assert!(pkt1.is_some());
+
+        // Get PTO timer.
+        let out = client.process(None, now);
+        assert_eq!(out, Output::Callback(Duration::from_millis(60)));
+
+        // Wait for PTO o expire and resend a handshake and 1rtt packet
+        now += Duration::from_millis(60);
+        let pkt2 = client.process(None, now).dgram();
+        assert!(pkt2.is_some());
+
+        now += Duration::from_millis(10);
+        let frames = server.test_process_input(pkt2.unwrap(), now);
+
+        assert!(matches!(
+            frames[0],
+            (Frame::Crypto { .. }, PNSpace::Handshake)
+        ));
+        assert!(matches!(
+            frames[1],
+            (Frame::Stream { .. }, PNSpace::ApplicationData)
+        ));
+    }
+
+    #[test]
+    fn test_pto_count_increase_across_spaces() {
+        let mut now = now();
+        qdebug!("---- client: generate CH");
+        let mut client = default_client();
+        let pkt = client.process(None, now).dgram();
+
+        now += Duration::from_millis(10);
+        qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+        let mut server = default_server();
+        let pkt = server.process(pkt, now).dgram();
+
+        now += Duration::from_millis(10);
+        qdebug!("---- client: cert verification");
+        let pkt = client.process(pkt, now).dgram();
+
+        now += Duration::from_millis(10);
+        let _pkt = server.process(pkt, now);
+
+        now += Duration::from_millis(10);
+        client.authenticated(AuthenticationStatus::Ok, now);
+
+        qdebug!("---- client: SH..FIN -> FIN");
+        let pkt1 = client.process(None, now).dgram();
+        assert!(pkt1.is_some());
+        // Get PTO timer.
+        let out = client.process(None, now);
+        assert_eq!(out, Output::Callback(Duration::from_millis(60)));
+
+        now += Duration::from_millis(10);
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        assert_eq!(client.stream_send(2, b"zero").unwrap(), 4);
+        qdebug!("---- client: 1RTT packet");
+        let pkt2 = client.process(None, now).dgram();
+        assert!(pkt2.is_some());
+
+        // Get PTO timer. It is the timer for pkt1(handshake pn space).
+        let out = client.process(None, now);
+        assert_eq!(out, Output::Callback(Duration::from_millis(50)));
+
+        // Wait for PTO to expire and resend a handshake and 1rtt packet
+        now += Duration::from_millis(50);
+        let pkt3 = client.process(None, now).dgram();
+        assert!(pkt3.is_some());
+
+        // Get PTO timer. It is the timer for pkt2(app pn space). PTO has been doubled.
+        // pkt2 has been sent 50ms ago (50 + 120 = 170 == 2*85)
+        let out = client.process(None, now);
+        assert_eq!(out, Output::Callback(Duration::from_millis(120)));
+
+        // Wait for PTO to expire and resend a handshake and 1rtt packet
+        now += Duration::from_millis(120);
+        let pkt4 = client.process(None, now).dgram();
+        assert!(pkt4.is_some());
+
+        now += Duration::from_millis(10);
+        let frames = server.test_process_input(pkt3.unwrap(), now);
+
+        assert!(matches!(
+            frames[0],
+            (Frame::Crypto { .. }, PNSpace::Handshake)
+        ));
+
+        now += Duration::from_millis(10);
+        let frames = server.test_process_input(pkt4.unwrap(), now);
+        assert!(matches!(
+            frames[1],
+            (Frame::Stream { .. }, PNSpace::ApplicationData)
+        ));
     }
 
     #[test]
