@@ -245,6 +245,18 @@ impl TransportParameters {
         }
     }
 
+    pub fn get_empty(&self, tipe: u16) -> Option<TransportParameter> {
+        let default = match tipe {
+            DISABLE_MIGRATION => None,
+            _ => panic!("Transport parameter not known or not an Empty"),
+        };
+        match self.params.get(&tipe) {
+            None => default,
+            Some(TransportParameter::Empty) => Some(TransportParameter::Empty),
+            _ => panic!("Internal error"),
+        }
+    }
+
     /// Return true if the remembered transport parameters are OK for 0-RTT.
     /// Generally this means that any value that is currently in effect is greater than
     /// or equal to the promised value.

@@ -19,7 +19,100 @@ use neqo_common::{hex, qinfo, Decoder, NeqoQlogRef};
 use crate::frame::{self, Frame};
 use crate::packet::{DecryptedPacket, PacketNumber, PacketType};
 use crate::path::Path;
+use crate::tparams::{tp_constants, TransportParametersHandler};
 use crate::QUIC_VERSION;
+use std::fmt::LowerHex;
+
+// TODO(hawkinsw@obs.cr): This is copied verbatim from neqo-qpack/src/qlog.rs where
+// it has appropriate tests. Refactor both uses into something in neqo-common.
+fn slice_to_hex_string<T: LowerHex>(slice: &[T]) -> String {
+    if slice.is_empty() {
+        "0x0".to_string()
+    } else {
+        slice
+            .iter()
+            .fold("0x".to_string(), |acc, x| acc + &format!("{:x}", x))
+    }
+}
+
+pub fn connection_tparams_set(
+    qlog: &Option<NeqoQlogRef>,
+    now: Instant,
+    tph: &TransportParametersHandler,
+) {
+    if let Some(qlog) = qlog {
+        let mut qlog = qlog.borrow_mut();
+        let elapsed = now.duration_since(qlog.zero_time);
+        let remote = tph.remote();
+        let data = EventData::TransportParametersSet {
+            owner: None,
+            resumption_allowed: None,
+            early_data_enabled: None,
+            alpn: None,
+            version: None,
+            tls_cipher: None,
+            original_connection_id: if let Some(ocid) =
+                remote.get_bytes(tp_constants::ORIGINAL_CONNECTION_ID)
+            {
+                // Cannot use packet::ConnectionId's Display trait implementation
+                // because it does not include the 0x prefix.
+                Some(slice_to_hex_string(&ocid))
+            } else {
+                None
+            },
+            stateless_reset_token: if let Some(srt) =
+                remote.get_bytes(tp_constants::STATELESS_RESET_TOKEN)
+            {
+                Some(slice_to_hex_string(&srt))
+            } else {
+                None
+            },
+            disable_active_migration: if remote.get_empty(tp_constants::DISABLE_MIGRATION).is_some()
+            {
+                Some(true)
+            } else {
+                None
+            },
+            idle_timeout: Some(remote.get_integer(tp_constants::IDLE_TIMEOUT)),
+            max_packet_size: Some(remote.get_integer(tp_constants::MAX_PACKET_SIZE)),
+            ack_delay_exponent: Some(remote.get_integer(tp_constants::ACK_DELAY_EXPONENT)),
+            max_ack_delay: Some(remote.get_integer(tp_constants::MAX_ACK_DELAY)),
+            // TODO(hawkinsw@obs.cr): We do not yet handle ACTIVE_CONNECTION_ID_LIMIT in tparams yet.
+            active_connection_id_limit: None,
+            initial_max_data: Some(format!(
+                "{}",
+                remote.get_integer(tp_constants::INITIAL_MAX_DATA)
+            )),
+            initial_max_stream_data_bidi_local: Some(format!(
+                "{}",
+                remote.get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL)
+            )),
+            initial_max_stream_data_bidi_remote: Some(format!(
+                "{}",
+                remote.get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE)
+            )),
+            initial_max_stream_data_uni: Some(format!(
+                "{}",
+                remote.get_integer(tp_constants::INITIAL_MAX_STREAM_DATA_UNI)
+            )),
+            initial_max_streams_bidi: Some(format!(
+                "{}",
+                remote.get_integer(tp_constants::INITIAL_MAX_STREAMS_BIDI)
+            )),
+            initial_max_streams_uni: Some(format!(
+                "{}",
+                remote.get_integer(tp_constants::INITIAL_MAX_STREAMS_UNI)
+            )),
+            // TODO(hawkinsw@obs.cr): We do not yet handle PREFERRED_ADDRESS in tparams yet.
+            preferred_address: None,
+        };
+        qlog.trace.push_transport_event(
+            format!("{}", elapsed.as_micros()),
+            TransportEventType::ParametersSet,
+            data,
+        );
+    }
+}
 
 pub fn server_connection_started(qlog: &Option<NeqoQlogRef>, now: Instant, path: &Path) {
     connection_started(qlog, now, path)
