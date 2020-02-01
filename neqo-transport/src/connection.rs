@@ -1770,6 +1770,7 @@ impl Connection {
             self.set_state(State::Confirmed);
         }
         qinfo!([self], "Connection established");
+        qlog::connection_tparams_set(&self.qlog, now, &*self.tps.borrow());
         Ok(())
     }
 
