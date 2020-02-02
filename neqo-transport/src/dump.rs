@@ -13,7 +13,7 @@ use crate::packet::{PacketNumber, PacketType};
 use neqo_common::{qdebug, Decoder};
 
 #[allow(clippy::module_name_repetitions)]
-pub fn dump_packet(conn: &Connection, dir: &str, pn: PacketNumber, pt: PacketType, payload: &[u8]) {
+pub fn dump_packet(conn: &Connection, dir: &str, pt: PacketType, pn: PacketNumber, payload: &[u8]) {
     let mut s = String::from("");
     let mut d = Decoder::from(payload);
     while d.remaining() > 0 {

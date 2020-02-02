@@ -934,8 +934,8 @@ impl Connection {
                 dump_packet(
                     self,
                     "-> RX",
-                    payload.pn(),
                     payload.packet_type(),
+                    payload.pn(),
                     &payload[..],
                 );
                 frames.extend(self.process_packet(&payload, now)?);
@@ -1267,7 +1267,7 @@ impl Connection {
                 continue;
             }
 
-            dump_packet(self, "TX ->", pn, pt, &builder[payload_start..]);
+            dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
 
             qdebug!("Need to send a packet: {:?}", pt);
             match pt {
