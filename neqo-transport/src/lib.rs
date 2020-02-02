@@ -37,7 +37,7 @@ pub use self::tparams::{tp_constants, TransportParameter};
 
 /// The supported version of the QUIC protocol.
 pub type Version = u32;
-pub const QUIC_VERSION: Version = 0xff00_0018;
+pub const QUIC_VERSION: Version = 0xff00_0000 + 25;
 
 const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60); // 1 minute
 
