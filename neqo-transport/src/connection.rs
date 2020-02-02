@@ -1176,10 +1176,7 @@ impl Connection {
                 frame = self.state_signaling.send_done();
             }
             if frame.is_none() {
-                frame = self
-                    .crypto
-                    .streams
-                    .get_frame(space, tx_mode, remaining)
+                frame = self.crypto.streams.get_frame(space, tx_mode, remaining)
             }
             if frame.is_none() && tx_mode == TxMode::Normal {
                 frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
@@ -1262,7 +1259,8 @@ impl Connection {
             }
             let limit = limit - tx.expansion();
 
-            let (tokens, ack_eliciting) = self.add_frames(&mut builder, *space, tx_mode, limit, now);
+            let (tokens, ack_eliciting) =
+                self.add_frames(&mut builder, *space, tx_mode, limit, now);
             if builder.is_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
