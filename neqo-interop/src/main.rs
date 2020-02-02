@@ -22,9 +22,12 @@ use std::rc::Rc;
 // use std::path::PathBuf;
 use std::str::FromStr;
 use std::string::ParseError;
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 use structopt::StructOpt;
+#[macro_use]
+extern crate lazy_static;
 
 #[derive(Debug, StructOpt, Clone)]
 #[structopt(name = "neqo-interop", about = "A QUIC interop client.")]
@@ -41,6 +44,9 @@ struct Args {
 
     #[structopt(short = "T", long)]
     exclude_tests: Vec<String>,
+
+    #[structopt(long, default_value = "5")]
+    timeout: u64,
 }
 
 trait Handler {
@@ -57,14 +63,22 @@ fn emit_datagram(socket: &UdpSocket, d: Datagram) {
     }
 }
 
+lazy_static! {
+    static ref TEST_TIMEOUT: Mutex<Duration> = Mutex::new(Duration::from_secs(5));
+}
+
 struct Timer {
     end: Instant,
 }
 impl Timer {
-    pub fn new(timeout: Duration) -> Self {
+    pub fn new() -> Self {
         Self {
-            end: Instant::now() + timeout,
+            end: Instant::now() + *TEST_TIMEOUT.lock().unwrap(),
         }
+    }
+
+    pub fn set_timeout(t: Duration) {
+        *TEST_TIMEOUT.lock().unwrap() = t;
     }
 
     pub fn check(&self) -> Result<Duration, String> {
@@ -81,10 +95,9 @@ fn process_loop(
     nctx: &NetworkCtx,
     client: &mut Connection,
     handler: &mut dyn Handler,
-    timeout: Duration,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
-    let timer = Timer::new(timeout);
+    let timer = Timer::new();
 
     loop {
         if let State::Closed(..) = client.state() {
@@ -234,13 +247,9 @@ struct H3Handler {
 }
 
 // TODO(ekr@rtfm.com): Figure out how to merge this.
-fn process_loop_h3(
-    nctx: &NetworkCtx,
-    handler: &mut H3Handler,
-    timeout: Duration,
-) -> Result<State, String> {
+fn process_loop_h3(nctx: &NetworkCtx, handler: &mut H3Handler) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
-    let timer = Timer::new(timeout);
+    let timer = Timer::new();
 
     loop {
         if let State::Closed(..) = handler.h3.conn().state() {
@@ -414,7 +423,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
     .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
-    let res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));
+    let res = process_loop(nctx, &mut client, &mut h);
 
     let st = match res {
         Ok(st) => st,
@@ -437,7 +446,7 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
         .unwrap();
     let mut hc = H9Handler::default();
     hc.streams.insert(client_stream_id);
-    let res = process_loop(nctx, client, &mut hc, Duration::new(5, 0));
+    let res = process_loop(nctx, client, &mut hc);
 
     if let Err(e) = res {
         return Err(format!("ERROR: {}", e));
@@ -466,7 +475,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
     let _ = hc.h3.stream_close_send(client_stream_id);
 
     hc.streams.insert(client_stream_id);
-    if let Err(e) = process_loop_h3(nctx, &mut hc, Duration::new(5, 0)) {
+    if let Err(e) = process_loop_h3(nctx, &mut hc) {
         return Err(format!("ERROR: {}", e));
     }
 
@@ -490,6 +499,7 @@ impl Handler for VnHandler {
         Some(Datagram::new(d.source(), d.destination(), payload))
     }
 }
+
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
     let mut client = Connection::new_client(
         peer.host,
@@ -501,7 +511,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
     .expect("must succeed");
     // Temporary here to help out the type inference engine
     let mut h = VnHandler {};
-    let _res = process_loop(nctx, &mut client, &mut h, Duration::new(5, 0));
+    let _res = process_loop(nctx, &mut client, &mut h);
 
     Ok(client)
 }
@@ -663,6 +673,7 @@ fn main() {
 
     let args = Args::from_args();
     init();
+    Timer::set_timeout(Duration::from_secs(args.timeout));
 
     let mut children = Vec::new();
 
