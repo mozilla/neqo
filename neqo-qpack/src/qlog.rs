@@ -56,11 +56,11 @@ mod tests {
     use super::*;
     #[test]
     fn test_slice_to_hex_string() {
-        let s = slice_to_hex_string(&vec![10, 9, 8]);
+        let s = slice_to_hex_string(&[10, 9, 8]);
         assert_eq!(r#"0xa98"#, s);
         let s = slice_to_hex_string(&Vec::<u8>::new());
         assert_eq!(r#"0x0"#, s);
-        let s = slice_to_hex_string(&vec![128]);
+        let s = slice_to_hex_string(&[128]);
         assert_eq!(r#"0x80"#, s);
     }
 }
