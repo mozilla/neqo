@@ -716,7 +716,7 @@ impl Connection {
 
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&mut self, now: Instant) -> Duration {
-        qtrace!([self], "Get callback delay");
+        qtrace!([self], "Get callback delay {:?}", now);
         let mut delays = SmallVec::<[_; 4]>::new();
 
         if let Some(lr_time) = self.loss_recovery.calculate_timer() {
