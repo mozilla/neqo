@@ -9,7 +9,7 @@ use crate::hframe::{HFrame, HFrameReader};
 use crate::client_events::Http3ClientEvents;
 use crate::connection::Http3Transaction;
 use crate::Header;
-use neqo_common::{qdebug, qinfo, qtrace, Encoder};
+use neqo_common::{qdebug, qinfo, qtrace, qwarn, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
@@ -291,6 +291,7 @@ impl TransactionClient {
             HFrame::PushPromise { .. } => Err(Error::HttpIdError),
             HFrame::Headers { .. } => {
                 // TODO implement trailers!
+                qwarn!([self], "Received trailers");
                 Err(Error::HttpFrameUnexpected)
             }
             _ => Err(Error::HttpFrameUnexpected),

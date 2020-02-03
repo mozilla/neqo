@@ -638,8 +638,8 @@ const PEERS: &[Peer] = &[
     },
     Peer {
         label: "applequic",
-        host: "31.133.129.48",
-        port: 8443,
+        host: "[2a00:79e1:abc:301:fca8:166e:525f:9b5c]",
+        port: 4433,
     },
     Peer {
         label: "f5",
@@ -649,12 +649,12 @@ const PEERS: &[Peer] = &[
     Peer {
         label: "msft",
         host: "quic.westus.cloudapp.azure.com",
-        port: 4433,
+        port: 4434,
     },
     Peer {
         label: "mvfst",
         host: "fb.mvfst.net",
-        port: 4433,
+        port: 443,
     },
     Peer {
         label: "google",
