@@ -6,7 +6,7 @@
 
 // Directly relating to QUIC frames.
 
-use neqo_common::{matches, qdebug, Decoder, Encoder};
+use neqo_common::{matches, qdebug, qtrace, Decoder, Encoder};
 
 use crate::packet::PacketType;
 use crate::stream_id::{StreamId, StreamIndex};
@@ -519,7 +519,6 @@ impl Frame {
     }
 
     pub fn is_allowed(&self, pt: PacketType) -> bool {
-        qdebug!("is_allowed {:?} {:?}", self, pt);
         if matches!(self, Self::Padding | Self::Ping) {
             true
         } else if matches!(self, Self::Crypto {..} | Self::Ack {..} | Self::ConnectionClose { error_code: CloseError::Transport(_), .. })
@@ -549,7 +548,6 @@ impl Frame {
 
         // TODO(ekr@rtfm.com): check for minimal encoding
         let t = d!(dec.decode_varint());
-        qdebug!("Frame type byte={:0x}", t);
         match t {
             FRAME_TYPE_PADDING => Ok(Self::Padding),
             FRAME_TYPE_PING => Ok(Self::Ping),
@@ -612,13 +610,12 @@ impl Frame {
                 } else {
                     dv!(dec)
                 };
-                qdebug!("STREAM {}", t);
                 let fill = (t & STREAM_FRAME_BIT_LEN) == 0;
                 let data = if fill {
-                    qdebug!("STREAM frame extends to the end of the packet");
+                    qtrace!("STREAM frame, extends to the end of the packet");
                     dec.decode_remainder()
                 } else {
-                    qdebug!("STREAM frame has a length");
+                    qtrace!("STREAM frame, with length");
                     d!(dec.decode_vvec())
                 };
                 Ok(Self::Stream {
