@@ -83,11 +83,14 @@ impl Timer {
     }
 
     pub fn check(&self) -> Result<Duration, String> {
-        let now = Instant::now();
-        if now > self.end {
-            Err(String::from("Timed out"))
+        if let Some(d) = self.end.checked_duration_since(Instant::now()) {
+            if d.as_nanos() > 0 {
+                Ok(d)
+            } else {
+                Err(String::from("Timed out"))
+            }
         } else {
-            Ok(self.end - now)
+            Err(String::from("Timed out"))
         }
     }
 }
@@ -105,6 +108,7 @@ fn process_loop(
             return Ok(client.state().clone());
         }
 
+        client.process_timer(Instant::now());
         loop {
             let output = client.process_output(Instant::now());
             match output {
@@ -131,7 +135,7 @@ fn process_loop(
             Ok(sz) => sz,
             Err(e) => {
                 return Err(String::from(match e.kind() {
-                    std::io::ErrorKind::WouldBlock => "Timed out",
+                    std::io::ErrorKind::WouldBlock => continue,
                     _ => "Read error",
                 }));
             }
@@ -263,6 +267,7 @@ fn process_loop_h3(nctx: &NetworkCtx, handler: &mut H3Handler) -> Result<State, 
             return Ok(handler.h3.conn().state().clone());
         }
 
+        handler.h3.conn().process_timer(Instant::now());
         loop {
             let output = handler.h3.conn().process_output(Instant::now());
             match output {
@@ -285,7 +290,7 @@ fn process_loop_h3(nctx: &NetworkCtx, handler: &mut H3Handler) -> Result<State, 
             Ok(sz) => sz,
             Err(e) => {
                 return Err(String::from(match e.kind() {
-                    std::io::ErrorKind::WouldBlock => "Timed out",
+                    std::io::ErrorKind::WouldBlock => continue,
                     _ => "Read error",
                 }));
             }
@@ -638,7 +643,7 @@ const PEERS: &[Peer] = &[
     },
     Peer {
         label: "f5",
-        host: "204.134.187.194",
+        host: "f5quic.com",
         port: 4433,
     },
     Peer {
