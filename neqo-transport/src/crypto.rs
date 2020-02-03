@@ -158,7 +158,7 @@ impl Crypto {
     pub fn buffer_records(&mut self, records: RecordList) {
         for r in records {
             assert_eq!(r.ct, 22);
-            qdebug!([self], "Adding CRYPTO data {:?}", r);
+            qtrace!([self], "Adding CRYPTO data {:?}", r);
             self.streams.send(PNSpace::from(r.epoch), &r.data);
         }
     }
@@ -376,7 +376,7 @@ impl HeaderProtectionMask for CryptoDxState {
 impl Unprotector for CryptoDxState {
     fn decrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
-        qinfo!(
+        qtrace!(
             [self],
             "decrypt pn={} hdr={} body={}",
             pn,
@@ -393,7 +393,7 @@ impl Unprotector for CryptoDxState {
 impl Protector for CryptoDxState {
     fn encrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
-        qdebug!(
+        qtrace!(
             [self],
             "encrypt pn={} hdr={} body={}",
             pn,
@@ -405,7 +405,7 @@ impl Protector for CryptoDxState {
         let mut out = vec![0; size];
         let res = self.aead.encrypt(pn, hdr, body, &mut out)?;
 
-        qdebug!([self], "encrypt ct={}", hex(res));
+        qtrace!([self], "encrypt ct={}", hex(res));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
         Ok(res.to_vec())

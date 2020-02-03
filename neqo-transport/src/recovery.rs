@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
 
-use neqo_common::{qdebug, qinfo};
+use neqo_common::{qdebug, qinfo, qtrace};
 
 use crate::cc::CongestionControl;
 use crate::crypto::CryptoRecoveryToken;
@@ -536,7 +536,7 @@ impl LossRecovery {
     }
 
     pub fn calculate_timer(&mut self) -> Option<Instant> {
-        qdebug!([self], "get_loss_detection_timer.");
+        qtrace!([self], "get_loss_detection_timer.");
 
         let has_ack_eliciting_out = self.spaces.iter().any(|sp| sp.ack_eliciting_outstanding());
 

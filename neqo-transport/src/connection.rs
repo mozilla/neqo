@@ -745,6 +745,11 @@ impl Connection {
 
         // TODO(agrover, mt) - need to analyze and fix #47
         // rather than just clamping to zero here.
+        qdebug!(
+            [self],
+            "delay duration {:?}",
+            max(now, earliest).duration_since(now)
+        );
         max(now, earliest).duration_since(now)
     }
 
@@ -866,7 +871,7 @@ impl Connection {
         let mut slc = &d[..];
         let mut frames = Vec::new();
 
-        qdebug!([self], "input {}", hex(&**d));
+        qtrace!([self], "input {}", hex(&**d));
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
@@ -1421,10 +1426,10 @@ impl Connection {
     }
 
     fn handshake(&mut self, now: Instant, space: PNSpace, data: Option<&[u8]>) -> Res<()> {
-        qdebug!("Handshake space={} data={:0x?}", space, data);
+        qtrace!("Handshake space={} data={:0x?}", space, data);
 
         let rec = data.map(|d| {
-            qdebug!([self], "Handshake received {:0x?} ", d);
+            qtrace!([self], "Handshake received {:0x?} ", d);
             Record {
                 ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
                 epoch: space.into(),
@@ -1530,7 +1535,7 @@ impl Connection {
             }
             Frame::Crypto { offset, data } => {
                 let space = ptype.space();
-                qdebug!(
+                qtrace!(
                     [self],
                     "Crypto frame on space={} offset={}, data={:0x?}",
                     space,
@@ -1638,7 +1643,7 @@ impl Connection {
                 reason_phrase,
             } => {
                 let reason_phrase = String::from_utf8_lossy(&reason_phrase);
-                qinfo!(
+                qerror!(
                     [self],
                     "ConnectionClose received. Error code: {:?} frame type {:x} reason {}",
                     error_code,
