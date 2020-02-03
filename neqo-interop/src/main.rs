@@ -11,11 +11,12 @@ use neqo_common::{matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent};
 use neqo_transport::{
-    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, State,
+    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output, State,
     StreamType,
 };
 
 use std::cell::RefCell;
+use std::cmp::min;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::rc::Rc;
@@ -104,22 +105,28 @@ fn process_loop(
             return Ok(client.state().clone());
         }
 
-        let exiting = !handler.handle(client);
-        let out_dgram = client.process_output(Instant::now());
-        if let Some(dgram) = out_dgram.dgram() {
-            let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
-            emit_datagram(&nctx.socket, dgram);
+        loop {
+            let output = client.process_output(Instant::now());
+            match output {
+                Output::Datagram(dgram) => {
+                    let dgram = handler.rewrite_out(&dgram).unwrap_or(dgram);
+                    emit_datagram(&nctx.socket, dgram);
+                }
+                Output::Callback(duration) => {
+                    let delay = min(timer.check()?, duration);
+                    nctx.socket.set_read_timeout(Some(delay)).unwrap();
+                    break;
+                }
+                Output::None => {
+                    return Ok(client.state().clone());
+                }
+            }
         }
 
-        if exiting {
+        if !handler.handle(client) {
             return Ok(client.state().clone());
         }
 
-        let time_remaining = timer.check()?;
-
-        nctx.socket
-            .set_read_timeout(Some(time_remaining))
-            .expect("Read timeout");
         let sz = match nctx.socket.recv(&mut buf[..]) {
             Ok(sz) => sz,
             Err(e) => {
@@ -256,20 +263,24 @@ fn process_loop_h3(nctx: &NetworkCtx, handler: &mut H3Handler) -> Result<State, 
             return Ok(handler.h3.conn().state().clone());
         }
 
-        let exiting = !handler.handle();
-        let out_dgram = handler.h3.conn().process_output(Instant::now());
-        if let Some(dgram) = out_dgram.dgram() {
-            emit_datagram(&nctx.socket, dgram);
+        loop {
+            let output = handler.h3.conn().process_output(Instant::now());
+            match output {
+                Output::Datagram(dgram) => emit_datagram(&nctx.socket, dgram),
+                Output::Callback(duration) => {
+                    let delay = min(timer.check()?, duration);
+                    nctx.socket.set_read_timeout(Some(delay)).unwrap();
+                    break;
+                }
+                Output::None => {
+                    return Ok(handler.h3.conn().state().clone());
+                }
+            }
         }
-
-        if exiting {
+        if !handler.handle() {
             return Ok(handler.h3.conn().state().clone());
         }
 
-        let remaining_time = timer.check()?;
-        nctx.socket
-            .set_read_timeout(Some(remaining_time))
-            .expect("Read timeout");
         let sz = match nctx.socket.recv(&mut buf[..]) {
             Ok(sz) => sz,
             Err(e) => {
@@ -432,9 +443,10 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
         }
     };
 
-    match st {
-        State::Connected => Ok(client),
-        _ => Err(format!("{:?}", st)),
+    if st.connected() {
+        Ok(client)
+    } else {
+        Err(format!("{:?}", st))
     }
 }
 
@@ -467,7 +479,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         host: String::from(peer.host),
         path: String::from("/"),
     };
-
+    hc.h3.process_http3(Instant::now());
     let client_stream_id = hc
         .h3
         .fetch("GET", "https", &hc.host, &hc.path, &[])
@@ -611,8 +623,8 @@ const PEERS: &[Peer] = &[
     },
     Peer {
         label: "quicly",
-        host: "kazuhooku.com",
-        port: 8443,
+        host: "quic.examp1e.net",
+        port: 443,
     },
     Peer {
         label: "local",
