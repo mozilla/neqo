@@ -232,7 +232,7 @@ fn retry_after_initial() {
 }
 
 #[test]
-fn retry_bad_odcid() {
+fn retry_bad_integrity() {
     let mut server = default_server();
     server.set_retry_required(true);
     let mut client = default_client();
@@ -245,17 +245,9 @@ fn retry_bad_odcid() {
     let retry = &dgram.as_ref().unwrap();
     assertions::assert_retry(retry);
 
-    let mut dec = Decoder::new(retry); // Start after version.
-    dec.skip(5);
-    dec.skip_vec(1); // DCID
-    dec.skip_vec(1); // SCID
-    let odcid_len = dec.decode_byte().unwrap();
-    assert_ne!(odcid_len, 0);
-    let odcid_offset = retry.len() - dec.remaining();
-    assert!(odcid_offset < retry.len());
-    let mut tweaked_retry = retry[..].to_vec();
-    tweaked_retry[odcid_offset] ^= 0x45; // damage the ODCID
-    let tweaked_packet = Datagram::new(retry.source(), retry.destination(), tweaked_retry);
+    let mut tweaked = retry.to_vec();
+    tweaked[retry.len() - 1] ^= 0x45; // damage the auth tag
+    let tweaked_packet = Datagram::new(retry.source(), retry.destination(), tweaked);
 
     // The client should ignore this packet.
     let dgram = client.process(Some(tweaked_packet), now()).dgram();

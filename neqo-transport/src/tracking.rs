@@ -16,6 +16,7 @@ use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::{Epoch, TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::frame::{AckRange, Frame};
+use crate::packet::{PacketNumber, PacketType};
 use crate::recovery::RecoveryToken;
 
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
@@ -44,6 +45,17 @@ impl From<Epoch> for PNSpace {
             TLS_EPOCH_INITIAL => Self::Initial,
             TLS_EPOCH_HANDSHAKE => Self::Handshake,
             _ => Self::ApplicationData,
+        }
+    }
+}
+
+impl From<PacketType> for PNSpace {
+    fn from(pt: PacketType) -> Self {
+        match pt {
+            PacketType::Initial => Self::Initial,
+            PacketType::Handshake => Self::Handshake,
+            PacketType::ZeroRtt | PacketType::Short => Self::ApplicationData,
+            _ => panic!("Attempted to get space from wrong packet type"),
         }
     }
 }
@@ -102,8 +114,8 @@ impl std::fmt::Display for PNSpace {
 
 #[derive(Clone, Debug, Default)]
 pub struct PacketRange {
-    largest: u64,
-    smallest: u64,
+    largest: PacketNumber,
+    smallest: PacketNumber,
     ack_needed: bool,
 }
 
@@ -197,7 +209,7 @@ pub struct RecvdPackets {
     space: PNSpace,
     ranges: VecDeque<PacketRange>,
     /// The packet number of the lowest number packet that we are tracking.
-    min_tracked: u64,
+    min_tracked: PacketNumber,
     /// The time we got the largest acknowledged.
     largest_pn_time: Option<Instant>,
     // The time that we should be sending an ACK.
@@ -290,7 +302,7 @@ impl RecvdPackets {
     }
 
     /// Check if the packet is a duplicate.
-    pub fn is_duplicate(&self, pn: u64) -> bool {
+    pub fn is_duplicate(&self, pn: PacketNumber) -> bool {
         if pn < self.min_tracked {
             return true;
         }

@@ -22,7 +22,7 @@ use neqo_crypto::{
 
 use crate::connection::Role;
 use crate::frame::{Frame, TxMode};
-use crate::packet::{HeaderProtectionMask, PacketNumber, Protector, Unprotector};
+use crate::packet::PacketNumber;
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
@@ -291,11 +291,6 @@ impl CryptoDxState {
         self.epoch & 1 != 1
     }
 
-    #[must_use]
-    pub fn expansion(&self) -> usize {
-        self.aead.expansion()
-    }
-
     /// This is a continuation of a previous, so adjust the range accordingly.
     /// Fail if the two ranges overlap.  Do nothing if the directions don't match.
     pub fn continuation(&mut self, prev: &Self) -> Res<()> {
@@ -359,39 +354,19 @@ impl CryptoDxState {
             self.epoch == usize::from(TLS_EPOCH_APPLICATION_DATA)
         }
     }
-}
 
-impl HeaderProtectionMask for CryptoDxState {
-    fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
+    pub fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
         let mask = self.hpkey.mask(sample)?;
         qdebug!([self], "HP sample={} mask={}", hex(sample), hex(&mask));
         Ok(mask)
     }
 
-    fn next_pn(&self) -> PacketNumber {
+    #[must_use]
+    pub fn next_pn(&self) -> PacketNumber {
         self.used_pn.end
     }
-}
 
-impl Unprotector for CryptoDxState {
-    fn decrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
-        debug_assert_eq!(self.direction, CryptoDxDirection::Read);
-        qtrace!(
-            [self],
-            "decrypt pn={} hdr={} body={}",
-            pn,
-            hex(hdr),
-            hex(body)
-        );
-        let mut out = vec![0; body.len()];
-        let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
-        self.used(pn)?;
-        Ok(res.to_vec())
-    }
-}
-
-impl Protector for CryptoDxState {
-    fn encrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+    pub fn encrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
             [self],
@@ -409,6 +384,33 @@ impl Protector for CryptoDxState {
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
         Ok(res.to_vec())
+    }
+
+    #[must_use]
+    pub fn expansion(&self) -> usize {
+        self.aead.expansion()
+    }
+
+    pub fn decrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
+        debug_assert_eq!(self.direction, CryptoDxDirection::Read);
+        qinfo!(
+            [self],
+            "decrypt pn={} hdr={} body={}",
+            pn,
+            hex(hdr),
+            hex(body)
+        );
+        let mut out = vec![0; body.len()];
+        let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
+        self.used(pn)?;
+        Ok(res.to_vec())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_default() -> Self {
+        // This matches the value in packet.rs
+        const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
+        Self::new_initial(CryptoDxDirection::Write, "server in", CLIENT_CID)
     }
 }
 
@@ -447,7 +449,7 @@ impl IndexMut<CryptoDxDirection> for CryptoState {
 /// `CryptoDxAppData` wraps the state necessary for one direction of application data keys.
 /// This includes the secret needed to generate the next set of keys.
 #[derive(Debug)]
-struct CryptoDxAppData {
+pub(crate) struct CryptoDxAppData {
     dx: CryptoDxState,
     cipher: Cipher,
     // Not the secret used to create `self.dx`, but the one needed for the next iteration.
@@ -765,6 +767,35 @@ impl CryptoStates {
             next_dx.continuation(&self.app_read.as_ref().unwrap().dx)?;
         }
         Ok(())
+    }
+
+    /// Make some state for removing protection in tests.
+    #[cfg(test)]
+    pub(crate) fn test_default() -> Self {
+        let read = || {
+            let mut dx = CryptoDxState::test_default();
+            dx.direction = CryptoDxDirection::Read;
+            dx
+        };
+        let app_read = || CryptoDxAppData {
+            dx: read(),
+            cipher: TLS_AES_128_GCM_SHA256,
+            next_secret: hkdf::import_key(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &[0xaa; 32])
+                .unwrap(),
+        };
+        Self {
+            initial: Some(CryptoState {
+                tx: CryptoDxState::test_default(),
+                rx: read(),
+            }),
+            handshake: None,
+            zero_rtt: None,
+            cipher: TLS_AES_128_GCM_SHA256,
+            app_write: None,
+            app_read: Some(app_read()),
+            app_read_next: Some(app_read()),
+            read_update_time: None,
+        }
     }
 }
 

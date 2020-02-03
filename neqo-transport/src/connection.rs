@@ -10,7 +10,6 @@ use std::cell::RefCell;
 use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::convert::TryInto;
 use std::fmt::{self, Debug};
 use std::net::SocketAddr;
 use std::rc::Rc;
@@ -25,15 +24,13 @@ use neqo_crypto::{
     Server,
 };
 
-use crate::crypto::Crypto;
+use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
+use crate::crypto::{Crypto, CryptoDxState};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{AckRange, Frame, FrameType, StreamType, TxMode};
-use crate::packet::{
-    decode_packet_hdr, decrypt_packet_body, decrypt_packet_hdr, encode_packet, ConnectionId,
-    ConnectionIdDecoder, HeaderProtectionMask, PacketHdr, PacketType,
-};
+use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
 use crate::recovery::{LossRecovery, RecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams};
@@ -43,7 +40,6 @@ use crate::tparams::{
     tp_constants, TransportParameter, TransportParameters, TransportParametersHandler,
 };
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
-use crate::QUIC_VERSION;
 use crate::{AppError, ConnectionError, Error, Res, LOCAL_IDLE_TIMEOUT};
 
 #[derive(Debug, Default)]
@@ -207,10 +203,6 @@ impl Output {
     }
 }
 
-pub trait ConnectionIdManager: ConnectionIdDecoder {
-    fn generate_cid(&mut self) -> ConnectionId;
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder;
-}
 /// Alias the common form for ConnectionIdManager.
 type CidMgr = Rc<RefCell<dyn ConnectionIdManager>>;
 
@@ -224,8 +216,8 @@ impl FixedConnectionIdManager {
     }
 }
 impl ConnectionIdDecoder for FixedConnectionIdManager {
-    fn decode_cid(&self, dec: &mut Decoder) -> Option<ConnectionId> {
-        dec.decode(self.len).map(ConnectionId::from)
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        dec.decode(self.len).map(ConnectionIdRef::from)
     }
 }
 impl ConnectionIdManager for FixedConnectionIdManager {
@@ -240,6 +232,15 @@ impl ConnectionIdManager for FixedConnectionIdManager {
 struct RetryInfo {
     token: Vec<u8>,
     odcid: ConnectionId,
+}
+
+impl RetryInfo {
+    fn new(odcid: ConnectionId) -> Self {
+        Self {
+            token: Vec::new(),
+            odcid,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -352,7 +353,6 @@ impl StateSignaling {
 /// After the connection is closed (either by calling `close()` or by the
 /// remote) continue processing until `state()` returns `Closed`.
 pub struct Connection {
-    version: crate::packet::Version,
     role: Role,
     state: State,
     tps: Rc<RefCell<TransportParametersHandler>>,
@@ -417,6 +417,7 @@ impl Connection {
             }),
         );
         c.crypto.states.init(Role::Client, &dcid);
+        c.retry_info = Some(RetryInfo::new(dcid));
         Ok(c)
     }
 
@@ -461,13 +462,13 @@ impl Connection {
         tps.set_integer(tp_constants::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
         tps.set_integer(
             tp_constants::IDLE_TIMEOUT,
-            LOCAL_IDLE_TIMEOUT.as_millis().try_into().unwrap(),
+            u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
         );
         tps.set_empty(tp_constants::DISABLE_MIGRATION);
     }
 
     fn new(
-        r: Role,
+        role: Role,
         agent: Agent,
         cid_manager: CidMgr,
         anti_replay: Option<&AntiReplay>,
@@ -480,9 +481,8 @@ impl Connection {
             .expect("TLS should be configured successfully");
 
         Self {
-            version: QUIC_VERSION,
-            role: r,
-            state: match r {
+            role,
+            state: match role {
                 Role::Client => State::Init,
                 Role::Server => State::WaitInitial,
             },
@@ -797,68 +797,49 @@ impl Connection {
         self.process_output(now)
     }
 
-    fn is_valid_cid(&self, cid: &ConnectionId) -> bool {
-        self.valid_cids.contains(cid) || self.path.iter().any(|p| p.local_cids.contains(cid))
+    fn is_valid_cid(&self, cid: &ConnectionIdRef) -> bool {
+        let check = |c| c == cid;
+        self.valid_cids.iter().any(check)
+            || self.path.iter().any(|p| p.local_cids.iter().any(check))
     }
 
-    fn is_valid_initial(&self, hdr: &PacketHdr) -> bool {
-        if let PacketType::Initial(token) = &hdr.tipe {
-            // Server checks the token, so if we have one,
-            // assume that the DCID is OK.
-            if hdr.dcid.len() < 8 {
-                if token.is_empty() {
-                    qinfo!([self], "Drop Initial with short DCID");
-                    false
-                } else {
-                    qinfo!([self], "Initial received with token, assuming OK");
-                    true
-                }
-            } else {
-                // This is the normal path. Don't log.
-                true
-            }
-        } else {
-            qdebug!([self], "Dropping non-Initial packet");
-            false
-        }
-    }
-
-    fn handle_retry(&mut self, scid: &ConnectionId, odcid: &ConnectionId, token: &[u8]) -> Res<()> {
+    fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
         qdebug!([self], "received Retry");
-        if self.retry_info.is_some() {
+        debug_assert!(self.retry_info.is_some());
+        if !self.retry_info.as_ref().unwrap().token.is_empty() {
             qinfo!([self], "Dropping extra Retry");
             self.stats.dropped_rx += 1;
             return Ok(());
         }
-        if token.is_empty() {
+        if packet.token().is_empty() {
             qinfo!([self], "Dropping Retry without a token");
             self.stats.dropped_rx += 1;
             return Ok(());
         }
-        match self.path.iter_mut().find(|p| p.remote_cid == *odcid) {
-            None => {
-                qinfo!([self], "Ignoring Retry with mismatched ODCID");
-                self.stats.dropped_rx += 1;
-                return Ok(());
-            }
-            Some(path) => {
-                path.remote_cid = scid.clone();
-            }
+        if !packet.is_valid_retry(&self.retry_info.as_ref().unwrap().odcid) {
+            qinfo!([self], "Dropping Retry with bad integrity tag");
+            self.stats.dropped_rx += 1;
+            return Ok(());
         }
+        if let Some(p) = &mut self.path {
+            // At this point, we shouldn't have a remote connection ID for the path.
+            p.remote_cid = ConnectionId::from(packet.scid());
+        } else {
+            qinfo!([self], "No path, but we received a Retry");
+            return Err(Error::InternalError);
+        };
+        self.retry_info.as_mut().unwrap().token = packet.token().to_vec();
         qinfo!(
             [self],
-            "Valid Retry received, restarting with provided token"
+            "Valid Retry received, token={}",
+            hex(packet.token())
         );
-        self.retry_info = Some(RetryInfo {
-            token: token.to_vec(),
-            odcid: odcid.clone(),
-        });
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
         // Switching crypto state here might not happen eventually.
         // https://github.com/quicwg/base-drafts/issues/2823
-        self.crypto.states.init(self.role, scid);
+        self.crypto.states.init(self.role, packet.scid());
         Ok(())
     }
 
@@ -875,51 +856,34 @@ impl Connection {
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
-            let res = decode_packet_hdr(self.cid_manager.borrow().as_decoder(), slc);
-            let mut hdr = match res {
-                Ok(h) => h,
-                Err(e) => {
-                    qinfo!(
-                        [self],
-                        "Received indecipherable packet header {} {}",
-                        hex(slc),
-                        e
-                    );
-                    self.stats.dropped_rx += 1;
-                    return Ok(frames); // Drop the remainder of the datagram.
-                }
-            };
+            let (packet, remainder) =
+                match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
+                    Ok((packet, remainder)) => (packet, remainder),
+                    Err(e) => {
+                        qinfo!([self], "Garbage packet: {} {}", e, hex(slc));
+                        self.stats.dropped_rx += 1;
+                        return Ok(frames);
+                    }
+                }; // TODO(mt) use in place of res, and allow errors
             self.stats.packets_rx += 1;
-            match (&hdr.tipe, &self.state, &self.role) {
-                (PacketType::VN(_), State::WaitInitial, Role::Client) => {
+            match (packet.packet_type(), &self.state, &self.role) {
+                (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
                     self.set_state(State::Closed(ConnectionError::Transport(
                         Error::VersionNegotiation,
                     )));
                     return Err(Error::VersionNegotiation);
                 }
-                (PacketType::Retry { odcid, token }, State::WaitInitial, Role::Client) => {
-                    self.handle_retry(hdr.scid.as_ref().unwrap(), odcid, token)?;
+                (PacketType::Retry, State::WaitInitial, Role::Client) => {
+                    self.handle_retry(packet)?;
                     return Ok(frames);
                 }
-                (PacketType::VN(_), ..) | (PacketType::Retry { .. }, ..) => {
-                    qwarn!("dropping {:?}", hdr.tipe);
+                (PacketType::VersionNegotiation, ..) | (PacketType::Retry, ..) => {
+                    qwarn!("dropping {:?}", packet.packet_type());
                     self.stats.dropped_rx += 1;
                     return Ok(frames);
                 }
                 _ => {}
             };
-
-            if let Some(version) = hdr.version {
-                if version != self.version {
-                    qwarn!(
-                        "Dropping packet from version {:x} (self.version={:x})",
-                        hdr.version.unwrap(),
-                        self.version,
-                    );
-                    self.stats.dropped_rx += 1;
-                    return Ok(frames);
-                }
-            }
 
             match self.state {
                 State::Init => {
@@ -930,20 +894,20 @@ impl Connection {
                 State::WaitInitial => {
                     qinfo!([self], "Received packet in WaitInitial");
                     if self.role == Role::Server {
-                        if !self.is_valid_initial(&hdr) {
+                        if !packet.is_valid_initial() {
                             self.stats.dropped_rx += 1;
                             return Ok(frames);
                         }
-                        self.crypto.states.init(self.role, &hdr.dcid);
+                        self.crypto.states.init(self.role, &packet.dcid());
                     }
                 }
                 State::Handshaking | State::Connected | State::Confirmed => {
-                    if !self.is_valid_cid(&hdr.dcid) {
-                        qinfo!([self], "Ignoring packet with CID {:?}", hdr.dcid);
+                    if !self.is_valid_cid(packet.dcid()) {
+                        qinfo!([self], "Ignoring packet with CID {:?}", packet.dcid());
                         self.stats.dropped_rx += 1;
                         return Ok(frames);
                     }
-                    if self.role == Role::Server && matches!(hdr.tipe, PacketType::Handshake {..}) {
+                    if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
                         // Server has received a Handshake packet -> discard Initial keys and states
                         self.discard_keys(PNSpace::Initial);
                     }
@@ -961,20 +925,27 @@ impl Connection {
                 }
             }
 
-            qdebug!([self], "Received unverified packet {:?}", hdr);
+            qdebug!([self], "Received unverified packet {:?}", packet);
 
-            let body = self.decrypt_packet(&mut hdr, slc, now);
-            slc = &slc[hdr.hdr_len + hdr.body_len()..];
-            if let Ok(body) = body {
+            let pto = self.loss_recovery.pto();
+            let payload = packet.decrypt(&mut self.crypto.states, now + pto);
+            slc = remainder;
+            if let Ok(payload) = payload {
                 // TODO(ekr@rtfm.com): Have the server blow away the initial
                 // crypto state if this fails? Otherwise, we will get a panic
                 // on the assert for doesn't exist.
                 // OK, we have a valid packet.
                 self.idle_timeout.on_packet_received(now);
-                dump_packet(self, "-> RX", &hdr, &body);
-                frames.extend(self.process_packet(&hdr, body, now)?);
+                dump_packet(
+                    self,
+                    "-> RX",
+                    payload.packet_type(),
+                    payload.pn(),
+                    &payload[..],
+                );
+                frames.extend(self.process_packet(&payload, now)?);
                 if matches!(self.state, State::WaitInitial) {
-                    self.start_handshake(hdr, &d)?;
+                    self.start_handshake(&packet, &d)?;
                 }
                 self.process_migrations(&d)?;
             } else {
@@ -987,48 +958,10 @@ impl Connection {
         Ok(frames)
     }
 
-    /// Decrypt a packet and - if successful - return the body.
-    fn decrypt_packet(
-        &mut self,
-        mut hdr: &mut PacketHdr,
-        slc: &[u8],
-        now: Instant,
-    ) -> Res<Vec<u8>> {
-        let space = hdr.tipe.space();
-        // This has to work in two stages because we need to remove header protection
-        // before picking the keys to use.
-        if let Some(rx) = self.crypto.states.rx_hp(space) {
-            // Note that this will dump early, which creates a side-channel.
-            // This is OK in this case because we the only reason this can
-            // fail is if the cryptographic module is bad or the packet is
-            // too small (which is public information).
-            let (hdrbytes, body) = decrypt_packet_hdr(rx, &mut hdr, slc)?;
-            qtrace!([rx], "decoded header: {:?}", hdr);
-            if let Some(rx) = self.crypto.states.rx(space, hdr.tipe.key_phase()) {
-                let res = decrypt_packet_body(rx, hdr.pn, &hdrbytes, body);
-                if res.is_ok() {
-                    // If this is the first packet ever successfully decrypted
-                    // using `rx`, make sure to initiate a key update.
-                    if rx.needs_update() {
-                        let pto = self.loss_recovery.pto();
-                        self.crypto.states.key_update_received(now + pto)?;
-                    }
-                }
-                self.crypto.states.check_pn_overlap()?;
-                res
-            } else {
-                Err(Error::DecryptError)
-            }
-        } else {
-            Err(Error::DecryptError)
-        }
-    }
-
     /// Ok(true) if the packet is a duplicate
     fn process_packet(
         &mut self,
-        hdr: &PacketHdr,
-        body: Vec<u8>,
+        packet: &DecryptedPacket,
         now: Instant,
     ) -> Res<Vec<(Frame, PNSpace)>> {
         // TODO(ekr@rtfm.com): Have the server blow away the initial
@@ -1038,15 +971,15 @@ impl Connection {
 
         // TODO(ekr@rtfm.com): Filter for valid for this epoch.
 
-        let space = hdr.tipe.space();
-        if self.acks[space].is_duplicate(hdr.pn) {
-            qdebug!([self], "Duplicate packet from {} pn={}", space, hdr.pn);
+        let space = PNSpace::from(packet.packet_type());
+        if self.acks[space].is_duplicate(packet.pn()) {
+            qdebug!([self], "Duplicate packet from {} pn={}", space, packet.pn());
             self.stats.dups_rx += 1;
             return Ok(vec![]);
         }
 
         let mut ack_eliciting = false;
-        let mut d = Decoder::from(&body[..]);
+        let mut d = Decoder::from(&packet[..]);
         #[allow(unused_mut)]
         let mut frames = Vec::new();
         while d.remaining() > 0 {
@@ -1056,22 +989,22 @@ impl Connection {
             }
             ack_eliciting |= f.ack_eliciting();
             let t = f.get_type();
-            let res = self.input_frame(&hdr.tipe, f, now);
+            let res = self.input_frame(packet.packet_type(), f, now);
             self.capture_error(now, t, res)?;
         }
-        self.acks[space].set_received(now, hdr.pn, ack_eliciting);
+        self.acks[space].set_received(now, packet.pn(), ack_eliciting);
 
         Ok(frames)
     }
 
-    fn start_handshake(&mut self, hdr: PacketHdr, d: &Datagram) -> Res<()> {
+    fn start_handshake(&mut self, packet: &PublicPacket, d: &Datagram) -> Res<()> {
         if self.role == Role::Server {
-            assert!(matches!(hdr.tipe, PacketType::Initial(..)));
+            assert_eq!(packet.packet_type(), PacketType::Initial);
             // A server needs to accept the client's selected CID during the handshake.
-            self.valid_cids.push(hdr.dcid.clone());
+            self.valid_cids.push(ConnectionId::from(packet.dcid()));
             // Install a path.
             assert!(self.path.is_none());
-            let mut p = Path::new(&d, hdr.scid.unwrap());
+            let mut p = Path::new(&d, ConnectionId::from(packet.scid()));
             p.local_cids
                 .push(self.cid_manager.borrow_mut().generate_cid());
             self.path = Some(p);
@@ -1084,17 +1017,13 @@ impl Connection {
                 _ => ZeroRttState::Rejected,
             };
         } else {
-            qdebug!(
-                [self],
-                "Changing to use Server CID={}",
-                hdr.scid.as_ref().unwrap()
-            );
+            qdebug!([self], "Changing to use Server CID={}", packet.scid());
             let p = self
                 .path
                 .iter_mut()
                 .find(|p| p.received_on(&d))
                 .expect("should have a path for sending Initial");
-            p.remote_cid = hdr.scid.unwrap();
+            p.remote_cid = ConnectionId::from(packet.scid());
         }
         self.set_state(State::Handshaking);
         Ok(())
@@ -1112,7 +1041,25 @@ impl Connection {
 
     fn output(&mut self, now: Instant) -> Option<Datagram> {
         if let Some(mut path) = self.path.take() {
-            let res = self.output_path(&mut path, now);
+            let res = match &self.state {
+                State::Init
+                | State::WaitInitial
+                | State::Handshaking
+                | State::Connected
+                | State::Confirmed => self.output_path(&mut path, now),
+                State::Closing {
+                    error,
+                    frame_type,
+                    msg,
+                    ..
+                } => {
+                    let err = error.clone();
+                    let frame_type = *frame_type;
+                    let msg = msg.clone();
+                    self.output_close(&path, err, frame_type, msg)
+                }
+                State::Closed(_) => Ok(None),
+            };
             let out = self.absorb_error(now, res).unwrap_or(None);
             self.path = Some(path);
             out
@@ -1121,14 +1068,157 @@ impl Connection {
         }
     }
 
-    #[allow(clippy::cognitive_complexity)]
+    fn build_packet_header(
+        path: &Path,
+        space: PNSpace,
+        encoder: Encoder,
+        tx: &CryptoDxState,
+        retry_info: &Option<RetryInfo>,
+    ) -> (PacketType, PacketNumber, PacketBuilder) {
+        let pt = match space {
+            PNSpace::Initial => PacketType::Initial,
+            PNSpace::Handshake => PacketType::Handshake,
+            PNSpace::ApplicationData => {
+                if tx.is_0rtt() {
+                    PacketType::ZeroRtt
+                } else {
+                    PacketType::Short
+                }
+            }
+        };
+        let mut builder = if pt == PacketType::Short {
+            PacketBuilder::short(encoder, tx.key_phase(), &path.remote_cid)
+        } else {
+            PacketBuilder::long(
+                encoder,
+                pt,
+                &path.remote_cid,
+                path.local_cids.first().unwrap(),
+            )
+        };
+        if pt == PacketType::Initial {
+            builder.initial_token(if let Some(info) = retry_info {
+                &info.token
+            } else {
+                &[]
+            });
+        }
+        // TODO(mt) work out packet number length based on `4*path CWND/path MTU`.
+        let pn = tx.next_pn();
+        builder.pn(pn, 3);
+        (pt, pn, builder)
+    }
+
+    fn output_close(
+        &mut self,
+        path: &Path,
+        error: ConnectionError,
+        frame_type: FrameType,
+        msg: String,
+    ) -> Res<Option<Datagram>> {
+        if !self.state_signaling.closing() {
+            return Ok(None);
+        }
+        let mut close_sent = false;
+        let mut encoder = Encoder::with_capacity(path.mtu());
+        for space in PNSpace::iter() {
+            let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
+                tx_state
+            } else {
+                continue;
+            };
+
+            // ConnectionClose frame not allowed for 0RTT.
+            if tx.is_0rtt() {
+                continue;
+            }
+
+            // ConnectionError::Application only allowed at 1RTT.
+            if *space != PNSpace::ApplicationData
+                && matches!(error, ConnectionError::Application(_))
+            {
+                continue;
+            }
+            let (_, _, mut builder) = Self::build_packet_header(path, *space, encoder, tx, &None);
+            let frame = Frame::ConnectionClose {
+                error_code: error.clone().into(),
+                frame_type,
+                reason_phrase: Vec::from(msg.clone()),
+            };
+            frame.marshal(&mut builder);
+            encoder = builder.build(tx)?;
+            close_sent = true;
+        }
+
+        if close_sent {
+            self.state_signaling.close_sent();
+        }
+        Ok(Some(Datagram::new(path.local, path.remote, encoder)))
+    }
+
+    /// Add frames to the provided builder and
+    /// return whether any of them were ACK eliciting.
     #[allow(clippy::useless_let_if_seq)]
+    fn add_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        space: PNSpace,
+        tx_mode: TxMode,
+        limit: usize,
+        now: Instant,
+    ) -> (Vec<RecoveryToken>, bool) {
+        let mut tokens = Vec::new();
+        let mut ack_eliciting = false;
+        // All useful frames are at least 2 bytes.
+        while builder.len() + 2 < limit {
+            let remaining = limit - builder.len();
+            // Try to get a frame from frame sources
+            let mut frame = None;
+            if tx_mode == TxMode::Normal {
+                frame = self.acks.get_frame(now, space);
+            }
+            if frame.is_none() && space == PNSpace::ApplicationData && self.role == Role::Server {
+                frame = self.state_signaling.send_done();
+            }
+            if frame.is_none() {
+                frame = self.crypto.streams.get_frame(space, tx_mode, remaining)
+            }
+            if frame.is_none() && tx_mode == TxMode::Normal {
+                frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
+            }
+            if frame.is_none() {
+                frame = self.send_streams.get_frame(space, tx_mode, remaining);
+            }
+
+            if let Some((frame, token)) = frame {
+                ack_eliciting |= frame.ack_eliciting();
+                debug_assert_ne!(frame, Frame::Padding);
+                frame.marshal(builder);
+                if let Some(t) = token {
+                    tokens.push(t);
+                }
+            } else {
+                if tx_mode == TxMode::Pto {
+                    // Add a PING.
+                    builder.encode_varint(Frame::Ping.get_type());
+                    ack_eliciting = true;
+                }
+                return (tokens, ack_eliciting);
+            }
+
+            // PTO only ever sends one frame and they always elicit ACKs.
+            if tx_mode == TxMode::Pto {
+                debug_assert!(ack_eliciting);
+                return (tokens, true);
+            }
+        }
+        (tokens, ack_eliciting)
+    }
+
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
     fn output_path(&mut self, path: &mut Path, now: Instant) -> Res<Option<Datagram>> {
-        let mut out_bytes = Vec::new();
         let mut needs_padding = false;
-        let mut close_sent = false;
 
         // Check whether we are sending packets in PTO mode.
         let (tx_mode, cong_avail, min_pn_space) =
@@ -1147,10 +1237,8 @@ impl Connection {
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
+        let mut encoder = Encoder::with_capacity(path.mtu());
         for space in PNSpace::iter() {
-            let mut encoder = Encoder::default();
-            let mut tokens = Vec::new();
-
             if *space < min_pn_space {
                 continue;
             }
@@ -1162,163 +1250,62 @@ impl Connection {
                 continue;
             };
 
-            let hdr = PacketHdr::new(
-                0,
-                match space {
-                    PNSpace::Initial => {
-                        let token = match &self.retry_info {
-                            Some(v) => v.token.clone(),
-                            _ => Vec::new(),
-                        };
-                        PacketType::Initial(token)
-                    }
-                    PNSpace::Handshake => PacketType::Handshake,
-                    PNSpace::ApplicationData => {
-                        if tx.is_0rtt() {
-                            PacketType::ZeroRTT
-                        } else {
-                            PacketType::Short(tx.key_phase())
-                        }
-                    }
-                },
-                Some(self.version),
-                path.remote_cid.clone(),
-                path.local_cids.first().cloned(),
-                tx.next_pn(),
-            );
+            let header_start = encoder.len();
+            let (pt, pn, mut builder) =
+                Self::build_packet_header(path, *space, encoder, tx, &self.retry_info);
+            let payload_start = builder.len();
 
-            let mut ack_eliciting = false;
-            let mut has_padding = false;
-
-            match &self.state {
-                State::Init
-                | State::WaitInitial
-                | State::Handshaking
-                | State::Connected
-                | State::Confirmed => {
-                    loop {
-                        let used = out_bytes.len()
-                            + encoder.len()
-                            + hdr.overhead(tx.expansion(), path.mtu());
-                        let remaining = min(
-                            path.mtu().saturating_sub(used),
-                            cong_avail.saturating_sub(used),
-                        );
-                        if remaining < 2 {
-                            // All useful frames are at least 2 bytes.
-                            break;
-                        }
-
-                        // Try to get a frame from frame sources
-                        let mut frame = None;
-                        if tx_mode == TxMode::Normal {
-                            frame = self.acks.get_frame(now, *space);
-                        }
-                        if frame.is_none()
-                            && *space == PNSpace::ApplicationData
-                            && self.role == Role::Server
-                        {
-                            frame = self.state_signaling.send_done();
-                        }
-                        if frame.is_none() && !tx.is_0rtt() {
-                            frame = self.crypto.streams.get_frame(*space, tx_mode, remaining)
-                        }
-                        if frame.is_none() && tx_mode == TxMode::Normal {
-                            frame = self.flow_mgr.borrow_mut().get_frame(*space, remaining);
-                        }
-                        if frame.is_none() {
-                            frame = self.send_streams.get_frame(*space, tx_mode, remaining);
-                        }
-
-                        if frame.is_none() && tx_mode == TxMode::Pto {
-                            frame = Some((Frame::Ping, None));
-                        }
-
-                        if let Some((frame, token)) = frame {
-                            ack_eliciting |= frame.ack_eliciting();
-                            if let Frame::Padding = frame {
-                                has_padding |= true;
-                            }
-                            frame.marshal(&mut encoder);
-                            if let Some(t) = token {
-                                tokens.push(t);
-                            }
-
-                            // Pto only ever sends one frame, but it ALWAYS
-                            // sends one
-                            if tx_mode == TxMode::Pto {
-                                break;
-                            }
-                        } else {
-                            // No more frames to send.
-                            break;
-                        }
-                    }
-                }
-                State::Closing {
-                    error,
-                    frame_type,
-                    msg,
-                    ..
-                } => {
-                    if self.state_signaling.closing() {
-                        // ConnectionClose frame not allowed for 0RTT
-                        if matches!(hdr.tipe, PacketType::ZeroRTT) {
-                            continue;
-                        }
-                        // ConnectionError::Application only allowed at 1RTT
-                        if *space != PNSpace::ApplicationData
-                            && matches!(error, ConnectionError::Application(_))
-                        {
-                            continue;
-                        }
-                        let frame = Frame::ConnectionClose {
-                            error_code: error.clone().into(),
-                            frame_type: *frame_type,
-                            reason_phrase: Vec::from(msg.clone()),
-                        };
-                        frame.marshal(&mut encoder);
-                        close_sent = true;
-                    }
-                }
-                State::Closed { .. } => unimplemented!(),
+            // Work out how much space we have in the congestion window.
+            let limit = min(path.mtu(), cong_avail);
+            if builder.len() + tx.expansion() > limit {
+                // No space for a packet of this type in the congestion window.
+                encoder = builder.abort();
+                continue;
             }
+            let limit = limit - tx.expansion();
 
-            assert!(encoder.len() <= path.mtu());
-            if encoder.len() == 0 {
+            let (tokens, ack_eliciting) =
+                self.add_frames(&mut builder, *space, tx_mode, limit, now);
+            if builder.is_empty() {
+                // Nothing to include in this packet.
+                encoder = builder.abort();
                 continue;
             }
 
-            qdebug!("Need to send a packet: {:?}", hdr);
-            match hdr.tipe {
+            dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
+
+            qdebug!("Need to send a packet: {:?}", pt);
+            match pt {
                 // Packets containing Initial packets need padding.
-                PacketType::Initial(_) => needs_padding = true,
-                PacketType::ZeroRTT => (),
+                PacketType::Initial => needs_padding = true,
+                PacketType::ZeroRtt => (),
                 // ...unless they include higher epochs.
                 _ => needs_padding = false,
             }
 
             self.stats.packets_tx += 1;
-            let mut packet = encode_packet(tx, &hdr, &encoder);
+            encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
+            assert!(encoder.len() <= path.mtu());
 
             if tx_mode != TxMode::Pto && ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
 
+            // Normal packets are in flight if they include PADDING frames,
+            // but we don't send those.
             let in_flight = match tx_mode {
                 TxMode::Pto => false,
-                TxMode::Normal => ack_eliciting || has_padding,
+                TxMode::Normal => ack_eliciting,
             };
 
-            self.loss_recovery.on_packet_sent(
-                *space,
-                hdr.pn,
-                SentPacket::new(now, ack_eliciting, tokens, packet.len(), in_flight),
+            let sent = SentPacket::new(
+                now,
+                ack_eliciting,
+                tokens,
+                encoder.len() - header_start,
+                in_flight,
             );
-
-            dump_packet(self, "TX ->", &hdr, &encoder);
-
-            out_bytes.append(&mut packet);
+            self.loss_recovery.on_packet_sent(*space, pn, sent);
 
             if *space == PNSpace::Handshake && self.role == Role::Client {
                 // Client can send Handshake packets -> discard Initial keys and states
@@ -1334,19 +1321,18 @@ impl Connection {
             }
         }
 
-        if close_sent {
-            self.state_signaling.close_sent();
-        }
-
-        if out_bytes.is_empty() {
+        if encoder.len() == 0 {
+            assert!(tx_mode != TxMode::Pto);
             Ok(None)
         } else {
+            debug_assert!(encoder.len() <= path.mtu());
             // Pad Initial packets sent by the client to mtu bytes.
+            let mut packets: Vec<u8> = encoder.into();
             if self.role == Role::Client && needs_padding {
                 qdebug!([self], "pad Initial to max_datagram_size");
-                out_bytes.resize(path.mtu(), 0);
+                packets.resize(path.mtu(), 0);
             }
-            Ok(Some(Datagram::new(path.local, path.remote, out_bytes)))
+            Ok(Some(Datagram::new(path.local, path.remote, packets)))
         }
     }
 
@@ -1407,20 +1393,26 @@ impl Connection {
             .conn_increase_max_credit(remote.get_integer(tp_constants::INITIAL_MAX_DATA));
     }
 
-    fn validate_odcid(&self) -> Res<()> {
-        if let Some(info) = &self.retry_info {
-            let tph = self.tps.borrow();
-            let tp = tph.remote().get_bytes(tp_constants::ORIGINAL_CONNECTION_ID);
-            if let Some(odcid_tp) = tp {
-                if odcid_tp[..] == info.odcid[..] {
-                    Ok(())
+    fn validate_odcid(&mut self) -> Res<()> {
+        // Here we drop our Retry state then validate it.
+        if let Some(info) = self.retry_info.take() {
+            if info.token.is_empty() {
+                Ok(())
+            } else {
+                let tph = self.tps.borrow();
+                let tp = tph.remote().get_bytes(tp_constants::ORIGINAL_CONNECTION_ID);
+                if let Some(odcid_tp) = tp {
+                    if odcid_tp[..] == info.odcid[..] {
+                        Ok(())
+                    } else {
+                        Err(Error::InvalidRetry)
+                    }
                 } else {
                     Err(Error::InvalidRetry)
                 }
-            } else {
-                Err(Error::InvalidRetry)
             }
         } else {
+            debug_assert_eq!(self.role, Role::Server);
             Ok(())
         }
     }
@@ -1487,7 +1479,7 @@ impl Connection {
         }
     }
 
-    fn input_frame(&mut self, ptype: &PacketType, frame: Frame, now: Instant) -> Res<()> {
+    fn input_frame(&mut self, ptype: PacketType, frame: Frame, now: Instant) -> Res<()> {
         if !frame.is_allowed(ptype) {
             return Err(Error::ProtocolViolation);
         }
@@ -1505,7 +1497,7 @@ impl Connection {
                 ack_ranges,
             } => {
                 self.handle_ack(
-                    ptype.space(),
+                    PNSpace::from(ptype),
                     largest_acknowledged,
                     ack_delay,
                     first_ack_range,
@@ -1534,7 +1526,7 @@ impl Connection {
                 }
             }
             Frame::Crypto { offset, data } => {
-                let space = ptype.space();
+                let space = PNSpace::from(ptype);
                 qtrace!(
                     [self],
                     "Crypto frame on space={} offset={}, data={:0x?}",
@@ -2169,11 +2161,11 @@ mod tests {
 
         // limit dcid to a constant value to make testing easier
         let mut modded_path = c.path.take().unwrap();
-        modded_path.remote_cid.0.truncate(8);
-        let modded_dcid = modded_path.remote_cid.0.clone();
-        assert_eq!(modded_dcid.len(), 8);
+        let mut modded_cid = modded_path.remote_cid.to_vec();
+        modded_cid.truncate(8);
+        modded_path.remote_cid = ConnectionId::from(&modded_cid[..]);
         c.path = Some(modded_path);
-        c.crypto.states.init(Role::Client, &modded_dcid);
+        c.crypto.states.init(Role::Client, &modded_cid);
         c
     }
     pub fn default_server() -> Connection {
@@ -2956,7 +2948,7 @@ mod tests {
             client
                 .stream_send(stream_id, &[b'a'; RX_STREAM_DATA_WINDOW as usize])
                 .unwrap(),
-            SMALL_MAX_DATA.try_into().unwrap()
+            usize::try_from(SMALL_MAX_DATA).unwrap()
         );
         let evts = client.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 2); // SendStreamWritable, StateChange(connected)
@@ -3622,6 +3614,15 @@ mod tests {
         )
     }
 
+    /// This magic number is the size of the Handshake packets sent
+    /// by the client and acknowledged by the server.
+    /// As we change how we build packets, or even as NSS changes,
+    /// this number might be different.  The tests that depend on this
+    /// value could fail as a result of variations, so it's OK to just
+    /// change this value, but it is good to first understand where the
+    /// change came from.
+    const HANDSHAKE_CWND_INCREASE: usize = 631;
+
     #[test]
     /// Verify initial CWND is honored.
     fn cc_slow_start() {
@@ -3642,16 +3643,12 @@ mod tests {
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         let c_tx_dgrams = send_bytes(&mut client, 2, now);
 
-        // Init/Handshake acks have increased cwnd by 630 so we actually can
+        // Init/Handshake acks have increased cwnd so we actually can
         // send 11 with the last being shorter
-        assert_eq!(
-            c_tx_dgrams.iter().map(|d| d.len()).sum::<usize>(),
-            (INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE) + 630
-        );
         assert_eq!(c_tx_dgrams.len(), INITIAL_CWND_PKTS + 1);
         let (last, rest) = c_tx_dgrams.split_last().unwrap();
         assert!(rest.iter().all(|d| d.len() == MAX_DATAGRAM_SIZE));
-        assert_eq!(last.len(), 630);
+        assert_eq!(last.len(), HANDSHAKE_CWND_INCREASE);
         assert_eq!(client.loss_recovery.cwnd_avail(), 0);
     }
 
@@ -3675,7 +3672,7 @@ mod tests {
         assert_eq!(c_tx_dgrams.len(), INITIAL_CWND_PKTS + 1);
         assert_eq!(
             c_tx_dgrams.iter().map(|d| d.len()).sum::<usize>(),
-            (INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE) + 630
+            (INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE) + HANDSHAKE_CWND_INCREASE
         );
 
         // Server: Receive and generate ack
