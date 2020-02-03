@@ -36,6 +36,8 @@ use std::time::Instant;
 use structopt::StructOpt;
 use url::Url;
 
+const DEFAULT_QLOG_OUTPUT: &str = "output.qlog";
+
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "neqo-client",
@@ -70,7 +72,7 @@ pub struct Args {
     /// Do not print received data
     omit_read_data: bool,
 
-    #[structopt(long, default_value = "output.qlog")]
+    #[structopt(long)]
     /// Output QLOG trace to a file.
     qlog: Option<Option<PathBuf>>,
 }
@@ -395,7 +397,7 @@ fn main() -> Result<(), std::io::Error> {
 
         qlog.traces.push(owned_trace);
 
-        let qlogpath = output_qlog.unwrap();
+        let qlogpath = output_qlog.unwrap_or_else(|| DEFAULT_QLOG_OUTPUT.into());
 
         match OpenOptions::new()
             .write(true)
