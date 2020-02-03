@@ -373,8 +373,8 @@ enum Test {
 impl Test {
     fn alpn(&self) -> Vec<String> {
         match self {
-            Self::H3 => vec![String::from("h3-24")],
-            _ => vec![String::from("hq-24")],
+            Self::H3 => vec![String::from("h3-25")],
+            _ => vec![String::from("hq-25")],
         }
     }
 
@@ -493,7 +493,7 @@ impl Handler for VnHandler {
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
     let mut client = Connection::new_client(
         peer.host,
-        &["hq-22"],
+        &["hq-25"],
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
