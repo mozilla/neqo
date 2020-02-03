@@ -59,6 +59,7 @@ pub enum Error {
     InvalidMigration,
     CryptoError(neqo_crypto::Error),
     CryptoAlert(u8),
+    ConnectionIdLimitError,
 
     // All internal errors from here.
     AckedUnsentPacket,
@@ -101,6 +102,7 @@ impl Error {
             Self::FinalSizeError => 6,
             Self::FrameEncodingError => 7,
             Self::TransportParameterError => 8,
+            Self::ConnectionIdLimitError => 9,
             Self::ProtocolViolation => 10,
             Self::InvalidMigration => 12,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),

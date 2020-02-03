@@ -1429,6 +1429,38 @@ impl Connection {
         }
     }
 
+    fn validate_active_connection_id_limit(&self) -> Res<()> {
+        if let Some(path) = &self.path {
+            let tph = self.tps.borrow();
+            let remote = tph.remote();
+            if path.remote_cid.len() == 0 {
+                // When the dcid length is 0 an active_connection_id_limit TP must not have been
+                // sent.
+                if remote.was_sent(tp_constants::ACTIVE_CONNECTION_ID_LIMIT) {
+                    qtrace!([self], "Received an active_connection_id TP on a connection with a dcid of zero length, bad!");
+                    Err(Error::TransportParameterError)
+                } else {
+                    qtrace!([self], "Did not receive an active_connection_id TP on a connection with a dcid of zero length, good!");
+                    Ok(())
+                }
+            } else {
+                // When the dcid length is non-zero the active_connection_id_limit TP must be
+                // greater than 2.
+                if remote.get_integer(tp_constants::ACTIVE_CONNECTION_ID_LIMIT) < 2 {
+                    qtrace!([self], "Received an active_connection_id TP  with value < 2 on a connection with a dcid of non-zero length, bad!");
+                    Err(Error::TransportParameterError)
+                } else {
+                    qtrace!([self], "Received an active_connection_id TP  with value >= 2 ({})on a connection with a dcid of non-zero length, good!",
+                        remote.get_integer(tp_constants::ACTIVE_CONNECTION_ID_LIMIT)
+                    );
+                    Ok(())
+                }
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     fn handshake(&mut self, now: Instant, space: PNSpace, data: Option<&[u8]>) -> Res<()> {
         qtrace!("Handshake space={} data={:0x?}", space, data);
 
@@ -1630,8 +1662,21 @@ impl Connection {
                 stateless_reset_token,
                 ..
             } => {
-                self.connection_ids
-                    .insert(sequence_number, (connection_id, stateless_reset_token));
+                // If adding an additional active connection id sends us over the limit,
+                // return a ConnectionIdLimitError.
+                if self.connection_ids.len() + 1
+                    > self
+                        .tps
+                        .borrow()
+                        .remote()
+                        .get_integer(tp_constants::ACTIVE_CONNECTION_ID_LIMIT)
+                        as usize
+                {
+                    return Err(Error::ConnectionIdLimitError);
+                } else {
+                    self.connection_ids
+                        .insert(sequence_number, (connection_id, stateless_reset_token));
+                }
             }
             Frame::RetireConnectionId { sequence_number } => {
                 self.connection_ids.remove(&sequence_number);
@@ -1775,6 +1820,7 @@ impl Connection {
         let pto = self.loss_recovery.pto();
         self.crypto.install_application_keys(now + pto)?;
         self.validate_odcid()?;
+        self.validate_active_connection_id_limit()?;
         self.set_initial_limits();
         self.set_state(State::Connected);
         if self.role == Role::Server {
@@ -4242,5 +4288,94 @@ mod tests {
         let dgram = client.process(dgram, now()).dgram();
         assert!(dgram.is_none());
         assert!(client.initiate_key_update().is_ok());
+    }
+
+    // When there is a dcid of non-zero length an active_connection_id_limit of >=2
+    // must be specified. When that is not the case, the connection must be in the
+    // TransportParameterError case. When a zero-length dcid is set, the client
+    // must not send an active_connection_id_limit.
+    #[test]
+    fn test_validate_active_connection_id_limit() {
+        let mut client = default_client();
+        let mut server = default_server();
+
+        // active_connection_id_limit of 0 with non-zero length cid should fail.
+        client
+            .tps
+            .borrow_mut()
+            .local
+            .set_integer(tp_constants::ACTIVE_CONNECTION_ID_LIMIT, 0);
+        handshake(&mut client, &mut server);
+        assert_error(
+            &server,
+            ConnectionError::Transport(Error::TransportParameterError),
+        );
+
+        let mut client = default_client();
+        let mut server = default_server();
+
+        // active_connection_id_limit of 1 with non-zero length cid should fail.
+        client
+            .tps
+            .borrow_mut()
+            .local
+            .set_integer(tp_constants::ACTIVE_CONNECTION_ID_LIMIT, 1);
+        handshake(&mut client, &mut server);
+        assert_error(
+            &server,
+            ConnectionError::Transport(Error::TransportParameterError),
+        );
+
+        let mut client = default_client();
+        let mut server = default_server();
+
+        // active_connection_id_limit of 2 with non-zero length cid should succeed.
+        client
+            .tps
+            .borrow_mut()
+            .local
+            .set_integer(tp_constants::ACTIVE_CONNECTION_ID_LIMIT, 2);
+        handshake(&mut client, &mut server);
+        assert_eq!(*server.state(), State::Confirmed);
+        assert_eq!(*client.state(), State::Confirmed);
+
+        fixture_init();
+        let mut client = Connection::new_client(
+            test_fixture::DEFAULT_SERVER_NAME,
+            test_fixture::DEFAULT_ALPN,
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+            loopback(),
+            loopback(),
+        )
+        .expect("create a client with zero-length cid");
+        let mut server = default_server();
+
+        // active_connection_id_limit of 0 with zero length cid should fail.
+        client
+            .tps
+            .borrow_mut()
+            .local
+            .set_integer(tp_constants::ACTIVE_CONNECTION_ID_LIMIT, 0);
+        handshake(&mut client, &mut server);
+        assert_error(
+            &server,
+            ConnectionError::Transport(Error::TransportParameterError),
+        );
+
+        // No active_connection_id_limit with zero length cid should succeed.
+        fixture_init();
+        let mut client = Connection::new_client(
+            test_fixture::DEFAULT_SERVER_NAME,
+            test_fixture::DEFAULT_ALPN,
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+            loopback(),
+            loopback(),
+        )
+        .expect("create a client with zero-length cid");
+        let mut server = default_server();
+
+        handshake(&mut client, &mut server);
+        assert_eq!(*server.state(), State::Confirmed);
+        assert_eq!(*client.state(), State::Confirmed);
     }
 }

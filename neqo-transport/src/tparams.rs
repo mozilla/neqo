@@ -43,6 +43,7 @@ pub mod tp_constants {
         MAX_ACK_DELAY = 11,
         DISABLE_MIGRATION = 12,
         PREFERRED_ADDRESS = 13,
+        ACTIVE_CONNECTION_ID_LIMIT = 14,
     }
 }
 
@@ -99,7 +100,8 @@ impl TransportParameter {
             | INITIAL_MAX_STREAM_DATA_UNI
             | INITIAL_MAX_STREAMS_BIDI
             | INITIAL_MAX_STREAMS_UNI
-            | MAX_ACK_DELAY => match d.decode_varint() {
+            | MAX_ACK_DELAY
+            | ACTIVE_CONNECTION_ID_LIMIT => match d.decode_varint() {
                 Some(v) => Self::Integer(v),
                 None => return Err(Error::TransportParameterError),
             },
@@ -186,6 +188,7 @@ impl TransportParameters {
             MAX_PACKET_SIZE => 65527,
             ACK_DELAY_EXPONENT => 3,
             MAX_ACK_DELAY => 25,
+            ACTIVE_CONNECTION_ID_LIMIT => 2,
             _ => panic!("Transport parameter not known or not an Integer"),
         };
         match self.params.get(&tipe) {
@@ -207,7 +210,8 @@ impl TransportParameters {
             | INITIAL_MAX_STREAMS_UNI
             | MAX_PACKET_SIZE
             | ACK_DELAY_EXPONENT
-            | MAX_ACK_DELAY => {
+            | MAX_ACK_DELAY
+            | ACTIVE_CONNECTION_ID_LIMIT => {
                 self.set(tipe, TransportParameter::Integer(value));
             }
             _ => panic!("Transport parameter not known"),
@@ -277,7 +281,7 @@ impl TransportParameters {
         true
     }
 
-    fn was_sent(&self, tipe: u16) -> bool {
+    pub fn was_sent(&self, tipe: u16) -> bool {
         self.params.contains_key(&tipe)
     }
 }
