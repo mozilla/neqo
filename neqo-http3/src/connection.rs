@@ -341,6 +341,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     }
 
     pub fn handle_state_change(&mut self, conn: &mut Connection, state: &State) -> Res<bool> {
+        qdebug!([self], "Handle state change {:?}", state);
         match state {
             State::Connected => {
                 debug_assert!(matches!(
