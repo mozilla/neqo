@@ -746,6 +746,7 @@ impl Connection {
         // TODO(agrover, mt) - need to analyze and fix #47
         // rather than just clamping to zero here.
         qdebug!(
+            [self],
             "delay duration {:?}",
             max(now, earliest).duration_since(now)
         );
