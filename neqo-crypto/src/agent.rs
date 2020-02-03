@@ -19,7 +19,7 @@ use crate::secrets::SecretHolder;
 use crate::ssl::{self, PRBool};
 use crate::time::{PRTime, Time};
 
-use neqo_common::{matches, qdebug, qinfo, qwarn};
+use neqo_common::{matches, qdebug, qinfo, qtrace, qwarn};
 use std::cell::RefCell;
 use std::convert::{TryFrom, TryInto};
 use std::ffi::CString;
@@ -79,7 +79,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
         }
         _ => None,
     };
-    qinfo!([format!("{:p}", fd)], "got ALPN {:?}", alpn);
+    qtrace!([format!("{:p}", fd)], "got ALPN {:?}", alpn);
     Ok(alpn)
 }
 
