@@ -7,7 +7,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use neqo_common::{matches, Datagram};
+use neqo_common::{hex, matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent};
 use neqo_transport::{
@@ -333,11 +333,11 @@ impl H3Handler {
                         .h3
                         .read_response_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
-                    eprintln!(
-                        "READ[{}]: {}",
-                        stream_id,
-                        String::from_utf8(data.clone()).unwrap()
-                    );
+                    if let Ok(txt) = String::from_utf8(data.clone()) {
+                        eprintln!("READ[{}]: {}", stream_id, txt);
+                    } else {
+                        eprintln!("READ[{}]: 0x{}", stream_id, hex(&data));
+                    }
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
                         self.h3.close(Instant::now(), 0, "kthxbye!");
@@ -649,7 +649,7 @@ const PEERS: &[Peer] = &[
     Peer {
         label: "msft",
         host: "quic.westus.cloudapp.azure.com",
-        port: 4434,
+        port: 443,
     },
     Peer {
         label: "mvfst",

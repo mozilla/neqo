@@ -184,6 +184,7 @@ impl Http3Client {
         match transaction.read_response_headers() {
             Ok((headers, fin)) => {
                 if transaction.done() {
+                    qinfo!([self], "read_response_headers transaction done");
                     self.base_handler.transactions.remove(&stream_id);
                 }
                 Ok((headers, fin))

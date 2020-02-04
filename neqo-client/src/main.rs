@@ -7,7 +7,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use neqo_common::{matches, Datagram};
+use neqo_common::{hex, matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_transport::FixedConnectionIdManager;
@@ -205,12 +205,10 @@ impl Handler for PostConnectHandler {
                         .expect("Read should succeed");
                     if args.omit_read_data {
                         println!("READ[{}]: {} bytes", stream_id, sz);
+                    } else if let Ok(txt) = String::from_utf8(data.clone()) {
+                        println!("READ[{}]: {}", stream_id, txt);
                     } else {
-                        println!(
-                            "READ[{}]: {}",
-                            stream_id,
-                            String::from_utf8(data.clone()).unwrap()
-                        )
+                        println!("READ[{}]: 0x{}", stream_id, hex(&data));
                     }
                     if fin {
                         println!("<FIN[{}]>", stream_id);
