@@ -329,11 +329,6 @@ impl RecvStreamState {
             _ => None,
         }
     }
-
-    fn transition(&mut self, new_state: Self) {
-        qtrace!("RecvStream state {} -> {}", self.name(), new_state.name());
-        *self = new_state;
-    }
 }
 
 /// Implement a QUIC receive stream.
@@ -358,6 +353,23 @@ impl RecvStream {
             flow_mgr,
             conn_events,
         }
+    }
+
+    fn set_state(&mut self, new_state: RecvStreamState) {
+        qtrace!(
+            "RecvStream {} state {} -> {}",
+            self.stream_id.as_u64(),
+            self.state.name(),
+            new_state.name()
+        );
+
+        if let RecvStreamState::Recv { .. } = &self.state {
+            self.flow_mgr
+                .borrow_mut()
+                .clear_max_stream_data(self.stream_id)
+        }
+
+        self.state = new_state;
     }
 
     pub fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
@@ -390,10 +402,9 @@ impl RecvStream {
 
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     if final_size == buf.retired() + buf.bytes_ready() as u64 {
-                        self.state
-                            .transition(RecvStreamState::DataRecvd { recv_buf: buf });
+                        self.set_state(RecvStreamState::DataRecvd { recv_buf: buf });
                     } else {
-                        self.state.transition(RecvStreamState::SizeKnown {
+                        self.set_state(RecvStreamState::SizeKnown {
                             recv_buf: buf,
                             final_size,
                         });
@@ -409,8 +420,7 @@ impl RecvStream {
                 recv_buf.inbound_frame(offset, data)?;
                 if *final_size == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
-                    self.state
-                        .transition(RecvStreamState::DataRecvd { recv_buf: buf });
+                    self.set_state(RecvStreamState::DataRecvd { recv_buf: buf });
                 }
             }
             RecvStreamState::DataRecvd { .. }
@@ -432,7 +442,7 @@ impl RecvStream {
             RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
                 self.conn_events
                     .recv_stream_reset(self.stream_id, application_error_code);
-                self.state.transition(RecvStreamState::ResetRecvd);
+                self.set_state(RecvStreamState::ResetRecvd);
             }
             _ => {
                 // Ignore reset if in DataRecvd, DataRead, or ResetRecvd
@@ -491,7 +501,7 @@ impl RecvStream {
                 let bytes_read = recv_buf.read(buf)?;
                 let fin_read = recv_buf.buffered() == 0;
                 if fin_read {
-                    self.state.transition(RecvStreamState::DataRead)
+                    self.set_state(RecvStreamState::DataRead)
                 }
                 Ok((bytes_read, fin_read))
             }
@@ -505,10 +515,10 @@ impl RecvStream {
         qtrace!("stop_sending called when in state {}", self.state.name());
         match &self.state {
             RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
-                self.state.transition(RecvStreamState::ResetRecvd);
+                self.set_state(RecvStreamState::ResetRecvd);
                 self.flow_mgr.borrow_mut().stop_sending(self.stream_id, err)
             }
-            RecvStreamState::DataRecvd { .. } => self.state.transition(RecvStreamState::DataRead),
+            RecvStreamState::DataRecvd { .. } => self.set_state(RecvStreamState::DataRead),
             RecvStreamState::DataRead | RecvStreamState::ResetRecvd => {
                 // Already in terminal state
             }

@@ -122,6 +122,16 @@ impl FlowMgr {
             .insert((stream_id, mem::discriminant(&frame)), frame);
     }
 
+    /// Don't send stream data updates if no more data is coming
+    pub fn clear_max_stream_data(&mut self, stream_id: StreamId) {
+        let frame = Frame::MaxStreamData {
+            stream_id,
+            maximum_stream_data: 0,
+        };
+        self.from_streams
+            .remove(&(stream_id, mem::discriminant(&frame)));
+    }
+
     /// Indicate to receiving remote we need more credits
     pub fn stream_data_blocked(&mut self, stream_id: StreamId, stream_data_limit: u64) {
         let frame = Frame::StreamDataBlocked {
