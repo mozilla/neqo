@@ -357,7 +357,7 @@ impl CryptoDxState {
 
     pub fn compute_mask(&self, sample: &[u8]) -> Res<Vec<u8>> {
         let mask = self.hpkey.mask(sample)?;
-        qdebug!([self], "HP sample={} mask={}", hex(sample), hex(&mask));
+        qtrace!([self], "HP sample={} mask={}", hex(sample), hex(&mask));
         Ok(mask)
     }
 
@@ -393,7 +393,7 @@ impl CryptoDxState {
 
     pub fn decrypt(&mut self, pn: PacketNumber, hdr: &[u8], body: &[u8]) -> Res<Vec<u8>> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
-        qinfo!(
+        qtrace!(
             [self],
             "decrypt pn={} hdr={} body={}",
             pn,

@@ -925,7 +925,7 @@ impl Connection {
                 }
             }
 
-            qdebug!([self], "Received unverified packet {:?}", packet);
+            qtrace!([self], "Received unverified packet {:?}", packet);
 
             let pto = self.loss_recovery.pto();
             let payload = packet.decrypt(&mut self.crypto.states, now + pto);
@@ -980,10 +980,22 @@ impl Connection {
 
         let mut ack_eliciting = false;
         let mut d = Decoder::from(&packet[..]);
+        let mut consecutive_padding = 0;
         #[allow(unused_mut)]
         let mut frames = Vec::new();
         while d.remaining() > 0 {
-            let f = Frame::decode(&mut d)?;
+            let mut f = Frame::decode(&mut d)?;
+
+            // Skip padding
+            while f == Frame::Padding && d.remaining() > 0 {
+                consecutive_padding += 1;
+                f = Frame::decode(&mut d)?;
+            }
+            if consecutive_padding > 0 {
+                qdebug!("PADDING frame repeated {} times", consecutive_padding);
+                consecutive_padding = 0;
+            }
+
             if cfg!(test) {
                 frames.push((f.clone(), space));
             }
@@ -1481,6 +1493,7 @@ impl Connection {
 
     fn input_frame(&mut self, ptype: PacketType, frame: Frame, now: Instant) -> Res<()> {
         if !frame.is_allowed(ptype) {
+            qerror!("frame not allowed: {:?} {:?}", frame, ptype);
             return Err(Error::ProtocolViolation);
         }
         match frame {

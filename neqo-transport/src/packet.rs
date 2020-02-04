@@ -10,7 +10,7 @@ use crate::crypto::{CryptoDxState, CryptoStates};
 use crate::tracking::PNSpace;
 use crate::{Error, Res, Version, QUIC_VERSION};
 
-use neqo_common::{hex, qdebug, qerror, qtrace, Decoder, Encoder};
+use neqo_common::{hex, qerror, qtrace, Decoder, Encoder};
 use neqo_crypto::{aead::Aead, hkdf, random, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
 use std::cell::RefCell;
@@ -195,7 +195,7 @@ impl PacketBuilder {
         }
         let hdr = &self.encoder[self.header.clone()];
         let body = &self.encoder[self.header.end..];
-        qdebug!(
+        qtrace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
             hex(hdr),
@@ -218,7 +218,7 @@ impl PacketBuilder {
         // Finally, cut off the plaintext and add back the ciphertext.
         self.encoder.truncate(self.header.end);
         self.encoder.encode(&ciphertext);
-        qdebug!("Packet built {}", hex(&self.encoder));
+        qtrace!("Packet built {}", hex(&self.encoder));
         Ok(self.encoder)
     }
 

@@ -315,7 +315,7 @@ impl ExtensionHandler for TransportParametersHandler {
     }
 
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
-        qdebug!(
+        qtrace!(
             "Handling transport parameters, msg={:?} value={}",
             msg,
             hex(d),
