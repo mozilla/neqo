@@ -984,7 +984,11 @@ impl Connection {
                 f = Frame::decode(&mut d)?;
             }
             if consecutive_padding > 0 {
-                qdebug!("PADDING frame repeated {} times", consecutive_padding);
+                qdebug!(
+                    [self],
+                    "PADDING frame repeated {} times",
+                    consecutive_padding
+                );
                 consecutive_padding = 0;
             }
 
