@@ -1099,8 +1099,16 @@ impl Connection {
             }
         };
         let mut builder = if pt == PacketType::Short {
+            qdebug!("Building Short dcid {}", &path.remote_cid,);
             PacketBuilder::short(encoder, tx.key_phase(), &path.remote_cid)
         } else {
+            qdebug!(
+                "Building {:?} dcid {} scid {}",
+                pt,
+                &path.remote_cid,
+                path.local_cids.first().unwrap()
+            );
+
             PacketBuilder::long(
                 encoder,
                 pt,
@@ -1110,6 +1118,7 @@ impl Connection {
         };
         if pt == PacketType::Initial {
             builder.initial_token(if let Some(info) = retry_info {
+                qtrace!("Initial token {}", hex(&info.token));
                 &info.token
             } else {
                 &[]
