@@ -519,6 +519,8 @@ impl RecvStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frame::Frame;
+    use neqo_common::matches;
 
     #[test]
     fn test_stream_rx() {
@@ -749,5 +751,27 @@ mod tests {
         assert_eq!(rx_ord.bytes_ready(), 9);
         assert_eq!(rx_ord.buffered(), 15);
         assert_eq!(rx_ord.retired(), 2);
+    }
+
+    #[test]
+    fn no_stream_flowc_event_after_exiting_recv() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        let conn_events = ConnectionEvents::default();
+
+        let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
+
+        let mut s = RecvStream::new(
+            67.into(),
+            RX_STREAM_DATA_WINDOW,
+            Rc::clone(&flow_mgr),
+            conn_events,
+        );
+
+        s.inbound_stream_frame(false, 0, frame1).unwrap();
+        flow_mgr.borrow_mut().max_stream_data(67.into(), 100);
+        assert!(matches!(s.flow_mgr.borrow().peek().unwrap(), Frame::MaxStreamData{..}));
+        s.inbound_stream_frame(true, RX_STREAM_DATA_WINDOW, vec![])
+            .unwrap();
+        assert!(matches!(s.flow_mgr.borrow().peek(), None));
     }
 }
