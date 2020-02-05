@@ -10,7 +10,7 @@ use crate::client_events::Http3ClientEvents;
 use crate::connection::Http3Transaction;
 use crate::response_stream::ResponseStream;
 use crate::Header;
-use neqo_common::{qdebug, qinfo, qtrace, qwarn, Encoder};
+use neqo_common::{qinfo, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
@@ -59,13 +59,12 @@ impl Request {
         }
 
         qinfo!([self], "Encoding headers for {}/{}", self.host, self.path);
-        let encoded_headers = encoder.encode_header_block(&self.headers, stream_id);
+        let header_block = encoder.encode_header_block(&self.headers, stream_id);
         let f = HFrame::Headers {
-            len: encoded_headers.len() as u64,
+            header_block: header_block.to_vec(),
         };
         let mut d = Encoder::default();
         f.encode(&mut d);
-        d.encode(&encoded_headers[..]);
         self.buf = Some(d.into());
     }
 
@@ -265,11 +264,7 @@ impl Http3Transaction for TransactionClient {
         Ok(())
     }
 
-    fn receive(
-        &mut self,
-        conn: &mut Connection,
-        decoder: &mut QPackDecoder,
-    ) -> Res<()> {
+    fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
         self.response_stream.receive(conn, decoder)
     }
 
