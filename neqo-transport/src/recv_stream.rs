@@ -29,7 +29,7 @@ pub(crate) type RecvStreams = BTreeMap<StreamId, RecvStream>;
 
 /// Holds data not yet read by application. Orders and dedupes data ranges
 /// from incoming STREAM frames.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
@@ -274,7 +274,7 @@ impl RxStreamOrderer {
 }
 
 /// QUIC receiving states, based on -transport 3.2.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 #[allow(dead_code)]
 // Because a dead_code warning is easier than clippy::unused_self, see https://github.com/rust-lang/rust/issues/68408
 enum RecvStreamState {
