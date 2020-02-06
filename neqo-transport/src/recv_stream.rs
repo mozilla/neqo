@@ -356,7 +356,7 @@ impl RecvStream {
     }
 
     fn set_state(&mut self, new_state: RecvStreamState) {
-        assert_ne!(
+        debug_assert_ne!(
             mem::discriminant(&self.state),
             mem::discriminant(&new_state)
         );
