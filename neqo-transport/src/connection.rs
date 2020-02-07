@@ -3198,6 +3198,10 @@ mod tests {
             frames[0],
             (Frame::Stream { .. }, PNSpace::ApplicationData)
         ));
+        assert!(matches!(
+            frames[1],
+            (Frame::Stream { .. }, PNSpace::ApplicationData)
+        ));
     }
 
     #[test]

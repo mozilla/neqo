@@ -637,7 +637,7 @@ impl LossRecovery {
         let mut lost = Vec::new();
         for space in PNSpace::iter() {
             // Skip early packet number spaces where the PTO timer hasn't fired.
-            // Once the timer for one space has fired, include higher spaces. Declaring more 
+            // Once the timer for one space has fired, include higher spaces. Declaring more
             // data as "lost" makes it more likely that PTO packets will include useful data.
             if lost.is_empty() && self.pto_time(*space).map(|t| t > now).unwrap_or(true) {
                 continue;

@@ -885,22 +885,14 @@ impl CryptoStreams {
             .mark_as_lost(token.offset, token.length)
     }
 
-    pub fn sent(&mut self, space: PNSpace, offset: u64, length: usize) {
-        self[space].tx.mark_as_sent(offset, length)
-    }
-
-    pub fn next_bytes(&self, space: PNSpace) -> Option<(u64, &[u8])> {
-        self[space].tx.next_bytes()
-    }
-
     pub fn get_frame(
         &mut self,
         space: PNSpace,
         remaining: usize,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        if let Some((offset, data)) = self.next_bytes(space) {
+        if let Some((offset, data)) = self[space].tx.next_bytes() {
             let (frame, length) = Frame::new_crypto(offset, data, remaining);
-            self.sent(space, offset, length);
+            self[space].tx.mark_as_sent(offset, length);
 
             qdebug!(
                 "Emitting crypto frame space={}, offset={}, len={}",
