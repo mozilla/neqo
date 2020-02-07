@@ -185,7 +185,14 @@ impl LossRecoverySpace {
     pub fn pto_packets(&mut self, count: usize) -> impl Iterator<Item = &SentPacket> {
         self.sent_packets
             .iter_mut()
-            .filter_map(|(_, sent)| if sent.pto() { Some(&*sent) } else { None })
+            .filter_map(|(pn, sent)| {
+                if sent.pto() {
+                    qtrace!("PTO: marking packet {} lost ", pn);
+                    Some(&*sent)
+                } else {
+                    None
+                }
+            })
             .take(count)
     }
 
@@ -604,7 +611,7 @@ impl LossRecovery {
             .map(|(spc, val)| (spc, val + self.loss_delay()))
     }
 
-    fn pto_time_for_pn(&self, pn_space: PNSpace) -> Option<Instant> {
+    fn pto_time(&self, pn_space: PNSpace) -> Option<Instant> {
         if let Some(time) = self.spaces[pn_space].time_of_last_sent_ack_eliciting_packet() {
             Some(time + self.pto_timeout(pn_space))
         } else {
@@ -616,7 +623,7 @@ impl LossRecovery {
     pub fn get_min_pto(&self) -> Option<Instant> {
         // TODO ignore PNSpace::Application until handshake is done -> a server side problem.
         PNSpace::iter()
-            .filter_map(|spc| self.pto_time_for_pn(*spc))
+            .filter_map(|spc| self.pto_time(*spc))
             .min_by_key(|&time| time)
     }
 
@@ -629,15 +636,14 @@ impl LossRecovery {
 
         let mut lost = Vec::new();
         for space in PNSpace::iter() {
-            if self
-                .pto_time_for_pn(*space)
-                .map(|t| t > now)
-                .unwrap_or(true)
-            {
+            // Skip early packet number spaces where the PTO timer hasn't fired.
+            // Once the timer for one space has fired, include higher spaces. Declaring more 
+            // data as "lost" makes it more likely that PTO packets will include useful data.
+            if lost.is_empty() && self.pto_time(*space).map(|t| t > now).unwrap_or(true) {
                 continue;
             }
-            qdebug!([self], "PTO timer fired for {}", space);
             if lost.is_empty() {
+                qdebug!([self], "PTO timer fired for {}", space);
                 self.loss_recovery_state = LossRecoveryState::new(
                     LossRecoveryMode::PtoExpired {
                         dgram_available: PTO_COUNT,

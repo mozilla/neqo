@@ -29,7 +29,7 @@ use crate::crypto::{Crypto, CryptoDxState};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
-use crate::frame::{AckRange, Frame, FrameType, StreamType, TxMode};
+use crate::frame::{AckRange, Frame, FrameType, StreamType};
 use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
 use crate::recovery::{LossRecovery, RecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
@@ -1177,7 +1177,6 @@ impl Connection {
         &mut self,
         builder: &mut PacketBuilder,
         space: PNSpace,
-        tx_mode: TxMode,
         limit: usize,
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool) {
@@ -1187,21 +1186,18 @@ impl Connection {
         while builder.len() + 2 < limit {
             let remaining = limit - builder.len();
             // Try to get a frame from frame sources
-            let mut frame = None;
-            if tx_mode == TxMode::Normal {
-                frame = self.acks.get_frame(now, space);
-            }
+            let mut frame = self.acks.get_frame(now, space);
             if frame.is_none() && space == PNSpace::ApplicationData && self.role == Role::Server {
                 frame = self.state_signaling.send_done();
             }
             if frame.is_none() {
-                frame = self.crypto.streams.get_frame(space, tx_mode, remaining)
+                frame = self.crypto.streams.get_frame(space, remaining)
             }
-            if frame.is_none() && tx_mode == TxMode::Normal {
+            if frame.is_none() {
                 frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
             }
             if frame.is_none() {
-                frame = self.send_streams.get_frame(space, tx_mode, remaining);
+                frame = self.send_streams.get_frame(space, remaining);
             }
 
             if let Some((frame, token)) = frame {
@@ -1212,18 +1208,7 @@ impl Connection {
                     tokens.push(t);
                 }
             } else {
-                if tx_mode == TxMode::Pto {
-                    // Add a PING.
-                    builder.encode_varint(Frame::Ping.get_type());
-                    ack_eliciting = true;
-                }
                 return (tokens, ack_eliciting);
-            }
-
-            // PTO only ever sends one frame and they always elicit ACKs.
-            if tx_mode == TxMode::Pto {
-                debug_assert!(ack_eliciting);
-                return (tokens, true);
             }
         }
         (tokens, ack_eliciting)
@@ -1235,15 +1220,15 @@ impl Connection {
         let mut needs_padding = false;
 
         // Check whether we are sending packets in PTO mode.
-        let (tx_mode, cong_avail, min_pn_space) =
+        let (pto, cong_avail, min_pn_space) =
             if let Some((min_pto_pn_space, can_send)) = self.loss_recovery.check_pto() {
                 if !can_send {
                     return Ok(None);
                 }
-                (TxMode::Pto, path.mtu(), min_pto_pn_space)
+                (true, path.mtu(), min_pto_pn_space)
             } else {
                 (
-                    TxMode::Normal,
+                    false,
                     usize::try_from(self.loss_recovery.cwnd_avail()).unwrap(),
                     PNSpace::Initial,
                 )
@@ -1278,12 +1263,17 @@ impl Connection {
             }
             let limit = limit - tx.expansion();
 
-            let (tokens, ack_eliciting) =
-                self.add_frames(&mut builder, *space, tx_mode, limit, now);
+            let (tokens, mut ack_eliciting) = self.add_frames(&mut builder, *space, limit, now);
             if builder.is_empty() {
-                // Nothing to include in this packet.
-                encoder = builder.abort();
-                continue;
+                if pto {
+                    // Add a PING.
+                    builder.encode_varint(Frame::Ping.get_type());
+                    ack_eliciting = true;
+                } else {
+                    // Nothing to include in this packet.
+                    encoder = builder.abort();
+                    continue;
+                }
             }
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
@@ -1301,16 +1291,13 @@ impl Connection {
             encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
             assert!(encoder.len() <= path.mtu());
 
-            if tx_mode != TxMode::Pto && ack_eliciting {
+            if !pto && ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
             }
 
             // Normal packets are in flight if they include PADDING frames,
             // but we don't send those.
-            let in_flight = match tx_mode {
-                TxMode::Pto => false,
-                TxMode::Normal => ack_eliciting,
-            };
+            let in_flight = if pto { false } else { ack_eliciting };
 
             let sent = SentPacket::new(
                 now,
@@ -1335,8 +1322,8 @@ impl Connection {
             }
         }
 
-        if encoder.len() == 0 {
-            assert!(tx_mode != TxMode::Pto);
+        if encoder.is_empty() {
+            assert!(!pto);
             Ok(None)
         } else {
             debug_assert!(encoder.len() <= path.mtu());
@@ -3550,8 +3537,8 @@ mod tests {
 
         // Wait for PTO to expire and resend a handshake and 1rtt packet
         now += Duration::from_millis(120);
-        let pkt4 = client.process(None, now).dgram();
-        assert!(pkt4.is_some());
+        let pkt5 = client.process(None, now).dgram();
+        assert!(pkt5.is_some());
 
         now += Duration::from_millis(10);
         let frames = server.test_process_input(pkt3.unwrap(), now);
@@ -3562,7 +3549,7 @@ mod tests {
         ));
 
         now += Duration::from_millis(10);
-        let frames = server.test_process_input(pkt4.unwrap(), now);
+        let frames = server.test_process_input(pkt5.unwrap(), now);
         assert!(matches!(
             frames[1],
             (Frame::Stream { .. }, PNSpace::ApplicationData)

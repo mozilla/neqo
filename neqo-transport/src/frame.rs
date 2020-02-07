@@ -694,12 +694,6 @@ impl Frame {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum TxMode {
-    Normal,
-    Pto,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

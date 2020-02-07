@@ -21,7 +21,7 @@ use neqo_crypto::{
 };
 
 use crate::connection::Role;
-use crate::frame::{Frame, TxMode};
+use crate::frame::Frame;
 use crate::packet::PacketNumber;
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
@@ -889,17 +889,16 @@ impl CryptoStreams {
         self[space].tx.mark_as_sent(offset, length)
     }
 
-    pub fn next_bytes(&self, space: PNSpace, mode: TxMode) -> Option<(u64, &[u8])> {
-        self[space].tx.next_bytes(mode)
+    pub fn next_bytes(&self, space: PNSpace) -> Option<(u64, &[u8])> {
+        self[space].tx.next_bytes()
     }
 
     pub fn get_frame(
         &mut self,
         space: PNSpace,
-        mode: TxMode,
         remaining: usize,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        if let Some((offset, data)) = self.next_bytes(space, mode) {
+        if let Some((offset, data)) = self.next_bytes(space) {
             let (frame, length) = Frame::new_crypto(offset, data, remaining);
             self.sent(space, offset, length);
 

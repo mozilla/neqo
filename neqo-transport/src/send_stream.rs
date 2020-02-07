@@ -19,7 +19,7 @@ use neqo_common::{matches, qdebug, qerror, qinfo, qtrace};
 
 use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
-use crate::frame::{Frame, TxMode};
+use crate::frame::Frame;
 use crate::recovery::RecoveryToken;
 use crate::stream_id::StreamId;
 use crate::tracking::PNSpace;
@@ -299,35 +299,24 @@ impl TxBuffer {
         can_buffer
     }
 
-    pub fn next_bytes(&self, mode: TxMode) -> Option<(u64, &[u8])> {
-        match mode {
-            TxMode::Normal => {
-                let (start, maybe_len) = self.ranges.first_unmarked_range();
+    pub fn next_bytes(&self) -> Option<(u64, &[u8])> {
+        let (start, maybe_len) = self.ranges.first_unmarked_range();
 
-                if start == self.retired + u64::try_from(self.buffered()).unwrap() {
-                    return None;
-                }
+        if start == self.retired + u64::try_from(self.buffered()).unwrap() {
+            return None;
+        }
 
-                let buff_off = usize::try_from(start - self.retired).unwrap();
-                match maybe_len {
-                    Some(len) => {
-                        let len = min(len, self.send_buf.as_slices().0.len().try_into().unwrap());
-                        Some((
-                            start,
-                            &self.send_buf.as_slices().0
-                                [buff_off..buff_off + usize::try_from(len).unwrap()],
-                        ))
-                    }
-                    None => Some((start, &self.send_buf.as_slices().0[buff_off..])),
-                }
+        let buff_off = usize::try_from(start - self.retired).unwrap();
+        match maybe_len {
+            Some(len) => {
+                let len = min(len, self.send_buf.as_slices().0.len().try_into().unwrap());
+                Some((
+                    start,
+                    &self.send_buf.as_slices().0
+                        [buff_off..buff_off + usize::try_from(len).unwrap()],
+                ))
             }
-            TxMode::Pto => {
-                if self.buffered() == 0 {
-                    None
-                } else {
-                    Some((self.retired, &self.send_buf.as_slices().0))
-                }
-            }
+            None => Some((start, &self.send_buf.as_slices().0[buff_off..])),
         }
     }
 
@@ -471,15 +460,15 @@ impl SendStream {
     }
 
     /// Return the next range to be sent, if any.
-    pub fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
+    pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
         match self.state {
-            SendStreamState::Send { ref send_buf } => send_buf.next_bytes(mode),
+            SendStreamState::Send { ref send_buf } => send_buf.next_bytes(),
             SendStreamState::DataSent {
                 ref send_buf,
                 fin_sent,
                 final_size,
             } => {
-                let bytes = send_buf.next_bytes(mode);
+                let bytes = send_buf.next_bytes();
                 if bytes.is_some() {
                     // Must be a resend
                     bytes
@@ -745,7 +734,6 @@ impl SendStreams {
     pub(crate) fn get_frame(
         &mut self,
         space: PNSpace,
-        mode: TxMode,
         remaining: usize,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
         if space != PNSpace::ApplicationData {
@@ -754,17 +742,16 @@ impl SendStreams {
 
         for (stream_id, stream) in self {
             let complete = stream.final_size().is_some();
-            if let Some((offset, data)) = stream.next_bytes(mode) {
+            if let Some((offset, data)) = stream.next_bytes() {
                 if let Some((frame, length)) =
                     Frame::new_stream(stream_id.as_u64(), offset, data, complete, remaining)
                 {
                     qdebug!(
-                        "Stream {} sending bytes {}-{}, space {:?}, mode {:?}",
+                        "Stream {} sending bytes {}-{}, space {:?}",
                         stream_id.as_u64(),
                         offset,
                         offset + length as u64,
                         space,
-                        mode,
                     );
                     let fin = complete && length == data.len();
                     debug_assert!(!fin || matches!(frame, Frame::Stream{fin: true, .. }));
@@ -933,15 +920,15 @@ mod tests {
     fn test_tx_buffer_acks() {
         let mut tx = TxBuffer::new();
         assert_eq!(tx.send(&[4; 100]), 100);
-        let res = tx.next_bytes(TxMode::Normal).unwrap();
+        let res = tx.next_bytes().unwrap();
         assert_eq!(res.0, 0);
         assert_eq!(res.1.len(), 100);
         tx.mark_as_sent(0, 100);
-        let res = tx.next_bytes(TxMode::Normal);
+        let res = tx.next_bytes();
         assert_eq!(res, None);
 
         tx.mark_as_acked(0, 100);
-        let res = tx.next_bytes(TxMode::Normal);
+        let res = tx.next_bytes();
         assert_eq!(res, None);
     }
 
