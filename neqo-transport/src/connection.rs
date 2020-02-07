@@ -683,16 +683,18 @@ impl Connection {
             qinfo!("Timer fired while closing/closed");
             return;
         }
-
-        let res = self.crypto.states.check_key_update(now);
-        self.absorb_error(now, res);
-
         if self.idle_timeout.expired(now) {
             qinfo!("idle timeout expired");
             self.set_state(State::Closed(ConnectionError::Transport(
                 Error::IdleTimeout,
             )));
-        } else if let Some(packets) = self.loss_recovery.check_loss_detection_timeout(now) {
+            return;
+        }
+
+        let res = self.crypto.states.check_key_update(now);
+        self.absorb_error(now, res);
+
+        if let Some(packets) = self.loss_recovery.check_loss_detection_timeout(now) {
             self.handle_lost_packets(&packets);
         }
     }
@@ -1234,7 +1236,7 @@ impl Connection {
 
         // Check whether we are sending packets in PTO mode.
         let (tx_mode, cong_avail, min_pn_space) =
-            if let Some((min_pto_pn_space, can_send)) = self.loss_recovery.get_pto_state() {
+            if let Some((min_pto_pn_space, can_send)) = self.loss_recovery.check_pto() {
                 if !can_send {
                     return Ok(None);
                 }
@@ -1669,6 +1671,9 @@ impl Connection {
         Ok(())
     }
 
+    /// Given a set of `SentPacket` instances, ensure that the source of the packet
+    /// is told that they are lost.  This gives the frame generation code a chance
+    /// to retransmit the frame as needed.
     fn handle_lost_packets(&mut self, lost_packets: &[SentPacket]) {
         for lost in lost_packets {
             for token in &lost.tokens {
@@ -3318,6 +3323,10 @@ mod tests {
         assert!(pkt2.is_some());
         assert_eq!(pkt2.unwrap().len(), 1232);
 
+        let pkt3 = client.process(None, now).dgram();
+        assert!(pkt3.is_some());
+        assert_eq!(pkt3.unwrap().len(), 1232);
+
         let out = client.process(None, now);
         // PTO has doubled.
         assert_eq!(out, Output::Callback(Duration::from_millis(240)));
@@ -3380,6 +3389,10 @@ mod tests {
         let pkt2 = client.process(None, now).dgram();
         assert!(pkt2.is_some());
 
+        // Get a second PTO packet.
+        let pkt3 = client.process(None, now).dgram();
+        assert!(pkt3.is_some());
+
         // PTO has been doubled.
         let out = client.process(None, now);
         assert_eq!(out, Output::Callback(Duration::from_millis(120)));
@@ -3391,11 +3404,16 @@ mod tests {
         let pkt = server.process(pkt1, now).dgram();
         assert!(pkt.is_some());
 
-        // Check that the second packet(pkt2) has a Handshake and an app pn space packet.
+        // Check that the PTO packets (pkt2, pkt3) have a Handshake and an app pn space packet.
         // The server has discarded the Handshake keys already, therefore the handshake packet
         // will be dropped.
         let dropped_before = server.stats().dropped_rx;
         let frames = server.test_process_input(pkt2.unwrap(), now);
+        assert_eq!(1, server.stats().dropped_rx - dropped_before);
+        assert!(matches!(frames[0], (Frame::Ping, PNSpace::ApplicationData)));
+
+        let dropped_before = server.stats().dropped_rx;
+        let frames = server.test_process_input(pkt3.unwrap(), now);
         assert_eq!(1, server.stats().dropped_rx - dropped_before);
         assert!(matches!(frames[0], (Frame::Ping, PNSpace::ApplicationData)));
 
@@ -3522,6 +3540,8 @@ mod tests {
         now += Duration::from_millis(50);
         let pkt3 = client.process(None, now).dgram();
         assert!(pkt3.is_some());
+        let pkt4 = client.process(None, now).dgram();
+        assert!(pkt4.is_some());
 
         // Get PTO timer. It is the timer for pkt2(app pn space). PTO has been doubled.
         // pkt2 has been sent 50ms ago (50 + 120 = 170 == 2*85)
@@ -3829,6 +3849,39 @@ mod tests {
         assert!(cwnd2 < cwnd1 + 500);
     }
 
+    fn induce_persistent_congestion(
+        client: &mut Connection,
+        server: &mut Connection,
+        mut now: Instant,
+    ) -> Instant {
+        // Note: wait some arbitrary time that should be longer than pto
+        // timer. This is rather brittle.
+        now += Duration::from_secs(1);
+
+        client.process_timer(now); // Should enter PTO mode
+        let c_tx_dgrams = send_bytes(client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
+
+        now += Duration::from_secs(2);
+        client.process_timer(now); // Should enter PTO mode
+        let c_tx_dgrams = send_bytes(client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
+
+        now += Duration::from_secs(4);
+        client.process_timer(now); // Should enter PTO mode
+        let c_tx_dgrams = send_bytes(client, 0, now);
+        assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
+
+        // Generate ACK
+        let (s_tx_dgram, _) = ack_bytes(server, 0, c_tx_dgrams, now);
+
+        // In PC now.
+        client.test_process_input(s_tx_dgram, now);
+
+        assert_eq!(client.loss_recovery.cwnd(), MIN_CONG_WINDOW);
+        now
+    }
+
     #[test]
     /// Verify transition to persistent congestion state if conditions are met.
     fn cc_slow_start_to_persistent_congestion_no_acks() {
@@ -3851,31 +3904,7 @@ mod tests {
 
         // ACK lost.
 
-        // Note: wait some arbitrary time that should be longer than pto
-        // timer. This is rather brittle.
-        now += Duration::from_secs(1);
-
-        client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
-        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
-
-        now += Duration::from_secs(2);
-        client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
-        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
-
-        now += Duration::from_secs(4);
-        client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
-        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
-
-        // Generate ACK
-        let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
-
-        // In PC now.
-        client.test_process_input(s_tx_dgram, now);
-
-        assert_eq!(client.loss_recovery.cwnd(), MIN_CONG_WINDOW);
+        induce_persistent_congestion(&mut client, &mut server, now);
     }
 
     #[test]
@@ -3907,28 +3936,7 @@ mod tests {
         // Not received.
         // let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
-        now += Duration::from_secs(1);
-        client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
-        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
-
-        now += Duration::from_secs(2);
-        client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
-        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
-
-        now += Duration::from_secs(4);
-        client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
-        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
-
-        // Generate ACK
-        let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
-
-        // In PC now.
-        client.test_process_input(s_tx_dgram, now);
-
-        assert_eq!(client.loss_recovery.cwnd(), MIN_CONG_WINDOW);
+        induce_persistent_congestion(&mut client, &mut server, now);
     }
 
     #[test]
@@ -3954,31 +3962,7 @@ mod tests {
 
         // ACK lost.
 
-        // Note: wait some arbitrary time that should be longer than pto
-        // timer. This is rather brittle.
-        now += Duration::from_secs(1);
-
-        client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
-        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
-
-        now += Duration::from_secs(2);
-        client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
-        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
-
-        now += Duration::from_secs(4);
-        client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
-        assert_eq!(c_tx_dgrams.len(), 1); // One PTO packet
-
-        // Generate ACK
-        let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
-
-        // In PC now.
-        client.test_process_input(s_tx_dgram, now);
-
-        assert_eq!(client.loss_recovery.cwnd(), MIN_CONG_WINDOW);
+        now = induce_persistent_congestion(&mut client, &mut server, now);
 
         // New part of test starts here
 

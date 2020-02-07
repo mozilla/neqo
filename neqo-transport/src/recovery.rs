@@ -113,7 +113,7 @@ impl LossRecoveryState {
         self.mode
     }
 
-    pub fn get_pto_state(&mut self) -> Option<(PNSpace, bool)> {
+    pub fn check_pto(&mut self) -> Option<(PNSpace, bool)> {
         if let LossRecoveryMode::PtoExpired {
             dgram_available,
             min_pn_space,
@@ -180,6 +180,13 @@ impl LossRecoverySpace {
 
     pub fn ack_eliciting_outstanding(&self) -> bool {
         self.ack_eliciting_outstanding > 0
+    }
+
+    pub fn pto_packets(&mut self, count: usize) -> impl Iterator<Item = &SentPacket> {
+        self.sent_packets
+            .iter_mut()
+            .filter_map(|(_, sent)| if sent.pto() { Some(&*sent) } else { None })
+            .take(count)
     }
 
     pub fn time_of_last_sent_ack_eliciting_packet(&self) -> Option<Instant> {
@@ -613,20 +620,36 @@ impl LossRecovery {
             .min_by_key(|&time| time)
     }
 
-    pub fn get_min_pto_pn_space(&self, now: Instant) -> Option<PNSpace> {
-        PNSpace::iter()
-            .filter_map(|spc| {
-                if let Some(time) = self.pto_time_for_pn(*spc) {
-                    if time <= now {
-                        Some(*spc)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-            .min_by_key(|&spc| spc)
+    /// This checks whether the PTO timer has fired.
+    /// When it has, mark a few packets as "lost" for the purposes of having frames
+    /// regenerated in subsequent packets.  The packets aren't truly lost, so
+    /// we have to clone the `SentPacket` instance.
+    fn check_pto_timer(&mut self, now: Instant) -> Option<Vec<SentPacket>> {
+        const PTO_COUNT: usize = 2;
+
+        let mut lost = Vec::new();
+        for space in PNSpace::iter() {
+            if self
+                .pto_time_for_pn(*space)
+                .map(|t| t > now)
+                .unwrap_or(true)
+            {
+                continue;
+            }
+            qdebug!([self], "PTO timer fired for {}", space);
+            if lost.is_empty() {
+                self.loss_recovery_state = LossRecoveryState::new(
+                    LossRecoveryMode::PtoExpired {
+                        dgram_available: PTO_COUNT,
+                        min_pn_space: *space,
+                    },
+                    Some(now),
+                );
+                self.pto_count += 1;
+            }
+            lost.extend(self.spaces[*space].pto_packets(PTO_COUNT).cloned());
+        }
+        Some(lost)
     }
 
     pub fn check_loss_detection_timeout(&mut self, now: Instant) -> Option<Vec<SentPacket>> {
@@ -650,32 +673,20 @@ impl LossRecovery {
                 let (pn_space, _) = self
                     .get_earliest_loss_time()
                     .expect("must be sent packets if in LostPackets mode");
-                return Some(self.detect_lost_packets(pn_space, now));
+                Some(self.detect_lost_packets(pn_space, now))
             }
             LossRecoveryMode::PtoTimer => {
-                qinfo!(
-                    [self],
-                    "check_loss_detection_timeout -send_one_or_two_packets"
-                );
-
-                if let Some(min_pn_space) = self.get_min_pto_pn_space(now) {
-                    self.loss_recovery_state = LossRecoveryState::new(
-                        LossRecoveryMode::PtoExpired {
-                            dgram_available: 1,
-                            min_pn_space,
-                        },
-                        Some(now),
-                    );
-                    self.pto_count += 1;
-                }
+                qinfo!([self], "PTO timer fired, send 1 or 2 packets");
+                self.check_pto_timer(now)
             }
-            _ => {} // We are already in PtoExpired state
+            _ => None, // We are already in PtoExpired state
         }
-        None
     }
 
-    pub fn get_pto_state(&mut self) -> Option<(PNSpace, bool)> {
-        self.loss_recovery_state.get_pto_state()
+    /// Check the PTO state and - if there is a PTO - return the packet number space and
+    /// whether more packets can be sent.
+    pub fn check_pto(&mut self) -> Option<(PNSpace, bool)> {
+        self.loss_recovery_state.check_pto()
     }
 }
 
