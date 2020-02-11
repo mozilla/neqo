@@ -67,6 +67,9 @@ scoped_ptr!(Slot, PK11SlotInfo, PK11_FreeSlot);
 
 impl SymKey {
     /// You really don't want to use this.
+    ///
+    /// # Errors
+    /// Internal errors in case of failures in NSS.
     pub fn as_bytes<'a>(&'a self) -> Res<&'a [u8]> {
         secstatus_to_res(unsafe { PK11_ExtractKeyValue(self.ptr) })?;
 
