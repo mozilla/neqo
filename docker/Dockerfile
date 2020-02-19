@@ -8,7 +8,7 @@ LABEL maintainer="Martin Thomson <mt@lowentropy.net>"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates coreutils curl git make mercurial ssh \
-    build-essential clang llvm libclang-dev gyp ninja-build pkg-config zlib1g-dev \
+    build-essential clang llvm libclang-dev gyp ninja-build pkg-config zlib1g-dev sudo \
  && apt-get autoremove -y && apt-get clean -y \
  && rm -rf /var/lib/apt/lists/*
 
@@ -32,6 +32,7 @@ ENV HOME /home/$USER
 ENV SHELL /bin/bash
 
 RUN useradd -d "$HOME" -s "$SHELL" -m "$USER"
+RUN echo "$USER ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 WORKDIR $HOME
 USER $USER
 
