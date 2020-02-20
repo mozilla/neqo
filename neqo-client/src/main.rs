@@ -14,8 +14,9 @@ use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::io::{self, ErrorKind};
+use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
 use std::time::Instant;
@@ -34,7 +35,7 @@ pub struct Args {
     /// This client still only does HTTP3 no matter what the ALPN says.
     alpn: Vec<String>,
 
-    url: Url,
+    urls: Vec<Url>,
 
     #[structopt(short = "m", default_value = "GET")]
     method: String,
@@ -52,39 +53,13 @@ pub struct Args {
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
-    #[structopt(name = "omit-read-data", long)]
-    /// Do not print received data
-    omit_read_data: bool,
-}
+    #[structopt(name = "output-read-data", long)]
+    /// Output received data to stdout
+    output_read_data: bool,
 
-impl Args {
-    fn remote_addr(&self) -> Result<SocketAddr, io::Error> {
-        Ok(self.to_socket_addrs()?.next().expect("No remote addresses"))
-    }
-
-    fn local_addr(&self) -> Result<SocketAddr, io::Error> {
-        match self.remote_addr()? {
-            SocketAddr::V4(..) => Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0)),
-            SocketAddr::V6(..) => Ok(SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0)),
-        }
-    }
-}
-
-impl ToSocketAddrs for Args {
-    type Iter = ::std::vec::IntoIter<SocketAddr>;
-    fn to_socket_addrs(&self) -> ::std::io::Result<Self::Iter> {
-        // This is idiotic.  There is no path from hostname: String to IpAddr.
-        // And no means of controlling name resolution either.
-        if self.url.port_or_known_default().is_none() {
-            return Err(io::Error::new(ErrorKind::InvalidInput, "invalid port"));
-        }
-        std::fmt::format(format_args!(
-            "{}:{}",
-            self.url.host_str().unwrap_or("localhost"),
-            self.url.port_or_known_default().unwrap()
-        ))
-        .to_socket_addrs()
-    }
+    #[structopt(name = "output-dir", long)]
+    /// Save contents of fetched URLs to a directory
+    output_dir: Option<PathBuf>,
 }
 
 trait Handler {
@@ -203,7 +178,7 @@ impl Handler for PostConnectHandler {
                     let (sz, fin) = client
                         .read_response_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
-                    if args.omit_read_data {
+                    if !args.output_read_data {
                         println!("READ[{}]: {} bytes", stream_id, sz);
                     } else if let Ok(txt) = String::from_utf8(data.clone()) {
                         println!("READ[{}]: {}", stream_id, txt);
@@ -239,9 +214,15 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
         .collect()
 }
 
-fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: SocketAddr) {
+fn client(
+    args: &Args,
+    socket: UdpSocket,
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
+    url: &Url,
+) {
     let mut client = Http3Client::new(
-        args.url.host_str().unwrap(),
+        url.host_str().unwrap(),
         &args.alpn,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
@@ -263,9 +244,9 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
 
     let client_stream_id = client.fetch(
         &args.method,
-        &args.url.scheme(),
-        &args.url.host_str().unwrap(),
-        &args.url.path(),
+        &url.scheme(),
+        &url.host_str().unwrap(),
+        &url.path(),
         &to_headers(&args.header),
     );
 
@@ -288,35 +269,51 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
     );
 }
 
-fn main() {
+fn main() -> std::io::Result<()> {
     init();
     let args = Args::from_args();
 
-    let remote_addr = match args.remote_addr() {
-        Err(e) => {
-            eprintln!("Unable to resolve remote addr: {}", e);
-            exit(1)
+    let urls = args.urls.clone();
+    for url in &urls {
+        let addrs: Vec<_> = format!(
+            "{}:{}",
+            url.host_str().unwrap_or("localhost"),
+            url.port_or_known_default().unwrap()
+        )
+        .to_socket_addrs()?
+        .collect();
+        let remote_addr = addrs.first().unwrap().clone();
+
+        let local_addr = match remote_addr {
+            SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0),
+            SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
+        };
+
+        let socket = match UdpSocket::bind(local_addr) {
+            Err(e) => {
+                eprintln!("Unable to bind UDP socket: {}", e);
+                exit(1)
+            }
+            Ok(s) => s,
+        };
+        socket
+            .connect(&remote_addr)
+            .expect("Unable to connect UDP socket");
+
+        println!(
+            "Client connecting: {:?} -> {:?}",
+            socket.local_addr().unwrap(),
+            remote_addr
+        );
+
+        if args.use_old_http {
+            old::old_client(&args, socket, local_addr, remote_addr, url)
+        } else {
+            client(&args, socket, local_addr, remote_addr, url)
         }
-        Ok(addr) => addr,
-    };
-    let socket = match args.local_addr().and_then(UdpSocket::bind) {
-        Err(e) => {
-            eprintln!("Unable to bind UDP socket: {}", e);
-            exit(1)
-        }
-        Ok(s) => s,
-    };
-    socket.connect(&args).expect("Unable to connect UDP socket");
-
-    let local_addr = socket.local_addr().expect("Socket local address not bound");
-
-    println!("Client connecting: {:?} -> {:?}", local_addr, remote_addr);
-
-    if args.use_old_http {
-        old::old_client(args, socket, local_addr, remote_addr)
-    } else {
-        client(args, socket, local_addr, remote_addr)
     }
+
+    Ok(())
 }
 
 mod old {
@@ -326,6 +323,8 @@ mod old {
     use std::process::exit;
     use std::rc::Rc;
     use std::time::Instant;
+
+    use url::Url;
 
     use neqo_common::Datagram;
     use neqo_transport::{
@@ -365,7 +364,7 @@ mod old {
                         let (sz, fin) = client
                             .stream_recv(stream_id, &mut data)
                             .expect("Read should succeed");
-                        if args.omit_read_data {
+                        if !args.output_read_data {
                             println!("READ[{}]: {} bytes", stream_id, sz);
                         } else {
                             println!(
@@ -435,18 +434,19 @@ mod old {
     }
 
     pub fn old_client(
-        args: Args,
+        args: &Args,
         socket: UdpSocket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
+        url: &Url,
     ) {
-        dbg!(args.url.host_str().unwrap());
+        dbg!(url.host_str().unwrap());
         dbg!(&args.alpn);
         dbg!(local_addr);
         dbg!(remote_addr);
 
         let mut client = Connection::new_client(
-            args.url.host_str().unwrap(),
+            url.host_str().unwrap(),
             &["http/0.9"],
             Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
             local_addr,
