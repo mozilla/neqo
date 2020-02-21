@@ -9,12 +9,13 @@
 
 use neqo_common::{hex, matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::io::ErrorKind;
+use std::fs::{File, OpenOptions};
+use std::io::{self, ErrorKind, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
 use std::process::exit;
@@ -22,6 +23,26 @@ use std::rc::Rc;
 use std::time::Instant;
 use structopt::StructOpt;
 use url::Url;
+
+#[derive(Debug)]
+enum ClientError {
+    Http3Error(neqo_http3::Error),
+    IoError(io::Error),
+}
+
+impl From<io::Error> for ClientError {
+    fn from(err: io::Error) -> Self {
+        Self::IoError(err)
+    }
+}
+
+impl From<neqo_http3::Error> for ClientError {
+    fn from(err: neqo_http3::Error) -> Self {
+        Self::Http3Error(err)
+    }
+}
+
+type Res<T> = Result<T, ClientError>;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -63,7 +84,12 @@ pub struct Args {
 }
 
 trait Handler {
-    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> bool;
+    fn handle(
+        &mut self,
+        args: &Args,
+        client: &mut Http3Client,
+        out_file: &mut Option<File>,
+    ) -> Res<bool>;
 }
 
 fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) {
@@ -82,14 +108,15 @@ fn process_loop(
     client: &mut Http3Client,
     handler: &mut dyn Handler,
     args: &Args,
-) -> neqo_http3::Http3State {
+    out_file: &mut Option<File>,
+) -> Res<neqo_http3::Http3State> {
     let buf = &mut [0u8; 2048];
     loop {
         if let Http3State::Closed(..) = client.state() {
-            return client.state();
+            return Ok(client.state());
         }
 
-        let mut exiting = !handler.handle(args, client);
+        let mut exiting = !handler.handle(args, client, out_file)?;
 
         loop {
             let output = client.process_output(Instant::now());
@@ -110,7 +137,7 @@ fn process_loop(
         client.process_http3(Instant::now());
 
         if exiting {
-            return client.state();
+            return Ok(client.state());
         }
 
         match socket.recv(&mut buf[..]) {
@@ -139,12 +166,17 @@ fn process_loop(
 
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
-    fn handle(&mut self, _args: &Args, client: &mut Http3Client) -> bool {
+    fn handle(
+        &mut self,
+        _args: &Args,
+        client: &mut Http3Client,
+        _out_file: &mut Option<File>,
+    ) -> Res<bool> {
         let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
         if client.events().any(authentication_needed) {
             client.authenticated(AuthenticationStatus::Ok, Instant::now());
         }
-        Http3State::Connected != client.state()
+        Ok(Http3State::Connected != client.state())
     }
 }
 
@@ -155,7 +187,12 @@ struct PostConnectHandler {
 
 // This is a bit fancier than actually needed.
 impl Handler for PostConnectHandler {
-    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> bool {
+    fn handle(
+        &mut self,
+        args: &Args,
+        client: &mut Http3Client,
+        out_file: &mut Option<File>,
+    ) -> Res<bool> {
         let mut data = vec![0; 4000];
         client.process_http3(Instant::now());
         while let Some(event) = client.next_event() {
@@ -163,39 +200,49 @@ impl Handler for PostConnectHandler {
                 Http3ClientEvent::HeaderReady { stream_id } => {
                     if !self.streams.contains(&stream_id) {
                         println!("Data on unexpected stream: {}", stream_id);
-                        return false;
+                        return Ok(false);
                     }
 
                     let headers = client.read_response_headers(stream_id);
-                    println!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                    if out_file.is_none() {
+                        println!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                    }
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
                         println!("Data on unexpected stream: {}", stream_id);
-                        return false;
+                        return Ok(false);
                     }
 
                     let (sz, fin) = client
                         .read_response_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
-                    if !args.output_read_data {
+
+                    if let Some(out_file) = out_file {
+                        if sz > 0 {
+                            out_file.write_all(&data[..sz])?;
+                        }
+                    } else if !args.output_read_data {
                         println!("READ[{}]: {} bytes", stream_id, sz);
                     } else if let Ok(txt) = String::from_utf8(data.clone()) {
                         println!("READ[{}]: {}", stream_id, txt);
                     } else {
                         println!("READ[{}]: 0x{}", stream_id, hex(&data));
                     }
+
                     if fin {
-                        println!("<FIN[{}]>", stream_id);
+                        if out_file.is_none() {
+                            println!("<FIN[{}]>", stream_id);
+                        }
                         client.close(Instant::now(), 0, "kthxbye!");
-                        return false;
+                        return Ok(false);
                     }
                 }
                 _ => {}
             }
         }
 
-        true
+        Ok(true)
     }
 }
 
@@ -220,7 +267,8 @@ fn client(
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
     url: &Url,
-) {
+    out_file: &mut Option<File>,
+) -> Res<()> {
     let mut client = Http3Client::new(
         url.host_str().unwrap(),
         &args.alpn,
@@ -240,7 +288,8 @@ fn client(
         &mut client,
         &mut h,
         &args,
-    );
+        out_file,
+    )?;
 
     let client_stream_id = client.fetch(
         &args.method,
@@ -248,13 +297,8 @@ fn client(
         &url.host_str().unwrap(),
         &url.path(),
         &to_headers(&args.header),
-    );
+    )?;
 
-    if let Err(err) = client_stream_id {
-        eprintln!("Could not connect: {:?}", err);
-        return;
-    }
-    let client_stream_id = client_stream_id.unwrap();
     let _ = client.stream_close_send(client_stream_id);
 
     let mut h2 = PostConnectHandler::default();
@@ -266,10 +310,13 @@ fn client(
         &mut client,
         &mut h2,
         &args,
-    );
+        out_file,
+    )?;
+
+    Ok(())
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> Res<()> {
     init();
     let args = Args::from_args();
 
@@ -282,7 +329,7 @@ fn main() -> std::io::Result<()> {
         )
         .to_socket_addrs()?
         .collect();
-        let remote_addr = addrs.first().unwrap().clone();
+        let remote_addr = *addrs.first().unwrap();
 
         let local_addr = match remote_addr {
             SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0),
@@ -306,10 +353,35 @@ fn main() -> std::io::Result<()> {
             remote_addr
         );
 
+        let mut out_file = if let Some(ref dir) = args.output_dir {
+            let mut out_path = dir.clone();
+
+            let url_path = if url.path() == "/" {
+                // If no path is given... call it "root"?
+                "root"
+            } else {
+                // Omit leading slash
+                &url.path()[1..]
+            };
+            out_path.push(url_path);
+
+            eprintln!("Saving {} to {:?}", url.clone().into_string(), dir);
+
+            Some(
+                OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&dir)?,
+            )
+        } else {
+            None
+        };
+
         if args.use_old_http {
             old::old_client(&args, socket, local_addr, remote_addr, url)
         } else {
-            client(&args, socket, local_addr, remote_addr, url)
+            client(&args, socket, local_addr, remote_addr, url, &mut out_file)?;
         }
     }
 
