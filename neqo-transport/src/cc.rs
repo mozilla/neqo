@@ -10,10 +10,11 @@ use std::cmp::max;
 use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
+use crate::path::PATH_MTU_V6;
 use crate::tracking::SentPacket;
 use neqo_common::{const_max, const_min, qdebug, qinfo, qtrace};
 
-pub const MAX_DATAGRAM_SIZE: usize = 1232; // For ipv6, smaller than ipv4 (1252)
+pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
 pub const INITIAL_CWND_PKTS: usize = 10;
 const INITIAL_WINDOW: usize = const_min(
     INITIAL_CWND_PKTS * MAX_DATAGRAM_SIZE,
