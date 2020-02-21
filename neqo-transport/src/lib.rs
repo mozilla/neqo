@@ -25,7 +25,7 @@ mod send_stream;
 pub mod server;
 mod stats;
 mod stream_id;
-mod tparams;
+pub mod tparams;
 mod tracking;
 
 pub use self::cid::ConnectionIdManager;
@@ -33,7 +33,6 @@ pub use self::connection::{Connection, FixedConnectionIdManager, Output, Role, S
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
-pub use self::tparams::{tp_constants, TransportParameter};
 
 /// The supported version of the QUIC protocol.
 pub type Version = u32;
