@@ -1667,7 +1667,7 @@ impl Connection {
                 self.set_state(State::Closed(error_code.into()));
             }
             Frame::HandshakeDone => {
-                if self.role == Role::Server {
+                if self.role == Role::Server || !self.state.connected() {
                     return Err(Error::ProtocolViolation);
                 }
                 self.set_state(State::Confirmed);
