@@ -3169,7 +3169,7 @@ mod tests {
         let mut server = default_server();
         connect_force_idle(&mut client, &mut server);
 
-        let now = now();
+        let mut now = now();
 
         let res = client.process(None, now);
         assert_eq!(res, Output::Callback(Duration::from_secs(60)));
@@ -3182,17 +3182,20 @@ mod tests {
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 6);
         assert_eq!(client.stream_send(6, b"there!").unwrap(), 6);
 
-        // Send orig pkt
-        let _out = client.process(None, now + Duration::from_secs(10));
+        // Send a packet after some time.
+        now += Duration::from_secs(10);
+        let out = client.process(None, now);
+        assert!(out.dgram().is_some());
 
         // Nothing to do, should return callback
-        let out = client.process(None, now + Duration::from_secs(10));
+        let out = client.process(None, now);
         assert!(matches!(out, Output::Callback(_)));
 
         // One second later, it should want to send PTO packet
-        let out = client.process(None, now + Duration::from_secs(11));
+        now += Duration::from_secs(1);
+        let out = client.process(None, now);
 
-        let frames = server.test_process_input(out.dgram().unwrap(), now + Duration::from_secs(11));
+        let frames = server.test_process_input(out.dgram().unwrap(), now);
 
         assert!(matches!(
             frames[0],
@@ -3202,6 +3205,39 @@ mod tests {
             frames[1],
             (Frame::Stream { .. }, PNSpace::ApplicationData)
         ));
+    }
+
+    #[test]
+    fn pto_works_full_cwnd() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect_force_idle(&mut client, &mut server);
+
+        let mut now = now();
+
+        let res = client.process(None, now);
+        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+
+        // Send lots of data.
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        let _dgrams = send_bytes(&mut client, 2, now);
+        // TODO assert_full_cwnd()
+
+        // Wait for the PTO.
+        now += Duration::from_secs(1);
+        client.process_timer(now); // TODO merge process_timer into process_output.
+        let dgrams = send_bytes(&mut client, 2, now);
+        assert_eq!(dgrams.len(), 2); // Two packets in the PTO.
+
+        // All (2) datagrams contain STREAM frames.
+        for d in dgrams {
+            assert_eq!(d.len(), 1232);
+            let frames = server.test_process_input(d, now);
+            assert!(matches!(
+                frames[0],
+                (Frame::Stream { .. }, PNSpace::ApplicationData)
+            ));
+        }
     }
 
     #[test]
@@ -3587,6 +3623,7 @@ mod tests {
 
         loop {
             let bytes_sent = src.stream_send(stream, &[0x42; 4_096]).unwrap();
+            qtrace!("send_bytes wrote {} bytes", bytes_sent);
             if bytes_sent == 0 {
                 break;
             }
@@ -3594,6 +3631,7 @@ mod tests {
 
         loop {
             let pkt = src.process_output(now);
+            qtrace!("send_bytes output: {:?}", pkt);
             match pkt {
                 Output::Datagram(dgram) => total_dgrams.push(dgram),
                 Output::Callback(_) => break,
