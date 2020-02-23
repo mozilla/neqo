@@ -549,19 +549,23 @@ impl<'a> PublicPacket<'a> {
             PACKET_HP_MASK_LONG
         };
         let first_byte = self.data[0] ^ (mask[0] & bits);
-        let pn_len = usize::from((first_byte & 0x3) + 1);
 
         // Make a copy of the header to work on.
-        let mut hdrbytes = self.data[..self.header_len + pn_len].to_vec();
+        let mut hdrbytes = self.data[..self.header_len + 4].to_vec();
         hdrbytes[0] = first_byte;
 
         // Unmask the PN.
         let mut pn_encoded: u64 = 0;
-        for i in 0..pn_len {
+        for i in 0..4 {
             hdrbytes[self.header_len + i] ^= mask[1 + i];
             pn_encoded <<= 8;
             pn_encoded += u64::from(hdrbytes[self.header_len + i]);
         }
+
+        // Now decode the packet number length and apply it, hopefully in constant time.
+        let pn_len = usize::from((first_byte & 0x3) + 1);
+        hdrbytes.truncate(self.header_len + pn_len);
+        pn_encoded >>= 8 * (4 - pn_len);
 
         qtrace!("unmasked hdr={}", hex(&hdrbytes));
 
