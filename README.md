@@ -23,6 +23,7 @@ use the existing NSS checkout.  However, in order to run anything that depends
 on NSS, you need to set `$\[DY]LD\_LIBRARY\_PATH` to point to
 `$NSS_DIR/../dist/Debug/lib`.
 
+Note: If you did not compile nss separately, you should have mercurial installed on your machine in order for nss to build.
 
 ## Debugging Neqo
 
