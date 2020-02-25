@@ -312,7 +312,7 @@ fn setup_standalone() -> Vec<String> {
 }
 
 fn setup_for_gecko() -> Vec<String> {
-    let mut flags: Vec<String> = Vec::new();
+    let flags: Vec<String> = Vec::new();
 
     let libs = match env::var("CARGO_CFG_TARGET_OS")
         .as_ref()
@@ -349,25 +349,6 @@ fn setup_for_gecko() -> Vec<String> {
                 .to_str()
                 .unwrap()
         );
-
-        let flags_path = path.join("netwerk/socket/neqo/extra-bindgen-flags");
-
-        println!("cargo:rerun-if-changed={}", flags_path.to_str().unwrap());
-        flags = fs::read_to_string(flags_path)
-            .expect("Failed to read extra-bindgen-flags file")
-            .split_whitespace()
-            .map(std::borrow::ToOwned::to_owned)
-            .collect();
-
-        flags.push(String::from("-include"));
-        flags.push(
-            path.join("dist")
-                .join("include")
-                .join("mozilla-config.h")
-                .to_str()
-                .unwrap()
-                .to_string(),
-        );
     } else {
         println!("cargo:warning=MOZ_TOPOBJDIR should be set by default, otherwise the build is not guaranteed to finish.");
     }
@@ -375,6 +356,7 @@ fn setup_for_gecko() -> Vec<String> {
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS");
     let flags = if cfg!(feature = "gecko") {
         setup_for_gecko()
     } else {
