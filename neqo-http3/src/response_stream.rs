@@ -10,6 +10,7 @@ use crate::{Error, Header, Res};
 use neqo_common::{matches, qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::Connection;
+use std::cmp::min;
 use std::mem;
 
 /*
@@ -161,17 +162,21 @@ impl ResponseStream {
 
     pub fn read_response_headers(&mut self) -> Res<(Vec<Header>, bool)> {
         if let ResponseHeadersState::Ready(ref mut headers) = self.response_headers_state {
-            let mut tmp = Vec::new();
-            if let Some(ref mut hdrs) = headers {
-                mem::swap(&mut tmp, hdrs);
-            }
+            let hdrs = if let Some(ref mut hdrs) = headers {
+                mem::replace(hdrs, Vec::new())
+            } else {
+                Vec::new()
+            };
+
             self.response_headers_state = ResponseHeadersState::Read;
-            let mut fin = false;
-            if self.state == ResponseStreamState::ClosePending {
-                fin = true;
+
+            let fin = if self.state == ResponseStreamState::ClosePending {
                 self.state = ResponseStreamState::Closed;
-            }
-            Ok((tmp, fin))
+                true
+            } else {
+                false
+            };
+            Ok((hdrs, fin))
         } else {
             Err(Error::Unavailable)
         }
@@ -186,11 +191,7 @@ impl ResponseStream {
             ResponseStreamState::ReadingData {
                 ref mut remaining_data_len,
             } => {
-                let to_read = if *remaining_data_len > buf.len() {
-                    buf.len()
-                } else {
-                    *remaining_data_len
-                };
+                let to_read = min(*remaining_data_len, buf.len());
                 let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[..to_read])?;
                 debug_assert!(amount <= to_read);
                 *remaining_data_len -= amount;
