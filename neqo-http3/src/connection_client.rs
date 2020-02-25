@@ -10,10 +10,12 @@ use crate::hframe::HFrame;
 use crate::hsettings_frame::HSettings;
 use crate::transaction_client::TransactionClient;
 use crate::Header;
-use neqo_common::{hex, matches, qdebug, qinfo, qtrace, Datagram, Decoder, Encoder, NeqoQlogRef};
+use neqo_common::{
+    hex, matches, qdebug, qinfo, qtrace, Datagram, Decoder, Encoder, NeqoQlogRef, Role,
+};
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_transport::{
-    AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, Role, StreamType,
+    AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, StreamType,
 };
 use std::cell::RefCell;
 use std::net::SocketAddr;

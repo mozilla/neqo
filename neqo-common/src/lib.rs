@@ -12,6 +12,7 @@ mod datagram;
 mod incrdecoder;
 pub mod log;
 pub mod once;
+pub mod qlog;
 pub mod timer;
 
 pub use self::codec::{Decoder, Encoder};
@@ -50,4 +51,27 @@ pub const fn const_max(a: usize, b: usize) -> usize {
 #[must_use]
 pub const fn const_min(a: usize, b: usize) -> usize {
     [a, b][(a >= b) as usize]
+}
+
+#[derive(Debug, PartialEq, Copy, Clone)]
+/// Client or Server.
+pub enum Role {
+    Client,
+    Server,
+}
+
+impl Role {
+    #[must_use]
+    pub fn remote(self) -> Self {
+        match self {
+            Self::Client => Self::Server,
+            Self::Server => Self::Client,
+        }
+    }
+}
+
+impl ::std::fmt::Display for Role {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }

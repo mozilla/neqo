@@ -146,7 +146,7 @@ pub fn packet_sent(
             }
         }
 
-        let packet_type = pkt_type_to_qlog_pkt_type(&pt);
+        let packet_type = pkt_type_to_qlog_pkt_type(pt);
 
         qlog.trace.push_transport_event(
             format!("{}", elapsed.as_micros()),
@@ -190,7 +190,7 @@ pub fn packet_received(qlog: &Option<NeqoQlogRef>, now: Instant, payload: &Decry
             }
         }
 
-        let packet_type = pkt_type_to_qlog_pkt_type(&payload.packet_type());
+        let packet_type = pkt_type_to_qlog_pkt_type(payload.packet_type());
 
         qlog.trace.push_transport_event(
             format!("{}", elapsed.as_micros()),
@@ -369,7 +369,7 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
     }
 }
 
-fn pkt_type_to_qlog_pkt_type(ptype: &PacketType) -> qlog::PacketType {
+fn pkt_type_to_qlog_pkt_type(ptype: PacketType) -> qlog::PacketType {
     match ptype {
         PacketType::Initial => qlog::PacketType::Initial,
         PacketType::Handshake => qlog::PacketType::Handshake,
