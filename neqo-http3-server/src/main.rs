@@ -5,39 +5,38 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![allow(clippy::option_option)]
 #![warn(clippy::use_self)]
-
-use chrono::offset::Utc;
-use chrono::DateTime;
-use qlog::{CommonFields, Configuration, Qlog, TimeUnits, Trace, VantagePoint, VantagePointType};
-use std::time::SystemTime;
-
-use neqo_common::{
-    log::{NeqoQlog, NeqoQlogRef},
-    qdebug, qinfo, Datagram,
-};
-use neqo_crypto::{init_db, AntiReplay};
-use neqo_http3::{Http3Server, Http3ServerEvent};
-use neqo_transport::{FixedConnectionIdManager, Output};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
+use std::mem;
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use structopt::StructOpt;
-
 use mio::net::UdpSocket;
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
+use qlog::Qlog;
+use structopt::StructOpt;
+
+use neqo_common::{
+    self as common,
+    log::{NeqoQlog, NeqoQlogRef},
+    qdebug, qinfo, Datagram, Role,
+};
+use neqo_crypto::{init_db, AntiReplay};
+use neqo_http3::{Http3Server, Http3ServerEvent, Http3State};
+use neqo_transport::server::ActiveConnectionRef;
+use neqo_transport::{ConnectionId, FixedConnectionIdManager, Output};
 
 const TIMER_TOKEN: Token = Token(0xffff_ffff);
+
+type Res<T> = Result<T, io::Error>;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-http3-server", about = "A basic HTTP3 server.")]
@@ -66,9 +65,9 @@ struct Args {
     /// This server still only does HTTP3 no matter what the ALPN says.
     alpn: String,
 
-    #[structopt(long, default_value = "output.qlog")]
-    /// Output QLOG trace to a file.
-    qlog: Option<Option<PathBuf>>,
+    #[structopt(name = "qlog-dir", long)]
+    /// Enable QLOG logging and QLOG traces to this directory
+    qlog_dir: Option<PathBuf>,
 }
 
 impl Args {
@@ -81,7 +80,7 @@ impl Args {
     }
 }
 
-fn process_events(server: &mut Http3Server) {
+fn process_events(server: &mut Http3Server, qlog_output_dir: &Option<&Path>) -> Res<()> {
     while let Some(event) = server.next_event() {
         eprintln!("Event: {:?}", event);
         match event {
@@ -117,9 +116,70 @@ fn process_events(server: &mut Http3Server) {
             Http3ServerEvent::Data { request, data, fin } => {
                 println!("Data (request={} fin={}): {:?}", request, fin, data);
             }
+            Http3ServerEvent::StateChange {
+                mut conn,
+                state: Http3State::Closed(_),
+            } => {
+                if let Some(qlog_output_dir) = qlog_output_dir {
+                    write_qlog(&qlog_output_dir, &mut conn)?;
+                }
+            }
             _ => {}
         }
     }
+    Ok(())
+}
+
+fn cid_to_string(cid: &ConnectionId) -> String {
+    let mut ret = String::with_capacity(cid.len() * 2);
+    for b in cid.iter() {
+        ret.push_str(&format!("{:02x}", b));
+    }
+    ret
+}
+
+/// Write a connection's QLOG to a file.
+fn write_qlog(output_dir: &Path, conn: &mut ActiveConnectionRef) -> Res<()> {
+    // Construct path "<out_dir>/<cid>.qlog"
+    let mut full_path = output_dir.to_path_buf();
+    let filename: PathBuf = cid_to_string(&conn.borrow().path().unwrap().local_cid()).into();
+    full_path.push(filename);
+    full_path.set_extension("qlog");
+
+    if let Some(n_qlog) = conn.borrow_mut().qlog() {
+        // Make qlog structs. Swap out events from conn, to
+        // avoid maybe a costly clone().
+        let mut qlog = Qlog {
+            qlog_version: qlog::QLOG_VERSION.into(),
+            title: None,
+            description: None,
+            summary: None,
+            traces: Vec::new(),
+        };
+
+        let mut trace = common::qlog::new_trace(Role::Server);
+
+        mem::swap(&mut trace.events, &mut n_qlog.borrow_mut().trace.events);
+        qlog.traces.push(trace);
+        let data = serde_json::to_string_pretty(&qlog)?;
+
+        eprintln!("Writing QLOG to {}", full_path.display());
+        match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&full_path)
+        {
+            Ok(mut f) => {
+                f.write_all(data.as_bytes()).unwrap();
+            }
+
+            Err(e) => {
+                eprintln!("Could not open qlog: {}", e);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn emit_packets(sockets: &mut Vec<UdpSocket>, out_dgrams: &HashMap<SocketAddr, Vec<Datagram>>) {
@@ -166,41 +226,8 @@ fn process(
     }
 }
 
-fn init_qlog_trace() -> qlog::Trace {
-    Trace {
-        vantage_point: VantagePoint {
-            name: Some("neqo-server".into()),
-            ty: VantagePointType::Server,
-            flow: None,
-        },
-        title: Some("neqo-http3-server trace".to_string()),
-        description: Some("Example qlog trace description".to_string()),
-        configuration: Some(Configuration {
-            time_offset: Some("0".into()),
-            time_units: Some(TimeUnits::Us),
-            original_uris: None,
-        }),
-        common_fields: Some(CommonFields {
-            group_id: None,
-            protocol_type: None,
-            reference_time: Some({
-                let system_time = SystemTime::now();
-                let datetime: DateTime<Utc> = system_time.into();
-                datetime.to_rfc3339()
-            }),
-        }),
-        event_fields: vec![
-            "relative_time".to_string(),
-            "category".to_string(),
-            "event".to_string(),
-            "data".to_string(),
-        ],
-        events: Vec::new(),
-    }
-}
-
 fn main() -> Result<(), io::Error> {
-    let args = Args::from_args();
+    let mut args = Args::from_args();
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
@@ -215,9 +242,8 @@ fn main() -> Result<(), io::Error> {
 
     let qtrace: NeqoQlogRef = Rc::new(RefCell::new(NeqoQlog::new(
         Instant::now(),
-        init_qlog_trace(),
+        common::qlog::new_trace(Role::Server),
     )));
-    let mut qtrace_last_flush_time = Instant::now();
 
     let mut sockets = Vec::new();
     let mut servers = HashMap::new();
@@ -283,20 +309,7 @@ fn main() -> Result<(), io::Error> {
 
     let mut events = Events::with_capacity(1024);
 
-    let (mut qlog, qlog_output_path) = if let Some(output_path) = &args.qlog {
-        (
-            Some(Qlog {
-                qlog_version: qlog::QLOG_VERSION.into(),
-                title: None,
-                description: None,
-                summary: None,
-                traces: Vec::new(),
-            }),
-            Some(output_path.clone().unwrap()),
-        )
-    } else {
-        (None, None)
-    };
+    let qlog_output_path = args.qlog_dir.take();
 
     loop {
         poll.poll(&mut events, None)?;
@@ -359,7 +372,7 @@ fn main() -> Result<(), io::Error> {
                             out,
                             &mut timer,
                         );
-                        process_events(server);
+                        process_events(server, &qlog_output_path.as_ref().map(|x| &**x))?;
                         process(server, svr_timeout, event.token().0, None, out, &mut timer);
                     }
                 }
@@ -367,31 +380,5 @@ fn main() -> Result<(), io::Error> {
         }
 
         emit_packets(&mut sockets, &out_dgrams);
-
-        // Consider the time since we last wrote the trace to disk. If it has been more than 5 seconds,
-        // flush it. NB: This is a demonstration implementation. The performance overhead for logging
-        // traces in this manner is not suitable for production.
-        if Instant::now() - qtrace_last_flush_time > Duration::from_secs(5) {
-            if let (Some(qlog), Some(qlog_output_path)) = (&mut qlog, &qlog_output_path) {
-                match OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(&qlog_output_path)
-                {
-                    Ok(mut f) => {
-                        eprintln!("Writing QLOG to {}", qlog_output_path.display());
-                        qlog.traces.push(qtrace.borrow().trace.clone());
-                        let data = serde_json::to_string_pretty(&qlog)?;
-                        f.write_all(data.as_bytes())?;
-                        qlog.traces.pop();
-                    }
-                    Err(e) => {
-                        eprintln!("Could not open qlog: {}", e);
-                    }
-                }
-            }
-            qtrace_last_flush_time = Instant::now();
-        }
     }
 }

@@ -11,7 +11,7 @@ use std::ops::{Index, IndexMut, Range};
 use std::rc::Rc;
 use std::time::Instant;
 
-use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace};
+use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, Role};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hp::HpKey;
 use neqo_crypto::{
@@ -20,7 +20,6 @@ use neqo_crypto::{
     TLS_EPOCH_ZERO_RTT, TLS_VERSION_1_3,
 };
 
-use crate::connection::Role;
 use crate::frame::{Frame, TxMode};
 use crate::packet::PacketNumber;
 use crate::recovery::RecoveryToken;

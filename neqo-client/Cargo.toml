@@ -17,7 +17,6 @@ url = "1.7.2"
 qlog = "0.1.0"
 serde = "1"
 serde_json = "1"
-chrono = "0.4.10"
 
 [features]
 default = ["deny-warnings"]

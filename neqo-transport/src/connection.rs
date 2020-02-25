@@ -19,6 +19,7 @@ use smallvec::SmallVec;
 
 use neqo_common::{
     hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder, NeqoQlogRef,
+    Role,
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
@@ -53,28 +54,6 @@ pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
-
-#[derive(Debug, PartialEq, Copy, Clone)]
-/// Client or Server.
-pub enum Role {
-    Client,
-    Server,
-}
-
-impl Role {
-    pub fn remote(self) -> Self {
-        match self {
-            Self::Client => Self::Server,
-            Self::Server => Self::Client,
-        }
-    }
-}
-
-impl ::std::fmt::Display for Role {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Ord, Eq)]
 /// The state of the Connection.
@@ -480,6 +459,16 @@ impl Connection {
             stats: Stats::default(),
             qlog,
         }
+    }
+
+    /// Get the local connection id.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_ref()
+    }
+
+    /// Get the qlog (if any) for this connection.
+    pub fn qlog(&self) -> Option<&NeqoQlogRef> {
+        self.qlog.as_ref()
     }
 
     /// Set a local transport parameter, possibly overriding a default value.

@@ -8,17 +8,13 @@
 #![allow(clippy::option_option)]
 #![warn(clippy::use_self)]
 
-use qlog::{CommonFields, Configuration, Qlog, TimeUnits, Trace, VantagePoint, VantagePointType};
+use qlog::Qlog;
 use serde_json;
 
-use chrono::offset::Utc;
-use chrono::DateTime;
-use std::time::SystemTime;
-
 use neqo_common::{
-    hex,
+    self as common, hex,
     log::{NeqoQlog, NeqoQlogRef},
-    matches, Datagram,
+    matches, Datagram, Role,
 };
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State, Output};
@@ -315,45 +311,12 @@ fn client(
     );
 }
 
-fn init_qlog_trace() -> qlog::Trace {
-    Trace {
-        vantage_point: VantagePoint {
-            name: Some("neqo-client".into()),
-            ty: VantagePointType::Client,
-            flow: None,
-        },
-        title: Some("neqo-client trace".to_string()),
-        description: Some("Example qlog trace description".to_string()),
-        configuration: Some(Configuration {
-            time_offset: Some("0".into()),
-            time_units: Some(TimeUnits::Us),
-            original_uris: None,
-        }),
-        common_fields: Some(CommonFields {
-            group_id: None,
-            protocol_type: None,
-            reference_time: Some({
-                let system_time = SystemTime::now();
-                let datetime: DateTime<Utc> = system_time.into();
-                datetime.to_rfc3339()
-            }),
-        }),
-        event_fields: vec![
-            "relative_time".to_string(),
-            "category".to_string(),
-            "event".to_string(),
-            "data".to_string(),
-        ],
-        events: Vec::new(),
-    }
-}
-
 fn main() -> Result<(), std::io::Error> {
     init();
 
     let qtrace: NeqoQlogRef = Rc::new(RefCell::new(NeqoQlog::new(
         Instant::now(),
-        init_qlog_trace(),
+        common::qlog::new_trace(Role::Client),
     )));
 
     let args = Args::from_args();
