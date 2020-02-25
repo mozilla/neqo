@@ -338,10 +338,7 @@ impl LossRecovery {
             .is_none());
         self.spaces[PNSpace::ApplicationData]
             .remove_ignored()
-            .map(|p| {
-                self.cc.discard(&p);
-                p
-            })
+            .inspect(|p| self.cc.discard(&p))
             .collect()
     }
 
@@ -438,10 +435,7 @@ impl LossRecovery {
         self.spaces
             .iter_mut()
             .flat_map(|spc| spc.remove_ignored())
-            .map(|p| {
-                cc.discard(&p);
-                p
-            })
+            .inspect(|p| cc.discard(&p))
             .collect()
     }
 

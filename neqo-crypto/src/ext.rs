@@ -118,11 +118,14 @@ impl ExtensionTracker {
     }
 
     /// Use the provided handler to manage an extension.  This is quite unsafe.
-    /// # Safety
     ///
+    /// # Safety
     /// The holder of this `ExtensionTracker` needs to ensure that it lives at
     /// least as long as the file descriptor, as NSS provides no way to remove
     /// an extension handler once it is configured.
+    ///
+    /// # Errors
+    /// If the underlying NSS API fails to register a handler.
     pub unsafe fn new(
         fd: *mut PRFileDesc,
         extension: Extension,

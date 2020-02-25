@@ -29,7 +29,7 @@ pub(crate) type RecvStreams = BTreeMap<StreamId, RecvStream>;
 
 /// Holds data not yet read by application. Orders and dedupes data ranges
 /// from incoming STREAM frames.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
@@ -274,7 +274,7 @@ impl RxStreamOrderer {
 }
 
 /// QUIC receiving states, based on -transport 3.2.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 #[allow(dead_code)]
 // Because a dead_code warning is easier than clippy::unused_self, see https://github.com/rust-lang/rust/issues/68408
 enum RecvStreamState {
@@ -329,11 +329,6 @@ impl RecvStreamState {
             _ => None,
         }
     }
-
-    fn transition(&mut self, new_state: Self) {
-        qtrace!("RecvStream state {} -> {}", self.name(), new_state.name());
-        *self = new_state;
-    }
 }
 
 /// Implement a QUIC receive stream.
@@ -358,6 +353,27 @@ impl RecvStream {
             flow_mgr,
             conn_events,
         }
+    }
+
+    fn set_state(&mut self, new_state: RecvStreamState) {
+        debug_assert_ne!(
+            mem::discriminant(&self.state),
+            mem::discriminant(&new_state)
+        );
+        qtrace!(
+            "RecvStream {} state {} -> {}",
+            self.stream_id.as_u64(),
+            self.state.name(),
+            new_state.name()
+        );
+
+        if let RecvStreamState::Recv { .. } = &self.state {
+            self.flow_mgr
+                .borrow_mut()
+                .clear_max_stream_data(self.stream_id)
+        }
+
+        self.state = new_state;
     }
 
     pub fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: Vec<u8>) -> Res<()> {
@@ -390,10 +406,9 @@ impl RecvStream {
 
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     if final_size == buf.retired() + buf.bytes_ready() as u64 {
-                        self.state
-                            .transition(RecvStreamState::DataRecvd { recv_buf: buf });
+                        self.set_state(RecvStreamState::DataRecvd { recv_buf: buf });
                     } else {
-                        self.state.transition(RecvStreamState::SizeKnown {
+                        self.set_state(RecvStreamState::SizeKnown {
                             recv_buf: buf,
                             final_size,
                         });
@@ -409,8 +424,7 @@ impl RecvStream {
                 recv_buf.inbound_frame(offset, data)?;
                 if *final_size == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
-                    self.state
-                        .transition(RecvStreamState::DataRecvd { recv_buf: buf });
+                    self.set_state(RecvStreamState::DataRecvd { recv_buf: buf });
                 }
             }
             RecvStreamState::DataRecvd { .. }
@@ -432,7 +446,7 @@ impl RecvStream {
             RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
                 self.conn_events
                     .recv_stream_reset(self.stream_id, application_error_code);
-                self.state.transition(RecvStreamState::ResetRecvd);
+                self.set_state(RecvStreamState::ResetRecvd);
             }
             _ => {
                 // Ignore reset if in DataRecvd, DataRead, or ResetRecvd
@@ -491,7 +505,7 @@ impl RecvStream {
                 let bytes_read = recv_buf.read(buf)?;
                 let fin_read = recv_buf.buffered() == 0;
                 if fin_read {
-                    self.state.transition(RecvStreamState::DataRead)
+                    self.set_state(RecvStreamState::DataRead)
                 }
                 Ok((bytes_read, fin_read))
             }
@@ -505,10 +519,10 @@ impl RecvStream {
         qtrace!("stop_sending called when in state {}", self.state.name());
         match &self.state {
             RecvStreamState::Recv { .. } | RecvStreamState::SizeKnown { .. } => {
-                self.state.transition(RecvStreamState::ResetRecvd);
+                self.set_state(RecvStreamState::ResetRecvd);
                 self.flow_mgr.borrow_mut().stop_sending(self.stream_id, err)
             }
-            RecvStreamState::DataRecvd { .. } => self.state.transition(RecvStreamState::DataRead),
+            RecvStreamState::DataRecvd { .. } => self.set_state(RecvStreamState::DataRead),
             RecvStreamState::DataRead | RecvStreamState::ResetRecvd => {
                 // Already in terminal state
             }
@@ -519,6 +533,8 @@ impl RecvStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frame::Frame;
+    use neqo_common::matches;
 
     #[test]
     fn test_stream_rx() {
@@ -749,5 +765,27 @@ mod tests {
         assert_eq!(rx_ord.bytes_ready(), 9);
         assert_eq!(rx_ord.buffered(), 15);
         assert_eq!(rx_ord.retired(), 2);
+    }
+
+    #[test]
+    fn no_stream_flowc_event_after_exiting_recv() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        let conn_events = ConnectionEvents::default();
+
+        let frame1 = vec![0; RX_STREAM_DATA_WINDOW as usize];
+
+        let mut s = RecvStream::new(
+            67.into(),
+            RX_STREAM_DATA_WINDOW,
+            Rc::clone(&flow_mgr),
+            conn_events,
+        );
+
+        s.inbound_stream_frame(false, 0, frame1).unwrap();
+        flow_mgr.borrow_mut().max_stream_data(67.into(), 100);
+        assert!(matches!(s.flow_mgr.borrow().peek().unwrap(), Frame::MaxStreamData{..}));
+        s.inbound_stream_frame(true, RX_STREAM_DATA_WINDOW, vec![])
+            .unwrap();
+        assert!(matches!(s.flow_mgr.borrow().peek(), None));
     }
 }

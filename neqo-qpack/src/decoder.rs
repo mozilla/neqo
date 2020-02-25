@@ -4,7 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(unused_variables, dead_code)]
 use crate::huffman::Huffman;
 use crate::qpack_helper::{
     read_prefixed_encoded_int_slice, read_prefixed_encoded_int_with_connection, BufWrapper,
@@ -311,7 +310,7 @@ impl QPackDecoder {
                                 self.table.insert_with_name_ref(
                                     *name_static_table,
                                     *name_index,
-                                    value_to_insert,
+                                    &value_to_insert,
                                 )?;
                                 self.total_num_of_inserts += 1;
                                 self.state = QPackDecoderState::ReadInstruction;
@@ -427,7 +426,7 @@ impl QPackDecoder {
                                     mem::swap(&mut value_to_insert, value);
                                 }
                                 qdebug!([label], "received instruction - insert with name literal name={:x?} value={:x?}", name_to_insert, value_to_insert);
-                                self.table.insert(name_to_insert, value_to_insert)?;
+                                self.table.insert(&name_to_insert, &value_to_insert)?;
                                 self.total_num_of_inserts += 1;
                                 self.state = QPackDecoderState::ReadInstruction;
                             } else {
@@ -479,15 +478,18 @@ impl QPackDecoder {
         if cap > u64::from(self.max_table_size) {
             return Err(Error::EncoderStreamError);
         }
-        self.table.set_capacity(cap);
-        Ok(())
+        self.table
+            .set_capacity(cap)
+            .map_err(|_| Error::EncoderStreamError)
     }
 
     fn header_ack(&mut self, stream_id: u64, required_inserts: u64) {
         let ack_increment_delta = required_inserts - self.table.get_acked_inserts_cnt();
         self.send_buf
             .encode_prefixed_encoded_int(0x80, 1, stream_id);
-        self.table.increment_acked(ack_increment_delta);
+        self.table
+            .increment_acked(ack_increment_delta)
+            .expect("This should never happen");
     }
 
     pub fn cancel_stream(&mut self, stream_id: u64) {
@@ -501,7 +503,9 @@ impl QPackDecoder {
         if ack_increment_delta > 0 {
             self.send_buf
                 .encode_prefixed_encoded_int(0x00, 2, ack_increment_delta);
-            self.table.increment_acked(ack_increment_delta);
+            self.table
+                .increment_acked(ack_increment_delta)
+                .expect("This should never happen");
         }
         if self.send_buf.len() == 0 {
             Ok(())
@@ -786,65 +790,100 @@ fn read_prefixed_encoded_int_with_connection_wrap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_transport::ConnectionEvent;
     use neqo_transport::StreamType;
     use std::convert::TryInto;
     use test_fixture::*;
 
-    fn connect() -> (QPackDecoder, Connection, Connection, u64, u64) {
-        let (mut conn_c, mut conn_s) = test_fixture::connect();
+    struct TestDecoder {
+        decoder: QPackDecoder,
+        send_stream_id: u64,
+        recv_stream_id: u64,
+        conn: Connection,
+        peer_conn: Connection,
+    }
+
+    fn connect() -> TestDecoder {
+        let (mut conn, mut peer_conn) = test_fixture::connect();
 
         // create a stream
-        let recv_stream_id = conn_s.stream_create(StreamType::UniDi).unwrap();
-        let send_stream_id = conn_c.stream_create(StreamType::UniDi).unwrap();
+        let recv_stream_id = peer_conn.stream_create(StreamType::UniDi).unwrap();
+        let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create a decoder
         let mut decoder = QPackDecoder::new(300, 100);
         decoder.add_send_stream(send_stream_id);
 
-        (decoder, conn_c, conn_s, recv_stream_id, send_stream_id)
+        TestDecoder {
+            decoder,
+            send_stream_id,
+            recv_stream_id,
+            conn,
+            peer_conn,
+        }
+    }
+
+    fn recv_instruction(decoder: &mut TestDecoder, encoder_instruction: &[u8], res: Res<()>) {
+        let _ = decoder
+            .peer_conn
+            .stream_send(decoder.recv_stream_id, encoder_instruction);
+        let out = decoder.peer_conn.process(None, now());
+        decoder.conn.process(out.dgram(), now());
+        assert_eq!(
+            decoder
+                .decoder
+                .read_instructions(&mut decoder.conn, decoder.recv_stream_id),
+            res
+        );
+    }
+
+    fn send_instructions_and_check(decoder: &mut TestDecoder, decoder_instruction: &[u8]) {
+        decoder.decoder.send(&mut decoder.conn).unwrap();
+        let out = decoder.conn.process(None, now());
+        decoder.peer_conn.process(out.dgram(), now());
+        let mut buf = [0u8; 100];
+        let (amount, fin) = decoder
+            .peer_conn
+            .stream_recv(decoder.send_stream_id, &mut buf)
+            .unwrap();
+        assert_eq!(fin, false);
+        assert_eq!(&buf[..amount], decoder_instruction);
+    }
+
+    fn decode_headers(
+        decoder: &mut TestDecoder,
+        header_block: &[u8],
+        headers: &[Header],
+        stream_id: u64,
+    ) {
+        let decoded_headers = decoder
+            .decoder
+            .decode_header_block(header_block, stream_id)
+            .unwrap();
+        let h = decoded_headers.unwrap();
+        assert_eq!(h, headers);
     }
 
     fn test_instruction(
         capacity: u64,
         instruction: &[u8],
-        err: Option<Error>,
+        res: Res<()>,
         decoder_instruction: &[u8],
         check_capacity: u64,
     ) {
-        let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
+        let mut decoder = connect();
 
         if capacity > 0 {
-            assert!(decoder.set_capacity(capacity).is_ok());
-        }
-        // send an instruction
-        let _ = conn_s.stream_send(recv_stream_id, instruction);
-        let out = conn_s.process(None, now());
-        conn_c.process(out.dgram(), now());
-
-        let res = decoder.read_instructions(&mut conn_c, recv_stream_id);
-        assert_eq!(err.is_some(), res.is_err());
-        if let Some(expected_err) = err {
-            assert_eq!(expected_err, res.unwrap_err());
+            assert!(decoder.decoder.set_capacity(capacity).is_ok());
         }
 
-        decoder.send(&mut conn_c).unwrap();
-        let out = conn_c.process(None, now());
-        conn_s.process(out.dgram(), now());
-        let mut found_instruction = false;
-        while let Some(e) = conn_s.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = [0u8; 100];
-                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(fin, false);
-                assert_eq!(buf[..amount], decoder_instruction[..]);
-                found_instruction = true;
-            }
-        }
-        assert_eq!(found_instruction, !decoder_instruction.is_empty());
+        // recv an instruction
+        recv_instruction(&mut decoder, instruction, res);
+
+        // send decoder instruction and check that is what we expect.
+        send_instructions_and_check(&mut decoder, decoder_instruction);
 
         if check_capacity > 0 {
-            assert_eq!(decoder.capacity(), check_capacity);
+            assert_eq!(decoder.decoder.capacity(), check_capacity);
         }
     }
 
@@ -854,7 +893,7 @@ mod tests {
         test_instruction(
             0,
             &[0xc4, 0x04, 0x31, 0x32, 0x33, 0x34],
-            Some(Error::DecoderStreamError),
+            Err(Error::DecoderStreamError),
             &[0x03],
             0,
         );
@@ -866,7 +905,7 @@ mod tests {
         test_instruction(
             100,
             &[0xc4, 0x04, 0x31, 0x32, 0x33, 0x34],
-            None,
+            Ok(()),
             &[0x03, 0x01],
             0,
         );
@@ -881,7 +920,7 @@ mod tests {
                 0x4e, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74,
                 0x68, 0x04, 0x31, 0x32, 0x33, 0x34,
             ],
-            None,
+            Ok(()),
             &[0x03, 0x01],
             0,
         );
@@ -889,7 +928,7 @@ mod tests {
 
     #[test]
     fn test_recv_change_capacity() {
-        test_instruction(0, &[0x3f, 0xa9, 0x01], None, &[0x03], 200);
+        test_instruction(0, &[0x3f, 0xa9, 0x01], Ok(()), &[0x03], 200);
     }
 
     #[test]
@@ -897,7 +936,7 @@ mod tests {
         test_instruction(
             0,
             &[0x3f, 0xf1, 0x02],
-            Some(Error::EncoderStreamError),
+            Err(Error::EncoderStreamError),
             &[0x03],
             0,
         );
@@ -906,49 +945,24 @@ mod tests {
     // this test tests header decoding, the header acks command and the insert count increment command.
     #[test]
     fn test_duplicate() {
-        let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
+        let mut decoder = connect();
 
-        assert!(decoder.set_capacity(100).is_ok());
+        assert!(decoder.decoder.set_capacity(100).is_ok());
 
-        // send an instruction
-        let _ = conn_s.stream_send(
-            recv_stream_id,
+        // receive an instruction
+        recv_instruction(
+            &mut decoder,
             &[
                 0x4e, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74,
                 0x68, 0x04, 0x31, 0x32, 0x33, 0x34,
             ],
+            Ok(()),
         );
-        let out = conn_s.process(None, now());
-        conn_c.process(out.dgram(), now());
-        assert!(decoder
-            .read_instructions(&mut conn_c, recv_stream_id)
-            .is_ok());
 
-        // send the second instruction, a duplicate instruction.
-        let _ = conn_s.stream_send(recv_stream_id, &[0x00]);
-        let out = conn_s.process(None, now());
-        conn_c.process(out.dgram(), now());
-        if decoder
-            .read_instructions(&mut conn_c, recv_stream_id)
-            .is_err()
-        {
-            panic!("failed to read")
-        }
+        // receive the second instruction, a duplicate instruction.
+        recv_instruction(&mut decoder, &[0x00], Ok(()));
 
-        decoder.send(&mut conn_c).unwrap();
-        let out = conn_c.process(None, now());
-        conn_s.process(out.dgram(), now());
-        let mut found_instruction = false;
-        while let Some(e) = conn_s.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = [0u8; 100];
-                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(fin, false);
-                assert_eq!(buf[..amount], [0x03, 0x02]);
-                found_instruction = true;
-            }
-        }
-        assert!(found_instruction);
+        send_instructions_and_check(&mut decoder, &[0x03, 0x02]);
     }
 
     struct TestElement {
@@ -959,16 +973,11 @@ mod tests {
 
     #[test]
     fn test_encode_incr_encode_header_ack_some() {
-        // Send three encoder instructions:
-        // 1. Encode a single header and value (from literal)
-        // 2. Encode a single header and value (from literal)
-        // 3. Encode a single header and value (from literal)
-        // and a single header block that references the literals encoded in (1) and (2).
-        // Between sending (1) and (2) and (3), force the decoder to process (1). That means that a
-        // single increment instruction will be sent. After processing (2) and (3) in the presence
-        // of the header block, the decoder block will send
-        // (1) a header ack
-        // (2) a single increment instruction.
+        // 1. Decoder receives an instruction (header and value both as literal)
+        // 2. Decoder process the instruction and sends an increment instruction.
+        // 3. Decoder receives another two instruction (header and value both as literal) and
+        //    a header block.
+        // 4. Now it sends only a header ack and an increment instruction with increment==1.
         let headers = vec![
             (String::from("my-headera"), String::from("my-valuea")),
             (String::from("my-headerb"), String::from("my-valueb")),
@@ -984,70 +993,28 @@ mod tests {
             0x64, 0x65, 0x72, 0x63, 0x09, 0x6d, 0x79, 0x2d, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x63,
         ];
 
-        let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
+        let mut decoder = connect();
 
-        assert!(decoder.set_capacity(200).is_ok());
+        assert!(decoder.decoder.set_capacity(200).is_ok());
 
-        let _ = conn_s.stream_send(recv_stream_id, first_encoder_inst);
-        let out = conn_s.process(None, now());
-        conn_c.process(out.dgram(), now());
-        assert!(decoder
-            .read_instructions(&mut conn_c, recv_stream_id)
-            .is_ok());
-        decoder.send(&mut conn_c).unwrap();
+        recv_instruction(&mut decoder, first_encoder_inst, Ok(()));
 
-        let out = conn_c.process(None, now());
-        conn_s.process(out.dgram(), now());
-        let mut found_incr = false;
-        while let Some(e) = conn_s.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = [0u8; 100];
-                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(fin, false);
-                assert_eq!(buf[..amount], [0x03, 0x1]);
-                found_incr = true;
-            }
-        }
-        assert!(found_incr);
+        send_instructions_and_check(&mut decoder, &[0x03, 0x1]);
 
-        let _ = conn_s.stream_send(recv_stream_id, second_encoder_inst);
-        let out = conn_s.process(None, now());
-        conn_c.process(out.dgram(), now());
-        assert!(decoder
-            .read_instructions(&mut conn_c, recv_stream_id)
-            .is_ok());
+        recv_instruction(&mut decoder, second_encoder_inst, Ok(()));
 
-        // N.B.: We fake the stream_id to decode_header_block
-        let decoded_headers = decoder.decode_header_block(header_block, 0).unwrap();
-        let h = decoded_headers.unwrap();
-        assert_eq!(h, headers);
+        decode_headers(&mut decoder, header_block, &headers, 0);
 
-        decoder.send(&mut conn_c).unwrap();
-        let out = conn_c.process(None, now());
-        conn_s.process(out.dgram(), now());
-        let mut found_header_ack = false;
-        while let Some(e) = conn_s.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = [0u8; 100];
-                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(fin, false);
-                assert_eq!(buf[..amount], [0x80, 0x1]);
-                found_header_ack = true;
-            }
-        }
-        assert!(found_header_ack);
+        send_instructions_and_check(&mut decoder, &[0x80, 0x1]);
     }
 
     #[test]
     fn test_encode_incr_encode_header_ack_all() {
-        // Send two encoder instructions:
-        // 1. Encode a single header and value (from literal)
-        // 2. Encode a single header and value (from literal)
-        // and a single header block that references the literals encoded in (1) and (2).
-        // Between sending (1) and (2), force the decoder to process (1). That means that a
-        // single increment instruction will be sent. After processing (2) in the presence
-        // of the header block, the decoder block will send
-        // (1) a header ack
+        // 1. Decoder receives an instruction (header and value both as literal)
+        // 2. Decoder process the instruction and sends an increment instruction.
+        // 3. Decoder receives another instruction (header and value both as literal) and
+        //    a header block.
+        // 4. Now it sends only a header ack.
         let headers = vec![
             (String::from("my-headera"), String::from("my-valuea")),
             (String::from("my-headerb"), String::from("my-valueb")),
@@ -1062,58 +1029,19 @@ mod tests {
             0x2d, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x62,
         ];
 
-        let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
+        let mut decoder = connect();
 
-        assert!(decoder.set_capacity(200).is_ok());
+        assert!(decoder.decoder.set_capacity(200).is_ok());
 
-        let _ = conn_s.stream_send(recv_stream_id, first_encoder_inst);
-        let out = conn_s.process(None, now());
-        conn_c.process(out.dgram(), now());
-        assert!(decoder
-            .read_instructions(&mut conn_c, recv_stream_id)
-            .is_ok());
-        decoder.send(&mut conn_c).unwrap();
+        recv_instruction(&mut decoder, first_encoder_inst, Ok(()));
 
-        let out = conn_c.process(None, now());
-        conn_s.process(out.dgram(), now());
-        let mut found_incr = false;
-        while let Some(e) = conn_s.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = [0u8; 100];
-                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(fin, false);
-                assert_eq!(buf[..amount], [0x03, 0x1]);
-                found_incr = true;
-            }
-        }
-        assert!(found_incr);
+        send_instructions_and_check(&mut decoder, &[0x03, 0x1]);
 
-        let _ = conn_s.stream_send(recv_stream_id, second_encoder_inst);
-        let out = conn_s.process(None, now());
-        conn_c.process(out.dgram(), now());
-        assert!(decoder
-            .read_instructions(&mut conn_c, recv_stream_id)
-            .is_ok());
+        recv_instruction(&mut decoder, second_encoder_inst, Ok(()));
 
-        // N.B.: We fake the stream_id to decode_header_block
-        let decoded_headers = decoder.decode_header_block(header_block, 0).unwrap();
-        let h = decoded_headers.unwrap();
-        assert_eq!(h, headers);
+        decode_headers(&mut decoder, header_block, &headers, 0);
 
-        decoder.send(&mut conn_c).unwrap();
-        let out = conn_c.process(None, now());
-        conn_s.process(out.dgram(), now());
-        let mut found_header_ack = false;
-        while let Some(e) = conn_s.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = [0u8; 100];
-                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(fin, false);
-                assert_eq!(buf[..amount], [0x80]);
-                found_header_ack = true;
-            }
-        }
-        assert!(found_header_ack);
+        send_instructions_and_check(&mut decoder, &[0x80]);
     }
 
     #[test]
@@ -1131,36 +1059,15 @@ mod tests {
             0x64, 0x65, 0x72, 0x62, 0x09, 0x6d, 0x79, 0x2d, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x62,
         ];
 
-        let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
+        let mut decoder = connect();
 
-        assert!(decoder.set_capacity(200).is_ok());
-        let _ = conn_s.stream_send(recv_stream_id, encoder_inst);
-        let out = conn_s.process(None, now());
-        conn_c.process(out.dgram(), now());
-        assert!(decoder
-            .read_instructions(&mut conn_c, recv_stream_id)
-            .is_ok());
-        // N.B.: We fake the stream_id to decode_header_block
-        let decoded_headers = decoder.decode_header_block(header_block, 0).unwrap();
-        let h = decoded_headers.unwrap();
-        assert_eq!(h, headers);
+        assert!(decoder.decoder.set_capacity(200).is_ok());
 
-        decoder.send(&mut conn_c).unwrap();
-        let out = conn_c.process(None, now());
-        conn_s.process(out.dgram(), now());
-        let mut found_header_ack = false;
-        while let Some(e) = conn_s.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = [0u8; 100];
-                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(fin, false);
-                // On the decoder stream (identified with type 0x03), we should receive back a
-                // header acknowledgment on stream 0 (0x80)
-                assert_eq!(buf[..amount], [0x03, 0x80]);
-                found_header_ack = true;
-            }
-        }
-        assert!(found_header_ack);
+        recv_instruction(&mut decoder, encoder_inst, Ok(()));
+
+        decode_headers(&mut decoder, header_block, &headers, 0);
+
+        send_instructions_and_check(&mut decoder, &[0x03, 0x80]);
     }
 
     #[test]
@@ -1176,37 +1083,15 @@ mod tests {
             0x64, 0x65, 0x72, 0x62, 0x09, 0x6d, 0x79, 0x2d, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x62,
         ];
 
-        let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
+        let mut decoder = connect();
 
-        assert!(decoder.set_capacity(200).is_ok());
-        let _ = conn_s.stream_send(recv_stream_id, encoder_inst);
-        let out = conn_s.process(None, now());
-        conn_c.process(out.dgram(), now());
-        assert!(decoder
-            .read_instructions(&mut conn_c, recv_stream_id)
-            .is_ok());
-        // N.B.: We fake the stream_id to decode_header_block
-        let decoded_headers = decoder.decode_header_block(header_block, 0).unwrap();
-        let h = decoded_headers.unwrap();
-        assert_eq!(h, headers);
+        assert!(decoder.decoder.set_capacity(200).is_ok());
 
-        decoder.send(&mut conn_c).unwrap();
-        let out = conn_c.process(None, now());
-        conn_s.process(out.dgram(), now());
-        let mut found_header_ack_and_incr_instruction = false;
-        while let Some(e) = conn_s.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = [0u8; 100];
-                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(fin, false);
-                // On the decoder stream (identified with type 0x03), we should receive back a
-                // header acknowledgment on stream 0 (0x80) and a single increment instruction
-                // (0x01).
-                assert_eq!(buf[..amount], [0x03, 0x80, 0x01]);
-                found_header_ack_and_incr_instruction = true;
-            }
-        }
-        assert!(found_header_ack_and_incr_instruction);
+        recv_instruction(&mut decoder, encoder_inst, Ok(()));
+
+        decode_headers(&mut decoder, header_block, &headers, 0);
+
+        send_instructions_and_check(&mut decoder, &[0x03, 0x80, 0x01]);
     }
 
     #[test]
@@ -1267,42 +1152,26 @@ mod tests {
             },
         ];
 
-        let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
+        let mut decoder = connect();
 
-        assert!(decoder.set_capacity(200).is_ok());
+        assert!(decoder.decoder.set_capacity(200).is_ok());
+
         for (i, t) in test_cases.iter().enumerate() {
-            // send an instruction
+            // receive an instruction
             if !t.encoder_inst.is_empty() {
-                let _ = conn_s.stream_send(recv_stream_id, t.encoder_inst);
-                let out = conn_s.process(None, now());
-                conn_c.process(out.dgram(), now());
-                assert!(decoder
-                    .read_instructions(&mut conn_c, recv_stream_id)
-                    .is_ok());
+                recv_instruction(&mut decoder, t.encoder_inst, Ok(()));
             }
 
-            let headers = decoder
-                .decode_header_block(t.header_block, i.try_into().unwrap())
-                .unwrap();
-            let h = headers.unwrap();
-            assert_eq!(h, t.headers);
+            decode_headers(
+                &mut decoder,
+                t.header_block,
+                &t.headers,
+                i.try_into().unwrap(),
+            );
         }
 
         // test header acks and the insert count increment command
-        decoder.send(&mut conn_c).unwrap();
-        let out = conn_c.process(None, now());
-        conn_s.process(out.dgram(), now());
-        let mut found_instruction = false;
-        while let Some(e) = conn_s.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = [0u8; 100];
-                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(fin, false);
-                assert_eq!(buf[..amount], [0x03, 0x82, 0x83, 0x84]);
-                found_instruction = true;
-            }
-        }
-        assert!(found_instruction);
+        send_instructions_and_check(&mut decoder, &[0x03, 0x82, 0x83, 0x84]);
     }
 
     #[test]
@@ -1361,42 +1230,25 @@ mod tests {
             },
         ];
 
-        let (mut decoder, mut conn_c, mut conn_s, recv_stream_id, send_stream_id) = connect();
+        let mut decoder = connect();
 
-        assert!(decoder.set_capacity(200).is_ok());
+        assert!(decoder.decoder.set_capacity(200).is_ok());
 
         for (i, t) in test_cases.iter().enumerate() {
-            // send an instruction.
+            // receive an instruction.
             if !t.encoder_inst.is_empty() {
-                let _ = conn_s.stream_send(recv_stream_id, t.encoder_inst);
-                let out = conn_s.process(None, now());
-                conn_c.process(out.dgram(), now());
-                // read the instruction.
-                assert!(decoder
-                    .read_instructions(&mut conn_c, recv_stream_id)
-                    .is_ok());
+                recv_instruction(&mut decoder, t.encoder_inst, Ok(()));
             }
 
-            let headers = decoder
-                .decode_header_block(t.header_block, i.try_into().unwrap())
-                .unwrap();
-            assert_eq!(headers.unwrap(), t.headers);
+            decode_headers(
+                &mut decoder,
+                t.header_block,
+                &t.headers,
+                i.try_into().unwrap(),
+            );
         }
 
         // test header acks and the insert count increment command
-        decoder.send(&mut conn_c).unwrap();
-        let out = conn_c.process(None, now());
-        conn_s.process(out.dgram(), now());
-        let mut found_instruction = false;
-        while let Some(e) = conn_s.next_event() {
-            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = [0u8; 100];
-                let (amount, fin) = conn_s.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(fin, false);
-                assert_eq!(buf[..amount], [0x03, 0x82, 0x83, 0x84]);
-                found_instruction = true;
-            }
-        }
-        assert!(found_instruction);
+        send_instructions_and_check(&mut decoder, &[0x03, 0x82, 0x83, 0x84]);
     }
 }
