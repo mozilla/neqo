@@ -1204,10 +1204,6 @@ impl Connection {
         // packets can go in a single datagram
         let mut encoder = Encoder::with_capacity(path.mtu());
         for space in PNSpace::iter() {
-            if *space < min_pn_space {
-                continue;
-            }
-
             // Ensure we have tx crypto state for this epoch, or skip it.
             let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
                 tx_state
@@ -1229,17 +1225,17 @@ impl Connection {
             }
             let limit = limit - tx.expansion();
 
-            let (tokens, mut ack_eliciting) = self.add_frames(&mut builder, *space, limit, now);
+            let (tokens, ack_eliciting) = if *space >= min_pn_space {
+                self.add_frames(&mut builder, *space, limit, now)
+            } else {
+                // Note that we only call this on PTO, so add a PING frame.
+                builder.encode_varint(Frame::Ping.get_type());
+                (Vec::new(), true)
+            }
             if builder.is_empty() {
-                if pto {
-                    // Add a PING.
-                    builder.encode_varint(Frame::Ping.get_type());
-                    ack_eliciting = true;
-                } else {
                     // Nothing to include in this packet.
                     encoder = builder.abort();
                     continue;
-                }
             }
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
