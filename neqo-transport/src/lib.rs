@@ -19,6 +19,7 @@ mod events;
 mod flow_mgr;
 mod frame;
 mod packet;
+mod path;
 mod recovery;
 mod recv_stream;
 mod send_stream;
@@ -36,7 +37,7 @@ pub use self::frame::StreamType;
 
 /// The supported version of the QUIC protocol.
 pub type Version = u32;
-pub const QUIC_VERSION: Version = 0xff00_0000 + 25;
+pub const QUIC_VERSION: Version = 0xff00_0000 + 27;
 
 const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60); // 1 minute
 
