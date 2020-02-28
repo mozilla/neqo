@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
-    RUST_VERSION=1.40.0
+    RUST_VERSION=1.41.1
 
 RUN set -eux; \
     curl -sSLf "https://static.rust-lang.org/rustup/archive/1.20.2/x86_64-unknown-linux-gnu/rustup-init" -o rustup-init; \
