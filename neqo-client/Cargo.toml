@@ -1,6 +1,6 @@
 [package]
 name = "neqo-client"
-version = "0.1.14"
+version = "0.2.0"
 authors = ["Martin Thomson <mt@lowentropy.net>",
 	"Dragana Damjanovic <dragana.damjano@gmail.com>",
 	"Andy Grover <agrover@mozilla.com>"]
@@ -8,10 +8,10 @@ edition = "2018"
 license = "MIT/Apache-2.0"
 
 [dependencies]
-neqo-crypto = { version = "0.1", path = "./../neqo-crypto" }
-neqo-transport = { version = "0.1", path = "./../neqo-transport" }
-neqo-common = { version="0.1", path="./../neqo-common" }
-neqo-http3 = { version = "0.1", path = "./../neqo-http3" }
+neqo-crypto = { path = "./../neqo-crypto" }
+neqo-transport = { path = "./../neqo-transport" }
+neqo-common = { path="./../neqo-common" }
+neqo-http3 = { path = "./../neqo-http3" }
 structopt = "0.2.15"
 url = "1.7.2"
 
