@@ -1225,18 +1225,27 @@ impl Connection {
             }
             let limit = limit - tx.expansion();
 
+            // Add frames to the packet.
             let (tokens, ack_eliciting) = if *space >= min_pn_space {
-                self.add_frames(&mut builder, *space, limit, now)
+                let r = self.add_frames(&mut builder, *space, limit, now);
+                if builder.is_empty() {
+                    if pto {
+                        // Add a PING if there is a PTO and nothing to send.
+                        builder.encode_varint(Frame::Ping.get_type());
+                        (Vec::new(), true)
+                    } else {
+                        // Nothing to include in this packet.
+                        encoder = builder.abort();
+                        continue;
+                    }
+                } else {
+                    r
+                }
             } else {
-                // Note that we only call this on PTO, so add a PING frame.
+                // A higher packet number space has a PTO; only add a PING.
                 builder.encode_varint(Frame::Ping.get_type());
                 (Vec::new(), true)
-            }
-            if builder.is_empty() {
-                    // Nothing to include in this packet.
-                    encoder = builder.abort();
-                    continue;
-            }
+            };
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
 

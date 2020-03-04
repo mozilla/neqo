@@ -628,6 +628,7 @@ impl LossRecovery {
     fn check_pto_timer(&mut self, now: Instant) -> Option<Vec<SentPacket>> {
         const PTO_COUNT: usize = 2;
 
+        let mut pto_space = None;
         let mut lost = Vec::new();
         for space in PNSpace::iter() {
             // Skip early packet number spaces where the PTO timer hasn't fired.
@@ -636,18 +637,20 @@ impl LossRecovery {
             if lost.is_empty() && self.pto_time(*space).map(|t| t > now).unwrap_or(true) {
                 continue;
             }
-            if lost.is_empty() {
-                qdebug!([self], "PTO timer fired for {}", space);
-                self.loss_recovery_state = LossRecoveryState::new(
-                    LossRecoveryMode::PtoExpired {
-                        dgram_available: PTO_COUNT,
-                        min_pn_space: *space,
-                    },
-                    Some(now),
-                );
-                self.pto_count += 1;
-            }
+            qdebug!([self], "PTO timer fired for {}", space);
+            pto_space = pto_space.or(Some(*space));
             lost.extend(self.spaces[*space].pto_packets(PTO_COUNT).cloned());
+        }
+
+        if let Some(space) = pto_space {
+            self.loss_recovery_state = LossRecoveryState::new(
+                LossRecoveryMode::PtoExpired {
+                    dgram_available: PTO_COUNT,
+                    min_pn_space: space,
+                },
+                Some(now),
+            );
+            self.pto_count += 1;
         }
         Some(lost)
     }
