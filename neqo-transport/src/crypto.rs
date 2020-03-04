@@ -183,9 +183,11 @@ impl Crypto {
         self.streams.lost(token);
     }
 
-    pub fn discard(&mut self, space: PNSpace) {
-        self.states.discard(space);
+    /// Discard state for a packet number space and return true
+    /// if something was discarded.
+    pub fn discard(&mut self, space: PNSpace) -> bool {
         self.streams.discard(space);
+        self.states.discard(space)
     }
 }
 
@@ -588,10 +590,11 @@ impl CryptoStates {
         self.zero_rtt = Some(CryptoDxState::new(dir, TLS_EPOCH_ZERO_RTT, secret, cipher));
     }
 
-    pub fn discard(&mut self, space: PNSpace) {
+    /// Discard keys and return true if that happened.
+    pub fn discard(&mut self, space: PNSpace) -> bool {
         match space {
-            PNSpace::Initial => self.initial = None,
-            PNSpace::Handshake => self.handshake = None,
+            PNSpace::Initial => self.initial.take().is_some(),
+            PNSpace::Handshake => self.handshake.take().is_some(),
             PNSpace::ApplicationData => panic!("Can't drop application data keys"),
         }
     }

@@ -440,8 +440,11 @@ impl LossRecovery {
     }
 
     /// Discard state for a given packet number space.
-    pub fn discard(&mut self, pn_space: PNSpace) {
-        for p in self.spaces[pn_space].remove_ignored() {
+    pub fn discard(&mut self, space: PNSpace) {
+        qdebug!([self], "Reset loss recovery state for {}", space);
+        // We just made progress, so discard PTO count.
+        self.pto_count = 0;
+        for p in self.spaces[space].remove_ignored() {
             self.cc.discard(&p);
         }
     }
@@ -634,7 +637,7 @@ impl LossRecovery {
             // Skip early packet number spaces where the PTO timer hasn't fired.
             // Once the timer for one space has fired, include higher spaces. Declaring more
             // data as "lost" makes it more likely that PTO packets will include useful data.
-            if lost.is_empty() && self.pto_time(*space).map(|t| t > now).unwrap_or(true) {
+            if pto_space.is_none() && self.pto_time(*space).map(|t| t > now).unwrap_or(true) {
                 continue;
             }
             qdebug!([self], "PTO timer fired for {}", space);

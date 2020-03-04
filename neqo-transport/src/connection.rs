@@ -808,8 +808,9 @@ impl Connection {
     }
 
     fn discard_keys(&mut self, space: PNSpace) {
-        self.loss_recovery.discard(space);
-        self.crypto.discard(space);
+        if self.crypto.discard(space) {
+            self.loss_recovery.discard(space);
+        }
     }
 
     fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, PNSpace)>> {
@@ -3379,7 +3380,7 @@ mod tests {
         let out = client.process(None, now);
         assert_eq!(out, Output::Callback(Duration::from_millis(60)));
 
-        // Wait for PTO o expire and resend a handshake packet
+        // Wait for PTO to expire and resend a handshake packet
         now += Duration::from_millis(60);
         let pkt2 = client.process(None, now).dgram();
         assert!(pkt2.is_some());
