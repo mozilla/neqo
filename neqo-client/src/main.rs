@@ -14,6 +14,7 @@ use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
@@ -25,7 +26,7 @@ use structopt::StructOpt;
 use url::Url;
 
 #[derive(Debug)]
-enum ClientError {
+pub enum ClientError {
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
 }
@@ -81,6 +82,10 @@ pub struct Args {
     #[structopt(name = "output-dir", long)]
     /// Save contents of fetched URLs to a directory
     output_dir: Option<PathBuf>,
+
+    #[structopt(name = "qns-mode", long)]
+    /// Enable special behavior for use with QUIC Network Simulator
+    qns_mode: bool,
 }
 
 trait Handler {
@@ -318,7 +323,18 @@ fn client(
 
 fn main() -> Res<()> {
     init();
-    let args = Args::from_args();
+    let mut args = Args::from_args();
+
+    if args.qns_mode {
+        match env::var("TESTCASE") {
+            Ok(s) if s == "http3" => {}
+            Ok(s) if s == "handshake" || s == "transfer" => {
+                args.use_old_http = true;
+            }
+            Ok(_) => exit(127),
+            Err(_) => exit(1),
+        }
+    }
 
     let urls = args.urls.clone();
     for url in &urls {
@@ -348,7 +364,8 @@ fn main() -> Res<()> {
             .expect("Unable to connect UDP socket");
 
         println!(
-            "Client connecting: {:?} -> {:?}",
+            "{} Client connecting: {:?} -> {:?}",
+            if args.use_old_http { "H9" } else { "H3" },
             socket.local_addr().unwrap(),
             remote_addr
         );
@@ -379,7 +396,7 @@ fn main() -> Res<()> {
         };
 
         if args.use_old_http {
-            old::old_client(&args, socket, local_addr, remote_addr, url)
+            old::old_client(&args, socket, local_addr, remote_addr, url, &mut out_file)?;
         } else {
             client(&args, socket, local_addr, remote_addr, url, &mut out_file)?;
         }
@@ -391,12 +408,16 @@ fn main() -> Res<()> {
 mod old {
     use std::cell::RefCell;
     use std::collections::HashSet;
+    use std::fs::File;
+    use std::io::Write;
     use std::net::{SocketAddr, UdpSocket};
     use std::process::exit;
     use std::rc::Rc;
     use std::time::Instant;
 
     use url::Url;
+
+    use super::Res;
 
     use neqo_common::Datagram;
     use neqo_transport::{
@@ -406,13 +427,23 @@ mod old {
     use super::{emit_datagram, Args};
 
     trait HandlerOld {
-        fn handle(&mut self, args: &Args, client: &mut Connection) -> bool;
+        fn handle(
+            &mut self,
+            args: &Args,
+            client: &mut Connection,
+            out_file: &mut Option<File>,
+        ) -> Res<bool>;
     }
 
     struct PreConnectHandlerOld {}
     impl HandlerOld for PreConnectHandlerOld {
-        fn handle(&mut self, _args: &Args, client: &mut Connection) -> bool {
-            State::Connected != *dbg!(client.state())
+        fn handle(
+            &mut self,
+            _args: &Args,
+            client: &mut Connection,
+            _out_file: &mut Option<File>,
+        ) -> Res<bool> {
+            Ok(State::Connected != *dbg!(client.state()))
         }
     }
 
@@ -423,20 +454,30 @@ mod old {
 
     // This is a bit fancier than actually needed.
     impl HandlerOld for PostConnectHandlerOld {
-        fn handle(&mut self, args: &Args, client: &mut Connection) -> bool {
+        fn handle(
+            &mut self,
+            args: &Args,
+            client: &mut Connection,
+            out_file: &mut Option<File>,
+        ) -> Res<bool> {
             let mut data = vec![0; 4000];
             while let Some(event) = client.next_event() {
                 match event {
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         if !self.streams.contains(&stream_id) {
                             println!("Data on unexpected stream: {}", stream_id);
-                            return false;
+                            return Ok(false);
                         }
 
                         let (sz, fin) = client
                             .stream_recv(stream_id, &mut data)
                             .expect("Read should succeed");
-                        if !args.output_read_data {
+
+                        if let Some(out_file) = out_file {
+                            if sz > 0 {
+                                out_file.write_all(&data[..sz])?;
+                            }
+                        } else if !args.output_read_data {
                             println!("READ[{}]: {} bytes", stream_id, sz);
                         } else {
                             println!(
@@ -448,7 +489,7 @@ mod old {
                         if fin {
                             println!("<FIN[{}]>", stream_id);
                             client.close(Instant::now(), 0, "kthxbye!");
-                            return false;
+                            return Ok(false);
                         }
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
@@ -460,7 +501,7 @@ mod old {
                 }
             }
 
-            true
+            Ok(true)
         }
     }
 
@@ -471,20 +512,21 @@ mod old {
         client: &mut Connection,
         handler: &mut dyn HandlerOld,
         args: &Args,
-    ) -> State {
+        out_file: &mut Option<File>,
+    ) -> Res<State> {
         let buf = &mut [0u8; 2048];
         loop {
             if let State::Closed(..) = client.state() {
-                return client.state().clone();
+                return Ok(client.state().clone());
             }
 
-            let exiting = !handler.handle(args, client);
+            let exiting = !handler.handle(args, client, out_file)?;
 
             let out_dgram = client.process_output(Instant::now());
             emit_datagram(&socket, out_dgram.dgram());
 
             if exiting {
-                return client.state().clone();
+                return Ok(client.state().clone());
             }
 
             let sz = match socket.recv(&mut buf[..]) {
@@ -511,12 +553,8 @@ mod old {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         url: &Url,
-    ) {
-        dbg!(url.host_str().unwrap());
-        dbg!(&args.alpn);
-        dbg!(local_addr);
-        dbg!(remote_addr);
-
+        out_file: &mut Option<File>,
+    ) -> Res<()> {
         let mut client = Connection::new_client(
             url.host_str().unwrap(),
             &["http/0.9"],
@@ -534,7 +572,8 @@ mod old {
             &mut client,
             &mut h,
             &args,
-        );
+            out_file,
+        )?;
 
         let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
         let req: String = "GET /10\r\n".to_string();
@@ -550,6 +589,9 @@ mod old {
             &mut client,
             &mut h2,
             &args,
-        );
+            out_file,
+        )?;
+
+        Ok(())
     }
 }
