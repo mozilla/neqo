@@ -343,7 +343,7 @@ mod test {
         let mut test_receiver: TestReceiver = TestReceiver::default();
         let mut decoder = EncoderInstructionReader::new();
         for i in 0..buf.len() - 1 {
-            test_receiver.write(&buf[i..i + 1]);
+            test_receiver.write(&buf[i..=i]);
             assert!(decoder
                 .read_instructions(&mut test_receiver)
                 .unwrap()
