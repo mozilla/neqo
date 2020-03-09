@@ -284,10 +284,8 @@ impl LiteralReader {
                 }
                 LiteralReaderState::ReadLength { reader } => match reader.read(s)? {
                     Some(v) => {
-                        self.literal.resize(
-                            v.try_into().or(Err(Error::DecodingError))?,
-                            0x0,
-                        );
+                        self.literal
+                            .resize(v.try_into().or(Err(Error::DecodingError))?, 0x0);
                         self.state = LiteralReaderState::ReadLiteral { offset: 0 };
                     }
                     None => break Ok(None),
