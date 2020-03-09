@@ -1035,7 +1035,7 @@ mod tests {
         flow_mgr.borrow_mut().conn_increase_max_credit(100);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(0.into(), 100, flow_mgr, conn_events.clone());
+        let mut s = SendStream::new(0.into(), 100, flow_mgr, conn_events);
         s.send(&[0; 10]).unwrap();
         s.close();
 
@@ -1045,11 +1045,11 @@ mod tests {
         let (_f1, f1_token) = ss
             .get_frame(PNSpace::ApplicationData, TxMode::Normal, 6)
             .unwrap();
-        assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if x.fin == false));
+        assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if !x.fin));
         let (_f2, f2_token) = ss
             .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
             .unwrap();
-        assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.fin == true));
+        assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.fin));
 
         // Should be no more data to frame
         let f3 = ss.get_frame(PNSpace::ApplicationData, TxMode::Normal, 100);
@@ -1067,7 +1067,7 @@ mod tests {
         let (_f4, f4_token) = ss
             .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
             .unwrap();
-        assert!(matches!(f4_token, Some(RecoveryToken::Stream(x)) if x.fin == false));
+        assert!(matches!(f4_token, Some(RecoveryToken::Stream(x)) if !x.fin));
 
         // Mark frame 2 as lost
         let f2_token = match f2_token {
@@ -1080,17 +1080,18 @@ mod tests {
         let (_f5, f5_token) = ss
             .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
             .unwrap();
-        assert!(matches!(f5_token, Some(RecoveryToken::Stream(x)) if x.fin == true));
+        assert!(matches!(f5_token, Some(RecoveryToken::Stream(x)) if x.fin));
     }
 
     #[test]
+    #[allow(clippy::cognitive_complexity)]
     // Verify lost frames handle fin properly with zero length fin
     fn send_stream_get_frame_zerolength_fin() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         flow_mgr.borrow_mut().conn_increase_max_credit(100);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(0.into(), 100, flow_mgr, conn_events.clone());
+        let mut s = SendStream::new(0.into(), 100, flow_mgr, conn_events);
         s.send(&[0; 10]).unwrap();
 
         let mut ss = SendStreams::default();
@@ -1101,7 +1102,7 @@ mod tests {
             .unwrap();
         assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if x.offset == 0));
         assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if x.length == 10));
-        assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if x.fin == false));
+        assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if !x.fin));
 
         // Should be no more data to frame
         let f2 = ss.get_frame(PNSpace::ApplicationData, TxMode::Normal, 100);
@@ -1114,7 +1115,7 @@ mod tests {
             .unwrap();
         assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.offset == 10));
         assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.length == 0));
-        assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.fin == true));
+        assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.fin));
 
         // Mark frame 2 as lost
         let f2_token = match f2_token {
@@ -1129,7 +1130,7 @@ mod tests {
             .unwrap();
         assert!(matches!(&f3_token, Some(RecoveryToken::Stream(x)) if x.offset == 10));
         assert!(matches!(&f3_token, Some(RecoveryToken::Stream(x)) if x.length == 0));
-        assert!(matches!(&f3_token, Some(RecoveryToken::Stream(x)) if x.fin == true));
+        assert!(matches!(&f3_token, Some(RecoveryToken::Stream(x)) if x.fin));
 
         // Mark frame 1 as lost
         let f1_token = match f1_token {
@@ -1144,6 +1145,6 @@ mod tests {
             .unwrap();
         assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.offset == 0));
         assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.length == 10));
-        assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.fin == true));
+        assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.fin));
     }
 }
