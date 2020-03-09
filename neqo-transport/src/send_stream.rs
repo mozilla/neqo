@@ -753,10 +753,14 @@ impl SendStreams {
         }
 
         for (stream_id, stream) in self {
-            let complete = stream.final_size().is_some();
+            let final_size = stream.final_size();
             if let Some((offset, data)) = stream.next_bytes(mode) {
+                let data_len = u64::try_from(data.len()).unwrap();
+                let range_has_fin = final_size
+                    .map(|fs| fs == offset + data_len)
+                    .unwrap_or(false);
                 if let Some((frame, length)) =
-                    Frame::new_stream(stream_id.as_u64(), offset, data, complete, remaining)
+                    Frame::new_stream(stream_id.as_u64(), offset, data, range_has_fin, remaining)
                 {
                     qdebug!(
                         "Stream {} sending bytes {}-{}, space {:?}, mode {:?}",
@@ -766,7 +770,7 @@ impl SendStreams {
                         space,
                         mode,
                     );
-                    let fin = complete && length == data.len();
+                    let fin = range_has_fin && length == data.len();
                     debug_assert!(!fin || matches!(frame, Frame::Stream{fin: true, .. }));
                     stream.mark_as_sent(offset, length, fin);
 
