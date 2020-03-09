@@ -4,80 +4,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::qpack_helper::{to_string, ReceiverBufferWrapper};
+use crate::prefix::{
+    BASE_PREFIX_NEGATIVE, BASE_PREFIX_POSITIVE, HEADER_FIELD_INDEX_DYNAMIC,
+    HEADER_FIELD_INDEX_DYNAMIC_POST, HEADER_FIELD_INDEX_STATIC, HEADER_FIELD_LITERAL_NAME_LITERAL,
+    HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC, HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST,
+    HEADER_FIELD_LITERAL_NAME_REF_STATIC, NO_PREFIX,
+};
 use crate::qpack_send_buf::QPData;
+use crate::reader::{to_string, ReceiverBufferWrapper};
 use crate::table::HeaderTable;
 use crate::Header;
 use crate::{Error, Res};
-use crate::{Prefix, NO_PREFIX};
 use neqo_common::qtrace;
 use std::ops::Deref;
-
-const BASE_PREFIX_POSITIVE: Prefix = Prefix {
-    prefix: 0x00,
-    len: 1,
-};
-const BASE_PREFIX_NEGATIVE: Prefix = Prefix {
-    prefix: 0x80,
-    len: 1,
-};
-
-// Header block encoding prefixes
-const HEADER_FIELD_INDEX_STATIC: Prefix = Prefix {
-    prefix: 0xC0,
-    len: 2,
-};
-const HEADER_FIELD_INDEX_DYNAMIC: Prefix = Prefix {
-    prefix: 0x80,
-    len: 2,
-};
-
-// | 1 | T |  index(6+) |
-// This covers HEADER_FIELD_INDEX_STATIC and HEADER_FIELD_INDEX_DYNAMIC.
-const HEADER_FIELD_INDEX_MASK: u8 = 0xC0;
-
-const HEADER_FIELD_INDEX_DYNAMIC_POST: Prefix = Prefix {
-    prefix: 0x10,
-    len: 4,
-};
-
-// | 0 | 0 | 0 | 1 |  Index(4+) |
-// This covers HEADER_FIELD_INDEX_DYNAMIC_POST
-const HEADER_FIELD_INDEX_POST_MASK: u8 = 0xF0;
-
-const HEADER_FIELD_LITERAL_NAME_REF_STATIC: Prefix = Prefix {
-    prefix: 0x50,
-    len: 4,
-};
-const HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC: Prefix = Prefix {
-    prefix: 0x40,
-    len: 4,
-};
-
-// | 0 | 1 | N | T |  Index(4+) |
-// N is ignored.
-// This covers HEADER_FIELD_LITERAL_NAME_REF_STATIC and HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC.
-const HEADER_FIELD_LITERAL_NAME_REF_MASK: u8 = 0xD0;
-
-const HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST: Prefix = Prefix {
-    prefix: 0x00,
-    len: 5,
-};
-
-// | 0 | 0 | 0 | 0 | N |  Index(3+) |
-// N is ignored.
-// This covers HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST.
-const HEADER_FIELD_LITERAL_NAME_REF_POST_MASK: u8 = 0xF0;
-
-const HEADER_FIELD_LITERAL_NAME_LITERAL: Prefix = Prefix {
-    prefix: 0x20,
-    len: 4,
-};
-
-// | 0 | 0 | 1 | N | H |  Index(3+) |
-// N is ignored. H is not relevant for decoding this prefix.
-// This covers HEADER_FIELD_LITERAL_NAME_LITERAL.
-const HEADER_FIELD_LITERAL_NAME_LITERAL_MASK: u8 = 0xE0;
 
 #[derive(Default, Debug, PartialEq)]
 pub struct HeaderEncoder {
@@ -129,33 +68,30 @@ impl HeaderEncoder {
             delta,
             fix
         );
-        let enc_insert_cnt = if req_insert_cnt != 0 {
-            (req_insert_cnt % (2 * self.max_entries)) + 1
-        } else {
+        let enc_insert_cnt = if req_insert_cnt == 0 {
             0
+        } else {
+            (req_insert_cnt % (2 * self.max_entries)) + 1
         };
 
-        let mut offset = 0; // this is for fixing header_block only.
-        if !fix {
-            self.buf
-                .encode_prefixed_encoded_int(NO_PREFIX, enc_insert_cnt);
-        } else {
-            // TODO fix for case when there is no enough space!!!
-            offset = self
-                .buf
-                .encode_prefixed_encoded_int_fix(0, NO_PREFIX, enc_insert_cnt);
-        }
         let prefix = if positive {
             BASE_PREFIX_POSITIVE
         } else {
             BASE_PREFIX_NEGATIVE
         };
-        if !fix {
-            self.buf.encode_prefixed_encoded_int(prefix, delta);
-        } else {
+
+        if fix {
+            // TODO fix for case when there is no enough space!!!
+            let offset =
+                self.buf
+                    .encode_prefixed_encoded_int_with_offset(0, NO_PREFIX, enc_insert_cnt);
             let _ = self
                 .buf
-                .encode_prefixed_encoded_int_fix(offset, prefix, delta);
+                .encode_prefixed_encoded_int_with_offset(offset, prefix, delta);
+        } else {
+            self.buf
+                .encode_prefixed_encoded_int(NO_PREFIX, enc_insert_cnt);
+            self.buf.encode_prefixed_encoded_int(prefix, delta);
         }
     }
 
@@ -308,28 +244,22 @@ impl<'a> HeaderDecoder<'a> {
             }
 
             let b = self.buf.peek()?;
-            if b & HEADER_FIELD_INDEX_MASK == HEADER_FIELD_INDEX_STATIC.prefix {
+            if HEADER_FIELD_INDEX_STATIC.cmp_prefix(b) {
                 h.push(self.read_indexed_static(table)?);
-            } else if b & HEADER_FIELD_INDEX_MASK == HEADER_FIELD_INDEX_DYNAMIC.prefix {
+            } else if HEADER_FIELD_INDEX_DYNAMIC.cmp_prefix(b) {
                 h.push(self.read_indexed_dynamic(table)?);
-            } else if b & HEADER_FIELD_INDEX_POST_MASK == HEADER_FIELD_INDEX_DYNAMIC_POST.prefix {
+            } else if HEADER_FIELD_INDEX_DYNAMIC_POST.cmp_prefix(b) {
                 h.push(self.read_indexed_dynamic_post(table)?);
-            } else if b & HEADER_FIELD_LITERAL_NAME_REF_MASK
-                == HEADER_FIELD_LITERAL_NAME_REF_STATIC.prefix
-            {
+            } else if HEADER_FIELD_LITERAL_NAME_REF_STATIC.cmp_prefix(b) {
                 h.push(self.read_literal_with_name_ref_static(table)?);
-            } else if b & HEADER_FIELD_LITERAL_NAME_REF_MASK
-                == HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC.prefix
-            {
+            } else if HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC.cmp_prefix(b) {
                 h.push(self.read_literal_with_name_ref_dynamic(table)?);
-            } else if b & HEADER_FIELD_LITERAL_NAME_LITERAL_MASK
-                == HEADER_FIELD_LITERAL_NAME_LITERAL.prefix
-            {
+            } else if HEADER_FIELD_LITERAL_NAME_LITERAL.cmp_prefix(b) {
                 h.push(self.read_literal_with_name_literal()?);
-            } else if b & HEADER_FIELD_LITERAL_NAME_REF_POST_MASK
-                == HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST.prefix
-            {
+            } else if HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST.cmp_prefix(b) {
                 h.push(self.read_literal_with_name_ref_dynamic_post(table)?);
+            } else {
+                unreachable!("All prefixes are covered");
             }
         }
     }
@@ -345,13 +275,13 @@ impl<'a> HeaderDecoder<'a> {
 
         let s = self.buf.peek()? & 0x80 != 0;
         let base_delta = self.buf.read_prefixed_int(1)?;
-        self.base = if !s {
-            self.req_insert_cnt + base_delta
-        } else {
+        self.base = if s {
             if self.req_insert_cnt <= base_delta {
                 return Err(Error::DecompressionFailed);
             }
             self.req_insert_cnt - base_delta - 1
+        } else {
+            self.req_insert_cnt + base_delta
         };
         qtrace!(
             [self],
@@ -392,7 +322,9 @@ impl<'a> HeaderDecoder<'a> {
     }
 
     fn read_indexed_static(&mut self, table: &HeaderTable) -> Res<Header> {
-        let index = self.buf.read_prefixed_int(HEADER_FIELD_INDEX_STATIC.len)?;
+        let index = self
+            .buf
+            .read_prefixed_int(HEADER_FIELD_INDEX_STATIC.len())?;
         qtrace!([self], "decoder static indexed {}.", index);
 
         match table.get_static(index) {
@@ -402,7 +334,9 @@ impl<'a> HeaderDecoder<'a> {
     }
 
     fn read_indexed_dynamic(&mut self, table: &HeaderTable) -> Res<Header> {
-        let index = self.buf.read_prefixed_int(HEADER_FIELD_INDEX_DYNAMIC.len)?;
+        let index = self
+            .buf
+            .read_prefixed_int(HEADER_FIELD_INDEX_DYNAMIC.len())?;
         qtrace!([self], "decoder dynamic indexed {}.", index);
         match table.get_dynamic(index, self.base, false) {
             Ok(entry) => Ok((to_string(entry.name())?, to_string(entry.value())?)),
@@ -413,7 +347,7 @@ impl<'a> HeaderDecoder<'a> {
     fn read_indexed_dynamic_post(&mut self, table: &HeaderTable) -> Res<Header> {
         let index = self
             .buf
-            .read_prefixed_int(HEADER_FIELD_INDEX_DYNAMIC_POST.len)?;
+            .read_prefixed_int(HEADER_FIELD_INDEX_DYNAMIC_POST.len())?;
         qtrace!([self], "decode post-based {}.", index);
         match table.get_dynamic(index, self.base, true) {
             Ok(entry) => Ok((to_string(entry.name())?, to_string(entry.value())?)),
@@ -429,7 +363,7 @@ impl<'a> HeaderDecoder<'a> {
 
         let index = self
             .buf
-            .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_STATIC.len)?;
+            .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_STATIC.len())?;
 
         match table.get_static(index) {
             Ok(entry) => Ok((
@@ -448,7 +382,7 @@ impl<'a> HeaderDecoder<'a> {
 
         let index = self
             .buf
-            .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC.len)?;
+            .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC.len())?;
 
         match table.get_dynamic(index, self.base, false) {
             Ok(entry) => Ok((
@@ -464,7 +398,7 @@ impl<'a> HeaderDecoder<'a> {
 
         let index = self
             .buf
-            .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST.len)?;
+            .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST.len())?;
 
         match table.get_dynamic(index, self.base, true) {
             Ok(entry) => Ok((
@@ -480,7 +414,7 @@ impl<'a> HeaderDecoder<'a> {
 
         let name = self
             .buf
-            .read_literal_from_buffer(HEADER_FIELD_LITERAL_NAME_LITERAL.len)?;
+            .read_literal_from_buffer(HEADER_FIELD_LITERAL_NAME_LITERAL.len())?;
 
         Ok((name, self.buf.read_literal_from_buffer(0)?))
     }

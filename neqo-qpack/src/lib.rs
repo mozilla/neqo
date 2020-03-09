@@ -5,7 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
-//#![warn(clippy::use_self)]
+#![warn(clippy::use_self)]
 
 pub mod decoder;
 mod decoder_instructions;
@@ -15,23 +15,14 @@ mod header_block;
 pub mod huffman;
 mod huffman_decode_helper;
 pub mod huffman_table;
-pub mod qpack_helper;
+mod prefix;
 mod qpack_send_buf;
+pub mod reader;
 mod static_table;
 mod table;
 
 pub type Header = (String, String);
 type Res<T> = Result<T, Error>;
-
-struct Prefix {
-    pub prefix: u8,
-    pub len: u8,
-}
-
-const NO_PREFIX: Prefix = Prefix {
-    prefix: 0x0,
-    len: 0,
-};
 
 #[derive(Debug)]
 enum QPackSide {

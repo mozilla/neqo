@@ -7,13 +7,14 @@
 use crate::decoder_instructions::DecoderInstruction;
 use crate::encoder_instructions::{EncoderInstruction, EncoderInstructionReader};
 use crate::header_block::{HeaderDecoder, HeaderDecoderResult};
-use crate::qpack_helper::ReceiverConnWrapper;
 use crate::qpack_send_buf::QPData;
+use crate::reader::ReceiverConnWrapper;
 use crate::table::HeaderTable;
 use crate::Header;
 use crate::{Error, Res};
 use neqo_common::qdebug;
 use neqo_transport::Connection;
+use std::convert::TryInto;
 
 pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
 
@@ -27,7 +28,7 @@ pub struct QPackDecoder {
     local_stream_id: Option<u64>,
     remote_stream_id: Option<u64>,
     max_table_size: u32,
-    max_blocked_streams: u16,
+    max_blocked_streams: usize,
     blocked_streams: Vec<(u64, u64)>, //stream_id and requested inserts count.
 }
 
@@ -43,7 +44,7 @@ impl QPackDecoder {
             local_stream_id: None,
             remote_stream_id: None,
             max_table_size,
-            max_blocked_streams,
+            max_blocked_streams: max_blocked_streams.try_into().unwrap(),
             blocked_streams: Vec::new(),
         }
     }
@@ -57,7 +58,7 @@ impl QPackDecoder {
     }
 
     pub fn get_blocked_streams(&self) -> u16 {
-        self.max_blocked_streams
+        self.max_blocked_streams.try_into().unwrap()
     }
 
     // returns a list of unblocked streams
@@ -78,13 +79,13 @@ impl QPackDecoder {
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv)? {
-                Some(instruction) => self.call_instruction(instruction)?,
+                Some(instruction) => self.execute_instruction(instruction)?,
                 None => break Ok(()),
             }
         }
     }
 
-    fn call_instruction(&mut self, instruction: EncoderInstruction) -> Res<()> {
+    fn execute_instruction(&mut self, instruction: EncoderInstruction) -> Res<()> {
         match instruction {
             EncoderInstruction::Capacity { value } => self.set_capacity(value)?,
             EncoderInstruction::InsertWithNameRefStatic { index, value } => {
@@ -169,7 +170,7 @@ impl QPackDecoder {
         )? {
             HeaderDecoderResult::Blocked(req_insert_cnt) => {
                 self.blocked_streams.push((stream_id, req_insert_cnt));
-                if self.blocked_streams.len() > self.max_blocked_streams as usize {
+                if self.blocked_streams.len() > self.max_blocked_streams {
                     return Err(Error::DecompressionFailed);
                 }
                 Ok(None)

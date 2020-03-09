@@ -51,7 +51,9 @@ impl<'a> ReceiverConnWrapper<'a> {
     }
 }
 
-// This is only used by header decoder therefore all errors are DecompressionFailed.
+/// This is only used by header decoder therefore all errors are DecompressionFailed.
+/// A header block is read entirely before decoding it, therefore if there is not enough
+/// data in the buffer an error DecompressionFailed will be return.
 pub(crate) struct ReceiverBufferWrapper<'a> {
     buf: &'a [u8],
     offset: usize,
@@ -86,8 +88,13 @@ impl<'a> ReceiverBufferWrapper<'a> {
         self.offset == self.buf.len()
     }
 
+    /// The function decodes varint with a prefixed, i.e. ignores prefix_len bits of the first
+    /// byte.
+    /// ReceiverBufferWrapper is only used for decoding header blocks. The header blocks are read
+    /// entirely before a decoding starts, therefore any incomplete varint because of reaching the
+    /// end of a buffer will be treated as the DecompressionFailed error.
     pub fn read_prefixed_int(&mut self, prefix_len: u8) -> Res<u64> {
-        assert!(prefix_len < 8);
+        debug_assert!(prefix_len < 8);
 
         let first_byte = self.read_byte()?;
         let mut reader = IntReader::new(first_byte, prefix_len);
@@ -97,9 +104,19 @@ impl<'a> ReceiverBufferWrapper<'a> {
         }
     }
 
-    // Do not use LiteralReader here to avoid copying data.
+    /// Do not use LiteralReader here to avoid copying data.
+    /// The function decoded a literal with a prefix:
+    ///   1) ignores prefix_len bits of the first byte,
+    ///   2) reads "huffman bit"
+    ///   3) decode varint that is the length of a literal
+    ///   4) reads the literal
+    ///   5) performs huffman decoding if needed.
+    ///
+    /// ReceiverBufferWrapper is only used for decoding header blocks. The header blocks are read
+    /// entirely before a decoding starts, therefore any incomplete varint or literal because of
+    /// reaching the end of a buffer will be treated as the DecompressionFailed error.
     pub fn read_literal_from_buffer(&mut self, prefix_len: u8) -> Res<String> {
-        assert!(prefix_len <= 7);
+        debug_assert!(prefix_len < 7);
 
         let first_byte = self.read_byte()?;
         let use_huffman = (first_byte & (0x80 >> prefix_len)) != 0;
@@ -127,6 +144,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
     }
 }
 
+/// This is varint reader that can take into account a prefix.
 #[derive(Debug)]
 pub struct IntReader {
     value: u64,
@@ -135,18 +153,32 @@ pub struct IntReader {
 }
 
 impl IntReader {
+    /// IntReader is created by suppling the first byte anf prefix length.
+    /// A varint may take only one byte, In that case already the first by has set state to done.
     pub fn new(first_byte: u8, prefix_len: u8) -> Self {
-        let mut reader = Self {
-            value: 0,
-            cnt: 0,
-            done: false,
+        debug_assert!(prefix_len < 8, "prefix cannot larger than 7.");
+        let mask = if prefix_len == 0 {
+            0xff
+        } else {
+            (1 << (8 - prefix_len)) - 1
         };
-        assert!(prefix_len <= 8, "prefix cannot larger than 8.");
-        reader.read_first_byte(prefix_len, first_byte);
-        reader
+        let value = u64::from(first_byte & mask);
+
+        Self {
+            value,
+            cnt: 0,
+            done: value < u64::from(mask),
+        }
     }
 
-    pub fn read(&mut self, s: &mut dyn ReadByte) -> Res<Option<u64>> {
+    /// This function reads more bytes until the varint is decoded or until stream/buffer does not
+    /// have any more date.
+    /// ### Error
+    /// Possible errors are:
+    ///  1) IntegerOverflow
+    ///  2) Any ReadByte's error
+    /// It returns Some(value) if reading the varint is done or None if it needs more data.
+    pub fn read<R: ReadByte>(&mut self, s: &mut R) -> Res<Option<u64>> {
         // If it is not finished yet read more data.
         // A varint may take only one byte, In that case already the first by has set state to done.
         if !self.done {
@@ -159,20 +191,7 @@ impl IntReader {
         Ok(None)
     }
 
-    fn read_first_byte(&mut self, prefix_len: u8, first_byte: u8) {
-        let mask = if prefix_len == 0 {
-            0xff
-        } else {
-            (1 << (8 - prefix_len)) - 1
-        };
-        self.value = u64::from(first_byte & mask);
-
-        if self.value < u64::from(mask) {
-            self.done = true;
-        }
-    }
-
-    fn read_more(&mut self, s: &mut dyn ReadByte) -> Res<()> {
+    fn read_more<R: ReadByte>(&mut self, s: &mut R) -> Res<()> {
         let mut b: u8;
         while !self.done {
             b = match s.read_byte() {
@@ -182,7 +201,7 @@ impl IntReader {
             };
 
             if (self.cnt == 63) && (b > 1 || (b == 1 && ((self.value >> 63) == 1))) {
-                qerror!("Error decooding prefixed encoded int - IntegerOverflow");
+                qerror!("Error decoding prefixed encoded int - IntegerOverflow");
                 return Err(Error::IntegerOverflow);
             }
             self.value += u64::from(b & 0x7f) << self.cnt;
@@ -206,30 +225,31 @@ enum LiteralReaderState {
     Done,
 }
 
-#[derive(Debug)]
+impl Default for LiteralReaderState {
+    fn default() -> Self {
+        Self::ReadHuffman
+    }
+}
+
+/// This is decoder of a literal with a prefix:
+///   1) ignores prefix_len bits of the first byte,
+///   2) reads "huffman bit"
+///   3) decode varint that is the length of a literal
+///   4) reads the literal
+///   5) performs huffman decoding if needed.
+#[derive(Debug, Default)]
 pub struct LiteralReader {
     state: LiteralReaderState,
     literal: Vec<u8>,
     use_huffman: bool,
 }
 
-impl Default for LiteralReader {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl LiteralReader {
-    pub fn new() -> Self {
-        Self {
-            state: LiteralReaderState::ReadHuffman,
-            literal: Vec::new(),
-            use_huffman: false,
-        }
-    }
-
+    /// Creates LiteralReader with the first byte. This constructor is always used
+    /// when a litreral has a prefix.
+    /// For literals without a prefix please use the default constructor.
     pub fn new_with_first_byte(first_byte: u8, prefix_len: u8) -> Self {
-        assert!(prefix_len <= 8);
+        assert!(prefix_len < 8);
         Self {
             state: LiteralReaderState::ReadLength {
                 reader: IntReader::new(first_byte, prefix_len + 1),
@@ -239,6 +259,13 @@ impl LiteralReader {
         }
     }
 
+    /// This function reads bytes until the literal is decoded or until stream/buffer does not
+    /// have any more date ready.
+    /// ### Error
+    /// Possible errors are:
+    ///  1) IntegerOverflow
+    ///  2) Any ReadByte's error
+    /// It returns Some(value) if reading the literal is done or None if it needs more data.
     pub fn read<T: ReadByte + Reader>(&mut self, s: &mut T) -> Res<Option<Vec<u8>>> {
         loop {
             qdebug!("state = {:?}", self.state);
@@ -257,9 +284,9 @@ impl LiteralReader {
                 }
                 LiteralReaderState::ReadLength { reader } => match reader.read(s)? {
                     Some(v) => {
-                        self.literal.resize_with(
+                        self.literal.resize(
                             v.try_into().or(Err(Error::DecodingError))?,
-                            Default::default,
+                            0x0,
                         );
                         self.state = LiteralReaderState::ReadLiteral { offset: 0 };
                     }
@@ -287,6 +314,8 @@ impl LiteralReader {
     }
 }
 
+/// This is a helper function used only by ReceiverBufferWrapper, therefore it returns
+/// DecompressionFailed if any error happens.
 pub fn to_string(v: &[u8]) -> Res<String> {
     match str::from_utf8(v) {
         Ok(s) => Ok(s.to_string()),
@@ -295,41 +324,48 @@ pub fn to_string(v: &[u8]) -> Res<String> {
 }
 
 #[cfg(test)]
-use std::collections::VecDeque;
+pub(crate) mod test_receiver {
 
-#[cfg(test)]
-#[derive(Default)]
-pub struct TestReceiver {
-    buf: VecDeque<u8>,
-}
+    use super::*;
+    use std::collections::VecDeque;
 
-#[cfg(test)]
-impl ReadByte for TestReceiver {
-    fn read_byte(&mut self) -> Res<u8> {
-        self.buf.pop_back().ok_or(Error::NoMoreData)
+    pub struct TestReceiver {
+        buf: VecDeque<u8>,
     }
-}
 
-#[cfg(test)]
-impl Reader for TestReceiver {
-    fn read(&mut self, buf: &mut [u8]) -> Res<usize> {
-        let len = if buf.len() > self.buf.len() {
-            self.buf.len()
-        } else {
-            buf.len()
-        };
-        for item in buf.iter_mut().take(len) {
-            *item = self.buf.pop_back().ok_or(Error::NoMoreData)?;
+    impl Default for TestReceiver {
+        fn default() -> Self {
+            Self {
+                buf: VecDeque::new(),
+            }
         }
-        Ok(len)
     }
-}
 
-#[cfg(test)]
-impl TestReceiver {
-    pub fn write(&mut self, buf: &[u8]) {
-        for b in buf {
-            self.buf.push_front(*b);
+    impl ReadByte for TestReceiver {
+        fn read_byte(&mut self) -> Res<u8> {
+            self.buf.pop_back().ok_or(Error::NoMoreData)
+        }
+    }
+
+    impl Reader for TestReceiver {
+        fn read(&mut self, buf: &mut [u8]) -> Res<usize> {
+            let len = if buf.len() > self.buf.len() {
+                self.buf.len()
+            } else {
+                buf.len()
+            };
+            for item in buf.iter_mut().take(len) {
+                *item = self.buf.pop_back().ok_or(Error::NoMoreData)?;
+            }
+            Ok(len)
+        }
+    }
+
+    impl TestReceiver {
+        pub fn write(&mut self, buf: &[u8]) {
+            for b in buf {
+                self.buf.push_front(*b);
+            }
         }
     }
 }
@@ -338,6 +374,7 @@ impl TestReceiver {
 mod tests {
 
     use super::*;
+    use test_receiver::TestReceiver;
 
     const TEST_CASES_NUMBERS: [(&[u8], u8, u64); 7] = [
         (&[0xEA], 3, 10),
@@ -353,7 +390,7 @@ mod tests {
     fn read_prefixed_int() {
         for (buf, prefix_len, value) in &TEST_CASES_NUMBERS {
             let mut reader = IntReader::new(buf[0], *prefix_len);
-            let mut test_receiver: TestReceiver = Default::default();
+            let mut test_receiver: TestReceiver = TestReceiver::default();
             test_receiver.write(&buf[1..]);
             assert_eq!(reader.read(&mut test_receiver), Ok(Some(*value)));
         }
@@ -363,7 +400,7 @@ mod tests {
     fn read_prefixed_int_with_more_data_in_buffer() {
         for (buf, prefix_len, value) in &TEST_CASES_NUMBERS {
             let mut reader = IntReader::new(buf[0], *prefix_len);
-            let mut test_receiver: TestReceiver = Default::default();
+            let mut test_receiver: TestReceiver = TestReceiver::default();
             test_receiver.write(&buf[1..]);
             // add some more data
             test_receiver.write(&[0x0, 0x0, 0x0]);
@@ -375,7 +412,7 @@ mod tests {
     fn read_prefixed_int_slow_writer() {
         let (buf, prefix_len, value) = &TEST_CASES_NUMBERS[4];
         let mut reader = IntReader::new(buf[0], *prefix_len);
-        let mut test_receiver: TestReceiver = Default::default();
+        let mut test_receiver: TestReceiver = TestReceiver::default();
 
         // data has not been received yet, reading IntReader will return Ok(None).
         assert_eq!(reader.read(&mut test_receiver), Ok(None));
@@ -420,7 +457,7 @@ mod tests {
     fn read_prefixed_int_big_number() {
         for (buf, prefix_len, value) in &TEST_CASES_BIG_NUMBERS {
             let mut reader = IntReader::new(buf[0], *prefix_len);
-            let mut test_receiver: TestReceiver = Default::default();
+            let mut test_receiver: TestReceiver = TestReceiver::default();
             test_receiver.write(&buf[1..]);
             assert_eq!(reader.read(&mut test_receiver), *value);
         }
@@ -496,7 +533,7 @@ mod tests {
     fn read_literal() {
         for (buf, prefix_len, value) in &TEST_CASES_LITERAL {
             let mut reader = LiteralReader::new_with_first_byte(buf[0], *prefix_len);
-            let mut test_receiver: TestReceiver = Default::default();
+            let mut test_receiver: TestReceiver = TestReceiver::default();
             test_receiver.write(&buf[1..]);
             assert_eq!(
                 to_string(&reader.read(&mut test_receiver).unwrap().unwrap()).unwrap(),

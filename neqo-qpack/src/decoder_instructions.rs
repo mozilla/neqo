@@ -4,28 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::qpack_helper::{IntReader, ReadByte};
+use crate::prefix::{
+    DECODER_HEADER_ACK, DECODER_INSERT_COUNT_INCREMENT, DECODER_STREAM_CANCELLATION,
+};
 use crate::qpack_send_buf::QPData;
-use crate::{Error, Prefix, Res};
+use crate::reader::{IntReader, ReadByte};
+use crate::{Error, Res};
 use neqo_common::{qdebug, qtrace};
 use std::mem;
-
-// Decoder instructions prefix
-const DECODER_HEADER_ACK: Prefix = Prefix {
-    prefix: 0x80,
-    len: 1,
-};
-const DECODER_STREAM_CANCELLATION: Prefix = Prefix {
-    prefix: 0x40,
-    len: 2,
-};
-const DECODER_INSERT_COUNT_INCREMENT: Prefix = Prefix {
-    prefix: 0x00,
-    len: 2,
-};
-
-const MASK_1: u8 = 0x80;
-const MASK_2: u8 = 0xC0;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum DecoderInstruction {
@@ -37,12 +23,14 @@ pub enum DecoderInstruction {
 
 impl DecoderInstruction {
     fn get_instruction(b: u8) -> Self {
-        if (b & MASK_1) == DECODER_HEADER_ACK.prefix {
+        if DECODER_HEADER_ACK.cmp_prefix(b) {
             Self::HeaderAck { stream_id: 0 }
-        } else if (b & MASK_2) == DECODER_STREAM_CANCELLATION.prefix {
+        } else if DECODER_STREAM_CANCELLATION.cmp_prefix(b) {
             Self::StreamCancellation { stream_id: 0 }
-        } else {
+        } else if DECODER_INSERT_COUNT_INCREMENT.cmp_prefix(b) {
             Self::InsertCountIncrement { increment: 0 }
+        } else {
+            unreachable!("The above patterns match everything.");
         }
     }
 
@@ -88,9 +76,9 @@ impl DecoderInstructionReader {
         }
     }
 
-    pub fn read_instructions(
+    pub fn read_instructions<R: ReadByte>(
         &mut self,
-        recv: &mut dyn ReadByte,
+        recv: &mut R,
     ) -> Res<Option<DecoderInstruction>> {
         qdebug!([self], "read a new instraction");
         loop {
@@ -99,7 +87,14 @@ impl DecoderInstructionReader {
                     Ok(b) => {
                         self.instruction = DecoderInstruction::get_instruction(b);
                         self.state = DecoderInstructionReaderState::ReadInt {
-                            reader: IntReader::new(b, if (b & MASK_1) != 0 { 1 } else { 2 }),
+                            reader: IntReader::new(
+                                b,
+                                if DECODER_HEADER_ACK.cmp_prefix(b) {
+                                    DECODER_HEADER_ACK.len()
+                                } else {
+                                    DECODER_STREAM_CANCELLATION.len()
+                                },
+                            ),
                         };
                     }
                     Err(Error::NoMoreData) => break Ok(None),
@@ -136,12 +131,12 @@ impl DecoderInstructionReader {
 mod test {
 
     use super::*;
-    use crate::qpack_helper::TestReceiver;
+    use crate::reader::test_receiver::TestReceiver;
 
     fn test_encoding_decoding(instruction: DecoderInstruction) {
         let mut buf = QPData::default();
         instruction.marshal(&mut buf);
-        let mut test_receiver: TestReceiver = Default::default();
+        let mut test_receiver: TestReceiver = TestReceiver::default();
         test_receiver.write(&buf);
         let mut decoder = DecoderInstructionReader::new();
         assert_eq!(
@@ -168,7 +163,7 @@ mod test {
     fn test_encoding_decoding_slow_reader(instruction: DecoderInstruction) {
         let mut buf = QPData::default();
         instruction.marshal(&mut buf);
-        let mut test_receiver: TestReceiver = Default::default();
+        let mut test_receiver: TestReceiver = TestReceiver::default();
         let mut decoder = DecoderInstructionReader::new();
         for i in 0..buf.len() - 1 {
             test_receiver.write(&buf[i..i + 1]);
@@ -200,7 +195,7 @@ mod test {
 
     #[test]
     fn test_decoding_error() {
-        let mut test_receiver: TestReceiver = Default::default();
+        let mut test_receiver: TestReceiver = TestReceiver::default();
         // InsertCountIncrement with overflow
         test_receiver.write(&[
             0x3f, 0xc1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xff, 0x02,
@@ -211,7 +206,7 @@ mod test {
             Err(Error::DecoderStreamError)
         );
 
-        let mut test_receiver: TestReceiver = Default::default();
+        let mut test_receiver: TestReceiver = TestReceiver::default();
         // StreamCancellation with overflow
         test_receiver.write(&[
             0x7f, 0xc1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xff, 0x02,
@@ -222,7 +217,7 @@ mod test {
             Err(Error::DecoderStreamError)
         );
 
-        let mut test_receiver: TestReceiver = Default::default();
+        let mut test_receiver: TestReceiver = TestReceiver::default();
         // HeaderAck with overflow
         test_receiver.write(&[
             0x7f, 0xc1, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xff, 0x02,

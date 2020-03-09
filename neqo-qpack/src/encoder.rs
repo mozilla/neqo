@@ -7,8 +7,8 @@
 use crate::decoder_instructions::{DecoderInstruction, DecoderInstructionReader};
 use crate::encoder_instructions::EncoderInstruction;
 use crate::header_block::HeaderEncoder;
-use crate::qpack_helper::ReceiverConnWrapper;
 use crate::qpack_send_buf::QPData;
+use crate::reader::ReceiverConnWrapper;
 use crate::table::{HeaderTable, LookupResult};
 use crate::Header;
 use crate::{Error, Res};
