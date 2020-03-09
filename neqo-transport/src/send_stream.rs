@@ -1023,4 +1023,123 @@ mod tests {
         assert_eq!(evts.len(), 1);
         assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
     }
+
+    #[test]
+    // Verify lost frames handle fin properly
+    fn send_stream_get_frame_data() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        flow_mgr.borrow_mut().conn_increase_max_credit(100);
+        let conn_events = ConnectionEvents::default();
+
+        let mut s = SendStream::new(0.into(), 100, flow_mgr, conn_events.clone());
+        s.send(&[0; 10]).unwrap();
+        s.close();
+
+        let mut ss = SendStreams::default();
+        ss.insert(0.into(), s);
+
+        let (_f1, f1_token) = ss
+            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 6)
+            .unwrap();
+        assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if x.fin == false));
+        let (_f2, f2_token) = ss
+            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
+            .unwrap();
+        assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.fin == true));
+
+        // Should be no more data to frame
+        let f3 = ss.get_frame(PNSpace::ApplicationData, TxMode::Normal, 100);
+        assert!(matches!(f3, None));
+
+        // Mark frame 1 as lost
+        let f1_token = match f1_token {
+            Some(RecoveryToken::Stream(rt)) => rt,
+            _ => panic!(),
+        };
+        ss.lost(&f1_token);
+
+        // Next frame should not set fin even though stream has fin but frame
+        // does not include end of stream
+        let (_f4, f4_token) = ss
+            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
+            .unwrap();
+        assert!(matches!(f4_token, Some(RecoveryToken::Stream(x)) if x.fin == false));
+
+        // Mark frame 2 as lost
+        let f2_token = match f2_token {
+            Some(RecoveryToken::Stream(rt)) => rt,
+            _ => panic!(),
+        };
+        ss.lost(&f2_token);
+
+        // Next frame should set fin because it includes end of stream
+        let (_f5, f5_token) = ss
+            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
+            .unwrap();
+        assert!(matches!(f5_token, Some(RecoveryToken::Stream(x)) if x.fin == true));
+    }
+
+    #[test]
+    // Verify lost frames handle fin properly with zero length fin
+    fn send_stream_get_frame_zerolength_fin() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        flow_mgr.borrow_mut().conn_increase_max_credit(100);
+        let conn_events = ConnectionEvents::default();
+
+        let mut s = SendStream::new(0.into(), 100, flow_mgr, conn_events.clone());
+        s.send(&[0; 10]).unwrap();
+
+        let mut ss = SendStreams::default();
+        ss.insert(0.into(), s);
+
+        let (_f1, f1_token) = ss
+            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
+            .unwrap();
+        assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if x.offset == 0));
+        assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if x.length == 10));
+        assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if x.fin == false));
+
+        // Should be no more data to frame
+        let f2 = ss.get_frame(PNSpace::ApplicationData, TxMode::Normal, 100);
+        assert!(matches!(f2, None));
+
+        ss.get_mut(0.into()).unwrap().close();
+
+        let (_f2, f2_token) = ss
+            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
+            .unwrap();
+        assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.offset == 10));
+        assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.length == 0));
+        assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.fin == true));
+
+        // Mark frame 2 as lost
+        let f2_token = match f2_token {
+            Some(RecoveryToken::Stream(rt)) => rt,
+            _ => panic!(),
+        };
+        ss.lost(&f2_token);
+
+        // Next frame should set fin
+        let (_f3, f3_token) = ss
+            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
+            .unwrap();
+        assert!(matches!(&f3_token, Some(RecoveryToken::Stream(x)) if x.offset == 10));
+        assert!(matches!(&f3_token, Some(RecoveryToken::Stream(x)) if x.length == 0));
+        assert!(matches!(&f3_token, Some(RecoveryToken::Stream(x)) if x.fin == true));
+
+        // Mark frame 1 as lost
+        let f1_token = match f1_token {
+            Some(RecoveryToken::Stream(rt)) => rt,
+            _ => panic!(),
+        };
+        ss.lost(&f1_token);
+
+        // Next frame should set fin and include all data
+        let (_f4, f4_token) = ss
+            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
+            .unwrap();
+        assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.offset == 0));
+        assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.length == 10));
+        assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.fin == true));
+    }
 }
