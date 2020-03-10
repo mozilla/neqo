@@ -30,7 +30,7 @@ impl DecoderInstruction {
         } else if DECODER_INSERT_COUNT_INCREMENT.cmp_prefix(b) {
             Self::InsertCountIncrement { increment: 0 }
         } else {
-            unreachable!("The above patterns match everything.");
+            unreachable!();
         }
     }
 
@@ -87,13 +87,13 @@ impl DecoderInstructionReader {
                     Ok(b) => {
                         self.instruction = DecoderInstruction::get_instruction(b);
                         self.state = DecoderInstructionReaderState::ReadInt {
-                            reader: IntReader::new(
+                            reader: IntReader::make(
                                 b,
-                                if DECODER_HEADER_ACK.cmp_prefix(b) {
-                                    DECODER_HEADER_ACK.len()
-                                } else {
-                                    DECODER_STREAM_CANCELLATION.len()
-                                },
+                                &[
+                                    DECODER_HEADER_ACK,
+                                    DECODER_STREAM_CANCELLATION,
+                                    DECODER_INSERT_COUNT_INCREMENT,
+                                ],
                             ),
                         };
                     }

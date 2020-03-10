@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use crate::huffman::Huffman;
+use crate::prefix::Prefix;
 use crate::{Error, Res};
 use neqo_common::{qdebug, qerror};
 use neqo_transport::Connection;
@@ -169,6 +170,15 @@ impl IntReader {
             cnt: 0,
             done: value < u64::from(mask),
         }
+    }
+
+    pub fn make(first_byte: u8, prefixes: &[Prefix]) -> Self {
+        for prefix in prefixes {
+            if prefix.cmp_prefix(first_byte) {
+                return Self::new(first_byte, prefix.len());
+            }
+        }
+        unreachable!();
     }
 
     /// This function reads more bytes until the varint is decoded or until stream/buffer does not

@@ -171,9 +171,10 @@ impl QPackDecoder {
             HeaderDecoderResult::Blocked(req_insert_cnt) => {
                 self.blocked_streams.push((stream_id, req_insert_cnt));
                 if self.blocked_streams.len() > self.max_blocked_streams {
-                    return Err(Error::DecompressionFailed);
+                    Err(Error::DecompressionFailed)
+                } else {
+                    Ok(None)
                 }
-                Ok(None)
             }
             HeaderDecoderResult::Headers(h) => {
                 if decoder.get_req_insert_cnt() != 0 {
