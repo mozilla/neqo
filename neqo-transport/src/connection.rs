@@ -495,7 +495,7 @@ impl Connection {
     }
 
     /// Access the latest resumption token on the connection.
-    pub fn resumption_token(&self) -> Option<Vec<u8>> {
+    pub fn resumption_token(&self) => Option<Vec<u8>> {
         if !self.state.connected() {
             return None;
         }
