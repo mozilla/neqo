@@ -6,10 +6,10 @@ edition = "2018"
 license = "MIT/Apache-2.0"
 
 [dependencies]
-neqo-common = {path = "../neqo-common"}
-neqo-crypto = {path = "../neqo-crypto"}
-neqo-http3 = {path = "../neqo-http3"}
-neqo-transport = {path = "../neqo-transport"}
+neqo-common = { path = "../neqo-common" }
+neqo-crypto = { path = "../neqo-crypto" }
+neqo-http3 = { path = "../neqo-http3" }
+neqo-transport = { path = "../neqo-transport" }
 log = {version = "0.4.0", default-features = false}
 
 [features]
