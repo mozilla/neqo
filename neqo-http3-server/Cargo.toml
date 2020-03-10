@@ -6,10 +6,10 @@ edition = "2018"
 license = "MIT/Apache-2.0"
 
 [dependencies]
-neqo-crypto = { path = "./../neqo-crypto" }
-neqo-transport = { path = "./../neqo-transport" }
-neqo-common = { path="./../neqo-common" }
-neqo-http3 = { path = "./../neqo-http3" }
+neqo-crypto = {path = "./../neqo-crypto"}
+neqo-transport = {path = "./../neqo-transport"}
+neqo-common = {path="./../neqo-common"}
+neqo-http3 = {path = "./../neqo-http3"}
 structopt = "0.2.15"
 mio = "0.6.17"
 mio-extras = "2.0.5"
