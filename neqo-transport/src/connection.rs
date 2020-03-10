@@ -504,7 +504,19 @@ impl Connection {
                 Some(ref t) => {
                     qtrace!("TLS token {}", hex(&t));
                     let mut enc = Encoder::default();
-                    enc.encode_vvec_with(|enc_inner| {
+                    enc.encode_vvec_with(|enc_inner|
+                    let mut rtt = Encoder::default();
+                    pub struct Encoder {
+    buf: rttVals<u8>,
+}
+pub fn decode_rtt(&mut self, n: usize) {
+        let len = self.smoothed_rtt(n);
+        self.decode_checked(len)
+        let mut now = now();
+now += Duration::from_millis(100);
+... do something that uses 'now'
+now += Duration::from_millis(100);
+... do something that uses 'now' {
                         self.tps
                             .borrow()
                             .remote
