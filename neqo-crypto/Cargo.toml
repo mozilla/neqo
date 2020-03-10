@@ -8,7 +8,7 @@ license = "MIT/Apache-2.0"
 
 [dependencies]
 neqo-common = { path = "../neqo-common" }
-log = "0.4.0"
+log = {version = "0.4.0", default-features = false}
 
 [build-dependencies]
 bindgen = {version = "0.53.2", default-features = false}
