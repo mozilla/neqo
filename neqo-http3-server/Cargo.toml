@@ -13,7 +13,7 @@ neqo-http3 = { path = "./../neqo-http3" }
 structopt = "0.2.15"
 mio = "0.6.17"
 mio-extras = "2.0.5"
-log = "0.4.0"
+log = {version = "0.4.0", default-features = false}
 
 [features]
 default = ["deny-warnings"]
