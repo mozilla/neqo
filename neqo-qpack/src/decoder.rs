@@ -484,12 +484,14 @@ impl QPackDecoder {
     }
 
     fn header_ack(&mut self, stream_id: u64, required_inserts: u64) {
-        let ack_increment_delta = required_inserts - self.table.get_acked_inserts_cnt();
         self.send_buf
             .encode_prefixed_encoded_int(0x80, 1, stream_id);
-        self.table
-            .increment_acked(ack_increment_delta)
-            .expect("This should never happen");
+        if required_inserts > self.table.get_acked_inserts_cnt() {
+            let ack_increment_delta = required_inserts - self.table.get_acked_inserts_cnt();
+            self.table
+                .increment_acked(ack_increment_delta)
+                .expect("This should never happen");
+        }
     }
 
     pub fn cancel_stream(&mut self, stream_id: u64) {
@@ -1250,5 +1252,37 @@ mod tests {
 
         // test header acks and the insert count increment command
         send_instructions_and_check(&mut decoder, &[0x03, 0x82, 0x83, 0x84]);
+    }
+
+    #[test]
+    fn test_subtract_overflow_in_header_ack() {
+        // Test for issue https://github.com/mozilla/neqo/issues/475
+        // Send two instructions to insert values into the dynamic table and send a header
+        // that references them both. This will increase number of acked inserts in the table
+        // to 2. Then send a header that references only one of them which shouldn't increase
+        // number of acked inserts.
+        let headers = vec![
+            (String::from("my-headera"), String::from("my-valuea")),
+            (String::from("my-headerb"), String::from("my-valueb")),
+        ];
+        let header_block = &[0x03, 0x81, 0x10, 0x11];
+        let encoder_inst = &[
+            0x4a, 0x6d, 0x79, 0x2d, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72, 0x61, 0x09, 0x6d, 0x79,
+            0x2d, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x61, 0x4a, 0x6d, 0x79, 0x2d, 0x68, 0x65, 0x61,
+            0x64, 0x65, 0x72, 0x62, 0x09, 0x6d, 0x79, 0x2d, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x62,
+        ];
+
+        let mut decoder = connect();
+
+        assert!(decoder.decoder.set_capacity(200).is_ok());
+
+        recv_instruction(&mut decoder, encoder_inst, Ok(()));
+
+        decode_headers(&mut decoder, header_block, &headers, 0);
+
+        let headers = vec![(String::from("my-headera"), String::from("my-valuea"))];
+        let header_block = &[0x02, 0x80, 0x10];
+
+        decode_headers(&mut decoder, header_block, &headers, 0);
     }
 }
