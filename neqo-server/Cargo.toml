@@ -1,14 +1,14 @@
 [package]
 name = "neqo-server"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Martin Thomson <mt@lowentropy.net>"]
 edition = "2018"
 license = "MIT/Apache-2.0"
 
 [dependencies]
-neqo-crypto = {path = "./../neqo-crypto"}
-neqo-transport = {path = "./../neqo-transport"}
-neqo-common = {path="./../neqo-common"}
+neqo-crypto = { path = "./../neqo-crypto" }
+neqo-transport = { path = "./../neqo-transport" }
+neqo-common = { path="./../neqo-common" }
 structopt = "0.2.15"
 regex = "1"
 
