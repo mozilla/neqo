@@ -306,18 +306,29 @@ impl TxBuffer {
             return None;
         }
 
+        // Convert from ranges-relative-to-zero to
+        // ranges-relative-to-buffer-start
         let buff_off = usize::try_from(start - self.retired).unwrap();
-        match maybe_len {
-            Some(len) => {
-                let len = min(len, self.send_buf.as_slices().0.len().try_into().unwrap());
-                Some((
-                    start,
-                    &self.send_buf.as_slices().0
-                        [buff_off..buff_off + usize::try_from(len).unwrap()],
-                ))
-            }
-            None => Some((start, &self.send_buf.as_slices().0[buff_off..])),
-        }
+
+        // Deque returns two slices. Create a subslice from whichever
+        // one contains the first unmarked data.
+        let slc = if buff_off < self.send_buf.as_slices().0.len() {
+            &self.send_buf.as_slices().0[buff_off..]
+        } else {
+            &self.send_buf.as_slices().1[buff_off - self.send_buf.as_slices().0.len()..]
+        };
+
+        let len = if let Some(range_len) = maybe_len {
+            // Truncate if range crosses deque slices
+            min(usize::try_from(range_len).unwrap(), slc.len())
+        } else {
+            slc.len()
+        };
+
+        debug_assert!(len > 0);
+        debug_assert!(len <= slc.len());
+
+        Some((start, &slc[..len]))
     }
 
     pub fn mark_as_sent(&mut self, offset: u64, len: usize) {
