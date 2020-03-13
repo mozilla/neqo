@@ -883,6 +883,60 @@ mod tests {
     }
 
     #[test]
+    fn tx_buffer_next_bytes_1() {
+        let mut txb = TxBuffer::new();
+
+        assert_eq!(txb.avail(), 65535);
+
+        assert_eq!(txb.send(&[1; 100000]), TxBuffer::BUFFER_SIZE);
+        assert!(matches!(txb.next_bytes(), Some((0, x)) if x.len()==65535));
+
+        txb.mark_as_sent(0, 65534);
+        assert!(matches!(txb.next_bytes(), Some((65534, x)) if x.len() == 1));
+
+        txb.mark_as_sent(0, 65535);
+        assert!(matches!(txb.next_bytes(), None));
+
+        txb.mark_as_lost(65534, 1);
+        assert!(matches!(txb.next_bytes(), Some((65534, x)) if x.len() == 1));
+
+        txb.mark_as_lost(65530, 100);
+        assert!(matches!(txb.next_bytes(), Some((65530, x)) if x.len() == 5));
+
+        txb.mark_as_acked(0, 65530);
+        assert_eq!(txb.send(&[2; 30]), 30);
+        assert!(matches!(txb.next_bytes(), Some((65530, x)) if x.len() == 5));
+        assert_eq!(txb.retired, 65530);
+        assert_eq!(txb.buffered(), 35);
+
+        // Test that things work around the slice break
+        txb.mark_as_sent(65530, 5);
+        assert!(matches!(txb.next_bytes(), Some((65535, x)) if x.len() == 30));
+    }
+
+    #[test]
+    fn tx_buffer_next_bytes_2() {
+        let mut txb = TxBuffer::new();
+
+        assert_eq!(txb.avail(), 65535);
+
+        assert_eq!(txb.send(&[1; 100000]), TxBuffer::BUFFER_SIZE);
+        assert!(matches!(txb.next_bytes(), Some((0, x)) if x.len()==65535));
+
+        txb.mark_as_acked(0, 65500);
+        assert!(matches!(txb.next_bytes(), Some((65500, x)) if x.len() == 35));
+
+        // Test that next_bytes works across the slice break if there is a
+        // marked range in the second slice
+        assert_eq!(txb.send(&[2; 100]), 100);
+        txb.mark_as_sent(65500, 10);
+        assert!(matches!(txb.next_bytes(), Some((65510, x)) if x.len() == 25));
+
+        txb.mark_as_sent(65539, 10);
+        assert!(matches!(txb.next_bytes(), Some((65510, x)) if x.len() == 25));
+    }
+
+    #[test]
     fn test_stream_tx() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         flow_mgr.borrow_mut().conn_increase_max_credit(4096);
