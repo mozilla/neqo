@@ -895,12 +895,13 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cognitive_complexity)]
     fn tx_buffer_next_bytes_1() {
         let mut txb = TxBuffer::new();
 
         assert_eq!(txb.avail(), 65535);
 
-        assert_eq!(txb.send(&[1; 100000]), TxBuffer::BUFFER_SIZE);
+        assert_eq!(txb.send(&[1; 100_000]), TxBuffer::BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(), Some((0, x)) if x.len()==65535));
 
         txb.mark_as_sent(0, 65534);
@@ -932,7 +933,7 @@ mod tests {
 
         assert_eq!(txb.avail(), 65535);
 
-        assert_eq!(txb.send(&[1; 100000]), TxBuffer::BUFFER_SIZE);
+        assert_eq!(txb.send(&[1; 100_000]), TxBuffer::BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(), Some((0, x)) if x.len()==65535));
 
         txb.mark_as_acked(0, 65500);
