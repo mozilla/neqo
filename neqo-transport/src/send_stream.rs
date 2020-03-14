@@ -340,6 +340,7 @@ impl TxBuffer {
 
         // We can drop contig acked range from the buffer
         let new_retirable = self.ranges.acked_from_zero() - self.retired;
+        debug_assert!(new_retirable <= self.buffered() as u64);
         let keep_len =
             self.buffered() - usize::try_from(new_retirable).expect("should fit in usize");
 
