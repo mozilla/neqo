@@ -9,18 +9,41 @@
 
 use neqo_common::{hex, matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::io::{self, ErrorKind};
+use std::env;
+use std::fs::{File, OpenOptions};
+use std::io::{self, ErrorKind, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
+use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
 use std::time::Instant;
 use structopt::StructOpt;
 use url::Url;
+
+#[derive(Debug)]
+pub enum ClientError {
+    Http3Error(neqo_http3::Error),
+    IoError(io::Error),
+}
+
+impl From<io::Error> for ClientError {
+    fn from(err: io::Error) -> Self {
+        Self::IoError(err)
+    }
+}
+
+impl From<neqo_http3::Error> for ClientError {
+    fn from(err: neqo_http3::Error) -> Self {
+        Self::Http3Error(err)
+    }
+}
+
+type Res<T> = Result<T, ClientError>;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -28,13 +51,13 @@ use url::Url;
     about = "A basic QUIC HTTP/0.9 and HTTP3 client."
 )]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3-25")]
+    #[structopt(short = "a", long, default_value = "h3-27")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP3 no matter what the ALPN says.
     alpn: Vec<String>,
 
-    url: Url,
+    urls: Vec<Url>,
 
     #[structopt(short = "m", default_value = "GET")]
     method: String,
@@ -52,43 +75,26 @@ pub struct Args {
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
-    #[structopt(name = "omit-read-data", long)]
-    /// Do not print received data
-    omit_read_data: bool,
-}
+    #[structopt(name = "output-read-data", long)]
+    /// Output received data to stdout
+    output_read_data: bool,
 
-impl Args {
-    fn remote_addr(&self) -> Result<SocketAddr, io::Error> {
-        Ok(self.to_socket_addrs()?.next().expect("No remote addresses"))
-    }
+    #[structopt(name = "output-dir", long)]
+    /// Save contents of fetched URLs to a directory
+    output_dir: Option<PathBuf>,
 
-    fn local_addr(&self) -> Result<SocketAddr, io::Error> {
-        match self.remote_addr()? {
-            SocketAddr::V4(..) => Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0)),
-            SocketAddr::V6(..) => Ok(SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0)),
-        }
-    }
-}
-
-impl ToSocketAddrs for Args {
-    type Iter = ::std::vec::IntoIter<SocketAddr>;
-    fn to_socket_addrs(&self) -> ::std::io::Result<Self::Iter> {
-        // This is idiotic.  There is no path from hostname: String to IpAddr.
-        // And no means of controlling name resolution either.
-        if self.url.port_or_known_default().is_none() {
-            return Err(io::Error::new(ErrorKind::InvalidInput, "invalid port"));
-        }
-        std::fmt::format(format_args!(
-            "{}:{}",
-            self.url.host_str().unwrap_or("localhost"),
-            self.url.port_or_known_default().unwrap()
-        ))
-        .to_socket_addrs()
-    }
+    #[structopt(name = "qns-mode", long)]
+    /// Enable special behavior for use with QUIC Network Simulator
+    qns_mode: bool,
 }
 
 trait Handler {
-    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> bool;
+    fn handle(
+        &mut self,
+        args: &Args,
+        client: &mut Http3Client,
+        out_file: &mut Option<File>,
+    ) -> Res<bool>;
 }
 
 fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) {
@@ -107,14 +113,15 @@ fn process_loop(
     client: &mut Http3Client,
     handler: &mut dyn Handler,
     args: &Args,
-) -> neqo_http3::Http3State {
+    out_file: &mut Option<File>,
+) -> Res<neqo_http3::Http3State> {
     let buf = &mut [0u8; 2048];
     loop {
         if let Http3State::Closed(..) = client.state() {
-            return client.state();
+            return Ok(client.state());
         }
 
-        let mut exiting = !handler.handle(args, client);
+        let mut exiting = !handler.handle(args, client, out_file)?;
 
         loop {
             let output = client.process_output(Instant::now());
@@ -135,7 +142,7 @@ fn process_loop(
         client.process_http3(Instant::now());
 
         if exiting {
-            return client.state();
+            return Ok(client.state());
         }
 
         match socket.recv(&mut buf[..]) {
@@ -164,12 +171,17 @@ fn process_loop(
 
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
-    fn handle(&mut self, _args: &Args, client: &mut Http3Client) -> bool {
+    fn handle(
+        &mut self,
+        _args: &Args,
+        client: &mut Http3Client,
+        _out_file: &mut Option<File>,
+    ) -> Res<bool> {
         let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
         if client.events().any(authentication_needed) {
             client.authenticated(AuthenticationStatus::Ok, Instant::now());
         }
-        Http3State::Connected != client.state()
+        Ok(Http3State::Connected != client.state())
     }
 }
 
@@ -180,7 +192,12 @@ struct PostConnectHandler {
 
 // This is a bit fancier than actually needed.
 impl Handler for PostConnectHandler {
-    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> bool {
+    fn handle(
+        &mut self,
+        args: &Args,
+        client: &mut Http3Client,
+        out_file: &mut Option<File>,
+    ) -> Res<bool> {
         let mut data = vec![0; 4000];
         client.process_http3(Instant::now());
         while let Some(event) = client.next_event() {
@@ -188,39 +205,49 @@ impl Handler for PostConnectHandler {
                 Http3ClientEvent::HeaderReady { stream_id } => {
                     if !self.streams.contains(&stream_id) {
                         println!("Data on unexpected stream: {}", stream_id);
-                        return false;
+                        return Ok(false);
                     }
 
                     let headers = client.read_response_headers(stream_id);
-                    println!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                    if out_file.is_none() {
+                        println!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                    }
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {
                         println!("Data on unexpected stream: {}", stream_id);
-                        return false;
+                        return Ok(false);
                     }
 
                     let (sz, fin) = client
                         .read_response_data(Instant::now(), stream_id, &mut data)
                         .expect("Read should succeed");
-                    if args.omit_read_data {
+
+                    if let Some(out_file) = out_file {
+                        if sz > 0 {
+                            out_file.write_all(&data[..sz])?;
+                        }
+                    } else if !args.output_read_data {
                         println!("READ[{}]: {} bytes", stream_id, sz);
                     } else if let Ok(txt) = String::from_utf8(data.clone()) {
                         println!("READ[{}]: {}", stream_id, txt);
                     } else {
                         println!("READ[{}]: 0x{}", stream_id, hex(&data));
                     }
+
                     if fin {
-                        println!("<FIN[{}]>", stream_id);
+                        if out_file.is_none() {
+                            println!("<FIN[{}]>", stream_id);
+                        }
                         client.close(Instant::now(), 0, "kthxbye!");
-                        return false;
+                        return Ok(false);
                     }
                 }
                 _ => {}
             }
         }
 
-        true
+        Ok(true)
     }
 }
 
@@ -239,9 +266,16 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
         .collect()
 }
 
-fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: SocketAddr) {
+fn client(
+    args: &Args,
+    socket: UdpSocket,
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
+    url: &Url,
+    out_file: &mut Option<File>,
+) -> Res<()> {
     let mut client = Http3Client::new(
-        args.url.host_str().unwrap(),
+        url.host_str().unwrap(),
         &args.alpn,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
@@ -259,21 +293,17 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         &mut client,
         &mut h,
         &args,
-    );
+        out_file,
+    )?;
 
     let client_stream_id = client.fetch(
         &args.method,
-        &args.url.scheme(),
-        &args.url.host_str().unwrap(),
-        &args.url.path(),
+        &url.scheme(),
+        &url.host_str().unwrap(),
+        &url.path(),
         &to_headers(&args.header),
-    );
+    )?;
 
-    if let Err(err) = client_stream_id {
-        eprintln!("Could not connect: {:?}", err);
-        return;
-    }
-    let client_stream_id = client_stream_id.unwrap();
     let _ = client.stream_close_send(client_stream_id);
 
     let mut h2 = PostConnectHandler::default();
@@ -285,47 +315,109 @@ fn client(args: Args, socket: UdpSocket, local_addr: SocketAddr, remote_addr: So
         &mut client,
         &mut h2,
         &args,
-    );
+        out_file,
+    )?;
+
+    Ok(())
 }
 
-fn main() {
+fn main() -> Res<()> {
     init();
-    let args = Args::from_args();
+    let mut args = Args::from_args();
 
-    let remote_addr = match args.remote_addr() {
-        Err(e) => {
-            eprintln!("Unable to resolve remote addr: {}", e);
-            exit(1)
+    if args.qns_mode {
+        match env::var("TESTCASE") {
+            Ok(s) if s == "http3" => {}
+            Ok(s) if s == "handshake" || s == "transfer" => {
+                args.use_old_http = true;
+            }
+            Ok(_) => exit(127),
+            Err(_) => exit(1),
         }
-        Ok(addr) => addr,
-    };
-    let socket = match args.local_addr().and_then(UdpSocket::bind) {
-        Err(e) => {
-            eprintln!("Unable to bind UDP socket: {}", e);
-            exit(1)
-        }
-        Ok(s) => s,
-    };
-    socket.connect(&args).expect("Unable to connect UDP socket");
-
-    let local_addr = socket.local_addr().expect("Socket local address not bound");
-
-    println!("Client connecting: {:?} -> {:?}", local_addr, remote_addr);
-
-    if args.use_old_http {
-        old::old_client(args, socket, local_addr, remote_addr)
-    } else {
-        client(args, socket, local_addr, remote_addr)
     }
+
+    let urls = args.urls.clone();
+    for url in &urls {
+        let addrs: Vec<_> = format!(
+            "{}:{}",
+            url.host_str().unwrap_or("localhost"),
+            url.port_or_known_default().unwrap()
+        )
+        .to_socket_addrs()?
+        .collect();
+        let remote_addr = *addrs.first().unwrap();
+
+        let local_addr = match remote_addr {
+            SocketAddr::V4(..) => SocketAddr::new(IpAddr::V4(Ipv4Addr::from([0; 4])), 0),
+            SocketAddr::V6(..) => SocketAddr::new(IpAddr::V6(Ipv6Addr::from([0; 16])), 0),
+        };
+
+        let socket = match UdpSocket::bind(local_addr) {
+            Err(e) => {
+                eprintln!("Unable to bind UDP socket: {}", e);
+                exit(1)
+            }
+            Ok(s) => s,
+        };
+        socket
+            .connect(&remote_addr)
+            .expect("Unable to connect UDP socket");
+
+        println!(
+            "{} Client connecting: {:?} -> {:?}",
+            if args.use_old_http { "H9" } else { "H3" },
+            socket.local_addr().unwrap(),
+            remote_addr
+        );
+
+        let mut out_file = if let Some(ref dir) = args.output_dir {
+            let mut out_path = dir.clone();
+
+            let url_path = if url.path() == "/" {
+                // If no path is given... call it "root"?
+                "root"
+            } else {
+                // Omit leading slash
+                &url.path()[1..]
+            };
+            out_path.push(url_path);
+
+            eprintln!("Saving {} to {:?}", url.clone().into_string(), dir);
+
+            Some(
+                OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&dir)?,
+            )
+        } else {
+            None
+        };
+
+        if args.use_old_http {
+            old::old_client(&args, socket, local_addr, remote_addr, url, &mut out_file)?;
+        } else {
+            client(&args, socket, local_addr, remote_addr, url, &mut out_file)?;
+        }
+    }
+
+    Ok(())
 }
 
 mod old {
     use std::cell::RefCell;
     use std::collections::HashSet;
+    use std::fs::File;
+    use std::io::Write;
     use std::net::{SocketAddr, UdpSocket};
     use std::process::exit;
     use std::rc::Rc;
     use std::time::Instant;
+
+    use url::Url;
+
+    use super::Res;
 
     use neqo_common::Datagram;
     use neqo_transport::{
@@ -335,13 +427,23 @@ mod old {
     use super::{emit_datagram, Args};
 
     trait HandlerOld {
-        fn handle(&mut self, args: &Args, client: &mut Connection) -> bool;
+        fn handle(
+            &mut self,
+            args: &Args,
+            client: &mut Connection,
+            out_file: &mut Option<File>,
+        ) -> Res<bool>;
     }
 
     struct PreConnectHandlerOld {}
     impl HandlerOld for PreConnectHandlerOld {
-        fn handle(&mut self, _args: &Args, client: &mut Connection) -> bool {
-            State::Connected != *dbg!(client.state())
+        fn handle(
+            &mut self,
+            _args: &Args,
+            client: &mut Connection,
+            _out_file: &mut Option<File>,
+        ) -> Res<bool> {
+            Ok(State::Connected != *dbg!(client.state()))
         }
     }
 
@@ -352,20 +454,30 @@ mod old {
 
     // This is a bit fancier than actually needed.
     impl HandlerOld for PostConnectHandlerOld {
-        fn handle(&mut self, args: &Args, client: &mut Connection) -> bool {
+        fn handle(
+            &mut self,
+            args: &Args,
+            client: &mut Connection,
+            out_file: &mut Option<File>,
+        ) -> Res<bool> {
             let mut data = vec![0; 4000];
             while let Some(event) = client.next_event() {
                 match event {
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         if !self.streams.contains(&stream_id) {
                             println!("Data on unexpected stream: {}", stream_id);
-                            return false;
+                            return Ok(false);
                         }
 
                         let (sz, fin) = client
                             .stream_recv(stream_id, &mut data)
                             .expect("Read should succeed");
-                        if args.omit_read_data {
+
+                        if let Some(out_file) = out_file {
+                            if sz > 0 {
+                                out_file.write_all(&data[..sz])?;
+                            }
+                        } else if !args.output_read_data {
                             println!("READ[{}]: {} bytes", stream_id, sz);
                         } else {
                             println!(
@@ -377,7 +489,7 @@ mod old {
                         if fin {
                             println!("<FIN[{}]>", stream_id);
                             client.close(Instant::now(), 0, "kthxbye!");
-                            return false;
+                            return Ok(false);
                         }
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
@@ -389,7 +501,7 @@ mod old {
                 }
             }
 
-            true
+            Ok(true)
         }
     }
 
@@ -400,20 +512,21 @@ mod old {
         client: &mut Connection,
         handler: &mut dyn HandlerOld,
         args: &Args,
-    ) -> State {
+        out_file: &mut Option<File>,
+    ) -> Res<State> {
         let buf = &mut [0u8; 2048];
         loop {
             if let State::Closed(..) = client.state() {
-                return client.state().clone();
+                return Ok(client.state().clone());
             }
 
-            let exiting = !handler.handle(args, client);
+            let exiting = !handler.handle(args, client, out_file)?;
 
             let out_dgram = client.process_output(Instant::now());
             emit_datagram(&socket, out_dgram.dgram());
 
             if exiting {
-                return client.state().clone();
+                return Ok(client.state().clone());
             }
 
             let sz = match socket.recv(&mut buf[..]) {
@@ -435,18 +548,15 @@ mod old {
     }
 
     pub fn old_client(
-        args: Args,
+        args: &Args,
         socket: UdpSocket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-    ) {
-        dbg!(args.url.host_str().unwrap());
-        dbg!(&args.alpn);
-        dbg!(local_addr);
-        dbg!(remote_addr);
-
+        url: &Url,
+        out_file: &mut Option<File>,
+    ) -> Res<()> {
         let mut client = Connection::new_client(
-            args.url.host_str().unwrap(),
+            url.host_str().unwrap(),
             &["http/0.9"],
             Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
             local_addr,
@@ -462,7 +572,8 @@ mod old {
             &mut client,
             &mut h,
             &args,
-        );
+            out_file,
+        )?;
 
         let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
         let req: String = "GET /10\r\n".to_string();
@@ -478,6 +589,9 @@ mod old {
             &mut client,
             &mut h2,
             &args,
-        );
+            out_file,
+        )?;
+
+        Ok(())
     }
 }

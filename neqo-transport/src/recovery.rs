@@ -251,7 +251,7 @@ impl LossRecoverySpace {
     /// and when keys are dropped.
     fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
         self.ack_eliciting_outstanding = 0;
-        std::mem::replace(&mut self.sent_packets, BTreeMap::default())
+        std::mem::take(&mut self.sent_packets)
             .into_iter()
             .map(|(_, v)| v)
     }

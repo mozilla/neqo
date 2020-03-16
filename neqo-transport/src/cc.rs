@@ -141,7 +141,7 @@ impl CongestionControl {
     }
 
     pub fn discard(&mut self, pkt: &SentPacket) {
-        if pkt.in_flight {
+        if pkt.in_flight && pkt.time_declared_lost.is_none() {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
             qtrace!([self], "Ignore pkt with size {}", pkt.size);
