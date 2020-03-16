@@ -19,7 +19,7 @@ use neqo_common::{matches, qdebug, qerror, qinfo, qtrace};
 
 use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
-use crate::frame::{Frame, TxMode};
+use crate::frame::Frame;
 use crate::recovery::RecoveryToken;
 use crate::stream_id::StreamId;
 use crate::tracking::PNSpace;
@@ -299,35 +299,24 @@ impl TxBuffer {
         can_buffer
     }
 
-    pub fn next_bytes(&self, mode: TxMode) -> Option<(u64, &[u8])> {
-        match mode {
-            TxMode::Normal => {
-                let (start, maybe_len) = self.ranges.first_unmarked_range();
+    pub fn next_bytes(&self) -> Option<(u64, &[u8])> {
+        let (start, maybe_len) = self.ranges.first_unmarked_range();
 
-                if start == self.retired + u64::try_from(self.buffered()).unwrap() {
-                    return None;
-                }
+        if start == self.retired + u64::try_from(self.buffered()).unwrap() {
+            return None;
+        }
 
-                let buff_off = usize::try_from(start - self.retired).unwrap();
-                match maybe_len {
-                    Some(len) => {
-                        let len = min(len, self.send_buf.as_slices().0.len().try_into().unwrap());
-                        Some((
-                            start,
-                            &self.send_buf.as_slices().0
-                                [buff_off..buff_off + usize::try_from(len).unwrap()],
-                        ))
-                    }
-                    None => Some((start, &self.send_buf.as_slices().0[buff_off..])),
-                }
+        let buff_off = usize::try_from(start - self.retired).unwrap();
+        match maybe_len {
+            Some(len) => {
+                let len = min(len, self.send_buf.as_slices().0.len().try_into().unwrap());
+                Some((
+                    start,
+                    &self.send_buf.as_slices().0
+                        [buff_off..buff_off + usize::try_from(len).unwrap()],
+                ))
             }
-            TxMode::Pto => {
-                if self.buffered() == 0 {
-                    None
-                } else {
-                    Some((self.retired, &self.send_buf.as_slices().0))
-                }
-            }
+            None => Some((start, &self.send_buf.as_slices().0[buff_off..])),
         }
     }
 
@@ -471,15 +460,15 @@ impl SendStream {
     }
 
     /// Return the next range to be sent, if any.
-    pub fn next_bytes(&mut self, mode: TxMode) -> Option<(u64, &[u8])> {
+    pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
         match self.state {
-            SendStreamState::Send { ref send_buf } => send_buf.next_bytes(mode),
+            SendStreamState::Send { ref send_buf } => send_buf.next_bytes(),
             SendStreamState::DataSent {
                 ref send_buf,
                 fin_sent,
                 final_size,
             } => {
-                let bytes = send_buf.next_bytes(mode);
+                let bytes = send_buf.next_bytes();
                 if bytes.is_some() {
                     // Must be a resend
                     bytes
@@ -745,7 +734,6 @@ impl SendStreams {
     pub(crate) fn get_frame(
         &mut self,
         space: PNSpace,
-        mode: TxMode,
         remaining: usize,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
         if space != PNSpace::ApplicationData {
@@ -754,7 +742,7 @@ impl SendStreams {
 
         for (stream_id, stream) in self {
             let final_size = stream.final_size();
-            if let Some((offset, data)) = stream.next_bytes(mode) {
+            if let Some((offset, data)) = stream.next_bytes() {
                 let data_len = u64::try_from(data.len()).unwrap();
                 let range_has_fin = final_size
                     .map(|fs| fs == offset + data_len)
@@ -763,12 +751,11 @@ impl SendStreams {
                     Frame::new_stream(stream_id.as_u64(), offset, data, range_has_fin, remaining)
                 {
                     qdebug!(
-                        "Stream {} sending bytes {}-{}, space {:?}, mode {:?}",
+                        "Stream {} sending bytes {}-{}, space {:?}",
                         stream_id.as_u64(),
                         offset,
                         offset + length as u64,
                         space,
-                        mode,
                     );
                     let fin = range_has_fin && length == data.len();
                     debug_assert!(!fin || matches!(frame, Frame::Stream{fin: true, .. }));
@@ -877,7 +864,7 @@ mod tests {
         let res = rt.first_unmarked_range();
         assert_eq!(res, (0, Some(5)));
         assert_eq!(
-            rt.used.iter().nth(0).unwrap(),
+            rt.used.iter().next().unwrap(),
             (&5, &(5, RangeState::Acked))
         );
         assert_eq!(
@@ -937,15 +924,15 @@ mod tests {
     fn test_tx_buffer_acks() {
         let mut tx = TxBuffer::new();
         assert_eq!(tx.send(&[4; 100]), 100);
-        let res = tx.next_bytes(TxMode::Normal).unwrap();
+        let res = tx.next_bytes().unwrap();
         assert_eq!(res.0, 0);
         assert_eq!(res.1.len(), 100);
         tx.mark_as_sent(0, 100);
-        let res = tx.next_bytes(TxMode::Normal);
+        let res = tx.next_bytes();
         assert_eq!(res, None);
 
         tx.mark_as_acked(0, 100);
-        let res = tx.next_bytes(TxMode::Normal);
+        let res = tx.next_bytes();
         assert_eq!(res, None);
     }
 
@@ -1042,17 +1029,13 @@ mod tests {
         let mut ss = SendStreams::default();
         ss.insert(0.into(), s);
 
-        let (_f1, f1_token) = ss
-            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 6)
-            .unwrap();
+        let (_f1, f1_token) = ss.get_frame(PNSpace::ApplicationData, 6).unwrap();
         assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if !x.fin));
-        let (_f2, f2_token) = ss
-            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
-            .unwrap();
+        let (_f2, f2_token) = ss.get_frame(PNSpace::ApplicationData, 100).unwrap();
         assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.fin));
 
         // Should be no more data to frame
-        let f3 = ss.get_frame(PNSpace::ApplicationData, TxMode::Normal, 100);
+        let f3 = ss.get_frame(PNSpace::ApplicationData, 100);
         assert!(matches!(f3, None));
 
         // Mark frame 1 as lost
@@ -1064,9 +1047,7 @@ mod tests {
 
         // Next frame should not set fin even though stream has fin but frame
         // does not include end of stream
-        let (_f4, f4_token) = ss
-            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
-            .unwrap();
+        let (_f4, f4_token) = ss.get_frame(PNSpace::ApplicationData, 100).unwrap();
         assert!(matches!(f4_token, Some(RecoveryToken::Stream(x)) if !x.fin));
 
         // Mark frame 2 as lost
@@ -1077,9 +1058,7 @@ mod tests {
         ss.lost(&f2_token);
 
         // Next frame should set fin because it includes end of stream
-        let (_f5, f5_token) = ss
-            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
-            .unwrap();
+        let (_f5, f5_token) = ss.get_frame(PNSpace::ApplicationData, 100).unwrap();
         assert!(matches!(f5_token, Some(RecoveryToken::Stream(x)) if x.fin));
     }
 
@@ -1097,22 +1076,18 @@ mod tests {
         let mut ss = SendStreams::default();
         ss.insert(0.into(), s);
 
-        let (_f1, f1_token) = ss
-            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
-            .unwrap();
+        let (_f1, f1_token) = ss.get_frame(PNSpace::ApplicationData, 100).unwrap();
         assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if x.offset == 0));
         assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if x.length == 10));
         assert!(matches!(&f1_token, Some(RecoveryToken::Stream(x)) if !x.fin));
 
         // Should be no more data to frame
-        let f2 = ss.get_frame(PNSpace::ApplicationData, TxMode::Normal, 100);
+        let f2 = ss.get_frame(PNSpace::ApplicationData, 100);
         assert!(matches!(f2, None));
 
         ss.get_mut(0.into()).unwrap().close();
 
-        let (_f2, f2_token) = ss
-            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
-            .unwrap();
+        let (_f2, f2_token) = ss.get_frame(PNSpace::ApplicationData, 100).unwrap();
         assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.offset == 10));
         assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.length == 0));
         assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.fin));
@@ -1125,9 +1100,7 @@ mod tests {
         ss.lost(&f2_token);
 
         // Next frame should set fin
-        let (_f3, f3_token) = ss
-            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
-            .unwrap();
+        let (_f3, f3_token) = ss.get_frame(PNSpace::ApplicationData, 100).unwrap();
         assert!(matches!(&f3_token, Some(RecoveryToken::Stream(x)) if x.offset == 10));
         assert!(matches!(&f3_token, Some(RecoveryToken::Stream(x)) if x.length == 0));
         assert!(matches!(&f3_token, Some(RecoveryToken::Stream(x)) if x.fin));
@@ -1140,9 +1113,7 @@ mod tests {
         ss.lost(&f1_token);
 
         // Next frame should set fin and include all data
-        let (_f4, f4_token) = ss
-            .get_frame(PNSpace::ApplicationData, TxMode::Normal, 100)
-            .unwrap();
+        let (_f4, f4_token) = ss.get_frame(PNSpace::ApplicationData, 100).unwrap();
         assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.offset == 0));
         assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.length == 10));
         assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.fin));
