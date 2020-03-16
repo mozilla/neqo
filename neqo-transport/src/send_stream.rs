@@ -901,30 +901,53 @@ mod tests {
 
         assert_eq!(txb.avail(), 65535);
 
+        // Fill the buffer
         assert_eq!(txb.send(&[1; 100_000]), TxBuffer::BUFFER_SIZE);
-        assert!(matches!(txb.next_bytes(), Some((0, x)) if x.len()==65535));
+        assert!(matches!(txb.next_bytes(),
+			 Some((0, x)) if x.len()==65535
+			 && x.iter().all(|ch| *ch == 1)));
 
+        // Mark almost all as sent. Get what's left
         txb.mark_as_sent(0, 65534);
-        assert!(matches!(txb.next_bytes(), Some((65534, x)) if x.len() == 1));
+        assert!(matches!(txb.next_bytes(),
+			 Some((65534, x)) if x.len() == 1
+			 && x.iter().all(|ch| *ch == 1)));
 
+        // Mark all as sent. Get nothing
         txb.mark_as_sent(0, 65535);
         assert!(matches!(txb.next_bytes(), None));
 
+        // Mark as lost. Get it again
         txb.mark_as_lost(65534, 1);
-        assert!(matches!(txb.next_bytes(), Some((65534, x)) if x.len() == 1));
+        assert!(matches!(txb.next_bytes(),
+			 Some((65534, x)) if x.len() == 1
+			 && x.iter().all(|ch| *ch == 1)));
 
+        // Mark a larger range lost, including beyond what's in the buffer even.
+        // Get a little more
         txb.mark_as_lost(65530, 100);
-        assert!(matches!(txb.next_bytes(), Some((65530, x)) if x.len() == 5));
+        assert!(matches!(txb.next_bytes(),
+			 Some((65530, x)) if x.len() == 5
+			 && x.iter().all(|ch| *ch == 1)));
 
+        // Contig acked range at start means it can be removed from buffer
+        // Impl of vecdeque should now result in a split buffer when more data
+        // is sent
         txb.mark_as_acked(0, 65530);
         assert_eq!(txb.send(&[2; 30]), 30);
-        assert!(matches!(txb.next_bytes(), Some((65530, x)) if x.len() == 5));
+        // Just get 5 even though there is more
+        assert!(matches!(txb.next_bytes(),
+			 Some((65530, x)) if x.len() == 5
+			 && x.iter().all(|ch| *ch == 1)));
         assert_eq!(txb.retired, 65530);
         assert_eq!(txb.buffered(), 35);
 
-        // Test that things work around the slice break
+        // Marking that bit as sent should let the last contig bit be returned
+        // when called again
         txb.mark_as_sent(65530, 5);
-        assert!(matches!(txb.next_bytes(), Some((65535, x)) if x.len() == 30));
+        assert!(matches!(txb.next_bytes(),
+			 Some((65535, x)) if x.len() == 30
+			 && x.iter().all(|ch| *ch == 2)));
     }
 
     #[test]
@@ -936,17 +959,41 @@ mod tests {
         assert_eq!(txb.send(&[1; 100_000]), TxBuffer::BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(), Some((0, x)) if x.len()==65535));
 
+        // As above
         txb.mark_as_acked(0, 65500);
         assert!(matches!(txb.next_bytes(), Some((65500, x)) if x.len() == 35));
 
-        // Test that next_bytes works across the slice break if there is a
-        // marked range in the second slice
+        // Valid new data placed in discontig location
         assert_eq!(txb.send(&[2; 100]), 100);
-        txb.mark_as_sent(65500, 10);
-        assert!(matches!(txb.next_bytes(), Some((65510, x)) if x.len() == 25));
 
-        txb.mark_as_sent(65539, 10);
-        assert!(matches!(txb.next_bytes(), Some((65510, x)) if x.len() == 25));
+        // Mark a little more as sent
+        txb.mark_as_sent(65500, 10);
+        assert!(matches!(txb.next_bytes(),
+			 Some((65510, x)) if x.len() == 25
+			 && x.iter().all(|ch| *ch == 1)));
+        // Mark a range 'A' in second slice as sent. Should still return the same
+        txb.mark_as_sent(65600, 10);
+        assert!(matches!(txb.next_bytes(),
+			 Some((65510, x)) if x.len() == 25
+			 && x.iter().all(|ch| *ch == 1)));
+        // Ack entire first slice and into second slice
+        txb.mark_as_acked(0, 65550);
+
+        // Get up to marked range A
+        assert!(matches!(txb.next_bytes(),
+			 Some((65550, x)) if x.len() == 50
+			 && x.iter().all(|ch| *ch == 2)));
+
+        txb.mark_as_sent(65550, 50);
+
+        // Get bit after earlier marked range A
+        assert!(matches!(txb.next_bytes(),
+			 Some((65610, x)) if x.len() == 25
+			 && x.iter().all(|ch| *ch == 2)));
+
+        // No more bytes.
+        txb.mark_as_sent(65610, 25);
+        assert!(matches!(txb.next_bytes(), None));
     }
 
     #[test]
