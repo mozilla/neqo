@@ -382,14 +382,14 @@ fn main() -> Res<()> {
             };
             out_path.push(url_path);
 
-            eprintln!("Saving {} to {:?}", url.clone().into_string(), dir);
+            eprintln!("Saving {} to {:?}", url.clone().into_string(), out_path);
 
             Some(
                 OpenOptions::new()
                     .write(true)
                     .create(true)
                     .truncate(true)
-                    .open(&dir)?,
+                    .open(&out_path)?,
             )
         } else {
             None
