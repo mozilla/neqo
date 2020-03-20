@@ -13,7 +13,7 @@ use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output
 use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
@@ -22,8 +22,9 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
 use std::time::Instant;
+
 use structopt::StructOpt;
-use url::Url;
+use url::{Origin, Url};
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -89,12 +90,7 @@ pub struct Args {
 }
 
 trait Handler {
-    fn handle(
-        &mut self,
-        args: &Args,
-        client: &mut Http3Client,
-        out_file: &mut Option<File>,
-    ) -> Res<bool>;
+    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> Res<bool>;
 }
 
 fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) {
@@ -113,7 +109,6 @@ fn process_loop(
     client: &mut Http3Client,
     handler: &mut dyn Handler,
     args: &Args,
-    out_file: &mut Option<File>,
 ) -> Res<neqo_http3::Http3State> {
     let buf = &mut [0u8; 2048];
     loop {
@@ -121,7 +116,7 @@ fn process_loop(
             return Ok(client.state());
         }
 
-        let mut exiting = !handler.handle(args, client, out_file)?;
+        let mut exiting = !handler.handle(args, client)?;
 
         loop {
             let output = client.process_output(Instant::now());
@@ -171,12 +166,7 @@ fn process_loop(
 
 struct PreConnectHandler {}
 impl Handler for PreConnectHandler {
-    fn handle(
-        &mut self,
-        _args: &Args,
-        client: &mut Http3Client,
-        _out_file: &mut Option<File>,
-    ) -> Res<bool> {
+    fn handle(&mut self, _args: &Args, client: &mut Http3Client) -> Res<bool> {
         let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
         if client.events().any(authentication_needed) {
             client.authenticated(AuthenticationStatus::Ok, Instant::now());
@@ -187,60 +177,67 @@ impl Handler for PreConnectHandler {
 
 #[derive(Default)]
 struct PostConnectHandler {
-    streams: HashSet<u64>,
+    streams: HashMap<u64, Option<File>>,
 }
 
 // This is a bit fancier than actually needed.
 impl Handler for PostConnectHandler {
-    fn handle(
-        &mut self,
-        args: &Args,
-        client: &mut Http3Client,
-        out_file: &mut Option<File>,
-    ) -> Res<bool> {
+    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> Res<bool> {
         let mut data = vec![0; 4000];
         client.process_http3(Instant::now());
         while let Some(event) = client.next_event() {
             match event {
-                Http3ClientEvent::HeaderReady { stream_id } => {
-                    if !self.streams.contains(&stream_id) {
-                        println!("Data on unexpected stream: {}", stream_id);
-                        return Ok(false);
-                    }
-
-                    let headers = client.read_response_headers(stream_id);
-                    if out_file.is_none() {
-                        println!("READ HEADERS[{}]: {:?}", stream_id, headers);
-                    }
-                }
-                Http3ClientEvent::DataReadable { stream_id } => {
-                    if !self.streams.contains(&stream_id) {
-                        println!("Data on unexpected stream: {}", stream_id);
-                        return Ok(false);
-                    }
-
-                    let (sz, fin) = client
-                        .read_response_data(Instant::now(), stream_id, &mut data)
-                        .expect("Read should succeed");
-
-                    if let Some(out_file) = out_file {
-                        if sz > 0 {
-                            out_file.write_all(&data[..sz])?;
-                        }
-                    } else if !args.output_read_data {
-                        println!("READ[{}]: {} bytes", stream_id, sz);
-                    } else if let Ok(txt) = String::from_utf8(data.clone()) {
-                        println!("READ[{}]: {}", stream_id, txt);
-                    } else {
-                        println!("READ[{}]: 0x{}", stream_id, hex(&data));
-                    }
-
-                    if fin {
+                Http3ClientEvent::HeaderReady { stream_id } => match self.streams.get(&stream_id) {
+                    Some(out_file) => {
+                        let headers = client.read_response_headers(stream_id);
                         if out_file.is_none() {
-                            println!("<FIN[{}]>", stream_id);
+                            println!("READ HEADERS[{}]: {:?}", stream_id, headers);
                         }
-                        client.close(Instant::now(), 0, "kthxbye!");
+                    }
+                    None => {
+                        println!("Data on unexpected stream: {}", stream_id);
                         return Ok(false);
+                    }
+                },
+                Http3ClientEvent::DataReadable { stream_id } => {
+                    let mut stream_done = false;
+                    match self.streams.get_mut(&stream_id) {
+                        None => {
+                            println!("Data on unexpected stream: {}", stream_id);
+                            return Ok(false);
+                        }
+                        Some(out_file) => {
+                            let (sz, fin) = client
+                                .read_response_data(Instant::now(), stream_id, &mut data)
+                                .expect("Read should succeed");
+
+                            if let Some(out_file) = out_file {
+                                if sz > 0 {
+                                    out_file.write_all(&data[..sz])?;
+                                }
+                            } else if !args.output_read_data {
+                                println!("READ[{}]: {} bytes", stream_id, sz);
+                            } else if let Ok(txt) = String::from_utf8(data.clone()) {
+                                println!("READ[{}]: {}", stream_id, txt);
+                            } else {
+                                println!("READ[{}]: 0x{}", stream_id, hex(&data));
+                            }
+
+                            if fin {
+                                if out_file.is_none() {
+                                    println!("<FIN[{}]>", stream_id);
+                                }
+                                stream_done = true;
+                            }
+                        }
+                    }
+
+                    if stream_done {
+                        self.streams.remove(&stream_id);
+                        if self.streams.is_empty() {
+                            client.close(Instant::now(), 0, "kthxbye!");
+                            return Ok(false);
+                        }
                     }
                 }
                 _ => {}
@@ -271,11 +268,11 @@ fn client(
     socket: UdpSocket,
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
-    url: &Url,
-    out_file: &mut Option<File>,
+    origin: &str,
+    urls: &[Url],
 ) -> Res<()> {
     let mut client = Http3Client::new(
-        url.host_str().unwrap(),
+        origin,
         &args.alpn,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
@@ -293,21 +290,57 @@ fn client(
         &mut client,
         &mut h,
         &args,
-        out_file,
     )?;
-
-    let client_stream_id = client.fetch(
-        &args.method,
-        &url.scheme(),
-        &url.host_str().unwrap(),
-        &url.path(),
-        &to_headers(&args.header),
-    )?;
-
-    let _ = client.stream_close_send(client_stream_id);
 
     let mut h2 = PostConnectHandler::default();
-    h2.streams.insert(client_stream_id);
+
+    let mut open_paths = Vec::new();
+
+    for url in urls {
+        let client_stream_id = client.fetch(
+            &args.method,
+            &url.scheme(),
+            &url.host_str().unwrap(),
+            &url.path(),
+            &to_headers(&args.header),
+        )?;
+
+        let _ = client.stream_close_send(client_stream_id);
+
+        let out_file = if let Some(ref dir) = args.output_dir {
+            let mut out_path = dir.clone();
+
+            let url_path = if url.path() == "/" {
+                // If no path is given... call it "root"?
+                "root"
+            } else {
+                // Omit leading slash
+                &url.path()[1..]
+            };
+            out_path.push(url_path);
+
+            if open_paths.contains(&out_path) {
+                eprintln!("duplicate path {}", out_path.display());
+                continue;
+            }
+
+            eprintln!("Saving {} to {:?}", url.clone().into_string(), out_path);
+
+            let f = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&out_path)?;
+
+            open_paths.push(out_path);
+            Some(f)
+        } else {
+            None
+        };
+
+        h2.streams.insert(client_stream_id, out_file);
+    }
+
     process_loop(
         &local_addr,
         &remote_addr,
@@ -315,7 +348,6 @@ fn client(
         &mut client,
         &mut h2,
         &args,
-        out_file,
     )?;
 
     Ok(())
@@ -336,15 +368,20 @@ fn main() -> Res<()> {
         }
     }
 
-    let urls = args.urls.clone();
-    for url in &urls {
-        let addrs: Vec<_> = format!(
-            "{}:{}",
-            url.host_str().unwrap_or("localhost"),
-            url.port_or_known_default().unwrap()
-        )
-        .to_socket_addrs()?
-        .collect();
+    let mut urls_by_origin: HashMap<Origin, Vec<Url>> = HashMap::new();
+    for url in &args.urls {
+        let entry = urls_by_origin.entry(url.origin()).or_default();
+        entry.push(url.clone());
+    }
+
+    for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
+        Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
+        Origin::Opaque(x) => {
+            eprintln!("Opaque origin {:?}", x);
+            None
+        }
+    }) {
+        let addrs: Vec<_> = format!("{}:{}", host, port).to_socket_addrs()?.collect();
         let remote_addr = *addrs.first().unwrap();
 
         let local_addr = match remote_addr {
@@ -370,35 +407,17 @@ fn main() -> Res<()> {
             remote_addr
         );
 
-        let mut out_file = if let Some(ref dir) = args.output_dir {
-            let mut out_path = dir.clone();
-
-            let url_path = if url.path() == "/" {
-                // If no path is given... call it "root"?
-                "root"
-            } else {
-                // Omit leading slash
-                &url.path()[1..]
-            };
-            out_path.push(url_path);
-
-            eprintln!("Saving {} to {:?}", url.clone().into_string(), out_path);
-
-            Some(
-                OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(&out_path)?,
-            )
+        if !args.use_old_http {
+            client(
+                &args,
+                socket,
+                local_addr,
+                remote_addr,
+                &format!("{}", host),
+                &urls,
+            )?;
         } else {
-            None
-        };
-
-        if args.use_old_http {
-            old::old_client(&args, socket, local_addr, remote_addr, url, &mut out_file)?;
-        } else {
-            client(&args, socket, local_addr, remote_addr, url, &mut out_file)?;
+            old::old_client(&args, socket, local_addr, remote_addr, &urls)?;
         }
     }
 
@@ -512,7 +531,6 @@ mod old {
         client: &mut Connection,
         handler: &mut dyn HandlerOld,
         args: &Args,
-        out_file: &mut Option<File>,
     ) -> Res<State> {
         let buf = &mut [0u8; 2048];
         loop {
@@ -520,7 +538,7 @@ mod old {
                 return Ok(client.state().clone());
             }
 
-            let exiting = !handler.handle(args, client, out_file)?;
+            let exiting = !handler.handle(args, client, &mut None)?;
 
             let out_dgram = client.process_output(Instant::now());
             emit_datagram(&socket, out_dgram.dgram());
@@ -552,45 +570,44 @@ mod old {
         socket: UdpSocket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        url: &Url,
-        out_file: &mut Option<File>,
+        urls: &[Url],
     ) -> Res<()> {
-        let mut client = Connection::new_client(
-            url.host_str().unwrap(),
-            &["http/0.9"],
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
-            local_addr,
-            remote_addr,
-        )
-        .expect("must succeed");
-        // Temporary here to help out the type inference engine
-        let mut h = PreConnectHandlerOld {};
-        process_loop_old(
-            &local_addr,
-            &remote_addr,
-            &socket,
-            &mut client,
-            &mut h,
-            &args,
-            out_file,
-        )?;
+        for url in urls {
+            let mut client = Connection::new_client(
+                url.host_str().unwrap(),
+                &["http/0.9"],
+                Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+                local_addr,
+                remote_addr,
+            )
+            .expect("must succeed");
+            // Temporary here to help out the type inference engine
+            let mut h = PreConnectHandlerOld {};
+            process_loop_old(
+                &local_addr,
+                &remote_addr,
+                &socket,
+                &mut client,
+                &mut h,
+                &args,
+            )?;
 
-        let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
-        let req: String = "GET /10\r\n".to_string();
-        client
-            .stream_send(client_stream_id, req.as_bytes())
-            .unwrap();
-        let mut h2 = PostConnectHandlerOld::default();
-        h2.streams.insert(client_stream_id);
-        process_loop_old(
-            &local_addr,
-            &remote_addr,
-            &socket,
-            &mut client,
-            &mut h2,
-            &args,
-            out_file,
-        )?;
+            let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
+            let req: String = "GET /10\r\n".to_string();
+            client
+                .stream_send(client_stream_id, req.as_bytes())
+                .unwrap();
+            let mut h2 = PostConnectHandlerOld::default();
+            h2.streams.insert(client_stream_id);
+            process_loop_old(
+                &local_addr,
+                &remote_addr,
+                &socket,
+                &mut client,
+                &mut h2,
+                &args,
+            )?;
+        }
 
         Ok(())
     }
