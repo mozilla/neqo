@@ -8,7 +8,6 @@
 #![warn(clippy::pedantic)]
 
 use neqo_common::matches;
-use neqo_common::once::OnceResult;
 use neqo_crypto::{init_db, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Server};
 use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
@@ -18,6 +17,8 @@ use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
+
+use lazy_static::lazy_static;
 
 pub mod assertions;
 
@@ -35,10 +36,13 @@ pub fn fixture_init() {
 // NSS operates in milliseconds and halves any value it is provided.
 pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(10);
 
+lazy_static! {
+    static ref BASE_TIME: Instant = Instant::now();
+}
+
 fn earlier() -> Instant {
-    static mut BASE_TIME: OnceResult<Instant> = OnceResult::new();
     fixture_init();
-    *unsafe { BASE_TIME.call_once(Instant::now) }
+    *BASE_TIME
 }
 
 /// The current time for the test.  Which is in the future,
