@@ -861,31 +861,88 @@ impl CryptoStreams {
     }
 
     pub fn send(&mut self, space: PNSpace, data: &[u8]) {
-        self[space].tx.send(data);
+        if let Some(cs) = self.get_mut(space) {
+            cs.tx.send(data);
+        } else {
+            panic!("Trying to send in a dropped space")
+        }
     }
 
     pub fn inbound_frame(&mut self, space: PNSpace, offset: u64, data: Vec<u8>) -> Res<()> {
-        self[space].rx.inbound_frame(offset, data)
+        if let Some(cs) = self.get_mut(space) {
+            cs.rx.inbound_frame(offset, data)
+        } else {
+            // TODO should be panic()? How did we read a packet from a dropped space?
+            qinfo!("Inbound frame in a dropped space");
+            Ok(())
+        }
     }
 
     pub fn data_ready(&self, space: PNSpace) -> bool {
-        self[space].rx.data_ready()
+        if let Some(cs) = self.get(space) {
+            cs.rx.data_ready()
+        } else {
+            false
+        }
     }
 
     pub fn read_to_end(&mut self, space: PNSpace, buf: &mut Vec<u8>) -> Res<u64> {
-        self[space].rx.read_to_end(buf)
+        self.get_mut(space)
+            .expect("data_ready() was true, PNSpace must be there")
+            .rx
+            .read_to_end(buf)
     }
 
     pub fn acked(&mut self, token: CryptoRecoveryToken) {
-        self[token.space]
-            .tx
-            .mark_as_acked(token.offset, token.length)
+        if let Some(cs) = self.get_mut(token.space) {
+            cs.tx.mark_as_acked(token.offset, token.length)
+        }
     }
 
     pub fn lost(&mut self, token: &CryptoRecoveryToken) {
-        self[token.space]
-            .tx
-            .mark_as_lost(token.offset, token.length)
+        if let Some(cs) = self.get_mut(token.space) {
+            cs.tx.mark_as_lost(token.offset, token.length)
+        }
+    }
+
+    fn get(&self, space: PNSpace) -> Option<&CryptoStream> {
+        let (initial, hs, app) = match self {
+            Self::Initial {
+                initial,
+                handshake,
+                application,
+            } => (Some(initial), Some(handshake), Some(application)),
+            Self::Handshake {
+                handshake,
+                application,
+            } => (None, Some(handshake), Some(application)),
+            Self::ApplicationData { application } => (None, None, Some(application)),
+        };
+        match space {
+            PNSpace::Initial => initial,
+            PNSpace::Handshake => hs,
+            PNSpace::ApplicationData => app,
+        }
+    }
+
+    fn get_mut(&mut self, space: PNSpace) -> Option<&mut CryptoStream> {
+        let (initial, hs, app) = match self {
+            Self::Initial {
+                initial,
+                handshake,
+                application,
+            } => (Some(initial), Some(handshake), Some(application)),
+            Self::Handshake {
+                handshake,
+                application,
+            } => (None, Some(handshake), Some(application)),
+            Self::ApplicationData { application } => (None, None, Some(application)),
+        };
+        match space {
+            PNSpace::Initial => initial,
+            PNSpace::Handshake => hs,
+            PNSpace::ApplicationData => app,
+        }
     }
 
     pub fn get_frame(
@@ -893,25 +950,30 @@ impl CryptoStreams {
         space: PNSpace,
         remaining: usize,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        if let Some((offset, data)) = self[space].tx.next_bytes() {
-            let (frame, length) = Frame::new_crypto(offset, data, remaining);
-            self[space].tx.mark_as_sent(offset, length);
+        if let Some(cs) = self.get_mut(space) {
+            if let Some((offset, data)) = cs.tx.next_bytes() {
+                let (frame, length) = Frame::new_crypto(offset, data, remaining);
+                cs.tx.mark_as_sent(offset, length);
 
-            qdebug!(
-                "Emitting crypto frame space={}, offset={}, len={}",
-                space,
-                offset,
-                length
-            );
-            Some((
-                frame,
-                Some(RecoveryToken::Crypto(CryptoRecoveryToken {
+                qdebug!(
+                    "Emitting crypto frame space={}, offset={}, len={}",
                     space,
                     offset,
-                    length,
-                })),
-            ))
+                    length
+                );
+                Some((
+                    frame,
+                    Some(RecoveryToken::Crypto(CryptoRecoveryToken {
+                        space,
+                        offset,
+                        length,
+                    })),
+                ))
+            } else {
+                None
+            }
         } else {
+            qerror!("Trying to get frame for dropped space {:?}", space);
             None
         }
     }
@@ -923,51 +985,6 @@ impl Default for CryptoStreams {
             initial: CryptoStream::default(),
             handshake: CryptoStream::default(),
             application: CryptoStream::default(),
-        }
-    }
-}
-
-impl Index<PNSpace> for CryptoStreams {
-    type Output = CryptoStream;
-    fn index(&self, space: PNSpace) -> &Self::Output {
-        let (initial, hs, app) = match self {
-            Self::Initial {
-                initial,
-                handshake,
-                application,
-            } => (Some(initial), Some(handshake), application),
-            Self::Handshake {
-                handshake,
-                application,
-            } => (None, Some(handshake), application),
-            Self::ApplicationData { application } => (None, None, application),
-        };
-        match space {
-            PNSpace::Initial => initial.expect("Initial state dropped!"),
-            PNSpace::Handshake => hs.expect("Handshake state dropped!"),
-            PNSpace::ApplicationData => app,
-        }
-    }
-}
-
-impl IndexMut<PNSpace> for CryptoStreams {
-    fn index_mut(&mut self, space: PNSpace) -> &mut Self::Output {
-        let (initial, hs, app) = match self {
-            Self::Initial {
-                initial,
-                handshake,
-                application,
-            } => (Some(initial), Some(handshake), application),
-            Self::Handshake {
-                handshake,
-                application,
-            } => (None, Some(handshake), application),
-            Self::ApplicationData { application } => (None, None, application),
-        };
-        match space {
-            PNSpace::Initial => initial.expect("Initial state dropped!"),
-            PNSpace::Handshake => hs.expect("Handshake state dropped!"),
-            PNSpace::ApplicationData => app,
         }
     }
 }
