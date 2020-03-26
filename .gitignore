@@ -4,3 +4,4 @@ Cargo.lock
 /db
 *~
 /.vscode/
+.idea
