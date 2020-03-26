@@ -6,7 +6,7 @@
 
 use crate::err::{Error, Res};
 
-use neqo_common::once::OnceResult;
+use crate::once::OnceResult;
 
 use std::convert::{TryFrom, TryInto};
 use std::ops::Deref;
