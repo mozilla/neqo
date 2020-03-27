@@ -861,45 +861,30 @@ impl CryptoStreams {
     }
 
     pub fn send(&mut self, space: PNSpace, data: &[u8]) {
-        if let Some(cs) = self.get_mut(space) {
-            cs.tx.send(data);
-        } else {
-            panic!("Trying to send in a dropped space")
-        }
+        self.get_mut(space).unwrap().tx.send(data);
     }
 
     pub fn inbound_frame(&mut self, space: PNSpace, offset: u64, data: Vec<u8>) -> Res<()> {
-        if let Some(cs) = self.get_mut(space) {
-            cs.rx.inbound_frame(offset, data)
-        } else {
-            // TODO should be panic()? How did we read a packet from a dropped space?
-            qinfo!("Inbound frame in a dropped space");
-            Ok(())
-        }
+        self.get_mut(space).unwrap().rx.inbound_frame(offset, data)
     }
 
     pub fn data_ready(&self, space: PNSpace) -> bool {
-        if let Some(cs) = self.get(space) {
-            cs.rx.data_ready()
-        } else {
-            false
-        }
+        self.get(space).map_or(false, |cs| cs.rx.data_ready())
     }
 
     pub fn read_to_end(&mut self, space: PNSpace, buf: &mut Vec<u8>) -> Res<u64> {
-        self.get_mut(space)
-            .expect("data_ready() was true, PNSpace must be there")
-            .rx
-            .read_to_end(buf)
+        self.get_mut(space).unwrap().rx.read_to_end(buf)
     }
 
     pub fn acked(&mut self, token: CryptoRecoveryToken) {
-        if let Some(cs) = self.get_mut(token.space) {
-            cs.tx.mark_as_acked(token.offset, token.length)
-        }
+        self.get_mut(token.space)
+            .unwrap()
+            .tx
+            .mark_as_acked(token.offset, token.length)
     }
 
     pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+        // See BZ 1624800, ignore lost packets in spaces we've dropped keys
         if let Some(cs) = self.get_mut(token.space) {
             cs.tx.mark_as_lost(token.offset, token.length)
         }
@@ -950,30 +935,26 @@ impl CryptoStreams {
         space: PNSpace,
         remaining: usize,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        if let Some(cs) = self.get_mut(space) {
-            if let Some((offset, data)) = cs.tx.next_bytes() {
-                let (frame, length) = Frame::new_crypto(offset, data, remaining);
-                cs.tx.mark_as_sent(offset, length);
+        let cs = self.get_mut(space).unwrap();
+        if let Some((offset, data)) = cs.tx.next_bytes() {
+            let (frame, length) = Frame::new_crypto(offset, data, remaining);
+            cs.tx.mark_as_sent(offset, length);
 
-                qdebug!(
-                    "Emitting crypto frame space={}, offset={}, len={}",
+            qdebug!(
+                "Emitting crypto frame space={}, offset={}, len={}",
+                space,
+                offset,
+                length
+            );
+            Some((
+                frame,
+                Some(RecoveryToken::Crypto(CryptoRecoveryToken {
                     space,
                     offset,
-                    length
-                );
-                Some((
-                    frame,
-                    Some(RecoveryToken::Crypto(CryptoRecoveryToken {
-                        space,
-                        offset,
-                        length,
-                    })),
-                ))
-            } else {
-                None
-            }
+                    length,
+                })),
+            ))
         } else {
-            qerror!("Trying to get frame for dropped space {:?}", space);
             None
         }
     }
