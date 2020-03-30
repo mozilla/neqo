@@ -506,6 +506,24 @@ impl Connection {
                 Some(ref t) => {
                     qtrace!("TLS token {}", hex(&t));
                     let mut enc = Encoder::default();
+                    let smoothed_rtt = match self.loss_recovery.smoothed_rtt() {
+                        Some(v) => v,
+                        None => {
+                            debug_assert!(false, "smoothed_rtt should not be None");
+                            return None;
+                        }
+                    };
+                    let smoothed_rtt = match u32::try_from(smoothed_rtt.as_millis()) {
+                        Ok(smoothed_rtt) => smoothed_rtt,
+                        _ => {
+                            debug_assert!(
+                                false,
+                                "failed to cast smoothed_rtt value from ms to u32"
+                            );
+                            return None;
+                        }
+                    };
+                    enc.encode_uint(4, smoothed_rtt);
                     enc.encode_vvec_with(|enc_inner| {
                         self.tps
                             .borrow()
@@ -515,6 +533,7 @@ impl Connection {
                             .encode(enc_inner);
                     });
                     enc.encode(&t[..]);
+
                     qinfo!("resumption token {}", hex(&enc[..]));
                     Some(enc.into())
                 }
@@ -535,6 +554,11 @@ impl Connection {
         }
         qinfo!([self], "resumption token {}", hex(token));
         let mut dec = Decoder::from(token);
+
+        let smoothed_rtt = match dec.decode_uint(4) {
+            Some(v) => v,
+            _ => return Err(Error::InvalidResumptionToken),
+        };
         let tp_slice = match dec.decode_vvec() {
             Some(v) => v,
             _ => return Err(Error::InvalidResumptionToken),
@@ -551,6 +575,8 @@ impl Connection {
         }
 
         self.tps.borrow_mut().remote_0rtt = Some(tp);
+        self.loss_recovery
+            .set_smoothed_rtt(Duration::from_millis(smoothed_rtt));
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
