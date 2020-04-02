@@ -533,7 +533,6 @@ impl Connection {
                             .encode(enc_inner);
                     });
                     enc.encode(&t[..]);
-
                     qinfo!("resumption token {}", hex(&enc[..]));
                     Some(enc.into())
                 }
@@ -559,6 +558,7 @@ impl Connection {
             Some(v) => v,
             _ => return Err(Error::InvalidResumptionToken),
         };
+
         let tp_slice = match dec.decode_vvec() {
             Some(v) => v,
             _ => return Err(Error::InvalidResumptionToken),
@@ -2592,6 +2592,47 @@ mod tests {
         connect(&mut client, &mut server);
         assert!(client.crypto.tls.info().unwrap().resumed());
         assert!(server.crypto.tls.info().unwrap().resumed());
+    }
+
+    fn connect_with_rtt(client: &mut Connection, server: &mut Connection, now: &mut Instant) {
+        let mut a = client;
+        let mut b = server;
+        let mut datagram = None;
+        let is_done = |c: &mut Connection| match c.state() {
+            State::Confirmed | State::Closing { .. } | State::Closed(..) => true,
+            _ => false,
+        };
+
+        while !is_done(a) {
+            let _ = maybe_authenticate(a);
+            let d = a.process(datagram, *now);
+            datagram = d.dgram();
+            *now += Duration::from_millis(20);
+            mem::swap(&mut a, &mut b);
+        }
+        a.process(datagram, *now);
+    }
+
+    #[test]
+    fn remember_smoothed_rtt() {
+        let mut client = default_client();
+        let mut server = default_server();
+
+        let mut now_time = now();
+        connect_with_rtt(&mut client, &mut server, &mut now_time);
+
+        // In exchange_ticket we only send a packet from a server to a client
+        // and client won't calculate rtt from that packet, so no need to increase time here.
+        let token = exchange_ticket(&mut client, &mut server);
+        let mut client = default_client();
+
+        client
+            .set_resumption_token(now(), &token[..])
+            .expect("should set token");
+        assert_eq!(
+            client.loss_recovery.smoothed_rtt().unwrap(),
+            Duration::from_millis(40)
+        );
     }
 
     #[test]
