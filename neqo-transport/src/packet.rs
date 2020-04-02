@@ -721,7 +721,7 @@ mod tests {
         padded.extend_from_slice(EXTRA);
         let (packet, remainder) = PublicPacket::decode(&padded, &cid_mgr()).unwrap();
         assert_eq!(packet.packet_type(), PacketType::Initial);
-        assert_eq!(&packet.dcid()[..], &[]);
+        assert_eq!(&packet.dcid()[..], &[] as &[u8]);
         assert_eq!(&packet.scid()[..], SERVER_CID);
         assert!(packet.token().is_empty());
         assert_eq!(remainder, EXTRA);
