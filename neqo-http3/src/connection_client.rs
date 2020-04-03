@@ -41,7 +41,7 @@ impl Http3Client {
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        max_table_size: u32,
+        max_table_size: u64,
         max_blocked_streams: u16,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
@@ -51,7 +51,7 @@ impl Http3Client {
         ))
     }
 
-    pub fn new_with_conn(c: Connection, max_table_size: u32, max_blocked_streams: u16) -> Self {
+    pub fn new_with_conn(c: Connection, max_table_size: u64, max_blocked_streams: u16) -> Self {
         Self {
             conn: c,
             base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
@@ -2816,7 +2816,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            Http3State::Closing(CloseError::Application(265)),
+            Http3State::Closing(CloseError::Application(514)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3013,7 +3013,7 @@ mod tests {
         // We already had HeaderReady
         let header_ready: fn(&Http3ClientEvent) -> _ =
             |e| matches!(*e, Http3ClientEvent::HeaderReady { .. });
-        assert!(!events.clone().iter().any(header_ready));
+        assert!(!events.iter().any(header_ready));
 
         // Check that we have a DataReady event. Reading from the stream will return fin=true.
         let data_readable: fn(&Http3ClientEvent) -> _ =
@@ -3075,7 +3075,7 @@ mod tests {
         // We already had HeaderReady
         let header_ready: fn(&Http3ClientEvent) -> _ =
             |e| matches!(*e, Http3ClientEvent::HeaderReady { .. });
-        assert!(!events.clone().iter().any(header_ready));
+        assert!(!events.iter().any(header_ready));
 
         // Check that we have a DataReady event. Reading from the stream will return fin=true.
         let data_readable: fn(&Http3ClientEvent) -> _ =
