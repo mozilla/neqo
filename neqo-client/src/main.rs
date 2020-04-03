@@ -67,7 +67,7 @@ pub struct Args {
     header: Vec<String>,
 
     #[structopt(name = "max-table-size", short = "t", long, default_value = "128")]
-    max_table_size: u32,
+    max_table_size: u64,
 
     #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "128")]
     max_blocked_streams: u16,

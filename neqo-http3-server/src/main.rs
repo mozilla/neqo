@@ -37,7 +37,7 @@ struct Args {
     hosts: Vec<String>,
 
     #[structopt(short = "t", long, default_value = "128")]
-    max_table_size: u32,
+    max_table_size: u64,
 
     #[structopt(short = "b", long, default_value = "128")]
     max_blocked_streams: u16,
