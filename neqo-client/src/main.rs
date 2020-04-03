@@ -8,8 +8,7 @@
 #![allow(clippy::option_option)]
 #![warn(clippy::use_self)]
 
-use qlog::Qlog;
-use serde_json;
+use qlog::QlogStreamer;
 
 use neqo_common::{
     self as common, hex,
@@ -38,7 +37,6 @@ use url::{Origin, Url};
 pub enum ClientError {
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
-    SerdeJson(serde_json::error::Error),
 }
 
 impl From<io::Error> for ClientError {
@@ -53,15 +51,7 @@ impl From<neqo_http3::Error> for ClientError {
     }
 }
 
-impl From<serde_json::error::Error> for ClientError {
-    fn from(err: serde_json::error::Error) -> Self {
-        Self::SerdeJson(err)
-    }
-}
-
 type Res<T> = Result<T, ClientError>;
-
-const DEFAULT_QLOG_OUTPUT: &str = "output.qlog";
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -97,9 +87,9 @@ pub struct Args {
     /// Output received data to stdout
     output_read_data: bool,
 
-    #[structopt(long)]
-    /// Output QLOG trace to a file.
-    qlog: Option<Option<PathBuf>>,
+    #[structopt(name = "qlog-dir", long)]
+    /// Enable QLOG logging and QLOG traces to this directory
+    qlog_dir: Option<PathBuf>,
 
     #[structopt(name = "output-dir", long)]
     /// Save contents of fetched URLs to a directory
@@ -288,7 +278,7 @@ fn client(
     remote_addr: SocketAddr,
     origin: &str,
     urls: &[Url],
-    log: NeqoQlogRef,
+    log: Option<NeqoQlogRef>,
 ) -> Res<()> {
     let mut client = Http3Client::new(
         origin,
@@ -298,7 +288,7 @@ fn client(
         remote_addr,
         args.max_table_size,
         args.max_blocked_streams,
-        Some(Rc::clone(&log)),
+        log,
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -376,11 +366,6 @@ fn client(
 fn main() -> Res<()> {
     init();
 
-    let qtrace: NeqoQlogRef = Rc::new(RefCell::new(NeqoQlog::new(
-        Instant::now(),
-        common::qlog::new_trace(Role::Client),
-    )));
-
     let mut args = Args::from_args();
 
     if args.qns_mode {
@@ -433,6 +418,31 @@ fn main() -> Res<()> {
             remote_addr
         );
 
+        let qtrace = if let Some(qlog_dir) = args.qlog_dir.as_ref() {
+            let mut qlog_path = qlog_dir.to_path_buf();
+            qlog_path.push(format!("{}.qlog", host));
+
+            let f = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&qlog_path)?;
+
+            let streamer = QlogStreamer::new(
+                qlog::QLOG_VERSION.to_string(),
+                Some("Example qlog".to_string()),
+                Some("Example qlog description".to_string()),
+                None,
+                std::time::Instant::now(),
+                common::qlog::new_trace(Role::Client),
+                Box::new(f),
+            );
+
+            Some(Rc::new(RefCell::new(NeqoQlog::new(streamer, qlog_path))))
+        } else {
+            None
+        };
+
         if !args.use_old_http {
             client(
                 &args,
@@ -441,42 +451,10 @@ fn main() -> Res<()> {
                 remote_addr,
                 &format!("{}", host),
                 &urls,
-                Rc::clone(&qtrace),
+                qtrace,
             )?;
         } else {
             old::old_client(&args, socket, local_addr, remote_addr, &urls)?;
-        }
-    }
-
-    if let Some(output_qlog) = args.qlog {
-        let mut qlog = Qlog {
-            qlog_version: qlog::QLOG_VERSION.into(),
-            title: None,
-            description: None,
-            summary: None,
-            traces: Vec::new(),
-        };
-
-        let owned_trace = qtrace.borrow().trace.clone();
-
-        qlog.traces.push(owned_trace);
-
-        let qlogpath = output_qlog.unwrap_or_else(|| DEFAULT_QLOG_OUTPUT.into());
-
-        match OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&qlogpath)
-        {
-            Ok(mut f) => {
-                eprintln!("Writing QLOG to {}", qlogpath.display());
-                let data = serde_json::to_string_pretty(&qlog)?;
-                f.write_all(data.as_bytes())?;
-            }
-            Err(e) => {
-                eprintln!("Could not open qlog: {}", e);
-            }
         }
     }
 

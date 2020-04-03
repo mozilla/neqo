@@ -7,7 +7,6 @@
 // Functions that handle capturing QLOG traces.
 
 use std::string::String;
-use std::time::Instant;
 
 use qlog::{self, event::Event, PacketHeader, QuicFrame};
 
@@ -17,7 +16,7 @@ use crate::frame::{self, Frame};
 use crate::packet::{DecryptedPacket, PacketNumber, PacketType};
 use crate::path::Path;
 use crate::tparams::{self, TransportParametersHandler};
-use crate::QUIC_VERSION;
+use crate::{Res, QUIC_VERSION};
 use std::fmt::LowerHex;
 
 // TODO(hawkinsw@obs.cr): This is copied verbatim from neqo-qpack/src/qlog.rs where
@@ -34,12 +33,10 @@ fn slice_to_hex_string<T: LowerHex>(slice: &[T]) -> String {
 
 pub fn connection_tparams_set(
     qlog: &Option<NeqoQlogRef>,
-    now: Instant,
     tph: &TransportParametersHandler,
-) {
+) -> Res<()> {
     if let Some(qlog) = qlog {
         let mut qlog = qlog.borrow_mut();
-        let elapsed = now.duration_since(qlog.zero_time);
         let remote = tph.remote();
         let event = Event::transport_parameters_set(
             None,
@@ -96,35 +93,39 @@ pub fn connection_tparams_set(
             None,
         );
 
-        qlog.trace.push_event(elapsed, event);
+        qlog.streamer.add_event(event)?;
     }
+    Ok(())
 }
 
-pub fn server_connection_started(qlog: &Option<NeqoQlogRef>, now: Instant, path: &Path) {
-    connection_started(qlog, now, path)
+pub fn server_connection_started(qlog: &Option<NeqoQlogRef>, path: &Path) -> Res<()> {
+    connection_started(qlog, path)
 }
 
-pub fn client_connection_started(qlog: &Option<NeqoQlogRef>, now: Instant, path: &Path) {
-    connection_started(qlog, now, path);
+pub fn client_connection_started(qlog: &Option<NeqoQlogRef>, path: &Path) -> Res<()> {
+    connection_started(qlog, path)
 }
 
 pub fn packet_sent(
     qlog: &Option<NeqoQlogRef>,
-    now: Instant,
     pt: PacketType,
     pn: PacketNumber,
     body: &[u8],
-) {
+) -> Res<()> {
     if let Some(qlog) = qlog {
         let mut qlog = qlog.borrow_mut();
-        let elapsed = now.duration_since(qlog.zero_time);
 
-        let mut frames = Vec::new();
         let mut d = Decoder::from(body);
 
+        qlog.streamer.add_event(Event::packet_sent_min(
+            pkt_type_to_qlog_pkt_type(pt),
+            PacketHeader::new(pn, None, None, None, None, None),
+            Some(Vec::new()),
+        ))?;
+
         while d.remaining() > 0 {
             match Frame::decode(&mut d) {
-                Ok(f) => frames.push(frame_to_qlogframe(&f)),
+                Ok(f) => qlog.streamer.add_frame(frame_to_qlogframe(&f), false)?,
                 Err(_) => {
                     qinfo!("qlog: invalid frame");
                     break;
@@ -132,30 +133,29 @@ pub fn packet_sent(
             }
         }
 
-        let packet_type = pkt_type_to_qlog_pkt_type(pt);
-
-        qlog.trace.push_event(
-            elapsed,
-            Event::packet_sent_min(
-                packet_type,
-                PacketHeader::new(pn, None, None, None, None, None),
-                Some(frames),
-            ),
-        );
+        qlog.streamer.finish_frames()?;
     }
+    Ok(())
 }
 
-pub fn packet_received(qlog: &Option<NeqoQlogRef>, now: Instant, payload: &DecryptedPacket) {
+pub fn packet_received(qlog: &Option<NeqoQlogRef>, payload: &DecryptedPacket) -> Res<()> {
     if let Some(qlog) = qlog {
         let mut qlog = qlog.borrow_mut();
-        let elapsed = now.duration_since(qlog.zero_time);
 
-        let mut frames = Vec::new();
         let mut d = Decoder::from(&payload[..]);
+
+        qlog.streamer.add_event(Event::packet_received(
+            pkt_type_to_qlog_pkt_type(payload.packet_type()),
+            PacketHeader::new(payload.pn(), None, None, None, None, None),
+            Some(Vec::new()),
+            None,
+            None,
+            None,
+        ))?;
 
         while d.remaining() > 0 {
             match Frame::decode(&mut d) {
-                Ok(f) => frames.push(frame_to_qlogframe(&f)),
+                Ok(f) => qlog.streamer.add_frame(frame_to_qlogframe(&f), false)?,
                 Err(_) => {
                     qinfo!("qlog: invalid frame");
                     break;
@@ -163,20 +163,9 @@ pub fn packet_received(qlog: &Option<NeqoQlogRef>, now: Instant, payload: &Decry
             }
         }
 
-        let packet_type = pkt_type_to_qlog_pkt_type(payload.packet_type());
-
-        qlog.trace.push_event(
-            elapsed,
-            Event::packet_received(
-                packet_type,
-                PacketHeader::new(payload.pn(), None, None, None, None, None),
-                Some(frames),
-                None,
-                None,
-                None,
-            ),
-        );
+        qlog.streamer.finish_frames()?;
     }
+    Ok(())
 }
 
 // Helper functions
@@ -301,28 +290,27 @@ fn pkt_type_to_qlog_pkt_type(ptype: PacketType) -> qlog::PacketType {
     }
 }
 
-fn connection_started(qlog: &Option<NeqoQlogRef>, now: Instant, path: &Path) {
+fn connection_started(qlog: &Option<NeqoQlogRef>, path: &Path) -> Res<()> {
     if let Some(qlog) = qlog {
         let mut qlog = qlog.borrow_mut();
-        let elapsed = now.duration_since(qlog.zero_time);
 
-        qlog.trace.push_event(
-            elapsed,
-            Event::connection_started(
-                if path.local_sock().ip().is_ipv4() {
-                    "ipv4".into()
-                } else {
-                    "ipv6".into()
-                },
-                format!("{}", path.local_sock().ip()),
-                format!("{}", path.remote_sock().ip()),
-                Some("QUIC".into()),
-                path.local_sock().port().into(),
-                path.remote_sock().port().into(),
-                Some(format!("{:x}", QUIC_VERSION)),
-                Some(format!("{}", path.local_cid())),
-                Some(format!("{}", path.remote_cid())),
-            ),
-        );
+        qlog.streamer.start_log()?;
+
+        qlog.streamer.add_event(Event::connection_started(
+            if path.local_sock().ip().is_ipv4() {
+                "ipv4".into()
+            } else {
+                "ipv6".into()
+            },
+            format!("{}", path.local_sock().ip()),
+            format!("{}", path.remote_sock().ip()),
+            Some("QUIC".into()),
+            path.local_sock().port().into(),
+            path.remote_sock().port().into(),
+            Some(format!("{:x}", QUIC_VERSION)),
+            Some(format!("{}", path.local_cid())),
+            Some(format!("{}", path.remote_cid())),
+        ))?;
     }
+    Ok(())
 }

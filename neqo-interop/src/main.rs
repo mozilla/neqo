@@ -480,7 +480,7 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
 fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), String> {
     let mut hc = H3Handler {
         streams: HashSet::new(),
-        h3: Http3Client::new_with_conn(client, 128, 128, None),
+        h3: Http3Client::new_with_conn(client, 128, 128),
         host: String::from(peer.host),
         path: String::from("/"),
     };

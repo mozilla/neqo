@@ -18,7 +18,6 @@ use neqo_transport::Connection;
 use num_traits::ToPrimitive;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryInto;
-use std::time::Instant;
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
 
@@ -38,12 +37,11 @@ pub struct QPackEncoder {
     unacked_header_blocks: HashMap<u64, VecDeque<HashSet<u64>>>,
     blocked_stream_cnt: u16,
     use_huffman: bool,
-    log: Option<NeqoQlogRef>,
 }
 
 impl QPackEncoder {
     #[must_use]
-    pub fn new(use_huffman: bool, log: Option<NeqoQlogRef>) -> Self {
+    pub fn new(use_huffman: bool) -> Self {
         Self {
             table: HeaderTable::new(true),
             send_buf: QPData::default(),
@@ -55,7 +53,6 @@ impl QPackEncoder {
             unacked_header_blocks: HashMap::new(),
             blocked_stream_cnt: 0,
             use_huffman,
-            log,
         }
     }
 
@@ -110,7 +107,7 @@ impl QPackEncoder {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv)? {
                 None => break Ok(()),
-                Some(instruction) => self.call_instruction(instruction)?,
+                Some(instruction) => self.call_instruction(instruction, conn.qlog())?,
             }
         }
     }
@@ -174,16 +171,19 @@ impl QPackEncoder {
         Ok(())
     }
 
-    fn call_instruction(&mut self, instruction: DecoderInstruction) -> Res<()> {
+    fn call_instruction(
+        &mut self,
+        instruction: DecoderInstruction,
+        qlog: Option<NeqoQlogRef>,
+    ) -> Res<()> {
         qdebug!([self], "call intruction {:?}", instruction);
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
                 qlog::qpack_read_insert_count_increment_instruction(
-                    &self.log,
-                    Instant::now(),
+                    &qlog,
                     increment,
                     &increment.to_be_bytes(),
-                );
+                )?;
 
                 self.insert_count_instruction(increment)
             }
@@ -426,7 +426,7 @@ mod tests {
         let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create an encoder
-        let mut encoder = QPackEncoder::new(huffman, None);
+        let mut encoder = QPackEncoder::new(huffman);
         encoder.add_send_stream(send_stream_id);
 
         TestEncoder {

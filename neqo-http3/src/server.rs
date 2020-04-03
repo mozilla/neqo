@@ -9,13 +9,13 @@ use crate::connection_server::Http3ServerHandler;
 use crate::server_connection_events::Http3ServerConnEvent;
 use crate::server_events::{ClientRequestStream, Http3ServerEvent, Http3ServerEvents};
 use crate::Res;
-use neqo_common::log::NeqoQlogRef;
 use neqo_common::{qtrace, Datagram};
 use neqo_crypto::AntiReplay;
 use neqo_transport::server::{ActiveConnectionRef, Server};
 use neqo_transport::{ConnectionIdManager, Output};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -27,7 +27,6 @@ pub struct Http3Server {
     max_blocked_streams: u16,
     http3_handlers: HashMap<ActiveConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
-    log: Option<NeqoQlogRef>,
 }
 
 impl ::std::fmt::Display for Http3Server {
@@ -46,15 +45,14 @@ impl Http3Server {
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
         max_table_size: u64,
         max_blocked_streams: u16,
-        log: Option<NeqoQlogRef>,
+        qlog_dir: Option<PathBuf>,
     ) -> Res<Self> {
         Ok(Self {
-            server: Server::new(now, certs, protocols, anti_replay, cid_manager, log.clone())?,
+            server: Server::new(now, certs, protocols, anti_replay, cid_manager, qlog_dir)?,
             max_table_size,
             max_blocked_streams,
             http3_handlers: HashMap::new(),
             events: Http3ServerEvents::default(),
-            log,
         })
     }
 
@@ -96,12 +94,10 @@ impl Http3Server {
         let max_table_size = self.max_table_size;
         let max_blocked_streams = self.max_blocked_streams;
         for mut conn in active_conns {
-            let log = self.log.clone();
             let handler = self.http3_handlers.entry(conn.clone()).or_insert_with(|| {
                 Rc::new(RefCell::new(Http3ServerHandler::new(
                     max_table_size,
                     max_blocked_streams,
-                    log,
                 )))
             });
 
@@ -314,7 +310,7 @@ mod tests {
             &[0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64],
         );
         assert_eq!(sent, Ok(9));
-        let mut encoder = QPackEncoder::new(true, None);
+        let mut encoder = QPackEncoder::new(true);
         encoder.add_send_stream(neqo_trans_conn.stream_create(StreamType::UniDi).unwrap());
         encoder.send(&mut neqo_trans_conn).unwrap();
         let decoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
