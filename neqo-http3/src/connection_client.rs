@@ -60,19 +60,13 @@ impl Http3Client {
             )?,
             max_table_size,
             max_blocked_streams,
-            log,
         ))
     }
 
-    pub fn new_with_conn(
-        c: Connection,
-        max_table_size: u64,
-        max_blocked_streams: u16,
-        log: Option<NeqoQlogRef>,
-    ) -> Self {
+    pub fn new_with_conn(c: Connection, max_table_size: u64, max_blocked_streams: u16) -> Self {
         Self {
             conn: c,
-            base_handler: Http3Connection::new(max_table_size, max_blocked_streams, log),
+            base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
             events: Http3ClientEvents::default(),
         }
     }
@@ -562,7 +556,7 @@ mod tests {
             },
             conn: default_server(),
             control_stream_id: None,
-            encoder: QPackEncoder::new(true, None),
+            encoder: QPackEncoder::new(true),
         }
     }
 

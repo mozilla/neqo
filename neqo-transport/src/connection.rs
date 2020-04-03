@@ -477,8 +477,8 @@ impl Connection {
     }
 
     /// Get the qlog (if any) for this connection.
-    pub fn qlog(&self) -> Option<&NeqoQlogRef> {
-        self.qlog.as_ref()
+    pub fn qlog(&self) -> Option<NeqoQlogRef> {
+        self.qlog.clone()
     }
 
     /// Set a local transport parameter, possibly overriding a default value.
@@ -930,7 +930,7 @@ impl Connection {
                     payload.pn(),
                     &payload[..],
                 );
-                qlog::packet_received(&self.qlog, now, &payload);
+                qlog::packet_received(&self.qlog, &payload)?;
                 frames.extend(self.process_packet(&payload, now)?);
                 if matches!(self.state, State::WaitInitial) {
                     self.start_handshake(&packet, &d)?;
@@ -1284,7 +1284,7 @@ impl Connection {
             };
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
-            qlog::packet_sent(&self.qlog, now, pt, pn, &builder[payload_start..]);
+            qlog::packet_sent(&self.qlog, pt, pn, &builder[payload_start..])?;
 
             qdebug!("Need to send a packet: {:?}", pt);
 
@@ -1368,7 +1368,7 @@ impl Connection {
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self], "client_start");
-        qlog::client_connection_started(&self.qlog, now, self.path.as_ref().unwrap());
+        qlog::client_connection_started(&self.qlog, self.path.as_ref().unwrap())?;
 
         self.handshake(now, PNSpace::Initial, None)?;
         self.set_state(State::WaitInitial);
@@ -1777,7 +1777,7 @@ impl Connection {
             assert_eq!(1, self.valid_cids.len());
             self.valid_cids.clear();
             // Generate a qlog event that the server connection started.
-            qlog::server_connection_started(&self.qlog, now, self.path.as_ref().unwrap());
+            qlog::server_connection_started(&self.qlog, self.path.as_ref().unwrap())?;
         } else {
             self.zero_rtt_state = if self.crypto.tls.info().unwrap().early_data_accepted() {
                 ZeroRttState::AcceptedClient
@@ -1798,7 +1798,7 @@ impl Connection {
             self.set_state(State::Confirmed);
         }
         qinfo!([self], "Connection established");
-        qlog::connection_tparams_set(&self.qlog, now, &*self.tps.borrow());
+        qlog::connection_tparams_set(&self.qlog, &*self.tps.borrow())?;
         Ok(())
     }
 

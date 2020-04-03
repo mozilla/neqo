@@ -7,31 +7,32 @@
 use std::cell::RefCell;
 use std::fmt;
 use std::io::Write;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Once;
 use std::time::Instant;
 
 use env_logger::Builder;
-use qlog::Trace;
+use qlog::QlogStreamer;
 
 pub struct NeqoQlog {
-    pub trace: Trace,
-    pub zero_time: Instant,
+    qlog_path: PathBuf,
+    pub streamer: QlogStreamer,
 }
 
 impl NeqoQlog {
     #[must_use]
-    pub fn new(now: Instant, trace: Trace) -> Self {
+    pub fn new(streamer: QlogStreamer, qlog_path: PathBuf) -> Self {
         Self {
-            trace,
-            zero_time: now,
+            streamer,
+            qlog_path,
         }
     }
 }
 
 impl fmt::Debug for NeqoQlog {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "NeqoQlog with zero time of {:?}", self.zero_time)
+        write!(f, "NeqoQlog writing to {}", self.qlog_path.display())
     }
 }
 

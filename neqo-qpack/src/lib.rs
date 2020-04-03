@@ -57,6 +57,7 @@ pub enum Error {
     Decoding, // this will be translated into Encoder/DecoderStreamError or DecompressionFailed depending on the caller
 
     TransportError(neqo_transport::Error),
+    QlogError,
 }
 
 impl Error {
@@ -91,5 +92,11 @@ impl ::std::fmt::Display for Error {
 impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {
         Self::TransportError(err)
+    }
+}
+
+impl From<::qlog::Error> for Error {
+    fn from(_err: ::qlog::Error) -> Self {
+        Self::QlogError
     }
 }

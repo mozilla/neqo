@@ -59,6 +59,7 @@ pub enum Error {
     ProtocolViolation,
     InvalidMigration,
     CryptoError(neqo_crypto::Error),
+    QlogError,
     CryptoAlert(u8),
 
     // All internal errors from here.
@@ -116,6 +117,12 @@ impl From<neqo_crypto::Error> for Error {
     fn from(err: neqo_crypto::Error) -> Self {
         qinfo!("Crypto operation failed {:?}", err);
         Self::CryptoError(err)
+    }
+}
+
+impl From<::qlog::Error> for Error {
+    fn from(_err: ::qlog::Error) -> Self {
+        Self::QlogError
     }
 }
 

@@ -7,8 +7,8 @@
 // This file implements a server that can handle multiple connections.
 
 use neqo_common::{
-    hex, log::NeqoQlogRef, matches, qerror, qinfo, qtrace, qwarn, timer::Timer, Datagram, Decoder,
-    Encoder,
+    self as common, hex, log::NeqoQlog, matches, qerror, qinfo, qtrace, qwarn, timer::Timer,
+    Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
@@ -24,9 +24,11 @@ use crate::Res;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
+use std::fs::OpenOptions;
 use std::mem;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::{Deref, DerefMut};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -197,7 +199,8 @@ pub struct Server {
     /// Whether a Retry packet will be sent in response to new
     /// Initial packets.
     retry: RetryToken,
-    qlog: Option<NeqoQlogRef>,
+    /// Directory to create qlog traces in
+    qlog_dir: Option<PathBuf>,
 }
 
 impl Server {
@@ -214,7 +217,7 @@ impl Server {
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
         cid_manager: CidMgr,
-        qlog: Option<NeqoQlogRef>,
+        qlog_dir: Option<PathBuf>,
     ) -> Res<Self> {
         Ok(Self {
             certs: certs.iter().map(|x| String::from(x.as_ref())).collect(),
@@ -226,7 +229,7 @@ impl Server {
             waiting: VecDeque::default(),
             timers: Timer::new(now, TIMER_GRANULARITY, TIMER_CAPACITY),
             retry: RetryToken::new(now)?,
-            qlog,
+            qlog_dir,
         })
     }
 
@@ -334,12 +337,51 @@ impl Server {
             cid_manager: self.cid_manager.clone(),
             connections: self.connections.clone(),
         }));
+
+        let qtrace = if let Some(qlog_dir) = &self.qlog_dir {
+            let mut qlog_path = qlog_dir.to_path_buf();
+            qlog_path.push(format!("{}.qlog", dgram.source()));
+
+            match OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&qlog_path)
+            {
+                Ok(f) => {
+                    println!("Qlog output to {}", qlog_path.display());
+
+                    let streamer = ::qlog::QlogStreamer::new(
+                        qlog::QLOG_VERSION.to_string(),
+                        Some("Neqo server qlog".to_string()),
+                        Some("Neqo server qlog".to_string()),
+                        None,
+                        std::time::Instant::now(),
+                        common::qlog::new_trace(Role::Server),
+                        Box::new(f),
+                    );
+
+                    Some(Rc::new(RefCell::new(NeqoQlog::new(streamer, qlog_path))))
+                }
+                Err(e) => {
+                    qerror!(
+                        "Could not open file {} for qlog output: {}",
+                        qlog_path.display(),
+                        e
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let sconn = Connection::new_server(
             &self.certs,
             &self.protocols,
             &self.anti_replay,
             cid_mgr.clone(),
-            self.qlog.clone(),
+            qtrace,
         );
         if let Ok(mut c) = sconn {
             if let Some(odcid) = odcid {

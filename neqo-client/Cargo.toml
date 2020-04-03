@@ -15,8 +15,6 @@ neqo-http3 = { path = "./../neqo-http3" }
 structopt = "0.3.7"
 url = "1.7.2"
 qlog = "0.2.0"
-serde = "1"
-serde_json = "1"
 
 [features]
 default = ["deny-warnings"]
