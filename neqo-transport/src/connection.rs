@@ -506,24 +506,12 @@ impl Connection {
                 Some(ref t) => {
                     qtrace!("TLS token {}", hex(&t));
                     let mut enc = Encoder::default();
-                    let smoothed_rtt = match self.loss_recovery.smoothed_rtt() {
-                        Some(v) => v,
-                        None => {
-                            debug_assert!(false, "smoothed_rtt should not be None");
-                            return None;
-                        }
-                    };
-                    let smoothed_rtt = match u32::try_from(smoothed_rtt.as_millis()) {
-                        Ok(smoothed_rtt) => smoothed_rtt,
-                        _ => {
-                            debug_assert!(
-                                false,
-                                "failed to cast smoothed_rtt value from ms to u32"
-                            );
-                            return None;
-                        }
-                    };
-                    enc.encode_uint(4, smoothed_rtt);
+                    let rtt = self
+                        .loss_recovery
+                        .smoothed_rtt()
+                        .map(|v| u64::try_from(v.as_millis()).unwrap_or(0))
+                        .unwrap_or(0);
+                    enc.encode_varint(rtt);
                     enc.encode_vvec_with(|enc_inner| {
                         self.tps
                             .borrow()
@@ -554,7 +542,7 @@ impl Connection {
         qinfo!([self], "resumption token {}", hex(token));
         let mut dec = Decoder::from(token);
 
-        let smoothed_rtt = match dec.decode_uint(4) {
+        let smoothed_rtt = match dec.decode_varint() {
             Some(v) => v,
             _ => return Err(Error::InvalidResumptionToken),
         };
@@ -2595,6 +2583,8 @@ mod tests {
     }
 
     fn connect_with_rtt(client: &mut Connection, server: &mut Connection, now: &mut Instant) {
+        const TIME_INTERVAL: u64 = 20;
+
         let mut a = client;
         let mut b = server;
         let mut datagram = None;
@@ -2607,7 +2597,7 @@ mod tests {
             let _ = maybe_authenticate(a);
             let d = a.process(datagram, *now);
             datagram = d.dgram();
-            *now += Duration::from_millis(20);
+            *now += Duration::from_millis(TIME_INTERVAL);
             mem::swap(&mut a, &mut b);
         }
         a.process(datagram, *now);
