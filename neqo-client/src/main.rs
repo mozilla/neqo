@@ -5,16 +5,11 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![allow(clippy::option_option)]
 #![warn(clippy::use_self)]
 
 use qlog::QlogStreamer;
 
-use neqo_common::{
-    self as common, hex,
-    log::{NeqoQlog, NeqoQlogRef},
-    matches, Datagram, Role,
-};
+use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_transport::FixedConnectionIdManager;
@@ -37,6 +32,7 @@ use url::{Origin, Url};
 pub enum ClientError {
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
+    QlogError,
 }
 
 impl From<io::Error> for ClientError {
@@ -48,6 +44,12 @@ impl From<io::Error> for ClientError {
 impl From<neqo_http3::Error> for ClientError {
     fn from(err: neqo_http3::Error) -> Self {
         Self::Http3Error(err)
+    }
+}
+
+impl From<qlog::Error> for ClientError {
+    fn from(_err: qlog::Error) -> Self {
+        Self::QlogError
     }
 }
 
@@ -278,7 +280,6 @@ fn client(
     remote_addr: SocketAddr,
     origin: &str,
     urls: &[Url],
-    log: Option<NeqoQlogRef>,
 ) -> Res<()> {
     let mut client = Http3Client::new(
         origin,
@@ -288,9 +289,9 @@ fn client(
         remote_addr,
         args.max_table_size,
         args.max_blocked_streams,
-        log,
     )
     .expect("must succeed");
+    client.set_qlog(qlog_new(args, origin)?);
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     process_loop(
@@ -363,6 +364,33 @@ fn client(
     Ok(())
 }
 
+fn qlog_new(args: &Args, origin: &str) -> Res<Option<NeqoQlog>> {
+    if let Some(qlog_dir) = &args.qlog_dir {
+        let mut qlog_path = qlog_dir.to_path_buf();
+        qlog_path.push(format!("{}.qlog", origin));
+
+        let f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&qlog_path)?;
+
+        let streamer = QlogStreamer::new(
+            qlog::QLOG_VERSION.to_string(),
+            Some("Example qlog".to_string()),
+            Some("Example qlog description".to_string()),
+            None,
+            std::time::Instant::now(),
+            common::qlog::new_trace(Role::Client),
+            Box::new(f),
+        );
+
+        Ok(Some(NeqoQlog::new(streamer, qlog_path)?))
+    } else {
+        Ok(None)
+    }
+}
+
 fn main() -> Res<()> {
     init();
 
@@ -418,31 +446,6 @@ fn main() -> Res<()> {
             remote_addr
         );
 
-        let qtrace = if let Some(qlog_dir) = args.qlog_dir.as_ref() {
-            let mut qlog_path = qlog_dir.to_path_buf();
-            qlog_path.push(format!("{}.qlog", host));
-
-            let f = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&qlog_path)?;
-
-            let streamer = QlogStreamer::new(
-                qlog::QLOG_VERSION.to_string(),
-                Some("Example qlog".to_string()),
-                Some("Example qlog description".to_string()),
-                None,
-                std::time::Instant::now(),
-                common::qlog::new_trace(Role::Client),
-                Box::new(f),
-            );
-
-            Some(Rc::new(RefCell::new(NeqoQlog::new(streamer, qlog_path))))
-        } else {
-            None
-        };
-
         if !args.use_old_http {
             client(
                 &args,
@@ -451,7 +454,6 @@ fn main() -> Res<()> {
                 remote_addr,
                 &format!("{}", host),
                 &urls,
-                qtrace,
             )?;
         } else {
             old::old_client(&args, socket, local_addr, remote_addr, &urls)?;
@@ -473,7 +475,7 @@ mod old {
 
     use url::Url;
 
-    use super::Res;
+    use super::{qlog_new, Res};
 
     use neqo_common::Datagram;
     use neqo_transport::{
@@ -616,9 +618,9 @@ mod old {
                 Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
                 local_addr,
                 remote_addr,
-                None,
             )
             .expect("must succeed");
+            client.set_qlog(qlog_new(args, &format!("{}", url.host().unwrap()))?);
             // Temporary here to help out the type inference engine
             let mut h = PreConnectHandlerOld {};
             process_loop_old(

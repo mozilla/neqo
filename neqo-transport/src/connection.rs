@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use neqo_common::{
-    hex, matches, qdebug, qerror, qinfo, qtrace, qwarn, Datagram, Decoder, Encoder, NeqoQlogRef,
+    hex, matches, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder,
     Role,
 };
 use neqo_crypto::agent::CertificateInfo;
@@ -350,7 +350,7 @@ pub struct Connection {
     events: ConnectionEvents,
     token: Option<Vec<u8>>,
     stats: Stats,
-    qlog: Option<NeqoQlogRef>,
+    qlog: Option<NeqoQlog>,
 }
 
 impl Debug for Connection {
@@ -371,7 +371,6 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        qlog: Option<NeqoQlogRef>,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let scid = cid_manager.borrow_mut().generate_cid();
@@ -382,7 +381,6 @@ impl Connection {
             None,
             protocols,
             Some(Path::new(local_addr, remote_addr, scid, dcid.clone())),
-            qlog,
         );
         c.crypto.states.init(Role::Client, &dcid);
         c.retry_info = Some(RetryInfo::new(dcid));
@@ -395,7 +393,6 @@ impl Connection {
         protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
         cid_manager: CidMgr,
-        qlog: Option<NeqoQlogRef>,
     ) -> Res<Self> {
         Ok(Self::new(
             Role::Server,
@@ -404,7 +401,6 @@ impl Connection {
             Some(anti_replay),
             protocols,
             None,
-            qlog,
         ))
     }
 
@@ -435,7 +431,6 @@ impl Connection {
         anti_replay: Option<&AntiReplay>,
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
-        qlog: Option<NeqoQlogRef>,
     ) -> Self {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
@@ -467,18 +462,23 @@ impl Connection {
             events: ConnectionEvents::default(),
             token: None,
             stats: Stats::default(),
-            qlog,
+            qlog: None,
         }
     }
 
-    /// Get the local connection id.
+    /// Get the local path.
     pub fn path(&self) -> Option<&Path> {
         self.path.as_ref()
     }
 
+    /// Set or clear the qlog for this connection.
+    pub fn set_qlog(&mut self, qlog: Option<NeqoQlog>) {
+        self.qlog = qlog;
+    }
+
     /// Get the qlog (if any) for this connection.
-    pub fn qlog(&self) -> Option<NeqoQlogRef> {
-        self.qlog.clone()
+    pub fn qlog_mut(&mut self) -> &mut Option<NeqoQlog> {
+        &mut self.qlog
     }
 
     /// Set a local transport parameter, possibly overriding a default value.
@@ -930,7 +930,7 @@ impl Connection {
                     payload.pn(),
                     &payload[..],
                 );
-                qlog::packet_received(&self.qlog, &payload)?;
+                qlog::packet_received(&mut self.qlog, &payload)?;
                 frames.extend(self.process_packet(&payload, now)?);
                 if matches!(self.state, State::WaitInitial) {
                     self.start_handshake(&packet, &d)?;
@@ -1284,7 +1284,7 @@ impl Connection {
             };
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
-            qlog::packet_sent(&self.qlog, pt, pn, &builder[payload_start..])?;
+            qlog::packet_sent(&mut self.qlog, pt, pn, &builder[payload_start..])?;
 
             qdebug!("Need to send a packet: {:?}", pt);
 
@@ -1368,7 +1368,7 @@ impl Connection {
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self], "client_start");
-        qlog::client_connection_started(&self.qlog, self.path.as_ref().unwrap())?;
+        qlog::client_connection_started(&mut self.qlog, self.path.as_ref().unwrap())?;
 
         self.handshake(now, PNSpace::Initial, None)?;
         self.set_state(State::WaitInitial);
@@ -1777,7 +1777,7 @@ impl Connection {
             assert_eq!(1, self.valid_cids.len());
             self.valid_cids.clear();
             // Generate a qlog event that the server connection started.
-            qlog::server_connection_started(&self.qlog, self.path.as_ref().unwrap())?;
+            qlog::server_connection_started(&mut self.qlog, self.path.as_ref().unwrap())?;
         } else {
             self.zero_rtt_state = if self.crypto.tls.info().unwrap().early_data_accepted() {
                 ZeroRttState::AcceptedClient
@@ -1798,7 +1798,7 @@ impl Connection {
             self.set_state(State::Confirmed);
         }
         qinfo!([self], "Connection established");
-        qlog::connection_tparams_set(&self.qlog, &*self.tps.borrow())?;
+        qlog::connection_tparams_set(&mut self.qlog, &*self.tps.borrow())?;
         Ok(())
     }
 
@@ -2188,7 +2188,6 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
-            None,
         )
         .expect("create a default client")
     }
@@ -2199,7 +2198,6 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-            None,
         )
         .expect("create a default server")
     }
@@ -2529,7 +2527,6 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
             loopback(),
             loopback(),
-            None,
         )
         .unwrap();
         let mut server = default_server();
@@ -2786,7 +2783,6 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-            None,
         )
         .unwrap();
 
@@ -3133,7 +3129,6 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
-            None,
         )
         .expect("create a server");
 

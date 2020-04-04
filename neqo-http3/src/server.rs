@@ -36,7 +36,6 @@ impl ::std::fmt::Display for Http3Server {
 }
 
 impl Http3Server {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         now: Instant,
         certs: &[impl AsRef<str>],
@@ -45,15 +44,18 @@ impl Http3Server {
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
         max_table_size: u64,
         max_blocked_streams: u16,
-        qlog_dir: Option<PathBuf>,
     ) -> Res<Self> {
         Ok(Self {
-            server: Server::new(now, certs, protocols, anti_replay, cid_manager, qlog_dir)?,
+            server: Server::new(now, certs, protocols, anti_replay, cid_manager)?,
             max_table_size,
             max_blocked_streams,
             http3_handlers: HashMap::new(),
             events: Http3ServerEvents::default(),
         })
+    }
+
+    pub fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
+        self.server.set_qlog_dir(dir)
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
@@ -183,7 +185,6 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
             100,
             100,
-            None,
         )
         .expect("create a default server")
     }

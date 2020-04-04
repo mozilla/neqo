@@ -95,13 +95,13 @@ impl Path {
         Datagram::new(self.local, self.remote, payload)
     }
 
-    /// Get local socketaddr
-    pub fn local_sock(&self) -> &SocketAddr {
+    /// Get local address as `SocketAddr`
+    pub fn local_address(&self) -> &SocketAddr {
         &self.local
     }
 
-    /// Get remote socketaddr
-    pub fn remote_sock(&self) -> &SocketAddr {
+    /// Get remote address as `SocketAddr`
+    pub fn remote_address(&self) -> &SocketAddr {
         &self.remote
     }
 }

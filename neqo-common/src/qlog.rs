@@ -4,28 +4,68 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use chrono::{DateTime, Utc};
-
+use std::fmt;
+use std::path::PathBuf;
 use std::time::SystemTime;
 
-use qlog::{CommonFields, Configuration, TimeUnits, Trace, VantagePoint, VantagePointType};
+use chrono::{DateTime, Utc};
+use qlog::{
+    self, CommonFields, Configuration, QlogStreamer, TimeUnits, Trace, VantagePoint,
+    VantagePointType,
+};
 
 use crate::Role;
 
+#[allow(clippy::module_name_repetitions)]
+pub struct NeqoQlog {
+    qlog_path: PathBuf,
+    streamer: QlogStreamer,
+}
+
+impl NeqoQlog {
+    /// # Errors
+    ///
+    /// Will return `qlog::Error` if cannot write to the new log.
+    pub fn new(mut streamer: QlogStreamer, qlog_path: PathBuf) -> Result<Self, qlog::Error> {
+        streamer.start_log()?;
+
+        Ok(Self {
+            streamer,
+            qlog_path,
+        })
+    }
+
+    pub fn stream(&mut self) -> &mut QlogStreamer {
+        &mut self.streamer
+    }
+}
+
+impl fmt::Debug for NeqoQlog {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "NeqoQlog writing to {}", self.qlog_path.display())
+    }
+}
+
+impl Drop for NeqoQlog {
+    fn drop(&mut self) {
+        if let Err(e) = self.streamer.finish_log() {
+            ::log::log!(::log::Level::Error, "Error dropping NeqoQlog: {}", e)
+        }
+    }
+}
+
 #[must_use]
 pub fn new_trace(role: Role) -> qlog::Trace {
-    let role_str = match role {
-        Role::Client => "client",
-        Role::Server => "server",
-    };
-
     Trace {
         vantage_point: VantagePoint {
-            name: Some(format!("neqo-{}", role_str)),
-            ty: VantagePointType::Server,
+            name: Some(format!("neqo-{}", role)),
+            ty: match role {
+                Role::Client => VantagePointType::Client,
+                Role::Server => VantagePointType::Server,
+            },
             flow: None,
         },
-        title: Some(format!("neqo-{} trace", role_str)),
+        title: Some(format!("neqo-{} trace", role)),
         description: Some("Example qlog trace description".to_string()),
         configuration: Some(Configuration {
             time_offset: Some("0".into()),

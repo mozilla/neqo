@@ -33,6 +33,7 @@ pub struct QPackDecoder {
 }
 
 impl QPackDecoder {
+    #[must_use]
     pub fn new(max_table_size: u64, max_blocked_streams: u16) -> Self {
         qdebug!("Decoder: creating a new qpack decoder.");
         Self {

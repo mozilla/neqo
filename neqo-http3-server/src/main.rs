@@ -5,7 +5,6 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![allow(clippy::option_option)]
 #![warn(clippy::use_self)]
 
 use std::cell::RefCell;
@@ -25,11 +24,9 @@ use structopt::StructOpt;
 use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Server, Http3ServerEvent};
-use neqo_transport::{ConnectionId, FixedConnectionIdManager, Output};
+use neqo_transport::{FixedConnectionIdManager, Output};
 
 const TIMER_TOKEN: Token = Token(0xffff_ffff);
-
-type Res<T> = Result<T, io::Error>;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-http3-server", about = "A basic HTTP3 server.")]
@@ -73,15 +70,7 @@ impl Args {
     }
 }
 
-pub fn cid_to_string(cid: &ConnectionId) -> String {
-    let mut ret = String::with_capacity(cid.len() * 2);
-    for b in cid.iter() {
-        ret.push_str(&format!("{:02x}", b));
-    }
-    ret
-}
-
-fn process_events(server: &mut Http3Server) -> Res<()> {
+fn process_events(server: &mut Http3Server) {
     while let Some(event) = server.next_event() {
         eprintln!("Event: {:?}", event);
         match event {
@@ -120,7 +109,6 @@ fn process_events(server: &mut Http3Server) -> Res<()> {
             _ => {}
         }
     }
-    Ok(())
 }
 
 fn emit_packets(sockets: &mut Vec<UdpSocket>, out_dgrams: &HashMap<SocketAddr, Vec<Datagram>>) {
@@ -225,18 +213,21 @@ fn main() -> Result<(), io::Error> {
         servers.insert(
             local_addr,
             (
-                Http3Server::new(
-                    Instant::now(),
-                    &[args.key.clone()],
-                    &[args.alpn.clone()],
-                    AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
-                        .expect("unable to setup anti-replay"),
-                    Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-                    args.max_table_size,
-                    args.max_blocked_streams,
-                    args.qlog_dir.clone(),
-                )
-                .expect("We cannot make a server!"),
+                {
+                    let mut svr = Http3Server::new(
+                        Instant::now(),
+                        &[args.key.clone()],
+                        &[args.alpn.clone()],
+                        AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+                            .expect("unable to setup anti-replay"),
+                        Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+                        args.max_table_size,
+                        args.max_blocked_streams,
+                    )
+                    .expect("We cannot make a server!");
+                    svr.set_qlog_dir(args.qlog_dir.clone());
+                    svr
+                },
                 None,
             ),
         );
@@ -307,7 +298,7 @@ fn main() -> Result<(), io::Error> {
                             out,
                             &mut timer,
                         );
-                        process_events(server)?;
+                        process_events(server);
                         process(server, svr_timeout, event.token().0, None, out, &mut timer);
                     }
                 }
