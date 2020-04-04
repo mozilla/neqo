@@ -318,12 +318,17 @@ impl LossRecovery {
         self.cc.ssthresh()
     }
 
+    #[cfg(test)]
+    pub fn latest_rtt(&self) -> Duration {
+        self.rtt_vals.latest_rtt
+    }
+
     pub fn smoothed_rtt(&self) -> Option<Duration> {
         self.rtt_vals.smoothed_rtt
     }
 
-    pub fn set_smoothed_rtt(&mut self, value: Duration) {
-        self.rtt_vals.smoothed_rtt = Some(value)
+    pub fn set_latest_rtt(&mut self, value: Duration) {
+        self.rtt_vals.latest_rtt = value
     }
 
     pub fn cwnd_avail(&self) -> usize {

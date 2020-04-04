@@ -564,7 +564,7 @@ impl Connection {
 
         self.tps.borrow_mut().remote_0rtt = Some(tp);
         self.loss_recovery
-            .set_smoothed_rtt(Duration::from_millis(smoothed_rtt));
+            .set_latest_rtt(Duration::from_millis(smoothed_rtt));
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
@@ -2619,10 +2619,7 @@ mod tests {
         client
             .set_resumption_token(now(), &token[..])
             .expect("should set token");
-        assert_eq!(
-            client.loss_recovery.smoothed_rtt().unwrap(),
-            Duration::from_millis(40)
-        );
+        assert_eq!(client.loss_recovery.latest_rtt(), Duration::from_millis(40));
     }
 
     #[test]
