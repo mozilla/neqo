@@ -4,39 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::cell::RefCell;
-use std::fmt;
 use std::io::Write;
-use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Once;
 use std::time::Instant;
 
 use env_logger::Builder;
-use qlog::QlogStreamer;
-
-pub struct NeqoQlog {
-    qlog_path: PathBuf,
-    pub streamer: QlogStreamer,
-}
-
-impl NeqoQlog {
-    #[must_use]
-    pub fn new(streamer: QlogStreamer, qlog_path: PathBuf) -> Self {
-        Self {
-            streamer,
-            qlog_path,
-        }
-    }
-}
-
-impl fmt::Debug for NeqoQlog {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "NeqoQlog writing to {}", self.qlog_path.display())
-    }
-}
-
-pub type NeqoQlogRef = Rc<RefCell<NeqoQlog>>;
 
 static INIT_ONCE: Once = Once::new();
 

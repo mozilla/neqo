@@ -7,7 +7,7 @@
 // This file implements a server that can handle multiple connections.
 
 use neqo_common::{
-    self as common, hex, log::NeqoQlog, matches, qerror, qinfo, qtrace, qwarn, timer::Timer,
+    self as common, hex, matches, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, timer::Timer,
     Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
@@ -217,7 +217,6 @@ impl Server {
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
         cid_manager: CidMgr,
-        qlog_dir: Option<PathBuf>,
     ) -> Res<Self> {
         Ok(Self {
             certs: certs.iter().map(|x| String::from(x.as_ref())).collect(),
@@ -229,8 +228,13 @@ impl Server {
             waiting: VecDeque::default(),
             timers: Timer::new(now, TIMER_GRANULARITY, TIMER_CAPACITY),
             retry: RetryToken::new(now)?,
-            qlog_dir,
+            qlog_dir: None,
         })
+    }
+
+    /// Set or clear directory to create logs of connection events in QLOG format.
+    pub fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
+        self.qlog_dir = dir;
     }
 
     pub fn set_retry_required(&mut self, require_retry: bool) {
@@ -273,6 +277,7 @@ impl Server {
             self.active.insert(ActiveConnectionRef { c: c.clone() });
         }
         if matches!(c.borrow().state(), State::Closed(_)) {
+            c.borrow_mut().set_qlog(None);
             self.connections
                 .borrow_mut()
                 .retain(|_, v| !Rc::ptr_eq(v, &c));
@@ -340,7 +345,13 @@ impl Server {
 
         let qtrace = if let Some(qlog_dir) = &self.qlog_dir {
             let mut qlog_path = qlog_dir.to_path_buf();
-            qlog_path.push(format!("{}.qlog", dgram.source()));
+
+            // Prefer odcid for file name, otherwise use ip/port
+            if let Some(odcid) = &odcid {
+                qlog_path.push(format!("{}.qlog", odcid));
+            } else {
+                qlog_path.push(format!("{}.qlog", dgram.source()));
+            }
 
             match OpenOptions::new()
                 .write(true)
@@ -349,7 +360,7 @@ impl Server {
                 .open(&qlog_path)
             {
                 Ok(f) => {
-                    println!("Qlog output to {}", qlog_path.display());
+                    qinfo!("Qlog output to {}", qlog_path.display());
 
                     let streamer = ::qlog::QlogStreamer::new(
                         qlog::QLOG_VERSION.to_string(),
@@ -360,8 +371,15 @@ impl Server {
                         common::qlog::new_trace(Role::Server),
                         Box::new(f),
                     );
-
-                    Some(Rc::new(RefCell::new(NeqoQlog::new(streamer, qlog_path))))
+                    let n_qlog = NeqoQlog::new(streamer, qlog_path);
+                    match n_qlog {
+                        Ok(nql) => Some(nql),
+                        Err(e) => {
+                            // Keep going but w/o qlogging
+                            qerror!("NeqoQlog error: {}", e);
+                            None
+                        }
+                    }
                 }
                 Err(e) => {
                     qerror!(
@@ -381,12 +399,13 @@ impl Server {
             &self.protocols,
             &self.anti_replay,
             cid_mgr.clone(),
-            qtrace,
         );
+
         if let Ok(mut c) = sconn {
             if let Some(odcid) = odcid {
                 c.original_connection_id(&odcid);
             }
+            c.set_qlog(qtrace);
             let c = Rc::new(RefCell::new(ServerConnectionState { c, last_timer: now }));
             cid_mgr.borrow_mut().c = Some(c.clone());
             self.process_connection(c, Some(dgram), now)

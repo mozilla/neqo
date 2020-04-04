@@ -36,7 +36,6 @@ fn default_server() -> Server {
         test_fixture::DEFAULT_ALPN,
         test_fixture::anti_replay(),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
-        None,
     )
     .expect("should create a server")
 }

@@ -125,7 +125,7 @@ fn nss_dir() -> PathBuf {
                 .expect("can't update to tag for NSPR");
             env::set_current_dir(&orig_dir).unwrap();
         }
-        dir.to_path_buf()
+        dir
     };
     assert!(dir.is_dir());
     // Note that this returns a relative path because UNC
