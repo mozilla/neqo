@@ -3139,4 +3139,34 @@ mod tests {
         client.process(out.dgram(), now());
         assert_closed(&client, Error::HttpFrameUnexpected);
     }
+
+    #[test]
+    fn transport_stream_readable_event_after_all_data() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(false);
+
+        // Send headers.
+        let _ = server.conn.stream_send(request_stream_id, HTTP_RESPONSE_2);
+
+        let out = server.conn.process(None, now());
+        client.process(out.dgram(), now());
+
+        // Send an empty data frame.
+        let _ = server.conn.stream_send(request_stream_id, &[0x00, 0x00]);
+        // ok NOW send fin
+        server.conn.stream_close_send(request_stream_id).unwrap();
+
+        let out = server.conn.process(None, now());
+        client.process_input(out.dgram().unwrap(), now());
+
+        let (h, fin) = client.read_response_headers(request_stream_id).unwrap();
+        check_response_header_2(h);
+        assert_eq!(fin, false);
+        let mut buf = [0u8; 100];
+        assert_eq!(
+            client.read_response_data(now(), 0, &mut buf),
+            Ok((3, false))
+        );
+
+        client.process(None, now());
+    }
 }
