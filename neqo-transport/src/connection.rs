@@ -53,6 +53,8 @@ const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
 const MIN_CC_WINDOW: usize = 0x200; // let's not send packets smaller than 512
 
+const GRANULARITY: u64 = 1; // timer granularity in ms
+
 #[derive(Debug, PartialEq, Copy, Clone)]
 /// Client or Server.
 pub enum Role {
@@ -506,11 +508,8 @@ impl Connection {
                 Some(ref t) => {
                     qtrace!("TLS token {}", hex(&t));
                     let mut enc = Encoder::default();
-                    let rtt = self
-                        .loss_recovery
-                        .smoothed_rtt()
-                        .map(|v| u64::try_from(v.as_millis()).unwrap_or(0))
-                        .unwrap_or(0);
+                    let rtt = self.loss_recovery.rtt();
+                    let rtt = u64::try_from(rtt.as_millis()).unwrap_or(0);
                     enc.encode_varint(rtt);
                     enc.encode_vvec_with(|enc_inner| {
                         self.tps
@@ -563,8 +562,11 @@ impl Connection {
         }
 
         self.tps.borrow_mut().remote_0rtt = Some(tp);
-        self.loss_recovery
-            .set_latest_rtt(Duration::from_millis(smoothed_rtt));
+
+        if smoothed_rtt > GRANULARITY {
+            self.loss_recovery
+                .set_initial_rtt(Duration::from_millis(smoothed_rtt));
+        }
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
@@ -2582,9 +2584,12 @@ mod tests {
         assert!(server.crypto.tls.info().unwrap().resumed());
     }
 
-    fn connect_with_rtt(client: &mut Connection, server: &mut Connection, now: &mut Instant) {
-        const TIME_INTERVAL: u64 = 20;
-
+    fn connect_with_rtt(
+        client: &mut Connection,
+        server: &mut Connection,
+        now: &mut Instant,
+        rtt: Duration,
+    ) {
         let mut a = client;
         let mut b = server;
         let mut datagram = None;
@@ -2597,19 +2602,22 @@ mod tests {
             let _ = maybe_authenticate(a);
             let d = a.process(datagram, *now);
             datagram = d.dgram();
-            *now += Duration::from_millis(TIME_INTERVAL);
+            *now += rtt / 2;
             mem::swap(&mut a, &mut b);
         }
         a.process(datagram, *now);
+        assert_eq!(a.loss_recovery.rtt(), rtt);
+        assert_eq!(b.loss_recovery.rtt(), rtt);
     }
 
     #[test]
     fn remember_smoothed_rtt() {
+        const RTT: Duration = Duration::from_millis(600);
         let mut client = default_client();
         let mut server = default_server();
 
         let mut now_time = now();
-        connect_with_rtt(&mut client, &mut server, &mut now_time);
+        connect_with_rtt(&mut client, &mut server, &mut now_time, RTT);
 
         // In exchange_ticket we only send a packet from a server to a client
         // and client won't calculate rtt from that packet, so no need to increase time here.
@@ -2619,7 +2627,7 @@ mod tests {
         client
             .set_resumption_token(now(), &token[..])
             .expect("should set token");
-        assert_eq!(client.loss_recovery.latest_rtt(), Duration::from_millis(40));
+        assert_eq!(client.loss_recovery.rtt(), RTT);
     }
 
     #[test]

@@ -76,7 +76,7 @@ impl RttVals {
         }
     }
 
-    fn rtt(&self) -> Duration {
+    pub fn rtt(&self) -> Duration {
         self.smoothed_rtt.unwrap_or(self.latest_rtt)
     }
 
@@ -318,16 +318,12 @@ impl LossRecovery {
         self.cc.ssthresh()
     }
 
-    #[cfg(test)]
-    pub fn latest_rtt(&self) -> Duration {
-        self.rtt_vals.latest_rtt
+    pub fn rtt(&self) -> Duration {
+        self.rtt_vals.rtt()
     }
 
-    pub fn smoothed_rtt(&self) -> Option<Duration> {
-        self.rtt_vals.smoothed_rtt
-    }
-
-    pub fn set_latest_rtt(&mut self, value: Duration) {
+    pub fn set_initial_rtt(&mut self, value: Duration) {
+        debug_assert!(self.rtt_vals.smoothed_rtt.is_none());
         self.rtt_vals.latest_rtt = value
     }
 
