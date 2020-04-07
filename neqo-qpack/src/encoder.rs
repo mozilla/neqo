@@ -13,7 +13,7 @@ use crate::table::{HeaderTable, LookupResult};
 use crate::Header;
 use crate::{Error, Res};
 use neqo_common::{qdebug, qtrace};
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryInto;
 
@@ -25,8 +25,8 @@ pub struct QPackEncoder {
     send_buf: QPData,
     max_entries: u64,
     instruction_reader: DecoderInstructionReader,
-    local_stream_id: Option<u64>,
-    remote_stream_id: Option<u64>,
+    local_stream_id: Option<StreamId>,
+    remote_stream_id: Option<StreamId>,
     max_blocked_streams: u16,
     // Remember header blocks that are referring to dynamic table.
     // There can be multiple header blocks in one stream, headers, trailer, push stream request, etc.
@@ -71,10 +71,14 @@ impl QPackEncoder {
         Ok(())
     }
 
-    pub fn recv_if_encoder_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
+    pub fn recv_if_encoder_stream(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+    ) -> Res<bool> {
         match self.remote_stream_id {
             Some(id) => {
-                if id == stream_id {
+                if id == stream_id.into() {
                     self.read_instructions(conn, stream_id)?;
                     Ok(true)
                 } else {
@@ -85,7 +89,7 @@ impl QPackEncoder {
         }
     }
 
-    fn read_instructions(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
+    fn read_instructions(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
         qdebug!([self], "read a new instraction");
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
@@ -117,9 +121,9 @@ impl QPackEncoder {
         Ok(())
     }
 
-    fn header_ack(&mut self, stream_id: u64) -> Res<()> {
+    fn header_ack(&mut self, stream_id: StreamId) -> Res<()> {
         let mut new_acked = self.table.get_acked_inserts_cnt();
-        if let Some(hb_list) = self.unacked_header_blocks.get_mut(&stream_id) {
+        if let Some(hb_list) = self.unacked_header_blocks.get_mut(&stream_id.as_u64()) {
             if let Some(ref_list) = hb_list.pop_back() {
                 for iter in ref_list {
                     self.table.remove_ref(iter);
@@ -131,7 +135,7 @@ impl QPackEncoder {
                 debug_assert!(false, "We should have at least one header block.");
             }
             if hb_list.is_empty() {
-                self.unacked_header_blocks.remove(&stream_id);
+                self.unacked_header_blocks.remove(&stream_id.as_u64());
             }
         }
         if new_acked > self.table.get_acked_inserts_cnt() {
@@ -141,9 +145,9 @@ impl QPackEncoder {
         Ok(())
     }
 
-    fn stream_cancellation(&mut self, stream_id: u64) -> Res<()> {
+    fn stream_cancellation(&mut self, stream_id: StreamId) -> Res<()> {
         let mut was_blocker = false;
-        if let Some(hb_list) = self.unacked_header_blocks.get_mut(&stream_id) {
+        if let Some(hb_list) = self.unacked_header_blocks.get_mut(&stream_id.as_u64()) {
             debug_assert!(!hb_list.is_empty());
             while let Some(ref_list) = hb_list.pop_front() {
                 for iter in ref_list {
@@ -165,9 +169,9 @@ impl QPackEncoder {
             DecoderInstruction::InsertCountIncrement { increment } => {
                 self.insert_count_instruction(increment)
             }
-            DecoderInstruction::HeaderAck { stream_id } => self.header_ack(stream_id),
+            DecoderInstruction::HeaderAck { stream_id } => self.header_ack(stream_id.into()),
             DecoderInstruction::StreamCancellation { stream_id } => {
-                self.stream_cancellation(stream_id)
+                self.stream_cancellation(stream_id.into())
             }
             _ => Ok(()),
         }
@@ -243,7 +247,7 @@ impl QPackEncoder {
         if self.send_buf.is_empty() {
             Ok(())
         } else if let Some(stream_id) = self.local_stream_id {
-            match conn.stream_send(stream_id, &self.send_buf[..]) {
+            match conn.stream_send(stream_id.into(), &self.send_buf[..]) {
                 Err(_) => Err(Error::EncoderStreamError),
                 Ok(r) => {
                     qdebug!([self], "{} bytes sent.", r);
@@ -256,8 +260,8 @@ impl QPackEncoder {
         }
     }
 
-    fn is_stream_blocker(&self, stream_id: u64) -> bool {
-        if let Some(hb_list) = self.unacked_header_blocks.get(&stream_id) {
+    fn is_stream_blocker(&self, stream_id: StreamId) -> bool {
+        if let Some(hb_list) = self.unacked_header_blocks.get(&stream_id.as_u64()) {
             debug_assert!(!hb_list.is_empty());
             match hb_list.iter().flat_map(|hb| hb.iter()).max() {
                 Some(max_ref) => *max_ref >= self.table.get_acked_inserts_cnt(),
@@ -268,7 +272,7 @@ impl QPackEncoder {
         }
     }
 
-    pub fn encode_header_block(&mut self, h: &[Header], stream_id: u64) -> HeaderEncoder {
+    pub fn encode_header_block(&mut self, h: &[Header], stream_id: StreamId) -> HeaderEncoder {
         qdebug!([self], "encoding headers.");
         let mut encoded_h =
             HeaderEncoder::new(self.table.base(), self.use_huffman, self.max_entries);
@@ -340,27 +344,27 @@ impl QPackEncoder {
 
         if !ref_entries.is_empty() {
             self.unacked_header_blocks
-                .entry(stream_id)
+                .entry(stream_id.as_u64())
                 .or_insert_with(VecDeque::new)
                 .push_front(ref_entries);
         }
         encoded_h
     }
 
-    pub fn add_send_stream(&mut self, stream_id: u64) {
+    pub fn add_send_stream(&mut self, stream_id: StreamId) {
         if self.local_stream_id.is_some() {
             panic!("Adding multiple local streams");
         }
-        self.local_stream_id = Some(stream_id);
+        self.local_stream_id = Some(stream_id.into());
         self.send_buf
             .write_byte(QPACK_UNI_STREAM_TYPE_ENCODER as u8);
     }
 
-    pub fn add_recv_stream(&mut self, stream_id: u64) -> Res<()> {
+    pub fn add_recv_stream(&mut self, stream_id: StreamId) -> Res<()> {
         match self.remote_stream_id {
             Some(_) => Err(Error::WrongStreamCount),
             None => {
-                self.remote_stream_id = Some(stream_id);
+                self.remote_stream_id = Some(stream_id.into());
                 Ok(())
             }
         }
@@ -386,8 +390,8 @@ mod tests {
 
     struct TestEncoder {
         encoder: QPackEncoder,
-        send_stream_id: u64,
-        recv_stream_id: u64,
+        send_stream_id: StreamId,
+        recv_stream_id: StreamId,
         conn: Connection,
         peer_conn: Connection,
     }
@@ -401,7 +405,7 @@ mod tests {
 
         // create an encoder
         let mut encoder = QPackEncoder::new(huffman);
-        encoder.add_send_stream(send_stream_id);
+        encoder.add_send_stream(send_stream_id.into());
 
         TestEncoder {
             encoder,
@@ -419,7 +423,7 @@ mod tests {
         let mut buf = [0u8; 100];
         let (amount, fin) = encoder
             .peer_conn
-            .stream_recv(encoder.send_stream_id, &mut buf)
+            .stream_recv(encoder.send_stream_id.into(), &mut buf)
             .unwrap();
         assert_eq!(fin, false);
         assert_eq!(buf[..amount], encoder_instruction[..]);
@@ -428,13 +432,13 @@ mod tests {
     fn recv_instruction(encoder: &mut TestEncoder, decoder_instruction: &[u8]) {
         encoder
             .peer_conn
-            .stream_send(encoder.recv_stream_id, decoder_instruction)
+            .stream_send(encoder.recv_stream_id.into(), decoder_instruction)
             .unwrap();
         let out = encoder.peer_conn.process(None, now());
         encoder.conn.process(out.dgram(), now());
         assert!(encoder
             .encoder
-            .read_instructions(&mut encoder.conn, encoder.recv_stream_id)
+            .read_instructions(&mut encoder.conn, encoder.recv_stream_id.into())
             .is_ok());
     }
 
@@ -887,7 +891,7 @@ mod tests {
 
         encoder.encoder.set_max_blocked_streams(1).unwrap();
 
-        let stream_id = 1;
+        let stream_id = 1.into();
         // send a header block, it refers to unacked entry.
         let buf = encoder.encoder.encode_header_block(
             &[(String::from("content-length"), String::from("1234"))],

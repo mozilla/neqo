@@ -12,7 +12,7 @@ use crate::{Error, Res};
 use neqo_common::{matches, qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 use std::mem;
 
 #[derive(PartialEq, Debug)]
@@ -35,13 +35,13 @@ enum TransactionSendState {
 pub struct TransactionServer {
     recv_state: TransactionRecvState,
     send_state: TransactionSendState,
-    stream_id: u64,
+    stream_id: StreamId,
     frame_reader: HFrameReader,
     conn_events: Http3ServerConnEvents,
 }
 
 impl TransactionServer {
-    pub fn new(stream_id: u64, conn_events: Http3ServerConnEvents) -> Self {
+    pub fn new(stream_id: StreamId, conn_events: Http3ServerConnEvents) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
             recv_state: TransactionRecvState::WaitingForHeaders,

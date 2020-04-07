@@ -294,7 +294,7 @@ mod tests {
 
     struct PeerConnection {
         conn: Connection,
-        control_stream_id: u64,
+        control_stream_id: StreamId,
     }
 
     // Connect transport, send and receive settings.
@@ -735,7 +735,7 @@ mod tests {
         // Send only request headers for now.
         peer_conn
             .conn
-            .stream_send(request_stream_id, &REQUEST_WITH_BODY[..20])
+            .stream_send(request_stream_id.into(), &REQUEST_WITH_BODY[..20])
             .unwrap();
 
         let out = peer_conn.conn.process(None, now());

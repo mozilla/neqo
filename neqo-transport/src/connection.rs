@@ -2048,32 +2048,32 @@ impl Connection {
     /// Send data on a stream.
     /// Returns how many bytes were successfully sent. Could be less
     /// than total, based on receiver credit space available, etc.
-    pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
+    pub fn stream_send(&mut self, stream_id: StreamId, data: &[u8]) -> Res<usize> {
         self.send_streams.get_mut(stream_id.into())?.send(data)
     }
 
     /// Bytes that stream_send() is guaranteed to accept for sending.
     /// i.e. that will not be blocked by flow credits or send buffer max
     /// capacity.
-    pub fn stream_avail_send_space(&self, stream_id: u64) -> Res<u64> {
+    pub fn stream_avail_send_space(&self, stream_id: StreamId) -> Res<u64> {
         Ok(self.send_streams.get(stream_id.into())?.avail())
     }
 
     /// Close the stream. Enqueued data will be sent.
-    pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
+    pub fn stream_close_send(&mut self, stream_id: StreamId) -> Res<()> {
         self.send_streams.get_mut(stream_id.into())?.close();
         Ok(())
     }
 
     /// Abandon transmission of in-flight and future stream data.
-    pub fn stream_reset_send(&mut self, stream_id: u64, err: AppError) -> Res<()> {
+    pub fn stream_reset_send(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
         self.send_streams.get_mut(stream_id.into())?.reset(err);
         Ok(())
     }
 
     /// Read buffered data from stream. bool says whether read bytes includes
     /// the final data on stream.
-    pub fn stream_recv(&mut self, stream_id: u64, data: &mut [u8]) -> Res<(usize, bool)> {
+    pub fn stream_recv(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
         let stream = self
             .recv_streams
             .get_mut(&stream_id.into())
@@ -2084,7 +2084,7 @@ impl Connection {
     }
 
     /// Application is no longer interested in this stream.
-    pub fn stream_stop_sending(&mut self, stream_id: u64, err: AppError) -> Res<()> {
+    pub fn stream_stop_sending(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
         let stream = self
             .recv_streams
             .get_mut(&stream_id.into())
@@ -2366,13 +2366,13 @@ mod tests {
 
         qdebug!("---- client");
         // Send
-        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap().into();
         client.stream_send(client_stream_id, &[6; 100]).unwrap();
         client.stream_send(client_stream_id, &[7; 40]).unwrap();
         client.stream_send(client_stream_id, &[8; 4000]).unwrap();
 
         // Send to another stream but some data after fin has been set
-        let client_stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
+        let client_stream_id2 = client.stream_create(StreamType::UniDi).unwrap().into();
         client.stream_send(client_stream_id2, &[6; 60]).unwrap();
         client.stream_close_send(client_stream_id2).unwrap();
         client.stream_send(client_stream_id2, &[7; 50]).unwrap_err();
@@ -2402,7 +2402,10 @@ mod tests {
             ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
             _ => None,
         });
-        let stream_id = stream_ids.next().expect("should have a new stream event");
+        let stream_id = stream_ids
+            .next()
+            .expect("should have a new stream event")
+            .into();
         let (received, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(received, 4000);
         assert_eq!(fin, false);
@@ -2412,7 +2415,8 @@ mod tests {
 
         let stream_id = stream_ids
             .next()
-            .expect("should have a second new stream event");
+            .expect("should have a second new stream event")
+            .into();
         let (received, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(received, 60);
         assert_eq!(fin, true);
@@ -2605,7 +2609,7 @@ mod tests {
         assert!(client_hs.as_dgram_ref().is_some());
 
         // Now send a 0-RTT packet.
-        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap().into();
         client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
@@ -2642,7 +2646,7 @@ mod tests {
 
         // Write 0-RTT before generating any packets.
         // This should result in a datagram that coalesces Initial and 0-RTT.
-        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap().into();
         client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let client_0rtt = client.process(None, now());
         assert!(client_0rtt.as_dgram_ref().is_some());
@@ -2696,7 +2700,7 @@ mod tests {
         assert!(client_hs.as_dgram_ref().is_some());
 
         // Write some data on the client.
-        let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        let stream_id = client.stream_create(StreamType::UniDi).unwrap().into();
         let msg = &[1, 2, 3];
         client.stream_send(stream_id, msg).unwrap();
         let client_0rtt = client.process(None, now());
@@ -2728,7 +2732,7 @@ mod tests {
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
         // Open a new stream and send data. StreamId should start with 0.
-        let stream_id_after_reject = client.stream_create(StreamType::UniDi).unwrap();
+        let stream_id_after_reject = client.stream_create(StreamType::UniDi).unwrap().into();
         assert_eq!(stream_id, stream_id_after_reject);
         let msg = &[1, 2, 3];
         client.stream_send(stream_id_after_reject, msg).unwrap();
@@ -2752,7 +2756,7 @@ mod tests {
         connect(&mut client, &mut server);
 
         // create a stream
-        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap().into();
         client.stream_send(stream_id, &[0x00]).unwrap();
         let out = client.process(None, now());
         server.process(out.dgram(), now());
@@ -2917,7 +2921,7 @@ mod tests {
 
         connect(&mut client, &mut server);
 
-        let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        let stream_id = client.stream_create(StreamType::UniDi).unwrap().into();
         assert_eq!(stream_id, 2);
         assert_eq!(
             client.stream_avail_send_space(stream_id).unwrap(),
@@ -3023,7 +3027,7 @@ mod tests {
         connect(&mut client, &mut server);
 
         // create a stream
-        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap().into();
         client.stream_send(stream_id, &[0x00]).unwrap();
         let out = client.process(None, now());
         server.process(out.dgram(), now());
@@ -3063,7 +3067,7 @@ mod tests {
         connect(&mut client, &mut server);
 
         // create a stream
-        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap().into();
         client.stream_send(stream_id, &[0x00]).unwrap();
         let out = client.process(None, now());
         server.process(out.dgram(), now());
@@ -3120,7 +3124,7 @@ mod tests {
         let client_fin = client.process(None, now());
         assert!(client_fin.as_dgram_ref().is_some());
 
-        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        let client_stream_id = client.stream_create(StreamType::UniDi).unwrap().into();
         client.stream_send(client_stream_id, &[1, 2, 3]).unwrap();
         let client_stream_data = client.process(None, now());
         assert!(client_stream_data.as_dgram_ref().is_some());
@@ -4063,7 +4067,7 @@ mod tests {
     /// Send something on a stream from `sender` to `receiver`.
     /// Return the resulting datagram.
     fn send_something(sender: &mut Connection, now: Instant) -> Datagram {
-        let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
+        let stream_id = sender.stream_create(StreamType::UniDi).unwrap().into();
         assert!(sender.stream_send(stream_id, b"data").is_ok());
         assert!(sender.stream_close_send(stream_id).is_ok());
         let dgram = sender.process(None, now).dgram();

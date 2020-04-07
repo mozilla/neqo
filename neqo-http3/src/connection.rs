@@ -12,7 +12,7 @@ use crate::stream_type_reader::NewStreamTypeReader;
 use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
-use neqo_transport::{AppError, CloseError, Connection, State, StreamType};
+use neqo_transport::{AppError, CloseError, Connection, State, StreamId, StreamType};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
 use std::mem;
@@ -130,14 +130,14 @@ impl<T: Http3Transaction> Http3Connection<T> {
     fn create_qpack_streams(&mut self, conn: &mut Connection) -> Res<()> {
         qdebug!([self], "create_qpack_streams.");
         self.qpack_encoder
-            .add_send_stream(conn.stream_create(StreamType::UniDi)?);
+            .add_send_stream(conn.stream_create(StreamType::UniDi)?.into());
         self.qpack_decoder
-            .add_send_stream(conn.stream_create(StreamType::UniDi)?);
+            .add_send_stream(conn.stream_create(StreamType::UniDi)?.into());
         Ok(())
     }
 
-    pub fn insert_streams_have_data_to_send(&mut self, stream_id: u64) {
-        self.streams_have_data_to_send.insert(stream_id);
+    pub fn insert_streams_have_data_to_send(&mut self, stream_id: StreamId) {
+        self.streams_have_data_to_send.insert(stream_id.as_u64());
     }
 
     pub fn has_data_to_send(&self) -> bool {
@@ -189,7 +189,11 @@ impl<T: Http3Transaction> Http3Connection<T> {
     // This function adds a new unidi stream and try to read its type. Http3Connection can handle
     // a Http3 Control stream, Qpack streams and an unknown stream, but it cannot handle a Push stream.
     // If a Push stream has been discovered, return true and let the Http3Client/Server handle it.
-    pub fn handle_new_unidi_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
+    pub fn handle_new_unidi_stream(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+    ) -> Res<bool> {
         qtrace!([self], "A new stream: {}.", stream_id);
         debug_assert!(self.state_active());
         let stream_type;
@@ -197,17 +201,17 @@ impl<T: Http3Transaction> Http3Connection<T> {
         {
             let ns = &mut self
                 .new_streams
-                .entry(stream_id)
+                .entry(stream_id.as_u64())
                 .or_insert_with(NewStreamTypeReader::new);
             stream_type = ns.get_type(conn, stream_id);
             fin = ns.fin();
         }
 
         if fin {
-            self.new_streams.remove(&stream_id);
+            self.new_streams.remove(&stream_id.as_u64());
             Ok(false)
         } else if let Some(t) = stream_type {
-            self.new_streams.remove(&stream_id);
+            self.new_streams.remove(&stream_id.as_u64());
             self.decode_new_stream(conn, t, stream_id)
         } else {
             Ok(false)
@@ -223,7 +227,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     pub(crate) fn handle_stream_readable(
         &mut self,
         conn: &mut Connection,
-        stream_id: u64,
+        stream_id: StreamId,
     ) -> Res<HandleReadableOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
 
@@ -283,14 +287,14 @@ impl<T: Http3Transaction> Http3Connection<T> {
                 self.handle_read_stream(conn, stream_id)?;
             }
             Ok(HandleReadableOutput::NoOutput)
-        } else if let Some(ns) = self.new_streams.get_mut(&stream_id) {
+        } else if let Some(ns) = self.new_streams.get_mut(&stream_id.as_u64()) {
             let stream_type = ns.get_type(conn, stream_id);
             let fin = ns.fin();
             if fin {
-                self.new_streams.remove(&stream_id);
+                self.new_streams.remove(&stream_id.as_u64());
             }
             if let Some(t) = stream_type {
-                self.new_streams.remove(&stream_id);
+                self.new_streams.remove(&stream_id.as_u64());
                 let push = self.decode_new_stream(conn, t, stream_id)?;
                 if push {
                     return Ok(HandleReadableOutput::PushStream);
@@ -313,7 +317,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     pub fn handle_stream_reset(
         &mut self,
         conn: &mut Connection,
-        stream_id: u64,
+        stream_id: StreamId,
         app_err: AppError,
     ) -> Res<bool> {
         qinfo!(
@@ -325,7 +329,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
 
         debug_assert!(self.state_active());
 
-        if let Some(t) = self.transactions.get_mut(&stream_id) {
+        if let Some(t) = self.transactions.get_mut(&stream_id.as_u64()) {
             // Close both sides of the transaction_client.
             t.reset_receiving_side();
             t.stop_sending();
@@ -333,7 +337,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
             // it as well, but just to be sure.
             let _ = conn.stream_reset_send(stream_id, app_err);
             // remove the stream
-            self.transactions.remove(&stream_id);
+            self.transactions.remove(&stream_id.as_u64());
             Ok(true)
         } else {
             Ok(false)
@@ -396,7 +400,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
         }
     }
 
-    fn handle_read_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
+    fn handle_read_stream(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<bool> {
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
@@ -405,7 +409,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
 
         debug_assert!(self.state_active());
 
-        if let Some(transaction) = &mut self.transactions.get_mut(&stream_id) {
+        if let Some(transaction) = &mut self.transactions.get_mut(&stream_id.as_u64()) {
             qinfo!(
                 [label],
                 "Request/response stream {} is readable.",
@@ -418,7 +422,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
                 }
                 Ok(()) => {
                     if transaction.done() {
-                        self.transactions.remove(&stream_id);
+                        self.transactions.remove(&stream_id.as_u64());
                     }
                 }
             }
@@ -433,7 +437,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
         &mut self,
         conn: &mut Connection,
         stream_type: u64,
-        stream_id: u64,
+        stream_id: StreamId,
     ) -> Res<bool> {
         match stream_type {
             HTTP3_UNI_STREAM_TYPE_CONTROL => {
@@ -479,13 +483,13 @@ impl<T: Http3Transaction> Http3Connection<T> {
     pub fn stream_reset(
         &mut self,
         conn: &mut Connection,
-        stream_id: u64,
+        stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
         qinfo!([self], "Reset stream {} error={}.", stream_id, error);
         let mut transaction = self
             .transactions
-            .remove(&stream_id)
+            .remove(&stream_id.as_u64())
             .ok_or(Error::InvalidStreamId)?;
         transaction.stop_sending();
         // Stream maybe already be closed and we may get an error here, but we do not care.
@@ -496,16 +500,16 @@ impl<T: Http3Transaction> Http3Connection<T> {
         Ok(())
     }
 
-    pub fn stream_close_send(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
+    pub fn stream_close_send(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
         qinfo!([self], "Close sending side for stream {}.", stream_id);
         debug_assert!(self.state_active() || self.state_zero_rtt());
         let transaction = self
             .transactions
-            .get_mut(&stream_id)
+            .get_mut(&stream_id.as_u64())
             .ok_or(Error::InvalidStreamId)?;
         transaction.close_send(conn)?;
         if transaction.done() {
-            self.transactions.remove(&stream_id);
+            self.transactions.remove(&stream_id.as_u64());
         }
         Ok(())
     }
@@ -616,10 +620,10 @@ impl<T: Http3Transaction> Http3Connection<T> {
         self.state.clone()
     }
 
-    pub fn add_transaction(&mut self, stream_id: u64, transaction: T) {
+    pub fn add_transaction(&mut self, stream_id: StreamId, transaction: T) {
         if transaction.has_data_to_send() {
-            self.streams_have_data_to_send.insert(stream_id);
+            self.streams_have_data_to_send.insert(stream_id.as_u64());
         }
-        self.transactions.insert(stream_id, transaction);
+        self.transactions.insert(stream_id.as_u64(), transaction);
     }
 }

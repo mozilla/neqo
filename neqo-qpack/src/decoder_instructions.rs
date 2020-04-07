@@ -24,9 +24,13 @@ pub enum DecoderInstruction {
 impl DecoderInstruction {
     fn get_instruction(b: u8) -> Self {
         if DECODER_HEADER_ACK.cmp_prefix(b) {
-            Self::HeaderAck { stream_id: 0 }
+            Self::HeaderAck {
+                stream_id: 0,
+            }
         } else if DECODER_STREAM_CANCELLATION.cmp_prefix(b) {
-            Self::StreamCancellation { stream_id: 0 }
+            Self::StreamCancellation {
+                stream_id: 0,
+            }
         } else if DECODER_INSERT_COUNT_INCREMENT.cmp_prefix(b) {
             Self::InsertCountIncrement { increment: 0 }
         } else {
@@ -153,11 +157,19 @@ mod test {
         test_encoding_decoding(DecoderInstruction::InsertCountIncrement { increment: 1 });
         test_encoding_decoding(DecoderInstruction::InsertCountIncrement { increment: 10_000 });
 
-        test_encoding_decoding(DecoderInstruction::HeaderAck { stream_id: 1 });
-        test_encoding_decoding(DecoderInstruction::HeaderAck { stream_id: 10_000 });
+        test_encoding_decoding(DecoderInstruction::HeaderAck {
+            stream_id: 1,
+        });
+        test_encoding_decoding(DecoderInstruction::HeaderAck {
+            stream_id: 10_000,
+        });
 
-        test_encoding_decoding(DecoderInstruction::StreamCancellation { stream_id: 1 });
-        test_encoding_decoding(DecoderInstruction::StreamCancellation { stream_id: 10_000 });
+        test_encoding_decoding(DecoderInstruction::StreamCancellation {
+            stream_id: 1,
+        });
+        test_encoding_decoding(DecoderInstruction::StreamCancellation {
+            stream_id: 10_000,
+        });
     }
 
     fn test_encoding_decoding_slow_reader(instruction: DecoderInstruction) {
@@ -187,9 +199,11 @@ mod test {
         test_encoding_decoding_slow_reader(DecoderInstruction::InsertCountIncrement {
             increment: 10_000,
         });
-        test_encoding_decoding_slow_reader(DecoderInstruction::HeaderAck { stream_id: 10_000 });
+        test_encoding_decoding_slow_reader(DecoderInstruction::HeaderAck {
+            stream_id: StreamId(10_000),
+        });
         test_encoding_decoding_slow_reader(DecoderInstruction::StreamCancellation {
-            stream_id: 10_000,
+            stream_id: StreamId(10_000),
         });
     }
 

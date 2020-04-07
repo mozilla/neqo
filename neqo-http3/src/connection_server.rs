@@ -10,7 +10,7 @@ use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvent
 use crate::transaction_server::TransactionServer;
 use crate::{Error, Header, Res};
 use neqo_common::{qdebug, qinfo, qtrace};
-use neqo_transport::{AppError, Connection, ConnectionEvent, StreamType};
+use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId, StreamType};
 use std::time::Instant;
 
 #[derive(Debug)]
@@ -34,25 +34,31 @@ impl Http3ServerHandler {
             needs_processing: false,
         }
     }
-    pub fn set_response(&mut self, stream_id: u64, headers: &[Header], data: Vec<u8>) -> Res<()> {
+    pub fn set_response(
+        &mut self,
+        stream_id: StreamId,
+        headers: &[Header],
+        data: Vec<u8>,
+    ) -> Res<()> {
         self.base_handler
             .transactions
-            .get_mut(&stream_id)
+            .get_mut(&stream_id.as_u64())
             .ok_or(Error::InvalidStreamId)?
             .set_response(headers, data, &mut self.base_handler.qpack_encoder);
         self.base_handler
-            .insert_streams_have_data_to_send(stream_id);
+            .insert_streams_have_data_to_send(stream_id.into());
         Ok(())
     }
 
     pub fn stream_reset(
         &mut self,
         conn: &mut Connection,
-        stream_id: u64,
+        stream_id: StreamId,
         app_error: AppError,
     ) -> Res<()> {
-        self.base_handler.stream_reset(conn, stream_id, app_error)?;
-        self.events.remove_events_for_stream_id(stream_id);
+        self.base_handler
+            .stream_reset(conn, stream_id.into(), app_error)?;
+        self.events.remove_events_for_stream_id(stream_id.into());
         self.needs_processing = true;
         Ok(())
     }
@@ -155,7 +161,7 @@ impl Http3ServerHandler {
         Ok(())
     }
 
-    fn handle_stream_readable(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
+    fn handle_stream_readable(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
         match self.base_handler.handle_stream_readable(conn, stream_id)? {
             HandleReadableOutput::PushStream => Err(Error::HttpStreamCreationError),
             HandleReadableOutput::ControlFrames(control_frames) => {
@@ -180,16 +186,16 @@ impl Http3ServerHandler {
     fn handle_stream_stop_sending(
         &mut self,
         conn: &mut Connection,
-        stop_stream_id: u64,
+        stop_stream_id: StreamId,
         app_err: AppError,
     ) {
-        if let Some(t) = self.base_handler.transactions.get_mut(&stop_stream_id) {
+        if let Some(t) = self.base_handler.transactions.get_mut(&stop_stream_id.as_u64()) {
             // close sending side.
             t.stop_sending();
             // receiving side may be closed already, just ignore an error in the following line.
             let _ = conn.stream_stop_sending(stop_stream_id, app_err);
             t.reset_receiving_side();
-            self.base_handler.transactions.remove(&stop_stream_id);
+            self.base_handler.transactions.remove(&stop_stream_id.as_u64());
         }
     }
 }

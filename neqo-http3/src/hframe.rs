@@ -8,7 +8,7 @@ use crate::hsettings_frame::HSettings;
 use neqo_common::{
     hex, qdebug, qtrace, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
 };
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 
 use std::mem;
 
@@ -52,7 +52,7 @@ pub enum HFrame {
         header_block: Vec<u8>,
     },
     Goaway {
-        stream_id: u64,
+        stream_id: StreamId,
     },
     MaxPushId {
         push_id: u64,
@@ -105,7 +105,7 @@ impl HFrame {
             }
             Self::Goaway { stream_id } => {
                 enc.encode_vvec_with(|enc_inner| {
-                    enc_inner.encode_varint(*stream_id);
+                    enc_inner.encode_varint(stream_id.as_u64());
                 });
             }
             Self::MaxPushId { push_id } => {
@@ -177,7 +177,7 @@ impl HFrameReader {
     }
 
     // returns true if quic stream was closed.
-    pub fn receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
+    pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId) -> Res<bool> {
         loop {
             let to_read = std::cmp::min(self.decoder.min_remaining(), 4096);
             let mut buf = vec![0; to_read];
@@ -356,7 +356,7 @@ impl HFrameReader {
             }
             H3_FRAME_TYPE_GOAWAY => HFrame::Goaway {
                 stream_id: match dec.decode_varint() {
-                    Some(v) => v,
+                    Some(v) => v.into(),
                     _ => return Err(Error::NotEnoughData),
                 },
             },

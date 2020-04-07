@@ -34,6 +34,7 @@ pub use self::connection::{Connection, FixedConnectionIdManager, Output, Role, S
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
+pub use self::stream_id::StreamId;
 
 /// The supported version of the QUIC protocol.
 pub type Version = u32;

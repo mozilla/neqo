@@ -261,13 +261,13 @@ impl Frame {
     /// Create a STREAM frame that fits the available space.
     /// Return a tuple of a frame and the amount of data it carries.
     pub fn new_stream(
-        stream_id: u64,
+        stream_id: StreamId,
         offset: u64,
         data: &[u8],
         fin: bool,
         space: usize,
     ) -> Option<(Self, usize)> {
-        let mut overhead = 1 + Encoder::varint_len(stream_id);
+        let mut overhead = 1 + Encoder::varint_len(stream_id.as_u64());
         if offset > 0 {
             overhead += Encoder::varint_len(offset);
         }

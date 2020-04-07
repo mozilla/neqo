@@ -10,6 +10,7 @@ use std::ops::AddAssign;
 
 use crate::connection::{Role, LOCAL_STREAM_LIMIT_BIDI, LOCAL_STREAM_LIMIT_UNI};
 use crate::frame::StreamType;
+use std::fmt;
 
 pub struct StreamIndexes {
     pub local_max_stream_uni: StreamIndex,
@@ -139,5 +140,11 @@ impl From<StreamId> for StreamIndex {
 impl AddAssign<u64> for StreamIndex {
     fn add_assign(&mut self, other: u64) {
         *self = Self::new(self.as_u64() + other)
+    }
+}
+
+impl fmt::Display for StreamId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_u64())
     }
 }

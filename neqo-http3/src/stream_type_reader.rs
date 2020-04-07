@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use neqo_common::{qdebug, Decoder, IncrementalDecoder, IncrementalDecoderResult};
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 
 #[derive(Debug)]
 pub struct NewStreamTypeReader {
@@ -20,7 +20,7 @@ impl NewStreamTypeReader {
             fin: false,
         }
     }
-    pub fn get_type(&mut self, conn: &mut Connection, stream_id: u64) -> Option<u64> {
+    pub fn get_type(&mut self, conn: &mut Connection, stream_id: StreamId) -> Option<u64> {
         // On any error we will only close this stream!
         loop {
             let to_read = self.reader.min_remaining();

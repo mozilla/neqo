@@ -183,7 +183,7 @@ impl Handler for H9Handler {
             eprintln!("Event: {:?}", event);
             match event {
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    if !self.streams.contains(&stream_id) {
+                    if !self.streams.contains(&stream_id.as_u64()) {
                         eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
@@ -315,7 +315,7 @@ impl H3Handler {
         while let Some(event) = self.h3.next_event() {
             match event {
                 Http3ClientEvent::HeaderReady { stream_id } => {
-                    if !self.streams.contains(&stream_id) {
+                    if !self.streams.contains(&stream_id.as_u64()) {
                         eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
@@ -324,7 +324,7 @@ impl H3Handler {
                     eprintln!("READ HEADERS[{}]: {:?}", stream_id, headers);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
-                    if !self.streams.contains(&stream_id) {
+                    if !self.streams.contains(&stream_id.as_u64()) {
                         eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
@@ -459,7 +459,7 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
     let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
     let req: String = "GET /10\r\n".to_string();
     client
-        .stream_send(client_stream_id, req.as_bytes())
+        .stream_send(client_stream_id.into(), req.as_bytes())
         .unwrap();
     let mut hc = H9Handler::default();
     hc.streams.insert(client_stream_id);
@@ -489,7 +489,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         .h3
         .fetch("GET", "https", &hc.host, &hc.path, &[])
         .unwrap();
-    let _ = hc.h3.stream_close_send(client_stream_id);
+    let _ = hc.h3.stream_close_send(client_stream_id.into());
 
     hc.streams.insert(client_stream_id);
     if let Err(e) = process_loop_h3(nctx, &mut hc) {

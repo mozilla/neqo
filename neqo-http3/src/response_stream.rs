@@ -9,7 +9,7 @@ use crate::hframe::{HFrame, HFrameReader};
 use crate::{Error, Header, Res};
 use neqo_common::{matches, qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 use std::cmp::min;
 use std::mem;
 
@@ -53,7 +53,7 @@ pub(crate) struct ResponseStream {
     frame_reader: HFrameReader,
     response_headers_state: ResponseHeadersState,
     conn_events: Http3ClientEvents,
-    stream_id: u64,
+    stream_id: StreamId,
 }
 
 impl ::std::fmt::Display for ResponseStream {
@@ -63,7 +63,7 @@ impl ::std::fmt::Display for ResponseStream {
 }
 
 impl ResponseStream {
-    pub fn new(stream_id: u64, conn_events: Http3ClientEvents) -> Self {
+    pub fn new(stream_id: StreamId, conn_events: Http3ClientEvents) -> Self {
         Self {
             state: ResponseStreamState::WaitingForResponseHeaders,
             frame_reader: HFrameReader::new(),

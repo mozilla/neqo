@@ -760,7 +760,7 @@ impl SendStreams {
                     .map(|fs| fs == offset + data_len)
                     .unwrap_or(false);
                 if let Some((frame, length)) =
-                    Frame::new_stream(stream_id.as_u64(), offset, data, range_has_fin, remaining)
+                    Frame::new_stream(stream_id.clone(), offset, data, range_has_fin, remaining)
                 {
                     qdebug!(
                         "Stream {} sending bytes {}-{}, space {:?}",

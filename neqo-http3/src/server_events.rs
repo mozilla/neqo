@@ -9,7 +9,7 @@ use crate::connection_server::Http3ServerHandler;
 use crate::{Header, Res};
 use neqo_common::{qdebug, qinfo};
 use neqo_transport::server::ActiveConnectionRef;
-use neqo_transport::{AppError, Connection};
+use neqo_transport::{AppError, Connection, StreamId};
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -19,7 +19,7 @@ use std::rc::Rc;
 pub struct ClientRequestStream {
     conn: ActiveConnectionRef,
     handler: Rc<RefCell<Http3ServerHandler>>,
-    stream_id: u64,
+    stream_id: StreamId,
 }
 
 impl ::std::fmt::Display for ClientRequestStream {
@@ -37,7 +37,7 @@ impl ClientRequestStream {
     pub fn new(
         conn: ActiveConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_id: u64,
+        stream_id: StreamId,
     ) -> Self {
         Self {
             conn,

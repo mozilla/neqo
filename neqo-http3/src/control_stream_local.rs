@@ -7,14 +7,14 @@
 use crate::hframe::HFrame;
 use crate::Res;
 use neqo_common::{qtrace, Encoder};
-use neqo_transport::{Connection, StreamType};
+use neqo_transport::{Connection, StreamId, StreamType};
 
 pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 
 // The local control stream, responsible for encoding frames and sending them
 #[derive(Default, Debug)]
 pub struct ControlStreamLocal {
-    stream_id: Option<u64>,
+    stream_id: Option<StreamId>,
     buf: Vec<u8>,
 }
 
@@ -49,7 +49,7 @@ impl ControlStreamLocal {
 
     pub fn create(&mut self, conn: &mut Connection) -> Res<()> {
         qtrace!([self], "Create a control stream.");
-        self.stream_id = Some(conn.stream_create(StreamType::UniDi)?);
+        self.stream_id = Some(conn.stream_create(StreamType::UniDi)?.into());
         let mut enc = Encoder::default();
         enc.encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL as u64);
         self.buf.append(&mut enc.into());

@@ -187,7 +187,7 @@ impl Handler for PostConnectHandler {
         client.process_http3(Instant::now());
         while let Some(event) = client.next_event() {
             match event {
-                Http3ClientEvent::HeaderReady { stream_id } => match self.streams.get(&stream_id) {
+                Http3ClientEvent::HeaderReady { stream_id } => match self.streams.get(&stream_id.as_u64()) {
                     Some(out_file) => {
                         let headers = client.read_response_headers(stream_id);
                         if out_file.is_none() {
@@ -201,7 +201,7 @@ impl Handler for PostConnectHandler {
                 },
                 Http3ClientEvent::DataReadable { stream_id } => {
                     let mut stream_done = false;
-                    match self.streams.get_mut(&stream_id) {
+                    match self.streams.get_mut(&stream_id.as_u64()) {
                         None => {
                             println!("Data on unexpected stream: {}", stream_id);
                             return Ok(false);
@@ -233,7 +233,7 @@ impl Handler for PostConnectHandler {
                     }
 
                     if stream_done {
-                        self.streams.remove(&stream_id);
+                        self.streams.remove(&stream_id.as_u64());
                         if self.streams.is_empty() {
                             client.close(Instant::now(), 0, "kthxbye!");
                             return Ok(false);
@@ -305,7 +305,7 @@ fn client(
             &to_headers(&args.header),
         )?;
 
-        let _ = client.stream_close_send(client_stream_id);
+        let _ = client.stream_close_send(client_stream_id.into());
 
         let out_file = if let Some(ref dir) = args.output_dir {
             let mut out_path = dir.clone();
@@ -483,7 +483,7 @@ mod old {
             while let Some(event) = client.next_event() {
                 match event {
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
-                        if !self.streams.contains(&stream_id) {
+                        if !self.streams.contains(&stream_id.as_u64()) {
                             println!("Data on unexpected stream: {}", stream_id);
                             return Ok(false);
                         }
@@ -595,7 +595,7 @@ mod old {
             let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
             let req: String = "GET /10\r\n".to_string();
             client
-                .stream_send(client_stream_id, req.as_bytes())
+                .stream_send(client_stream_id.into(), req.as_bytes())
                 .unwrap();
             let mut h2 = PostConnectHandlerOld::default();
             h2.streams.insert(client_stream_id);

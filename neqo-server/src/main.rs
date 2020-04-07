@@ -9,7 +9,7 @@
 
 use neqo_common::Datagram;
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
+use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamId};
 use regex::Regex;
 
 use std::cell::RefCell;
@@ -85,7 +85,7 @@ impl ToSocketAddrs for Args {
 // World's dumbest HTTP 0.9 server. Assumes that the whole request is
 // in a single write.
 // TODO(ekr@rtfm.com): One imagines we could fix this.
-fn http_serve(server: &mut Connection, stream: u64) {
+fn http_serve(server: &mut Connection, stream: StreamId) {
     println!("Stream ID {}", stream);
     let mut data = vec![0; 4000];
     server

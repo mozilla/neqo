@@ -8,6 +8,7 @@ use crate::connection::Http3State;
 use crate::Header;
 use neqo_common::matches;
 use neqo_transport::AppError;
+use neqo_transport::StreamId;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -17,18 +18,21 @@ use std::rc::Rc;
 pub enum Http3ServerConnEvent {
     /// Headers are ready.
     Headers {
-        stream_id: u64,
+        stream_id: StreamId,
         headers: Vec<Header>,
         fin: bool,
     },
     /// Request data is ready.
     Data {
-        stream_id: u64,
+        stream_id: StreamId,
         data: Vec<u8>,
         fin: bool,
     },
     /// Peer reset the stream.
-    Reset { stream_id: u64, error: AppError },
+    Reset {
+        stream_id: StreamId,
+        error: AppError,
+    },
     /// Connection state change.
     StateChange(Http3State),
 }
@@ -62,7 +66,7 @@ impl Http3ServerConnEvents {
         self.events.borrow_mut().pop_front()
     }
 
-    pub fn headers(&self, stream_id: u64, headers: Vec<Header>, fin: bool) {
+    pub fn headers(&self, stream_id: StreamId, headers: Vec<Header>, fin: bool) {
         self.insert(Http3ServerConnEvent::Headers {
             stream_id,
             headers,
@@ -70,7 +74,7 @@ impl Http3ServerConnEvents {
         });
     }
 
-    pub fn data(&self, stream_id: u64, data: Vec<u8>, fin: bool) {
+    pub fn data(&self, stream_id: StreamId, data: Vec<u8>, fin: bool) {
         self.insert(Http3ServerConnEvent::Data {
             stream_id,
             data,
@@ -78,7 +82,7 @@ impl Http3ServerConnEvents {
         });
     }
 
-    pub fn reset(&self, stream_id: u64, error: AppError) {
+    pub fn reset(&self, stream_id: StreamId, error: AppError) {
         self.insert(Http3ServerConnEvent::Reset { stream_id, error });
     }
 
@@ -86,7 +90,7 @@ impl Http3ServerConnEvents {
         self.insert(Http3ServerConnEvent::StateChange(state));
     }
 
-    pub fn remove_events_for_stream_id(&self, stream_id: u64) {
+    pub fn remove_events_for_stream_id(&self, stream_id: StreamId) {
         self.remove(|evt| {
             matches!(evt,
                 Http3ServerConnEvent::Reset { stream_id: x, .. } if *x == stream_id)
