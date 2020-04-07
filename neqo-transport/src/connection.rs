@@ -32,7 +32,7 @@ use crate::flow_mgr::FlowMgr;
 use crate::frame::{AckRange, Frame, FrameType, StreamType};
 use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
 use crate::path::Path;
-use crate::recovery::{LossRecovery, RecoveryToken};
+use crate::recovery::{LossRecovery, RecoveryToken, GRANULARITY};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::Stats;
@@ -52,8 +52,6 @@ pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
 const MIN_CC_WINDOW: usize = 0x200; // let's not send packets smaller than 512
-
-const GRANULARITY: u64 = 1; // timer granularity in ms
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 /// Client or Server.
@@ -563,7 +561,7 @@ impl Connection {
 
         self.tps.borrow_mut().remote_0rtt = Some(tp);
 
-        if smoothed_rtt > GRANULARITY {
+        if smoothed_rtt > GRANULARITY.as_millis() as u64 {
             self.loss_recovery
                 .set_initial_rtt(Duration::from_millis(smoothed_rtt));
         }

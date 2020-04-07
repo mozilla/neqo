@@ -22,7 +22,7 @@ use crate::send_stream::StreamRecoveryToken;
 use crate::tracking::{AckToken, PNSpace, SentPacket};
 use crate::LOCAL_IDLE_TIMEOUT;
 
-const GRANULARITY: Duration = Duration::from_millis(20);
+pub const GRANULARITY: Duration = Duration::from_millis(20);
 // Defined in -recovery 6.2 as 500ms but using lower value until we have RTT
 // caching. See https://github.com/mozilla/neqo/issues/79
 const INITIAL_RTT: Duration = Duration::from_millis(100);
