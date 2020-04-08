@@ -309,13 +309,6 @@ impl Http3Client {
         self.process_http3(now);
     }
 
-    /// This is called when timer expires.
-    pub fn process_timer(&mut self, now: Instant) {
-        qtrace!([self], "Process timer.");
-        self.conn.process_timer(now);
-        self.process_http3(now);
-    }
-
     // Only used by neqo-interop
     pub fn conn(&mut self) -> &mut Connection {
         &mut self.conn

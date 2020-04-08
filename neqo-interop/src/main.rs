@@ -108,7 +108,6 @@ fn process_loop(
             return Ok(client.state().clone());
         }
 
-        client.process_timer(Instant::now());
         loop {
             let output = client.process_output(Instant::now());
             match output {
@@ -267,7 +266,6 @@ fn process_loop_h3(nctx: &NetworkCtx, handler: &mut H3Handler) -> Result<State, 
             return Ok(handler.h3.conn().state().clone());
         }
 
-        handler.h3.conn().process_timer(Instant::now());
         loop {
             let output = handler.h3.conn().process_output(Instant::now());
             match output {

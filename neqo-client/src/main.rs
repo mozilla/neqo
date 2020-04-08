@@ -153,10 +153,7 @@ fn process_loop(
         }
 
         match socket.recv(&mut buf[..]) {
-            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
-                // timer expired
-                client.process_timer(Instant::now());
-            }
+            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {}
             Err(err) => {
                 eprintln!("UDP error: {}", err);
                 exit(1)
