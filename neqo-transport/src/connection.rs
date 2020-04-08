@@ -540,7 +540,7 @@ impl Connection {
         let mut dec = Decoder::from(token);
 
         let smoothed_rtt = match dec.decode_varint() {
-            Some(v) => v,
+            Some(v) => Duration::from_millis(v),
             _ => return Err(Error::InvalidResumptionToken),
         };
 
@@ -561,9 +561,8 @@ impl Connection {
 
         self.tps.borrow_mut().remote_0rtt = Some(tp);
 
-        if smoothed_rtt > GRANULARITY.as_millis() as u64 {
-            self.loss_recovery
-                .set_initial_rtt(Duration::from_millis(smoothed_rtt));
+        if smoothed_rtt > GRANULARITY {
+            self.loss_recovery.set_initial_rtt(smoothed_rtt);
         }
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
@@ -2610,22 +2609,32 @@ mod tests {
 
     #[test]
     fn remember_smoothed_rtt() {
-        const RTT: Duration = Duration::from_millis(600);
         let mut client = default_client();
         let mut server = default_server();
-
         let mut now_time = now();
-        connect_with_rtt(&mut client, &mut server, &mut now_time, RTT);
 
-        // In exchange_ticket we only send a packet from a server to a client
-        // and client won't calculate rtt from that packet, so no need to increase time here.
+        const RTT1: Duration = Duration::from_millis(130);
+        connect_with_rtt(&mut client, &mut server, &mut now_time, RTT1);
+        assert_eq!(client.loss_recovery.rtt(), RTT1);
+
         let token = exchange_ticket(&mut client, &mut server);
         let mut client = default_client();
-
         client
             .set_resumption_token(now(), &token[..])
             .expect("should set token");
-        assert_eq!(client.loss_recovery.rtt(), RTT);
+        assert_eq!(
+            client.loss_recovery.rtt(),
+            RTT1,
+            "client should remember previous RTT"
+        );
+
+        //        const RTT2: Duration = Duration::from_millis(70);
+        //        connect_with_rtt(&mut client, &mut server, &mut now_time, RTT2);
+        //        assert_eq!(
+        //            client.loss_recovery.rtt(),
+        //            RTT2,
+        //            "previous RTT should be completely erased"
+        //        );
     }
 
     #[test]
