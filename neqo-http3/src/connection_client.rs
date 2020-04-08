@@ -10,7 +10,7 @@ use crate::hframe::HFrame;
 use crate::hsettings_frame::HSettings;
 use crate::transaction_client::TransactionClient;
 use crate::Header;
-use neqo_common::{hex, matches, qdebug, qinfo, qtrace, Datagram, Decoder, Encoder};
+use neqo_common::{hex, hex_with_len, matches, qdebug, qinfo, qtrace, Datagram, Decoder, Encoder};
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, Role, StreamType,
@@ -101,7 +101,7 @@ impl Http3Client {
             Some(v) => v,
             _ => return Err(Error::InvalidResumptionToken),
         };
-        qtrace!([self], "  settings {}", hex(&settings_slice));
+        qtrace!([self], "  settings {}", hex_with_len(&settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
         let mut settings = HSettings::default();
         settings.decode_frame_contents(&mut dec_settings)?;

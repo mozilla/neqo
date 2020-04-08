@@ -6,7 +6,7 @@
 
 use crate::hsettings_frame::HSettings;
 use neqo_common::{
-    hex, qdebug, qtrace, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
+    hex_with_len, qdebug, qtrace, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
 };
 use neqo_transport::Connection;
 
@@ -278,7 +278,7 @@ impl HFrameReader {
                                 [conn],
                                 "received frame {}: {}",
                                 self.hframe_type,
-                                hex(&data[..])
+                                hex_with_len(&data[..])
                             );
                             self.payload = data;
                             self.state = HFrameReaderState::Done;

@@ -9,7 +9,7 @@ use crate::err::{nspr, Error, PR_SetError, Res};
 use crate::prio;
 use crate::ssl;
 
-use neqo_common::{hex, qtrace};
+use neqo_common::{hex, hex_with_len, qtrace};
 use std::cmp::min;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -79,7 +79,7 @@ impl fmt::Debug for Record {
             "Record {:?}:{:?} {}",
             self.epoch,
             self.ct,
-            hex(&self.data[..])
+            hex_with_len(&self.data[..])
         )
     }
 }

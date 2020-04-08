@@ -10,7 +10,7 @@ use crate::crypto::{CryptoDxState, CryptoStates};
 use crate::tracking::PNSpace;
 use crate::{Error, Res, Version, QUIC_VERSION};
 
-use neqo_common::{hex, qerror, qtrace, Decoder, Encoder};
+use neqo_common::{hex, hex_with_len, qerror, qtrace, Decoder, Encoder};
 use neqo_crypto::{aead::Aead, hkdf, random, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
 
 use std::cell::RefCell;
@@ -622,8 +622,8 @@ impl fmt::Debug for PublicPacket<'_> {
             f,
             "{:?}: {} {}",
             self.packet_type(),
-            hex(&self.data[..self.header_len]),
-            hex(&self.data[self.header_len..])
+            hex_with_len(&self.data[..self.header_len]),
+            hex_with_len(&self.data[self.header_len..])
         )
     }
 }
