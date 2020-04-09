@@ -144,18 +144,17 @@ impl HeaderTable {
     }
 
     pub fn get_dynamic(&self, index: u64, base: u64, post: bool) -> Res<&DynamicTableEntry> {
-        let inx: u64;
-        if post {
+        let inx = if post {
             if self.base < (base + index + 1) {
                 return Err(Error::HeaderLookup);
             }
-            inx = self.base - (base + index + 1);
+            self.base - (base + index + 1)
         } else {
             if (self.base + index) < base {
                 return Err(Error::HeaderLookup);
             }
-            inx = (self.base + index) - base;
-        }
+            (self.base + index) - base
+        };
 
         self.get_dynamic_with_relative_index(inx)
     }
