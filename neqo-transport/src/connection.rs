@@ -2432,27 +2432,50 @@ mod tests {
     }
 
     /// Drive the handshake between the client and server.
-    fn handshake(client: &mut Connection, server: &mut Connection) {
+    fn handshake(
+        client: &mut Connection,
+        server: &mut Connection,
+        now: Instant,
+        rtt: Duration,
+    ) -> Instant {
         let mut a = client;
         let mut b = server;
+        let mut now = now;
+
         let mut datagram = None;
         let is_done = |c: &mut Connection| match c.state() {
             State::Confirmed | State::Closing { .. } | State::Closed(..) => true,
             _ => false,
         };
+
         while !is_done(a) {
             let _ = maybe_authenticate(a);
-            let d = a.process(datagram, now());
+            let d = a.process(datagram, now);
             datagram = d.dgram();
+            now += rtt / 2;
             mem::swap(&mut a, &mut b);
         }
-        a.process(datagram, now());
+        a.process(datagram, now);
+        now
+    }
+
+    fn connect_with_rtt(
+        client: &mut Connection,
+        server: &mut Connection,
+        now: Instant,
+        rtt: Duration,
+    ) -> Instant {
+        let now = handshake(client, server, now, rtt);
+        assert_eq!(*client.state(), State::Confirmed);
+        assert_eq!(*client.state(), State::Confirmed);
+
+        assert_eq!(client.loss_recovery.rtt(), rtt);
+        assert_eq!(server.loss_recovery.rtt(), rtt);
+        now
     }
 
     fn connect(client: &mut Connection, server: &mut Connection) {
-        handshake(client, server);
-        assert_eq!(*client.state(), State::Confirmed);
-        assert_eq!(*server.state(), State::Confirmed);
+        connect_with_rtt(client, server, now(), Duration::new(0, 0));
     }
 
     fn assert_error(c: &Connection, err: ConnectionError) {
@@ -2477,7 +2500,7 @@ mod tests {
         .unwrap();
         let mut server = default_server();
 
-        handshake(&mut client, &mut server);
+        handshake(&mut client, &mut server, now(), Duration::new(0, 0));
         // TODO (mt): errors are immediate, which means that we never send CONNECTION_CLOSE
         // and the client never sees the server's rejection of its handshake.
         //assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(120)));
@@ -2581,60 +2604,32 @@ mod tests {
         assert!(server.crypto.tls.info().unwrap().resumed());
     }
 
-    fn connect_with_rtt(
-        client: &mut Connection,
-        server: &mut Connection,
-        now: &mut Instant,
-        rtt: Duration,
-    ) {
-        let mut a = client;
-        let mut b = server;
-        let mut datagram = None;
-        let is_done = |c: &mut Connection| match c.state() {
-            State::Confirmed | State::Closing { .. } | State::Closed(..) => true,
-            _ => false,
-        };
-
-        while !is_done(a) {
-            let _ = maybe_authenticate(a);
-            let d = a.process(datagram, *now);
-            datagram = d.dgram();
-            *now += rtt / 2;
-            mem::swap(&mut a, &mut b);
-        }
-        a.process(datagram, *now);
-        assert_eq!(a.loss_recovery.rtt(), rtt);
-        assert_eq!(b.loss_recovery.rtt(), rtt);
-    }
-
     #[test]
     fn remember_smoothed_rtt() {
         let mut client = default_client();
         let mut server = default_server();
-        let mut now_time = now();
 
         const RTT1: Duration = Duration::from_millis(130);
-        connect_with_rtt(&mut client, &mut server, &mut now_time, RTT1);
+        let now = connect_with_rtt(&mut client, &mut server, now(), RTT1);
         assert_eq!(client.loss_recovery.rtt(), RTT1);
 
         let token = exchange_ticket(&mut client, &mut server);
         let mut client = default_client();
-        client
-            .set_resumption_token(now(), &token[..])
-            .expect("should set token");
+        let mut server = default_server();
+        client.set_resumption_token(now, &token[..]).unwrap();
         assert_eq!(
             client.loss_recovery.rtt(),
             RTT1,
             "client should remember previous RTT"
         );
 
-        //        const RTT2: Duration = Duration::from_millis(70);
-        //        connect_with_rtt(&mut client, &mut server, &mut now_time, RTT2);
-        //        assert_eq!(
-        //            client.loss_recovery.rtt(),
-        //            RTT2,
-        //            "previous RTT should be completely erased"
-        //        );
+        const RTT2: Duration = Duration::from_millis(70);
+        connect_with_rtt(&mut client, &mut server, now, RTT2);
+        assert_eq!(
+            client.loss_recovery.rtt(),
+            RTT2,
+            "previous RTT should be completely erased"
+        );
     }
 
     #[test]
