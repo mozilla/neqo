@@ -33,7 +33,7 @@ macro_rules! matches {
 
 #[must_use]
 pub fn hex(buf: &[u8]) -> String {
-    let mut ret = String::with_capacity(10 + buf.len() * 3);
+    let mut ret = String::with_capacity(buf.len() * 2);
     for b in buf {
         ret.push_str(&format!("{:02x}", b));
     }
