@@ -728,4 +728,31 @@ mod tests {
 
         decode_headers(&mut decoder, HEADER_BLOCK_2, &headers, 0);
     }
+
+    #[test]
+    fn test_base_larger_than_entry_count() {
+        // Test for issue https://github.com/mozilla/neqo/issues/533
+        // Send instruction that inserts 2 fields into the dynamic table and send a header that
+        // uses base larger than 2.
+        const ENCODER_INST: &[u8] = &[
+            0x4a, 0x6d, 0x79, 0x2d, 0x68, 0x65, 0x61, 0x64, 0x65, 0x72, 0x61, 0x09, 0x6d, 0x79,
+            0x2d, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x61, 0x4a, 0x6d, 0x79, 0x2d, 0x68, 0x65, 0x61,
+            0x64, 0x65, 0x72, 0x62, 0x09, 0x6d, 0x79, 0x2d, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x62,
+        ];
+
+        const HEADER_BLOCK: &[u8] = &[0x03, 0x03, 0x83, 0x84];
+
+        let headers = vec![
+            (String::from("my-headerb"), String::from("my-valueb")),
+            (String::from("my-headera"), String::from("my-valuea")),
+        ];
+
+        let mut decoder = connect();
+
+        assert!(decoder.decoder.set_capacity(200).is_ok());
+
+        recv_instruction(&mut decoder, ENCODER_INST, &Ok(()));
+
+        decode_headers(&mut decoder, HEADER_BLOCK, &headers, 0);
+    }
 }
