@@ -208,9 +208,9 @@ impl Http3Client {
 
         match transaction.read_response_data(&mut self.conn, buf) {
             Ok((amount, fin)) => {
-                if fin {
+                if transaction.done() {
                     self.base_handler.transactions.remove(&stream_id);
-                } else if amount > 0 {
+                } else if !fin && amount > 0 {
                     // Directly call receive instead of adding to
                     // streams_are_readable here. This allows the app to
                     // pick up subsequent already-received data frames in
