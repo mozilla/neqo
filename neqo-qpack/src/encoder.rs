@@ -345,7 +345,7 @@ impl QPackEncoder {
             // The streams was not a blocker, check if the stream is a blocker now.
             if let Some(max_ref) = ref_entries.iter().max() {
                 if *max_ref >= self.table.get_acked_inserts_cnt() {
-                    debug_assert!(self.blocked_stream_cnt < self.max_blocked_streams);
+                    debug_assert!(self.blocked_stream_cnt <= self.max_blocked_streams);
                     self.blocked_stream_cnt += 1;
                 }
             }
