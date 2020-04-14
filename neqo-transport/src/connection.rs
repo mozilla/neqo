@@ -2862,15 +2862,15 @@ mod tests {
         let now = now();
 
         let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
-        // Still connected after 59 seconds. Idle timer not reset
-        client.process(None, now + Duration::from_secs(59));
+        // Still connected after 29 seconds. Idle timer not reset
+        client.process(None, now + LOCAL_IDLE_TIMEOUT - Duration::from_secs(1));
         assert!(matches!(client.state(), State::Confirmed));
 
-        client.process_timer(now + Duration::from_secs(60));
+        client.process_timer(now + LOCAL_IDLE_TIMEOUT);
 
-        // Not connected after 60 seconds.
+        // Not connected after LOCAL_IDLE_TIMEOUT seconds.
         assert!(matches!(client.state(), State::Closed(_)));
     }
 
@@ -2883,7 +2883,7 @@ mod tests {
         let now = now();
 
         let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);
@@ -2891,13 +2891,16 @@ mod tests {
         let out = client.process(None, now + Duration::from_secs(10));
         let out = server.process(out.dgram(), now + Duration::from_secs(10));
 
-        // Still connected after 69 seconds because idle timer reset by outgoing
+        // Still connected after 39 seconds because idle timer reset by outgoing
         // packet
-        client.process(out.dgram(), now + Duration::from_secs(69));
+        client.process(
+            out.dgram(),
+            now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(9),
+        );
         assert!(matches!(client.state(), State::Confirmed));
 
-        // Not connected after 70 seconds.
-        client.process_timer(now + Duration::from_secs(70));
+        // Not connected after 40 seconds.
+        client.process_timer(now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
         assert!(matches!(client.state(), State::Closed(_)));
     }
 
@@ -2910,7 +2913,7 @@ mod tests {
         let now = now();
 
         let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);
@@ -2920,13 +2923,13 @@ mod tests {
         assert_eq!(client.stream_send(2, b"there").unwrap(), 5);
         let _out = client.process(None, now + Duration::from_secs(20));
 
-        // Still connected after 69 seconds.
-        client.process(None, now + Duration::from_secs(69));
+        // Still connected after 39 seconds.
+        client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(9));
         assert!(matches!(client.state(), State::Confirmed));
 
-        // Not connected after 70 seconds because timer not reset by second
+        // Not connected after 40 seconds because timer not reset by second
         // outgoing packet
-        client.process_timer(now + Duration::from_secs(70));
+        client.process_timer(now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
         assert!(matches!(client.state(), State::Closed(_)));
     }
 
@@ -2939,7 +2942,7 @@ mod tests {
         let now = now();
 
         let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
         assert_eq!(client.stream_send(0, b"hello").unwrap(), 5);
@@ -2951,17 +2954,16 @@ mod tests {
         let out = server.process_output(now + Duration::from_secs(10));
         assert_ne!(out.as_dgram_ref(), None);
 
-        // Still connected after 79 seconds because idle timer reset by received
-        // packet
         client.process(out.dgram(), now + Duration::from_secs(20));
         assert!(matches!(client.state(), State::Confirmed));
 
-        // Still connected after 79 seconds.
-        client.process_timer(now + Duration::from_secs(79));
+        // Still connected after 49 seconds because idle timer reset by received
+        // packet
+        client.process_timer(now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(19));
         assert!(matches!(client.state(), State::Confirmed));
 
-        // Not connected after 80 seconds.
-        client.process_timer(now + Duration::from_secs(80));
+        // Not connected after 50 seconds.
+        client.process_timer(now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(20));
         assert!(matches!(client.state(), State::Closed(_)));
     }
 
@@ -3207,7 +3209,7 @@ mod tests {
         let mut now = now();
 
         let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
         // Send data on two streams
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
@@ -3251,7 +3253,7 @@ mod tests {
         let mut now = now();
 
         let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
         // Send lots of data.
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
@@ -3285,7 +3287,7 @@ mod tests {
         let now = now();
 
         let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
         // Send "zero" pkt
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
@@ -3407,9 +3409,9 @@ mod tests {
         assert!(out.is_some());
 
         // We do not have PTO for the resent initial packet any more, because keys are discarded.
-        // The timeout will be an idle time out of 60s
+        // The timeout will be an idle time out of LOCAL_IDLE_TIMEOUT seconds.
         let out = client.process(None, now);
-        assert_eq!(out, Output::Callback(Duration::from_secs(60)));
+        assert_eq!(out, Output::Callback(LOCAL_IDLE_TIMEOUT));
     }
 
     #[test]
@@ -3430,7 +3432,7 @@ mod tests {
         let pkt = client.process(pkt, now).dgram();
 
         let out = client.process(None, now);
-        assert_eq!(out, Output::Callback(Duration::from_secs(60)));
+        assert_eq!(out, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
         now += Duration::from_millis(10);
         let pkt = server.process(pkt, now).dgram();
@@ -3641,7 +3643,7 @@ mod tests {
         let now = now();
 
         let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(Duration::from_secs(60)));
+        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
         // Try to send a large stream and verify first packet is correctly sized
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);

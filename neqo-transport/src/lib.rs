@@ -39,7 +39,7 @@ pub use self::frame::StreamType;
 pub type Version = u32;
 pub const QUIC_VERSION: Version = 0xff00_0000 + 27;
 
-const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60); // 1 minute
+const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30); // 30 second
 
 type TransportError = u64;
 
