@@ -10,7 +10,7 @@ use crate::client_events::Http3ClientEvents;
 use crate::connection::Http3Transaction;
 use crate::response_stream::ResponseStream;
 use crate::Header;
-use neqo_common::{qinfo, Encoder};
+use neqo_common::{matches, qinfo, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
@@ -109,7 +109,7 @@ impl ::std::fmt::Display for Request {
  *  Transaction send states:
  *    SendingHeaders : sending headers. From here we may switch to SendingData
  *                     or Closed (if the app does not want to send data and
- *                     has alreadyclosed the send stream).
+ *                     has already closed the send stream).
  *    SendingData : We are sending request data until the app closes the stream.
  *    Closed
  */
@@ -270,12 +270,11 @@ impl Http3Transaction for TransactionClient {
         self.response_stream.receive(conn, decoder)
     }
 
+    // TransactionClient owns headers and sends them. This method returns if
+    // they're still being sent. Request body (if any) is sent by http client
+    // afterwards using `send_request_body` after receiving DataWritable event.
     fn has_data_to_send(&self) -> bool {
-        if let TransactionSendState::SendingHeaders { .. } = self.send_state {
-            true
-        } else {
-            false
-        }
+        matches!(self.send_state, TransactionSendState::SendingHeaders { .. } )
     }
 
     fn reset_receiving_side(&mut self) {
