@@ -311,7 +311,6 @@ fn process_loop_h3(nctx: &NetworkCtx, handler: &mut H3Handler) -> Result<State, 
 impl H3Handler {
     fn handle(&mut self) -> bool {
         let mut data = vec![0; 4000];
-        self.h3.process_http3(Instant::now());
         while let Some(event) = self.h3.next_event() {
             match event {
                 Http3ClientEvent::HeaderReady { stream_id } => {
@@ -484,7 +483,6 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         host: String::from(peer.host),
         path: String::from("/"),
     };
-    hc.h3.process_http3(Instant::now());
     let client_stream_id = hc
         .h3
         .fetch("GET", "https", &hc.host, &hc.path, &[])

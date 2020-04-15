@@ -252,25 +252,27 @@ impl Http3Client {
         if let Some(d) = dgram {
             self.process_input(d, now);
         }
-        self.process_http3(now);
         self.process_output(now)
     }
 
     pub fn process_input(&mut self, dgram: Datagram, now: Instant) {
         qtrace!([self], "Process input.");
         self.conn.process_input(dgram, now);
+        self.process_http3(now);
     }
 
     pub fn process_timer(&mut self, now: Instant) {
         qtrace!([self], "Process timer.");
         self.conn.process_timer(now);
+        self.process_http3(now);
     }
 
+    // Only used by neqo-interop
     pub fn conn(&mut self) -> &mut Connection {
         &mut self.conn
     }
 
-    pub fn process_http3(&mut self, now: Instant) {
+    fn process_http3(&mut self, now: Instant) {
         qtrace!([self], "Process http3 internal.");
         match self.base_handler.state() {
             Http3State::ZeroRtt | Http3State::Connected | Http3State::GoingAway => {
@@ -291,7 +293,16 @@ impl Http3Client {
 
     pub fn process_output(&mut self, now: Instant) -> Output {
         qtrace!([self], "Process output.");
-        self.conn.process_output(now)
+
+        // Maybe send() stuff on http3-managed streams
+        self.process_http3(now);
+
+        let out = self.conn.process_output(now);
+
+        // Update H3 for any transport state changes and events
+        self.process_http3(now);
+
+        out
     }
 
     // This function takes the provided result and check for an error.
@@ -1099,7 +1110,6 @@ mod tests {
             }
         }
 
-        client.process_http3(now());
         let http_events = client.events().collect::<Vec<_>>();
         assert_eq!(http_events.len(), 1);
         for e in http_events {
@@ -1916,7 +1926,6 @@ mod tests {
                     _ => {}
                 }
             }
-            client.process_http3(now());
             http_events = client.events().collect::<Vec<_>>();
         }
 
