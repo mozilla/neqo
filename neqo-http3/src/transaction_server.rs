@@ -13,8 +13,11 @@ use neqo_common::{matches, qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
+use std::cmp::min;
 use std::convert::TryFrom;
 use std::mem;
+
+const MAX_EVENT_DATA_SIZE: usize = 1024;
 
 #[derive(PartialEq, Debug)]
 enum TransactionRecvState {
@@ -227,31 +230,25 @@ impl Http3Transaction for TransactionServer {
                     // TODO add available(stream_id) to neqo_transport.
                     assert!(*remaining_data_len > 0);
                     while *remaining_data_len != 0 {
-                        let to_read = if *remaining_data_len > 1024 {
-                            1024
-                        } else {
-                            *remaining_data_len
-                        };
-
-                        let mut data = vec![0x0; to_read];
-                        let (amount, fin) = conn.stream_recv(self.stream_id, &mut data[..])?;
-                        assert!(amount <= to_read);
+                        let mut data = vec![0x0; min(*remaining_data_len, MAX_EVENT_DATA_SIZE)];
+                        let (amount, fin) = conn.stream_recv(self.stream_id, &mut data)?;
                         if amount > 0 {
                             data.truncate(amount);
                             self.conn_events.data(self.stream_id, data, fin);
                             *remaining_data_len -= amount;
                         }
+
                         if fin {
                             if *remaining_data_len > 0 {
                                 return Err(Error::HttpFrame);
+                            } else {
+                                self.recv_state = TransactionRecvState::Closed;
+                                return Ok(());
                             }
-                            self.recv_state = TransactionRecvState::Closed;
-                            return Ok(());
                         } else if *remaining_data_len == 0 {
                             self.recv_state = TransactionRecvState::WaitingForData;
                             break;
-                        }
-                        if amount == 0 {
+                        } else if amount == 0 {
                             return Ok(());
                         }
                     }
