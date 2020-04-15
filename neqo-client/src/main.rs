@@ -134,7 +134,6 @@ fn process_loop(
                 }
             }
         }
-        client.process_http3(Instant::now());
 
         if exiting {
             return Ok(client.state());
@@ -157,7 +156,6 @@ fn process_loop(
                 if sz > 0 {
                     let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
                     client.process_input(d, Instant::now());
-                    client.process_http3(Instant::now());
                 }
             }
         };
@@ -184,7 +182,6 @@ struct PostConnectHandler {
 impl Handler for PostConnectHandler {
     fn handle(&mut self, args: &Args, client: &mut Http3Client) -> Res<bool> {
         let mut data = vec![0; 4000];
-        client.process_http3(Instant::now());
         while let Some(event) = client.next_event() {
             match event {
                 Http3ClientEvent::HeaderReady { stream_id } => match self.streams.get(&stream_id) {
