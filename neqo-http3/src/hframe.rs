@@ -9,15 +9,15 @@ use neqo_common::{
     hex_with_len, qdebug, qtrace, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
 };
 use neqo_transport::Connection;
-
+use std::convert::TryFrom;
 use std::mem;
 
 use crate::{Error, Res};
 
-pub type HFrameType = u64;
+pub(crate) type HFrameType = u64;
 
-pub const H3_FRAME_TYPE_DATA: HFrameType = 0x0;
-pub const H3_FRAME_TYPE_HEADERS: HFrameType = 0x1;
+pub(crate) const H3_FRAME_TYPE_DATA: HFrameType = 0x0;
+pub(crate) const H3_FRAME_TYPE_HEADERS: HFrameType = 0x1;
 const H3_FRAME_TYPE_CANCEL_PUSH: HFrameType = 0x3;
 const H3_FRAME_TYPE_SETTINGS: HFrameType = 0x4;
 const H3_FRAME_TYPE_PUSH_PROMISE: HFrameType = 0x5;
@@ -25,16 +25,9 @@ const H3_FRAME_TYPE_GOAWAY: HFrameType = 0x7;
 const H3_FRAME_TYPE_MAX_PUSH_ID: HFrameType = 0xd;
 const H3_FRAME_TYPE_DUPLICATE_PUSH: HFrameType = 0xe;
 
-#[derive(Copy, Clone, PartialEq)]
-pub enum HStreamType {
-    Control,
-    Request,
-    Push,
-}
-
 // data for DATA frame is not read into HFrame::Data.
 #[derive(PartialEq, Debug)]
-pub enum HFrame {
+pub(crate) enum HFrame {
     Data {
         len: u64, // length of the data
     },
@@ -120,19 +113,6 @@ impl HFrame {
             }
         }
     }
-
-    pub fn is_allowed(&self, s: HStreamType) -> bool {
-        match self {
-            Self::Data { .. } => !(s == HStreamType::Control),
-            Self::Headers { .. } => !(s == HStreamType::Control),
-            Self::CancelPush { .. } => (s == HStreamType::Control),
-            Self::Settings { .. } => (s == HStreamType::Control),
-            Self::PushPromise { .. } => (s == HStreamType::Request),
-            Self::Goaway { .. } => (s == HStreamType::Control),
-            Self::MaxPushId { .. } => (s == HStreamType::Control),
-            Self::DuplicatePush { .. } => (s == HStreamType::Request),
-        }
-    }
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -146,7 +126,7 @@ enum HFrameReaderState {
 }
 
 #[derive(Debug)]
-pub struct HFrameReader {
+pub(crate) struct HFrameReader {
     state: HFrameReaderState,
     decoder: IncrementalDecoder,
     hframe_type: u64,
@@ -161,6 +141,7 @@ impl Default for HFrameReader {
 }
 
 impl HFrameReader {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             state: HFrameReaderState::BeforeFrame,
@@ -176,7 +157,10 @@ impl HFrameReader {
         self.decoder = IncrementalDecoder::decode_varint();
     }
 
-    // returns true if quic stream was closed.
+    #[allow(clippy::too_many_lines)]
+    /// returns true if quic stream was closed.
+    /// # Errors
+    /// returns an error if frame is not complete.
     pub fn receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         loop {
             let to_read = std::cmp::min(self.decoder.min_remaining(), 4096);
@@ -187,7 +171,7 @@ impl HFrameReader {
                     qtrace!([conn], "HFrameReader::receive: stream has been closed");
                     break match self.state {
                         HFrameReaderState::BeforeFrame => Ok(true),
-                        _ => Err(Error::HttpFrameError),
+                        _ => Err(Error::HttpFrame),
                     };
                 }
                 Ok((0, false)) => break Ok(false),
@@ -252,7 +236,9 @@ impl HFrameReader {
                                     if len == 0 {
                                         HFrameReaderState::Done
                                     } else {
-                                        self.decoder = IncrementalDecoder::decode(len as usize);
+                                        self.decoder = IncrementalDecoder::decode(
+                                            usize::try_from(len).or(Err(Error::HttpFrame))?,
+                                        );
                                         HFrameReaderState::GetData
                                     }
                                 }
@@ -261,7 +247,9 @@ impl HFrameReader {
                                         self.decoder = IncrementalDecoder::decode_varint();
                                         HFrameReaderState::BeforeFrame
                                     } else {
-                                        self.decoder = IncrementalDecoder::ignore(len as usize);
+                                        self.decoder = IncrementalDecoder::ignore(
+                                            usize::try_from(len).or(Err(Error::HttpFrame))?,
+                                        );
                                         HFrameReaderState::UnknownFrameDischargeData
                                     }
                                 }
@@ -309,16 +297,19 @@ impl HFrameReader {
                 if self.state == HFrameReaderState::BeforeFrame {
                     break Ok(fin);
                 } else {
-                    break Err(Error::HttpFrameError);
+                    break Err(Error::HttpFrame);
                 }
             }
         }
     }
 
+    #[must_use]
     pub fn done(&self) -> bool {
         self.state == HFrameReaderState::Done
     }
 
+    /// # Errors
+    /// May return `NotEnoughData` if frame is not completely read.
     pub fn get_frame(&mut self) -> Res<HFrame> {
         if self.state != HFrameReaderState::Done {
             return Err(Error::NotEnoughData);
@@ -381,12 +372,12 @@ impl HFrameReader {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Encoder, Error, HFrame, HFrameReader, HSettings};
     use crate::hsettings_frame::{HSetting, HSettingType};
     use neqo_crypto::AuthenticationStatus;
     use neqo_transport::StreamType;
     use num_traits::Num;
-    use test_fixture::*;
+    use test_fixture::{connect, default_client, default_server, now};
 
     #[allow(clippy::many_single_char_names)]
     fn enc_dec(f: &HFrame, st: &str, remaining: usize) {
@@ -430,7 +421,7 @@ mod tests {
         assert_eq!(Ok(false), fr.receive(&mut conn_c, stream_id));
 
         // Check remaining data.
-        let mut buf = [0u8; 100];
+        let mut buf = [0_u8; 100];
         let (amount, _) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(amount, remaining);
 
@@ -655,7 +646,7 @@ mod tests {
 
         // headers are still on the stream.
         // assert that we do not have any more date on the stream
-        let mut buf = [0u8; 100];
+        let mut buf = [0_u8; 100];
         let (amount, _) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(amount, 0);
 
@@ -694,7 +685,7 @@ mod tests {
 
         // payloead is still on the stream.
         // assert that we have 3 bytes in the stream
-        let mut buf = [0u8; 100];
+        let mut buf = [0_u8; 100];
         let (amount, _) = conn_c.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(amount, 3);
 
@@ -711,6 +702,9 @@ mod tests {
     // Test an unknown frame
     #[test]
     fn test_unknown_frame() {
+        // Construct an unknown frame.
+        const UNKNOWN_FRAME_LEN: usize = 832;
+
         let (mut conn_c, mut conn_s) = connect();
 
         // create a stream
@@ -718,10 +712,8 @@ mod tests {
 
         let mut fr: HFrameReader = HFrameReader::new();
 
-        // Construct an unknown frame.
-        const UNKNOWN_FRAME_LEN: usize = 832;
         let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
-        enc.encode_varint(1028u64); // Arbitrary type.
+        enc.encode_varint(1028_u64); // Arbitrary type.
         enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
         let mut buf: Vec<_> = enc.into();
         buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
@@ -762,8 +754,8 @@ mod tests {
 
     fn test_reading_frame(
         buf: &[u8],
-        test_to_send: FrameReadingTestSend,
-        expected_result: FrameReadingTestExpect,
+        test_to_send: &FrameReadingTestSend,
+        expected_result: &FrameReadingTestExpect,
     ) {
         let (mut conn_c, mut conn_s) = connect();
 
@@ -788,7 +780,7 @@ mod tests {
         let rv = fr.receive(&mut conn_c, stream_id);
 
         match expected_result {
-            FrameReadingTestExpect::Error => assert_eq!(Err(Error::HttpFrameError), rv),
+            FrameReadingTestExpect::Error => assert_eq!(Err(Error::HttpFrame), rv),
             FrameReadingTestExpect::Incomplete => {
                 assert_eq!(Ok(false), rv);
                 assert_eq!(false, fr.done());
@@ -813,7 +805,7 @@ mod tests {
         // Construct an unknown frame.
         const UNKNOWN_FRAME_LEN: usize = 832;
         let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
-        enc.encode_varint(1028u64); // Arbitrary type.
+        enc.encode_varint(1028_u64); // Arbitrary type.
         enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
         let mut buf: Vec<_> = enc.into();
         buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
@@ -822,34 +814,34 @@ mod tests {
         for i in 1..len {
             test_reading_frame(
                 &buf[..i],
-                FrameReadingTestSend::OnlyData,
-                FrameReadingTestExpect::Incomplete,
+                &FrameReadingTestSend::OnlyData,
+                &FrameReadingTestExpect::Incomplete,
             );
             test_reading_frame(
                 &buf[..i],
-                FrameReadingTestSend::DataWithFin,
-                FrameReadingTestExpect::Error,
+                &FrameReadingTestSend::DataWithFin,
+                &FrameReadingTestExpect::Error,
             );
             test_reading_frame(
                 &buf[..i],
-                FrameReadingTestSend::DataThenFin,
-                FrameReadingTestExpect::Error,
+                &FrameReadingTestSend::DataThenFin,
+                &FrameReadingTestExpect::Error,
             );
         }
         test_reading_frame(
             &buf,
-            FrameReadingTestSend::OnlyData,
-            FrameReadingTestExpect::Incomplete,
+            &FrameReadingTestSend::OnlyData,
+            &FrameReadingTestExpect::Incomplete,
         );
         test_reading_frame(
             &buf,
-            FrameReadingTestSend::DataWithFin,
-            FrameReadingTestExpect::StreamDoneWithoutFrame,
+            &FrameReadingTestSend::DataWithFin,
+            &FrameReadingTestExpect::StreamDoneWithoutFrame,
         );
         test_reading_frame(
             &buf,
-            FrameReadingTestSend::DataThenFin,
-            FrameReadingTestExpect::StreamDoneWithoutFrame,
+            &FrameReadingTestSend::DataThenFin,
+            &FrameReadingTestExpect::StreamDoneWithoutFrame,
         );
     }
 
@@ -863,53 +855,53 @@ mod tests {
         for i in 1..len {
             test_reading_frame(
                 &buf[..i],
-                FrameReadingTestSend::OnlyData,
+                &FrameReadingTestSend::OnlyData,
                 if i >= done_state {
-                    FrameReadingTestExpect::FrameComplete
+                    &FrameReadingTestExpect::FrameComplete
                 } else {
-                    FrameReadingTestExpect::Incomplete
+                    &FrameReadingTestExpect::Incomplete
                 },
             );
             test_reading_frame(
                 &buf[..i],
-                FrameReadingTestSend::DataWithFin,
+                &FrameReadingTestSend::DataWithFin,
                 match i.cmp(&done_state) {
-                    Ordering::Greater => FrameReadingTestExpect::FrameComplete,
-                    Ordering::Equal => FrameReadingTestExpect::FrameAndStreamComplete,
-                    Ordering::Less => FrameReadingTestExpect::Error,
+                    Ordering::Greater => &FrameReadingTestExpect::FrameComplete,
+                    Ordering::Equal => &FrameReadingTestExpect::FrameAndStreamComplete,
+                    Ordering::Less => &FrameReadingTestExpect::Error,
                 },
             );
             test_reading_frame(
                 &buf[..i],
-                FrameReadingTestSend::DataThenFin,
+                &FrameReadingTestSend::DataThenFin,
                 match i.cmp(&done_state) {
-                    Ordering::Greater => FrameReadingTestExpect::FrameComplete,
-                    Ordering::Equal => FrameReadingTestExpect::FrameAndStreamComplete,
-                    Ordering::Less => FrameReadingTestExpect::Error,
+                    Ordering::Greater => &FrameReadingTestExpect::FrameComplete,
+                    Ordering::Equal => &FrameReadingTestExpect::FrameAndStreamComplete,
+                    Ordering::Less => &FrameReadingTestExpect::Error,
                 },
             );
         }
         test_reading_frame(
             buf,
-            FrameReadingTestSend::OnlyData,
-            FrameReadingTestExpect::FrameComplete,
+            &FrameReadingTestSend::OnlyData,
+            &FrameReadingTestExpect::FrameComplete,
         );
         test_reading_frame(
             buf,
-            FrameReadingTestSend::DataWithFin,
+            &FrameReadingTestSend::DataWithFin,
             if buf.len() == done_state {
-                FrameReadingTestExpect::FrameAndStreamComplete
+                &FrameReadingTestExpect::FrameAndStreamComplete
             } else {
-                FrameReadingTestExpect::FrameComplete
+                &FrameReadingTestExpect::FrameComplete
             },
         );
         test_reading_frame(
             buf,
-            FrameReadingTestSend::DataThenFin,
+            &FrameReadingTestSend::DataThenFin,
             if buf.len() == done_state {
-                FrameReadingTestExpect::FrameAndStreamComplete
+                &FrameReadingTestExpect::FrameAndStreamComplete
             } else {
-                FrameReadingTestExpect::FrameComplete
+                &FrameReadingTestExpect::FrameComplete
             },
         );
     }

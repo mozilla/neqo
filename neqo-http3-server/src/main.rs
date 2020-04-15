@@ -99,7 +99,7 @@ fn process_events(server: &mut Http3Server) {
                             (String::from(":status"), String::from("200")),
                             (String::from("content-length"), response.len().to_string()),
                         ],
-                        response,
+                        &response,
                     )
                     .unwrap();
             }

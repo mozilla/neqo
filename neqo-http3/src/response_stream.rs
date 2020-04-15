@@ -11,6 +11,7 @@ use neqo_common::{matches, qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::Connection;
 use std::cmp::min;
+use std::convert::TryFrom;
 use std::mem;
 
 /*
@@ -102,10 +103,10 @@ impl ResponseStream {
             ResponseStreamState::WaitingForData => {
                 if len > 0 {
                     if fin {
-                        return Err(Error::HttpFrameError);
+                        return Err(Error::HttpFrame);
                     }
                     self.state = ResponseStreamState::ReadingData {
-                        remaining_data_len: len as usize,
+                        remaining_data_len: usize::try_from(len).or(Err(Error::HttpFrame))?,
                     };
                 }
             }
@@ -120,7 +121,7 @@ impl ResponseStream {
                 false,
                 "self.response_headers_state must be in state ResponseHeadersState::NoHeaders."
             );
-            return Err(Error::HttpInternalError);
+            return Err(Error::HttpInternal);
         }
         self.response_headers_state = ResponseHeadersState::Ready(headers);
         self.conn_events.header_ready(self.stream_id);
@@ -152,11 +153,11 @@ impl ResponseStream {
     fn recv_frame(&mut self, conn: &mut Connection) -> Res<(Option<HFrame>, bool)> {
         qtrace!([self], "receiving frame header");
         let fin = self.frame_reader.receive(conn, self.stream_id)?;
-        if !self.frame_reader.done() {
-            Ok((None, fin))
-        } else {
+        if self.frame_reader.done() {
             qdebug!([self], "A new frame has been received.");
             Ok((Some(self.frame_reader.get_frame()?), fin))
+        } else {
+            Ok((None, fin))
         }
     }
 
@@ -198,7 +199,7 @@ impl ResponseStream {
 
                 if fin {
                     if *remaining_data_len > 0 {
-                        return Err(Error::HttpFrameError);
+                        return Err(Error::HttpFrame);
                     }
                     self.state = ResponseStreamState::Closed;
                 } else if *remaining_data_len == 0 {
@@ -247,7 +248,7 @@ impl ResponseStream {
                                 }
                                 HFrame::Data { len } => self.handle_data_frame(len, fin)?,
                                 HFrame::PushPromise { .. } | HFrame::DuplicatePush { .. } => {
-                                    break Err(Error::HttpIdError)
+                                    break Err(Error::HttpId)
                                 }
                                 _ => break Err(Error::HttpFrameUnexpected),
                             }
@@ -263,27 +264,25 @@ impl ResponseStream {
                 ResponseStreamState::DecodingHeaders {
                     ref header_block,
                     fin,
-                } => match decoder.decode_header_block(header_block, self.stream_id)? {
-                    Some(headers) => {
+                } => {
+                    if let Some(headers) =
+                        decoder.decode_header_block(header_block, self.stream_id)?
+                    {
                         self.add_headers(Some(headers))?;
                         if fin {
                             self.set_state_to_close_pending();
                             break Ok(());
                         }
-                    }
-                    None => {
+                    } else {
                         qinfo!([self], "decoding header is blocked.");
                         break Ok(());
                     }
-                },
+                }
                 ResponseStreamState::ReadingData { .. } => {
                     self.conn_events.data_readable(self.stream_id);
                     break Ok(());
                 }
-                ResponseStreamState::ClosePending => {
-                    panic!("Stream readable after being closed!");
-                }
-                ResponseStreamState::Closed => {
+                ResponseStreamState::ClosePending | ResponseStreamState::Closed => {
                     panic!("Stream readable after being closed!");
                 }
             };
