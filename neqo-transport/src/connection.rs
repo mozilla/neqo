@@ -217,44 +217,61 @@ impl RetryInfo {
 #[derive(Debug, Clone)]
 /// There's a little bit of different behavior for resetting idle timeout. See
 /// -transport 10.2 ("Idle Timeout").
-enum IdleTimeout {
+enum IdleTimeoutState {
     Init,
     PacketReceived(Instant),
     AckElicitingPacketSent(Instant),
 }
 
+#[derive(Debug, Clone)]
+/// There's a little bit of different behavior for resetting idle timeout. See
+/// -transport 10.2 ("Idle Timeout").
+struct IdleTimeout {
+    timeout: Duration,
+    state: IdleTimeoutState,
+}
+
 impl Default for IdleTimeout {
     fn default() -> Self {
-        Self::Init
+        Self {
+            timeout: LOCAL_IDLE_TIMEOUT,
+            state: IdleTimeoutState::Init,
+        }
     }
 }
 
 impl IdleTimeout {
-    pub fn as_instant(&self) -> Option<Instant> {
-        match self {
-            Self::Init => None,
-            Self::PacketReceived(t) | Self::AckElicitingPacketSent(t) => Some(*t),
+    pub fn set_peer_timeout(&mut self, peer_timeout: Duration) {
+        self.timeout = min(self.timeout, peer_timeout);
+    }
+
+    pub fn expiry(&self, pto: Duration) -> Option<Instant> {
+        match self.state {
+            IdleTimeoutState::Init => None,
+            IdleTimeoutState::PacketReceived(t) | IdleTimeoutState::AckElicitingPacketSent(t) => {
+                Some(t + max(self.timeout, pto * 3))
+            }
         }
     }
 
     fn on_packet_sent(&mut self, now: Instant) {
         // Only reset idle timeout if we've received a packet since the last
         // time we reset the timeout here.
-        match self {
-            Self::AckElicitingPacketSent(_) => {}
-            Self::Init | Self::PacketReceived(_) => {
-                *self = Self::AckElicitingPacketSent(now + LOCAL_IDLE_TIMEOUT);
+        match self.state {
+            IdleTimeoutState::AckElicitingPacketSent(_) => {}
+            IdleTimeoutState::Init | IdleTimeoutState::PacketReceived(_) => {
+                self.state = IdleTimeoutState::AckElicitingPacketSent(now);
             }
         }
     }
 
     fn on_packet_received(&mut self, now: Instant) {
-        *self = Self::PacketReceived(now + LOCAL_IDLE_TIMEOUT);
+        self.state = IdleTimeoutState::PacketReceived(now);
     }
 
-    pub fn expired(&self, now: Instant) -> bool {
-        if let Some(timeout) = self.as_instant() {
-            now >= timeout
+    pub fn expired(&self, now: Instant, pto: Duration) -> bool {
+        if let Some(expiry) = self.expiry(pto) {
+            now >= expiry
         } else {
             false
         }
@@ -653,7 +670,7 @@ impl Connection {
             qinfo!("Timer fired while closing/closed");
             return;
         }
-        if self.idle_timeout.expired(now) {
+        if self.idle_timeout.expired(now, self.loss_recovery.raw_pto()) {
             qinfo!("idle timeout expired");
             self.set_state(State::Closed(ConnectionError::Transport(
                 Error::IdleTimeout,
@@ -701,7 +718,7 @@ impl Connection {
             delays.push(ack_time);
         }
 
-        if let Some(idle_time) = self.idle_timeout.as_instant() {
+        if let Some(idle_time) = self.idle_timeout.expiry(self.loss_recovery.raw_pto()) {
             qtrace!([self], "Idle timer {:?}", idle_time);
             delays.push(idle_time);
         }
@@ -1386,6 +1403,12 @@ impl Connection {
         self.flow_mgr
             .borrow_mut()
             .conn_increase_max_credit(remote.get_integer(tparams::INITIAL_MAX_DATA));
+
+        let peer_timeout = remote.get_integer(tparams::IDLE_TIMEOUT);
+        if peer_timeout > 0 {
+            self.idle_timeout
+                .set_peer_timeout(Duration::from_millis(peer_timeout));
+        }
     }
 
     fn validate_odcid(&mut self) -> Res<()> {
@@ -2872,6 +2895,80 @@ mod tests {
 
         // Not connected after LOCAL_IDLE_TIMEOUT seconds.
         assert!(matches!(client.state(), State::Closed(_)));
+    }
+
+    #[test]
+    fn asymmetric_idle_timeout() {
+        const LOWER_TIMEOUT_MS: u64 = 1000;
+        const LOWER_TIMEOUT: Duration = Duration::from_millis(LOWER_TIMEOUT_MS);
+        // Sanity check the constant.
+        assert!(LOWER_TIMEOUT < LOCAL_IDLE_TIMEOUT);
+
+        let mut client = default_client();
+        let mut server = default_server();
+
+        // Overwrite the default at the server.
+        server
+            .tps
+            .borrow_mut()
+            .local
+            .set_integer(tparams::IDLE_TIMEOUT, LOWER_TIMEOUT_MS);
+        server.idle_timeout.timeout = LOWER_TIMEOUT;
+
+        // Now connect and force idleness manually.
+        connect(&mut client, &mut server);
+        let p1 = send_something(&mut server, now());
+        let p2 = send_something(&mut server, now());
+        client.process_input(p2, now());
+        let ack = client.process(Some(p1), now()).dgram();
+        assert!(ack.is_some());
+        // Now the server has its ACK and both should be idle.
+        assert_eq!(server.process(ack, now()), Output::Callback(LOWER_TIMEOUT));
+        assert_eq!(client.process(None, now()), Output::Callback(LOWER_TIMEOUT));
+    }
+
+    #[test]
+    fn tiny_idle_timeout() {
+        const RTT: Duration = Duration::from_millis(500);
+        const LOWER_TIMEOUT_MS: u64 = 100;
+        const LOWER_TIMEOUT: Duration = Duration::from_millis(LOWER_TIMEOUT_MS);
+        // We won't respect a value that is lower than 3*PTO, sanity check.
+        assert!(LOWER_TIMEOUT < 3 * RTT);
+
+        let mut client = default_client();
+        let mut server = default_server();
+
+        // Overwrite the default at the server.
+        server
+            .tps
+            .borrow_mut()
+            .local
+            .set_integer(tparams::IDLE_TIMEOUT, LOWER_TIMEOUT_MS);
+        server.idle_timeout.timeout = LOWER_TIMEOUT;
+
+        // Now connect with an RTT and force idleness manually.
+        let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
+        let p1 = send_something(&mut server, now);
+        let p2 = send_something(&mut server, now);
+        now += RTT / 2;
+        client.process_input(p2, now);
+        let ack = client.process(Some(p1), now).dgram();
+        assert!(ack.is_some());
+
+        // The client should be idle now, but with a different timer.
+        if let Output::Callback(t) = client.process(None, now) {
+            assert!(t > LOWER_TIMEOUT);
+        } else {
+            panic!("Client not idle");
+        }
+
+        // The server should go idle after the ACK, but again with a larger timeout.
+        now += RTT / 2;
+        if let Output::Callback(t) = client.process(ack, now) {
+            assert!(t > LOWER_TIMEOUT);
+        } else {
+            panic!("Client not idle");
+        }
     }
 
     #[test]
