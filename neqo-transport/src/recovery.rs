@@ -429,6 +429,13 @@ impl LossRecovery {
         max(rtt * 9 / 8, GRANULARITY)
     }
 
+    /// Get the Base PTO value, which is derived only from the RTT and RTTvar values.
+    /// This is for those cases where you need a value for the time you might sensibly
+    /// wait for a packet to propagate.  Using `3*raw_pto()` is common.
+    pub fn raw_pto(&self) -> Duration {
+        self.rtt_vals.pto(PNSpace::ApplicationData)
+    }
+
     // Calculate PTO duration
     fn pto_timeout(&self, pn_space: PNSpace) -> Duration {
         self.rtt_vals
