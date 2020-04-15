@@ -166,7 +166,7 @@ impl HFrameReader {
             let to_read = std::cmp::min(self.decoder.min_remaining(), 4096);
             let mut buf = vec![0; to_read];
             let fin;
-            let mut input = match conn.stream_recv(stream_id, &mut buf[..]) {
+            let mut input = match conn.stream_recv(stream_id, &mut buf) {
                 Ok((0, true)) => {
                     qtrace!([conn], "HFrameReader::receive: stream has been closed");
                     break match self.state {
