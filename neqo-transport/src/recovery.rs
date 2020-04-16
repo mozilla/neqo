@@ -358,7 +358,7 @@ impl LossRecovery {
         sent_packet: SentPacket,
     ) {
         qdebug!([self], "packet {:?}-{} sent.", pn_space, packet_number);
-        self.cc.on_packet_sent(&sent_packet);
+        self.cc.on_packet_sent(&sent_packet, self.rtt());
         self.spaces[pn_space].on_packet_sent(packet_number, sent_packet);
     }
 
@@ -553,17 +553,23 @@ impl LossRecovery {
         lost_packets
     }
 
-    pub fn callback_time(&mut self) -> Option<Instant> {
-        self.loss_recovery_state.callback_time()
-    }
-
     #[cfg(test)]
     pub fn state_mode(&self) -> LossRecoveryMode {
         self.loss_recovery_state.mode()
     }
 
+    /// Start the packet pacer.
+    pub fn start_pacer(&mut self, now: Instant) {
+        self.cc.start_pacer(now);
+    }
+
+    /// Get the next time that a paced packet might be sent.
+    pub fn next_paced(&self) -> Option<Instant> {
+        self.cc.next_paced(self.rtt())
+    }
+
     pub fn calculate_timer(&mut self) -> Option<Instant> {
-        qtrace!([self], "get_loss_detection_timer.");
+        qtrace!([self], "calculate_timer");
 
         let has_ack_eliciting_out = self.spaces.iter().any(|sp| sp.ack_eliciting_outstanding());
 
@@ -682,7 +688,7 @@ impl LossRecovery {
             return None;
         }
 
-        if self.callback_time() > Some(now) {
+        if self.loss_recovery_state.callback_time() > Some(now) {
             // LR timer, but hasn't expired.
             return None;
         }
@@ -723,6 +729,7 @@ mod tests {
     use super::*;
     use std::convert::TryInto;
     use std::time::{Duration, Instant};
+    use test_fixture::now;
 
     const ON_SENT_SIZE: usize = 100;
 
@@ -793,7 +800,7 @@ mod tests {
     // In most of the tests below, packets are sent at a fixed cadence, with PACING between each.
     const PACING: Duration = ms!(7);
     fn pn_time(pn: u64) -> Instant {
-        ::test_fixture::now() + (PACING * pn.try_into().unwrap())
+        now() + (PACING * pn.try_into().unwrap())
     }
 
     fn pace(lr: &mut LossRecovery, count: u64) {
@@ -821,6 +828,7 @@ mod tests {
     #[test]
     fn initial_rtt() {
         let mut lr = LossRecovery::new();
+        lr.start_pacer(now());
         pace(&mut lr, 1);
         let rtt = ms!(100);
         ack(&mut lr, 0, rtt);
@@ -835,6 +843,7 @@ mod tests {
     /// Send `n` packets (using PACING), then acknowledge the first.
     fn setup_lr(n: u64) -> LossRecovery {
         let mut lr = LossRecovery::new();
+        lr.start_pacer(now());
         pace(&mut lr, n);
         ack(&mut lr, 0, INITIAL_RTT);
         assert_rtts(&lr, INITIAL_RTT, INITIAL_RTT, INITIAL_RTTVAR, INITIAL_RTT);
@@ -911,6 +920,7 @@ mod tests {
     #[test]
     fn time_loss_detection_gap() {
         let mut lr = LossRecovery::new();
+        lr.start_pacer(now());
         // Create a single packet gap, and have pn 0 time out.
         // This can't use the default pacing, which is too tight.
         // So send two packets with 1/4 RTT between them.  Acknowledge pn 1 after 1 RTT.

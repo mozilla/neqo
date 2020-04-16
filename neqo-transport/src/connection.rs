@@ -174,6 +174,20 @@ impl Output {
     }
 }
 
+/// Used by inner functions like Connection::output.
+enum SendOption {
+    /// Yes, please send this datagram.
+    Yes(Datagram),
+    /// Don't send.  If this was blocked on the pacer (the arg is true).
+    No(bool),
+}
+
+impl Default for SendOption {
+    fn default() -> Self {
+        Self::No(false)
+    }
+}
+
 /// Alias the common form for ConnectionIdManager.
 type CidMgr = Rc<RefCell<dyn ConnectionIdManager>>;
 
@@ -456,10 +470,7 @@ impl Connection {
 
         Self {
             role,
-            state: match role {
-                Role::Client => State::Init,
-                Role::Server => State::WaitInitial,
-            },
+            state: State::Init,
             cid_manager,
             path,
             valid_cids: Vec::new(),
@@ -484,10 +495,7 @@ impl Connection {
 
     /// Set a local transport parameter, possibly overriding a default value.
     pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
-        if matches!(
-            (self.role(), self.state()),
-            (Role::Client, State::Init) | (Role::Server, State::WaitInitial)
-        ) {
+        if *self.state() == State::Init {
             self.tps.borrow_mut().local.set(tp, value);
             Ok(())
         } else {
@@ -704,9 +712,9 @@ impl Connection {
     }
 
     /// Get the time that we next need to be called back, relative to `now`.
-    fn next_delay(&mut self, now: Instant) -> Duration {
+    fn next_delay(&mut self, now: Instant, paced: bool) -> Duration {
         qtrace!([self], "Get callback delay {:?}", now);
-        let mut delays = SmallVec::<[_; 4]>::new();
+        let mut delays = SmallVec::<[_; 5]>::new();
 
         if let Some(lr_time) = self.loss_recovery.calculate_timer() {
             qtrace!([self], "Loss recovery timer {:?}", lr_time);
@@ -728,6 +736,13 @@ impl Connection {
             delays.push(key_update_time);
         }
 
+        if paced {
+            if let Some(pace_time) = self.loss_recovery.next_paced() {
+                qtrace!([self], "Pacing timer {:?}", pace_time);
+                delays.push(pace_time);
+            }
+        }
+
         // Should always at least have idle timeout, once connected
         assert!(!delays.is_empty());
         let earliest = delays.into_iter().min().unwrap();
@@ -747,11 +762,16 @@ impl Connection {
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
     pub fn process_output(&mut self, now: Instant) -> Output {
-        let pkt = match &self.state {
+        let option = match &self.state {
             State::Init => {
-                let res = self.client_start(now);
-                self.absorb_error(now, res);
-                self.output(now)
+                if self.role == Role::Client {
+                    let res = self.client_start(now);
+                    self.absorb_error(now, res);
+                    self.output(now)
+                } else {
+                    qinfo!([self], "Invalid packet received: no response");
+                    SendOption::default()
+                }
             }
             State::Closing { error, timeout, .. } => {
                 if *timeout > now {
@@ -760,19 +780,19 @@ impl Connection {
                     // Close timeout expired, move to Closed
                     let st = State::Closed(error.clone());
                     self.set_state(st);
-                    None
+                    SendOption::default()
                 }
             }
-            State::Closed(..) => None,
+            State::Closed(..) => SendOption::default(),
             _ => self.output(now),
         };
 
-        match pkt {
-            Some(pkt) => Output::Datagram(pkt),
-            None => match self.state {
+        match option {
+            SendOption::Yes(dgram) => Output::Datagram(dgram),
+            SendOption::No(paced) => match self.state {
                 State::Closed(_) => Output::None,
                 State::Closing { timeout, .. } => Output::Callback(timeout - now),
-                _ => Output::Callback(self.next_delay(now)),
+                _ => Output::Callback(self.next_delay(now, paced)),
             },
         }
     }
@@ -855,6 +875,16 @@ impl Connection {
                 }; // TODO(mt) use in place of res, and allow errors
             self.stats.packets_rx += 1;
             match (packet.packet_type(), &self.state, &self.role) {
+                (PacketType::Initial, State::Init, Role::Server) => {
+                    if !packet.is_valid_initial() {
+                        self.stats.dropped_rx += 1;
+                        return Ok(frames);
+                    }
+                    qinfo!([self], "Received valid Initial packet");
+                    self.set_state(State::WaitInitial);
+                    self.loss_recovery.start_pacer(now);
+                    self.crypto.states.init(self.role, &packet.dcid());
+                }
                 (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
                     self.set_state(State::Closed(ConnectionError::Transport(
                         Error::VersionNegotiation,
@@ -879,16 +909,7 @@ impl Connection {
                     self.stats.dropped_rx += 1;
                     return Ok(frames);
                 }
-                State::WaitInitial => {
-                    qinfo!([self], "Received packet in WaitInitial");
-                    if self.role == Role::Server {
-                        if !packet.is_valid_initial() {
-                            self.stats.dropped_rx += 1;
-                            return Ok(frames);
-                        }
-                        self.crypto.states.init(self.role, &packet.dcid());
-                    }
-                }
+                State::WaitInitial => {}
                 State::Handshaking | State::Connected | State::Confirmed => {
                     if !self.is_valid_cid(packet.dcid()) {
                         qinfo!([self], "Ignoring packet with CID {:?}", packet.dcid());
@@ -1038,7 +1059,7 @@ impl Connection {
         }
     }
 
-    fn output(&mut self, now: Instant) -> Option<Datagram> {
+    fn output(&mut self, now: Instant) -> SendOption {
         if let Some(mut path) = self.path.take() {
             let res = match &self.state {
                 State::Init
@@ -1057,13 +1078,13 @@ impl Connection {
                     let msg = msg.clone();
                     self.output_close(&path, err, frame_type, msg)
                 }
-                State::Closed(_) => Ok(None),
+                State::Closed(_) => Ok(SendOption::default()),
             };
-            let out = self.absorb_error(now, res).unwrap_or(None);
+            let out = self.absorb_error(now, res).unwrap_or(SendOption::default());
             self.path = Some(path);
             out
         } else {
-            None
+            SendOption::default()
         }
     }
 
@@ -1118,9 +1139,9 @@ impl Connection {
         error: ConnectionError,
         frame_type: FrameType,
         msg: String,
-    ) -> Res<Option<Datagram>> {
+    ) -> Res<SendOption> {
         if !self.state_signaling.closing() {
-            return Ok(None);
+            return Ok(SendOption::default());
         }
         let mut close_sent = false;
         let mut encoder = Encoder::with_capacity(path.mtu());
@@ -1156,7 +1177,7 @@ impl Connection {
         if close_sent {
             self.state_signaling.close_sent();
         }
-        Ok(Some(path.datagram(encoder)))
+        Ok(SendOption::Yes(path.datagram(encoder)))
     }
 
     /// Add frames to the provided builder and
@@ -1210,15 +1231,17 @@ impl Connection {
 
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
-    fn output_path(&mut self, path: &mut Path, now: Instant) -> Res<Option<Datagram>> {
+    fn output_path(&mut self, path: &mut Path, now: Instant) -> Res<SendOption> {
         let mut initial_sent = None;
         let mut needs_padding = false;
 
+        // Whether we are limited by pacing.
+        let paced = self.loss_recovery.next_paced().map_or(false, |t| t > now);
         // Check whether we are sending packets in PTO mode.
         let (pto, cong_avail, min_pn_space, cc_limited) =
             if let Some((min_pto_pn_space, can_send)) = self.loss_recovery.check_pto() {
                 if !can_send {
-                    return Ok(None);
+                    return Ok(SendOption::default());
                 }
                 (true, path.mtu(), min_pto_pn_space, false)
             } else if self.loss_recovery.cwnd_avail() < MIN_CC_WINDOW {
@@ -1230,9 +1253,18 @@ impl Connection {
                     false,
                     self.loss_recovery.cwnd_avail(),
                     PNSpace::Initial,
-                    false,
+                    paced,
                 )
             };
+        qtrace!(
+            [self],
+            "output pto {}({}) cc {}{}{}",
+            pto,
+            min_pn_space,
+            cong_avail,
+            if cc_limited { " (limited)" } else { "" },
+            if paced { " (paced)" } else { "" },
+        );
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -1331,7 +1363,7 @@ impl Connection {
 
         if encoder.is_empty() {
             assert!(!pto);
-            Ok(None)
+            Ok(SendOption::No(paced))
         } else {
             // Pad Initial packets sent by the client to mtu bytes.
             let mut packets: Vec<u8> = encoder.into();
@@ -1344,7 +1376,7 @@ impl Connection {
                 self.loss_recovery
                     .on_packet_sent(PNSpace::Initial, initial_pn, initial);
             }
-            Ok(Some(path.datagram(packets)))
+            Ok(SendOption::Yes(path.datagram(packets)))
         }
     }
 
@@ -1367,6 +1399,7 @@ impl Connection {
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self], "client_start");
+        self.loss_recovery.start_pacer(now);
         self.handshake(now, PNSpace::Initial, None)?;
         self.set_state(State::WaitInitial);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.role)? {
@@ -2575,11 +2608,11 @@ mod tests {
         assert_eq!(1, client.stats().dropped_rx);
     }
 
-    fn exchange_ticket(client: &mut Connection, server: &mut Connection) -> Vec<u8> {
-        server.send_ticket(now(), &[]).expect("can send ticket");
-        let ticket = server.process_output(now()).dgram();
+    fn exchange_ticket(client: &mut Connection, server: &mut Connection, now: Instant) -> Vec<u8> {
+        server.send_ticket(now, &[]).expect("can send ticket");
+        let ticket = server.process_output(now).dgram();
         assert!(ticket.is_some());
-        client.process_input(ticket.unwrap(), now());
+        client.process_input(ticket.unwrap(), now);
         assert_eq!(*client.state(), State::Confirmed);
         client.resumption_token().expect("should have token")
     }
@@ -2616,7 +2649,7 @@ mod tests {
         let mut server = default_server();
         connect(&mut client, &mut server);
 
-        let token = exchange_ticket(&mut client, &mut server);
+        let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
             .set_resumption_token(now(), &token[..])
@@ -2636,7 +2669,7 @@ mod tests {
         let now = connect_with_rtt(&mut client, &mut server, now(), RTT1);
         assert_eq!(client.loss_recovery.rtt(), RTT1);
 
-        let token = exchange_ticket(&mut client, &mut server);
+        let token = exchange_ticket(&mut client, &mut server, now);
         let mut client = default_client();
         let mut server = default_server();
         client.set_resumption_token(now, &token[..]).unwrap();
@@ -2663,7 +2696,7 @@ mod tests {
         let mut server = default_server();
         connect(&mut client, &mut server);
 
-        let token = exchange_ticket(&mut client, &mut server);
+        let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
             .set_resumption_token(now(), &token[..])
@@ -2680,7 +2713,7 @@ mod tests {
         let mut server = default_server();
         connect(&mut client, &mut server);
 
-        let token = exchange_ticket(&mut client, &mut server);
+        let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
             .set_resumption_token(now(), &token[..])
@@ -2720,7 +2753,7 @@ mod tests {
         let mut server = default_server();
         connect(&mut client, &mut server);
 
-        let token = exchange_ticket(&mut client, &mut server);
+        let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
             .set_resumption_token(now(), &token[..])
@@ -2761,7 +2794,7 @@ mod tests {
         let mut server = default_server();
         connect(&mut client, &mut server);
 
-        let token = exchange_ticket(&mut client, &mut server);
+        let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
             .set_resumption_token(now(), &token[..])
@@ -2940,10 +2973,11 @@ mod tests {
 
         // Overwrite the default at the server.
         server
-            .tps
-            .borrow_mut()
-            .local
-            .set_integer(tparams::IDLE_TIMEOUT, LOWER_TIMEOUT_MS);
+            .set_local_tparam(
+                tparams::IDLE_TIMEOUT,
+                TransportParameter::Integer(LOWER_TIMEOUT_MS),
+            )
+            .unwrap();
         server.idle_timeout.timeout = LOWER_TIMEOUT;
 
         // Now connect with an RTT and force idleness manually.

@@ -10,6 +10,7 @@ use std::cmp::max;
 use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
+use crate::pace::Pacer;
 use crate::path::PATH_MTU_V6;
 use crate::tracking::SentPacket;
 use neqo_common::{const_max, const_min, qdebug, qinfo, qtrace};
@@ -29,6 +30,7 @@ pub struct CongestionControl {
     bytes_in_flight: usize,
     congestion_recovery_start_time: Option<Instant>,
     ssthresh: usize,
+    pacer: Option<Pacer>,
 }
 
 impl Default for CongestionControl {
@@ -38,6 +40,7 @@ impl Default for CongestionControl {
             bytes_in_flight: 0,
             congestion_recovery_start_time: None,
             ssthresh: std::usize::MAX,
+            pacer: None,
         }
     }
 }
@@ -46,8 +49,8 @@ impl Display for CongestionControl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "CongCtrl {}/{} ssthresh {}",
-            self.bytes_in_flight, self.congestion_window, self.ssthresh
+            "CongCtrl {}/{} ssthresh {} {:?}",
+            self.bytes_in_flight, self.congestion_window, self.ssthresh, self.pacer,
         )
     }
 }
@@ -148,7 +151,12 @@ impl CongestionControl {
         }
     }
 
-    pub fn on_packet_sent(&mut self, pkt: &SentPacket) {
+    pub fn on_packet_sent(&mut self, pkt: &SentPacket, rtt: Duration) {
+        self.pacer
+            .as_mut()
+            .unwrap()
+            .spend(pkt.time_sent, rtt, self.congestion_window, pkt.size);
+
         if !pkt.in_flight {
             return;
         }
@@ -193,5 +201,24 @@ impl CongestionControl {
     fn app_limited(&self) -> bool {
         //TODO(agrover): how do we get this info??
         false
+    }
+
+    pub fn start_pacer(&mut self, now: Instant) {
+        // Start the pacer with a small burst size of 3 packets.
+        self.pacer = Some(Pacer::new(now, MAX_DATAGRAM_SIZE * 3, MAX_DATAGRAM_SIZE));
+    }
+
+    pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {
+        // Only pace if there are bytes in flight.
+        if self.bytes_in_flight > 0 {
+            Some(
+                self.pacer
+                    .as_ref()
+                    .unwrap()
+                    .next(rtt, self.congestion_window),
+            )
+        } else {
+            None
+        }
     }
 }

@@ -561,7 +561,7 @@ mod tests {
         let out = client.process(None, now());
         assert_eq!(client.state(), Http3State::Initializing);
 
-        assert_eq!(*server.conn.state(), State::WaitInitial);
+        assert_eq!(*server.conn.state(), State::Init);
         let out = server.conn.process(out.dgram(), now());
         assert_eq!(*server.conn.state(), State::Handshaking);
 
@@ -2539,7 +2539,7 @@ mod tests {
         let out = client.process(None, now());
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
-        assert_eq!(*server.conn.state(), State::WaitInitial);
+        assert_eq!(*server.conn.state(), State::Init);
         let out = server.conn.process(out.dgram(), now());
 
         // Check that control and qpack streams are received and a
@@ -2573,7 +2573,7 @@ mod tests {
         let out = client.process(None, now());
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
-        assert_eq!(*server.conn.state(), State::WaitInitial);
+        assert_eq!(*server.conn.state(), State::Init);
         let out = server.conn.process(out.dgram(), now());
 
         // Check that control and qpack streams are received and a
@@ -2700,7 +2700,7 @@ mod tests {
         let out = client.process(None, now());
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
-        assert_eq!(*server.conn.state(), State::WaitInitial);
+        assert_eq!(*server.conn.state(), State::Init);
         let out = server.conn.process(out.dgram(), now());
 
         // Check that control and qpack streams anda SETTINGS frame are received.
