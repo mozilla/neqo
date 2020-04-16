@@ -1080,7 +1080,7 @@ impl Connection {
                 }
                 State::Closed(_) => Ok(SendOption::default()),
             };
-            let out = self.absorb_error(now, res).unwrap_or(SendOption::default());
+            let out = self.absorb_error(now, res).unwrap_or_default();
             self.path = Some(path);
             out
         } else {
@@ -1256,15 +1256,6 @@ impl Connection {
                     paced,
                 )
             };
-        qtrace!(
-            [self],
-            "output pto {}({}) cc {}{}{}",
-            pto,
-            min_pn_space,
-            cong_avail,
-            if cc_limited { " (limited)" } else { "" },
-            if paced { " (paced)" } else { "" },
-        );
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
