@@ -204,8 +204,8 @@ impl CongestionControl {
     }
 
     pub fn start_pacer(&mut self, now: Instant) {
-        // Start the pacer with a small burst size of 3 packets.
-        self.pacer = Some(Pacer::new(now, MAX_DATAGRAM_SIZE * 3, MAX_DATAGRAM_SIZE));
+        // Start the pacer with a small burst size of 2 packets.
+        self.pacer = Some(Pacer::new(now, MAX_DATAGRAM_SIZE * 2, MAX_DATAGRAM_SIZE));
     }
 
     pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {

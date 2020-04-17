@@ -1353,7 +1353,6 @@ impl Connection {
         }
 
         if encoder.is_empty() {
-            assert!(!pto);
             Ok(SendOption::No(paced))
         } else {
             // Pad Initial packets sent by the client to mtu bytes.
@@ -3372,20 +3371,18 @@ mod tests {
         let mut server = default_server();
         connect_force_idle(&mut client, &mut server);
 
-        let mut now = now();
-
-        let res = client.process(None, now);
+        let res = client.process(None, now());
         assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
         // Send lots of data.
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        let _dgrams = send_bytes(&mut client, 2, now);
-        // TODO assert_full_cwnd()
+        let (dgrams, mut now) = fill_cwnd(&mut client, 2, now());
+        assert_full_cwnd(&dgrams, POST_HANDSHAKE_CWND);
 
         // Wait for the PTO.
         now += Duration::from_secs(1);
         client.process_timer(now); // TODO merge process_timer into process_output.
-        let dgrams = send_bytes(&mut client, 2, now);
+        let (dgrams, now) = fill_cwnd(&mut client, 2, now);
         assert_eq!(dgrams.len(), 2); // Two packets in the PTO.
 
         // All (2) datagrams contain STREAM frames.
@@ -3775,32 +3772,50 @@ mod tests {
         assert_eq!(pkt0.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
     }
 
-    // Handle sending a bunch of bytes from one connection to another, until
-    // something stops us from sending.
-    fn send_bytes(src: &mut Connection, stream: u64, now: Instant) -> Vec<Datagram> {
+    /// This fills the congestion window from a single source.
+    /// As the pacer will interfere with this, this moves time forward
+    /// as `Output::Callback` is received.  Because it is hard to tell 
+    /// from the return value whether a timeout is to ACK delay, PTO, or
+    /// pacing, this looks at the congestion window to tell when to stop.
+    /// Returns a list of datagrams and the new time.
+    fn fill_cwnd(src: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagram>, Instant) {
+        const BLOCK_SIZE: usize = 4_096;
         let mut total_dgrams = Vec::new();
 
+        qtrace!(
+            "fill_cwnd starting cwnd: {}",
+            src.loss_recovery.cwnd_avail()
+        );
+
         loop {
-            let bytes_sent = src.stream_send(stream, &[0x42; 4_096]).unwrap();
-            qtrace!("send_bytes wrote {} bytes", bytes_sent);
-            if bytes_sent == 0 {
+            let bytes_sent = src.stream_send(stream, &[0x42; BLOCK_SIZE]).unwrap();
+            qtrace!("fill_cwnd wrote {} bytes", bytes_sent);
+            if bytes_sent < BLOCK_SIZE {
                 break;
             }
         }
 
         loop {
             let pkt = src.process_output(now);
-            qtrace!("send_bytes output: {:?}", pkt);
+            qtrace!(
+                "fill_cwnd cwnd remaining={}, output: {:?}",
+                src.loss_recovery.cwnd_avail(), pkt
+            );
             match pkt {
                 Output::Datagram(dgram) => {
                     total_dgrams.push(dgram);
                 }
-                Output::Callback(_) => break,
+                Output::Callback(t) => {
+                    if src.loss_recovery.cwnd_avail() < MIN_CC_WINDOW {
+                        break;
+                    }
+                    now += t;
+                }
                 _ => panic!(),
             }
         }
 
-        total_dgrams
+        (total_dgrams, now)
     }
 
     // Receive multiple packets and generate an ack-only packet.
@@ -3884,13 +3899,13 @@ mod tests {
                 TransportParameter::Integer(65536),
             )
             .unwrap();
-        connect(&mut client, &mut server);
+        connect_force_idle(&mut client, &mut server);
 
         let now = now();
 
         // Try to send a lot of data
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        let c_tx_dgrams = send_bytes(&mut client, 2, now);
+        let (c_tx_dgrams, _) = fill_cwnd(&mut client, 2, now);
         assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND);
         assert!(client.loss_recovery.cwnd_avail() < MIN_CC_WINDOW);
     }
@@ -3900,17 +3915,18 @@ mod tests {
     fn cc_slow_start_to_cong_avoidance_recovery_period() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
-
-        let now = now();
+        connect_force_idle(&mut client, &mut server);
 
         // Create stream 0
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
 
         // Buffer up lot of data and generate packets
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
+        let (c_tx_dgrams, now) = fill_cwnd(&mut client, 0, now());
         assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND);
-        let flight1_largest: PacketNumber = u64::try_from(c_tx_dgrams.len()).unwrap() - 1;
+        // Predict the packet number of the last packet sent.
+        // We have already sent one packet in `connect_force_idle` (an ACK),
+        // so this will be equal to the number of packets in this flight.
+        let flight1_largest = PacketNumber::try_from(c_tx_dgrams.len()).unwrap();
 
         // Server: Receive and generate ack
         let (s_tx_dgram, _recvd_frames) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
@@ -3933,7 +3949,7 @@ mod tests {
         }
 
         // Client: send more
-        let mut c_tx_dgrams = send_bytes(&mut client, 0, now);
+        let (mut c_tx_dgrams, now) = fill_cwnd(&mut client, 0, now);
         assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND * 2);
         let flight2_largest = flight1_largest + u64::try_from(c_tx_dgrams.len()).unwrap();
 
@@ -3968,15 +3984,13 @@ mod tests {
     fn cc_cong_avoidance_recovery_period_unchanged() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
-
-        let now = now();
+        connect_force_idle(&mut client, &mut server);
 
         // Create stream 0
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
 
         // Buffer up lot of data and generate packets
-        let mut c_tx_dgrams = send_bytes(&mut client, 0, now);
+        let (mut c_tx_dgrams, now) = fill_cwnd(&mut client, 0, now());
         assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND);
 
         // Drop 0th packet. When acked, this should put client into CARP.
@@ -4013,13 +4027,11 @@ mod tests {
         let mut server = default_server();
         connect(&mut client, &mut server);
 
-        let mut now = now();
-
         // Create stream 0
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
 
         // Buffer up lot of data and generate packets
-        let mut c_tx_dgrams = send_bytes(&mut client, 0, now);
+        let (mut c_tx_dgrams, mut now) = fill_cwnd(&mut client, 0, now());
 
         // Drop 0th packet. When acked, this should put client into CARP.
         c_tx_dgrams.remove(0);
@@ -4036,7 +4048,8 @@ mod tests {
         now += Duration::from_secs(10); // Time passes. CARP -> CA
 
         // Client: Send more data
-        let mut c_tx_dgrams = send_bytes(&mut client, 0, now);
+        let (mut c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
+        now = next_now;
 
         // Only sent 2 packets, to generate an ack but also keep cwnd increase
         // small
@@ -4066,17 +4079,20 @@ mod tests {
         now += Duration::from_secs(1);
 
         client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(client, 0, now);
+        let (c_tx_dgrams, next_now) = fill_cwnd(client, 0, now);
+        now = next_now;
         assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
 
         now += Duration::from_secs(2);
         client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(client, 0, now);
+        let (c_tx_dgrams, next_now) = fill_cwnd(client, 0, now);
+        now = next_now;
         assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
 
         now += Duration::from_secs(4);
         client.process_timer(now); // Should enter PTO mode
-        let c_tx_dgrams = send_bytes(client, 0, now);
+        let (c_tx_dgrams, next_now) = fill_cwnd(client, 0, now);
+        now = next_now;
         assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
 
         // Generate ACK
@@ -4094,15 +4110,13 @@ mod tests {
     fn cc_slow_start_to_persistent_congestion_no_acks() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
-
-        let mut now = now();
+        connect_force_idle(&mut client, &mut server);
 
         // Create stream 0
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
 
         // Buffer up lot of data and generate packets
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
+        let (c_tx_dgrams, mut now) = fill_cwnd(&mut client, 0, now());
         assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND);
 
         // Server: Receive and generate ack
@@ -4119,15 +4133,13 @@ mod tests {
     fn cc_slow_start_to_persistent_congestion_some_acks() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
-
-        let mut now = now();
+        connect_force_idle(&mut client, &mut server);
 
         // Create stream 0
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
 
         // Buffer up lot of data and generate packets
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
+        let (c_tx_dgrams, mut now) = fill_cwnd(&mut client, 0, now());
         assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND);
 
         // Server: Receive and generate ack
@@ -4138,8 +4150,8 @@ mod tests {
         client.test_process_input(s_tx_dgram, now);
 
         // send bytes that will be lost
-        let _c_tx_dgrams = send_bytes(&mut client, 0, now);
-        now += Duration::from_millis(100);
+        let (_c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
+        now = next_now + Duration::from_millis(100);
         // Not received.
         // let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
@@ -4152,15 +4164,13 @@ mod tests {
     fn cc_persistent_congestion_to_slow_start() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
-
-        let mut now = now();
+        connect_force_idle(&mut client, &mut server);
 
         // Create stream 0
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
 
         // Buffer up lot of data and generate packets
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
+        let (c_tx_dgrams, mut now) = fill_cwnd(&mut client, 0, now());
         assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND);
 
         // Server: Receive and generate ack
@@ -4176,11 +4186,11 @@ mod tests {
         now += Duration::from_millis(100);
 
         // Send packets from after start of CARP
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
+        let (c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
         assert_eq!(c_tx_dgrams.len(), 2);
 
         // Server: Receive and generate ack
-        now += Duration::from_millis(100);
+        now = next_now + Duration::from_millis(100);
         let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
         // No longer in CARP. (pkts acked from after start of CARP)
@@ -4188,7 +4198,7 @@ mod tests {
         client.test_process_input(s_tx_dgram, now);
 
         // ACKing 2 packets should let client send 4.
-        let c_tx_dgrams = send_bytes(&mut client, 0, now);
+        let (c_tx_dgrams, _) = fill_cwnd(&mut client, 0, now);
         assert_eq!(c_tx_dgrams.len(), 4);
     }
 
@@ -4439,25 +4449,35 @@ mod tests {
     fn ack_are_not_cc() {
         let mut client = default_client();
         let mut server = default_server();
-        connect(&mut client, &mut server);
+        connect_force_idle(&mut client, &mut server);
 
         // Create a stream
         assert_eq!(client.stream_create(StreamType::BiDi).unwrap(), 0);
 
-        // Buffer up lot of data and generate packets, so thatt cc window is filled.
-        let c_tx_dgrams = send_bytes(&mut client, 0, now());
+        // Buffer up lot of data and generate packets, so that cc window is filled.
+        let (c_tx_dgrams, now) = fill_cwnd(&mut client, 0, now());
         assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND);
 
-        // Server send a ack-eliciting packet
+        // The server hasn't received any of these packets yet, the server
+        // won't ACK, but if it sends an ack-eliciting packet instead.
+        qdebug!([server], "Sending ack-eliciting");
         assert_eq!(server.stream_create(StreamType::BiDi).unwrap(), 1);
-        server.stream_send(1, &[6; 100]).unwrap();
-        let ack_eliciting_pkt = server.process(None, now()).dgram();
-        assert!(ack_eliciting_pkt.is_some());
+        server.stream_send(1, b"dropped").unwrap();
+        let dropped_packet = server.process(None, now).dgram();
+        assert!(dropped_packet.is_some()); // Now drop this one.
 
-        // Make sure client can ack the server packet even if cc windows is full.
-        let ack_pkt = client.process(ack_eliciting_pkt, now()).dgram();
+        // Now the server sends a packet that will force an ACK,
+        // because the client will detect a gap.
+        server.stream_send(1, b"sent").unwrap();
+        let ack_eliciting_packet = server.process(None, now).dgram();
+        assert!(ack_eliciting_packet.is_some());
+
+        // The client can ack the server packet even if cc windows is full.
+        qdebug!([client], "Process ack-eliciting");
+        let ack_pkt = client.process(ack_eliciting_packet, now).dgram();
         assert!(ack_pkt.is_some());
-        let frames = server.test_process_input(ack_pkt.unwrap(), now());
+        qdebug!([server], "Handle ACK");
+        let frames = server.test_process_input(ack_pkt.unwrap(), now);
         assert_eq!(frames.len(), 1);
         assert!(matches!(
             frames[0],
