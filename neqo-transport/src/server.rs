@@ -303,8 +303,10 @@ impl Server {
     ) -> Option<Datagram> {
         match self.retry.validate(&token, dgram.source(), now) {
             RetryTokenResult::Invalid => None,
-            RetryTokenResult::Pass => self.accept_connection(None, dgram, now),
-            RetryTokenResult::Valid(dcid) => self.accept_connection(Some(dcid), dgram, now),
+            RetryTokenResult::Pass => self.accept_connection(dcid, None, dgram, now),
+            RetryTokenResult::Valid(orig_dcid) => {
+                self.accept_connection(dcid, Some(orig_dcid), dgram, now)
+            }
             RetryTokenResult::Validate => {
                 qinfo!([self], "Send retry for {:?}", dcid);
 
@@ -330,7 +332,8 @@ impl Server {
 
     fn accept_connection(
         &mut self,
-        odcid: Option<ConnectionId>,
+        dcid: ConnectionId,
+        orig_dcid: Option<ConnectionId>,
         dgram: Datagram,
         now: Instant,
     ) -> Option<Datagram> {
@@ -346,12 +349,7 @@ impl Server {
         let qtrace = if let Some(qlog_dir) = &self.qlog_dir {
             let mut qlog_path = qlog_dir.to_path_buf();
 
-            // Prefer odcid for file name, otherwise use ip/port
-            if let Some(odcid) = &odcid {
-                qlog_path.push(format!("{}.qlog", odcid));
-            } else {
-                qlog_path.push(format!("{}.qlog", dgram.source()));
-            }
+            qlog_path.push(format!("{}.qlog", orig_dcid.as_ref().unwrap_or(&dcid)));
 
             match OpenOptions::new()
                 .write(true)
@@ -402,7 +400,7 @@ impl Server {
         );
 
         if let Ok(mut c) = sconn {
-            if let Some(odcid) = odcid {
+            if let Some(odcid) = orig_dcid {
                 c.original_connection_id(&odcid);
             }
             c.set_qlog(qtrace);
