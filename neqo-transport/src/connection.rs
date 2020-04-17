@@ -51,8 +51,6 @@ pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
-const MIN_CC_WINDOW: usize = 0x200; // let's not send packets smaller than 512
-
 #[derive(Debug, PartialEq, Copy, Clone)]
 /// Client or Server.
 pub enum Role {
@@ -1188,7 +1186,7 @@ impl Connection {
         builder: &mut PacketBuilder,
         space: PNSpace,
         limit: usize,
-        cc_limited: bool,
+        ack_only: bool,
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool) {
         let mut tokens = Vec::new();
@@ -1198,8 +1196,8 @@ impl Connection {
             let remaining = limit - builder.len();
             // Try to get a frame from frame sources
             let mut frame = self.acks.get_frame(now, space);
-            // If we are cc limited we can only send acks!
-            if !cc_limited {
+            // If we are CC limited we can only send acks!
+            if !ack_only {
                 if frame.is_none() && space == PNSpace::ApplicationData && self.role == Role::Server
                 {
                     frame = self.state_signaling.send_done();
@@ -1235,31 +1233,17 @@ impl Connection {
         let mut initial_sent = None;
         let mut needs_padding = false;
 
-        // Whether we are limited by pacing.
-        let paced = self.loss_recovery.next_paced().map_or(false, |t| t > now);
-        // Check whether we are sending packets in PTO mode.
-        let (pto, cong_avail, min_pn_space, cc_limited) =
-            if let Some((min_pto_pn_space, can_send)) = self.loss_recovery.check_pto() {
-                if !can_send {
-                    return Ok(SendOption::default());
-                }
-                (true, path.mtu(), min_pto_pn_space, false)
-            } else if self.loss_recovery.cwnd_avail() < MIN_CC_WINDOW {
-                // If avail == 0 we do not have available congestion window, we may send only
-                // non-congestion controlled frames
-                (false, path.mtu(), PNSpace::Initial, true)
-            } else {
-                (
-                    false,
-                    self.loss_recovery.cwnd_avail(),
-                    PNSpace::Initial,
-                    paced,
-                )
-            };
+        // Determine how we are sending packets (PTO, etc..).
+        let profile = self.loss_recovery.send_profile(now, path.mtu());
+        qdebug!([self], "output_path send_profile {:?}", profile);
+        if profile.disabled() {
+            // Can't send a packet at all.
+            return Ok(SendOption::default());
+        }
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
-        let mut encoder = Encoder::with_capacity(path.mtu());
+        let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PNSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
             let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
@@ -1273,22 +1257,19 @@ impl Connection {
                 Self::build_packet_header(path, *space, encoder, tx, &self.retry_info);
             let payload_start = builder.len();
 
-            // Work out how much space we have in the congestion window.
-            let limit = min(path.mtu(), cong_avail);
-            if builder.len() + tx.expansion() > limit {
-                // No space for a packet of this type in the congestion window.
+            // Work out if we have space left.
+            if builder.len() + tx.expansion() > profile.limit() {
+                // No space for a packet of this type.
                 encoder = builder.abort();
                 continue;
             }
-            let limit = limit - tx.expansion();
-
-            debug_assert!(!(pto && cc_limited));
 
             // Add frames to the packet.
-            let (tokens, ack_eliciting) = if *space >= min_pn_space {
-                let r = self.add_frames(&mut builder, *space, limit, cc_limited, now);
+            let (tokens, ack_eliciting) = if profile.can_send(*space) {
+                let limit = profile.limit() - tx.expansion();
+                let r = self.add_frames(&mut builder, *space, limit, profile.ack_only(), now);
                 if builder.is_empty() {
-                    if pto {
+                    if profile.pto().is_some() {
                         // Add a PING if there is a PTO and nothing to send.
                         builder.encode_varint(Frame::Ping.get_type());
                         (Vec::new(), true)
@@ -1314,14 +1295,12 @@ impl Connection {
             encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
             debug_assert!(encoder.len() <= path.mtu());
 
-            if !pto && ack_eliciting {
-                self.idle_timeout.on_packet_sent(now);
-            }
-
             // Normal packets are in flight if they include PADDING frames,
             // but we don't send those.
-            let in_flight = !pto && ack_eliciting;
-
+            let in_flight = profile.pto().is_none() && ack_eliciting;
+            if in_flight {
+                self.idle_timeout.on_packet_sent(now);
+            }
             let sent = SentPacket::new(
                 now,
                 ack_eliciting,
@@ -1353,7 +1332,7 @@ impl Connection {
         }
 
         if encoder.is_empty() {
-            Ok(SendOption::No(paced))
+            Ok(SendOption::No(profile.paced()))
         } else {
             // Pad Initial packets sent by the client to mtu bytes.
             let mut packets: Vec<u8> = encoder.into();
@@ -2184,6 +2163,7 @@ mod tests {
     use crate::cc::{INITIAL_CWND_PKTS, MIN_CONG_WINDOW};
     use crate::frame::{CloseError, StreamType};
     use crate::path::PATH_MTU_V6;
+    use crate::recovery::MIN_CC_LIMIT;
 
     use neqo_common::matches;
     use std::mem;
@@ -2874,29 +2854,37 @@ mod tests {
         assert!(client.events().any(stream_readable));
     }
 
+    /// Connect with an RTT and then force both peers to be idle.
     /// Getting the client and server to reach an idle state is surprisingly hard.
     /// The server sends HANDSHAKE_DONE at the end of the handshake, and the client
-    /// doesn't immediately acknowledge it.
-
-    /// Force the client to send an ACK by having the server send two packets out
-    /// of order.
-    fn connect_force_idle(client: &mut Connection, server: &mut Connection) {
-        connect(client, server);
-        let p1 = send_something(server, now());
-        let p2 = send_something(server, now());
-        client.process_input(p2, now());
-        // Now the client really wants to send an ACK, but hold it back.
-        let ack = client.process(Some(p1), now()).dgram();
+    /// doesn't immediately acknowledge it.  Reordering packets does the trick.
+    fn connect_rtt_idle(
+        client: &mut Connection,
+        server: &mut Connection,
+        rtt: Duration,
+    ) -> Instant {
+        let mut now = connect_with_rtt(client, server, now(), rtt);
+        let p1 = send_something(server, now);
+        let p2 = send_something(server, now);
+        now += rtt / 2;
+        // Delivering p2 first at the client causes it to want to ACK.
+        client.process_input(p2, now);
+        // Delivering p1 should not have the client change its mind about the ACK.
+        let ack = client.process(Some(p1), now).dgram();
         assert!(ack.is_some());
-        // Now the server has its ACK and both should be idle.
         assert_eq!(
-            server.process(ack, now()),
+            server.process(ack, now),
             Output::Callback(LOCAL_IDLE_TIMEOUT)
         );
         assert_eq!(
-            client.process_output(now()),
+            client.process_output(now),
             Output::Callback(LOCAL_IDLE_TIMEOUT)
         );
+        now
+    }
+
+    fn connect_force_idle(client: &mut Connection, server: &mut Connection) {
+        connect_rtt_idle(client, server, Duration::new(0, 0));
     }
 
     #[test]
@@ -3774,7 +3762,7 @@ mod tests {
 
     /// This fills the congestion window from a single source.
     /// As the pacer will interfere with this, this moves time forward
-    /// as `Output::Callback` is received.  Because it is hard to tell 
+    /// as `Output::Callback` is received.  Because it is hard to tell
     /// from the return value whether a timeout is to ACK delay, PTO, or
     /// pacing, this looks at the congestion window to tell when to stop.
     /// Returns a list of datagrams and the new time.
@@ -3799,14 +3787,15 @@ mod tests {
             let pkt = src.process_output(now);
             qtrace!(
                 "fill_cwnd cwnd remaining={}, output: {:?}",
-                src.loss_recovery.cwnd_avail(), pkt
+                src.loss_recovery.cwnd_avail(),
+                pkt
             );
             match pkt {
                 Output::Datagram(dgram) => {
                     total_dgrams.push(dgram);
                 }
                 Output::Callback(t) => {
-                    if src.loss_recovery.cwnd_avail() < MIN_CC_WINDOW {
+                    if src.loss_recovery.cwnd_avail() < MIN_CC_LIMIT {
                         break;
                     }
                     now += t;
@@ -3866,13 +3855,13 @@ mod tests {
 
     /// Determine the number of packets required to fill the CWND.
     const fn cwnd_packets(data: usize) -> usize {
-        (data + MIN_CC_WINDOW - 1) / PATH_MTU_V6
+        (data + MIN_CC_LIMIT - 1) / PATH_MTU_V6
     }
 
-    /// Determin the size of the last packet.
-    /// The minimal size of a packet is MIN_CC_WINDOW.
+    /// Determine the size of the last packet.
+    /// The minimal size of a packet is `MIN_CC_LIMIT`.
     fn last_packet(cwnd: usize) -> usize {
-        if (cwnd % PATH_MTU_V6) > MIN_CC_WINDOW {
+        if (cwnd % PATH_MTU_V6) > MIN_CC_LIMIT {
             cwnd % PATH_MTU_V6
         } else {
             PATH_MTU_V6
@@ -3907,7 +3896,7 @@ mod tests {
         assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
         let (c_tx_dgrams, _) = fill_cwnd(&mut client, 2, now);
         assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND);
-        assert!(client.loss_recovery.cwnd_avail() < MIN_CC_WINDOW);
+        assert!(client.loss_recovery.cwnd_avail() < MIN_CC_LIMIT);
     }
 
     #[test]
@@ -4534,5 +4523,44 @@ mod tests {
         let readable_stream_evt =
             |e| matches!(e, ConnectionEvent::RecvStreamReadable { stream_id } if stream_id == id);
         assert!(!client.events().any(readable_stream_evt));
+    }
+
+    #[test]
+    fn pace() {
+        const RTT: Duration = Duration::from_millis(1000);
+        const DATA: &[u8] = &[0xcc; 4_096];
+        const BURST_SIZE: usize = 2;
+        let mut client = default_client();
+        let mut server = default_server();
+        let mut now = connect_rtt_idle(&mut client, &mut server, RTT);
+
+        // Now fill up the pipe and watch it trickle out.
+        let stream = client.stream_create(StreamType::BiDi).unwrap();
+        loop {
+            let written = client.stream_send(stream, DATA).unwrap();
+            if written < DATA.len() {
+                break;
+            }
+        }
+        let mut count = 0;
+        // We should get a burst at first.
+        for _ in 0..BURST_SIZE {
+            let dgram = client.process_output(now).dgram();
+            assert!(dgram.is_some());
+            count += 1;
+        }
+        let gap = client.process_output(now).callback();
+        assert_ne!(gap, Duration::new(0, 0));
+        for _ in BURST_SIZE..cwnd_packets(POST_HANDSHAKE_CWND) {
+            assert_eq!(client.process_output(now).callback(), gap);
+            now += gap;
+            let dgram = client.process_output(now).dgram();
+            assert!(dgram.is_some());
+            count += 1;
+        }
+        assert_eq!(count, cwnd_packets(POST_HANDSHAKE_CWND));
+        let fin = client.process_output(now).callback();
+        assert_ne!(fin, Duration::new(0, 0));
+        assert_ne!(fin, gap);
     }
 }

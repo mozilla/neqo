@@ -27,6 +27,9 @@ pub const GRANULARITY: Duration = Duration::from_millis(20);
 // caching. See https://github.com/mozilla/neqo/issues/79
 const INITIAL_RTT: Duration = Duration::from_millis(100);
 const PACKET_THRESHOLD: u64 = 3;
+/// `MIN_CC_LIMIT` is the minimum size of the congestion window.
+/// If the window is below this, we will only send ACK frames.
+pub(crate) const MIN_CC_LIMIT: usize = 512;
 
 #[derive(Debug, Clone)]
 pub enum RecoveryToken {
@@ -91,6 +94,40 @@ impl RttVals {
     }
 }
 
+/// `SendProfile` tells a sender how to send packets.
+#[derive(Debug)]
+pub struct SendProfile {
+    limit: usize,
+    pto: Option<PNSpace>,
+    paced: bool,
+}
+
+impl SendProfile {
+    pub fn pto(&self) -> Option<PNSpace> {
+        self.pto
+    }
+
+    pub fn ack_only(&self) -> bool {
+        self.limit < MIN_CC_LIMIT || self.paced
+    }
+
+    pub fn paced(&self) -> bool {
+        self.paced
+    }
+
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    pub fn disabled(&self) -> bool {
+        self.pto.is_some() && self.limit == 0
+    }
+
+    pub fn can_send(&self, space: PNSpace) -> bool {
+        self.pto.map_or(true, |sp| space >= sp)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct LossRecoveryState {
     mode: LossRecoveryMode,
@@ -113,20 +150,27 @@ impl LossRecoveryState {
         self.mode
     }
 
-    pub fn check_pto(&mut self) -> Option<(PNSpace, bool)> {
+    pub fn pto(&self) -> Option<PNSpace> {
+        if let LossRecoveryMode::PtoExpired { min_pn_space, .. } = &self.mode {
+            Some(*min_pn_space)
+        } else {
+            None
+        }
+    }
+
+    pub fn take_pto_packet(&mut self) -> bool {
         if let LossRecoveryMode::PtoExpired {
-            dgram_available,
-            min_pn_space,
+            dgram_available, ..
         } = &mut self.mode
         {
             if *dgram_available > 0 {
                 *dgram_available -= 1;
-                Some((*min_pn_space, true))
+                true
             } else {
-                Some((*min_pn_space, false))
+                false
             }
         } else {
-            None
+            panic!("not a PTO");
         }
     }
 }
@@ -711,10 +755,37 @@ impl LossRecovery {
         }
     }
 
-    /// Check the PTO state and - if there is a PTO - return the packet number space and
-    /// whether more packets can be sent.
-    pub fn check_pto(&mut self) -> Option<(PNSpace, bool)> {
-        self.loss_recovery_state.check_pto()
+    /// Check how packets should be sent, based on whether there is a PTO,
+    /// what the current congestion window is, and what the pacer says.
+    pub fn send_profile(&mut self, now: Instant, mtu: usize) -> SendProfile {
+        let pto = self.loss_recovery_state.pto();
+        let limit = if pto.is_some() {
+            if self.loss_recovery_state.take_pto_packet() {
+                mtu
+            } else {
+                0
+            }
+        } else {
+            let cwnd = self.cwnd_avail();
+            if cwnd < MIN_CC_LIMIT {
+                MIN_CC_LIMIT - 1 // This will cause only ACKs to be sent.
+            } else if cwnd < mtu {
+                cwnd
+            } else {
+                // More than an MTU available; we might need to pace.
+                let paced = self.next_paced().map_or(false, |t| t > now);
+                return SendProfile {
+                    limit: mtu,
+                    pto,
+                    paced,
+                };
+            }
+        };
+        SendProfile {
+            limit,
+            pto,
+            paced: false,
+        }
     }
 }
 
