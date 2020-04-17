@@ -6,7 +6,7 @@
 
 // Encoding and decoding packets off the wire.
 
-use neqo_common::{hex_with_len, matches, Decoder};
+use neqo_common::{hex, hex_with_len, matches, Decoder};
 use neqo_crypto::random;
 
 use std::borrow::Borrow;
@@ -76,7 +76,7 @@ impl ::std::fmt::Debug for ConnectionId {
 
 impl ::std::fmt::Display for ConnectionId {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{}", hex_with_len(&self.cid))
+        write!(f, "{}", hex(&self.cid))
     }
 }
 
