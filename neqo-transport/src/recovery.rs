@@ -70,8 +70,8 @@ impl RttVals {
                     self.latest_rtt - smoothed_rtt
                 };
 
-                self.rttvar = (self.rttvar * 3 / 4) + (rttvar_sample / 4);
-                self.smoothed_rtt = Some((smoothed_rtt * 7 / 8) + (self.latest_rtt / 8));
+                self.rttvar = (self.rttvar * 3 + rttvar_sample) / 4;
+                self.smoothed_rtt = Some((smoothed_rtt * 7 + self.latest_rtt) / 8);
             }
         }
     }
