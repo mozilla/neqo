@@ -8,6 +8,7 @@
 #![allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 
 use crate::constants::*;
+use crate::err::{secstatus_to_res, Res};
 
 use std::os::raw::{c_uint, c_void};
 
@@ -43,7 +44,7 @@ pub enum Opt {
 impl Opt {
     // Cast is safe here because SSLOptions are within the i32 range
     #[allow(clippy::cast_possible_wrap)]
-    pub fn as_int(self) -> PRInt32 {
+    pub(crate) fn as_int(self) -> PRInt32 {
         let i = match self {
             Self::Locking => SSLOption::SSL_NO_LOCKS,
             Self::Tickets => SSLOption::SSL_ENABLE_SESSION_TICKETS,
@@ -60,12 +61,16 @@ impl Opt {
     }
 
     // Some options are backwards, like SSL_NO_LOCKS, so use this to manage that.
-    pub fn map_enabled(self, enabled: bool) -> PRIntn {
+    fn map_enabled(self, enabled: bool) -> PRIntn {
         let v = match self {
             Self::Locking => !enabled,
             _ => enabled,
         };
         PRIntn::from(v)
+    }
+
+    pub(crate) fn set(self, fd: *mut PRFileDesc, value: bool) -> Res<()> {
+        secstatus_to_res(unsafe { SSL_OptionSet(fd, self.as_int(), self.map_enabled(value)) })
     }
 }
 
