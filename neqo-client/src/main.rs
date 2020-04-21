@@ -635,7 +635,7 @@ mod old {
             )?;
 
             let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
-            let req: String = "GET /10\r\n".to_string();
+            let req = format!("GET {}\r\n", url.path());
             client
                 .stream_send(client_stream_id, req.as_bytes())
                 .unwrap();
