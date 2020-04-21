@@ -23,8 +23,7 @@ use neqo_common::{
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, AuthenticationStatus, Client, HandshakeState, Record, SecretAgentInfo,
-    Server,
+    Agent, AntiReplay, AuthenticationStatus, Client, HandshakeState, SecretAgentInfo, Server,
 };
 
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
@@ -598,7 +597,7 @@ impl Connection {
                 enc.encode(extra);
                 let records = s.send_ticket(now, &enc)?;
                 qinfo!([self], "send session ticket {}", hex(&enc));
-                self.crypto.buffer_records(records);
+                self.crypto.buffer_records(records)?;
                 Ok(())
             }
             Agent::Client(_) => Err(Error::WrongRole),
@@ -946,7 +945,6 @@ impl Connection {
         Ok(frames)
     }
 
-    /// Ok(true) if the packet is a duplicate
     fn process_packet(
         &mut self,
         packet: &DecryptedPacket,
@@ -956,8 +954,6 @@ impl Connection {
         // crypto state if this fails? Otherwise, we will get a panic
         // on the assert for doesn't exist.
         // OK, we have a valid packet.
-
-        // TODO(ekr@rtfm.com): Filter for valid for this epoch.
 
         let space = PNSpace::from(packet.packet_type());
         if self.acks[space].is_duplicate(packet.pn()) {
@@ -1439,30 +1435,10 @@ impl Connection {
     }
 
     fn handshake(&mut self, now: Instant, space: PNSpace, data: Option<&[u8]>) -> Res<()> {
-        qtrace!("Handshake space={} data={:0x?}", space, data);
+        qtrace!([self], "Handshake space={} data={:0x?}", space, data);
 
-        let rec = data.map(|d| {
-            qtrace!([self], "Handshake received {:0x?} ", d);
-            Record {
-                ct: 22, // TODO(ekr@rtfm.com): Symbolic constants for CT. This is handshake.
-                epoch: space.into(),
-                data: d.to_vec(),
-            }
-        });
-        let try_update = rec.is_some();
-
-        match self.crypto.tls.handshake_raw(now, rec) {
-            Err(e) => {
-                qwarn!([self], "Handshake failed");
-                return Err(match self.crypto.tls.alert() {
-                    Some(a) => Error::CryptoAlert(*a),
-                    _ => Error::CryptoError(e),
-                });
-            }
-            Ok(msgs) => self.crypto.buffer_records(msgs),
-        }
-
-        match self.crypto.tls.state() {
+        let try_update = data.is_some();
+        match self.crypto.handshake(now, space, data)? {
             HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
             HandshakeState::AuthenticationPending => self.events.authentication_needed(),
             HandshakeState::Complete(_) => {

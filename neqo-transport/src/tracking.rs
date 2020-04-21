@@ -13,7 +13,7 @@ use std::ops::{Index, IndexMut};
 use std::time::{Duration, Instant};
 
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};
-use neqo_crypto::{Epoch, TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
+use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::frame::{AckRange, Frame};
 use crate::packet::{PacketNumber, PacketType};
@@ -101,17 +101,6 @@ impl SentPacket {
         } else {
             self.pto = true;
             true
-        }
-    }
-}
-
-impl Into<Epoch> for PNSpace {
-    fn into(self) -> Epoch {
-        match self {
-            Self::Initial => TLS_EPOCH_INITIAL,
-            Self::Handshake => TLS_EPOCH_HANDSHAKE,
-            // Our epoch progresses forward, but the TLS epoch is fixed to 3.
-            Self::ApplicationData => TLS_EPOCH_APPLICATION_DATA,
         }
     }
 }
