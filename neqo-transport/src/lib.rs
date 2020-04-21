@@ -43,6 +43,7 @@ pub const QUIC_VERSION: Version = 0xff00_0000 + 27;
 const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30); // 30 second
 
 type TransportError = u64;
+const ERROR_APPLICATION_CLOSE: TransportError = 12;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 #[allow(clippy::pub_enum_variant_names)]
@@ -107,7 +108,7 @@ impl Error {
             Self::TransportParameterError => 8,
             Self::ProtocolViolation => 10,
             Self::InvalidToken => 11,
-            Self::ApplicationError => 12,
+            Self::ApplicationError => ERROR_APPLICATION_CLOSE,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),
             Self::PeerError(a) => *a,
             // All the rest are internal errors.
