@@ -474,7 +474,8 @@ mod old {
 
     use super::{qlog_new, Res};
 
-    use neqo_common::Datagram;
+    use neqo_common::{matches, Datagram};
+    use neqo_crypto::AuthenticationStatus;
     use neqo_transport::{
         Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
     };
@@ -498,6 +499,10 @@ mod old {
             client: &mut Connection,
             _out_file: &mut Option<File>,
         ) -> Res<bool> {
+            let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+            if client.events().any(authentication_needed) {
+                client.authenticated(AuthenticationStatus::Ok, Instant::now());
+            }
             Ok(State::Connected != *dbg!(client.state()))
         }
     }
