@@ -38,7 +38,7 @@ fn process_server_events(server: &mut Http3Server) {
                         (String::from(":status"), String::from("200")),
                         (String::from("content-length"), String::from("3")),
                     ],
-                    RESPONSE_DATA.to_vec(),
+                    RESPONSE_DATA,
                 )
                 .unwrap();
             request_found = true;
