@@ -446,6 +446,23 @@ impl Frame {
         }
     }
 
+    /// Convert a CONNECTION_CLOSE into a nicer CONNECTION_CLOSE.
+    pub fn sanitize_close(&self) -> Self {
+        if let Self::ConnectionClose { error_code, .. } = &self {
+            if let CloseError::Application(_) = error_code {
+                Self::ConnectionClose {
+                    error_code: CloseError::Transport(Error::ApplicationError.code()),
+                    frame_type: 0,
+                    reason_phrase: vec![],
+                }
+            } else {
+                self.clone()
+            }
+        } else {
+            panic!("Attempted to sanitize a non-close frame");
+        }
+    }
+
     pub fn ack_eliciting(&self) -> bool {
         !matches!(self, Self::Ack { .. } | Self::Padding | Self::ConnectionClose { .. })
     }

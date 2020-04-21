@@ -94,7 +94,7 @@ impl Http3ServerHandler {
         match &res {
             Err(e) => {
                 qinfo!([self], "Connection error: {}.", e);
-                conn.close(now, e.code(), &format!("{}", e));
+                conn.close(now, e.code(), format!("{}", e));
                 self.base_handler.close(e.code());
                 self.events
                     .connection_state_change(self.base_handler.state());

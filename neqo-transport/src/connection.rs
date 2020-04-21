@@ -11,6 +11,7 @@ use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{self, Debug};
+use std::mem;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -31,7 +32,7 @@ use crate::crypto::{Crypto, CryptoDxState};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
-use crate::frame::{AckRange, Frame, FrameType, StreamType};
+use crate::frame::{AckRange, CloseError, Frame, FrameType, StreamType};
 use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
 use crate::path::Path;
 use crate::qlog;
@@ -66,8 +67,6 @@ pub enum State {
     Confirmed,
     Closing {
         error: ConnectionError,
-        frame_type: FrameType,
-        msg: String,
         timeout: Instant,
     },
     Closed(ConnectionError),
@@ -77,6 +76,11 @@ impl State {
     #[must_use]
     pub fn connected(&self) -> bool {
         matches!(self, Self::Connected | Self::Confirmed)
+    }
+
+    #[must_use]
+    pub fn closed(&self) -> bool {
+        matches!(self, Self::Closing {..} | Self::Closed(_))
     }
 }
 
@@ -270,8 +274,10 @@ impl IdleTimeout {
 enum StateSignaling {
     Idle,
     HandshakeDone,
-    ConnectionClose,
-    CloseSent,
+    // This state saves the frame that needs to be sent.
+    ConnectionClose(Frame),
+    // This state saves the frame that might need to be sent again.
+    CloseSent(Frame),
 }
 
 impl StateSignaling {
@@ -292,17 +298,32 @@ impl StateSignaling {
         }
     }
 
-    pub fn closing(&self) -> bool {
-        *self == Self::ConnectionClose
+    pub fn close(&mut self, error: ConnectionError, frame_type: FrameType, message: String) {
+        let frame = Frame::ConnectionClose {
+            error_code: CloseError::from(error),
+            frame_type,
+            reason_phrase: Vec::from(message),
+        };
+        *self = Self::ConnectionClose(frame);
     }
 
-    pub fn close(&mut self) {
-        *self = Self::ConnectionClose
+    /// If a close is pending, take it.
+    pub fn close_frame(&mut self) -> Option<Frame> {
+        if let Self::ConnectionClose(frame) = self {
+            let frame = mem::replace(frame, Frame::Padding);
+            *self = Self::CloseSent(frame.clone());
+            Some(frame)
+        } else {
+            None
+        }
     }
 
-    pub fn close_sent(&mut self) {
-        debug_assert!(self.closing());
-        *self = Self::CloseSent
+    /// If a close can be sent again, prepare to send it again.
+    pub fn send_close(&mut self) {
+        if let Self::CloseSent(frame) = self {
+            let frame = mem::replace(frame, Frame::Padding);
+            *self = Self::ConnectionClose(frame);
+        }
     }
 }
 
@@ -643,15 +664,24 @@ impl Connection {
             let msg = format!("{:?}", v);
             #[cfg(not(debug_assertions))]
             let msg = String::from("");
-            if let State::Closed(err) | State::Closing { error: err, .. } = &self.state {
-                qwarn!([self], "Closing again after error {:?}", err);
-            } else {
-                self.set_state(State::Closing {
-                    error: ConnectionError::Transport(v.clone()),
-                    frame_type,
-                    msg,
-                    timeout: self.get_closing_period_time(now),
-                });
+            let error = ConnectionError::Transport(v.clone());
+            match &self.state {
+                State::Closed(err) | State::Closing { error: err, .. } => {
+                    qwarn!([self], "Closing again after error {:?}", err);
+                }
+                State::WaitInitial => {
+                    // We don't have any state yet, so don't bother with
+                    // the closing state, just send one CONNECTION_CLOSE.
+                    self.set_state(State::Closed(error.clone()));
+                    self.state_signaling.close(error, frame_type, msg);
+                }
+                _ => {
+                    self.set_state(State::Closing {
+                        error: error.clone(),
+                        timeout: self.get_closing_period_time(now),
+                    });
+                    self.state_signaling.close(error, frame_type, msg);
+                }
             }
         }
         res
@@ -664,10 +694,20 @@ impl Connection {
     }
 
     pub fn process_timer(&mut self, now: Instant) {
-        if matches!(self.state(), State::Closing{..} | State::Closed{..}) {
-            qinfo!("Timer fired while closing/closed");
+        if let State::Closing { error, timeout, .. } = &self.state {
+            if *timeout <= now {
+                // Close timeout expired, move to Closed
+                let st = State::Closed(error.clone());
+                self.set_state(st);
+                qinfo!("Closing timer expired");
+                return;
+            }
+        }
+        if let State::Closed(_) = self.state {
+            qinfo!("Timer fired while closed");
             return;
         }
+
         if self.idle_timeout.expired(now, self.loss_recovery.raw_pto()) {
             qinfo!("idle timeout expired");
             self.set_state(State::Closed(ConnectionError::Transport(
@@ -745,27 +785,11 @@ impl Connection {
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
     pub fn process_output(&mut self, now: Instant) -> Output {
-        let pkt = match &self.state {
-            State::Init => {
-                let res = self.client_start(now);
-                self.absorb_error(now, res);
-                self.output(now)
-            }
-            State::Closing { error, timeout, .. } => {
-                if *timeout > now {
-                    self.output(now)
-                } else {
-                    // Close timeout expired, move to Closed
-                    let st = State::Closed(error.clone());
-                    self.set_state(st);
-                    None
-                }
-            }
-            State::Closed(..) => None,
-            _ => self.output(now),
-        };
-
-        match pkt {
+        if let State::Init = &self.state {
+            let res = self.client_start(now);
+            self.absorb_error(now, res);
+        }
+        match self.output(now) {
             Some(pkt) => Output::Datagram(pkt),
             None => match self.state {
                 State::Closed(_) => Output::None,
@@ -901,7 +925,7 @@ impl Connection {
                 State::Closing { .. } => {
                     // Don't bother processing the packet. Instead ask to get a
                     // new close frame.
-                    self.state_signaling.close();
+                    self.state_signaling.send_close();
                     return Ok(frames);
                 }
                 State::Closed(..) => {
@@ -930,8 +954,12 @@ impl Connection {
                     &payload[..],
                 );
                 qlog::packet_received(&mut self.qlog, &payload)?;
-                frames.extend(self.process_packet(&payload, now)?);
-                if matches!(self.state, State::WaitInitial) {
+                let res = self.process_packet(&payload, now);
+                if res.is_err() && self.path.is_none() {
+                    self.initialize_path(&packet, &d);
+                }
+                frames.extend(res?);
+                if self.state == State::WaitInitial {
                     self.start_handshake(&packet, &d)?;
                 }
                 self.process_migrations(&d)?;
@@ -993,16 +1021,20 @@ impl Connection {
         Ok(frames)
     }
 
+    fn initialize_path(&mut self, packet: &PublicPacket, d: &Datagram) {
+        debug_assert!(self.path.is_none());
+        let mut p = Path::from_datagram(&d, ConnectionId::from(packet.scid()));
+        p.add_local_cid(self.cid_manager.borrow_mut().generate_cid());
+        self.path = Some(p);
+    }
+
     fn start_handshake(&mut self, packet: &PublicPacket, d: &Datagram) -> Res<()> {
         if self.role == Role::Server {
             assert_eq!(packet.packet_type(), PacketType::Initial);
             // A server needs to accept the client's selected CID during the handshake.
             self.valid_cids.push(ConnectionId::from(packet.dcid()));
             // Install a path.
-            assert!(self.path.is_none());
-            let mut p = Path::from_datagram(&d, ConnectionId::from(packet.scid()));
-            p.add_local_cid(self.cid_manager.borrow_mut().generate_cid());
-            self.path = Some(p);
+            self.initialize_path(packet, d);
 
             self.zero_rtt_state = match self.crypto.enable_0rtt(self.role) {
                 Ok(true) => {
@@ -1042,18 +1074,13 @@ impl Connection {
                 | State::Handshaking
                 | State::Connected
                 | State::Confirmed => self.output_path(&mut path, now),
-                State::Closing {
-                    error,
-                    frame_type,
-                    msg,
-                    ..
-                } => {
-                    let err = error.clone();
-                    let frame_type = *frame_type;
-                    let msg = msg.clone();
-                    self.output_close(&path, err, frame_type, msg)
+                State::Closing { .. } | State::Closed(_) => {
+                    if let Some(frame) = self.state_signaling.close_frame() {
+                        self.output_close(&path, &frame)
+                    } else {
+                        Ok(None)
+                    }
                 }
-                State::Closed(_) => Ok(None),
             };
             let out = self.absorb_error(now, res).unwrap_or(None);
             self.path = Some(path);
@@ -1108,17 +1135,7 @@ impl Connection {
         (pt, pn, builder)
     }
 
-    fn output_close(
-        &mut self,
-        path: &Path,
-        error: ConnectionError,
-        frame_type: FrameType,
-        msg: String,
-    ) -> Res<Option<Datagram>> {
-        if !self.state_signaling.closing() {
-            return Ok(None);
-        }
-        let mut close_sent = false;
+    fn output_close(&mut self, path: &Path, frame: &Frame) -> Res<Option<Datagram>> {
         let mut encoder = Encoder::with_capacity(path.mtu());
         for space in PNSpace::iter() {
             let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
@@ -1132,26 +1149,17 @@ impl Connection {
                 continue;
             }
 
-            // ConnectionError::Application only allowed at 1RTT.
-            if *space != PNSpace::ApplicationData
-                && matches!(error, ConnectionError::Application(_))
-            {
-                continue;
-            }
             let (_, _, mut builder) = Self::build_packet_header(path, *space, encoder, tx, &None);
-            let frame = Frame::ConnectionClose {
-                error_code: error.clone().into(),
-                frame_type,
-                reason_phrase: Vec::from(msg.clone()),
-            };
-            frame.marshal(&mut builder);
+            // ConnectionError::Application is only allowed at 1RTT.
+            if *space == PNSpace::ApplicationData {
+                frame.marshal(&mut builder);
+            } else {
+                frame.sanitize_close().marshal(&mut builder);
+            }
+
             encoder = builder.build(tx)?;
-            close_sent = true;
         }
 
-        if close_sent {
-            self.state_signaling.close_sent();
-        }
         Ok(Some(path.datagram(encoder)))
     }
 
@@ -1383,13 +1391,13 @@ impl Connection {
     }
 
     /// Close the connection.
-    pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
+    pub fn close(&mut self, now: Instant, error: AppError, msg: String) {
+        let error = ConnectionError::Application(error);
         self.set_state(State::Closing {
-            error: ConnectionError::Application(error),
-            frame_type: 0,
-            msg: msg.into(),
+            error: error.clone(),
             timeout: self.get_closing_period_time(now),
         });
+        self.state_signaling.close(error, 0, msg);
     }
 
     fn set_initial_limits(&mut self) {
@@ -1782,18 +1790,9 @@ impl Connection {
         if state > self.state {
             qinfo!([self], "State change from {:?} -> {:?}", self.state, state);
             self.state = state.clone();
-            match &self.state {
-                State::Closing { .. } => {
-                    self.send_streams.clear();
-                    self.recv_streams.clear();
-                    self.state_signaling.close();
-                }
-                State::Closed(..) => {
-                    // Equivalent to spec's "draining" state -- never send anything.
-                    self.send_streams.clear();
-                    self.recv_streams.clear();
-                }
-                _ => {}
+            if self.state.closed() {
+                self.send_streams.clear();
+                self.recv_streams.clear();
             }
             self.events.connection_state_change(state);
         } else {
@@ -2576,7 +2575,7 @@ mod tests {
 
         let now = now();
 
-        client.close(now, 42, "");
+        client.close(now, 42, String::new());
 
         let out = client.process(None, now);
 
@@ -4473,5 +4472,67 @@ mod tests {
         let readable_stream_evt =
             |e| matches!(e, ConnectionEvent::RecvStreamReadable { stream_id } if stream_id == id);
         assert!(!client.events().any(readable_stream_evt));
+    }
+
+    // During the handshake, an application close should be sanitized.
+    #[test]
+    fn early_application_close() {
+        let mut client = default_client();
+        let mut server = default_server();
+
+        // One flight each.
+        let dgram = client.process(None, now()).dgram();
+        assert!(dgram.is_some());
+        let dgram = server.process(dgram, now()).dgram();
+        assert!(dgram.is_some());
+
+        server.close(now(), 77, String::from(""));
+        assert!(server.state().closed());
+        let dgram = server.process(None, now()).dgram();
+        assert!(dgram.is_some());
+
+        let frames = client.test_process_input(dgram.unwrap(), now());
+        assert!(matches!(
+            frames[0],
+            (
+                Frame::ConnectionClose {
+                    error_code: CloseError::Transport(code),
+                    ..
+                },
+                PNSpace::Initial,
+            ) if code == Error::ApplicationError.code()
+        ));
+        assert!(client.state().closed());
+    }
+
+    #[test]
+    fn bad_tls_version() {
+        let mut client = default_client();
+        // Do a bad, bad thing.
+        client
+            .crypto
+            .tls
+            .set_option(neqo_crypto::Opt::Tls13CompatMode, true)
+            .unwrap();
+        let mut server = default_server();
+        let dgram = client.process(None, now()).dgram();
+        assert!(dgram.is_some());
+        let dgram = server.process(dgram, now()).dgram();
+        assert_eq!(
+            *server.state(),
+            State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
+        );
+        assert!(dgram.is_some());
+        let frames = client.test_process_input(dgram.unwrap(), now());
+        assert!(matches!(
+            frames[0],
+            (
+                Frame::ConnectionClose {
+                    error_code: CloseError::Transport(_),
+                    ..
+                },
+                PNSpace::Initial,
+            )
+        ));
     }
 }

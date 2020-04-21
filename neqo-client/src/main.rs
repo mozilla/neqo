@@ -245,7 +245,7 @@ impl Handler for PostConnectHandler {
                     if stream_done {
                         self.streams.remove(&stream_id);
                         if self.streams.is_empty() {
-                            client.close(Instant::now(), 0, "kthxbye!");
+                            client.close(Instant::now(), 0, String::from("kthxbye!"));
                             return Ok(false);
                         }
                     }
@@ -546,7 +546,7 @@ mod old {
                         }
                         if fin {
                             println!("<FIN[{}]>", stream_id);
-                            client.close(Instant::now(), 0, "kthxbye!");
+                            client.close(Instant::now(), 0, String::from("kthxbye!"));
                             return Ok(false);
                         }
                     }

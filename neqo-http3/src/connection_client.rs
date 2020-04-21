@@ -119,7 +119,7 @@ impl Http3Client {
             .set_resumption_settings(&mut self.conn, settings)
     }
 
-    pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
+    pub fn close(&mut self, now: Instant, error: AppError, msg: String) {
         qinfo!([self], "Close the connection error={} msg={}.", error, msg);
         if !matches!(self.base_handler.state, Http3State::Closing(_)| Http3State::Closed(_)) {
             self.conn.close(now, error, msg);
@@ -229,7 +229,7 @@ impl Http3Client {
             }
             Err(e) => {
                 if e == Error::HttpFrameError {
-                    self.close(now, e.code(), "");
+                    self.close(now, e.code(), String::from(""));
                 }
                 Err(e)
             }
@@ -318,7 +318,7 @@ impl Http3Client {
         match &res {
             Err(e) => {
                 qinfo!([self], "Connection error: {}.", e);
-                self.close(now, e.code(), &format!("{}", e));
+                self.close(now, e.code(), format!("{}", e));
                 true
             }
             _ => false,
@@ -1141,7 +1141,7 @@ mod tests {
         let res = client.read_response_data(now(), request_stream_id, &mut buf);
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, "");
+        client.close(now(), 0, String::from(""));
     }
 
     // Helper function: read response when a server sends HTTP_RESPONSE_2.
@@ -1178,7 +1178,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, "");
+        client.close(now(), 0, String::from(""));
     }
 
     // Data sent with a request:
@@ -1549,7 +1549,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, "");
+        client.close(now(), 0, String::from(""));
     }
 
     // Server sends stop sending and reset.
@@ -1603,7 +1603,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, "");
+        client.close(now(), 0, String::from(""));
     }
 
     // Server sends stop sending with RequestRejected, but it does not send reset.
@@ -1652,7 +1652,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, "");
+        client.close(now(), 0, String::from(""));
     }
 
     // Server sends stop sending and reset. We have some events for that stream already
@@ -1715,7 +1715,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, "");
+        client.close(now(), 0, String::from(""));
     }
 
     // Server sends stop sending with code that is not EarlyResponse.
@@ -1773,7 +1773,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, "");
+        client.close(now(), 0, String::from(""));
     }
 
     // Server sends a reset. We will close sending side as well.
@@ -1821,7 +1821,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, "");
+        client.close(now(), 0, String::from(""));
     }
 
     fn test_incomplet_frame(buf: &[u8], error: Error) {
@@ -1938,7 +1938,7 @@ mod tests {
 
         assert!(stream_reset);
         assert_eq!(client.state(), Http3State::GoingAway);
-        client.close(now(), 0, "");
+        client.close(now(), 0, String::from(""));
     }
 
     // Close stream before headers.
