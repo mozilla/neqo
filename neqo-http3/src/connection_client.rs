@@ -226,6 +226,8 @@ impl Http3Client {
             Ok((headers, fin)) => {
                 if transaction.done() {
                     qinfo!([self], "read_response_headers transaction done");
+                    self.events
+                        .remove_data_ready_events_for_stream_id(stream_id);
                     self.base_handler.transactions.remove(&stream_id);
                 }
                 Ok((headers, fin))
@@ -255,6 +257,8 @@ impl Http3Client {
         match transaction.read_response_data(&mut self.conn, buf) {
             Ok((amount, fin)) => {
                 if transaction.done() {
+                    self.events
+                        .remove_data_ready_events_for_stream_id(stream_id);
                     self.base_handler.transactions.remove(&stream_id);
                 } else if !fin && amount > 0 {
                     // Directly call receive instead of adding to
@@ -3223,5 +3227,45 @@ mod tests {
         );
 
         client.process(None, now());
+    }
+
+    #[test]
+    fn no_data_ready_events_after_fin() {
+        // Connect exchange headers and send a request. Also check if the correct header frame has been sent.
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        // send response - 200  Content-Length: 7
+        // with content: 'abcdefg'.
+        // The content will be send in 2 DATA frames.
+        let _ = server.conn.stream_send(request_stream_id, HTTP_RESPONSE_1);
+        server.conn.stream_close_send(request_stream_id).unwrap();
+
+        let out = server.conn.process(None, now());
+        client.process(out.dgram(), now());
+
+        let data_readable_event = |e| matches!(e, Http3ClientEvent::DataReadable { stream_id } if stream_id == request_stream_id);
+        assert!(client.events().any(data_readable_event));
+
+        let (h, fin) = client.read_response_headers(request_stream_id).unwrap();
+        check_response_header_1(&h);
+        assert_eq!(fin, false);
+
+        let mut buf = [0_u8; 100];
+        assert_eq!(
+            (EXPECTED_RESPONSE_DATA_1_FRAME_1.len(), false),
+            client
+                .read_response_data(now(), request_stream_id, &mut buf)
+                .unwrap()
+        );
+
+        // Read again from the stream.
+        assert_eq!(
+            (EXPECTED_RESPONSE_DATA_1_FRAME_2.len(), true),
+            client
+                .read_response_data(now(), request_stream_id, &mut buf)
+                .unwrap()
+        );
+
+        assert!(!client.events().any(data_readable_event));
     }
 }
