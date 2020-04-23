@@ -194,11 +194,14 @@ impl Handler for PostConnectHandler {
         let mut data = vec![0; 4000];
         while let Some(event) = client.next_event() {
             match event {
-                Http3ClientEvent::HeaderReady { stream_id } => match self.streams.get(&stream_id) {
+                Http3ClientEvent::HeaderReady {
+                    stream_id,
+                    headers,
+                    fin,
+                } => match self.streams.get(&stream_id) {
                     Some(out_file) => {
-                        let headers = client.read_response_headers(stream_id);
                         if out_file.is_none() {
-                            println!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                            println!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
                         }
                     }
                     None => {

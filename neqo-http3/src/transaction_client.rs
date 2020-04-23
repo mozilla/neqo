@@ -216,10 +216,6 @@ impl TransactionClient {
         }
     }
 
-    pub fn read_response_headers(&mut self) -> Res<(Vec<Header>, bool)> {
-        self.response_stream.read_response_headers()
-    }
-
     pub fn read_response_data(
         &mut self,
         conn: &mut Connection,
