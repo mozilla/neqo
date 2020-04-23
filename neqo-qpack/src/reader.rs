@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::huffman::Huffman;
+use crate::huffman::decode_huffman;
 use crate::prefix::Prefix;
 use crate::{Error, Res};
 use neqo_common::{qdebug, qerror};
@@ -134,7 +134,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
             .try_into()
             .or(Err(Error::DecompressionFailed))?;
         if use_huffman {
-            Ok(to_string(&Huffman::default().decode(self.slice(length)?)?)?)
+            Ok(to_string(&decode_huffman(self.slice(length)?)?)?)
         } else {
             Ok(to_string(self.slice(length)?)?)
         }
@@ -315,7 +315,7 @@ impl LiteralReader {
                     if *offset == self.literal.len() {
                         self.state = LiteralReaderState::Done;
                         if self.use_huffman {
-                            break Ok(Some(Huffman::default().decode(&self.literal)?));
+                            break Ok(Some(decode_huffman(&self.literal)?));
                         } else {
                             break Ok(Some(mem::replace(&mut self.literal, Vec::new())));
                         }
