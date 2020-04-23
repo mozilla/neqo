@@ -165,6 +165,15 @@ impl Http3Client {
             host,
             path
         );
+        // Requests cannot be created when a connection is in states: Initializing, GoingAway, Closing and Closed.
+        match self.base_handler.state() {
+            Http3State::GoingAway | Http3State::Closing(..) | Http3State::Closed(..) => {
+                return Err(Error::AlreadyClosed)
+            }
+            Http3State::Initializing => return Err(Error::Unavailable),
+            _ => {}
+        }
+
         let id = self.conn.stream_create(StreamType::BiDi)?;
         self.base_handler.add_transaction(
             id,
@@ -1948,6 +1957,13 @@ mod tests {
 
         assert!(stream_reset);
         assert_eq!(client.state(), Http3State::GoingAway);
+
+        // Check that a new request cannot be made.
+        assert_eq!(
+            client.fetch("GET", "https", "something.com", "/", &[]),
+            Err(Error::AlreadyClosed)
+        );
+
         client.close(now(), 0, "");
     }
 
