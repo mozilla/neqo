@@ -7,12 +7,13 @@
 use crate::decoder_instructions::{DecoderInstruction, DecoderInstructionReader};
 use crate::encoder_instructions::EncoderInstruction;
 use crate::header_block::HeaderEncoder;
+use crate::qlog;
 use crate::qpack_send_buf::QPData;
 use crate::reader::ReceiverConnWrapper;
 use crate::table::{HeaderTable, LookupResult};
 use crate::Header;
 use crate::{Error, Res};
-use neqo_common::{qdebug, qtrace};
+use neqo_common::{qdebug, qlog::NeqoQlog, qtrace};
 use neqo_transport::Connection;
 use num_traits::ToPrimitive;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -106,7 +107,7 @@ impl QPackEncoder {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv)? {
                 None => break Ok(()),
-                Some(instruction) => self.call_instruction(instruction)?,
+                Some(instruction) => self.call_instruction(instruction, conn.qlog_mut())?,
             }
         }
     }
@@ -170,10 +171,20 @@ impl QPackEncoder {
         Ok(())
     }
 
-    fn call_instruction(&mut self, instruction: DecoderInstruction) -> Res<()> {
+    fn call_instruction(
+        &mut self,
+        instruction: DecoderInstruction,
+        qlog: &mut Option<NeqoQlog>,
+    ) -> Res<()> {
         qdebug!([self], "call intruction {:?}", instruction);
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
+                qlog::qpack_read_insert_count_increment_instruction(
+                    qlog,
+                    increment,
+                    &increment.to_be_bytes(),
+                )?;
+
                 self.insert_count_instruction(increment)
             }
             DecoderInstruction::HeaderAck { stream_id } => self.header_ack(stream_id),

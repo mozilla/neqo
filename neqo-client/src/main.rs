@@ -7,7 +7,9 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use neqo_common::{hex, matches, Datagram};
+use qlog::QlogStreamer;
+
+use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_transport::FixedConnectionIdManager;
@@ -30,6 +32,7 @@ use url::{Origin, Url};
 pub enum ClientError {
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
+    QlogError,
 }
 
 impl From<io::Error> for ClientError {
@@ -41,6 +44,12 @@ impl From<io::Error> for ClientError {
 impl From<neqo_http3::Error> for ClientError {
     fn from(err: neqo_http3::Error) -> Self {
         Self::Http3Error(err)
+    }
+}
+
+impl From<qlog::Error> for ClientError {
+    fn from(_err: qlog::Error) -> Self {
+        Self::QlogError
     }
 }
 
@@ -79,6 +88,10 @@ pub struct Args {
     #[structopt(name = "output-read-data", long)]
     /// Output received data to stdout
     output_read_data: bool,
+
+    #[structopt(name = "qlog-dir", long)]
+    /// Enable QLOG logging and QLOG traces to this directory
+    qlog_dir: Option<PathBuf>,
 
     #[structopt(name = "output-dir", long)]
     /// Save contents of fetched URLs to a directory
@@ -140,10 +153,7 @@ fn process_loop(
         }
 
         match socket.recv(&mut buf[..]) {
-            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
-                // timer expired
-                client.process_timer(Instant::now());
-            }
+            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {}
             Err(err) => {
                 eprintln!("UDP error: {}", err);
                 exit(1)
@@ -278,6 +288,7 @@ fn client(
         args.max_blocked_streams,
     )
     .expect("must succeed");
+    client.set_qlog(qlog_new(args, origin)?);
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     process_loop(
@@ -350,8 +361,36 @@ fn client(
     Ok(())
 }
 
+fn qlog_new(args: &Args, origin: &str) -> Res<Option<NeqoQlog>> {
+    if let Some(qlog_dir) = &args.qlog_dir {
+        let mut qlog_path = qlog_dir.to_path_buf();
+        qlog_path.push(format!("{}.qlog", origin));
+
+        let f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&qlog_path)?;
+
+        let streamer = QlogStreamer::new(
+            qlog::QLOG_VERSION.to_string(),
+            Some("Example qlog".to_string()),
+            Some("Example qlog description".to_string()),
+            None,
+            std::time::Instant::now(),
+            common::qlog::new_trace(Role::Client),
+            Box::new(f),
+        );
+
+        Ok(Some(NeqoQlog::new(streamer, qlog_path)?))
+    } else {
+        Ok(None)
+    }
+}
+
 fn main() -> Res<()> {
     init();
+
     let mut args = Args::from_args();
 
     if args.qns_mode {
@@ -433,9 +472,10 @@ mod old {
 
     use url::Url;
 
-    use super::Res;
+    use super::{qlog_new, Res};
 
-    use neqo_common::Datagram;
+    use neqo_common::{matches, Datagram};
+    use neqo_crypto::AuthenticationStatus;
     use neqo_transport::{
         Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
     };
@@ -459,6 +499,10 @@ mod old {
             client: &mut Connection,
             _out_file: &mut Option<File>,
         ) -> Res<bool> {
+            let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+            if client.events().any(authentication_needed) {
+                client.authenticated(AuthenticationStatus::Ok, Instant::now());
+            }
             Ok(State::Connected != *dbg!(client.state()))
         }
     }
@@ -578,6 +622,7 @@ mod old {
                 remote_addr,
             )
             .expect("must succeed");
+            client.set_qlog(qlog_new(args, &format!("{}", url.host().unwrap()))?);
             // Temporary here to help out the type inference engine
             let mut h = PreConnectHandlerOld {};
             process_loop_old(
@@ -590,7 +635,7 @@ mod old {
             )?;
 
             let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
-            let req: String = "GET /10\r\n".to_string();
+            let req = format!("GET {}\r\n", url.path());
             client
                 .stream_send(client_stream_id, req.as_bytes())
                 .unwrap();

@@ -73,8 +73,8 @@ impl RttVals {
                     self.latest_rtt - smoothed_rtt
                 };
 
-                self.rttvar = (self.rttvar * 3 / 4) + (rttvar_sample / 4);
-                self.smoothed_rtt = Some((smoothed_rtt * 7 / 8) + (self.latest_rtt / 8));
+                self.rttvar = (self.rttvar * 3 + rttvar_sample) / 4;
+                self.smoothed_rtt = Some((smoothed_rtt * 7 + self.latest_rtt) / 8);
             }
         }
     }
@@ -617,7 +617,7 @@ impl LossRecovery {
 
         let has_ack_eliciting_out = self.spaces.iter().any(|sp| sp.ack_eliciting_outstanding());
 
-        qdebug!([self], "has_ack_eliciting_out={}", has_ack_eliciting_out,);
+        qdebug!([self], "has_ack_eliciting_out={}", has_ack_eliciting_out);
 
         if !has_ack_eliciting_out {
             self.loss_recovery_state = LossRecoveryState::new(LossRecoveryMode::None, None);
@@ -661,11 +661,11 @@ impl LossRecovery {
         }
 
         PNSpace::iter()
-            .map(|spc| (*spc, self.spaces[*spc].earliest_sent_time()))
-            .filter_map(|(spc, time)| {
+            .filter_map(|spc| {
+                let time = self.spaces[*spc].earliest_sent_time();
                 // None is ordered less than Some(_). Bad. Filter them out.
                 if let Some(time) = time {
-                    Some((spc, time))
+                    Some((*spc, time))
                 } else {
                     None
                 }
@@ -758,6 +758,7 @@ impl LossRecovery {
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
     pub fn send_profile(&mut self, now: Instant, mtu: usize) -> SendProfile {
+        qdebug!([self], "get send profile {:?}", now);
         let pto = self.loss_recovery_state.pto();
         let limit = if pto.is_some() {
             if self.loss_recovery_state.take_pto_packet() {

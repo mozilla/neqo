@@ -7,7 +7,8 @@
 // This file implements a server that can handle multiple connections.
 
 use neqo_common::{
-    hex, matches, qerror, qinfo, qtrace, qwarn, timer::Timer, Datagram, Decoder, Encoder,
+    self as common, hex, matches, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, timer::Timer,
+    Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
@@ -23,9 +24,11 @@ use crate::Res;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
+use std::fs::OpenOptions;
 use std::mem;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::{Deref, DerefMut};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -196,6 +199,8 @@ pub struct Server {
     /// Whether a Retry packet will be sent in response to new
     /// Initial packets.
     retry: RetryToken,
+    /// Directory to create qlog traces in
+    qlog_dir: Option<PathBuf>,
 }
 
 impl Server {
@@ -223,7 +228,13 @@ impl Server {
             waiting: VecDeque::default(),
             timers: Timer::new(now, TIMER_GRANULARITY, TIMER_CAPACITY),
             retry: RetryToken::new(now)?,
+            qlog_dir: None,
         })
+    }
+
+    /// Set or clear directory to create logs of connection events in QLOG format.
+    pub fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
+        self.qlog_dir = dir;
     }
 
     pub fn set_retry_required(&mut self, require_retry: bool) {
@@ -266,6 +277,7 @@ impl Server {
             self.active.insert(ActiveConnectionRef { c: c.clone() });
         }
         if matches!(c.borrow().state(), State::Closed(_)) {
+            c.borrow_mut().set_qlog(None);
             self.connections
                 .borrow_mut()
                 .retain(|_, v| !Rc::ptr_eq(v, &c));
@@ -291,8 +303,10 @@ impl Server {
     ) -> Option<Datagram> {
         match self.retry.validate(&token, dgram.source(), now) {
             RetryTokenResult::Invalid => None,
-            RetryTokenResult::Pass => self.accept_connection(None, dgram, now),
-            RetryTokenResult::Valid(dcid) => self.accept_connection(Some(dcid), dgram, now),
+            RetryTokenResult::Pass => self.accept_connection(dcid, None, dgram, now),
+            RetryTokenResult::Valid(orig_dcid) => {
+                self.accept_connection(dcid, Some(orig_dcid), dgram, now)
+            }
             RetryTokenResult::Validate => {
                 qinfo!([self], "Send retry for {:?}", dcid);
 
@@ -318,7 +332,8 @@ impl Server {
 
     fn accept_connection(
         &mut self,
-        odcid: Option<ConnectionId>,
+        dcid: ConnectionId,
+        orig_dcid: Option<ConnectionId>,
         dgram: Datagram,
         now: Instant,
     ) -> Option<Datagram> {
@@ -330,16 +345,65 @@ impl Server {
             cid_manager: self.cid_manager.clone(),
             connections: self.connections.clone(),
         }));
+
+        let qtrace = if let Some(qlog_dir) = &self.qlog_dir {
+            let mut qlog_path = qlog_dir.to_path_buf();
+
+            qlog_path.push(format!("{}.qlog", orig_dcid.as_ref().unwrap_or(&dcid)));
+
+            match OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&qlog_path)
+            {
+                Ok(f) => {
+                    qinfo!("Qlog output to {}", qlog_path.display());
+
+                    let streamer = ::qlog::QlogStreamer::new(
+                        qlog::QLOG_VERSION.to_string(),
+                        Some("Neqo server qlog".to_string()),
+                        Some("Neqo server qlog".to_string()),
+                        None,
+                        std::time::Instant::now(),
+                        common::qlog::new_trace(Role::Server),
+                        Box::new(f),
+                    );
+                    let n_qlog = NeqoQlog::new(streamer, qlog_path);
+                    match n_qlog {
+                        Ok(nql) => Some(nql),
+                        Err(e) => {
+                            // Keep going but w/o qlogging
+                            qerror!("NeqoQlog error: {}", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    qerror!(
+                        "Could not open file {} for qlog output: {}",
+                        qlog_path.display(),
+                        e
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let sconn = Connection::new_server(
             &self.certs,
             &self.protocols,
             &self.anti_replay,
             cid_mgr.clone(),
         );
+
         if let Ok(mut c) = sconn {
-            if let Some(odcid) = odcid {
+            if let Some(odcid) = orig_dcid {
                 c.original_connection_id(&odcid);
             }
+            c.set_qlog(qtrace);
             let c = Rc::new(RefCell::new(ServerConnectionState { c, last_timer: now }));
             cid_mgr.borrow_mut().c = Some(c.clone());
             self.process_connection(c, Some(dgram), now)

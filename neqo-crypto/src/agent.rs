@@ -400,9 +400,7 @@ impl SecretAgent {
     /// # Errors
     /// Returns an error if the option or option value is invalid; i.e., never.
     pub fn set_option(&mut self, opt: ssl::Opt, value: bool) -> Res<()> {
-        secstatus_to_res(unsafe {
-            ssl::SSL_OptionSet(self.fd, opt.as_int(), opt.map_enabled(value))
-        })
+        opt.set(self.fd, value)
     }
 
     /// Enable 0-RTT.

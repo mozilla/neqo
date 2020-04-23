@@ -49,9 +49,13 @@ impl Display for CongestionControl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "CongCtrl {}/{} ssthresh {} {:?}",
-            self.bytes_in_flight, self.congestion_window, self.ssthresh, self.pacer,
-        )
+            "CongCtrl {}/{} ssthresh {}",
+            self.bytes_in_flight, self.congestion_window, self.ssthresh,
+        )?;
+        if let Some(p) = &self.pacer {
+            write!(f, " {}", p)?;
+        }
+        Ok(())
     }
 }
 

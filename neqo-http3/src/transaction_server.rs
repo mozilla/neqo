@@ -13,7 +13,11 @@ use neqo_common::{matches, qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
+use std::cmp::min;
+use std::convert::TryFrom;
 use std::mem;
+
+const MAX_EVENT_DATA_SIZE: usize = 1024;
 
 #[derive(PartialEq, Debug)]
 enum TransactionRecvState {
@@ -41,7 +45,8 @@ pub struct TransactionServer {
 }
 
 impl TransactionServer {
-    pub fn new(stream_id: u64, conn_events: Http3ServerConnEvents) -> Self {
+    #[must_use]
+    pub(crate) fn new(stream_id: u64, conn_events: Http3ServerConnEvents) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
             recv_state: TransactionRecvState::WaitingForHeaders,
@@ -52,7 +57,7 @@ impl TransactionServer {
         }
     }
 
-    pub fn set_response(&mut self, headers: &[Header], data: Vec<u8>, encoder: &mut QPackEncoder) {
+    pub fn set_response(&mut self, headers: &[Header], data: &[u8], encoder: &mut QPackEncoder) {
         qdebug!([self], "Encoding headers");
         let header_block = encoder.encode_header_block(&headers, self.stream_id);
         let hframe = HFrame::Headers {
@@ -66,7 +71,7 @@ impl TransactionServer {
                 len: data.len() as u64,
             };
             d_frame.encode(&mut d);
-            d.encode(&data);
+            d.encode(data);
         }
 
         self.send_state = TransactionSendState::SendingResponse { buf: d.into() };
@@ -75,11 +80,11 @@ impl TransactionServer {
     fn recv_frame(&mut self, conn: &mut Connection) -> Res<(Option<HFrame>, bool)> {
         qtrace!([self], "receiving a frame");
         let fin = self.frame_reader.receive(conn, self.stream_id)?;
-        if !self.frame_reader.done() {
-            Ok((None, fin))
-        } else {
+        if self.frame_reader.done() {
             qinfo!([self], "A new frame has been received.");
             Ok((Some(self.frame_reader.get_frame()?), fin))
+        } else {
+            Ok((None, fin))
         }
     }
 
@@ -87,10 +92,10 @@ impl TransactionServer {
         qinfo!([self], "A new data frame len={} fin={}", len, fin);
         if len > 0 {
             if fin {
-                return Err(Error::HttpFrameError);
+                return Err(Error::HttpFrame);
             }
             self.recv_state = TransactionRecvState::ReadingData {
-                remaining_data_len: len as usize,
+                remaining_data_len: usize::try_from(len).or(Err(Error::HttpFrame))?,
             };
         } else if fin {
             self.conn_events.data(self.stream_id, Vec::new(), true);
@@ -130,6 +135,7 @@ impl Http3Transaction for TransactionServer {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
@@ -156,11 +162,7 @@ impl Http3Transaction for TransactionServer {
                             return Ok(());
                         }
                         (Some(HFrame::Headers { header_block }), fin) => {
-                            if !header_block.is_empty() {
-                                // Next step decoding headers.
-                                self.recv_state =
-                                    TransactionRecvState::DecodingHeaders { header_block, fin };
-                            } else {
+                            if header_block.is_empty() {
                                 self.conn_events.headers(self.stream_id, Vec::new(), fin);
                                 if fin {
                                     self.recv_state = TransactionRecvState::Closed;
@@ -168,6 +170,10 @@ impl Http3Transaction for TransactionServer {
                                 } else {
                                     self.recv_state = TransactionRecvState::WaitingForData;
                                 }
+                            } else {
+                                // Next step decoding headers.
+                                self.recv_state =
+                                    TransactionRecvState::DecodingHeaders { header_block, fin };
                             }
                         }
                         // server can only receive a Header frame at this point.
@@ -179,8 +185,10 @@ impl Http3Transaction for TransactionServer {
                 TransactionRecvState::DecodingHeaders {
                     ref mut header_block,
                     fin,
-                } => match decoder.decode_header_block(header_block, self.stream_id)? {
-                    Some(headers) => {
+                } => {
+                    if let Some(headers) =
+                        decoder.decode_header_block(header_block, self.stream_id)?
+                    {
                         self.conn_events.headers(self.stream_id, headers, fin);
                         if fin {
                             self.recv_state = TransactionRecvState::Closed;
@@ -188,12 +196,11 @@ impl Http3Transaction for TransactionServer {
                         } else {
                             self.recv_state = TransactionRecvState::WaitingForData;
                         }
-                    }
-                    None => {
+                    } else {
                         qinfo!([self], "decoding header is blocked.");
                         return Ok(());
                     }
-                },
+                }
                 TransactionRecvState::WaitingForData => {
                     match self.recv_frame(conn)? {
                         (None, true) => {
@@ -223,31 +230,25 @@ impl Http3Transaction for TransactionServer {
                     // TODO add available(stream_id) to neqo_transport.
                     assert!(*remaining_data_len > 0);
                     while *remaining_data_len != 0 {
-                        let to_read = if *remaining_data_len > 1024 {
-                            1024
-                        } else {
-                            *remaining_data_len
-                        };
-
-                        let mut data = vec![0x0; to_read];
-                        let (amount, fin) = conn.stream_recv(self.stream_id, &mut data[..])?;
-                        assert!(amount <= to_read);
+                        let mut data = vec![0x0; min(*remaining_data_len, MAX_EVENT_DATA_SIZE)];
+                        let (amount, fin) = conn.stream_recv(self.stream_id, &mut data)?;
                         if amount > 0 {
                             data.truncate(amount);
                             self.conn_events.data(self.stream_id, data, fin);
                             *remaining_data_len -= amount;
                         }
+
                         if fin {
                             if *remaining_data_len > 0 {
-                                return Err(Error::HttpFrameError);
+                                return Err(Error::HttpFrame);
+                            } else {
+                                self.recv_state = TransactionRecvState::Closed;
+                                return Ok(());
                             }
-                            self.recv_state = TransactionRecvState::Closed;
-                            return Ok(());
                         } else if *remaining_data_len == 0 {
                             self.recv_state = TransactionRecvState::WaitingForData;
                             break;
-                        }
-                        if amount == 0 {
+                        } else if amount == 0 {
                             return Ok(());
                         }
                     }

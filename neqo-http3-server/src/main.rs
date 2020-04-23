@@ -7,11 +7,6 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::use_self)]
 
-use neqo_common::{qdebug, qinfo, Datagram};
-use neqo_crypto::{init_db, AntiReplay};
-use neqo_http3::{Http3Server, Http3ServerEvent};
-use neqo_transport::{FixedConnectionIdManager, Output};
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io;
@@ -21,11 +16,15 @@ use std::process::exit;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use structopt::StructOpt;
-
 use mio::net::UdpSocket;
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
+use structopt::StructOpt;
+
+use neqo_common::{qdebug, qinfo, Datagram};
+use neqo_crypto::{init_db, AntiReplay};
+use neqo_http3::{Http3Server, Http3ServerEvent};
+use neqo_transport::{FixedConnectionIdManager, Output};
 
 const TIMER_TOKEN: Token = Token(0xffff_ffff);
 
@@ -55,6 +54,10 @@ struct Args {
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.
     alpn: String,
+
+    #[structopt(name = "qlog-dir", long)]
+    /// Enable QLOG logging and QLOG traces to this directory
+    qlog_dir: Option<PathBuf>,
 }
 
 impl Args {
@@ -96,7 +99,7 @@ fn process_events(server: &mut Http3Server) {
                             (String::from(":status"), String::from("200")),
                             (String::from("content-length"), response.len().to_string()),
                         ],
-                        response,
+                        &response,
                     )
                     .unwrap();
             }
@@ -205,21 +208,26 @@ fn main() -> Result<(), io::Error> {
             Ready::readable() | Ready::writable(),
             PollOpt::edge(),
         )?;
+
         sockets.push(socket);
         servers.insert(
             local_addr,
             (
-                Http3Server::new(
-                    Instant::now(),
-                    &[args.key.clone()],
-                    &[args.alpn.clone()],
-                    AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
-                        .expect("unable to setup anti-replay"),
-                    Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-                    args.max_table_size,
-                    args.max_blocked_streams,
-                )
-                .expect("We cannot make a server!"),
+                {
+                    let mut svr = Http3Server::new(
+                        Instant::now(),
+                        &[args.key.clone()],
+                        &[args.alpn.clone()],
+                        AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+                            .expect("unable to setup anti-replay"),
+                        Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+                        args.max_table_size,
+                        args.max_blocked_streams,
+                    )
+                    .expect("We cannot make a server!");
+                    svr.set_qlog_dir(args.qlog_dir.clone());
+                    svr
+                },
                 None,
             ),
         );

@@ -10,10 +10,11 @@ neqo-crypto = { path = "./../neqo-crypto" }
 neqo-transport = { path = "./../neqo-transport" }
 neqo-common = { path="./../neqo-common" }
 neqo-http3 = { path = "./../neqo-http3" }
-structopt = "0.2.15"
+structopt = "0.3.7"
 mio = "0.6.17"
 mio-extras = "2.0.5"
 log = {version = "0.4.0", default-features = false}
+qlog = "0.2.0"
 
 [features]
 default = ["deny-warnings"]

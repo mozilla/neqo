@@ -11,7 +11,7 @@ neqo-transport = { path = "./../neqo-transport" }
 neqo-common = { path="./../neqo-common" }
 neqo-http3 = { path = "./../neqo-http3" }
 
-structopt = "0.2.15"
+structopt = "0.3.7"
 lazy_static = "1.3.0"
 
 [features]
