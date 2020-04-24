@@ -662,9 +662,7 @@ impl LossRecovery {
 
         PNSpace::iter()
             .filter_map(|spc| {
-                let time = self.spaces[*spc].earliest_sent_time();
-                // None is ordered less than Some(_). Bad. Filter them out.
-                if let Some(time) = time {
+                if let Some(time) = self.spaces[*spc].earliest_sent_time() {
                     Some((*spc, time))
                 } else {
                     None
