@@ -55,6 +55,7 @@ pub enum Error {
     WrongStreamCount,
     Internal,
     Decoding, // this will be translated into Encoder/DecoderStreamError or DecompressionFailed depending on the caller
+    EncoderStreamBlocked,
 
     TransportError(neqo_transport::Error),
     QlogError,
