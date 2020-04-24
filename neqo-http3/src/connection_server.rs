@@ -46,7 +46,7 @@ impl Http3ServerHandler {
             .transactions
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .set_response(headers, data, &mut self.base_handler.qpack_encoder);
+            .set_response(headers, data);
         self.base_handler
             .insert_streams_have_data_to_send(stream_id);
         Ok(())
