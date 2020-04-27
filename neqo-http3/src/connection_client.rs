@@ -3240,42 +3240,40 @@ mod tests {
         let data_readable_event = |e| matches!(e, Http3ClientEvent::DataReadable { stream_id } if stream_id == request_stream_id);
         assert!(client.events().any(data_readable_event));
 
-        let mut buf = [0_u8; 1];
+        let mut buf1 = [0_u8; 1];
         assert_eq!(
             (1, false),
             client
-                .read_response_data(now(), request_stream_id, &mut buf)
+                .read_response_data(now(), request_stream_id, &mut buf1)
                 .unwrap()
         );
         assert!(!client.events().any(data_readable_event));
 
         // Now read only until the end of the first frame. The firs framee has 3 bytes.
-        let mut buf = [0_u8; 2];
+        let mut buf2 = [0_u8; 2];
         assert_eq!(
             (2, false),
             client
-                .read_response_data(now(), request_stream_id, &mut buf)
+                .read_response_data(now(), request_stream_id, &mut buf2)
                 .unwrap()
         );
         assert!(!client.events().any(data_readable_event));
 
         // Read a half of the second frame.
-        let mut buf = [0_u8; 2];
         assert_eq!(
             (2, false),
             client
-                .read_response_data(now(), request_stream_id, &mut buf)
+                .read_response_data(now(), request_stream_id, &mut buf2)
                 .unwrap()
         );
         assert!(!client.events().any(data_readable_event));
 
         // Read the rest.
         // Read a half of the second frame.
-        let mut buf = [0_u8; 2];
         assert_eq!(
             (2, true),
             client
-                .read_response_data(now(), request_stream_id, &mut buf)
+                .read_response_data(now(), request_stream_id, &mut buf2)
                 .unwrap()
         );
         assert!(!client.events().any(data_readable_event));
