@@ -679,9 +679,8 @@ impl Connection {
         let res = self.crypto.states.check_key_update(now);
         self.absorb_error(now, res);
 
-        if let Some(packets) = self.loss_recovery.check_loss_detection_timeout(now) {
-            self.handle_lost_packets(&packets);
-        }
+        let lost = self.loss_recovery.timeout(now);
+        self.handle_lost_packets(&lost);
     }
 
     /// Call in to process activity on the connection. Either new packets have
@@ -706,7 +705,7 @@ impl Connection {
         qtrace!([self], "Get callback delay {:?}", now);
         let mut delays = SmallVec::<[_; 4]>::new();
 
-        if let Some(lr_time) = self.loss_recovery.calculate_timer() {
+        if let Some(lr_time) = self.loss_recovery.next_timeout() {
             qtrace!([self], "Loss recovery timer {:?}", lr_time);
             delays.push(lr_time);
         }
@@ -1210,13 +1209,14 @@ impl Connection {
         let mut initial_sent = None;
         let mut needs_padding = false;
 
-        // Check whether we are sending packets in PTO mode.
         let (pto, cong_avail, min_pn_space, cc_limited) =
-            if let Some((min_pto_pn_space, can_send)) = self.loss_recovery.check_pto() {
-                if !can_send {
+        // Check whether we are sending packets in PTO mode.
+        if self.loss_recovery.pto_active() {
+                if let Some(space) = self.loss_recovery.take_pto_packet() {
+                    (true, path.mtu(), space, false)
+                } else {
                     return Ok(None);
                 }
-                (true, path.mtu(), min_pto_pn_space, false)
             } else if self.loss_recovery.cwnd_avail() < MIN_CC_WINDOW {
                 // If avail == 0 we do not have available congestion window, we may send only
                 // non-congestion controlled frames
@@ -3625,7 +3625,7 @@ mod tests {
         let out = client.process(None, now);
         assert_eq!(out, Output::Callback(Duration::from_millis(60)));
 
-        // Wait for PTO o expire and resend a handshake and 1rtt packet
+        // Wait for PTO to expire and resend a handshake and 1rtt packet
         now += Duration::from_millis(60);
         let pkt2 = client.process(None, now).dgram();
         assert!(pkt2.is_some());
@@ -4290,7 +4290,8 @@ mod tests {
         // But at this point the client hasn't received a key update from the server.
         // It will be stuck with old keys.
         now += Duration::from_secs(1);
-        client.process(None, now);
+        let dgram = client.process(None, now).dgram();
+        assert!(dgram.is_some()); // Drop this packet.
         assert_eq!(client.get_epochs(), (Some(4), Some(3)));
         server.process(None, now);
         assert_eq!(server.get_epochs(), (Some(4), Some(4)));
@@ -4298,8 +4299,8 @@ mod tests {
         // Even though the server has updated, it hasn't received an ACK yet.
         assert!(server.initiate_key_update().is_err());
 
-        // Now get an ACK from the server. We needt o send 2 packets to get a ACK because of ACK_DELAY.
-        assert!(send_and_receive(&mut client, &mut server, now).is_none());
+        // Now get an ACK from the server.
+        // The previous PTO packet (see above) was dropped, so we should get an ACK here.
         let dgram = send_and_receive(&mut client, &mut server, now);
         assert!(dgram.is_some());
         let res = client.process(dgram, now);
@@ -4481,5 +4482,33 @@ mod tests {
         let readable_stream_evt =
             |e| matches!(e, ConnectionEvent::RecvStreamReadable { stream_id } if stream_id == id);
         assert!(!client.events().any(readable_stream_evt));
+    }
+
+    #[test]
+    fn loss_recovery_crash() {
+        const TIME_SHIFT: Duration = Duration::from_secs(1);
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+        let now = now();
+
+        // The server sends something, but we will drop this.
+        let _ = send_something(&mut server, now);
+
+        // Then send something again, but let it through.
+        let ack = send_and_receive(&mut server, &mut client, now);
+        assert!(ack.is_some());
+
+        // Have the server process the ACK.
+        let cb = server.process(ack, now).callback();
+        assert!(cb > Duration::from_secs(0));
+
+        // Now we leap into the future.  The server should regard the first
+        // packet as lost based on time alone.
+        let dgram = server.process(None, now + TIME_SHIFT).dgram();
+        assert!(dgram.is_some());
+
+        // This crashes.
+        let _ = send_something(&mut server, now + TIME_SHIFT);
     }
 }
