@@ -3280,5 +3280,4 @@ mod tests {
         );
         assert!(!client.events().any(data_readable_event));
     }
-
 }
