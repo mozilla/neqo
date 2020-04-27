@@ -3220,4 +3220,62 @@ mod tests {
 
         assert!(!client.events().any(data_readable_event));
     }
+
+    #[test]
+    fn reading_small_chunks_of_data() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        // send response - 200  Content-Length: 7
+        // with content: 'abcdefg'.
+        // The content will be send in 2 DATA frames.
+        let _ = server.conn.stream_send(request_stream_id, HTTP_RESPONSE_1);
+        server.conn.stream_close_send(request_stream_id).unwrap();
+        let out = server.conn.process(None, now());
+        client.process(out.dgram(), now());
+
+        let (h, fin) = client.read_response_headers(request_stream_id).unwrap();
+        check_response_header_1(&h);
+        assert_eq!(fin, false);
+
+        let data_readable_event = |e| matches!(e, Http3ClientEvent::DataReadable { stream_id } if stream_id == request_stream_id);
+        assert!(client.events().any(data_readable_event));
+
+        let mut buf1 = [0_u8; 1];
+        assert_eq!(
+            (1, false),
+            client
+                .read_response_data(now(), request_stream_id, &mut buf1)
+                .unwrap()
+        );
+        assert!(!client.events().any(data_readable_event));
+
+        // Now read only until the end of the first frame. The firs framee has 3 bytes.
+        let mut buf2 = [0_u8; 2];
+        assert_eq!(
+            (2, false),
+            client
+                .read_response_data(now(), request_stream_id, &mut buf2)
+                .unwrap()
+        );
+        assert!(!client.events().any(data_readable_event));
+
+        // Read a half of the second frame.
+        assert_eq!(
+            (2, false),
+            client
+                .read_response_data(now(), request_stream_id, &mut buf2)
+                .unwrap()
+        );
+        assert!(!client.events().any(data_readable_event));
+
+        // Read the rest.
+        // Read a half of the second frame.
+        assert_eq!(
+            (2, true),
+            client
+                .read_response_data(now(), request_stream_id, &mut buf2)
+                .unwrap()
+        );
+        assert!(!client.events().any(data_readable_event));
+    }
 }

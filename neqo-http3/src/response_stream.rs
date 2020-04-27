@@ -211,6 +211,8 @@ impl ResponseStream {
                     } else if *remaining_data_len == 0 {
                         self.state = ResponseStreamState::WaitingForData;
                         self.receive(conn, decoder, false)?;
+                    } else {
+                        break Ok((written, false));
                     }
                 }
                 ResponseStreamState::ClosePending => {
