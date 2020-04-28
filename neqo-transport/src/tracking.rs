@@ -497,7 +497,9 @@ impl AckTracker {
         now: Instant,
         pn_space: PNSpace,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        self.get(pn_space).map(|space| space.get_frame(now)).flatten()
+        self.get(pn_space)
+            .map(|space| space.get_frame(now))
+            .flatten()
     }
 }
 
@@ -650,16 +652,25 @@ mod tests {
     fn aggregate_ack_time() {
         let mut tracker = AckTracker::default();
         // This packet won't trigger an ACK.
-        tracker.get(PNSpace::Handshake).unwrap().set_received(*NOW, 0, false);
+        tracker
+            .get(PNSpace::Handshake)
+            .unwrap()
+            .set_received(*NOW, 0, false);
         assert_eq!(None, tracker.ack_time());
 
         // This should be delayed.
-        tracker.get(PNSpace::ApplicationData).unwrap().set_received(*NOW, 0, true);
+        tracker
+            .get(PNSpace::ApplicationData)
+            .unwrap()
+            .set_received(*NOW, 0, true);
         assert_eq!(Some(*NOW + ACK_DELAY), tracker.ack_time());
 
         // This should move the time forward.
         let later = *NOW + ACK_DELAY.checked_div(2).unwrap();
-        tracker.get(PNSpace::Initial).unwrap().set_received(later, 0, true);
+        tracker
+            .get(PNSpace::Initial)
+            .unwrap()
+            .set_received(later, 0, true);
         assert_eq!(Some(later), tracker.ack_time());
     }
 }
