@@ -830,6 +830,7 @@ impl Connection {
     fn discard_keys(&mut self, space: PNSpace) {
         if self.crypto.discard(space) {
             self.loss_recovery.discard(space);
+            self.acks.drop_space(space);
         }
     }
 
@@ -955,7 +956,7 @@ impl Connection {
         // OK, we have a valid packet.
 
         let space = PNSpace::from(packet.packet_type());
-        if self.acks[space].is_duplicate(packet.pn()) {
+        if self.acks.get(space).unwrap().is_duplicate(packet.pn()) {
             qdebug!([self], "Duplicate packet from {} pn={}", space, packet.pn());
             self.stats.dups_rx += 1;
             return Ok(vec![]);
@@ -987,7 +988,10 @@ impl Connection {
             let res = self.input_frame(packet.packet_type(), f, now);
             self.capture_error(now, t, res)?;
         }
-        self.acks[space].set_received(now, packet.pn(), ack_eliciting);
+        self.acks
+            .get(space)
+            .unwrap()
+            .set_received(now, packet.pn(), ack_eliciting);
 
         Ok(frames)
     }

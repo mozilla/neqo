@@ -602,7 +602,7 @@ impl LossRecovery {
         let loss_delay = self.loss_delay();
         let mut lost_packets = Vec::new();
         for &sp in PNSpace::iter() {
-            let first = lost_packets.len();  // The first packet lost in this space.
+            let first = lost_packets.len(); // The first packet lost in this space.
             self.spaces[sp].detect_lost_packets(now, loss_delay, &mut lost_packets);
             self.cc.on_packets_lost(
                 now,

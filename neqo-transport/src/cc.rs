@@ -74,10 +74,7 @@ impl CongestionControl {
 
     // Multi-packet version of OnPacketAckedCC
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket]) {
-        for pkt in acked_pkts
-            .iter()
-            .filter(|pkt| pkt.cc_outstanding())
-        {
+        for pkt in acked_pkts.iter().filter(|pkt| pkt.cc_outstanding()) {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
 
