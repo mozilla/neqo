@@ -5,7 +5,8 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::use_self)]
+#![warn(clippy::pedantic)]
+#![allow(clippy::pub_enum_variant_names)]
 
 mod client_events;
 mod connection;
@@ -41,21 +42,20 @@ type Res<T> = Result<T, Error>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     HttpNoError,
-    HttpGeneralProtocolError,
-    HttpInternalError,
-    HttpStreamCreationError,
+    HttpGeneralProtocol,
+    HttpInternal,
+    HttpStreamCreation,
     HttpClosedCriticalStream,
     HttpFrameUnexpected,
-    HttpFrameError,
+    HttpFrame,
     HttpExcessiveLoad,
-    HttpIdError,
-    HttpSettingsError,
+    HttpId,
+    HttpSettings,
     HttpMissingSettings,
     HttpRequestRejected,
     HttpRequestCancelled,
     HttpRequestIncomplete,
-    HttpEarlyResponse,
-    HttpConnectError,
+    HttpConnect,
     HttpVersionFallback,
     QpackError(neqo_qpack::Error),
 
@@ -72,24 +72,24 @@ pub enum Error {
 }
 
 impl Error {
+    #[must_use]
     pub fn code(&self) -> AppError {
         match self {
             Self::HttpNoError => 0x100,
-            Self::HttpGeneralProtocolError => 0x101,
-            Self::HttpInternalError => 0x102,
-            Self::HttpStreamCreationError => 0x103,
+            Self::HttpGeneralProtocol => 0x101,
+            Self::HttpInternal => 0x102,
+            Self::HttpStreamCreation => 0x103,
             Self::HttpClosedCriticalStream => 0x104,
             Self::HttpFrameUnexpected => 0x105,
-            Self::HttpFrameError => 0x106,
+            Self::HttpFrame => 0x106,
             Self::HttpExcessiveLoad => 0x107,
-            Self::HttpIdError => 0x108,
-            Self::HttpSettingsError => 0x109,
+            Self::HttpId => 0x108,
+            Self::HttpSettings => 0x109,
             Self::HttpMissingSettings => 0x10a,
             Self::HttpRequestRejected => 0x10b,
             Self::HttpRequestCancelled => 0x10c,
             Self::HttpRequestIncomplete => 0x10d,
-            Self::HttpEarlyResponse => 0x10e,
-            Self::HttpConnectError => 0x10f,
+            Self::HttpConnect => 0x10f,
             Self::HttpVersionFallback => 0x110,
             Self::QpackError(e) => e.code(),
             // These are all internal errors.
@@ -114,26 +114,24 @@ impl From<AppError> for Error {
     fn from(error: AppError) -> Self {
         match error {
             0x100 => Self::HttpNoError,
-            0x101 => Self::HttpGeneralProtocolError,
-            0x102 => Self::HttpInternalError,
-            0x103 => Self::HttpStreamCreationError,
+            0x101 => Self::HttpGeneralProtocol,
+            0x103 => Self::HttpStreamCreation,
             0x104 => Self::HttpClosedCriticalStream,
             0x105 => Self::HttpFrameUnexpected,
-            0x106 => Self::HttpFrameError,
+            0x106 => Self::HttpFrame,
             0x107 => Self::HttpExcessiveLoad,
-            0x108 => Self::HttpIdError,
-            0x109 => Self::HttpSettingsError,
+            0x108 => Self::HttpId,
+            0x109 => Self::HttpSettings,
             0x10a => Self::HttpMissingSettings,
             0x10b => Self::HttpRequestRejected,
             0x10c => Self::HttpRequestCancelled,
             0x10d => Self::HttpRequestIncomplete,
-            0x10e => Self::HttpEarlyResponse,
-            0x10f => Self::HttpConnectError,
+            0x10f => Self::HttpConnect,
             0x110 => Self::HttpVersionFallback,
             0x200 => Self::QpackError(QpackError::DecompressionFailed),
             0x201 => Self::QpackError(QpackError::EncoderStream),
             0x202 => Self::QpackError(QpackError::DecoderStream),
-            _ => Self::HttpInternalError,
+            _ => Self::HttpInternal,
         }
     }
 }

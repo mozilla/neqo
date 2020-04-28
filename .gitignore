@@ -5,3 +5,5 @@ Cargo.lock
 *~
 /.vscode/
 .idea
+*.qlog
+*.swp

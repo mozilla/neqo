@@ -153,10 +153,7 @@ fn process_loop(
         }
 
         match socket.recv(&mut buf[..]) {
-            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
-                // timer expired
-                client.process_timer(Instant::now());
-            }
+            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {}
             Err(err) => {
                 eprintln!("UDP error: {}", err);
                 exit(1)
@@ -477,7 +474,8 @@ mod old {
 
     use super::{qlog_new, Res};
 
-    use neqo_common::Datagram;
+    use neqo_common::{matches, Datagram};
+    use neqo_crypto::AuthenticationStatus;
     use neqo_transport::{
         Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
     };
@@ -501,6 +499,10 @@ mod old {
             client: &mut Connection,
             _out_file: &mut Option<File>,
         ) -> Res<bool> {
+            let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+            if client.events().any(authentication_needed) {
+                client.authenticated(AuthenticationStatus::Ok, Instant::now());
+            }
             Ok(State::Connected != *dbg!(client.state()))
         }
     }
@@ -633,7 +635,7 @@ mod old {
             )?;
 
             let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
-            let req: String = "GET /10\r\n".to_string();
+            let req = format!("GET {}\r\n", url.path());
             client
                 .stream_send(client_stream_id, req.as_bytes())
                 .unwrap();

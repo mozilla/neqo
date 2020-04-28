@@ -788,6 +788,8 @@ impl Connection {
         if let State::Init = &self.state {
             let res = self.client_start(now);
             self.absorb_error(now, res);
+        } else {
+            self.process_timer(now);
         }
         match self.output(now) {
             Some(pkt) => Output::Datagram(pkt),
@@ -804,7 +806,6 @@ impl Connection {
         if let Some(d) = dgram {
             self.process_input(d, now);
         }
-        self.process_timer(now);
         self.process_output(now)
     }
 
@@ -1372,6 +1373,7 @@ impl Connection {
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self], "client_start");
+        debug_assert_eq!(self.role, Role::Client);
         qlog::client_connection_started(&mut self.qlog, self.path.as_ref().unwrap())?;
 
         self.handshake(now, PNSpace::Initial, None)?;
@@ -1643,7 +1645,7 @@ impl Connection {
                 reason_phrase,
             } => {
                 let reason_phrase = String::from_utf8_lossy(&reason_phrase);
-                qerror!(
+                qinfo!(
                     [self],
                     "ConnectionClose received. Error code: {:?} frame type {:x} reason {}",
                     error_code,
@@ -2229,6 +2231,7 @@ mod tests {
     #[test]
     fn test_conn_stream_create() {
         let mut client = default_client();
+
         let out = client.process(None, now());
         let mut server = default_server();
         let out = server.process(out.dgram(), now());
@@ -2874,7 +2877,7 @@ mod tests {
         client.process(None, now + LOCAL_IDLE_TIMEOUT - Duration::from_secs(1));
         assert!(matches!(client.state(), State::Confirmed));
 
-        client.process_timer(now + LOCAL_IDLE_TIMEOUT);
+        client.process(None, now + LOCAL_IDLE_TIMEOUT);
 
         // Not connected after LOCAL_IDLE_TIMEOUT seconds.
         assert!(matches!(client.state(), State::Closed(_)));
@@ -2980,7 +2983,8 @@ mod tests {
         assert!(matches!(client.state(), State::Confirmed));
 
         // Not connected after 40 seconds.
-        client.process_timer(now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
+        client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
+
         assert!(matches!(client.state(), State::Closed(_)));
     }
 
@@ -3009,7 +3013,7 @@ mod tests {
 
         // Not connected after 40 seconds because timer not reset by second
         // outgoing packet
-        client.process_timer(now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
+        client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
         assert!(matches!(client.state(), State::Closed(_)));
     }
 
@@ -3039,11 +3043,12 @@ mod tests {
 
         // Still connected after 49 seconds because idle timer reset by received
         // packet
-        client.process_timer(now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(19));
+        client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(19));
         assert!(matches!(client.state(), State::Confirmed));
 
         // Not connected after 50 seconds.
-        client.process_timer(now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(20));
+        client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(20));
+
         assert!(matches!(client.state(), State::Closed(_)));
     }
 
@@ -3342,7 +3347,6 @@ mod tests {
 
         // Wait for the PTO.
         now += Duration::from_secs(1);
-        client.process_timer(now); // TODO merge process_timer into process_output.
         let dgrams = send_bytes(&mut client, 2, now);
         assert_eq!(dgrams.len(), 2); // Two packets in the PTO.
 
@@ -3767,7 +3771,7 @@ mod tests {
         stream: u64,
         in_dgrams: Vec<Datagram>,
         now: Instant,
-    ) -> (Datagram, Vec<Frame>) {
+    ) -> (Vec<Datagram>, Vec<Frame>) {
         let mut srv_buf = [0; 4_096];
         let mut recvd_frames = Vec::new();
 
@@ -3787,10 +3791,10 @@ mod tests {
             tx_dgrams.push(dg);
         }
 
-        assert_eq!(tx_dgrams.len(), 1);
+        assert!((tx_dgrams.len() == 1) || (tx_dgrams.len() == 2));
 
         (
-            tx_dgrams.pop().unwrap(),
+            tx_dgrams,
             recvd_frames.into_iter().map(|(f, _e)| f).collect(),
         )
     }
@@ -3874,20 +3878,22 @@ mod tests {
         let (s_tx_dgram, _recvd_frames) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
         // Client: Process ack
-        let recvd_frames = client.test_process_input(s_tx_dgram, now);
+        for dgram in s_tx_dgram {
+            let recvd_frames = client.test_process_input(dgram, now);
 
-        // Verify that server-sent frame was what we thought.
-        if let (
-            Frame::Ack {
-                largest_acknowledged,
-                ..
-            },
-            PNSpace::ApplicationData,
-        ) = recvd_frames[0]
-        {
-            assert_eq!(largest_acknowledged, flight1_largest);
-        } else {
-            panic!("Expected an application ACK");
+            // Verify that server-sent frame was what we thought.
+            if let (
+                Frame::Ack {
+                    largest_acknowledged,
+                    ..
+                },
+                PNSpace::ApplicationData,
+            ) = recvd_frames[0]
+            {
+                assert_eq!(largest_acknowledged, flight1_largest);
+            } else {
+                panic!("Expected an application ACK");
+            }
         }
 
         // Client: send more
@@ -3900,20 +3906,22 @@ mod tests {
         let (s_tx_dgram, _recvd_frames) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
         // Client: Process ack
-        let recvd_frames = client.test_process_input(s_tx_dgram, now);
+        for dgram in s_tx_dgram {
+            let recvd_frames = client.test_process_input(dgram, now);
 
-        // Verify that server-sent frame was what we thought.
-        if let (
-            Frame::Ack {
-                largest_acknowledged,
-                ..
-            },
-            PNSpace::ApplicationData,
-        ) = recvd_frames[0]
-        {
-            assert_eq!(largest_acknowledged, flight2_largest);
-        } else {
-            panic!("Expected an application ACK");
+            // Verify that server-sent frame was what we thought.
+            if let (
+                Frame::Ack {
+                    largest_acknowledged,
+                    ..
+                },
+                PNSpace::ApplicationData,
+            ) = recvd_frames[0]
+            {
+                assert_eq!(largest_acknowledged, flight2_largest);
+            } else {
+                panic!("Expected an application ACK");
+            }
         }
 
         // If we just triggered cong avoidance, these should be equal
@@ -3944,8 +3952,9 @@ mod tests {
 
         // Server: Receive and generate ack
         let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
-
-        client.test_process_input(s_tx_dgram, now);
+        for dgram in s_tx_dgram {
+            client.test_process_input(dgram, now);
+        }
 
         // If we just triggered cong avoidance, these should be equal
         let cwnd1 = client.loss_recovery.cwnd();
@@ -3955,7 +3964,9 @@ mod tests {
         let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams2, now);
 
         // ACK more packets but they were sent before end of recovery period
-        client.test_process_input(s_tx_dgram, now);
+        for dgram in s_tx_dgram {
+            client.test_process_input(dgram, now);
+        }
 
         // cwnd should not have changed since ACKed packets were sent before
         // recovery period expired
@@ -3986,12 +3997,14 @@ mod tests {
         let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
         // Client: Process ack
-        client.test_process_input(s_tx_dgram, now);
+        for dgram in s_tx_dgram {
+            client.test_process_input(dgram, now);
+        }
 
         // Should be in CARP now.
         let cwnd1 = client.loss_recovery.cwnd();
 
-        now += Duration::from_secs(10); // Time passes. CARP -> CA
+        now += Duration::from_millis(10); // Time passes. CARP -> CA
 
         // Client: Send more data
         let mut c_tx_dgrams = send_bytes(&mut client, 0, now);
@@ -4003,13 +4016,16 @@ mod tests {
         // Generate ACK
         let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
-        client.test_process_input(s_tx_dgram, now);
+        for dgram in s_tx_dgram {
+            client.test_process_input(dgram, now);
+        }
 
         // ACK of pkts sent after start of recovery period should have caused
         // exit from recovery period to just regular congestion avoidance. cwnd
         // should now be a little higher but not as high as acked pkts during
         // slow-start would cause it to be.
         let cwnd2 = client.loss_recovery.cwnd();
+
         assert!(cwnd2 > cwnd1);
         assert!(cwnd2 < cwnd1 + 500);
     }
@@ -4023,17 +4039,17 @@ mod tests {
         // timer. This is rather brittle.
         now += Duration::from_secs(1);
 
-        client.process_timer(now); // Should enter PTO mode
+        // Should enter PTO mode
         let c_tx_dgrams = send_bytes(client, 0, now);
         assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
 
         now += Duration::from_secs(2);
-        client.process_timer(now); // Should enter PTO mode
+        // Should enter PTO mode
         let c_tx_dgrams = send_bytes(client, 0, now);
         assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
 
         now += Duration::from_secs(4);
-        client.process_timer(now); // Should enter PTO mode
+        // Should enter PTO mode
         let c_tx_dgrams = send_bytes(client, 0, now);
         assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
 
@@ -4041,7 +4057,9 @@ mod tests {
         let (s_tx_dgram, _) = ack_bytes(server, 0, c_tx_dgrams, now);
 
         // In PC now.
-        client.test_process_input(s_tx_dgram, now);
+        for dgram in s_tx_dgram {
+            client.test_process_input(dgram, now);
+        }
 
         assert_eq!(client.loss_recovery.cwnd(), MIN_CONG_WINDOW);
         now
@@ -4093,13 +4111,13 @@ mod tests {
         let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
         now += Duration::from_millis(100);
-        client.test_process_input(s_tx_dgram, now);
+        for dgram in s_tx_dgram {
+            client.test_process_input(dgram, now);
+        }
 
         // send bytes that will be lost
         let _c_tx_dgrams = send_bytes(&mut client, 0, now);
         now += Duration::from_millis(100);
-        // Not received.
-        // let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
         induce_persistent_congestion(&mut client, &mut server, now);
     }
@@ -4122,7 +4140,7 @@ mod tests {
         assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND);
 
         // Server: Receive and generate ack
-        now += Duration::from_millis(100);
+        now += Duration::from_millis(10);
         let (_s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
         // ACK lost.
@@ -4131,19 +4149,21 @@ mod tests {
 
         // New part of test starts here
 
-        now += Duration::from_millis(100);
+        now += Duration::from_millis(10);
 
         // Send packets from after start of CARP
         let c_tx_dgrams = send_bytes(&mut client, 0, now);
         assert_eq!(c_tx_dgrams.len(), 2);
 
         // Server: Receive and generate ack
-        now += Duration::from_millis(100);
+        now += Duration::from_millis(10);
         let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
         // No longer in CARP. (pkts acked from after start of CARP)
         // Should be in slow start now.
-        client.test_process_input(s_tx_dgram, now);
+        for dgram in s_tx_dgram {
+            client.test_process_input(dgram, now);
+        }
 
         // ACKing 2 packets should let client send 4.
         let c_tx_dgrams = send_bytes(&mut client, 0, now);
@@ -4234,24 +4254,13 @@ mod tests {
         connect_force_idle(&mut client, &mut server);
         let mut now = now();
 
-        // Both client and server should be idle now.
-        assert_eq!(
-            Output::Callback(LOCAL_IDLE_TIMEOUT),
-            client.process(None, now)
-        );
-        assert_eq!(
-            Output::Callback(LOCAL_IDLE_TIMEOUT),
-            server.process(None, now)
-        );
         assert_eq!(client.get_epochs(), (Some(3), Some(3))); // (write, read)
         assert_eq!(server.get_epochs(), (Some(3), Some(3)));
 
         // TODO(mt) this needs to wait for handshake confirmation,
         // but for now, we can do this immediately.
-        let res = client.initiate_key_update();
-        assert!(res.is_ok());
-        let res = client.initiate_key_update();
-        assert!(res.is_err());
+        assert!(client.initiate_key_update().is_ok());
+        assert!(client.initiate_key_update().is_err());
 
         // Initiating an update should only increase the write epoch.
         assert_eq!(
@@ -4282,15 +4291,16 @@ mod tests {
         // But at this point the client hasn't received a key update from the server.
         // It will be stuck with old keys.
         now += Duration::from_secs(1);
-        client.process_timer(now);
+        client.process(None, now);
         assert_eq!(client.get_epochs(), (Some(4), Some(3)));
-        server.process_timer(now);
+        server.process(None, now);
         assert_eq!(server.get_epochs(), (Some(4), Some(4)));
 
         // Even though the server has updated, it hasn't received an ACK yet.
         assert!(server.initiate_key_update().is_err());
 
-        // Now get an ACK from the server.
+        // Now get an ACK from the server. We needt o send 2 packets to get a ACK because of ACK_DELAY.
+        assert!(send_and_receive(&mut client, &mut server, now).is_none());
         let dgram = send_and_receive(&mut client, &mut server, now);
         assert!(dgram.is_some());
         let res = client.process(dgram, now);
@@ -4308,7 +4318,7 @@ mod tests {
         assert!(server.initiate_key_update().is_err());
 
         now += Duration::from_secs(1);
-        client.process_timer(now);
+        client.process(None, now);
         assert_eq!(client.get_epochs(), (Some(4), Some(4)));
     }
 
@@ -4336,7 +4346,7 @@ mod tests {
             assert_eq!(server.get_epochs(), (Some(4), Some(3)));
             // Now move the server temporarily into the future so that it
             // rotates the keys.  Don't do this at home folks.
-            server.process_timer(now + Duration::from_secs(1));
+            server.process(None, now + Duration::from_secs(1));
             assert_eq!(server.get_epochs(), (Some(4), Some(4)));
         } else {
             panic!("server should have a timer set");

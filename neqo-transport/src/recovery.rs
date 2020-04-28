@@ -611,14 +611,10 @@ impl LossRecovery {
         }
 
         PNSpace::iter()
-            .map(|spc| (*spc, self.spaces[*spc].earliest_sent_time()))
-            .filter_map(|(spc, time)| {
-                // None is ordered less than Some(_). Bad. Filter them out.
-                if let Some(time) = time {
-                    Some((spc, time))
-                } else {
-                    None
-                }
+            .filter_map(|&spc| {
+                self.spaces[spc]
+                    .earliest_sent_time()
+                    .map(|time| (spc, time))
             })
             .min_by_key(|&(_, time)| time)
             .map(|(spc, val)| (spc, val + self.loss_delay()))
