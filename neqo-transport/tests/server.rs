@@ -87,6 +87,23 @@ fn single_client() {
 }
 
 #[test]
+fn duplicate_initial() {
+    let mut server = default_server();
+    let mut client = default_client();
+
+    assert_eq!(*client.state(), State::Init);
+    let initial = client.process(None, now()).dgram();
+    assert!(initial.is_some());
+    let dgram = server.process(initial.clone(), now()).dgram();
+    assert!(dgram.is_some());
+
+    let dgram = server.process(initial, now()).dgram();
+    assert!(dgram.is_none());
+
+    assert_eq!(server.active_connections().len(), 1);
+}
+
+#[test]
 fn retry() {
     let mut server = default_server();
     server.set_retry_required(true);
