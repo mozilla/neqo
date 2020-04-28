@@ -201,6 +201,29 @@ fn same_initial_after_connected() {
 }
 
 #[test]
+fn drop_non_initial() {
+    const CID: &[u8] = &[55; 8]; // not a real connection ID
+    let mut server = default_server();
+
+    // This is big enough to look like an Initial, but it uses the Retry type.
+    let mut header = neqo_common::Encoder::with_capacity(1200);
+    header
+        .encode_byte(0xfa)
+        .encode_uint(4, QUIC_VERSION)
+        .encode_vec(1, CID)
+        .encode_vec(1, CID);
+    let mut bogus_data: Vec<u8> = header.into();
+    bogus_data.resize(1200, 66);
+
+    let bogus = Datagram::new(
+        test_fixture::loopback(),
+        test_fixture::loopback(),
+        bogus_data,
+    );
+    assert!(server.process(Some(bogus), now()).dgram().is_none());
+}
+
+#[test]
 fn retry() {
     let mut server = default_server();
     server.set_retry_required(true);
