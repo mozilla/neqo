@@ -12,7 +12,6 @@ use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::Connection;
 use std::cmp::min;
 use std::convert::TryFrom;
-use std::mem;
 
 /*
  * Response stream state:
@@ -41,18 +40,10 @@ enum ResponseStreamState {
     Closed,
 }
 
-#[derive(Debug, PartialEq)]
-enum ResponseHeadersState {
-    NoHeaders,
-    Ready(Option<Vec<Header>>),
-    Read,
-}
-
 #[derive(Debug)]
 pub(crate) struct ResponseStream {
     state: ResponseStreamState,
     frame_reader: HFrameReader,
-    response_headers_state: ResponseHeadersState,
     conn_events: Http3ClientEvents,
     stream_id: u64,
 }
@@ -68,7 +59,6 @@ impl ResponseStream {
         Self {
             state: ResponseStreamState::WaitingForResponseHeaders,
             frame_reader: HFrameReader::new(),
-            response_headers_state: ResponseHeadersState::NoHeaders,
             conn_events,
             stream_id,
         }
@@ -78,7 +68,7 @@ impl ResponseStream {
         match self.state {
             ResponseStreamState::WaitingForResponseHeaders => {
                 if header_block.is_empty() {
-                    self.add_headers(None)?;
+                    self.add_headers(None, fin);
                 } else {
                     self.state = ResponseStreamState::DecodingHeaders { header_block, fin };
                 }
@@ -115,18 +105,15 @@ impl ResponseStream {
         Ok(())
     }
 
-    fn add_headers(&mut self, headers: Option<Vec<Header>>) -> Res<()> {
-        if self.response_headers_state != ResponseHeadersState::NoHeaders {
-            debug_assert!(
-                false,
-                "self.response_headers_state must be in state ResponseHeadersState::NoHeaders."
-            );
-            return Err(Error::HttpInternal);
+    fn add_headers(&mut self, headers: Option<Vec<Header>>, fin: bool) {
+        if fin {
+            self.conn_events.header_ready(self.stream_id, headers, true);
+            self.state = ResponseStreamState::Closed;
+        } else {
+            self.conn_events
+                .header_ready(self.stream_id, headers, false);
+            self.state = ResponseStreamState::WaitingForData;
         }
-        self.response_headers_state = ResponseHeadersState::Ready(headers);
-        self.conn_events.header_ready(self.stream_id);
-        self.state = ResponseStreamState::WaitingForData;
-        Ok(())
     }
 
     fn set_state_to_close_pending(&mut self) {
@@ -134,20 +121,25 @@ impl ResponseStream {
         // or data_readable event so that app can pick up the fin.
         qtrace!(
             [self],
-            "set_state_to_close_pending:  response_headers_state={:?}",
-            self.response_headers_state
+            "set_state_to_close_pending:  state={:?}",
+            self.state
         );
-        match self.response_headers_state {
-            ResponseHeadersState::NoHeaders => {
-                self.conn_events.header_ready(self.stream_id);
-                self.response_headers_state = ResponseHeadersState::Ready(None);
+
+        match self.state {
+            ResponseStreamState::WaitingForResponseHeaders => {
+                self.conn_events.header_ready(self.stream_id, None, true);
+                self.state = ResponseStreamState::Closed;
             }
-            // In Ready state we are already waiting for app to pick up headers
-            // it can also pick up fin, so we do not need a new event.
-            ResponseHeadersState::Ready(..) => {}
-            ResponseHeadersState::Read => self.conn_events.data_readable(self.stream_id),
+            ResponseStreamState::ReadingData { .. } => {}
+            ResponseStreamState::WaitingForData
+            | ResponseStreamState::WaitingForFinAfterTrailers => {
+                self.conn_events.data_readable(self.stream_id)
+            }
+            _ => unreachable!("Closing an already closed transaction."),
         }
-        self.state = ResponseStreamState::ClosePending;
+        if !matches!(self.state, ResponseStreamState::Closed) {
+            self.state = ResponseStreamState::ClosePending;
+        }
     }
 
     fn recv_frame(&mut self, conn: &mut Connection) -> Res<(Option<HFrame>, bool)> {
@@ -158,28 +150,6 @@ impl ResponseStream {
             Ok((Some(self.frame_reader.get_frame()?), fin))
         } else {
             Ok((None, fin))
-        }
-    }
-
-    pub fn read_response_headers(&mut self) -> Res<(Vec<Header>, bool)> {
-        if let ResponseHeadersState::Ready(ref mut headers) = self.response_headers_state {
-            let hdrs = if let Some(ref mut hdrs) = headers {
-                mem::replace(hdrs, Vec::new())
-            } else {
-                Vec::new()
-            };
-
-            self.response_headers_state = ResponseHeadersState::Read;
-
-            let fin = if self.state == ResponseStreamState::ClosePending {
-                self.state = ResponseStreamState::Closed;
-                true
-            } else {
-                false
-            };
-            Ok((hdrs, fin))
-        } else {
-            Err(Error::Unavailable)
         }
     }
 
@@ -265,6 +235,9 @@ impl ResponseStream {
                                 }
                                 _ => break Err(Error::HttpFrameUnexpected),
                             }
+                            if matches!(self.state, ResponseStreamState::Closed) {
+                                break Ok(());
+                            }
                             if fin
                                 && !matches!(self.state, ResponseStreamState::DecodingHeaders{..})
                             {
@@ -281,9 +254,8 @@ impl ResponseStream {
                     if let Some(headers) =
                         decoder.decode_header_block(header_block, self.stream_id)?
                     {
-                        self.add_headers(Some(headers))?;
+                        self.add_headers(Some(headers), fin);
                         if fin {
-                            self.set_state_to_close_pending();
                             break Ok(());
                         }
                     } else {
