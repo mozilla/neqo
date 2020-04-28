@@ -6,6 +6,8 @@
 
 // Tracking of received packets and generating acks thereof.
 
+#![deny(clippy::pedantic)]
+
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::convert::TryInto;
@@ -66,11 +68,11 @@ pub struct SentPacket {
     pub time_sent: Instant,
     pub tokens: Vec<RecoveryToken>,
 
-    pub time_declared_lost: Option<Instant>,
+    time_declared_lost: Option<Instant>,
     /// After a PTO, the packet has been released.
     pto: bool,
 
-    pub in_flight: bool,
+    in_flight: bool,
     pub size: usize,
 }
 
@@ -93,10 +95,49 @@ impl SentPacket {
         }
     }
 
+    /// Returns `true` if the packet counts requires congestion control accounting.
+    /// The specification uses the term "in flight" for this.
+    pub fn cc_in_flight(&self) -> bool {
+        self.in_flight
+    }
+
+    /// Whether the packet has been declared lost.
+    pub fn lost(&self) -> bool {
+        self.time_declared_lost.is_some()
+    }
+
+    /// Whether accounting for the loss or acknowledgement in the
+    /// congestion controller is pending.
+    /// Returns `true` if the packet counts as being "in flight",
+    /// and has not previously been declared lost.
+    pub fn cc_outstanding(&self) -> bool {
+        self.cc_in_flight() && !self.lost()
+    }
+
+    /// Declare the packet as lost.  Returns `true` if this is the first time.
+    pub fn declare_lost(&mut self, now: Instant) -> bool {
+        if self.lost() {
+            false
+        } else {
+            self.time_declared_lost = Some(now);
+            true
+        }
+    }
+
+    /// Ask whether this tracked packet has been declared lost for long enough
+    /// that it can be expired and no longer tracked.
+    pub fn expired(&self, now: Instant, expiration_period: Duration) -> bool {
+        if let Some(loss_time) = self.time_declared_lost {
+            (loss_time + expiration_period) <= now
+        } else {
+            false
+        }
+    }
+
     /// On PTO, we need to get the recovery tokens so that we can ensure that
     /// the frames we sent can be sent again in the PTO packet(s).  Do that just once.
     pub fn pto(&mut self) -> bool {
-        if self.pto {
+        if self.pto || self.lost() {
             false
         } else {
             self.pto = true;
@@ -177,7 +218,7 @@ impl PacketRange {
     }
 
     /// When a packet containing the range `other` is acknowledged,
-    /// clear the ack_needed attribute on this.
+    /// clear the `ack_needed` attribute on this.
     /// Requires that other is equal to this, or a larger range.
     pub fn acknowledged(&mut self, other: &Self) {
         if (other.smallest <= self.smallest) && (other.largest >= self.largest) {
@@ -220,7 +261,7 @@ pub struct RecvdPackets {
 }
 
 impl RecvdPackets {
-    /// Make a new RecvdPackets for the indicated packet number space.
+    /// Make a new `RecvdPackets` for the indicated packet number space.
     pub fn new(space: PNSpace) -> Self {
         Self {
             space,

@@ -251,17 +251,9 @@ impl LossRecoverySpace {
                 break;
             };
 
-            if packet.time_declared_lost.is_none() {
-                // Track declared-lost packets for a little while, maybe they
-                // will still show up?
-                packet.time_declared_lost = Some(now);
-
+            if packet.declare_lost(now) {
                 lost_pns.push(*pn);
-            } else if packet
-                .time_declared_lost
-                .map(|tdl| tdl + (loss_delay * 2) < now)
-                .unwrap_or(false)
-            {
+            } else if packet.expired(now, loss_delay * 2) {
                 really_lost_pns.push(*pn);
             }
         }
@@ -449,23 +441,20 @@ impl LossRecovery {
                 self.rtt_vals.update_rtt(latest_rtt, ack_delay);
             }
         }
-
-        // TODO Process ECN information if present.
+        self.cc.on_packets_acked(&acked_packets);
 
         let loss_delay = self.loss_delay();
         let mut lost_packets = Vec::new();
         self.spaces[pn_space].detect_lost_packets(now, loss_delay, &mut lost_packets);
-
-        self.pto_state = None;
-
-        self.cc.on_packets_acked(&acked_packets);
-
+        // TODO Process ECN information if present.
         self.cc.on_packets_lost(
             now,
             prev_largest_acked_sent_time,
             self.rtt_vals.pto(pn_space),
             &lost_packets,
         );
+
+        self.pto_state = None;
 
         (acked_packets, lost_packets)
     }
@@ -578,11 +567,11 @@ impl LossRecovery {
         }
     }
 
-    /// This checks whether the PTO timer has fired.
+    /// This checks whether the PTO timer has fired and fires it if needed.
     /// When it has, mark a few packets as "lost" for the purposes of having frames
     /// regenerated in subsequent packets.  The packets aren't truly lost, so
     /// we have to clone the `SentPacket` instance.
-    fn maybe_pto(&mut self, now: Instant, lost: &mut Vec<SentPacket>) {
+    fn maybe_fire_pto(&mut self, now: Instant, lost: &mut Vec<SentPacket>) {
         let mut pto_space = None;
         for space in PNSpace::iter() {
             // Skip early packet number spaces where the PTO timer hasn't fired.
@@ -612,11 +601,19 @@ impl LossRecovery {
 
         let loss_delay = self.loss_delay();
         let mut lost_packets = Vec::new();
-        for space in self.spaces.iter_mut() {
-            space.detect_lost_packets(now, loss_delay, &mut lost_packets);
+        for &sp in PNSpace::iter() {
+            let first = lost_packets.len();  // The first packet lost in this space.
+            self.spaces[sp].detect_lost_packets(now, loss_delay, &mut lost_packets);
+            self.cc.on_packets_lost(
+                now,
+                self.spaces[sp].largest_acked_sent_time,
+                self.rtt_vals.pto(sp),
+                &lost_packets[first..],
+            )
         }
+
         self.enable_timed_loss_detection = self.spaces.iter().any(|space| space.has_out_of_order());
-        self.maybe_pto(now, &mut lost_packets);
+        self.maybe_fire_pto(now, &mut lost_packets);
         lost_packets
     }
 
@@ -889,7 +886,9 @@ mod tests {
         assert_eq!(callback_time, Some(pn1_loss_time));
         let packets = lr.timeout(pn1_loss_time);
         assert_eq!(packets.len(), 1);
-        assert_eq!(packets[0].time_declared_lost, callback_time);
+        // This checks for expiration over a zero-length interval, which
+        // lets us check the loss time.
+        assert!(packets[0].expired(pn1_loss_time, Duration::from_secs(0)));
         assert_no_sent_times(&lr);
     }
 
