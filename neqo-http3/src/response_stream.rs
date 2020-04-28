@@ -186,37 +186,50 @@ impl ResponseStream {
     pub fn read_response_data(
         &mut self,
         conn: &mut Connection,
+        decoder: &mut QPackDecoder,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        match self.state {
-            ResponseStreamState::ReadingData {
-                ref mut remaining_data_len,
-            } => {
-                let to_read = min(*remaining_data_len, buf.len());
-                let (amount, fin) = conn.stream_recv(self.stream_id, &mut buf[..to_read])?;
-                debug_assert!(amount <= to_read);
-                *remaining_data_len -= amount;
+        let mut written = 0;
+        loop {
+            match self.state {
+                ResponseStreamState::ReadingData {
+                    ref mut remaining_data_len,
+                } => {
+                    let to_read = min(*remaining_data_len, buf.len() - written);
+                    let (amount, fin) =
+                        conn.stream_recv(self.stream_id, &mut buf[written..written + to_read])?;
+                    debug_assert!(amount <= to_read);
+                    *remaining_data_len -= amount;
+                    written += amount;
 
-                if fin {
-                    if *remaining_data_len > 0 {
-                        return Err(Error::HttpFrame);
+                    if fin {
+                        if *remaining_data_len > 0 {
+                            return Err(Error::HttpFrame);
+                        }
+                        self.state = ResponseStreamState::Closed;
+                        break Ok((written, fin));
+                    } else if *remaining_data_len == 0 {
+                        self.state = ResponseStreamState::WaitingForData;
+                        self.receive(conn, decoder, false)?;
+                    } else {
+                        break Ok((written, false));
                     }
-                    self.state = ResponseStreamState::Closed;
-                } else if *remaining_data_len == 0 {
-                    self.state = ResponseStreamState::WaitingForData;
                 }
-
-                Ok((amount, fin))
+                ResponseStreamState::ClosePending => {
+                    self.state = ResponseStreamState::Closed;
+                    break Ok((written, true));
+                }
+                _ => break Ok((written, false)),
             }
-            ResponseStreamState::ClosePending => {
-                self.state = ResponseStreamState::Closed;
-                Ok((0, true))
-            }
-            _ => Ok((0, false)),
         }
     }
 
-    pub fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
+    pub fn receive(
+        &mut self,
+        conn: &mut Connection,
+        decoder: &mut QPackDecoder,
+        post_readable_event: bool,
+    ) -> Res<()> {
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
@@ -279,7 +292,9 @@ impl ResponseStream {
                     }
                 }
                 ResponseStreamState::ReadingData { .. } => {
-                    self.conn_events.data_readable(self.stream_id);
+                    if post_readable_event {
+                        self.conn_events.data_readable(self.stream_id);
+                    }
                     break Ok(());
                 }
                 ResponseStreamState::ClosePending | ResponseStreamState::Closed => {

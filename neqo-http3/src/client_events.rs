@@ -153,14 +153,4 @@ impl Http3ClientEvents {
                 | Http3ClientEvent::StopSending { stream_id: x, .. } if *x == stream_id)
         });
     }
-
-    /// Remove header/data ready events for a stream
-    pub(crate) fn remove_data_ready_events_for_stream_id(&self, stream_id: u64) {
-        self.remove(|evt| {
-            matches!(evt,
-                Http3ClientEvent::HeaderReady { stream_id: x }
-                | Http3ClientEvent::DataReadable { stream_id: x }
-                | Http3ClientEvent::NewPushStream { stream_id: x } if *x == stream_id)
-        });
-    }
 }

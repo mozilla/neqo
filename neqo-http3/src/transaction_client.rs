@@ -223,9 +223,10 @@ impl TransactionClient {
     pub fn read_response_data(
         &mut self,
         conn: &mut Connection,
+        decoder: &mut QPackDecoder,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        self.response_stream.read_response_data(conn, buf)
+        self.response_stream.read_response_data(conn, decoder, buf)
     }
 
     pub fn is_state_sending_data(&self) -> bool {
@@ -267,7 +268,7 @@ impl Http3Transaction for TransactionClient {
     }
 
     fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
-        self.response_stream.receive(conn, decoder)
+        self.response_stream.receive(conn, decoder, true)
     }
 
     // TransactionClient owns headers and sends them. This method returns if
