@@ -57,7 +57,7 @@ pub enum Http3State {
     Initializing,
     ZeroRtt,
     Connected,
-    GoingAway,
+    GoingAway(u64),
     Closing(CloseError),
     Closed(CloseError),
 }
@@ -618,7 +618,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     }
 
     fn state_active(&self) -> bool {
-        matches!(self.state, Http3State::Connected | Http3State::GoingAway)
+        matches!(self.state, Http3State::Connected | Http3State::GoingAway(_))
     }
 
     fn state_zero_rtt(&self) -> bool {
