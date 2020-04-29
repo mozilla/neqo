@@ -69,7 +69,7 @@ impl Http3ServerHandler {
     pub fn process_http3(&mut self, conn: &mut Connection, now: Instant) {
         qtrace!([self], "Process http3 internal.");
         match self.base_handler.state() {
-            Http3State::Connected | Http3State::GoingAway => {
+            Http3State::Connected | Http3State::GoingAway(..) => {
                 let res = self.check_connection_events(conn);
                 if self.check_result(conn, now, &res) {
                     return;
