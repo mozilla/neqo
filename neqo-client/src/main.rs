@@ -115,7 +115,11 @@ fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) {
     }
 }
 
-fn get_output_file(url: &Url, output_dir: &Option<PathBuf>, all_paths: &mut Vec<PathBuf>) -> Option<File> {
+fn get_output_file(
+    url: &Url,
+    output_dir: &Option<PathBuf>,
+    all_paths: &mut Vec<PathBuf>,
+) -> Option<File> {
     if let Some(ref dir) = output_dir {
         let mut out_path = dir.clone();
 
@@ -139,7 +143,8 @@ fn get_output_file(url: &Url, output_dir: &Option<PathBuf>, all_paths: &mut Vec<
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&out_path) {
+            .open(&out_path)
+        {
             Err(_) => return None,
             Ok(f) => f,
         };
@@ -497,23 +502,15 @@ mod old {
         Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
     };
 
-    use super::{emit_datagram, Args, get_output_file};
+    use super::{emit_datagram, get_output_file, Args};
 
     trait HandlerOld {
-        fn handle(
-            &mut self,
-            args: &Args,
-            client: &mut Connection,
-        ) -> Res<bool>;
+        fn handle(&mut self, args: &Args, client: &mut Connection) -> Res<bool>;
     }
 
     struct PreConnectHandlerOld {}
     impl HandlerOld for PreConnectHandlerOld {
-        fn handle(
-            &mut self,
-            _args: &Args,
-            client: &mut Connection,
-        ) -> Res<bool> {
+        fn handle(&mut self, _args: &Args, client: &mut Connection) -> Res<bool> {
             let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
             if client.events().any(authentication_needed) {
                 client.authenticated(AuthenticationStatus::Ok, Instant::now());
@@ -529,11 +526,7 @@ mod old {
 
     // This is a bit fancier than actually needed.
     impl HandlerOld for PostConnectHandlerOld {
-        fn handle(
-            &mut self,
-            args: &Args,
-            client: &mut Connection,
-        ) -> Res<bool> {
+        fn handle(&mut self, args: &Args, client: &mut Connection) -> Res<bool> {
             let mut data = vec![0; 4000];
             while let Some(event) = client.next_event() {
                 match event {
@@ -636,7 +629,6 @@ mod old {
         origin: &str,
         urls: &[Url],
     ) -> Res<()> {
-
         let mut open_paths = Vec::new();
 
         let mut client = Connection::new_client(
