@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use crate::decoder_instructions::DecoderInstruction;
-use crate::encoder_instructions::{EncoderInstruction, EncoderInstructionReader};
+use crate::encoder_instructions::{DecodedEncoderInstruction, EncoderInstructionReader};
 use crate::header_block::{HeaderDecoder, HeaderDecoderResult};
 use crate::qpack_send_buf::QPData;
 use crate::reader::ReceiverConnWrapper;
@@ -91,26 +91,26 @@ impl QPackDecoder {
         }
     }
 
-    fn execute_instruction(&mut self, instruction: EncoderInstruction) -> Res<()> {
+    fn execute_instruction(&mut self, instruction: DecodedEncoderInstruction) -> Res<()> {
         match instruction {
-            EncoderInstruction::Capacity { value } => self.set_capacity(value)?,
-            EncoderInstruction::InsertWithNameRefStatic { index, value } => {
+            DecodedEncoderInstruction::Capacity { value } => self.set_capacity(value)?,
+            DecodedEncoderInstruction::InsertWithNameRefStatic { index, value } => {
                 self.table.insert_with_name_ref(true, index, &value)?;
                 self.total_num_of_inserts += 1;
             }
-            EncoderInstruction::InsertWithNameRefDynamic { index, value } => {
+            DecodedEncoderInstruction::InsertWithNameRefDynamic { index, value } => {
                 self.table.insert_with_name_ref(false, index, &value)?;
                 self.total_num_of_inserts += 1;
             }
-            EncoderInstruction::InsertWithNameLiteral { name, value } => {
+            DecodedEncoderInstruction::InsertWithNameLiteral { name, value } => {
                 self.table.insert(&name, &value).map(|_| ())?;
                 self.total_num_of_inserts += 1;
             }
-            EncoderInstruction::Duplicate { index } => {
+            DecodedEncoderInstruction::Duplicate { index } => {
                 self.table.duplicate(index)?;
                 self.total_num_of_inserts += 1;
             }
-            EncoderInstruction::NoInstruction => {
+            DecodedEncoderInstruction::NoInstruction => {
                 unreachable!("This can be call only with an instruction.")
             }
         }

@@ -334,8 +334,8 @@ impl QPackEncoder {
                 match self.insert(
                     conn,
                     &EncoderInstruction::InsertWithNameLiteral {
-                        name: name.clone(),
-                        value: value.clone(),
+                        name: &name,
+                        value: &value,
                     },
                 ) {
                     Ok(index) => {
@@ -543,7 +543,7 @@ mod tests {
                 &mut encoder.conn,
                 &EncoderInstruction::InsertWithNameRefStatic {
                     index: 4,
-                    value: VALUE_1.to_vec(),
+                    value: VALUE_1,
                 },
             )
             .unwrap_err();
@@ -565,7 +565,7 @@ mod tests {
                 &mut encoder.conn,
                 &EncoderInstruction::InsertWithNameRefStatic {
                     index: 4,
-                    value: VALUE_1.to_vec()
+                    value: VALUE_1
                 }
             )
             .is_ok());
@@ -581,8 +581,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
         assert_eq!(Error::EncoderStream, res.unwrap_err());
@@ -602,8 +602,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
         assert!(res.is_ok());
@@ -630,8 +630,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
         assert!(res.is_ok());
@@ -817,8 +817,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
         assert!(res.is_ok());
@@ -828,8 +828,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_2.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_2,
             },
         );
         assert!(res.is_err());
@@ -842,8 +842,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_2.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_2,
             },
         );
         assert!(res.is_ok());
@@ -865,8 +865,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
         assert!(res.is_ok());
@@ -891,8 +891,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_2.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_2,
             },
         );
         assert!(res.is_err());
@@ -910,8 +910,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_2.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_2,
             },
         );
         assert!(res.is_ok());
@@ -957,8 +957,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
 
@@ -1024,8 +1024,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
 
@@ -1036,8 +1036,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_2.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_2,
             },
         );
 
@@ -1387,8 +1387,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
 
@@ -1437,8 +1437,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
 
@@ -1487,8 +1487,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
 
@@ -1520,8 +1520,8 @@ mod tests {
         let res = encoder.encoder.insert(
             &mut encoder.conn,
             &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH.to_vec(),
-                value: VALUE_1.to_vec(),
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
             },
         );
 
