@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use crate::static_table::{StaticTableEntry, HEADER_STATIC_TABLE};
-use crate::{Error, QPackSide, Res};
+use crate::{Error, Res};
 use neqo_common::qtrace;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
@@ -17,11 +17,12 @@ pub struct LookupResult {
 }
 
 #[derive(Debug)]
-pub struct DynamicTableEntry {
+pub(crate) struct DynamicTableEntry {
     base: u64,
     name: Vec<u8>,
     value: Vec<u8>,
-    /// Number of streams that refer this entry.
+    /// Number of header blocks that refer this entry.
+    /// This is only used by the encoder.
     refs: u64,
 }
 
@@ -57,17 +58,17 @@ impl DynamicTableEntry {
 }
 
 #[derive(Debug)]
-pub struct HeaderTable {
-    qpack_side: QPackSide,
+pub(crate) struct HeaderTable {
     dynamic: VecDeque<DynamicTableEntry>,
-    // The total capacity (in QPACK bytes) of the table. This is set by
-    // configuration.
+    /// The total capacity (in QPACK bytes) of the table. This is set by
+    /// configuration.
     capacity: u64,
-    // The amount of used capacity.
+    /// The amount of used capacity.
     used: u64,
-    // The total number of inserts thus far.
+    /// The total number of inserts thus far.
     base: u64,
-    // This is number of inserts that are acked. this correspond to index of the first not acked.
+    /// This is number of inserts that are acked. this correspond to index of the first not acked.
+    /// This is only used by thee encoder.
     acked_inserts_cnt: u64,
 }
 
@@ -75,8 +76,8 @@ impl ::std::fmt::Display for HeaderTable {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(
             f,
-            "HeaderTable for {} (base={} acked_inserts_cnt={} capacity={})",
-            self.qpack_side, self.base, self.acked_inserts_cnt, self.capacity
+            "HeaderTable for (base={} acked_inserts_cnt={} capacity={})",
+            self.base, self.acked_inserts_cnt, self.capacity
         )
     }
 }
@@ -84,36 +85,40 @@ impl ::std::fmt::Display for HeaderTable {
 impl HeaderTable {
     pub fn new(encoder: bool) -> Self {
         Self {
-            qpack_side: if encoder {
-                QPackSide::Encoder
-            } else {
-                QPackSide::Decoder
-            },
             dynamic: VecDeque::new(),
             capacity: 0,
             used: 0,
             base: 0,
-            acked_inserts_cnt: 0,
+            acked_inserts_cnt: if encoder { 0 } else { u64::max_value() },
         }
     }
 
+    /// Returns number of inserts.
     pub fn base(&self) -> u64 {
         self.base
     }
 
+    /// Returns capacity of the dynamic table
     pub fn capacity(&self) -> u64 {
         self.capacity
     }
 
+    /// Change the dynamic table capacity.
+    /// ### Errors
+    /// `ChangeCapacity` if table capacity cannot be reduced.
+    /// The table cannot be reduce if there are entries that are referred at the moment or their inserts are unacked.
     pub fn set_capacity(&mut self, cap: u64) -> Res<()> {
         qtrace!([self], "set capacity to {}", cap);
         if !self.evict_to(cap) {
-            return Err(Error::Internal);
+            return Err(Error::ChangeCapacity);
         }
         self.capacity = cap;
         Ok(())
     }
 
+    /// Get a static entry with `index`.
+    /// ### Errors
+    /// `HeaderLookup` if the index does not exist in the static table.
     pub fn get_static(index: u64) -> Res<&'static StaticTableEntry> {
         let inx = usize::try_from(index).or(Err(Error::HeaderLookup))?;
         if inx > HEADER_STATIC_TABLE.len() {
@@ -124,8 +129,8 @@ impl HeaderTable {
 
     fn get_dynamic_with_abs_index(&mut self, index: u64) -> Res<&mut DynamicTableEntry> {
         if self.base <= index {
-            debug_assert!(false, "This is an iternal error");
-            return Err(Error::Internal);
+            debug_assert!(false, "This is an internal error");
+            return Err(Error::HeaderLookup);
         }
         let inx = self.base - index - 1;
         let inx = usize::try_from(inx).or(Err(Error::HeaderLookup))?;
@@ -143,6 +148,9 @@ impl HeaderTable {
         Ok(&self.dynamic[inx])
     }
 
+    /// Get a entry in the  dynamic table.
+    /// ### Errors
+    /// `HeaderLookup` if entry does not exist.
     pub fn get_dynamic(&self, index: u64, base: u64, post: bool) -> Res<&DynamicTableEntry> {
         let inx = if post {
             if self.base < (base + index + 1) {
@@ -159,6 +167,7 @@ impl HeaderTable {
         self.get_dynamic_with_relative_index(inx)
     }
 
+    /// Remove a reference to a dynamic table entry.
     pub fn remove_ref(&mut self, index: u64) {
         qtrace!([self], "remove reference to entry {}", index);
         self.get_dynamic_with_abs_index(index)
@@ -166,6 +175,7 @@ impl HeaderTable {
             .remove_ref();
     }
 
+    /// Add a reference to a dynamic table entry.
     pub fn add_ref(&mut self, index: u64) {
         qtrace!([self], "add reference to entry {}", index);
         self.get_dynamic_with_abs_index(index)
@@ -173,6 +183,9 @@ impl HeaderTable {
             .add_ref();
     }
 
+    /// Look for a header pair.
+    /// The function returns `LookupResult`: `index`, `static_table` (if it is a static table entry) and `value_matches`
+    /// (if the header value matches as well not only header name)
     pub fn lookup(&mut self, name: &[u8], value: &[u8], can_block: bool) -> Option<LookupResult> {
         qtrace!(
             [self],
@@ -227,7 +240,7 @@ impl HeaderTable {
         name_match
     }
 
-    pub fn evict_to(&mut self, reduce: u64) -> bool {
+    fn evict_to(&mut self, reduce: u64) -> bool {
         qtrace!(
             [self],
             "reduce table to {}, currently used:{}",
@@ -236,10 +249,8 @@ impl HeaderTable {
         );
         while (!self.dynamic.is_empty()) && self.used > reduce {
             if let Some(e) = self.dynamic.back() {
-                if let QPackSide::Encoder = self.qpack_side {
-                    if !e.can_reduce(self.acked_inserts_cnt) {
-                        return false;
-                    }
+                if !e.can_reduce(self.acked_inserts_cnt) {
+                    return false;
                 }
                 self.used -= e.size();
                 self.dynamic.pop_back();
@@ -248,6 +259,10 @@ impl HeaderTable {
         true
     }
 
+    /// Insert a new entry.
+    /// ### Errors
+    /// `DynamicTableFull` if an entry cannot be added to the table because there is not enough space and/or
+    /// other entry cannot be evicted.
     pub fn insert(&mut self, name: &[u8], value: &[u8]) -> Res<u64> {
         qtrace!([self], "insert name={:?} value={:?}", name, value);
         let entry = DynamicTableEntry {
@@ -257,10 +272,7 @@ impl HeaderTable {
             refs: 0,
         };
         if entry.size() > self.capacity || !self.evict_to(self.capacity - entry.size()) {
-            match self.qpack_side {
-                QPackSide::Encoder => return Err(Error::EncoderStream),
-                QPackSide::Decoder => return Err(Error::DecoderStream),
-            }
+            return Err(Error::DynamicTableFull);
         }
         self.base += 1;
         self.used += entry.size();
@@ -269,6 +281,11 @@ impl HeaderTable {
         Ok(index)
     }
 
+    /// Insert a new entry with the name refer to by a index to static or dynamic table.
+    /// ### Errors
+    /// `DynamicTableFull` if an entry cannot be added to the table because there is not enough space and/or
+    /// other entry cannot be evicted.
+    /// `HeaderLookup` if the index dos not exits in the static/dynamic table.
     pub fn insert_with_name_ref(
         &mut self,
         name_static_table: bool,
@@ -296,8 +313,13 @@ impl HeaderTable {
         self.insert(&name, value)
     }
 
+    /// Duplicate an entry.
+    /// ### Errors
+    /// `DynamicTableFull` if an entry cannot be added to the table because there is not enough space and/or
+    /// other entry cannot be evicted.
+    /// `HeaderLookup` if the index dos not exits in the static/dynamic table.
     pub fn duplicate(&mut self, index: u64) -> Res<u64> {
-        qtrace!([self], "dumplicate entry={}", index);
+        qtrace!([self], "duplicate entry={}", index);
         // need to remember name and value because insert may delete the entry.
         let name: Vec<u8>;
         let value: Vec<u8>;
@@ -310,15 +332,19 @@ impl HeaderTable {
         self.insert(&name, &value)
     }
 
+    /// Increment number of acknowledge entries.
+    /// ### Errors
+    /// `IncrementAck` if ack is greater than actual number of inserts.
     pub fn increment_acked(&mut self, increment: u64) -> Res<()> {
         qtrace!([self], "increment acked by {}", increment);
         self.acked_inserts_cnt += increment;
         if self.base < self.acked_inserts_cnt {
-            return Err(Error::Internal);
+            return Err(Error::IncrementAck);
         }
         Ok(())
     }
 
+    /// Return number of acknowledge inserts.
     pub fn get_acked_inserts_cnt(&self) -> u64 {
         self.acked_inserts_cnt
     }
