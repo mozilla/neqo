@@ -199,9 +199,10 @@ impl QPackEncoder {
     /// if it is possible to send the corresponding instruction immediately, i.e. the encoder stream is not
     /// blocked by the flow control.
     /// ### Errors
-    /// 'EncoderStreamBlocked' if the encoder stream is blocked by the flow control. The function can return transport
-    /// errors and HeaderLookup if an InsertWithNameRefDynamic instruction is used and the dynamic entry could not
-    /// be found.
+    /// `EncoderStreamBlocked` if the encoder stream is blocked by the flow control.
+    /// The function can return transport errors.
+    /// `HeaderLookup` if `InsertWithNameRefStatic`, `InsertWithNameRefDynamic` or `Duplicate` is used and the
+    /// reference entry cannot be found.
     pub fn insert(&mut self, conn: &mut Connection, instruction: &EncoderInstruction) -> Res<u64> {
         qdebug!([self], "insert instruction {:?}.", instruction);
         self.send(conn)?;
@@ -256,14 +257,12 @@ impl QPackEncoder {
         if self.send_buf.is_empty() {
             Ok(())
         } else if let Some(stream_id) = self.local_stream_id {
-            match conn.stream_send(stream_id, &self.send_buf[..]) {
-                Err(_) => Err(Error::EncoderStream),
-                Ok(r) => {
-                    qdebug!([self], "{} bytes sent.", r);
-                    self.send_buf.read(r as usize);
-                    Ok(())
-                }
-            }
+            let r = conn
+                .stream_send(stream_id, &self.send_buf[..])
+                .map_err(|_| Error::EncoderStream)?;
+            qdebug!([self], "{} bytes sent.", r);
+            self.send_buf.read(r as usize);
+            Ok(())
         } else {
             Ok(())
         }
@@ -283,7 +282,8 @@ impl QPackEncoder {
 
     /// Encodes headers
     /// ### Errors
-    /// This function may return a transport error when a new entry is added to the table and its instruction is sent.
+    /// This function may return a transport error when a new entry is added to the table and while sending its
+    /// instruction an error occurs.
     pub fn encode_header_block(
         &mut self,
         conn: &mut Connection,
