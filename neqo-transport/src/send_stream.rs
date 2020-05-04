@@ -699,6 +699,22 @@ impl SendStream {
             SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
         };
     }
+
+    pub fn stream_can_immediately_send(&mut self, len: u64) -> bool {
+        if self.avail() >= len {
+            return true;
+        }
+        if self.credit_avail() < len {
+            self.flow_mgr
+                .borrow_mut()
+                .stream_data_blocked(self.stream_id, self.max_stream_data);
+        }
+
+        if self.flow_mgr.borrow().conn_credit_avail() < len {
+            self.flow_mgr.borrow_mut().data_blocked();
+        }
+        false
+    }
 }
 
 #[derive(Debug, Default)]

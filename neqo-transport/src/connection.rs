@@ -2084,6 +2084,13 @@ impl Connection {
         Ok(self.send_streams.get(stream_id.into())?.avail())
     }
 
+    pub fn stream_can_immediately_send(&mut self, stream_id: u64, len: u64) -> Res<bool> {
+        Ok(self
+            .send_streams
+            .get_mut(stream_id.into())?
+            .stream_can_immediately_send(len))
+    }
+
     /// Close the stream. Enqueued data will be sent.
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
         self.send_streams.get_mut(stream_id.into())?.close();

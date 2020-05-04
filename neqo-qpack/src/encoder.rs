@@ -215,8 +215,7 @@ impl QPackEncoder {
 
         let stream_id = self.local_stream_id.ok_or(Error::Internal)?;
 
-        if conn.stream_avail_send_space(stream_id)? < u64::try_from(buf.len()).unwrap() {
-            // TODO conn.send_blocked(stream_id);
+        if !conn.stream_can_immediately_send(stream_id, u64::try_from(buf.len()).unwrap())? {
             return Err(Error::EncoderStreamBlocked);
         }
 
