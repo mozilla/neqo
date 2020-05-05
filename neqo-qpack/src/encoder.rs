@@ -480,7 +480,8 @@ mod tests {
     fn send_instructions(encoder: &mut TestEncoder, encoder_instruction: &[u8]) {
         encoder.encoder.send(&mut encoder.conn).unwrap();
         let out = encoder.conn.process(None, now());
-        encoder.peer_conn.process(out.dgram(), now());
+        let out2 = encoder.peer_conn.process(out.dgram(), now());
+        encoder.conn.process(out2.dgram(), now());
         let mut buf = [0_u8; 100];
         let (amount, fin) = encoder
             .peer_conn
@@ -1595,8 +1596,6 @@ mod tests {
         assert_eq!(buf1[2], 0x10);
         // Assert that the second header is encoded as a literal with a name literal
         assert_eq!(buf1[3] & 0xf0, 0x20);
-        // Ensure that we have sent only one instruction for (String::from("something"), String::from("1234"))
-        send_instructions(&mut encoder, ONE_INSTRUCTION);
 
         // Try to encode another header block. Here both headers will be encoded as a literal with a name literal
         let buf2 = encoder
@@ -1611,11 +1610,9 @@ mod tests {
             )
             .unwrap();
         assert_eq!(buf2[2] & 0xf0, 0x20);
-        // Ensure that we have not sent any instruction.
-        send_instructions(&mut encoder, &[]);
 
-        // Increase max data
-        encoder.conn.handle_max_data_test(100_000);
+        // Ensure that we have sent only one instruction for (String::from("something"), String::from("1234"))
+        send_instructions(&mut encoder, ONE_INSTRUCTION);
 
         // Try writing a new header block. Now, headers will be added to the dynamic table again, because
         // instructions can be sent.
