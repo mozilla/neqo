@@ -194,7 +194,8 @@ fn process_loop(
         }
 
         match socket.recv(&mut buf[..]) {
-            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {}
+            Err(ref err)
+                if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::Interrupted => {}
             Err(err) => {
                 eprintln!("UDP error: {}", err);
                 exit(1)
@@ -486,7 +487,7 @@ mod old {
     use std::cell::RefCell;
     use std::collections::HashMap;
     use std::fs::File;
-    use std::io::Write;
+    use std::io::{ErrorKind, Write};
     use std::net::{SocketAddr, UdpSocket};
     use std::process::exit;
     use std::rc::Rc;
@@ -604,6 +605,12 @@ mod old {
             }
 
             let sz = match socket.recv(&mut buf[..]) {
+                Err(ref err)
+                    if err.kind() == ErrorKind::WouldBlock
+                        || err.kind() == ErrorKind::Interrupted =>
+                {
+                    0
+                }
                 Err(err) => {
                     eprintln!("UDP error: {}", err);
                     exit(1)
