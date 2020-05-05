@@ -58,4 +58,9 @@ impl ControlStreamLocal {
         self.buf.append(&mut enc.into());
         Ok(())
     }
+
+    #[must_use]
+    pub fn stream_id(&self) -> Option<u64> {
+        self.stream_id
+    }
 }

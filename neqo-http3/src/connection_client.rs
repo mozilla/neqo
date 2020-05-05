@@ -476,6 +476,8 @@ impl Http3Client {
             if t.done() {
                 self.base_handler.transactions.remove(&stop_stream_id);
             }
+        } else if self.base_handler.is_critical_stream(stop_stream_id) {
+            return Err(Error::HttpClosedCriticalStream);
         }
         Ok(())
     }
@@ -592,6 +594,8 @@ mod tests {
         conn: Connection,
         control_stream_id: Option<u64>,
         encoder: QPackEncoder,
+        encoder_stream_id: Option<u64>,
+        decoder_stream_id: Option<u64>,
     }
 
     fn make_server(server_settings: &[HSetting]) -> TestServer {
@@ -603,6 +607,8 @@ mod tests {
             conn: default_server(),
             control_stream_id: None,
             encoder: QPackEncoder::new(true),
+            encoder_stream_id: None,
+            decoder_stream_id: None,
         }
     }
 
@@ -660,7 +666,7 @@ mod tests {
 
         // send and receive server settings
 
-        // Creat control stream
+        // Create control stream
         server.control_stream_id = Some(server.conn.stream_create(StreamType::UniDi).unwrap());
         let mut enc = Encoder::default();
         server.settings.encode(&mut enc);
@@ -677,14 +683,17 @@ mod tests {
             .stream_send(server.control_stream_id.unwrap(), &enc[..]);
         assert_eq!(sent.unwrap(), enc[..].len());
         // Create a QPACK encoder stream
+        server.encoder_stream_id = Some(server.conn.stream_create(StreamType::UniDi).unwrap());
         server
             .encoder
-            .add_send_stream(server.conn.stream_create(StreamType::UniDi).unwrap());
+            .add_send_stream(server.encoder_stream_id.unwrap());
         server.encoder.send(&mut server.conn).unwrap();
 
         // Create decoder stream
-        let decoder_stream = server.conn.stream_create(StreamType::UniDi).unwrap();
-        sent = server.conn.stream_send(decoder_stream, DECODER_STREAM_DATA);
+        server.decoder_stream_id = Some(server.conn.stream_create(StreamType::UniDi).unwrap());
+        sent = server
+            .conn
+            .stream_send(server.decoder_stream_id.unwrap(), DECODER_STREAM_DATA);
         assert_eq!(sent, Ok(1));
         // Actually send all above data
         let out = server.conn.process(None, now());
@@ -715,6 +724,10 @@ mod tests {
         assert_eq!(&buf[..amount], expected_data);
     }
 
+    const CLIENT_SIDE_CONTROL_STREAM_ID: u64 = 2;
+    const CLIENT_SIDE_ENCODER_STREAM_ID: u64 = 6;
+    const CLIENT_SIDE_DECODER_STREAM_ID: u64 = 10;
+
     // Check that server has received correct settings and qpack streams.
     fn check_control_qpack_streams(server: &mut Connection) {
         let mut connected = false;
@@ -731,15 +744,15 @@ mod tests {
                     assert_eq!(stream_type, StreamType::UniDi);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    if stream_id == 2 {
+                    if stream_id == CLIENT_SIDE_CONTROL_STREAM_ID {
                         // the control stream
                         read_and_check_stream_data(server, stream_id, CONTROL_STREAM_DATA, false);
                         control_stream = true;
-                    } else if stream_id == 6 {
+                    } else if stream_id == CLIENT_SIDE_ENCODER_STREAM_ID {
                         // the qpack encoder stream
                         read_and_check_stream_data(server, stream_id, ENCODER_STREAM_DATA, false);
                         qpack_encoder_stream = true;
-                    } else if stream_id == 10 {
+                    } else if stream_id == CLIENT_SIDE_DECODER_STREAM_ID {
                         // the qpack decoder stream
                         read_and_check_stream_data(server, stream_id, DECODER_STREAM_DATA, false);
                         qpack_decoder_stream = true;
@@ -884,6 +897,90 @@ mod tests {
         server
             .conn
             .stream_close_send(server.control_stream_id.unwrap())
+            .unwrap();
+        let out = server.conn.process(None, now());
+        client.process(out.dgram(), now());
+        assert_closed(&client, &Error::HttpClosedCriticalStream);
+    }
+
+    // Client: Test that the connection will be closed if the local control stream
+    // has been reset.
+    #[test]
+    fn test_client_reset_control_stream() {
+        let (mut client, mut server) = connect();
+        server
+            .conn
+            .stream_reset_send(server.control_stream_id.unwrap(), Error::HttpNoError.code())
+            .unwrap();
+        let out = server.conn.process(None, now());
+        client.process(out.dgram(), now());
+        assert_closed(&client, &Error::HttpClosedCriticalStream);
+    }
+
+    // Client: Test that the connection will be closed if the server side encoder stream
+    // has been reset.
+    #[test]
+    fn test_client_reset_server_side_encoder_stream() {
+        let (mut client, mut server) = connect();
+        server
+            .conn
+            .stream_reset_send(server.encoder_stream_id.unwrap(), Error::HttpNoError.code())
+            .unwrap();
+        let out = server.conn.process(None, now());
+        client.process(out.dgram(), now());
+        assert_closed(&client, &Error::HttpClosedCriticalStream);
+    }
+
+    // Client: Test that the connection will be closed if the server side decoder stream
+    // has been reset.
+    #[test]
+    fn test_client_reset_server_side_decoder_stream() {
+        let (mut client, mut server) = connect();
+        server
+            .conn
+            .stream_reset_send(server.decoder_stream_id.unwrap(), Error::HttpNoError.code())
+            .unwrap();
+        let out = server.conn.process(None, now());
+        client.process(out.dgram(), now());
+        assert_closed(&client, &Error::HttpClosedCriticalStream);
+    }
+
+    // Client: Test that the connection will be closed if the local control stream
+    // has received a stop_sending.
+    #[test]
+    fn test_client_stop_sending_control_stream() {
+        let (mut client, mut server) = connect();
+        server
+            .conn
+            .stream_stop_sending(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
+            .unwrap();
+        let out = server.conn.process(None, now());
+        client.process(out.dgram(), now());
+        assert_closed(&client, &Error::HttpClosedCriticalStream);
+    }
+
+    // Client: Test that the connection will be closed if the client side encoder stream
+    // has received a stop_sending.
+    #[test]
+    fn test_client_stop_sending_encoder_stream() {
+        let (mut client, mut server) = connect();
+        server
+            .conn
+            .stream_stop_sending(CLIENT_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
+            .unwrap();
+        let out = server.conn.process(None, now());
+        client.process(out.dgram(), now());
+        assert_closed(&client, &Error::HttpClosedCriticalStream);
+    }
+
+    // Client: Test that the connection will be closed if the client side decoder stream
+    // has received a stop_sending.
+    #[test]
+    fn test_client_stop_sending_decoder_stream() {
+        let (mut client, mut server) = connect();
+        server
+            .conn
+            .stream_stop_sending(CLIENT_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
             .unwrap();
         let out = server.conn.process(None, now());
         client.process(out.dgram(), now());

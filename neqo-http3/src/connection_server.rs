@@ -149,7 +149,7 @@ impl Http3ServerHandler {
                 ConnectionEvent::SendStreamStopSending {
                     stream_id,
                     app_error,
-                } => self.handle_stream_stop_sending(conn, stream_id, app_error),
+                } => self.handle_stream_stop_sending(conn, stream_id, app_error)?,
                 ConnectionEvent::StateChange(state) => {
                     if self.base_handler.handle_state_change(conn, &state)? {
                         self.events
@@ -194,7 +194,7 @@ impl Http3ServerHandler {
         conn: &mut Connection,
         stop_stream_id: u64,
         app_err: AppError,
-    ) {
+    ) -> Res<()> {
         if let Some(t) = self.base_handler.transactions.get_mut(&stop_stream_id) {
             // close sending side.
             t.stop_sending();
@@ -202,6 +202,10 @@ impl Http3ServerHandler {
             let _ = conn.stream_stop_sending(stop_stream_id, app_err);
             t.reset_receiving_side();
             self.base_handler.transactions.remove(&stop_stream_id);
+        } else if self.base_handler.is_critical_stream(stop_stream_id) {
+            return Err(Error::HttpClosedCriticalStream);
         }
+
+        Ok(())
     }
 }

@@ -400,6 +400,16 @@ impl QPackEncoder {
         }
     }
 
+    #[must_use]
+    pub fn local_stream_id(&self) -> Option<u64> {
+        self.local_stream_id
+    }
+
+    #[must_use]
+    pub fn remote_stream_id(&self) -> Option<u64> {
+        self.remote_stream_id
+    }
+
     #[cfg(test)]
     fn blocked_stream_cnt(&self) -> u16 {
         self.blocked_stream_cnt

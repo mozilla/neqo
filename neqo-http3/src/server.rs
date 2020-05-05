@@ -97,11 +97,11 @@ impl Http3Server {
             .collect();
         // For http_active connection we need to put them in neqo-transport's server
         // waiting queue.
-        http3_active
-            .iter()
-            .for_each(|conn| self.server.add_to_waiting(conn.clone()));
         active_conns.append(&mut http3_active);
         active_conns.dedup();
+        active_conns
+            .iter()
+            .for_each(|conn| self.server.add_to_waiting(conn.clone()));
         let max_table_size = self.max_table_size;
         let max_blocked_streams = self.max_blocked_streams;
         for mut conn in active_conns {
@@ -225,6 +225,13 @@ mod tests {
         assert!(!hconn.events().any(closed));
     }
 
+    const CLIENT_SIDE_CONTROL_STREAM_ID: u64 = 2;
+    const CLIENT_SIDE_ENCODER_STREAM_ID: u64 = 6;
+    const CLIENT_SIDE_DECODER_STREAM_ID: u64 = 10;
+    const SERVER_SIDE_CONTROL_STREAM_ID: u64 = 3;
+    const SERVER_SIDE_ENCODER_STREAM_ID: u64 = 7;
+    const SERVER_SIDE_DECODER_STREAM_ID: u64 = 11;
+
     // Start a client/server and check setting frame.
     #[allow(clippy::cognitive_complexity)]
     fn connect_and_receive_settings() -> (Http3Server, Connection) {
@@ -259,11 +266,17 @@ mod tests {
                     stream_id,
                     stream_type,
                 } => {
-                    assert!((stream_id == 3) || (stream_id == 7) || (stream_id == 11));
+                    assert!(
+                        (stream_id == SERVER_SIDE_CONTROL_STREAM_ID)
+                            || (stream_id == SERVER_SIDE_ENCODER_STREAM_ID)
+                            || (stream_id == SERVER_SIDE_DECODER_STREAM_ID)
+                    );
                     assert_eq!(stream_type, StreamType::UniDi);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    if stream_id == 2 || stream_id == 3 {
+                    if stream_id == CLIENT_SIDE_CONTROL_STREAM_ID
+                        || stream_id == SERVER_SIDE_CONTROL_STREAM_ID
+                    {
                         // the control stream
                         let mut buf = [0_u8; 100];
                         let (amount, fin) =
@@ -271,14 +284,18 @@ mod tests {
                         assert_eq!(fin, false);
                         assert_eq!(amount, CONTROL_STREAM_DATA.len());
                         assert_eq!(&buf[..9], CONTROL_STREAM_DATA);
-                    } else if stream_id == 6 || stream_id == 7 {
+                    } else if stream_id == CLIENT_SIDE_ENCODER_STREAM_ID
+                        || stream_id == SERVER_SIDE_ENCODER_STREAM_ID
+                    {
                         let mut buf = [0_u8; 100];
                         let (amount, fin) =
                             neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
                         assert_eq!(fin, false);
                         assert_eq!(amount, 1);
                         assert_eq!(buf[..1], [0x2]);
-                    } else if stream_id == 10 || stream_id == 11 {
+                    } else if stream_id == CLIENT_SIDE_DECODER_STREAM_ID
+                        || stream_id == SERVER_SIDE_DECODER_STREAM_ID
+                    {
                         let mut buf = [0_u8; 100];
                         let (amount, fin) =
                             neqo_trans_conn.stream_recv(stream_id, &mut buf).unwrap();
@@ -290,7 +307,11 @@ mod tests {
                     }
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    assert!((stream_id == 2) || (stream_id == 6) || (stream_id == 10));
+                    assert!(
+                        (stream_id == CLIENT_SIDE_CONTROL_STREAM_ID)
+                            || (stream_id == CLIENT_SIDE_ENCODER_STREAM_ID)
+                            || (stream_id == CLIENT_SIDE_DECODER_STREAM_ID)
+                    );
                 }
                 ConnectionEvent::StateChange(State::Connected) => connected = true,
                 ConnectionEvent::StateChange(_) => (),
@@ -328,8 +349,9 @@ mod tests {
         let decoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         sent = neqo_trans_conn.stream_send(decoder_stream, &[0x3]);
         assert_eq!(sent, Ok(1));
-        let out = neqo_trans_conn.process(None, now());
-        hconn.process(out.dgram(), now());
+        let out1 = neqo_trans_conn.process(None, now());
+        let out2 = hconn.process(out1.dgram(), now());
+        neqo_trans_conn.process(out2.dgram(), now());
 
         // assert no error occured.
         assert_not_closed(&mut hconn);
@@ -800,5 +822,90 @@ mod tests {
         assert_eq!(headers_frames, 1);
         assert_eq!(reset, 1);
         assert_eq!(stop_sending, 1);
+    }
+
+    // Server: Test that the connection will be closed if the local control stream
+    // has been reset.
+    #[test]
+    fn test_server_reset_control_stream() {
+        let (mut hconn, mut peer_conn) = connect();
+        peer_conn
+            .conn
+            .stream_reset_send(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
+            .unwrap();
+        let out = peer_conn.conn.process(None, now());
+        hconn.process(out.dgram(), now());
+        assert_closed(&mut hconn, &Error::HttpClosedCriticalStream);
+    }
+
+    // Server: Test that the connection will be closed if the client side encoder stream
+    // has been reset.
+    #[test]
+    fn test_server_reset_client_side_encoder_stream() {
+        let (mut hconn, mut peer_conn) = connect();
+        peer_conn
+            .conn
+            .stream_reset_send(CLIENT_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
+            .unwrap();
+        let out = peer_conn.conn.process(None, now());
+        hconn.process(out.dgram(), now());
+        assert_closed(&mut hconn, &Error::HttpClosedCriticalStream);
+    }
+
+    // Server: Test that the connection will be closed if the client side decoder stream
+    // has been reset.
+    #[test]
+    fn test_server_reset_client_side_decoder_stream() {
+        let (mut hconn, mut peer_conn) = connect();
+        peer_conn
+            .conn
+            .stream_reset_send(CLIENT_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
+            .unwrap();
+        let out = peer_conn.conn.process(None, now());
+        hconn.process(out.dgram(), now());
+        assert_closed(&mut hconn, &Error::HttpClosedCriticalStream);
+    }
+
+    // Server: Test that the connection will be closed if the local control stream
+    // has received a stop_sending.
+    #[test]
+    fn test_client_stop_sending_control_stream() {
+        let (mut hconn, mut peer_conn) = connect();
+
+        peer_conn
+            .conn
+            .stream_stop_sending(SERVER_SIDE_CONTROL_STREAM_ID, Error::HttpNoError.code())
+            .unwrap();
+        let out = peer_conn.conn.process(None, now());
+        hconn.process(out.dgram(), now());
+        assert_closed(&mut hconn, &Error::HttpClosedCriticalStream);
+    }
+
+    // Server: Test that the connection will be closed if the server side encoder stream
+    // has received a stop_sending.
+    #[test]
+    fn test_server_stop_sending_encoder_stream() {
+        let (mut hconn, mut peer_conn) = connect();
+        peer_conn
+            .conn
+            .stream_stop_sending(SERVER_SIDE_ENCODER_STREAM_ID, Error::HttpNoError.code())
+            .unwrap();
+        let out = peer_conn.conn.process(None, now());
+        hconn.process(out.dgram(), now());
+        assert_closed(&mut hconn, &Error::HttpClosedCriticalStream);
+    }
+
+    // Server: Test that the connection will be closed if the server side decoder stream
+    // has received a stop_sending.
+    #[test]
+    fn test_server_stop_sending_decoder_stream() {
+        let (mut hconn, mut peer_conn) = connect();
+        peer_conn
+            .conn
+            .stream_stop_sending(SERVER_SIDE_DECODER_STREAM_ID, Error::HttpNoError.code())
+            .unwrap();
+        let out = peer_conn.conn.process(None, now());
+        hconn.process(out.dgram(), now());
+        assert_closed(&mut hconn, &Error::HttpClosedCriticalStream);
     }
 }
