@@ -54,7 +54,7 @@ impl Request {
         r
     }
 
-    fn ensure_encoded(
+    fn encode(
         &mut self,
         conn: &mut Connection,
         encoder: &mut QPackEncoder,
@@ -86,7 +86,7 @@ impl Request {
         } else {
             String::new()
         };
-        self.ensure_encoded(conn, encoder, stream_id)?;
+        self.encode(conn, encoder, stream_id)?;
         if let Some(buf) = &mut self.buf {
             let sent = conn.stream_send(stream_id, &buf)?;
             qinfo!([label], "{} bytes sent", sent);

@@ -428,8 +428,11 @@ mod tests {
         peer_conn: Connection,
     }
 
-    fn connect(huffman: bool) -> TestEncoder {
-        let (mut conn, mut peer_conn) = test_fixture::connect();
+    fn connect_generic<F>(huffman: bool, f: F) -> TestEncoder
+    where F : FnOnce(&mut Connection,&mut Connection) {
+        let mut conn = default_client();
+        let mut peer_conn = default_server();
+        f(&mut conn, &mut peer_conn);
 
         // create a stream
         let recv_stream_id = peer_conn.stream_create(StreamType::UniDi).unwrap();
@@ -448,34 +451,21 @@ mod tests {
         }
     }
 
-    fn connect_flow_control(max_data: u64) -> TestEncoder {
-        let mut conn = default_client();
-        let mut peer_conn = default_server();
+    fn connect(huffman: bool) -> TestEncoder {
+        connect_generic(huffman, |client, server| { handshake(client, server); })
+    }
 
-        peer_conn
+    fn connect_flow_control(max_data: u64) -> TestEncoder {
+        connect_generic(true, |client, server| {
+        server
             .set_local_tparam(
                 tparams::INITIAL_MAX_DATA,
                 TransportParameter::Integer(max_data),
             )
             .unwrap();
 
-        handshake(&mut conn, &mut peer_conn);
-
-        // create a stream
-        let recv_stream_id = peer_conn.stream_create(StreamType::UniDi).unwrap();
-        let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
-
-        // create an encoder
-        let mut encoder = QPackEncoder::new(true);
-        encoder.add_send_stream(send_stream_id);
-
-        TestEncoder {
-            encoder,
-            send_stream_id,
-            recv_stream_id,
-            conn,
-            peer_conn,
-        }
+        handshake(client, server);
+        })
     }
 
     fn send_instructions(encoder: &mut TestEncoder, encoder_instruction: &[u8]) {
