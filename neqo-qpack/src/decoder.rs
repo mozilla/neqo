@@ -224,6 +224,16 @@ impl QPackDecoder {
             Ok(())
         }
     }
+
+    #[must_use]
+    pub fn local_stream_id(&self) -> Option<u64> {
+        self.local_stream_id
+    }
+
+    #[must_use]
+    pub fn remote_stream_id(&self) -> Option<u64> {
+        self.remote_stream_id
+    }
 }
 
 impl ::std::fmt::Display for QPackDecoder {

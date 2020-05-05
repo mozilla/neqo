@@ -66,4 +66,9 @@ impl ControlStreamRemote {
     pub fn get_frame(&mut self) -> Res<HFrame> {
         self.frame_reader.get_frame()
     }
+
+    #[must_use]
+    pub fn stream_id(&self) -> Option<u64> {
+        self.stream_id
+    }
 }
