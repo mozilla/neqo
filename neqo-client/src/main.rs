@@ -500,7 +500,7 @@ mod old {
     use neqo_common::{matches, Datagram};
     use neqo_crypto::AuthenticationStatus;
     use neqo_transport::{
-        Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
+        Connection, ConnectionEvent, FixedConnectionIdManager, Output, State, StreamType,
     };
 
     use super::{emit_datagram, get_output_file, Args};
@@ -595,10 +595,24 @@ mod old {
                 return Ok(client.state().clone());
             }
 
-            let exiting = !handler.handle(args, client)?;
+            let mut exiting = !handler.handle(args, client)?;
 
-            let out_dgram = client.process_output(Instant::now());
-            emit_datagram(&socket, out_dgram.dgram());
+            loop {
+                let output = client.process_output(Instant::now());
+                match output {
+                    Output::Datagram(dgram) => emit_datagram(&socket, Some(dgram)),
+                    Output::Callback(duration) => {
+                        socket.set_read_timeout(Some(duration)).unwrap();
+                        break;
+                    }
+                    Output::None => {
+                        // Not strictly necessary, since we're about to exit
+                        socket.set_read_timeout(None).unwrap();
+                        exiting = true;
+                        break;
+                    }
+                }
+            }
 
             if exiting {
                 return Ok(client.state().clone());
