@@ -324,43 +324,22 @@ impl<T: Http3Transaction> Http3Connection<T> {
     }
 
     pub fn is_critical_stream(&self, stream_id: u64) -> bool {
-        if let Some(id) = self.qpack_encoder.local_stream_id() {
-            if stream_id == id {
-                return true;
-            }
-        }
-
-        if let Some(id) = self.qpack_encoder.remote_stream_id() {
-            if stream_id == id {
-                return true;
-            }
-        }
-
-        if let Some(id) = self.qpack_decoder.local_stream_id() {
-            if stream_id == id {
-                return true;
-            }
-        }
-
-        if let Some(id) = self.qpack_decoder.remote_stream_id() {
-            if stream_id == id {
-                return true;
-            }
-        }
-
-        if let Some(id) = self.control_stream_local.stream_id() {
-            if stream_id == id {
-                return true;
-            }
-        }
-
-        if let Some(id) = self.control_stream_remote.stream_id() {
-            if stream_id == id {
-                return true;
-            }
-        }
-
-        false
+        self.qpack_encoder
+            .local_stream_id()
+            .iter()
+            .chain(
+                self.qpack_encoder.remote_stream_id().iter().chain(
+                    self.qpack_decoder.local_stream_id().iter().chain(
+                        self.qpack_decoder.remote_stream_id().iter().chain(
+                            self.control_stream_local
+                                .stream_id()
+                                .iter()
+                                .chain(self.control_stream_remote.stream_id().iter()),
+                        ),
+                    ),
+                ),
+            )
+            .any(|id| stream_id == *id)
     }
 
     /// This is called when a RESET frame has been received.
