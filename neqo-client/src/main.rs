@@ -85,6 +85,10 @@ pub struct Args {
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
+    #[structopt(name = "download-in-series", long)]
+    /// Download resources in series using separate connections
+    download_in_series: bool,
+
     #[structopt(name = "output-read-data", long)]
     /// Output received data to stdout
     output_read_data: bool,
@@ -415,6 +419,10 @@ fn main() -> Res<()> {
             Ok(s) if s == "handshake" || s == "transfer" => {
                 args.use_old_http = true;
             }
+            Ok(s) if s == "multiconnect" => {
+                args.use_old_http = true;
+                args.download_in_series = true;
+            }
             Ok(_) => exit(127),
             Err(_) => exit(1),
         }
@@ -469,14 +477,27 @@ fn main() -> Res<()> {
                 &urls,
             )?;
         } else {
-            old::old_client(
-                &args,
-                socket,
-                local_addr,
-                remote_addr,
-                &format!("{}", host),
-                &urls,
-            )?;
+            if !args.download_in_series {
+                old::old_client(
+                    &args,
+                    &socket,
+                    local_addr,
+                    remote_addr,
+                    &format!("{}", host),
+                    &urls,
+                )?;
+            } else {
+                for url in urls {
+                    old::old_client(
+                        &args,
+                        &socket,
+                        local_addr,
+                        remote_addr,
+                        &format!("{}", host),
+                        &[url],
+                    )?;
+                }
+            }
         }
     }
 
@@ -644,7 +665,7 @@ mod old {
 
     pub fn old_client(
         args: &Args,
-        socket: UdpSocket,
+        socket: &UdpSocket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         origin: &str,
