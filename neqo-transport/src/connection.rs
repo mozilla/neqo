@@ -4548,7 +4548,7 @@ mod tests {
             )
         ));
     }
-    
+
     #[test]
     fn loss_recovery_crash() {
         const TIME_SHIFT: Duration = Duration::from_secs(1);

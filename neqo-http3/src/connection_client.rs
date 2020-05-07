@@ -342,7 +342,7 @@ impl Http3Client {
                 self.close(
                     now,
                     Error::HttpGeneralProtocol.code(),
-                    "Connection error: goaway stream_id increased",
+                    String::from("Connection error: goaway stream_id increased"),
                 );
                 true
             }
