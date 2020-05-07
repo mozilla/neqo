@@ -126,7 +126,7 @@ impl<'a> Decoder<'a> {
         res
     }
 
-    fn decode_checked(&mut self, n: Option<u64>) -> Option<&'a [u8]> {
+    pub fn decode_checked(&mut self, n: Option<u64>) -> Option<&'a [u8]> {
         let len = match n {
             Some(l) => l,
             _ => return None,
