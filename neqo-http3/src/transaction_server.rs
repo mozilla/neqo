@@ -31,6 +31,7 @@ enum TransactionRecvState {
 #[derive(PartialEq, Debug)]
 enum TransactionSendState {
     Initial,
+    ResponseInitiated { headers: Vec<Header>, data: Vec<u8> },
     SendingResponse { buf: Vec<u8> },
     Closed,
 }
@@ -57,24 +58,38 @@ impl TransactionServer {
         }
     }
 
-    pub fn set_response(&mut self, headers: &[Header], data: &[u8], encoder: &mut QPackEncoder) {
-        qdebug!([self], "Encoding headers");
-        let header_block = encoder.encode_header_block(&headers, self.stream_id);
-        let hframe = HFrame::Headers {
-            header_block: header_block.to_vec(),
+    pub fn set_response(&mut self, headers: &[Header], data: &[u8]) {
+        self.send_state = TransactionSendState::ResponseInitiated {
+            headers: headers.to_vec(),
+            data: data.to_vec(),
         };
-        let mut d = Encoder::default();
-        hframe.encode(&mut d);
-        if !data.is_empty() {
-            qdebug!([self], "Encoding data");
-            let d_frame = HFrame::Data {
-                len: data.len() as u64,
-            };
-            d_frame.encode(&mut d);
-            d.encode(data);
-        }
+    }
 
-        self.send_state = TransactionSendState::SendingResponse { buf: d.into() };
+    fn ensure_response_encoded(
+        &mut self,
+        conn: &mut Connection,
+        encoder: &mut QPackEncoder,
+    ) -> Res<()> {
+        if let TransactionSendState::ResponseInitiated { headers, data } = &self.send_state {
+            qdebug!([self], "Encoding headers");
+            let header_block = encoder.encode_header_block(conn, &headers, self.stream_id)?;
+            let hframe = HFrame::Headers {
+                header_block: header_block.to_vec(),
+            };
+            let mut d = Encoder::default();
+            hframe.encode(&mut d);
+            if !data.is_empty() {
+                qdebug!([self], "Encoding data");
+                let d_frame = HFrame::Data {
+                    len: data.len() as u64,
+                };
+                d_frame.encode(&mut d);
+                d.encode(&data);
+            }
+
+            self.send_state = TransactionSendState::SendingResponse { buf: d.into() };
+        }
+        Ok(())
     }
 
     fn recv_frame(&mut self, conn: &mut Connection) -> Res<(Option<HFrame>, bool)> {
@@ -112,7 +127,8 @@ impl ::std::fmt::Display for TransactionServer {
 }
 
 impl Http3Transaction for TransactionServer {
-    fn send(&mut self, conn: &mut Connection, _encoder: &mut QPackEncoder) -> Res<()> {
+    fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
+        self.ensure_response_encoded(conn, encoder)?;
         qtrace!([self], "Sending response.");
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)

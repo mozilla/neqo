@@ -2501,6 +2501,7 @@ mod tests {
 
         server.encoder.set_max_capacity(100).unwrap();
         server.encoder.set_max_blocked_streams(100).unwrap();
+        server.encoder.send(&mut server.conn).unwrap();
 
         let headers = vec![
             (String::from(":status"), String::from("200")),
@@ -2509,10 +2510,16 @@ mod tests {
         ];
         let encoded_headers = server
             .encoder
-            .encode_header_block(&headers, request_stream_id);
+            .encode_header_block(&mut server.conn, &headers, request_stream_id)
+            .unwrap();
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
+
+        // Send the encoder instructions, but delay them so that the stream is blocked on decoding headers.
+        let encoder_inst_pkt = server.conn.process(None, now());
+
+        // Send response
         let mut d = Encoder::default();
         hframe.encode(&mut d);
         let d_frame = HFrame::Data { len: 3 };
@@ -2521,15 +2528,14 @@ mod tests {
         let _ = server.conn.stream_send(request_stream_id, &d[..]);
         server.conn.stream_close_send(request_stream_id).unwrap();
 
-        // Send response before sending encoder instructions.
         let out = server.conn.process(None, now());
         let _out = client.process(out.dgram(), now());
 
         let header_ready_event = |e| matches!(e, Http3ClientEvent::HeaderReady { .. });
         assert!(!client.events().any(header_ready_event));
 
-        // Send encoder instructions to unblock the stream.
-        server.encoder.send(&mut server.conn).unwrap();
+        // Let client receive the encoder instructions.
+        let _out = client.process(encoder_inst_pkt.dgram(), now());
 
         let out = server.conn.process(None, now());
         let _out = client.process(out.dgram(), now());
@@ -2563,6 +2569,7 @@ mod tests {
 
         server.encoder.set_max_capacity(100).unwrap();
         server.encoder.set_max_blocked_streams(100).unwrap();
+        server.encoder.send(&mut server.conn).unwrap();
 
         let sent_headers = vec![
             (String::from(":status"), String::from("200")),
@@ -2571,29 +2578,28 @@ mod tests {
         ];
         let encoded_headers = server
             .encoder
-            .encode_header_block(&sent_headers, request_stream_id);
+            .encode_header_block(&mut server.conn, &sent_headers, request_stream_id)
+            .unwrap();
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
         };
+
+        // Send the encoder instructions, but delay them so that the stream is blocked on decoding headers.
+        let encoder_inst_pkt = server.conn.process(None, now());
+
         let mut d = Encoder::default();
         hframe.encode(&mut d);
 
         let _ = server.conn.stream_send(request_stream_id, &d[..]);
         server.conn.stream_close_send(request_stream_id).unwrap();
-
-        // Send response before sending encoder instructions.
         let out = server.conn.process(None, now());
         let _out = hconn.process(out.dgram(), now());
 
         let header_ready_event = |e| matches!(e, Http3ClientEvent::HeaderReady { .. });
         assert!(!hconn.events().any(header_ready_event));
 
-        // Send encoder instructions to unblock the stream.
-        server.encoder.send(&mut server.conn).unwrap();
-
-        let out = server.conn.process(None, now());
-        let _out = hconn.process(out.dgram(), now());
-        let _out = hconn.process(None, now());
+        // Let client receive the encoder instructions.
+        let _out = hconn.process(encoder_inst_pkt.dgram(), now());
 
         let mut recv_header = false;
         // Now the stream is unblocked. After headers we will receive a fin.
