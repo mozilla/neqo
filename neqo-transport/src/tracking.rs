@@ -8,7 +8,6 @@
 
 #![deny(clippy::pedantic)]
 
-use std::cmp::min;
 use std::collections::VecDeque;
 use std::convert::TryInto;
 use std::time::{Duration, Instant};
@@ -475,32 +474,38 @@ pub struct AckTracker {
 }
 
 impl AckTracker {
-    pub fn drop_space(&mut self, space: PNSpace) {
+    fn idx(space: PNSpace) -> usize {
         match space {
-            PNSpace::Initial => self.spaces.truncate(2),
-            PNSpace::Handshake => self.spaces.truncate(1),
-            _ => panic!(),
-        }
-    }
-
-    pub fn get(&mut self, space: PNSpace) -> Option<&mut RecvdPackets> {
-        self.spaces.get_mut(match space {
             PNSpace::ApplicationData => 0,
             PNSpace::Handshake => 1,
             PNSpace::Initial => 2,
-        })
-    }
-
-    pub fn ack_time(&self) -> Option<Instant> {
-        let mut iter = self.spaces.iter().filter_map(RecvdPackets::ack_time);
-        match iter.next() {
-            Some(v) => Some(iter.fold(v, min)),
-            _ => None,
         }
     }
 
+    pub fn drop_space(&mut self, space: PNSpace) {
+        assert_ne!(
+            space,
+            PNSpace::ApplicationData,
+            "discarding application space"
+        );
+        assert_eq!(
+            Self::idx(space) + 1,
+            self.spaces.len(),
+            "dropping spaces out of order"
+        );
+        self.spaces.remove(Self::idx(space));
+    }
+
+    pub fn get_mut(&mut self, space: PNSpace) -> Option<&mut RecvdPackets> {
+        self.spaces.get_mut(Self::idx(space))
+    }
+
+    pub fn ack_time(&self) -> Option<Instant> {
+        self.spaces.iter().filter_map(RecvdPackets::ack_time).min()
+    }
+
     pub fn acked(&mut self, token: &AckToken) {
-        if let Some(space) = self.get(token.space) {
+        if let Some(space) = self.get_mut(token.space) {
             space.acknowledged(&token.ranges);
         }
     }
@@ -510,7 +515,7 @@ impl AckTracker {
         now: Instant,
         pn_space: PNSpace,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
-        self.get(pn_space)
+        self.get_mut(pn_space)
             .map(|space| space.get_frame(now))
             .flatten()
     }
@@ -668,14 +673,14 @@ mod tests {
         let mut tracker = AckTracker::default();
         // This packet won't trigger an ACK.
         tracker
-            .get(PNSpace::Handshake)
+            .get_mut(PNSpace::Handshake)
             .unwrap()
             .set_received(*NOW, 0, false);
         assert_eq!(None, tracker.ack_time());
 
         // This should be delayed.
         tracker
-            .get(PNSpace::ApplicationData)
+            .get_mut(PNSpace::ApplicationData)
             .unwrap()
             .set_received(*NOW, 0, true);
         assert_eq!(Some(*NOW + ACK_DELAY), tracker.ack_time());
@@ -683,9 +688,48 @@ mod tests {
         // This should move the time forward.
         let later = *NOW + ACK_DELAY.checked_div(2).unwrap();
         tracker
-            .get(PNSpace::Initial)
+            .get_mut(PNSpace::Initial)
             .unwrap()
             .set_received(later, 0, true);
         assert_eq!(Some(later), tracker.ack_time());
+    }
+
+    #[test]
+    #[should_panic(expected = "discarding application space")]
+    fn drop_app() {
+        let mut tracker = AckTracker::default();
+        tracker.drop_space(PNSpace::ApplicationData);
+    }
+
+    #[test]
+    #[should_panic(expected = "dropping spaces out of order")]
+    fn drop_out_of_order() {
+        let mut tracker = AckTracker::default();
+        tracker.drop_space(PNSpace::Handshake);
+    }
+
+    #[test]
+    fn drop_spaces() {
+        let mut tracker = AckTracker::default();
+        if let Some(recvd) = tracker.get_mut(PNSpace::Initial) {
+            recvd.set_received(*NOW, 0, true);
+        } else {
+            panic!("no initial space");
+        }
+        assert!(tracker.ack_time().is_some());
+        let (_ack, token) = tracker.get_frame(*NOW, PNSpace::Initial).unwrap();
+        assert!(token.is_some());
+
+        // Now drop that space.
+        tracker.drop_space(PNSpace::Initial);
+
+        assert!(tracker.get_mut(PNSpace::Initial).is_none());
+        assert!(tracker.get_frame(*NOW, PNSpace::Initial).is_none());
+        assert!(tracker.ack_time().is_none());
+        if let RecoveryToken::Ack(tok) = token.as_ref().unwrap() {
+            tracker.acked(tok); // Should be a noop.
+        } else {
+            panic!("not an ACK token");
+        }
     }
 }

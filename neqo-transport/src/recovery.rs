@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use smallvec::{smallvec, SmallVec};
 
-use neqo_common::{qdebug, qtrace, qwarn};
+use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 
 use crate::cc::CongestionControl;
 use crate::crypto::CryptoRecoveryToken;
@@ -317,8 +317,16 @@ impl LossRecoverySpaces {
     /// # Panics
     /// If the space has already been removed.
     pub fn drop_space(&mut self, space: PNSpace) -> Vec<SentPacket> {
-        debug_assert_ne!(space, PNSpace::ApplicationData);
-        debug_assert_eq!(Self::idx(space) + 1, self.spaces.len());
+        assert_ne!(
+            space,
+            PNSpace::ApplicationData,
+            "discarding application space"
+        );
+        assert_eq!(
+            Self::idx(space) + 1,
+            self.spaces.len(),
+            "dropping spaces out of order"
+        );
         self.spaces
             .remove(Self::idx(space))
             .remove_ignored()
@@ -454,18 +462,14 @@ impl LossRecovery {
             .collect()
     }
 
-    pub fn on_packet_sent(
-        &mut self,
-        pn_space: PNSpace,
-        packet_number: u64,
-        sent_packet: SentPacket,
-    ) {
-        qdebug!([self], "packet {:?}-{} sent.", pn_space, packet_number);
-        self.cc.on_packet_sent(&sent_packet);
-        self.spaces
-            .get_mut(pn_space)
-            .unwrap()
-            .on_packet_sent(packet_number, sent_packet);
+    pub fn on_packet_sent(&mut self, pn_space: PNSpace, pn: u64, sent_packet: SentPacket) {
+        qdebug!([self], "packet {}-{} sent", pn_space, pn);
+        if let Some(space) = self.spaces.get_mut(pn_space) {
+            self.cc.on_packet_sent(&sent_packet);
+            space.on_packet_sent(pn, sent_packet);
+        } else {
+            qinfo!([self], "ignoring {}-{} from dropped space", pn_space, pn);
+        }
     }
 
     /// Returns (acked packets, lost packets)
@@ -484,12 +488,10 @@ impl LossRecovery {
             largest_acked
         );
 
-        let space = self.spaces.get_mut(pn_space);
-        if space.is_none() {
-            // Ignoring this space now.
-            return (Vec::new(), Vec::new());
-        }
-        let space = space.unwrap();
+        let space = self
+            .spaces
+            .get_mut(pn_space)
+            .expect("ACK on discarded space");
         let (acked_packets, any_ack_eliciting) = space.remove_acked(acked_ranges);
         if acked_packets.is_empty() {
             // No new information.
@@ -549,7 +551,7 @@ impl LossRecovery {
         let cc = &mut self.cc;
         self.spaces
             .iter_mut()
-            .flat_map(|spc| spc.remove_ignored())
+            .flat_map(LossRecoverySpace::remove_ignored)
             .inspect(|p| cc.discard(&p))
             .collect()
     }
@@ -588,7 +590,7 @@ impl LossRecovery {
         if self.enable_timed_loss_detection {
             self.spaces
                 .iter()
-                .filter_map(|space| space.earliest_sent_time())
+                .filter_map(LossRecoverySpace::earliest_sent_time)
                 .min()
                 .map(|val| val + self.loss_delay())
         } else {
@@ -596,7 +598,7 @@ impl LossRecovery {
         }
     }
 
-    /// Get the Base PTO value, which is derived only from the RTT and RTTvar values.
+    /// Get the Base PTO value, which is derived only from the `RTT` and `RTTvar` values.
     /// This is for those cases where you need a value for the time you might sensibly
     /// wait for a packet to propagate.  Using `3*raw_pto()` is common.
     pub fn raw_pto(&self) -> Duration {
@@ -639,7 +641,7 @@ impl LossRecovery {
             // Skip early packet number spaces where the PTO timer hasn't fired.
             // Once the timer for one space has fired, include higher spaces. Declaring more
             // data as "lost" makes it more likely that PTO packets will include useful data.
-            if pto_space.is_none() && self.pto_time(*pn_space).map(|t| t > now).unwrap_or(true) {
+            if pto_space.is_none() && self.pto_time(*pn_space).map_or(true, |t| t > now) {
                 continue;
             }
             qdebug!([self], "PTO timer fired for {}", pn_space);
@@ -678,7 +680,8 @@ impl LossRecovery {
             )
         }
 
-        self.enable_timed_loss_detection = self.spaces.iter().any(|space| space.has_out_of_order());
+        self.enable_timed_loss_detection =
+            self.spaces.iter().any(LossRecoverySpace::has_out_of_order);
         self.maybe_fire_pto(now, &mut lost_packets);
         lost_packets
     }
@@ -738,7 +741,7 @@ mod tests {
         let est = |sp| {
             lr.spaces
                 .get(sp)
-                .map(|space| space.earliest_sent_time())
+                .map(LossRecoverySpace::earliest_sent_time)
                 .flatten()
         };
         println!(
@@ -809,7 +812,7 @@ mod tests {
         assert_no_sent_times(&lr);
     }
 
-    /// An INITIAL_RTT for using with setup_lr().
+    /// An initial RTT for using with `setup_lr`.
     const INITIAL_RTT: Duration = ms!(80);
     const INITIAL_RTTVAR: Duration = ms!(40);
 
@@ -972,5 +975,68 @@ mod tests {
             pn_time(4),
         );
         assert_eq!(lost.len(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "discarding application space")]
+    fn drop_app() {
+        let mut lr = LossRecovery::new();
+        lr.discard(PNSpace::ApplicationData);
+    }
+
+    #[test]
+    #[should_panic(expected = "dropping spaces out of order")]
+    fn drop_out_of_order() {
+        let mut lr = LossRecovery::new();
+        lr.discard(PNSpace::Handshake);
+    }
+
+    #[test]
+    #[should_panic(expected = "ACK on discarded space")]
+    fn ack_after_drop() {
+        let mut lr = LossRecovery::new();
+        lr.discard(PNSpace::Initial);
+        lr.on_ack_received(
+            PNSpace::Initial,
+            0,
+            vec![],
+            Duration::from_millis(0),
+            pn_time(0),
+        );
+    }
+
+    #[test]
+    fn drop_spaces() {
+        let mut lr = LossRecovery::new();
+        lr.on_packet_sent(
+            PNSpace::Initial,
+            0,
+            SentPacket::new(pn_time(0), true, Vec::new(), ON_SENT_SIZE, true),
+        );
+        lr.on_packet_sent(
+            PNSpace::Handshake,
+            0,
+            SentPacket::new(pn_time(1), true, Vec::new(), ON_SENT_SIZE, true),
+        );
+        lr.on_packet_sent(
+            PNSpace::ApplicationData,
+            0,
+            SentPacket::new(pn_time(2), true, Vec::new(), ON_SENT_SIZE, true),
+        );
+
+        lr.discard(PNSpace::Initial);
+        assert_sent_times(&lr, None, Some(pn_time(1)), Some(pn_time(2)));
+
+        lr.discard(PNSpace::Handshake);
+        assert_sent_times(&lr, None, None, Some(pn_time(2)));
+
+        // There are cases where we send a packet that is not subsequently tracked.
+        // So check that this works.
+        lr.on_packet_sent(
+            PNSpace::Initial,
+            0,
+            SentPacket::new(pn_time(3), true, Vec::new(), ON_SENT_SIZE, true),
+        );
+        assert_sent_times(&lr, None, None, Some(pn_time(2)));
     }
 }

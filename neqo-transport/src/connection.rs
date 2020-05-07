@@ -957,7 +957,7 @@ impl Connection {
         // OK, we have a valid packet.
 
         let space = PNSpace::from(packet.packet_type());
-        if self.acks.get(space).unwrap().is_duplicate(packet.pn()) {
+        if self.acks.get_mut(space).unwrap().is_duplicate(packet.pn()) {
             qdebug!([self], "Duplicate packet from {} pn={}", space, packet.pn());
             self.stats.dups_rx += 1;
             return Ok(vec![]);
@@ -990,7 +990,7 @@ impl Connection {
             self.capture_error(now, t, res)?;
         }
         self.acks
-            .get(space)
+            .get_mut(space)
             .unwrap()
             .set_received(now, packet.pn(), ack_eliciting);
 
