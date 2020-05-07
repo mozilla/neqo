@@ -15,16 +15,16 @@ use neqo_common::{matches, qdebug, qtrace};
 use std::mem;
 
 #[derive(Debug, PartialEq)]
-pub enum EncoderInstruction {
+pub enum EncoderInstruction<'a> {
     Capacity { value: u64 },
-    InsertWithNameRefStatic { index: u64, value: Vec<u8> },
-    InsertWithNameRefDynamic { index: u64, value: Vec<u8> },
-    InsertWithNameLiteral { name: Vec<u8>, value: Vec<u8> },
+    InsertWithNameRefStatic { index: u64, value: &'a [u8] },
+    InsertWithNameRefDynamic { index: u64, value: &'a [u8] },
+    InsertWithNameLiteral { name: &'a [u8], value: &'a [u8] },
     Duplicate { index: u64 },
     NoInstruction,
 }
 
-impl EncoderInstruction {
+impl<'a> EncoderInstruction<'a> {
     pub(crate) fn marshal(&self, enc: &mut QPData, use_huffman: bool) {
         match self {
             Self::Capacity { value } => {
@@ -59,10 +59,48 @@ enum EncoderInstructionReaderState {
     Done,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum DecodedEncoderInstruction {
+    Capacity { value: u64 },
+    InsertWithNameRefStatic { index: u64, value: Vec<u8> },
+    InsertWithNameRefDynamic { index: u64, value: Vec<u8> },
+    InsertWithNameLiteral { name: Vec<u8>, value: Vec<u8> },
+    Duplicate { index: u64 },
+    NoInstruction,
+}
+
+impl<'a> From<&'a EncoderInstruction<'a>> for DecodedEncoderInstruction {
+    fn from(inst: &'a EncoderInstruction) -> Self {
+        match inst {
+            EncoderInstruction::Capacity { value } => Self::Capacity { value: *value },
+            EncoderInstruction::InsertWithNameRefStatic { index, value } => {
+                Self::InsertWithNameRefStatic {
+                    index: *index,
+                    value: value.to_vec(),
+                }
+            }
+            EncoderInstruction::InsertWithNameRefDynamic { index, value } => {
+                Self::InsertWithNameRefDynamic {
+                    index: *index,
+                    value: value.to_vec(),
+                }
+            }
+            EncoderInstruction::InsertWithNameLiteral { name, value } => {
+                Self::InsertWithNameLiteral {
+                    name: name.to_vec(),
+                    value: value.to_vec(),
+                }
+            }
+            EncoderInstruction::Duplicate { index } => Self::Duplicate { index: *index },
+            EncoderInstruction::NoInstruction => Self::NoInstruction,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct EncoderInstructionReader {
     state: EncoderInstructionReaderState,
-    instruction: EncoderInstruction,
+    instruction: DecodedEncoderInstruction,
 }
 
 impl ::std::fmt::Display for EncoderInstructionReader {
@@ -79,30 +117,30 @@ impl EncoderInstructionReader {
     pub fn new() -> Self {
         Self {
             state: EncoderInstructionReaderState::ReadInstruction,
-            instruction: EncoderInstruction::NoInstruction,
+            instruction: DecodedEncoderInstruction::NoInstruction,
         }
     }
 
     fn decode_instruction_from_byte(&mut self, b: u8) {
         self.instruction = if ENCODER_INSERT_WITH_NAME_REF_STATIC.cmp_prefix(b) {
-            EncoderInstruction::InsertWithNameRefStatic {
+            DecodedEncoderInstruction::InsertWithNameRefStatic {
                 index: 0,
                 value: Vec::new(),
             }
         } else if ENCODER_INSERT_WITH_NAME_REF_DYNAMIC.cmp_prefix(b) {
-            EncoderInstruction::InsertWithNameRefDynamic {
+            DecodedEncoderInstruction::InsertWithNameRefDynamic {
                 index: 0,
                 value: Vec::new(),
             }
         } else if ENCODER_INSERT_WITH_NAME_LITERAL.cmp_prefix(b) {
-            EncoderInstruction::InsertWithNameLiteral {
+            DecodedEncoderInstruction::InsertWithNameLiteral {
                 name: Vec::new(),
                 value: Vec::new(),
             }
         } else if ENCODER_CAPACITY.cmp_prefix(b) {
-            EncoderInstruction::Capacity { value: 0 }
+            DecodedEncoderInstruction::Capacity { value: 0 }
         } else if ENCODER_DUPLICATE.cmp_prefix(b) {
-            EncoderInstruction::Duplicate { index: 0 }
+            DecodedEncoderInstruction::Duplicate { index: 0 }
         } else {
             unreachable!("The above patterns match everything.");
         };
@@ -114,18 +152,19 @@ impl EncoderInstructionReader {
             Ok(b) => {
                 self.decode_instruction_from_byte(b);
                 match self.instruction {
-                    EncoderInstruction::Capacity { .. } | EncoderInstruction::Duplicate { .. } => {
+                    DecodedEncoderInstruction::Capacity { .. }
+                    | DecodedEncoderInstruction::Duplicate { .. } => {
                         self.state = EncoderInstructionReaderState::ReadFirstInt {
                             reader: IntReader::new(b, ENCODER_CAPACITY.len()),
                         }
                     }
-                    EncoderInstruction::InsertWithNameRefStatic { .. }
-                    | EncoderInstruction::InsertWithNameRefDynamic { .. } => {
+                    DecodedEncoderInstruction::InsertWithNameRefStatic { .. }
+                    | DecodedEncoderInstruction::InsertWithNameRefDynamic { .. } => {
                         self.state = EncoderInstructionReaderState::ReadFirstInt {
                             reader: IntReader::new(b, ENCODER_INSERT_WITH_NAME_REF_STATIC.len()),
                         }
                     }
-                    EncoderInstruction::InsertWithNameLiteral { .. } => {
+                    DecodedEncoderInstruction::InsertWithNameLiteral { .. } => {
                         self.state = EncoderInstructionReaderState::ReadFirstLiteral {
                             reader: LiteralReader::new_with_first_byte(
                                 b,
@@ -133,7 +172,7 @@ impl EncoderInstructionReader {
                             ),
                         }
                     }
-                    EncoderInstruction::NoInstruction => {
+                    DecodedEncoderInstruction::NoInstruction => {
                         unreachable!("We must have instruction at this point.")
                     }
                 }
@@ -148,7 +187,7 @@ impl EncoderInstructionReader {
     pub fn read_instructions<T: ReadByte + Reader>(
         &mut self,
         recv: &mut T,
-    ) -> Res<Option<EncoderInstruction>> {
+    ) -> Res<Option<DecodedEncoderInstruction>> {
         qdebug!([self], "reading instructions");
         loop {
             match &mut self.state {
@@ -161,13 +200,17 @@ impl EncoderInstructionReader {
                     Ok(Some(val)) => {
                         qtrace!([self], "First varint read {}", val);
                         match &mut self.instruction {
-                            EncoderInstruction::Capacity { value: v, .. }
-                            | EncoderInstruction::Duplicate { index: v } => {
+                            DecodedEncoderInstruction::Capacity { value: v, .. }
+                            | DecodedEncoderInstruction::Duplicate { index: v } => {
                                 *v = val;
                                 self.state = EncoderInstructionReaderState::Done;
                             }
-                            EncoderInstruction::InsertWithNameRefStatic { index, .. }
-                            | EncoderInstruction::InsertWithNameRefDynamic { index, .. } => {
+                            DecodedEncoderInstruction::InsertWithNameRefStatic {
+                                index, ..
+                            }
+                            | DecodedEncoderInstruction::InsertWithNameRefDynamic {
+                                index, ..
+                            } => {
                                 *index = val;
                                 self.state = EncoderInstructionReaderState::ReadFirstLiteral {
                                     reader: LiteralReader::default(),
@@ -185,12 +228,20 @@ impl EncoderInstructionReader {
                         Ok(Some(val)) => {
                             qtrace!([self], "first literal read {:?}", val);
                             match &mut self.instruction {
-                                EncoderInstruction::InsertWithNameRefStatic { value, .. }
-                                | EncoderInstruction::InsertWithNameRefDynamic { value, .. } => {
+                                DecodedEncoderInstruction::InsertWithNameRefStatic {
+                                    value,
+                                    ..
+                                }
+                                | DecodedEncoderInstruction::InsertWithNameRefDynamic {
+                                    value,
+                                    ..
+                                } => {
                                     *value = val;
                                     self.state = EncoderInstructionReaderState::Done;
                                 }
-                                EncoderInstruction::InsertWithNameLiteral { name, .. } => {
+                                DecodedEncoderInstruction::InsertWithNameLiteral {
+                                    name, ..
+                                } => {
                                     *name = val;
                                     self.state = EncoderInstructionReaderState::ReadSecondLiteral {
                                         reader: LiteralReader::default(),
@@ -209,7 +260,9 @@ impl EncoderInstructionReader {
                         Ok(Some(val)) => {
                             qtrace!([self], "second literal read {:?}", val);
                             match &mut self.instruction {
-                                EncoderInstruction::InsertWithNameLiteral { value, .. } => {
+                                DecodedEncoderInstruction::InsertWithNameLiteral {
+                                    value, ..
+                                } => {
                                     *value = val;
                                     self.state = EncoderInstructionReaderState::Done;
                                 }
@@ -227,7 +280,7 @@ impl EncoderInstructionReader {
                 self.state = EncoderInstructionReaderState::ReadInstruction;
                 break Ok(Some(mem::replace(
                     &mut self.instruction,
-                    EncoderInstruction::NoInstruction,
+                    DecodedEncoderInstruction::NoInstruction,
                 )));
             }
         }
@@ -251,7 +304,7 @@ mod test {
                 .read_instructions(&mut test_receiver)
                 .unwrap()
                 .unwrap(),
-            *instruction
+            instruction.into()
         );
     }
 
@@ -263,28 +316,28 @@ mod test {
         test_encoding_decoding(
             &EncoderInstruction::InsertWithNameRefStatic {
                 index: 1,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             false,
         );
         test_encoding_decoding(
             &EncoderInstruction::InsertWithNameRefStatic {
                 index: 1,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             true,
         );
         test_encoding_decoding(
             &EncoderInstruction::InsertWithNameRefStatic {
                 index: 10_000,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             false,
         );
         test_encoding_decoding(
             &EncoderInstruction::InsertWithNameRefStatic {
                 index: 10_000,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             true,
         );
@@ -292,43 +345,43 @@ mod test {
         test_encoding_decoding(
             &EncoderInstruction::InsertWithNameRefDynamic {
                 index: 1,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             false,
         );
         test_encoding_decoding(
             &EncoderInstruction::InsertWithNameRefDynamic {
                 index: 1,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             true,
         );
         test_encoding_decoding(
             &EncoderInstruction::InsertWithNameRefDynamic {
                 index: 10_000,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             false,
         );
         test_encoding_decoding(
             &EncoderInstruction::InsertWithNameRefDynamic {
                 index: 10_000,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             true,
         );
 
         test_encoding_decoding(
             &EncoderInstruction::InsertWithNameLiteral {
-                name: vec![0x62, 0x64, 0x65],
-                value: vec![0x62, 0x64, 0x65],
+                name: &[0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             false,
         );
         test_encoding_decoding(
             &EncoderInstruction::InsertWithNameLiteral {
-                name: vec![0x62, 0x64, 0x65],
-                value: vec![0x62, 0x64, 0x65],
+                name: &[0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             true,
         );
@@ -355,7 +408,7 @@ mod test {
                 .read_instructions(&mut test_receiver)
                 .unwrap()
                 .unwrap(),
-            *instruction
+            instruction.into()
         );
     }
 
@@ -367,28 +420,28 @@ mod test {
         test_encoding_decoding_slow_reader(
             &EncoderInstruction::InsertWithNameRefStatic {
                 index: 1,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             false,
         );
         test_encoding_decoding_slow_reader(
             &EncoderInstruction::InsertWithNameRefStatic {
                 index: 1,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             true,
         );
         test_encoding_decoding_slow_reader(
             &EncoderInstruction::InsertWithNameRefStatic {
                 index: 10_000,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             false,
         );
         test_encoding_decoding_slow_reader(
             &EncoderInstruction::InsertWithNameRefStatic {
                 index: 10_000,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             true,
         );
@@ -396,43 +449,43 @@ mod test {
         test_encoding_decoding_slow_reader(
             &EncoderInstruction::InsertWithNameRefDynamic {
                 index: 1,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             false,
         );
         test_encoding_decoding_slow_reader(
             &EncoderInstruction::InsertWithNameRefDynamic {
                 index: 1,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             true,
         );
         test_encoding_decoding_slow_reader(
             &EncoderInstruction::InsertWithNameRefDynamic {
                 index: 10_000,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             false,
         );
         test_encoding_decoding_slow_reader(
             &EncoderInstruction::InsertWithNameRefDynamic {
                 index: 10_000,
-                value: vec![0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             true,
         );
 
         test_encoding_decoding_slow_reader(
             &EncoderInstruction::InsertWithNameLiteral {
-                name: vec![0x62, 0x64, 0x65],
-                value: vec![0x62, 0x64, 0x65],
+                name: &[0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             false,
         );
         test_encoding_decoding_slow_reader(
             &EncoderInstruction::InsertWithNameLiteral {
-                name: vec![0x62, 0x64, 0x65],
-                value: vec![0x62, 0x64, 0x65],
+                name: &[0x62, 0x64, 0x65],
+                value: &[0x62, 0x64, 0x65],
             },
             true,
         );

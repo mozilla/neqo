@@ -274,7 +274,7 @@ impl HeaderTable {
         name_static_table: bool,
         name_index: u64,
         value: &[u8],
-    ) -> Res<()> {
+    ) -> Res<u64> {
         qtrace!(
             [self],
             "insert with ref to index={} in {} value={:?}",
@@ -293,11 +293,10 @@ impl HeaderTable {
                 .name()
                 .to_vec()
         };
-        self.insert(&name, value)?;
-        Ok(())
+        self.insert(&name, value)
     }
 
-    pub fn duplicate(&mut self, index: u64) -> Res<()> {
+    pub fn duplicate(&mut self, index: u64) -> Res<u64> {
         qtrace!([self], "dumplicate entry={}", index);
         // need to remember name and value because insert may delete the entry.
         let name: Vec<u8>;
@@ -308,8 +307,7 @@ impl HeaderTable {
             value = entry.value().to_vec();
             qtrace!([self], "dumplicate name={:?} value={:?}", name, value);
         }
-        self.insert(&name, &value)?;
-        Ok(())
+        self.insert(&name, &value)
     }
 
     pub fn increment_acked(&mut self, increment: u64) -> Res<()> {
