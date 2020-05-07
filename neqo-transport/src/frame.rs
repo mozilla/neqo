@@ -594,14 +594,13 @@ impl Frame {
             }),
             FRAME_TYPE_CRYPTO => {
                 let o = dv!(dec);
-                let l = dv!(dec);
-                if (o + l) > ((1 << 62) - 1) {
+                let data = d!(dec.decode_vvec());
+                if o + u64::try_from(data.len()).unwrap() > ((1 << 62) - 1) {
                     return Err(Error::FrameEncodingError);
                 }
-                let len = Some(l);
                 Ok(Self::Crypto {
                     offset: o,
-                    data: d!(dec.decode_checked(len)).to_vec(), // TODO(mt) unnecessary copy
+                    data: data.to_vec(), // TODO(mt) unnecessary copy
                 })
             }
             FRAME_TYPE_NEW_TOKEN => {
@@ -622,14 +621,11 @@ impl Frame {
                     dec.decode_remainder()
                 } else {
                     qtrace!("STREAM frame, with length");
-                    let l = dv!(dec);
-
-                    if (o + l) > ((1 << 62) - 1) {
-                        return Err(Error::FrameEncodingError);
-                    }
-                    let len = Some(l);
-                    d!(dec.decode_checked(len))
+                    d!(dec.decode_vvec())
                 };
+                if o + u64::try_from(data.len()).unwrap() > ((1 << 62) - 1) {
+                    return Err(Error::FrameEncodingError);
+                }
                 Ok(Self::Stream {
                     fin: (t & STREAM_FRAME_BIT_FIN) != 0,
                     stream_id: s.into(),
