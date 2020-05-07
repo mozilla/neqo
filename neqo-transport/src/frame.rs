@@ -595,7 +595,7 @@ impl Frame {
             FRAME_TYPE_CRYPTO => {
                 let o = dv!(dec);
                 let l = dv!(dec);
-                if (o + l) > (1 << 62 - 1) {
+                if (o + l) > ((1 << 62) - 1) {
                     return Err(Error::FrameEncodingError);
                 }
                 let len = Some(l);
@@ -624,7 +624,7 @@ impl Frame {
                     qtrace!("STREAM frame, with length");
                     let l = dv!(dec);
 
-                    if (o + l) > (1 << 62 - 1) {
+                    if (o + l) > ((1 << 62) - 1) {
                         return Err(Error::FrameEncodingError);
                     }
                     let len = Some(l);
