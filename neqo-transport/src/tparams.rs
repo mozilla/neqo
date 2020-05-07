@@ -97,8 +97,7 @@ impl TransportParameter {
                 None => return Err(Error::TransportParameterError),
             },
 
-            INITIAL_MAX_STREAMS_BIDI
-            | INITIAL_MAX_STREAMS_UNI => match d.decode_varint() {
+            INITIAL_MAX_STREAMS_BIDI | INITIAL_MAX_STREAMS_UNI => match d.decode_varint() {
                 Some(v) if v <= (1 << 60) => Self::Integer(v),
                 _ => return Err(Error::StreamLimitError),
             },

@@ -596,7 +596,7 @@ impl Frame {
                 let o = dv!(dec);
                 let l = dv!(dec);
                 if (o + l) > (1 << 62 - 1) {
-                    return Err(Error::FrameEncodingError)
+                    return Err(Error::FrameEncodingError);
                 }
                 let len = Some(l);
                 Ok(Self::Crypto {
@@ -625,7 +625,7 @@ impl Frame {
                     let l = dv!(dec);
 
                     if (o + l) > (1 << 62 - 1) {
-                        return Err(Error::FrameEncodingError)
+                        return Err(Error::FrameEncodingError);
                     }
                     let len = Some(l);
                     d!(dec.decode_checked(len))
@@ -648,13 +648,13 @@ impl Frame {
             FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => {
                 let m = dv!(dec);
                 if m > (1 << 60) {
-                        return Err(Error::StreamLimitError)
+                    return Err(Error::StreamLimitError);
                 }
                 Ok(Self::MaxStreams {
                     stream_type: StreamType::from_type_bit(t),
                     maximum_streams: StreamIndex::new(m),
                 })
-            },
+            }
             FRAME_TYPE_DATA_BLOCKED => Ok(Self::DataBlocked {
                 data_limit: dv!(dec),
             }),
