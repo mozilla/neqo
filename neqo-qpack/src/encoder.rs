@@ -429,7 +429,9 @@ mod tests {
     }
 
     fn connect_generic<F>(huffman: bool, f: F) -> TestEncoder
-    where F : FnOnce(&mut Connection,&mut Connection) {
+    where
+        F: FnOnce(&mut Connection, &mut Connection),
+    {
         let mut conn = default_client();
         let mut peer_conn = default_server();
         f(&mut conn, &mut peer_conn);
@@ -452,19 +454,21 @@ mod tests {
     }
 
     fn connect(huffman: bool) -> TestEncoder {
-        connect_generic(huffman, |client, server| { handshake(client, server); })
+        connect_generic(huffman, |client, server| {
+            handshake(client, server);
+        })
     }
 
     fn connect_flow_control(max_data: u64) -> TestEncoder {
         connect_generic(true, |client, server| {
-        server
-            .set_local_tparam(
-                tparams::INITIAL_MAX_DATA,
-                TransportParameter::Integer(max_data),
-            )
-            .unwrap();
+            server
+                .set_local_tparam(
+                    tparams::INITIAL_MAX_DATA,
+                    TransportParameter::Integer(max_data),
+                )
+                .unwrap();
 
-        handshake(client, server);
+            handshake(client, server);
         })
     }
 
