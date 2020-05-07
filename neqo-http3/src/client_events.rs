@@ -7,6 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::connection::Http3State;
+use crate::Header;
 use neqo_common::matches;
 use neqo_transport::{AppError, StreamType};
 
@@ -17,7 +18,11 @@ use std::rc::Rc;
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub enum Http3ClientEvent {
     /// Space available in the buffer for an application write to succeed.
-    HeaderReady { stream_id: u64 },
+    HeaderReady {
+        stream_id: u64,
+        headers: Option<Vec<Header>>,
+        fin: bool,
+    },
     /// A stream can accept new data.
     DataWritable { stream_id: u64 },
     /// New bytes available for reading.
@@ -47,8 +52,12 @@ pub struct Http3ClientEvents {
 
 impl Http3ClientEvents {
     /// Add a new `HeaderReady` event.
-    pub(crate) fn header_ready(&self, stream_id: u64) {
-        self.insert(Http3ClientEvent::HeaderReady { stream_id });
+    pub(crate) fn header_ready(&self, stream_id: u64, headers: Option<Vec<Header>>, fin: bool) {
+        self.insert(Http3ClientEvent::HeaderReady {
+            stream_id,
+            headers,
+            fin,
+        });
     }
 
     /// Add a new `DataWritable` event.
@@ -145,7 +154,7 @@ impl Http3ClientEvents {
     pub(crate) fn remove_events_for_stream_id(&self, stream_id: u64) {
         self.remove(|evt| {
             matches!(evt,
-                Http3ClientEvent::HeaderReady { stream_id: x }
+                Http3ClientEvent::HeaderReady { stream_id: x, .. }
                 | Http3ClientEvent::DataWritable { stream_id: x }
                 | Http3ClientEvent::DataReadable { stream_id: x }
                 | Http3ClientEvent::NewPushStream { stream_id: x }

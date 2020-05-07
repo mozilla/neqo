@@ -40,13 +40,19 @@ fn default_server() -> Server {
     .expect("should create a server")
 }
 
+// Check that there is at least one connection.  Returns a ref to the first confirmed connection.
 fn connected_server(server: &mut Server) -> ActiveConnectionRef {
     let server_connections = server.active_connections();
-    assert_eq!(server_connections.len(), 1);
-    assert_eq!(*server_connections[0].borrow().state(), State::Confirmed);
-    server_connections[0].clone()
+    // Find confirmed connections.  There should only be one.
+    let mut confirmed = server_connections
+        .iter()
+        .filter(|c: &&ActiveConnectionRef| *c.borrow().state() == State::Confirmed);
+    let c = confirmed.next().expect("one confirmed");
+    assert!(confirmed.next().is_none(), "only one confirmed");
+    c.clone()
 }
 
+/// Connect.  This returns a reference to the server connection.
 fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef {
     server.set_retry_required(false);
 
@@ -78,12 +84,143 @@ fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef 
     connected_server(server)
 }
 
+/// Take a pair of connections in any state and complete the handshake.
+/// The `datagram` argument is a packet that was received from the server.
+/// See `connect` for what this returns.
+fn complete_connection(
+    client: &mut Connection,
+    server: &mut Server,
+    mut datagram: Option<Datagram>,
+) -> ActiveConnectionRef {
+    let is_done = |c: &Connection| matches!(c.state(), State::Confirmed | State::Closing { .. } | State::Closed(..));
+    while !is_done(client) {
+        let _ = test_fixture::maybe_authenticate(client);
+        let out = client.process(datagram, now());
+        let out = server.process(out.dgram(), now());
+        datagram = out.dgram();
+    }
+
+    assert_eq!(*client.state(), State::Confirmed);
+    connected_server(server)
+}
+
 #[test]
 fn single_client() {
     let mut server = default_server();
     let mut client = default_client();
-
     connect(&mut client, &mut server);
+}
+
+#[test]
+fn duplicate_initial() {
+    let mut server = default_server();
+    let mut client = default_client();
+
+    assert_eq!(*client.state(), State::Init);
+    let initial = client.process(None, now()).dgram();
+    assert!(initial.is_some());
+
+    // The server should ignore a packets with the same remote address and
+    // destination connection ID as an existing connection attempt.
+    let server_initial = server.process(initial.clone(), now()).dgram();
+    assert!(server_initial.is_some());
+    let dgram = server.process(initial, now()).dgram();
+    assert!(dgram.is_none());
+
+    assert_eq!(server.active_connections().len(), 1);
+    complete_connection(&mut client, &mut server, server_initial);
+}
+
+#[test]
+fn duplicate_initial_new_path() {
+    let mut server = default_server();
+    let mut client = default_client();
+
+    assert_eq!(*client.state(), State::Init);
+    let initial = client.process(None, now()).dgram().unwrap();
+    let other = Datagram::new(
+        SocketAddr::new(initial.source().ip(), initial.source().port() ^ 23),
+        initial.destination(),
+        &initial[..],
+    );
+
+    // The server should respond to both as these came from different addresses.
+    let dgram = server.process(Some(other), now()).dgram();
+    assert!(dgram.is_some());
+
+    let server_initial = server.process(Some(initial), now()).dgram();
+    assert!(server_initial.is_some());
+
+    assert_eq!(server.active_connections().len(), 2);
+    complete_connection(&mut client, &mut server, server_initial);
+}
+
+#[test]
+fn different_initials_same_path() {
+    let mut server = default_server();
+    let mut client1 = default_client();
+    let mut client2 = default_client();
+
+    let client_initial1 = client1.process(None, now()).dgram();
+    assert!(client_initial1.is_some());
+    let client_initial2 = client2.process(None, now()).dgram();
+    assert!(client_initial2.is_some());
+
+    // The server should respond to both as these came from different addresses.
+    let server_initial1 = server.process(client_initial1, now()).dgram();
+    assert!(server_initial1.is_some());
+
+    let server_initial2 = server.process(client_initial2, now()).dgram();
+    assert!(server_initial2.is_some());
+
+    assert_eq!(server.active_connections().len(), 2);
+    complete_connection(&mut client1, &mut server, server_initial1);
+    complete_connection(&mut client2, &mut server, server_initial2);
+}
+
+#[test]
+fn same_initial_after_connected() {
+    let mut server = default_server();
+    let mut client = default_client();
+
+    let client_initial = client.process(None, now()).dgram();
+    assert!(client_initial.is_some());
+
+    let server_initial = server.process(client_initial.clone(), now()).dgram();
+    assert!(server_initial.is_some());
+    complete_connection(&mut client, &mut server, server_initial);
+    // This removes the connection from the active set until something happens to it.
+    assert_eq!(server.active_connections().len(), 0);
+
+    // Now make a new connection using the exact same initial as before.
+    // The server should respond to an attempt to connect with the same Initial.
+    let dgram = server.process(client_initial, now()).dgram();
+    assert!(dgram.is_some());
+    // The server should make a new connection object.
+    assert_eq!(server.active_connections().len(), 1);
+}
+
+#[test]
+fn drop_non_initial() {
+    const CID: &[u8] = &[55; 8]; // not a real connection ID
+    let mut server = default_server();
+
+    // This is big enough to look like an Initial, but it uses the Retry type.
+    let mut header = neqo_common::Encoder::with_capacity(1200);
+    header
+        .encode_byte(0xfa)
+        .encode_uint(4, QUIC_VERSION)
+        .encode_vec(1, CID)
+        .encode_vec(1, CID);
+    let mut bogus_data: Vec<u8> = header.into();
+    bogus_data.resize(1200, 66);
+
+    let bogus = Datagram::new(
+        test_fixture::loopback(),
+        test_fixture::loopback(),
+        bogus_data,
+    );
+    assert!(server.process(Some(bogus), now()).dgram().is_none());
 }
 
 #[test]

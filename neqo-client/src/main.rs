@@ -115,6 +115,47 @@ fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) {
     }
 }
 
+fn get_output_file(
+    url: &Url,
+    output_dir: &Option<PathBuf>,
+    all_paths: &mut Vec<PathBuf>,
+) -> Option<File> {
+    if let Some(ref dir) = output_dir {
+        let mut out_path = dir.clone();
+
+        let url_path = if url.path() == "/" {
+            // If no path is given... call it "root"?
+            "root"
+        } else {
+            // Omit leading slash
+            &url.path()[1..]
+        };
+        out_path.push(url_path);
+
+        if all_paths.contains(&out_path) {
+            eprintln!("duplicate path {}", out_path.display());
+            return None;
+        }
+
+        eprintln!("Saving {} to {:?}", url.clone().into_string(), out_path);
+
+        let f = match OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&out_path)
+        {
+            Err(_) => return None,
+            Ok(f) => f,
+        };
+
+        all_paths.push(out_path);
+        Some(f)
+    } else {
+        None
+    }
+}
+
 fn process_loop(
     local_addr: &SocketAddr,
     remote_addr: &SocketAddr,
@@ -153,7 +194,8 @@ fn process_loop(
         }
 
         match socket.recv(&mut buf[..]) {
-            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {}
+            Err(ref err)
+                if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::Interrupted => {}
             Err(err) => {
                 eprintln!("UDP error: {}", err);
                 exit(1)
@@ -194,11 +236,14 @@ impl Handler for PostConnectHandler {
         let mut data = vec![0; 4000];
         while let Some(event) = client.next_event() {
             match event {
-                Http3ClientEvent::HeaderReady { stream_id } => match self.streams.get(&stream_id) {
+                Http3ClientEvent::HeaderReady {
+                    stream_id,
+                    headers,
+                    fin,
+                } => match self.streams.get(&stream_id) {
                     Some(out_file) => {
-                        let headers = client.read_response_headers(stream_id);
                         if out_file.is_none() {
-                            println!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                            println!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
                         }
                     }
                     None => {
@@ -315,36 +360,7 @@ fn client(
 
         let _ = client.stream_close_send(client_stream_id);
 
-        let out_file = if let Some(ref dir) = args.output_dir {
-            let mut out_path = dir.clone();
-
-            let url_path = if url.path() == "/" {
-                // If no path is given... call it "root"?
-                "root"
-            } else {
-                // Omit leading slash
-                &url.path()[1..]
-            };
-            out_path.push(url_path);
-
-            if open_paths.contains(&out_path) {
-                eprintln!("duplicate path {}", out_path.display());
-                continue;
-            }
-
-            eprintln!("Saving {} to {:?}", url.clone().into_string(), out_path);
-
-            let f = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&out_path)?;
-
-            open_paths.push(out_path);
-            Some(f)
-        } else {
-            None
-        };
+        let out_file = get_output_file(url, &args.output_dir, &mut open_paths);
 
         h2.streams.insert(client_stream_id, out_file);
     }
@@ -453,7 +469,14 @@ fn main() -> Res<()> {
                 &urls,
             )?;
         } else {
-            old::old_client(&args, socket, local_addr, remote_addr, &urls)?;
+            old::old_client(
+                &args,
+                socket,
+                local_addr,
+                remote_addr,
+                &format!("{}", host),
+                &urls,
+            )?;
         }
     }
 
@@ -462,9 +485,9 @@ fn main() -> Res<()> {
 
 mod old {
     use std::cell::RefCell;
-    use std::collections::HashSet;
+    use std::collections::HashMap;
     use std::fs::File;
-    use std::io::Write;
+    use std::io::{ErrorKind, Write};
     use std::net::{SocketAddr, UdpSocket};
     use std::process::exit;
     use std::rc::Rc;
@@ -480,25 +503,15 @@ mod old {
         Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
     };
 
-    use super::{emit_datagram, Args};
+    use super::{emit_datagram, get_output_file, Args};
 
     trait HandlerOld {
-        fn handle(
-            &mut self,
-            args: &Args,
-            client: &mut Connection,
-            out_file: &mut Option<File>,
-        ) -> Res<bool>;
+        fn handle(&mut self, args: &Args, client: &mut Connection) -> Res<bool>;
     }
 
     struct PreConnectHandlerOld {}
     impl HandlerOld for PreConnectHandlerOld {
-        fn handle(
-            &mut self,
-            _args: &Args,
-            client: &mut Connection,
-            _out_file: &mut Option<File>,
-        ) -> Res<bool> {
+        fn handle(&mut self, _args: &Args, client: &mut Connection) -> Res<bool> {
             let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
             if client.events().any(authentication_needed) {
                 client.authenticated(AuthenticationStatus::Ok, Instant::now());
@@ -509,22 +522,18 @@ mod old {
 
     #[derive(Default)]
     struct PostConnectHandlerOld {
-        streams: HashSet<u64>,
+        streams: HashMap<u64, Option<File>>,
     }
 
     // This is a bit fancier than actually needed.
     impl HandlerOld for PostConnectHandlerOld {
-        fn handle(
-            &mut self,
-            args: &Args,
-            client: &mut Connection,
-            out_file: &mut Option<File>,
-        ) -> Res<bool> {
+        fn handle(&mut self, args: &Args, client: &mut Connection) -> Res<bool> {
             let mut data = vec![0; 4000];
             while let Some(event) = client.next_event() {
                 match event {
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
-                        if !self.streams.contains(&stream_id) {
+                        let out_file = self.streams.get_mut(&stream_id);
+                        if out_file.is_none() {
                             println!("Data on unexpected stream: {}", stream_id);
                             return Ok(false);
                         }
@@ -533,9 +542,11 @@ mod old {
                             .stream_recv(stream_id, &mut data)
                             .expect("Read should succeed");
 
+                        let mut have_out_file = false;
                         if let Some(out_file) = out_file {
+                            have_out_file = true;
                             if sz > 0 {
-                                out_file.write_all(&data[..sz])?;
+                                out_file.as_ref().unwrap().write_all(&data[..sz])?;
                             }
                         } else if !args.output_read_data {
                             println!("READ[{}]: {} bytes", stream_id, sz);
@@ -547,9 +558,14 @@ mod old {
                             )
                         }
                         if fin {
-                            println!("<FIN[{}]>", stream_id);
-                            client.close(Instant::now(), 0, String::from("kthxbye!"));
-                            return Ok(false);
+                            if !have_out_file {
+                                println!("<FIN[{}]>", stream_id);
+                            }
+                            self.streams.remove(&stream_id);
+                            if self.streams.is_empty() {
+                                client.close(Instant::now(), 0, String::from("kthxbye!"));
+                                return Ok(false);
+                            }
                         }
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
@@ -579,7 +595,7 @@ mod old {
                 return Ok(client.state().clone());
             }
 
-            let exiting = !handler.handle(args, client, &mut None)?;
+            let exiting = !handler.handle(args, client)?;
 
             let out_dgram = client.process_output(Instant::now());
             emit_datagram(&socket, out_dgram.dgram());
@@ -589,6 +605,12 @@ mod old {
             }
 
             let sz = match socket.recv(&mut buf[..]) {
+                Err(ref err)
+                    if err.kind() == ErrorKind::WouldBlock
+                        || err.kind() == ErrorKind::Interrupted =>
+                {
+                    0
+                }
                 Err(err) => {
                     eprintln!("UDP error: {}", err);
                     exit(1)
@@ -611,45 +633,52 @@ mod old {
         socket: UdpSocket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
+        origin: &str,
         urls: &[Url],
     ) -> Res<()> {
-        for url in urls {
-            let mut client = Connection::new_client(
-                url.host_str().unwrap(),
-                &["http/0.9"],
-                Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
-                local_addr,
-                remote_addr,
-            )
-            .expect("must succeed");
-            client.set_qlog(qlog_new(args, &format!("{}", url.host().unwrap()))?);
-            // Temporary here to help out the type inference engine
-            let mut h = PreConnectHandlerOld {};
-            process_loop_old(
-                &local_addr,
-                &remote_addr,
-                &socket,
-                &mut client,
-                &mut h,
-                &args,
-            )?;
+        let mut open_paths = Vec::new();
 
+        let mut client = Connection::new_client(
+            origin,
+            &["hq-27"],
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+            local_addr,
+            remote_addr,
+        )
+        .expect("must succeed");
+        client.set_qlog(qlog_new(args, origin)?);
+        // Temporary here to help out the type inference engine
+        let mut h = PreConnectHandlerOld {};
+        process_loop_old(
+            &local_addr,
+            &remote_addr,
+            &socket,
+            &mut client,
+            &mut h,
+            &args,
+        )?;
+
+        let mut h2 = PostConnectHandlerOld::default();
+
+        for url in urls {
             let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
             let req = format!("GET {}\r\n", url.path());
             client
                 .stream_send(client_stream_id, req.as_bytes())
                 .unwrap();
-            let mut h2 = PostConnectHandlerOld::default();
-            h2.streams.insert(client_stream_id);
-            process_loop_old(
-                &local_addr,
-                &remote_addr,
-                &socket,
-                &mut client,
-                &mut h2,
-                &args,
-            )?;
+            let _ = client.stream_close_send(client_stream_id);
+            let out_file = get_output_file(url, &args.output_dir, &mut open_paths);
+            h2.streams.insert(client_stream_id, out_file);
         }
+
+        process_loop_old(
+            &local_addr,
+            &remote_addr,
+            &socket,
+            &mut client,
+            &mut h2,
+            &args,
+        )?;
 
         Ok(())
     }

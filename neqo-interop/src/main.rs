@@ -311,14 +311,17 @@ impl H3Handler {
         let mut data = vec![0; 4000];
         while let Some(event) = self.h3.next_event() {
             match event {
-                Http3ClientEvent::HeaderReady { stream_id } => {
+                Http3ClientEvent::HeaderReady {
+                    stream_id,
+                    headers,
+                    fin,
+                } => {
                     if !self.streams.contains(&stream_id) {
                         eprintln!("Data on unexpected stream: {}", stream_id);
                         return false;
                     }
 
-                    let headers = self.h3.read_response_headers(stream_id);
-                    eprintln!("READ HEADERS[{}]: {:?}", stream_id, headers);
+                    eprintln!("READ HEADERS[{}]: fin={} {:?}", stream_id, fin, headers);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
                     if !self.streams.contains(&stream_id) {

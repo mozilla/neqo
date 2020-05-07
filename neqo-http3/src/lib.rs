@@ -69,6 +69,7 @@ pub enum Error {
     Unavailable,
     Unexpected,
     InvalidResumptionToken,
+    HttpGoaway,
 }
 
 impl Error {
