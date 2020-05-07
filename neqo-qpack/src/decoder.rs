@@ -21,7 +21,6 @@ pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
 pub struct QPackDecoder {
     instruction_reader: EncoderInstructionReader,
     table: HeaderTable,
-    total_num_of_inserts: u64,
     acked_inserts: u64,
     max_entries: u64,
     send_buf: QPData,
@@ -39,7 +38,6 @@ impl QPackDecoder {
         Self {
             instruction_reader: EncoderInstructionReader::new(),
             table: HeaderTable::new(false),
-            total_num_of_inserts: 0,
             acked_inserts: 0,
             max_entries: qpack_settings.max_table_size_decoder >> 5,
             send_buf: QPData::default(),
@@ -106,26 +104,22 @@ impl QPackDecoder {
                 self.table
                     .insert_with_name_ref(true, index, &value)
                     .map_err(|_| Error::EncoderStream)?;
-                self.total_num_of_inserts += 1;
             }
             DecodedEncoderInstruction::InsertWithNameRefDynamic { index, value } => {
                 self.table
                     .insert_with_name_ref(false, index, &value)
                     .map_err(|_| Error::EncoderStream)?;
-                self.total_num_of_inserts += 1;
             }
             DecodedEncoderInstruction::InsertWithNameLiteral { name, value } => {
                 self.table
                     .insert(&name, &value)
                     .map(|_| ())
                     .map_err(|_| Error::EncoderStream)?;
-                self.total_num_of_inserts += 1;
             }
             DecodedEncoderInstruction::Duplicate { index } => {
                 self.table
                     .duplicate(index)
                     .map_err(|_| Error::EncoderStream)?;
-                self.total_num_of_inserts += 1;
             }
             DecodedEncoderInstruction::NoInstruction => {
                 unreachable!("This can be call only with an instruction.")
@@ -157,10 +151,10 @@ impl QPackDecoder {
     ///     May return an error in case of any transport error. TODO: define transport errors.
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         // Encode increment instruction if needed.
-        let increment = self.total_num_of_inserts - self.acked_inserts;
+        let increment = self.table.base() - self.acked_inserts;
         if increment > 0 {
             DecoderInstruction::InsertCountIncrement { increment }.marshal(&mut self.send_buf);
-            self.acked_inserts = self.total_num_of_inserts;
+            self.acked_inserts = self.table.base();
         }
         if self.send_buf.len() != 0 && self.local_stream_id.is_some() {
             let r = conn
@@ -180,8 +174,7 @@ impl QPackDecoder {
         qdebug!([self], "decode header block.");
         let mut decoder = HeaderDecoder::new(buf);
 
-        match decoder.decode_header_block(&self.table, self.max_entries, self.total_num_of_inserts)
-        {
+        match decoder.decode_header_block(&self.table, self.max_entries, self.table.base()) {
             Ok(HeaderDecoderResult::Blocked(req_insert_cnt)) => {
                 self.blocked_streams.push((stream_id, req_insert_cnt));
                 if self.blocked_streams.len() > self.max_blocked_streams {
