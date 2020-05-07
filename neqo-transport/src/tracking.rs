@@ -236,7 +236,8 @@ impl ::std::fmt::Display for PacketRange {
 }
 
 /// The ACK delay we use.
-pub const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
+const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
+pub const MAX_UNACKED_PKTS: u64 = 1;
 const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
@@ -259,6 +260,7 @@ pub struct RecvdPackets {
     largest_pn_time: Option<Instant>,
     // The time that we should be sending an ACK.
     ack_time: Option<Instant>,
+    pkts_since_last_ack: u64,
 }
 
 impl RecvdPackets {
@@ -270,6 +272,7 @@ impl RecvdPackets {
             min_tracked: 0,
             largest_pn_time: None,
             ack_time: None,
+            pkts_since_last_ack: 0,
         }
     }
 
@@ -333,13 +336,22 @@ impl RecvdPackets {
         }
 
         if ack_eliciting {
+            self.pkts_since_last_ack += 1;
+
             // Send ACK right away if out-of-order
             // On the first in-order ack-eliciting packet since sending an ACK,
-            // set a delay. On the second, remove that delay.
+            // set a delay.
+            // Count packets until we exceed MAX_UNACKED_PKTS, then remove the
+            // delay.
             if pn != next_in_order_pn {
                 self.ack_time = Some(now);
-            } else if self.ack_time.is_none() && self.space == PNSpace::ApplicationData {
-                self.ack_time = Some(now + ACK_DELAY);
+            } else if self.space == PNSpace::ApplicationData {
+                match &mut self.pkts_since_last_ack {
+                    0 => unreachable!(),
+                    1 => self.ack_time = Some(now + ACK_DELAY),
+                    x if *x > MAX_UNACKED_PKTS => self.ack_time = Some(now),
+                    _ => debug_assert!(self.ack_time.is_some()),
+                }
             } else {
                 self.ack_time = Some(now);
             }
@@ -421,6 +433,7 @@ impl RecvdPackets {
 
         // We've sent an ACK, reset the timer.
         self.ack_time = None;
+        self.pkts_since_last_ack = 0;
 
         let ack_delay = now.duration_since(self.largest_pn_time.unwrap());
         // We use the default exponent so
@@ -604,14 +617,16 @@ mod tests {
         assert!(rp.ack_time().is_none());
         assert!(!rp.ack_now(*NOW));
 
-        // One packet won't cause an ACK to be needed.
-        rp.set_received(*NOW, 0, true);
-        assert_eq!(Some(*NOW + ACK_DELAY), rp.ack_time());
-        assert!(!rp.ack_now(*NOW));
-        assert!(rp.ack_now(*NOW + ACK_DELAY));
+        // Some packets won't cause an ACK to be needed.
+        for num in 0..MAX_UNACKED_PKTS {
+            rp.set_received(*NOW, num, true);
+            assert_eq!(Some(*NOW + ACK_DELAY), rp.ack_time());
+            assert!(!rp.ack_now(*NOW));
+            assert!(rp.ack_now(*NOW + ACK_DELAY));
+        }
 
-        // A second packet will move the ACK time to now.
-        rp.set_received(*NOW, 1, true);
+        // Exceeding MAX_UNACKED_PKTS will move the ACK time to now.
+        rp.set_received(*NOW, MAX_UNACKED_PKTS, true);
         assert_eq!(Some(*NOW), rp.ack_time());
         assert!(rp.ack_now(*NOW));
     }
