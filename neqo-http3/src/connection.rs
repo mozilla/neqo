@@ -327,18 +327,11 @@ impl<T: Http3Transaction> Http3Connection<T> {
         self.qpack_encoder
             .local_stream_id()
             .iter()
-            .chain(
-                self.qpack_encoder.remote_stream_id().iter().chain(
-                    self.qpack_decoder.local_stream_id().iter().chain(
-                        self.qpack_decoder.remote_stream_id().iter().chain(
-                            self.control_stream_local
-                                .stream_id()
-                                .iter()
-                                .chain(self.control_stream_remote.stream_id().iter()),
-                        ),
-                    ),
-                ),
-            )
+            .chain(self.qpack_encoder.remote_stream_id().iter())
+            .chain(self.qpack_decoder.local_stream_id().iter())
+            .chain(self.qpack_decoder.remote_stream_id().iter())
+            .chain(self.control_stream_local.stream_id().iter())
+            .chain(self.control_stream_remote.stream_id().iter())
             .any(|id| stream_id == *id)
     }
 
