@@ -645,11 +645,16 @@ impl Frame {
                 stream_id: dv!(dec).into(),
                 maximum_stream_data: dv!(dec),
             }),
-            FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => Ok(Self::MaxStreams {
-                stream_type: StreamType::from_type_bit(t),
-                maximum_streams: StreamIndex::new(dv!(dec)),
-            }),
-
+            FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => {
+                let m = dv!(dec);
+                if m > (1 << 60) {
+                        return Err(Error::StreamLimitError)
+                }
+                Ok(Self::MaxStreams {
+                    stream_type: StreamType::from_type_bit(t),
+                    maximum_streams: StreamIndex::new(m),
+                })
+            },
             FRAME_TYPE_DATA_BLOCKED => Ok(Self::DataBlocked {
                 data_limit: dv!(dec),
             }),
