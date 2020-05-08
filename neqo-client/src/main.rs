@@ -476,27 +476,25 @@ fn main() -> Res<()> {
                 &format!("{}", host),
                 &urls,
             )?;
+        } else if !args.download_in_series {
+            old::old_client(
+                &args,
+                &socket,
+                local_addr,
+                remote_addr,
+                &format!("{}", host),
+                &urls,
+            )?;
         } else {
-            if !args.download_in_series {
+            for url in urls {
                 old::old_client(
                     &args,
                     &socket,
                     local_addr,
                     remote_addr,
                     &format!("{}", host),
-                    &urls,
+                    &[url],
                 )?;
-            } else {
-                for url in urls {
-                    old::old_client(
-                        &args,
-                        &socket,
-                        local_addr,
-                        remote_addr,
-                        &format!("{}", host),
-                        &[url],
-                    )?;
-                }
             }
         }
     }
