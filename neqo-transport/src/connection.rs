@@ -1213,9 +1213,11 @@ impl Connection {
         // Check whether we are sending packets in PTO mode.
         if self.loss_recovery.pto_active() {
                 if let Some(space) = self.loss_recovery.take_pto_packet() {
+                    // Send a probe packet.
                     (true, path.mtu(), space, false)
                 } else {
-                    return Ok(None);
+                    // The PTO budget has run out; only send ACK frames.
+                    (false, path.mtu(), PNSpace::Initial, true)
                 }
             } else if self.loss_recovery.cwnd_avail() < MIN_CC_WINDOW {
                 // If avail == 0 we do not have available congestion window, we may send only
@@ -1281,8 +1283,6 @@ impl Connection {
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
             qlog::packet_sent(&mut self.qlog, pt, pn, &builder[payload_start..])?;
-
-            qdebug!("Need to send a packet: {:?}", pt);
 
             self.stats.packets_tx += 1;
             encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
@@ -2150,11 +2150,14 @@ mod tests {
     use crate::cc::{INITIAL_CWND_PKTS, MIN_CONG_WINDOW};
     use crate::frame::{CloseError, StreamType};
     use crate::path::PATH_MTU_V6;
+    use crate::recovery::PTO_PACKET_COUNT;
     use crate::tracking::MAX_UNACKED_PKTS;
 
     use neqo_common::matches;
     use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
+
+    const AT_LEAST_PTO: Duration = Duration::from_secs(1);
 
     // This is fabulous: because test_fixture uses the public API for Connection,
     // it gets a different type to the ones that are referenced via super::*.
@@ -3320,7 +3323,7 @@ mod tests {
         assert!(matches!(out, Output::Callback(_)));
 
         // One second later, it should want to send PTO packet
-        now += Duration::from_secs(1);
+        now += AT_LEAST_PTO;
         let out = client.process(None, now);
 
         let frames = server.test_process_input(out.dgram().unwrap(), now);
@@ -3352,7 +3355,7 @@ mod tests {
         // TODO assert_full_cwnd()
 
         // Wait for the PTO.
-        now += Duration::from_secs(1);
+        now += AT_LEAST_PTO;
         let dgrams = send_bytes(&mut client, 2, now);
         assert_eq!(dgrams.len(), 2); // Two packets in the PTO.
 
@@ -4043,7 +4046,7 @@ mod tests {
     ) -> Instant {
         // Note: wait some arbitrary time that should be longer than pto
         // timer. This is rather brittle.
-        now += Duration::from_secs(1);
+        now += AT_LEAST_PTO;
 
         // Should enter PTO mode
         let c_tx_dgrams = send_bytes(client, 0, now);
@@ -4234,6 +4237,7 @@ mod tests {
 
     /// Send something on a stream from `sender` to `receiver`.
     /// Return the resulting datagram.
+    #[must_use]
     fn send_something(sender: &mut Connection, now: Instant) -> Datagram {
         let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
         assert!(sender.stream_send(stream_id, b"data").is_ok());
@@ -4296,7 +4300,7 @@ mod tests {
         // Waiting now for at least a PTO should cause the server to drop old keys.
         // But at this point the client hasn't received a key update from the server.
         // It will be stuck with old keys.
-        now += Duration::from_secs(1);
+        now += AT_LEAST_PTO;
         let dgram = client.process(None, now).dgram();
         assert!(dgram.is_some()); // Drop this packet.
         assert_eq!(client.get_epochs(), (Some(4), Some(3)));
@@ -4324,7 +4328,7 @@ mod tests {
         // The server can't update until it gets something from the client.
         assert!(server.initiate_key_update().is_err());
 
-        now += Duration::from_secs(1);
+        now += AT_LEAST_PTO;
         client.process(None, now);
         assert_eq!(client.get_epochs(), (Some(4), Some(4)));
     }
@@ -4353,7 +4357,7 @@ mod tests {
             assert_eq!(server.get_epochs(), (Some(4), Some(3)));
             // Now move the server temporarily into the future so that it
             // rotates the keys.  Don't do this at home folks.
-            server.process(None, now + Duration::from_secs(1));
+            server.process(None, now + AT_LEAST_PTO);
             assert_eq!(server.get_epochs(), (Some(4), Some(4)));
         } else {
             panic!("server should have a timer set");
@@ -4493,7 +4497,6 @@ mod tests {
 
     #[test]
     fn loss_recovery_crash() {
-        const TIME_SHIFT: Duration = Duration::from_secs(1);
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -4512,10 +4515,54 @@ mod tests {
 
         // Now we leap into the future.  The server should regard the first
         // packet as lost based on time alone.
-        let dgram = server.process(None, now + TIME_SHIFT).dgram();
+        let dgram = server.process(None, now + AT_LEAST_PTO).dgram();
         assert!(dgram.is_some());
 
         // This crashes.
-        let _ = send_something(&mut server, now + TIME_SHIFT);
+        let _ = send_something(&mut server, now + AT_LEAST_PTO);
+    }
+
+    // If we receive packets after the PTO timer has fired, we won't clear
+    // the PTO state, but we might need to acknowledge those packets.
+    // This shouldn't happen, but we found that some implementations do this.
+    #[test]
+    fn ack_after_pto() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect_force_idle(&mut client, &mut server);
+
+        let mut now = now();
+
+        // The client sends and is forced into a PTO.
+        let _ = send_something(&mut client, now);
+
+        // Jump forward to the PTO and drain the PTO packets.
+        now += AT_LEAST_PTO;
+        for _ in 0..PTO_PACKET_COUNT {
+            let dgram = client.process(None, now).dgram();
+            assert!(dgram.is_some());
+        }
+        assert!(client.process(None, now).dgram().is_none());
+
+        // The server now needs to send something that will cause the
+        // client to want to acknowledge it.  A little out of order
+        // delivery is just the thing.
+        // Note: The server can't ACK anything here, but none of what
+        // the client has sent so far has been transferred.
+        let _ = send_something(&mut server, now);
+        let dgram = send_something(&mut server, now);
+
+        // The client is now after a PTO, but if it receives something
+        // that demands acknowledgment, it will send just the ACK.
+        let ack = client.process(Some(dgram), now).dgram();
+        assert!(ack.is_some());
+
+        // Make sure that the packet only contained ACK frames.
+        let frames = server.test_process_input(ack.unwrap(), now);
+        assert_eq!(frames.len(), 1);
+        for (frame, space) in frames {
+            assert_eq!(space, PNSpace::ApplicationData);
+            assert!(matches!(frame, Frame::Ack { .. }));
+        }
     }
 }
