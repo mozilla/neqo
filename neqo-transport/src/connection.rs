@@ -703,13 +703,13 @@ impl Connection {
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&mut self, now: Instant) -> Duration {
         qtrace!([self], "Get callback delay {:?}", now);
-        let mut delays = SmallVec::<[_; 4]>::new();
 
-        if let Some(lr_time) = self.loss_recovery.next_timeout() {
-            qtrace!([self], "Loss recovery timer {:?}", lr_time);
-            delays.push(lr_time);
+        // Only one timer matters when closing...
+        if let State::Closing { timeout, .. } = self.state {
+            return timeout.duration_since(now);
         }
 
+        let mut delays = SmallVec::<[_; 4]>::new();
         if let Some(ack_time) = self.acks.ack_time() {
             qtrace!([self], "Delayed ACK timer {:?}", ack_time);
             delays.push(ack_time);
@@ -718,6 +718,11 @@ impl Connection {
         if let Some(idle_time) = self.idle_timeout.expiry(self.loss_recovery.raw_pto()) {
             qtrace!([self], "Idle timer {:?}", idle_time);
             delays.push(idle_time);
+        }
+
+        if let Some(lr_time) = self.loss_recovery.next_timeout() {
+            qtrace!([self], "Loss recovery timer {:?}", lr_time);
+            delays.push(lr_time);
         }
 
         if let Some(key_update_time) = self.crypto.states.update_time() {
@@ -736,6 +741,7 @@ impl Connection {
             "delay duration {:?}",
             max(now, earliest).duration_since(now)
         );
+        debug_assert!(earliest > now);
         max(now, earliest).duration_since(now)
     }
 
@@ -4524,5 +4530,32 @@ mod tests {
 
         // This crashes.
         let _ = send_something(&mut server, now + TIME_SHIFT);
+    }
+
+    #[test]
+    fn closing_timers() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let mut now = now();
+
+        // We're going to induce time-based loss recovery so that timer is set.
+        let _p1 = send_something(&mut client, now);
+        let p2 = send_something(&mut client, now);
+        let ack = server.process(Some(p2), now).dgram();
+        assert!(ack.is_some()); // This is an ACK.
+
+        // After processing the ACK, we should be on the loss recovery timer.
+        let cb = client.process(ack, now).callback();
+        assert_ne!(cb, Duration::from_secs(0));
+        now += cb;
+
+        // Rather than let the timer pop, close the connection.
+        client.close(now, 0, "");
+        // This should now report the end of the closing period, not a
+        // zero-duration wait driven by the (now defunct) loss recovery timer.
+        let res = client.process(None, now);
+        assert_ne!(res.callback(), Duration::from_secs(0));
     }
 }
