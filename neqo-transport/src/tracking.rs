@@ -354,6 +354,7 @@ impl RecvdPackets {
             } else {
                 self.ack_time = Some(now);
             }
+            qdebug!([self], "Set ACK timer to {:?}", self.ack_time);
         }
     }
 

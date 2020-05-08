@@ -665,11 +665,11 @@ impl Connection {
 
     pub fn process_timer(&mut self, now: Instant) {
         if matches!(self.state(), State::Closing{..} | State::Closed{..}) {
-            qinfo!("Timer fired while closing/closed");
+            qinfo!([self], "Timer fired while closing/closed");
             return;
         }
         if self.idle_timeout.expired(now, self.loss_recovery.raw_pto()) {
-            qinfo!("idle timeout expired");
+            qinfo!([self], "idle timeout expired");
             self.set_state(State::Closed(ConnectionError::Transport(
                 Error::IdleTimeout,
             )));
@@ -744,6 +744,7 @@ impl Connection {
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
     pub fn process_output(&mut self, now: Instant) -> Output {
+        qtrace!([self], "process_output {:?}", now);
         self.process_timer(now);
         let pkt = match &self.state {
             State::Init => {
@@ -1039,6 +1040,7 @@ impl Connection {
     }
 
     fn output(&mut self, now: Instant) -> Option<Datagram> {
+        qtrace!([self], "output {:?}", now);
         if let Some(mut path) = self.path.take() {
             let res = match &self.state {
                 State::Init
