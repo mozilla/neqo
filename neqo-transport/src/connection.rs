@@ -2153,6 +2153,7 @@ mod tests {
     use crate::path::PATH_MTU_V6;
     use crate::recovery::ACK_ONLY_SIZE_LIMIT;
     use crate::tracking::MAX_UNACKED_PKTS;
+    use crate::cc::PACING_BURST_SIZE;
 
     use neqo_common::matches;
     use std::mem;
@@ -4526,7 +4527,6 @@ mod tests {
     fn pace() {
         const RTT: Duration = Duration::from_millis(1000);
         const DATA: &[u8] = &[0xcc; 4_096];
-        const BURST_SIZE: usize = 2;
         let mut client = default_client();
         let mut server = default_server();
         let mut now = connect_rtt_idle(&mut client, &mut server, RTT);
@@ -4541,14 +4541,14 @@ mod tests {
         }
         let mut count = 0;
         // We should get a burst at first.
-        for _ in 0..BURST_SIZE {
+        for _ in 0..PACING_BURST_SIZE {
             let dgram = client.process_output(now).dgram();
             assert!(dgram.is_some());
             count += 1;
         }
         let gap = client.process_output(now).callback();
         assert_ne!(gap, Duration::new(0, 0));
-        for _ in BURST_SIZE..cwnd_packets(POST_HANDSHAKE_CWND) {
+        for _ in PACING_BURST_SIZE..cwnd_packets(POST_HANDSHAKE_CWND) {
             assert_eq!(client.process_output(now).callback(), gap);
             now += gap;
             let dgram = client.process_output(now).dgram();

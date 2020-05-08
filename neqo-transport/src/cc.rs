@@ -22,6 +22,8 @@ const INITIAL_WINDOW: usize = const_min(
     const_max(2 * MAX_DATAGRAM_SIZE, 14720),
 );
 pub const MIN_CONG_WINDOW: usize = MAX_DATAGRAM_SIZE * 2;
+/// The number of packets we allow to burst from the pacer.
+pub(crate) const PACING_BURST_SIZE: usize = 2;
 const PERSISTENT_CONG_THRESH: u32 = 3;
 
 #[derive(Debug)]
@@ -209,7 +211,7 @@ impl CongestionControl {
 
     pub fn start_pacer(&mut self, now: Instant) {
         // Start the pacer with a small burst size of 2 packets.
-        self.pacer = Some(Pacer::new(now, MAX_DATAGRAM_SIZE * 2, MAX_DATAGRAM_SIZE));
+        self.pacer = Some(Pacer::new(now, MAX_DATAGRAM_SIZE * PACING_BURST_SIZE, MAX_DATAGRAM_SIZE));
     }
 
     pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {
