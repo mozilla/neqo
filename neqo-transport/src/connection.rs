@@ -1479,6 +1479,11 @@ impl Connection {
         }
     }
 
+    // TODO: this should be #[cfg(test)], but it is not acceptable from a different crate.
+    pub fn handle_max_data_test(&mut self, maximum_data: u64) {
+        self.handle_max_data(maximum_data);
+    }
+
     fn input_frame(&mut self, ptype: PacketType, frame: Frame, now: Instant) -> Res<()> {
         if !frame.is_allowed(ptype) {
             qerror!("frame not allowed: {:?} {:?}", frame, ptype);
@@ -2147,6 +2152,7 @@ mod tests {
     use crate::frame::{CloseError, StreamType};
     use crate::path::PATH_MTU_V6;
     use crate::recovery::ACK_ONLY_SIZE_LIMIT;
+    use crate::tracking::MAX_UNACKED_PKTS;
 
     use neqo_common::matches;
     use std::mem;
@@ -2410,12 +2416,13 @@ mod tests {
         assert_eq!(*client.state(), State::Confirmed);
 
         qdebug!("---- server");
-        let mut expect_ack = false;
-        for d in datagrams {
+        for (d_num, d) in datagrams.into_iter().enumerate() {
             let out = server.process(Some(d), now());
-            assert_eq!(out.as_dgram_ref().is_some(), expect_ack); // ACK every second.
+            assert_eq!(
+                out.as_dgram_ref().is_some(),
+                (d_num as u64 + 1) % (MAX_UNACKED_PKTS + 1) == 0
+            );
             qdebug!("Output={:0x?}", out.as_dgram_ref());
-            expect_ack = !expect_ack;
         }
         assert_eq!(*server.state(), State::Confirmed);
 

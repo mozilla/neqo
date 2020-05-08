@@ -54,19 +54,25 @@ impl Request {
         r
     }
 
-    fn ensure_encoded(&mut self, encoder: &mut QPackEncoder, stream_id: u64) {
+    fn encode(
+        &mut self,
+        conn: &mut Connection,
+        encoder: &mut QPackEncoder,
+        stream_id: u64,
+    ) -> Res<()> {
         if self.buf.is_some() {
-            return;
+            return Ok(());
         }
 
         qinfo!([self], "Encoding headers for {}/{}", self.host, self.path);
-        let header_block = encoder.encode_header_block(&self.headers, stream_id);
+        let header_block = encoder.encode_header_block(conn, &self.headers, stream_id)?;
         let f = HFrame::Headers {
             header_block: header_block.to_vec(),
         };
         let mut d = Encoder::default();
         f.encode(&mut d);
         self.buf = Some(d.into());
+        Ok(())
     }
 
     fn send(
@@ -80,7 +86,7 @@ impl Request {
         } else {
             String::new()
         };
-        self.ensure_encoded(encoder, stream_id);
+        self.encode(conn, encoder, stream_id)?;
         if let Some(buf) = &mut self.buf {
             let sent = conn.stream_send(stream_id, &buf)?;
             qinfo!([label], "{} bytes sent", sent);
@@ -214,10 +220,6 @@ impl TransactionClient {
             TransactionSendState::SendingData => false,
             _ => true,
         }
-    }
-
-    pub fn read_response_headers(&mut self) -> Res<(Vec<Header>, bool)> {
-        self.response_stream.read_response_headers()
     }
 
     pub fn read_response_data(

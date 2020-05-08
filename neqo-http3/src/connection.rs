@@ -57,7 +57,7 @@ pub enum Http3State {
     Initializing,
     ZeroRtt,
     Connected,
-    GoingAway,
+    GoingAway(u64),
     Closing(CloseError),
     Closed(CloseError),
 }
@@ -156,11 +156,16 @@ impl<T: Http3Transaction> Http3Connection<T> {
 
         let to_send = mem::replace(&mut self.streams_have_data_to_send, BTreeSet::new());
         for stream_id in to_send {
+            let mut remove = false;
             if let Some(t) = &mut self.transactions.get_mut(&stream_id) {
                 t.send(conn, &mut self.qpack_encoder)?;
                 if t.has_data_to_send() {
                     self.streams_have_data_to_send.insert(stream_id);
                 }
+                remove = t.done();
+            }
+            if remove {
+                self.transactions.remove(&stream_id);
             }
         }
         self.qpack_decoder.send(conn)?;
@@ -318,6 +323,18 @@ impl<T: Http3Transaction> Http3Connection<T> {
         }
     }
 
+    pub fn is_critical_stream(&self, stream_id: u64) -> bool {
+        self.qpack_encoder
+            .local_stream_id()
+            .iter()
+            .chain(self.qpack_encoder.remote_stream_id().iter())
+            .chain(self.qpack_decoder.local_stream_id().iter())
+            .chain(self.qpack_decoder.remote_stream_id().iter())
+            .chain(self.control_stream_local.stream_id().iter())
+            .chain(self.control_stream_remote.stream_id().iter())
+            .any(|id| stream_id == *id)
+    }
+
     /// This is called when a RESET frame has been received.
     pub fn handle_stream_reset(
         &mut self,
@@ -344,6 +361,8 @@ impl<T: Http3Transaction> Http3Connection<T> {
             // remove the stream
             self.transactions.remove(&stream_id);
             Ok(true)
+        } else if self.is_critical_stream(stream_id) {
+            Err(Error::HttpClosedCriticalStream)
         } else {
             Ok(false)
         }
@@ -416,28 +435,23 @@ impl<T: Http3Transaction> Http3Connection<T> {
         };
 
         debug_assert!(self.state_active());
+        let t = self.transactions.get_mut(&stream_id);
 
-        if let Some(transaction) = &mut self.transactions.get_mut(&stream_id) {
-            qinfo!(
-                [label],
-                "Request/response stream {} is readable.",
-                stream_id
-            );
-            match transaction.receive(conn, &mut self.qpack_decoder) {
-                Err(e) => {
-                    qerror!([label], "Error {} ocurred", e);
-                    return Err(e);
-                }
-                Ok(()) => {
-                    if transaction.done() {
-                        self.transactions.remove(&stream_id);
-                    }
-                }
-            }
-            Ok(true)
-        } else {
-            Ok(false)
+        if t.is_none() {
+            return Ok(false);
         }
+
+        let transaction = t.unwrap();
+        qinfo!(
+            [label],
+            "Request/response stream {} is readable.",
+            stream_id
+        );
+        transaction.receive(conn, &mut self.qpack_decoder)?;
+        if transaction.done() {
+            self.transactions.remove(&stream_id);
+        }
+        Ok(true)
     }
 
     // Returns true if it is a push stream.
@@ -618,7 +632,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     }
 
     fn state_active(&self) -> bool {
-        matches!(self.state, Http3State::Connected | Http3State::GoingAway)
+        matches!(self.state, Http3State::Connected | Http3State::GoingAway(_))
     }
 
     fn state_zero_rtt(&self) -> bool {
