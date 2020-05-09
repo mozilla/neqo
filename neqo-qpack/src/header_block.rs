@@ -237,12 +237,7 @@ impl<'a> HeaderDecoder<'a> {
         }
         let mut h: Vec<Header> = Vec::new();
 
-        loop {
-            if self.buf.done() {
-                qtrace!([self], "done decoding header block.");
-                break Ok(HeaderDecoderResult::Headers(h));
-            }
-
+        while !self.buf.done() {
             let b = self.buf.peek()?;
             if HEADER_FIELD_INDEX_STATIC.cmp_prefix(b) {
                 h.push(self.read_indexed_static()?);
@@ -262,6 +257,9 @@ impl<'a> HeaderDecoder<'a> {
                 unreachable!("All prefixes are covered");
             }
         }
+
+        qtrace!([self], "done decoding header block.");
+        Ok(HeaderDecoderResult::Headers(h))
     }
 
     pub fn get_req_insert_cnt(&self) -> u64 {
@@ -322,10 +320,8 @@ impl<'a> HeaderDecoder<'a> {
             .read_prefixed_int(HEADER_FIELD_INDEX_STATIC.len())?;
         qtrace!([self], "decoder static indexed {}.", index);
 
-        match HeaderTable::get_static(index) {
-            Ok(entry) => Ok((to_string(entry.name())?, to_string(entry.value())?)),
-            Err(_) => Err(Error::DecompressionFailed),
-        }
+        let entry = HeaderTable::get_static(index)?;
+        Ok((to_string(entry.name())?, to_string(entry.value())?))
     }
 
     fn read_indexed_dynamic(&mut self, table: &HeaderTable) -> Res<Header> {
@@ -333,10 +329,8 @@ impl<'a> HeaderDecoder<'a> {
             .buf
             .read_prefixed_int(HEADER_FIELD_INDEX_DYNAMIC.len())?;
         qtrace!([self], "decoder dynamic indexed {}.", index);
-        match table.get_dynamic(index, self.base, false) {
-            Ok(entry) => Ok((to_string(entry.name())?, to_string(entry.value())?)),
-            Err(_) => Err(Error::DecompressionFailed),
-        }
+        let entry = table.get_dynamic(index, self.base, false)?;
+        Ok((to_string(entry.name())?, to_string(entry.value())?))
     }
 
     fn read_indexed_dynamic_post(&mut self, table: &HeaderTable) -> Res<Header> {
@@ -344,10 +338,8 @@ impl<'a> HeaderDecoder<'a> {
             .buf
             .read_prefixed_int(HEADER_FIELD_INDEX_DYNAMIC_POST.len())?;
         qtrace!([self], "decode post-based {}.", index);
-        match table.get_dynamic(index, self.base, true) {
-            Ok(entry) => Ok((to_string(entry.name())?, to_string(entry.value())?)),
-            Err(_) => Err(Error::DecompressionFailed),
-        }
+        let entry = table.get_dynamic(index, self.base, true)?;
+        Ok((to_string(entry.name())?, to_string(entry.value())?))
     }
 
     fn read_literal_with_name_ref_static(&mut self) -> Res<Header> {
@@ -360,13 +352,10 @@ impl<'a> HeaderDecoder<'a> {
             .buf
             .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_STATIC.len())?;
 
-        match HeaderTable::get_static(index) {
-            Ok(entry) => Ok((
-                to_string(entry.name())?,
-                self.buf.read_literal_from_buffer(0)?,
-            )),
-            Err(_) => Err(Error::DecompressionFailed),
-        }
+        Ok((
+            to_string(HeaderTable::get_static(index)?.name())?,
+            self.buf.read_literal_from_buffer(0)?,
+        ))
     }
 
     fn read_literal_with_name_ref_dynamic(&mut self, table: &HeaderTable) -> Res<Header> {
@@ -379,13 +368,10 @@ impl<'a> HeaderDecoder<'a> {
             .buf
             .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC.len())?;
 
-        match table.get_dynamic(index, self.base, false) {
-            Ok(entry) => Ok((
-                to_string(entry.name())?,
-                self.buf.read_literal_from_buffer(0)?,
-            )),
-            Err(_) => Err(Error::DecompressionFailed),
-        }
+        Ok((
+            to_string(table.get_dynamic(index, self.base, false)?.name())?,
+            self.buf.read_literal_from_buffer(0)?,
+        ))
     }
 
     fn read_literal_with_name_ref_dynamic_post(&mut self, table: &HeaderTable) -> Res<Header> {
@@ -395,13 +381,10 @@ impl<'a> HeaderDecoder<'a> {
             .buf
             .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST.len())?;
 
-        match table.get_dynamic(index, self.base, true) {
-            Ok(entry) => Ok((
-                to_string(entry.name())?,
-                self.buf.read_literal_from_buffer(0)?,
-            )),
-            Err(_) => Err(Error::DecompressionFailed),
-        }
+        Ok((
+            to_string(table.get_dynamic(index, self.base, true)?.name())?,
+            self.buf.read_literal_from_buffer(0)?,
+        ))
     }
 
     fn read_literal_with_name_literal(&mut self) -> Res<Header> {

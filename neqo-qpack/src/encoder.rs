@@ -86,12 +86,14 @@ impl QPackEncoder {
 
     /// Reads decoder instructions.
     /// # Errors
-    /// TODO dragana: I think some errors are not correct, e.g. This can return Error:Internal.
+    /// May return: `ClosedCriticalStream` if stream has been closed or `DecoderStream`
+    /// in case of any other transport error.
     pub fn recv_if_encoder_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         match self.remote_stream_id {
             Some(id) => {
                 if id == stream_id {
-                    self.read_instructions(conn, stream_id)?;
+                    self.read_instructions(conn, stream_id)
+                        .map_err(|e| map_error(&e))?;
                     Ok(true)
                 } else {
                     Ok(false)
@@ -105,9 +107,10 @@ impl QPackEncoder {
         qdebug!([self], "read a new instraction");
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
-            match self.instruction_reader.read_instructions(&mut recv)? {
-                None => break Ok(()),
-                Some(instruction) => self.call_instruction(instruction, conn.qlog_mut())?,
+            match self.instruction_reader.read_instructions(&mut recv) {
+                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut())?,
+                Err(Error::NeedMoreData) => break Ok(()),
+                Err(e) => break Err(e),
             }
         }
     }
@@ -419,6 +422,14 @@ impl QPackEncoder {
 impl ::std::fmt::Display for QPackEncoder {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "QPackEncoder")
+    }
+}
+
+fn map_error(err: &Error) -> Error {
+    if *err == Error::ClosedCriticalStream {
+        Error::ClosedCriticalStream
+    } else {
+        Error::DecoderStream
     }
 }
 
