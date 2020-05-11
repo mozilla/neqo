@@ -342,8 +342,8 @@ impl QPackEncoder {
                 } else {
                     encoded_h.encode_literal_with_name_ref(static_table, index, &value);
                 }
-                if !static_table {
-                    ref_entries.insert(index);
+                if !static_table && ref_entries.insert(index) {
+                    self.table.add_ref(index);
                 }
             } else if can_block & !encoder_stream_blocked {
                 match self.insert(
@@ -356,6 +356,7 @@ impl QPackEncoder {
                     Ok(index) => {
                         encoded_h.encode_indexed_dynamic(index);
                         ref_entries.insert(index);
+                        self.table.add_ref(index);
                     }
                     Err(Error::EncoderStreamBlocked) => {
                         // As soon as one of the instructions cannot be written, do not try again.
@@ -373,10 +374,6 @@ impl QPackEncoder {
         }
 
         encoded_h.fix_header_block_prefix();
-
-        for iter in &ref_entries {
-            self.table.add_ref(*iter);
-        }
 
         if !stream_is_blocker {
             // The streams was not a blocker, check if the stream is a blocker now.
@@ -1685,5 +1682,42 @@ mod tests {
         // change capacity to 2000.
         assert!(encoder.encoder.set_max_capacity(2000).is_ok());
         send_instructions(&mut encoder, CAP_INSTRUCTION_1500);
+    }
+
+    #[test]
+    fn test_do_not_evict_entry_that_are_referd_only_by_the_same_header_blocked_encoding() {
+        let mut encoder = connect(false);
+
+        encoder.encoder.set_max_blocked_streams(20).unwrap();
+        assert!(encoder.encoder.set_max_capacity(50).is_ok());
+
+        encoder
+            .encoder
+            .insert(
+                &mut encoder.conn,
+                &EncoderInstruction::InsertWithNameLiteral {
+                    name: b"something5",
+                    value: b"1234",
+                },
+            )
+            .unwrap();
+
+        encoder.encoder.send(&mut encoder.conn).unwrap();
+        let out = encoder.conn.process(None, now());
+        encoder.peer_conn.process(out.dgram(), now());
+        // receive an insert count increment.
+        recv_instruction(&mut encoder, &[0x01]);
+
+        assert!(encoder
+            .encoder
+            .encode_header_block(
+                &mut encoder.conn,
+                &[
+                    (String::from("something5"), String::from("1234")),
+                    (String::from("something6"), String::from("1234")),
+                ],
+                3,
+            )
+            .is_ok());
     }
 }
