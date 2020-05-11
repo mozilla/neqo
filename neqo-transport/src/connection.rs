@@ -67,7 +67,7 @@ pub enum State {
     Closing {
         error: ConnectionError,
         frame_type: FrameType,
-        msg: String,
+        msg: Vec<u8>,
         timeout: Instant,
     },
     Closed(ConnectionError),
@@ -640,9 +640,9 @@ impl Connection {
     fn capture_error<T>(&mut self, now: Instant, frame_type: FrameType, res: Res<T>) -> Res<T> {
         if let Err(v) = &res {
             #[cfg(debug_assertions)]
-            let msg = format!("{:?}", v);
+            let msg = Vec::from(format!("{:?}", v));
             #[cfg(not(debug_assertions))]
-            let msg = String::from("");
+            let msg = Vec::new();
             if let State::Closed(err) | State::Closing { error: err, .. } = &self.state {
                 qwarn!([self], "Closing again after error {:?}", err);
             } else {
@@ -1112,7 +1112,7 @@ impl Connection {
         path: &Path,
         error: ConnectionError,
         frame_type: FrameType,
-        msg: String,
+        msg: Vec<u8>,
     ) -> Res<Option<Datagram>> {
         if !self.state_signaling.closing() {
             return Ok(None);
@@ -1141,7 +1141,7 @@ impl Connection {
             let frame = Frame::ConnectionClose {
                 error_code: error.clone().into(),
                 frame_type,
-                reason_phrase: Vec::from(msg.clone()),
+                reason_phrase: msg.clone(), // TODO(mt) Pointless clone.
             };
             frame.marshal(&mut builder);
             encoder = builder.build(tx)?;
@@ -1385,12 +1385,13 @@ impl Connection {
     /// Close the connection.
     pub fn close<S>(&mut self, now: Instant, error: AppError, msg: S)
     where
-        S: Into<String>,
+        S: AsRef<str>,
     {
+        let msg: &[u8] = msg.as_ref().as_ref();
         self.set_state(State::Closing {
             error: ConnectionError::Application(error),
             frame_type: 0,
-            msg: msg.into(),
+            msg: msg.to_vec(),
             timeout: self.get_closing_period_time(now),
         });
     }

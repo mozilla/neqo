@@ -138,7 +138,7 @@ impl Http3Client {
     /// This is call to close a connection.
     pub fn close<S>(&mut self, now: Instant, error: AppError, msg: S)
     where
-        S: Into<String> + Display,
+        S: AsRef<str> + Display,
     {
         qinfo!([self], "Close the connection error={} msg={}.", error, msg);
         if !matches!(self.base_handler.state, Http3State::Closing(_)| Http3State::Closed(_)) {
