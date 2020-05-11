@@ -325,6 +325,7 @@ impl Server {
         dgram: Datagram,
         now: Instant,
     ) -> Option<Datagram> {
+        qdebug!([self], "Handle initial packet");
         match self.retry.validate(&token, dgram.source(), now) {
             RetryTokenResult::Invalid => None,
             RetryTokenResult::Pass => self.connection_attempt(dcid, None, dgram, now),
