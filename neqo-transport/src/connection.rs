@@ -667,7 +667,7 @@ impl Connection {
             #[cfg(debug_assertions)]
             let msg = format!("{:?}", v);
             #[cfg(not(debug_assertions))]
-            let msg = String::from("");
+            let msg = "";
             let error = ConnectionError::Transport(v.clone());
             match &self.state {
                 State::Closed(err) | State::Closing { error: err, .. } => {
