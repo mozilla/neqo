@@ -14,6 +14,10 @@ use crate::Res;
 use neqo_common::{matches, qdebug, qtrace};
 use std::mem;
 
+// The encoder only uses InsertWithNameLiteral, therefore clippy is complaining about dead_code.
+// We may decide to use othe instruction in the future.
+// All instructions are used for testing, therefore they are defined.
+#[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 pub enum EncoderInstruction<'a> {
     Capacity { value: u64 },

@@ -10,7 +10,7 @@ use crate::header_block::HeaderEncoder;
 use crate::qlog;
 use crate::qpack_send_buf::QPData;
 use crate::reader::ReceiverConnWrapper;
-use crate::table::{HeaderTable, LookupResult};
+use crate::table::{HeaderTable, LookupResult, ADDITIONAL_TABLE_ENTRY_SIZE};
 use crate::Header;
 use crate::{Error, QpackSettings, Res};
 use neqo_common::{qdebug, qlog::NeqoQlog, qtrace};
@@ -211,50 +211,49 @@ impl QPackEncoder {
 
     /// Inserts a new entry into a table and sends the corresponding instruction to a peer. An entry is added only
     /// if it is possible to send the corresponding instruction immediately, i.e. the encoder stream is not
-    /// blocked by the flow control.
+    /// blocked by the flow control (or stream internal buffer(this is very unlikely)).
     /// ### Errors
     /// `EncoderStreamBlocked` if the encoder stream is blocked by the flow control.
     /// The function can return transport errors.
-    /// `HeaderLookup` if `InsertWithNameRefStatic`, `InsertWithNameRefDynamic` or `Duplicate` is used and the
-    /// reference entry cannot be found.
     /// `DynamicTableFull` if the dynamic table does not have enough space for the entry.
-    pub fn insert(&mut self, conn: &mut Connection, instruction: &EncoderInstruction) -> Res<u64> {
-        qdebug!([self], "insert instruction {:?}.", instruction);
+    pub fn insert(&mut self, conn: &mut Connection, name: &[u8], value: &[u8]) -> Res<u64> {
+        qdebug!([self], "insert {:?} {:?}.", name, value);
         self.send(conn)?;
         if self.send_buf.len() != 0 {
             return Err(Error::EncoderStreamBlocked);
         }
 
+        let entry_size =
+            u64::try_from(name.len() + value.len() + ADDITIONAL_TABLE_ENTRY_SIZE).unwrap();
+
+        if !self.table.check_insert_possible(entry_size) {
+            return Err(Error::DynamicTableFull);
+        }
+
         let mut buf = QPData::default();
-        instruction.marshal(&mut buf, self.use_huffman);
+        EncoderInstruction::InsertWithNameLiteral {
+            name: &name,
+            value: &value,
+        }
+        .marshal(&mut buf, self.use_huffman);
 
         let stream_id = self.local_stream_id.ok_or(Error::Internal)?;
 
-        if conn.stream_avail_send_space(stream_id)? < u64::try_from(buf.len()).unwrap() {
-            // TODO conn.send_blocked(stream_id);
+        let amount = conn.stream_send_atomic(stream_id, &buf)?;
+        if amount == 0 {
             return Err(Error::EncoderStreamBlocked);
         }
+        if amount < buf.len() {
+            debug_assert!(false);
+            return Err(Error::Internal);
+        }
 
-        let index = self.table_insert(instruction)?;
-
-        let amount = conn.stream_send(stream_id, &buf)?;
-        assert_eq!(amount, buf.len());
-        Ok(index)
-    }
-
-    fn table_insert(&mut self, instruction: &EncoderInstruction) -> Res<u64> {
-        match instruction {
-            EncoderInstruction::InsertWithNameRefStatic { index, value } => {
-                self.table.insert_with_name_ref(true, *index, value)
+        match self.table.insert(name, value) {
+            Ok(inx) => Ok(inx),
+            Err(e) => {
+                debug_assert!(false);
+                Err(e)
             }
-            EncoderInstruction::InsertWithNameRefDynamic { index, value } => {
-                self.table.insert_with_name_ref(false, *index, value)
-            }
-            EncoderInstruction::InsertWithNameLiteral { name, value } => {
-                self.table.insert(name, value)
-            }
-            EncoderInstruction::Duplicate { index } => self.table.duplicate(*index),
-            _ => unreachable!("Do not call this for capacity"),
         }
     }
 
@@ -314,7 +313,7 @@ impl QPackEncoder {
 
         let mut ref_entries = HashSet::new();
 
-        let mut encoder_stream_blocked = false;
+        let mut encoder_blocked = false;
 
         for iter in h.iter() {
             let name = iter.0.clone().into_bytes();
@@ -345,26 +344,19 @@ impl QPackEncoder {
                 if !static_table && ref_entries.insert(index) {
                     self.table.add_ref(index);
                 }
-            } else if can_block & !encoder_stream_blocked {
-                match self.insert(
-                    conn,
-                    &EncoderInstruction::InsertWithNameLiteral {
-                        name: &name,
-                        value: &value,
-                    },
-                ) {
+            } else if can_block & !encoder_blocked {
+                // Insert using an InsertWithNameLiteral instruction. This entry name does not match any name in the
+                // tables therefore we cannot use any other instruction.
+                match self.insert(conn, &name, &value) {
                     Ok(index) => {
                         encoded_h.encode_indexed_dynamic(index);
                         ref_entries.insert(index);
                         self.table.add_ref(index);
                     }
-                    Err(Error::EncoderStreamBlocked) => {
-                        // As soon as one of the instructions cannot be written, do not try again.
-                        encoder_stream_blocked = true;
+                    Err(Error::EncoderStreamBlocked) | Err(Error::DynamicTableFull) => {
+                        // As soon as one of the instructions cannot be written or the table is full, do not try again.
+                        encoder_blocked = true;
                         encoded_h.encode_literal_with_name_literal(&name, &value)
-                    }
-                    Err(Error::DynamicTableFull) => {
-                        encoded_h.encode_literal_with_name_literal(&name, &value);
                     }
                     Err(e) => return Err(e),
                 }
@@ -448,7 +440,6 @@ fn map_error(err: &Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::{Connection, Error, Header, QPackEncoder};
-    use crate::encoder_instructions::EncoderInstruction;
     use crate::QpackSettings;
     use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::StreamType;
@@ -569,58 +560,15 @@ mod tests {
     const HEADER_ACK_STREAM_ID_2: &[u8] = &[0x82];
     const STREAM_CANCELED_ID_1: &[u8] = &[0x41];
 
-    // test insert_with_name_ref which fails because there is not enough space in the table
-    #[test]
-    fn test_insert_with_name_ref_1() {
-        let mut encoder = connect(false);
-        let e = encoder
-            .encoder
-            .insert(
-                &mut encoder.conn,
-                &EncoderInstruction::InsertWithNameRefStatic {
-                    index: 4,
-                    value: VALUE_1,
-                },
-            )
-            .unwrap_err();
-        assert_eq!(Error::DynamicTableFull, e);
-        send_instructions(&mut encoder, &[0x02]);
-    }
-
-    // test insert_name_ref that succeeds
-    #[test]
-    fn test_insert_with_name_ref_2() {
-        let mut encoder = connect(false);
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
-        // test the change capacity instruction.
-        send_instructions(&mut encoder, CAP_INSTRUCTION_200);
-
-        assert!(encoder
-            .encoder
-            .insert(
-                &mut encoder.conn,
-                &EncoderInstruction::InsertWithNameRefStatic {
-                    index: 4,
-                    value: VALUE_1
-                }
-            )
-            .is_ok());
-        send_instructions(&mut encoder, &[0xc4, 0x04, 0x31, 0x32, 0x33, 0x34]);
-    }
-
     // test insert_with_name_literal which fails because there is not enough space in the table
     #[test]
     fn test_insert_with_name_literal_1() {
         let mut encoder = connect(false);
 
         // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
         assert_eq!(Error::DynamicTableFull, res.unwrap_err());
         send_instructions(&mut encoder, &[0x02]);
     }
@@ -635,13 +583,9 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_200);
 
         // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
     }
@@ -652,35 +596,6 @@ mod tests {
 
         assert!(encoder.encoder.set_max_capacity(200).is_ok());
         send_instructions(&mut encoder, CAP_INSTRUCTION_200);
-    }
-
-    #[test]
-    fn test_duplicate() {
-        let mut encoder = connect(false);
-
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
-        // test the change capacity instruction.
-        send_instructions(&mut encoder, CAP_INSTRUCTION_200);
-
-        // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
-        assert!(res.is_ok());
-        send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
-
-        assert!(encoder
-            .encoder
-            .insert(
-                &mut encoder.conn,
-                &EncoderInstruction::Duplicate { index: 0 }
-            )
-            .is_ok());
-        send_instructions(&mut encoder, &[0x00]);
     }
 
     struct TestElement {
@@ -850,24 +765,16 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_60);
 
         // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // insert "content-length: 12345 which will fail because the ntry in the table cannot be evicted.
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_2,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
         assert!(res.is_err());
         send_instructions(&mut encoder, &[]);
 
@@ -875,13 +782,9 @@ mod tests {
         recv_instruction(&mut encoder, &[0x01]);
 
         // insert "content-length: 12345 again it will succeed.
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_2,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
     }
@@ -898,13 +801,9 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_60);
 
         // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
@@ -924,13 +823,9 @@ mod tests {
         send_instructions(&mut encoder, &[]);
 
         // insert "content-length: 12345 which will fail because the entry in the table cannot be evicted
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_2,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
         assert!(res.is_err());
         send_instructions(&mut encoder, &[]);
 
@@ -943,13 +838,9 @@ mod tests {
         }
 
         // insert "content-length: 12345 again it will succeed.
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_2,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
     }
@@ -990,13 +881,9 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_60);
 
         // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1057,25 +944,17 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_200);
 
         // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // insert "content-length: 12345
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_2,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
@@ -1420,13 +1299,9 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1470,13 +1345,9 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1520,13 +1391,9 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1553,13 +1420,9 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder.encoder.insert(
-            &mut encoder.conn,
-            &EncoderInstruction::InsertWithNameLiteral {
-                name: HEADER_CONTENT_LENGTH,
-                value: VALUE_1,
-            },
-        );
+        let res = encoder
+            .encoder
+            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1693,13 +1556,7 @@ mod tests {
 
         encoder
             .encoder
-            .insert(
-                &mut encoder.conn,
-                &EncoderInstruction::InsertWithNameLiteral {
-                    name: b"something5",
-                    value: b"1234",
-                },
-            )
+            .insert(&mut encoder.conn, b"something5", b"1234")
             .unwrap();
 
         encoder.encoder.send(&mut encoder.conn).unwrap();

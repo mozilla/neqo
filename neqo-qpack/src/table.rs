@@ -10,6 +10,8 @@ use neqo_common::qtrace;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 
+pub const ADDITIONAL_TABLE_ENTRY_SIZE: usize = 32;
+
 pub struct LookupResult {
     pub index: u64,
     pub static_table: bool,
@@ -32,7 +34,7 @@ impl DynamicTableEntry {
     }
 
     pub fn size(&self) -> u64 {
-        (self.name.len() + self.value.len() + 32) as u64
+        u64::try_from(self.name.len() + self.value.len() + ADDITIONAL_TABLE_ENTRY_SIZE).unwrap()
     }
 
     pub fn add_ref(&mut self) {
@@ -241,22 +243,39 @@ impl HeaderTable {
     }
 
     fn evict_to(&mut self, reduce: u64) -> bool {
+        self.evict_to_internal(reduce, false)
+    }
+
+    fn test_evict_to(&mut self, reduce: u64) -> bool {
+        self.evict_to_internal(reduce, true)
+    }
+
+    pub fn evict_to_internal(&mut self, reduce: u64, only_check: bool) -> bool {
         qtrace!(
             [self],
-            "reduce table to {}, currently used:{}",
+            "reduce table to {}, currently used:{} only_check:{}",
             reduce,
-            self.used
+            self.used,
+            only_check
         );
-        while (!self.dynamic.is_empty()) && self.used > reduce {
+        let mut used = self.used;
+        while (!self.dynamic.is_empty()) && used > reduce {
             if let Some(e) = self.dynamic.back() {
                 if !e.can_reduce(self.acked_inserts_cnt) {
                     return false;
                 }
-                self.used -= e.size();
-                self.dynamic.pop_back();
+                used -= e.size();
+                if !only_check {
+                    self.used -= e.size();
+                    self.dynamic.pop_back();
+                }
             }
         }
         true
+    }
+
+    pub fn check_insert_possible(&mut self, size: u64) -> bool {
+        size <= self.capacity && self.test_evict_to(self.capacity - size)
     }
 
     /// Insert a new entry.

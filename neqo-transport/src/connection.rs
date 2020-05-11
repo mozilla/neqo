@@ -2094,6 +2094,16 @@ impl Connection {
         self.send_streams.get_mut(stream_id.into())?.send(data)
     }
 
+    /// Send all data or nothing on a stream. If no data can be send DATA_BLOCKED or
+    /// STREAM_DATA_BLOCKED will be sent.
+    /// Returns how many bytes were successfully sent. It can only return 0 or exactly amount of data
+    /// supply in the buffer.
+    pub fn stream_send_atomic(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
+        self.send_streams
+            .get_mut(stream_id.into())?
+            .send_atomic(data)
+    }
+
     /// Bytes that stream_send() is guaranteed to accept for sending.
     /// i.e. that will not be blocked by flow credits or send buffer max
     /// capacity.
