@@ -290,7 +290,9 @@ impl LossRecoverySpace {
 
 #[derive(Debug)]
 pub(crate) struct LossRecoverySpaces {
-    spaces: SmallVec<[LossRecoverySpace; 3]>,
+    /// When we have all of the loss recovery spaces, this will use a separate
+    /// allocation, but this is reduced once the handshake is done.
+    spaces: SmallVec<[LossRecoverySpace; 1]>,
 }
 
 impl LossRecoverySpaces {
@@ -317,20 +319,18 @@ impl LossRecoverySpaces {
     /// # Panics
     /// If the space has already been removed.
     pub fn drop_space(&mut self, space: PNSpace) -> Vec<SentPacket> {
-        assert_ne!(
-            space,
-            PNSpace::ApplicationData,
-            "discarding application space"
-        );
-        assert_eq!(
-            Self::idx(space) + 1,
-            self.spaces.len(),
-            "dropping spaces out of order"
-        );
-        self.spaces
-            .remove(Self::idx(space))
-            .remove_ignored()
-            .collect()
+        let sp = match space {
+            PNSpace::Initial => self.spaces.pop(),
+            PNSpace::Handshake => {
+                let sp = self.spaces.pop();
+                self.spaces.shrink_to_fit();
+                sp
+            }
+            _ => panic!("discarding application space"),
+        };
+        let mut sp = sp.unwrap();
+        assert_eq!(sp.space(), space, "dropping spaces out of order");
+        sp.remove_ignored().collect()
     }
 
     pub fn get(&self, space: PNSpace) -> Option<&LossRecoverySpace> {
@@ -621,7 +621,7 @@ impl LossRecovery {
     }
 
     /// Find the earliest PTO time for all active packet number spaces.
-    /// On
+    /// Only consider Initial and Handshake spaces if those have a PTO active.
     fn earliest_pto(&self) -> Option<Instant> {
         self.pto_time(PNSpace::Initial)
             .iter()

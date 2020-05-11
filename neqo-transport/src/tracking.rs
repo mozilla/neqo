@@ -471,34 +471,29 @@ pub struct AckTracker {
     /// This stores information about received packets in *reverse* order
     /// by spaces.  Why reverse?  Because we ultimately only want to keep
     /// `ApplicationData` and this allows us to drop other spaces easily.
-    spaces: SmallVec<[RecvdPackets; 3]>,
+    spaces: SmallVec<[RecvdPackets; 1]>,
 }
 
 impl AckTracker {
-    fn idx(space: PNSpace) -> usize {
-        match space {
-            PNSpace::ApplicationData => 0,
-            PNSpace::Handshake => 1,
-            PNSpace::Initial => 2,
-        }
-    }
-
     pub fn drop_space(&mut self, space: PNSpace) {
-        assert_ne!(
-            space,
-            PNSpace::ApplicationData,
-            "discarding application space"
-        );
-        assert_eq!(
-            Self::idx(space) + 1,
-            self.spaces.len(),
-            "dropping spaces out of order"
-        );
-        self.spaces.remove(Self::idx(space));
+        let sp = match space {
+            PNSpace::Initial => self.spaces.pop(),
+            PNSpace::Handshake => {
+                let sp = self.spaces.pop();
+                self.spaces.shrink_to_fit();
+                sp
+            }
+            _ => panic!("discarding application space"),
+        };
+        assert_eq!(sp.unwrap().space, space, "dropping spaces out of order");
     }
 
     pub fn get_mut(&mut self, space: PNSpace) -> Option<&mut RecvdPackets> {
-        self.spaces.get_mut(Self::idx(space))
+        self.spaces.get_mut(match space {
+            PNSpace::ApplicationData => 0,
+            PNSpace::Handshake => 1,
+            PNSpace::Initial => 2,
+        })
     }
 
     pub fn ack_time(&self) -> Option<Instant> {
