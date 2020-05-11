@@ -615,9 +615,13 @@ impl Frame {
             }),
             FRAME_TYPE_CRYPTO => {
                 let o = dv!(dec);
+                let data = d!(dec.decode_vvec());
+                if o + u64::try_from(data.len()).unwrap() > ((1 << 62) - 1) {
+                    return Err(Error::FrameEncodingError);
+                }
                 Ok(Self::Crypto {
                     offset: o,
-                    data: d!(dec.decode_vvec()).to_vec(), // TODO(mt) unnecessary copy
+                    data: data.to_vec(), // TODO(mt) unnecessary copy
                 })
             }
             FRAME_TYPE_NEW_TOKEN => {
@@ -640,6 +644,9 @@ impl Frame {
                     qtrace!("STREAM frame, with length");
                     d!(dec.decode_vvec())
                 };
+                if o + u64::try_from(data.len()).unwrap() > ((1 << 62) - 1) {
+                    return Err(Error::FrameEncodingError);
+                }
                 Ok(Self::Stream {
                     fin: (t & STREAM_FRAME_BIT_FIN) != 0,
                     stream_id: s.into(),
@@ -655,11 +662,16 @@ impl Frame {
                 stream_id: dv!(dec).into(),
                 maximum_stream_data: dv!(dec),
             }),
-            FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => Ok(Self::MaxStreams {
-                stream_type: StreamType::from_type_bit(t),
-                maximum_streams: StreamIndex::new(dv!(dec)),
-            }),
-
+            FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => {
+                let m = dv!(dec);
+                if m > (1 << 60) {
+                    return Err(Error::StreamLimitError);
+                }
+                Ok(Self::MaxStreams {
+                    stream_type: StreamType::from_type_bit(t),
+                    maximum_streams: StreamIndex::new(m),
+                })
+            }
             FRAME_TYPE_DATA_BLOCKED => Ok(Self::DataBlocked {
                 data_limit: dv!(dec),
             }),

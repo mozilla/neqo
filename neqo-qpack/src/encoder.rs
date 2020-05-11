@@ -17,7 +17,7 @@ use neqo_common::{qdebug, qlog::NeqoQlog, qtrace};
 use neqo_transport::Connection;
 use num_traits::ToPrimitive;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::convert::TryInto;
+use std::convert::TryFrom;
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
 
@@ -80,7 +80,7 @@ impl QPackEncoder {
     /// # Errors
     /// `EncoderStream` if value is too big.
     pub fn set_max_blocked_streams(&mut self, blocked_streams: u64) -> Res<()> {
-        self.max_blocked_streams = blocked_streams.try_into().or(Err(Error::EncoderStream))?;
+        self.max_blocked_streams = u16::try_from(blocked_streams).or(Err(Error::EncoderStream))?;
         Ok(())
     }
 
@@ -195,65 +195,52 @@ impl QPackEncoder {
         }
     }
 
-    #[cfg(test)]
-    fn insert_with_name_ref(
-        &mut self,
-        name_static_table: bool,
-        index: u64,
-        value: &[u8],
-    ) -> Res<()> {
-        qdebug!(
-            [self],
-            "insert with name reference {} from {} value={:x?}.",
-            index,
-            if name_static_table {
-                "static table"
-            } else {
-                "dynamic table"
-            },
-            value
-        );
-        self.table
-            .insert_with_name_ref(name_static_table, index, value)?;
-
-        // write instruction
-        if name_static_table {
-            EncoderInstruction::InsertWithNameRefStatic {
-                index,
-                value: value.to_vec(),
-            }
-            .marshal(&mut self.send_buf, self.use_huffman);
-        } else {
-            EncoderInstruction::InsertWithNameRefDynamic {
-                index,
-                value: value.to_vec(),
-            }
-            .marshal(&mut self.send_buf, self.use_huffman);
+    /// Inserts a new entry into a table and sends the corresponding instruction to a peer. An entry is added only
+    /// if it is possible to send the corresponding instruction immediately, i.e. the encoder stream is not
+    /// blocked by the flow control.
+    /// ### Errors
+    /// `EncoderStreamBlocked` if the encoder stream is blocked by the flow control.
+    /// The function can return transport errors.
+    /// `HeaderLookup` if `InsertWithNameRefStatic`, `InsertWithNameRefDynamic` or `Duplicate` is used and the
+    /// reference entry cannot be found.
+    pub fn insert(&mut self, conn: &mut Connection, instruction: &EncoderInstruction) -> Res<u64> {
+        qdebug!([self], "insert instruction {:?}.", instruction);
+        self.send(conn)?;
+        if self.send_buf.len() != 0 {
+            return Err(Error::EncoderStreamBlocked);
         }
-        Ok(())
-    }
 
-    fn insert_with_name_literal(&mut self, name: &[u8], value: &[u8]) -> Res<u64> {
-        qdebug!([self], "insert name {:x?}, value={:x?}.", name, value);
-        // try to insert a new entry
-        let index = self.table.insert(name, value)?;
+        let mut buf = QPData::default();
+        instruction.marshal(&mut buf, self.use_huffman);
 
-        // encode instruction.
-        EncoderInstruction::InsertWithNameLiteral {
-            name: name.to_vec(),
-            value: value.to_vec(),
+        let stream_id = self.local_stream_id.ok_or(Error::Internal)?;
+
+        if conn.stream_avail_send_space(stream_id)? < u64::try_from(buf.len()).unwrap() {
+            // TODO conn.send_blocked(stream_id);
+            return Err(Error::EncoderStreamBlocked);
         }
-        .marshal(&mut self.send_buf, self.use_huffman);
 
+        let index = self.table_insert(instruction)?;
+
+        let amount = conn.stream_send(stream_id, &buf)?;
+        assert_eq!(amount, buf.len());
         Ok(index)
     }
 
-    #[cfg(test)]
-    fn duplicate(&mut self, index: u64) -> Res<()> {
-        qdebug!([self], "duplicate entry {}.", index);
-        self.table.duplicate(index)?;
-        EncoderInstruction::Duplicate { index }.marshal(&mut self.send_buf, self.use_huffman);
-        Ok(())
+    fn table_insert(&mut self, instruction: &EncoderInstruction) -> Res<u64> {
+        match instruction {
+            EncoderInstruction::InsertWithNameRefStatic { index, value } => {
+                self.table.insert_with_name_ref(true, *index, value)
+            }
+            EncoderInstruction::InsertWithNameRefDynamic { index, value } => {
+                self.table.insert_with_name_ref(false, *index, value)
+            }
+            EncoderInstruction::InsertWithNameLiteral { name, value } => {
+                self.table.insert(name, value)
+            }
+            EncoderInstruction::Duplicate { index } => self.table.duplicate(*index),
+            _ => unreachable!("Do not call this for capacity"),
+        }
     }
 
     fn change_capacity(&mut self, value: u64) -> Res<()> {
@@ -270,14 +257,12 @@ impl QPackEncoder {
         if self.send_buf.is_empty() {
             Ok(())
         } else if let Some(stream_id) = self.local_stream_id {
-            match conn.stream_send(stream_id, &self.send_buf[..]) {
-                Err(_) => Err(Error::EncoderStream),
-                Ok(r) => {
-                    qdebug!([self], "{} bytes sent.", r);
-                    self.send_buf.read(r as usize);
-                    Ok(())
-                }
-            }
+            let r = conn
+                .stream_send(stream_id, &self.send_buf[..])
+                .map_err(|_| Error::EncoderStream)?;
+            qdebug!([self], "{} bytes sent.", r);
+            self.send_buf.read(r as usize);
+            Ok(())
         } else {
             Ok(())
         }
@@ -295,7 +280,16 @@ impl QPackEncoder {
         }
     }
 
-    pub fn encode_header_block(&mut self, h: &[Header], stream_id: u64) -> HeaderEncoder {
+    /// Encodes headers
+    /// ### Errors
+    /// This function may return a transport error when a new entry is added to the table and while sending its
+    /// instruction an error occurs.
+    pub fn encode_header_block(
+        &mut self,
+        conn: &mut Connection,
+        h: &[Header],
+        stream_id: u64,
+    ) -> Res<HeaderEncoder> {
         qdebug!([self], "encoding headers.");
         let mut encoded_h =
             HeaderEncoder::new(self.table.base(), self.use_huffman, self.max_entries);
@@ -304,6 +298,8 @@ impl QPackEncoder {
         let can_block = self.blocked_stream_cnt < self.max_blocked_streams || stream_is_blocker;
 
         let mut ref_entries = HashSet::new();
+
+        let mut encoder_stream_blocked = false;
 
         for iter in h.iter() {
             let name = iter.0.clone().into_bytes();
@@ -334,12 +330,24 @@ impl QPackEncoder {
                 if !static_table {
                     ref_entries.insert(index);
                 }
-            } else if can_block {
-                if let Ok(index) = self.insert_with_name_literal(&name, &value) {
-                    encoded_h.encode_indexed_dynamic(index);
-                    ref_entries.insert(index);
-                } else {
-                    encoded_h.encode_literal_with_name_literal(&name, &value);
+            } else if can_block & !encoder_stream_blocked {
+                match self.insert(
+                    conn,
+                    &EncoderInstruction::InsertWithNameLiteral {
+                        name: &name,
+                        value: &value,
+                    },
+                ) {
+                    Ok(index) => {
+                        encoded_h.encode_indexed_dynamic(index);
+                        ref_entries.insert(index);
+                    }
+                    Err(Error::EncoderStreamBlocked) => {
+                        // As soon as one of the instructions cannot be written, do not try again.
+                        encoder_stream_blocked = true;
+                        encoded_h.encode_literal_with_name_literal(&name, &value)
+                    }
+                    Err(e) => return Err(e),
                 }
             } else {
                 encoded_h.encode_literal_with_name_literal(&name, &value);
@@ -368,7 +376,7 @@ impl QPackEncoder {
                 .or_insert_with(VecDeque::new)
                 .push_front(ref_entries);
         }
-        encoded_h
+        Ok(encoded_h)
     }
 
     /// Encoder stream has been created. Add the stream id.
@@ -392,6 +400,16 @@ impl QPackEncoder {
         }
     }
 
+    #[must_use]
+    pub fn local_stream_id(&self) -> Option<u64> {
+        self.local_stream_id
+    }
+
+    #[must_use]
+    pub fn remote_stream_id(&self) -> Option<u64> {
+        self.remote_stream_id
+    }
+
     #[cfg(test)]
     fn blocked_stream_cnt(&self) -> u16 {
         self.blocked_stream_cnt
@@ -407,8 +425,10 @@ impl ::std::fmt::Display for QPackEncoder {
 #[cfg(test)]
 mod tests {
     use super::{Connection, Error, Header, QPackEncoder};
+    use crate::encoder_instructions::EncoderInstruction;
+    use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::StreamType;
-    use test_fixture::now;
+    use test_fixture::{default_client, default_server, handshake, now};
 
     struct TestEncoder {
         encoder: QPackEncoder,
@@ -418,8 +438,13 @@ mod tests {
         peer_conn: Connection,
     }
 
-    fn connect(huffman: bool) -> TestEncoder {
-        let (mut conn, mut peer_conn) = test_fixture::connect();
+    fn connect_generic<F>(huffman: bool, f: F) -> TestEncoder
+    where
+        F: FnOnce(&mut Connection, &mut Connection),
+    {
+        let mut conn = default_client();
+        let mut peer_conn = default_server();
+        f(&mut conn, &mut peer_conn);
 
         // create a stream
         let recv_stream_id = peer_conn.stream_create(StreamType::UniDi).unwrap();
@@ -436,6 +461,25 @@ mod tests {
             conn,
             peer_conn,
         }
+    }
+
+    fn connect(huffman: bool) -> TestEncoder {
+        connect_generic(huffman, |client, server| {
+            handshake(client, server);
+        })
+    }
+
+    fn connect_flow_control(max_data: u64) -> TestEncoder {
+        connect_generic(true, |client, server| {
+            server
+                .set_local_tparam(
+                    tparams::INITIAL_MAX_DATA,
+                    TransportParameter::Integer(max_data),
+                )
+                .unwrap();
+
+            handshake(client, server);
+        })
     }
 
     fn send_instructions(encoder: &mut TestEncoder, encoder_instruction: &[u8]) {
@@ -466,6 +510,7 @@ mod tests {
 
     const CAP_INSTRUCTION_200: &[u8] = &[0x02, 0x3f, 0xa9, 0x01];
     const CAP_INSTRUCTION_60: &[u8] = &[0x02, 0x3f, 0x1d];
+    const CAP_INSTRUCTION_1000: &[u8] = &[0x02, 0x3f, 0xc9, 0x07];
 
     const HEADER_CONTENT_LENGTH: &[u8] = &[
         0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
@@ -498,7 +543,13 @@ mod tests {
         let mut encoder = connect(false);
         let e = encoder
             .encoder
-            .insert_with_name_ref(true, 4, VALUE_1)
+            .insert(
+                &mut encoder.conn,
+                &EncoderInstruction::InsertWithNameRefStatic {
+                    index: 4,
+                    value: VALUE_1,
+                },
+            )
             .unwrap_err();
         assert_eq!(Error::EncoderStream, e);
         send_instructions(&mut encoder, &[0x02]);
@@ -514,7 +565,13 @@ mod tests {
 
         assert!(encoder
             .encoder
-            .insert_with_name_ref(true, 4, VALUE_1)
+            .insert(
+                &mut encoder.conn,
+                &EncoderInstruction::InsertWithNameRefStatic {
+                    index: 4,
+                    value: VALUE_1
+                }
+            )
             .is_ok());
         send_instructions(&mut encoder, &[0xc4, 0x04, 0x31, 0x32, 0x33, 0x34]);
     }
@@ -525,9 +582,13 @@ mod tests {
         let mut encoder = connect(false);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
         assert_eq!(Error::EncoderStream, res.unwrap_err());
         send_instructions(&mut encoder, &[0x02]);
     }
@@ -542,9 +603,13 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_200);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
     }
@@ -566,13 +631,23 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_200);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
-        assert!(encoder.encoder.duplicate(0).is_ok());
+        assert!(encoder
+            .encoder
+            .insert(
+                &mut encoder.conn,
+                &EncoderInstruction::Duplicate { index: 0 }
+            )
+            .is_ok());
         send_instructions(&mut encoder, &[0x00]);
     }
 
@@ -649,7 +724,10 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_200);
 
         for t in &test_cases {
-            let buf = encoder.encoder.encode_header_block(&t.headers, 1);
+            let buf = encoder
+                .encoder
+                .encode_header_block(&mut encoder.conn, &t.headers, 1)
+                .unwrap();
             assert_eq!(&buf[..], t.header_block);
             send_instructions(&mut encoder, t.encoder_inst);
         }
@@ -720,7 +798,10 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_200);
 
         for t in &test_cases {
-            let buf = encoder.encoder.encode_header_block(&t.headers, 1);
+            let buf = encoder
+                .encoder
+                .encode_header_block(&mut encoder.conn, &t.headers, 1)
+                .unwrap();
             assert_eq!(&buf[..], t.header_block);
             send_instructions(&mut encoder, t.encoder_inst);
         }
@@ -737,16 +818,24 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_60);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // insert "content-length: 12345 which will fail because the ntry in the table cannot be evicted.
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_2);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_2,
+            },
+        );
         assert!(res.is_err());
         send_instructions(&mut encoder, &[]);
 
@@ -754,9 +843,13 @@ mod tests {
         recv_instruction(&mut encoder, &[0x01]);
 
         // insert "content-length: 12345 again it will succeed.
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_2);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_2,
+            },
+        );
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
     }
@@ -773,9 +866,13 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_60);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
@@ -785,14 +882,23 @@ mod tests {
         // send a header block
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("content-length"), String::from("1234"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("content-length"), String::from("1234"))],
+                1,
+            )
+            .unwrap();
         assert_eq!(&buf[..], ENCODE_INDEXED_REF_DYNAMIC);
         send_instructions(&mut encoder, &[]);
 
         // insert "content-length: 12345 which will fail because the entry in the table cannot be evicted
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_2);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_2,
+            },
+        );
         assert!(res.is_err());
         send_instructions(&mut encoder, &[]);
 
@@ -805,9 +911,13 @@ mod tests {
         }
 
         // insert "content-length: 12345 again it will succeed.
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_2);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_2,
+            },
+        );
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
     }
@@ -848,9 +958,13 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_60);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -860,7 +974,12 @@ mod tests {
         // send a header block, it refers to unacked entry.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("content-length"), String::from("1234"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("content-length"), String::from("1234"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -871,7 +990,12 @@ mod tests {
         // limit.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("content-length"), String::from("1234"))], 2);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("content-length"), String::from("1234"))],
+                2,
+            )
+            .unwrap();
         assert_is_index_to_static_name_only(&buf);
 
         send_instructions(&mut encoder, &[]);
@@ -880,7 +1004,12 @@ mod tests {
         // another header block to already blocked stream can still use the entry.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("content-length"), String::from("1234"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("content-length"), String::from("1234"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -896,17 +1025,25 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_200);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // insert "content-length: 12345
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_2);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_2,
+            },
+        );
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
@@ -915,20 +1052,28 @@ mod tests {
 
         let stream_id = 1;
         // send a header block, it refers to unacked entry.
-        let buf = encoder.encoder.encode_header_block(
-            &[(String::from("content-length"), String::from("1234"))],
-            stream_id,
-        );
+        let buf = encoder
+            .encoder
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("content-length"), String::from("1234"))],
+                stream_id,
+            )
+            .unwrap();
         assert_is_index_to_dynamic(&buf);
 
         // encode another header block for the same stream that will refer to the second entry
         // in the dynamic table.
         // This should work because the stream is already a blocked stream
         // send a header block, it refers to unacked entry.
-        let buf = encoder.encoder.encode_header_block(
-            &[(String::from("content-length"), String::from("12345"))],
-            stream_id,
-        );
+        let buf = encoder
+            .encoder
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("content-length"), String::from("12345"))],
+                stream_id,
+            )
+            .unwrap();
         assert_is_index_to_dynamic(&buf);
     }
 
@@ -948,7 +1093,12 @@ mod tests {
         // send a header block, that creates an new entry and refers to it.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name1"), String::from("value1"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name1"), String::from("value1"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -956,7 +1106,12 @@ mod tests {
         // The next one will not create a new entry because the encoder is on max_blocked_streams limit.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name2"), String::from("value2"))], 2);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name2"), String::from("value2"))],
+                2,
+            )
+            .unwrap();
         assert_is_literal_value_literal_name(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -964,7 +1119,12 @@ mod tests {
         // another header block to already blocked stream can still create a new entry.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name2"), String::from("value2"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name2"), String::from("value2"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -986,7 +1146,12 @@ mod tests {
         // send a header block, that creates an new entry and refers to it.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name1"), String::from("value1"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name1"), String::from("value1"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -994,7 +1159,12 @@ mod tests {
         // another header block to already blocked stream can still create a new entry.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name2"), String::from("value2"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name2"), String::from("value2"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1022,7 +1192,12 @@ mod tests {
         // send a header block, that creates an new entry and refers to it.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name1"), String::from("value1"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name1"), String::from("value1"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1030,7 +1205,12 @@ mod tests {
         // another header block to already blocked stream can still create a new entry.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name1"), String::from("value1"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name1"), String::from("value1"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1058,7 +1238,12 @@ mod tests {
         // send a header block, that creates an new entry and refers to it.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name1"), String::from("value1"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name1"), String::from("value1"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1066,7 +1251,12 @@ mod tests {
         // header block for the next stream will create an new entry as well.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name2"), String::from("value2"))], 2);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name2"), String::from("value2"))],
+                2,
+            )
+            .unwrap();
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 2);
@@ -1094,7 +1284,12 @@ mod tests {
         // send a header block, that creates an new entry and refers to it.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name1"), String::from("value1"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name1"), String::from("value1"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1102,7 +1297,12 @@ mod tests {
         // header block for the next stream will create an new entry as well.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name1"), String::from("value1"))], 2);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name1"), String::from("value1"))],
+                2,
+            )
+            .unwrap();
         assert_is_index_to_dynamic(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 2);
@@ -1132,7 +1332,12 @@ mod tests {
         // send a header block, that creates an new entry and refers to it.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name1"), String::from("value1"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name1"), String::from("value1"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1140,7 +1345,12 @@ mod tests {
         // header block for the next stream will refer to the same entry.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name1"), String::from("value1"))], 2);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name1"), String::from("value1"))],
+                2,
+            )
+            .unwrap();
         assert_is_index_to_dynamic(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 2);
@@ -1148,7 +1358,12 @@ mod tests {
         // send another header block on stream 1.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("name2"), String::from("value2"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("name2"), String::from("value2"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 2);
@@ -1173,9 +1388,13 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1183,7 +1402,12 @@ mod tests {
         // send a header block, it refers to unacked entry.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("content-length"), String::from("1234"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("content-length"), String::from("1234"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic(&buf);
 
         // trying to evict the entry will failed.
@@ -1214,9 +1438,13 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1224,7 +1452,12 @@ mod tests {
         // send a header block, it refers to unacked entry.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("content-length"), String::from("1234"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("content-length"), String::from("1234"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic(&buf);
 
         // trying to evict the entry will failed.
@@ -1255,9 +1488,13 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1284,9 +1521,13 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert_with_name_literal(HEADER_CONTENT_LENGTH, VALUE_1);
+        let res = encoder.encoder.insert(
+            &mut encoder.conn,
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: HEADER_CONTENT_LENGTH,
+                value: VALUE_1,
+            },
+        );
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1294,7 +1535,12 @@ mod tests {
         // send a header block, it refers to unacked entry.
         let buf = encoder
             .encoder
-            .encode_header_block(&[(String::from("content-length"), String::from("1234"))], 1);
+            .encode_header_block(
+                &mut encoder.conn,
+                &[(String::from("content-length"), String::from("1234"))],
+                1,
+            )
+            .unwrap();
         assert_is_index_to_dynamic(&buf);
 
         // trying to evict the entry will failed. The stream is still referring to it and
@@ -1306,5 +1552,94 @@ mod tests {
 
         // now entry can be evicted.
         assert!(encoder.encoder.set_max_capacity(10).is_ok());
+    }
+
+    #[test]
+    fn encoder_flow_controlled_blocked() {
+        const SMALL_MAX_DATA: u64 = 900;
+        const STREAM_DATA_LEN: usize = 900 - 20;
+        const STREAM_DATA: &[u8] = &[0; STREAM_DATA_LEN];
+        const ONE_INSTRUCTION: &[u8] = &[
+            0x67, 0x41, 0xe9, 0x2a, 0x67, 0x35, 0x53, 0x7f, 0x83, 0x8, 0x99, 0x6b,
+        ];
+        const TWO_INSTRUCTION: &[u8] = &[
+            0x67, 0x41, 0xe9, 0x2a, 0x67, 0x35, 0x53, 0x37, 0x83, 0x8, 0x99, 0x6b, 0x67, 0x41,
+            0xe9, 0x2a, 0x67, 0x35, 0x53, 0x39, 0x88, 0x8, 0x99, 0x69, 0xb7, 0x1d, 0x79, 0xf0,
+            0x83,
+        ];
+        let mut encoder = connect_flow_control(SMALL_MAX_DATA);
+
+        // change capacity to 1000 and max_block streams to 20.
+        encoder.encoder.set_max_blocked_streams(20).unwrap();
+        assert!(encoder.encoder.set_max_capacity(1000).is_ok());
+        send_instructions(&mut encoder, CAP_INSTRUCTION_1000);
+
+        // Write some data to fill the flow control allowance.
+        let stream_id = encoder.conn.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(
+            encoder.conn.stream_send(stream_id, STREAM_DATA).unwrap(),
+            STREAM_DATA_LEN
+        );
+
+        // Encode a header block with 2 headers. The first header will be added to the dynamic table.
+        // The second will not be added to the dynamic table, because the corresponding instruction
+        // cannot be written immediately due to the flow control limit.
+        let buf1 = encoder
+            .encoder
+            .encode_header_block(
+                &mut encoder.conn,
+                &[
+                    (String::from("something"), String::from("1234")),
+                    (String::from("something2"), String::from("12345678910")),
+                ],
+                1,
+            )
+            .unwrap();
+
+        // Assert that the first header is encoded as an index to the dynamic table (a post form).
+        assert_eq!(buf1[2], 0x10);
+        // Assert that the second header is encoded as a literal with a name literal
+        assert_eq!(buf1[3] & 0xf0, 0x20);
+        // Ensure that we have sent only one instruction for (String::from("something"), String::from("1234"))
+        send_instructions(&mut encoder, ONE_INSTRUCTION);
+
+        // Try to encode another header block. Here both headers will be encoded as a literal with a name literal
+        let buf2 = encoder
+            .encoder
+            .encode_header_block(
+                &mut encoder.conn,
+                &[
+                    (String::from("something3"), String::from("1234")),
+                    (String::from("something4"), String::from("12345678910")),
+                ],
+                2,
+            )
+            .unwrap();
+        assert_eq!(buf2[2] & 0xf0, 0x20);
+        // Ensure that we have not sent any instruction.
+        send_instructions(&mut encoder, &[]);
+
+        // Increase max data
+        encoder.conn.handle_max_data_test(100_000);
+
+        // Try writing a new header block. Now, headers will be added to the dynamic table again, because
+        // instructions can be sent.
+        let buf3 = encoder
+            .encoder
+            .encode_header_block(
+                &mut encoder.conn,
+                &[
+                    (String::from("something5"), String::from("1234")),
+                    (String::from("something6"), String::from("12345678910")),
+                ],
+                3,
+            )
+            .unwrap();
+        // Assert that both headers are encoded as an index to the dynamic table (a post form).
+        assert_eq!(buf3[2], 0x10);
+        assert_eq!(buf3[3], 0x11);
+
+        // Asset that 2 instruction has been sent
+        send_instructions(&mut encoder, TWO_INSTRUCTION);
     }
 }
