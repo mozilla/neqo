@@ -1264,7 +1264,7 @@ mod tests {
         flow_mgr.borrow_mut().conn_increase_max_credit(5);
         let conn_events = ConnectionEvents::default();
 
-        let mut s = SendStream::new(4.into(), 0, Rc::clone(&flow_mgr), conn_events.clone());
+        let mut s = SendStream::new(4.into(), 0, Rc::clone(&flow_mgr), conn_events);
         s.set_max_stream_data(2);
 
         // Stream is initially blocked (conn:5, stream:2)
