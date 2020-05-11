@@ -12,6 +12,7 @@ use qlog::QlogStreamer;
 use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_qpack::QpackSettings;
 use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
@@ -75,8 +76,11 @@ pub struct Args {
     #[structopt(short = "h", long, number_of_values = 2)]
     header: Vec<String>,
 
-    #[structopt(name = "max-table-size", short = "t", long, default_value = "128")]
-    max_table_size: u64,
+    #[structopt(name = "encoder-table-size", short = "e", long, default_value = "128")]
+    max_table_size_encoder: u64,
+
+    #[structopt(name = "decoder-table-size", short = "d", long, default_value = "128")]
+    max_table_size_decoder: u64,
 
     #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "128")]
     max_blocked_streams: u16,
@@ -341,8 +345,11 @@ fn client(
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
         remote_addr,
-        args.max_table_size,
-        args.max_blocked_streams,
+        QpackSettings {
+            max_table_size_encoder: args.max_table_size_encoder,
+            max_table_size_decoder: args.max_table_size_decoder,
+            max_blocked_streams: args.max_blocked_streams,
+        },
     )
     .expect("must succeed");
     client.set_qlog(qlog_new(args, origin)?);

@@ -29,6 +29,13 @@ mod table;
 pub type Header = (String, String);
 type Res<T> = Result<T, Error>;
 
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
+pub struct QpackSettings {
+    pub max_table_size_decoder: u64,
+    pub max_table_size_encoder: u64,
+    pub max_blocked_streams: u16,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     DecompressionFailed,

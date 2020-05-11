@@ -13,6 +13,7 @@ use crate::server_events::{ClientRequestStream, Http3ServerEvent, Http3ServerEve
 use crate::Res;
 use neqo_common::{qtrace, Datagram};
 use neqo_crypto::AntiReplay;
+use neqo_qpack::QpackSettings;
 use neqo_transport::server::{ActiveConnectionRef, Server};
 use neqo_transport::{ConnectionIdManager, Output};
 use std::cell::RefCell;
@@ -25,8 +26,7 @@ type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
 
 pub struct Http3Server {
     server: Server,
-    max_table_size: u64,
-    max_blocked_streams: u16,
+    qpack_settings: QpackSettings,
     http3_handlers: HashMap<ActiveConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
 }
@@ -47,13 +47,11 @@ impl Http3Server {
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
-        max_table_size: u64,
-        max_blocked_streams: u16,
+        qpack_settings: QpackSettings,
     ) -> Res<Self> {
         Ok(Self {
             server: Server::new(now, certs, protocols, anti_replay, cid_manager)?,
-            max_table_size,
-            max_blocked_streams,
+            qpack_settings,
             http3_handlers: HashMap::new(),
             events: Http3ServerEvents::default(),
         })
@@ -102,15 +100,12 @@ impl Http3Server {
         active_conns
             .iter()
             .for_each(|conn| self.server.add_to_waiting(conn.clone()));
-        let max_table_size = self.max_table_size;
-        let max_blocked_streams = self.max_blocked_streams;
+        let qpack_settings = self.qpack_settings;
         for mut conn in active_conns {
-            let handler = self.http3_handlers.entry(conn.clone()).or_insert_with(|| {
-                Rc::new(RefCell::new(Http3ServerHandler::new(
-                    max_table_size,
-                    max_blocked_streams,
-                )))
-            });
+            let handler = self
+                .http3_handlers
+                .entry(conn.clone())
+                .or_insert_with(|| Rc::new(RefCell::new(Http3ServerHandler::new(qpack_settings))));
 
             handler
                 .borrow_mut()
@@ -178,6 +173,7 @@ mod tests {
     use neqo_common::matches;
     use neqo_crypto::AuthenticationStatus;
     use neqo_qpack::encoder::QPackEncoder;
+    use neqo_qpack::QpackSettings;
     use neqo_transport::{
         CloseError, Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
     };
@@ -194,8 +190,11 @@ mod tests {
             DEFAULT_ALPN,
             anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-            100,
-            100,
+            QpackSettings {
+                max_table_size_encoder: 100,
+                max_table_size_decoder: 100,
+                max_blocked_streams: 100,
+            },
         )
         .expect("create a default server")
     }
@@ -343,7 +342,14 @@ mod tests {
             &[0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64],
         );
         assert_eq!(sent, Ok(9));
-        let mut encoder = QPackEncoder::new(true);
+        let mut encoder = QPackEncoder::new(
+            QpackSettings {
+                max_table_size_encoder: 100,
+                max_table_size_decoder: 0,
+                max_blocked_streams: 0,
+            },
+            true,
+        );
         encoder.add_send_stream(neqo_trans_conn.stream_create(StreamType::UniDi).unwrap());
         encoder.send(&mut neqo_trans_conn).unwrap();
         let decoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();

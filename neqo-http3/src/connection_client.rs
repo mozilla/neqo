@@ -15,6 +15,7 @@ use neqo_common::{
     Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
+use neqo_qpack::QpackSettings;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, StreamId, StreamType,
 };
@@ -48,21 +49,19 @@ impl Http3Client {
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        max_table_size: u64,
-        max_blocked_streams: u16,
+        qpack_settings: QpackSettings,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
             Connection::new_client(server_name, protocols, cid_manager, local_addr, remote_addr)?,
-            max_table_size,
-            max_blocked_streams,
+            qpack_settings,
         ))
     }
 
     #[must_use]
-    pub fn new_with_conn(c: Connection, max_table_size: u64, max_blocked_streams: u16) -> Self {
+    pub fn new_with_conn(c: Connection, qpack_settings: QpackSettings) -> Self {
         Self {
             conn: c,
-            base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
+            base_handler: Http3Connection::new(qpack_settings),
             events: Http3ClientEvents::default(),
         }
     }
@@ -533,7 +532,7 @@ impl Http3Client {
 mod tests {
     use super::{
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
-        Http3State, Rc, RefCell, StreamType,
+        Http3State, QpackSettings, Rc, RefCell, StreamType,
     };
     use crate::hframe::HFrame;
     use crate::hsettings_frame::{HSetting, HSettingType};
@@ -563,8 +562,11 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
-            100,
-            100,
+            QpackSettings {
+                max_table_size_encoder: 100,
+                max_table_size_decoder: 100,
+                max_blocked_streams: 100,
+            },
         )
         .expect("create a default client")
     }
@@ -610,7 +612,14 @@ mod tests {
             },
             conn: default_server(),
             control_stream_id: None,
-            encoder: QPackEncoder::new(true),
+            encoder: QPackEncoder::new(
+                QpackSettings {
+                    max_table_size_encoder: 128,
+                    max_table_size_decoder: 0,
+                    max_blocked_streams: 0,
+                },
+                true,
+            ),
             encoder_stream_id: None,
             decoder_stream_id: None,
         }

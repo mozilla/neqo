@@ -10,8 +10,7 @@ use crate::header_block::{HeaderDecoder, HeaderDecoderResult};
 use crate::qpack_send_buf::QPData;
 use crate::reader::ReceiverConnWrapper;
 use crate::table::HeaderTable;
-use crate::Header;
-use crate::{Error, Res};
+use crate::{Error, Header, QpackSettings, Res};
 use neqo_common::qdebug;
 use neqo_transport::Connection;
 use std::convert::TryInto;
@@ -35,19 +34,19 @@ pub struct QPackDecoder {
 
 impl QPackDecoder {
     #[must_use]
-    pub fn new(max_table_size: u64, max_blocked_streams: u16) -> Self {
+    pub fn new(qpack_settings: QpackSettings) -> Self {
         qdebug!("Decoder: creating a new qpack decoder.");
         Self {
             instruction_reader: EncoderInstructionReader::new(),
             table: HeaderTable::new(false),
             total_num_of_inserts: 0,
             acked_inserts: 0,
-            max_entries: max_table_size >> 5,
+            max_entries: qpack_settings.max_table_size_decoder >> 5,
             send_buf: QPData::default(),
             local_stream_id: None,
             remote_stream_id: None,
-            max_table_size,
-            max_blocked_streams: max_blocked_streams.try_into().unwrap(),
+            max_table_size: qpack_settings.max_table_size_decoder,
+            max_blocked_streams: qpack_settings.max_blocked_streams.try_into().unwrap(),
             blocked_streams: Vec::new(),
         }
     }
@@ -256,6 +255,7 @@ fn map_error(err: &Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::{Connection, Error, Header, QPackDecoder, Res};
+    use crate::QpackSettings;
     use neqo_transport::StreamType;
     use std::convert::TryInto;
     use test_fixture::now;
@@ -276,7 +276,11 @@ mod tests {
         let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create a decoder
-        let mut decoder = QPackDecoder::new(300, 100);
+        let mut decoder = QPackDecoder::new(QpackSettings {
+            max_table_size_encoder: 0,
+            max_table_size_decoder: 300,
+            max_blocked_streams: 100,
+        });
         decoder.add_send_stream(send_stream_id);
 
         TestDecoder {
