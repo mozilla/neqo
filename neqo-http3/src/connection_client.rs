@@ -19,6 +19,7 @@ use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, StreamId, StreamType,
 };
 use std::cell::RefCell;
+use std::fmt::Display;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Instant;
@@ -31,7 +32,7 @@ pub struct Http3Client {
     events: Http3ClientEvents,
 }
 
-impl ::std::fmt::Display for Http3Client {
+impl Display for Http3Client {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "Http3 client")
     }
@@ -135,7 +136,10 @@ impl Http3Client {
     }
 
     /// This is call to close a connection.
-    pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
+    pub fn close<S>(&mut self, now: Instant, error: AppError, msg: S)
+    where
+        S: Into<String> + Display,
+    {
         qinfo!([self], "Close the connection error={} msg={}.", error, msg);
         if !matches!(self.base_handler.state, Http3State::Closing(_)| Http3State::Closed(_)) {
             self.conn.close(now, error, msg);

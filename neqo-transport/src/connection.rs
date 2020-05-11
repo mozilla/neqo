@@ -1383,7 +1383,10 @@ impl Connection {
     }
 
     /// Close the connection.
-    pub fn close(&mut self, now: Instant, error: AppError, msg: &str) {
+    pub fn close<S>(&mut self, now: Instant, error: AppError, msg: S)
+    where
+        S: Into<String>,
+    {
         self.set_state(State::Closing {
             error: ConnectionError::Application(error),
             frame_type: 0,
