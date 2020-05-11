@@ -255,7 +255,7 @@ impl Http3Client {
             }
             Err(e) => {
                 if e == Error::HttpFrame {
-                    self.close(now, e.code(), String::from(""));
+                    self.close(now, e.code(), "");
                 }
                 Err(e)
             }
@@ -346,13 +346,13 @@ impl Http3Client {
                 self.close(
                     now,
                     Error::HttpGeneralProtocol.code(),
-                    String::from("Connection error: goaway stream_id increased"),
+                    "Connection error: goaway stream_id increased",
                 );
                 true
             }
             Err(e) => {
                 qinfo!([self], "Connection error: {}.", e);
-                self.close(now, e.code(), format!("{}", e));
+                self.close(now, e.code(), &format!("{}", e));
                 true
             }
             _ => false,
@@ -1277,7 +1277,7 @@ mod tests {
         let res = client.read_response_data(now(), request_stream_id, &mut buf);
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, String::from(""));
+        client.close(now(), 0, "");
     }
 
     // Helper function: read response when a server sends HTTP_RESPONSE_2.
@@ -1317,7 +1317,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, String::from(""));
+        client.close(now(), 0, "");
     }
 
     // Data sent with a request:
@@ -1691,7 +1691,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, String::from(""));
+        client.close(now(), 0, "");
     }
 
     // Server sends stop sending and reset.
@@ -1745,7 +1745,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, String::from(""));
+        client.close(now(), 0, "");
     }
 
     // Server sends stop sending with RequestRejected, but it does not send reset.
@@ -1794,7 +1794,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, String::from(""));
+        client.close(now(), 0, "");
     }
 
     // Server sends stop sending and reset. We have some events for that stream already
@@ -1857,7 +1857,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, String::from(""));
+        client.close(now(), 0, "");
     }
 
     // Server sends stop sending with code that is not HttpNoError.
@@ -1915,7 +1915,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, String::from(""));
+        client.close(now(), 0, "");
     }
 
     // Server sends a reset. We will close sending side as well.
@@ -1963,7 +1963,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-        client.close(now(), 0, String::from(""));
+        client.close(now(), 0, "");
     }
 
     fn test_incomplet_frame(buf: &[u8], error: &Error) {
@@ -2076,7 +2076,7 @@ mod tests {
             Err(Error::AlreadyClosed)
         );
 
-        client.close(now(), 0, String::from(""));
+        client.close(now(), 0, "");
     }
 
     #[test]

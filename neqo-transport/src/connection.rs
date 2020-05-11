@@ -2593,7 +2593,7 @@ mod tests {
 
         let now = now();
 
-        client.close(now, 42, String::new());
+        client.close(now, 42, "");
 
         let out = client.process(None, now);
 

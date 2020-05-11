@@ -195,7 +195,7 @@ impl Handler for H9Handler {
                     self.rbytes += sz;
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
-                        client.close(Instant::now(), 0, String::from("kthxbye!"));
+                        client.close(Instant::now(), 0, "kthxbye!");
                         self.rsfin = true;
                         return false;
                     }
@@ -340,7 +340,7 @@ impl H3Handler {
                     }
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
-                        self.h3.close(Instant::now(), 0, String::from("kthxbye!"));
+                        self.h3.close(Instant::now(), 0, "kthxbye!");
                         return false;
                     }
                 }
