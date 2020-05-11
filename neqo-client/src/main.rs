@@ -562,10 +562,10 @@ mod old {
                             .expect("Read should succeed");
 
                         let mut have_out_file = false;
-                        if let Some(out_file) = out_file {
+                        if let Some(Some(out_file)) = out_file {
                             have_out_file = true;
                             if sz > 0 {
-                                out_file.as_ref().unwrap().write_all(&data[..sz])?;
+                                out_file.write_all(&data[..sz])?;
                             }
                         } else if !args.output_read_data {
                             println!("READ[{}]: {} bytes", stream_id, sz);
