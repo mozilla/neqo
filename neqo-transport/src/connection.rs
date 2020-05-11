@@ -298,11 +298,15 @@ impl StateSignaling {
         }
     }
 
-    pub fn close(&mut self, error: ConnectionError, frame_type: FrameType, message: String) {
+    pub fn close<S>(&mut self, error: ConnectionError, frame_type: FrameType, message: S)
+    where
+        S: AsRef<str>,
+    {
+        let msg: &[u8] = message.as_ref().as_ref();
         let frame = Frame::ConnectionClose {
             error_code: CloseError::from(error),
             frame_type,
-            reason_phrase: Vec::from(message),
+            reason_phrase: msg.to_vec(),
         };
         *self = Self::ConnectionClose(frame);
     }
@@ -1393,13 +1397,14 @@ impl Connection {
     }
 
     /// Close the connection.
-    pub fn close(&mut self, now: Instant, error: AppError, msg: String) {
-        let error = ConnectionError::Application(error);
-        self.set_state(State::Closing {
-            error: error.clone(),
-            timeout: self.get_closing_period_time(now),
-        });
-        self.state_signaling.close(error, 0, msg);
+    pub fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
+    where
+        S: AsRef<str>,
+    {
+        let error = ConnectionError::Application(app_error);
+        let timeout = self.get_closing_period_time(now);
+        self.state_signaling.close(error.clone(), 0, msg);
+        self.set_state(State::Closing { error, timeout });
     }
 
     fn set_initial_limits(&mut self) {
