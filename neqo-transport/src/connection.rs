@@ -4606,8 +4606,8 @@ mod tests {
         client.close(now, 0, "");
         let res = client.process(None, now);
         assert!(res.dgram().is_some()); // CONNECTION_CLOSE
-        // This should now report the end of the closing period, not a
-        // zero-duration wait driven by the (now defunct) loss recovery timer.
+                                        // This should now report the end of the closing period, not a
+                                        // zero-duration wait driven by the (now defunct) loss recovery timer.
         let res = client.process(None, now);
         assert_ne!(res.callback(), Duration::from_secs(0));
     }
