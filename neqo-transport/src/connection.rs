@@ -1294,7 +1294,7 @@ impl Connection {
 
             // Normal packets are in flight if they include PADDING frames,
             // but we don't send those.
-            let in_flight = profile.pto() && ack_eliciting;
+            let in_flight = !profile.pto() && ack_eliciting;
             if in_flight {
                 self.idle_timeout.on_packet_sent(now);
             }
@@ -3345,14 +3345,14 @@ mod tests {
 
         let frames = server.test_process_input(out.dgram().unwrap(), now);
 
-        assert!(matches!(
-            frames[0],
-            (Frame::Stream { .. }, PNSpace::ApplicationData)
-        ));
-        assert!(matches!(
-            frames[1],
-            (Frame::Stream { .. }, PNSpace::ApplicationData)
-        ));
+        assert!(frames.iter().all(|(_, sp)| *sp == PNSpace::ApplicationData));
+        assert!(frames.iter().any(|(f, _)| *f == Frame::Ping));
+        assert!(frames
+            .iter()
+            .any(|(f, _)| matches!(f, Frame::Stream { stream_id, .. } if stream_id.as_u64() == 2)));
+        assert!(frames
+            .iter()
+            .any(|(f, _)| matches!(f, Frame::Stream { stream_id, .. } if stream_id.as_u64() == 6)));
     }
 
     #[test]
@@ -3373,12 +3373,13 @@ mod tests {
         let (dgrams, now) = fill_cwnd(&mut client, 2, now + AT_LEAST_PTO);
         assert_eq!(dgrams.len(), 2); // Two packets in the PTO.
 
-        // All (2) datagrams contain STREAM frames.
+        // All (2) datagrams contain PING and STREAM frames.
         for d in dgrams {
             assert_eq!(d.len(), PATH_MTU_V6);
             let frames = server.test_process_input(d, now);
+            assert!(matches!(frames[0], (Frame::Ping, PNSpace::ApplicationData)));
             assert!(matches!(
-                frames[0],
+                frames[1],
                 (Frame::Stream { .. }, PNSpace::ApplicationData)
             ));
         }
