@@ -665,11 +665,11 @@ impl Connection {
 
     pub fn process_timer(&mut self, now: Instant) {
         if matches!(self.state(), State::Closing{..} | State::Closed{..}) {
-            qinfo!("Timer fired while closing/closed");
+            qinfo!([self], "Timer fired while closing/closed");
             return;
         }
         if self.idle_timeout.expired(now, self.loss_recovery.raw_pto()) {
-            qinfo!("idle timeout expired");
+            qinfo!([self], "idle timeout expired");
             self.set_state(State::Closed(ConnectionError::Transport(
                 Error::IdleTimeout,
             )));
@@ -744,6 +744,7 @@ impl Connection {
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
     pub fn process_output(&mut self, now: Instant) -> Output {
+        qtrace!([self], "process_output {:?}", now);
         self.process_timer(now);
         let pkt = match &self.state {
             State::Init => {
@@ -828,8 +829,10 @@ impl Connection {
     }
 
     fn discard_keys(&mut self, space: PNSpace) {
+        qinfo!([self], "Drop packet number space {}", space);
         if self.crypto.discard(space) {
             self.loss_recovery.discard(space);
+            self.acks.drop_space(space);
         }
     }
 
@@ -955,7 +958,7 @@ impl Connection {
         // OK, we have a valid packet.
 
         let space = PNSpace::from(packet.packet_type());
-        if self.acks[space].is_duplicate(packet.pn()) {
+        if self.acks.get_mut(space).unwrap().is_duplicate(packet.pn()) {
             qdebug!([self], "Duplicate packet from {} pn={}", space, packet.pn());
             self.stats.dups_rx += 1;
             return Ok(vec![]);
@@ -987,7 +990,10 @@ impl Connection {
             let res = self.input_frame(packet.packet_type(), f, now);
             self.capture_error(now, t, res)?;
         }
-        self.acks[space].set_received(now, packet.pn(), ack_eliciting);
+        self.acks
+            .get_mut(space)
+            .unwrap()
+            .set_received(now, packet.pn(), ack_eliciting);
 
         Ok(frames)
     }
@@ -1034,6 +1040,7 @@ impl Connection {
     }
 
     fn output(&mut self, now: Instant) -> Option<Datagram> {
+        qtrace!([self], "output {:?}", now);
         if let Some(mut path) = self.path.take() {
             let res = match &self.state {
                 State::Init
