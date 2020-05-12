@@ -23,6 +23,7 @@ pub struct QPackDecoder {
     instruction_reader: EncoderInstructionReader,
     table: HeaderTable,
     total_num_of_inserts: u64,
+    acked_inserts: u64,
     max_entries: u64,
     send_buf: QPData,
     local_stream_id: Option<u64>,
@@ -40,6 +41,7 @@ impl QPackDecoder {
             instruction_reader: EncoderInstructionReader::new(),
             table: HeaderTable::new(false),
             total_num_of_inserts: 0,
+            acked_inserts: 0,
             max_entries: max_table_size >> 5,
             send_buf: QPData::default(),
             local_stream_id: None,
@@ -102,19 +104,28 @@ impl QPackDecoder {
         match instruction {
             DecodedEncoderInstruction::Capacity { value } => self.set_capacity(value)?,
             DecodedEncoderInstruction::InsertWithNameRefStatic { index, value } => {
-                self.table.insert_with_name_ref(true, index, &value)?;
+                self.table
+                    .insert_with_name_ref(true, index, &value)
+                    .map_err(|_| Error::EncoderStream)?;
                 self.total_num_of_inserts += 1;
             }
             DecodedEncoderInstruction::InsertWithNameRefDynamic { index, value } => {
-                self.table.insert_with_name_ref(false, index, &value)?;
+                self.table
+                    .insert_with_name_ref(false, index, &value)
+                    .map_err(|_| Error::EncoderStream)?;
                 self.total_num_of_inserts += 1;
             }
             DecodedEncoderInstruction::InsertWithNameLiteral { name, value } => {
-                self.table.insert(&name, &value).map(|_| ())?;
+                self.table
+                    .insert(&name, &value)
+                    .map(|_| ())
+                    .map_err(|_| Error::EncoderStream)?;
                 self.total_num_of_inserts += 1;
             }
             DecodedEncoderInstruction::Duplicate { index } => {
-                self.table.duplicate(index)?;
+                self.table
+                    .duplicate(index)
+                    .map_err(|_| Error::EncoderStream)?;
                 self.total_num_of_inserts += 1;
             }
             DecodedEncoderInstruction::NoInstruction => {
@@ -134,11 +145,8 @@ impl QPackDecoder {
 
     fn header_ack(&mut self, stream_id: u64, required_inserts: u64) {
         DecoderInstruction::HeaderAck { stream_id }.marshal(&mut self.send_buf);
-        if required_inserts > self.table.get_acked_inserts_cnt() {
-            let ack_increment_delta = required_inserts - self.table.get_acked_inserts_cnt();
-            self.table
-                .increment_acked(ack_increment_delta)
-                .expect("This should never happen");
+        if required_inserts > self.acked_inserts {
+            self.acked_inserts = required_inserts;
         }
     }
 
@@ -150,15 +158,15 @@ impl QPackDecoder {
     ///     May return an error in case of any transport error. TODO: define transport errors.
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         // Encode increment instruction if needed.
-        let increment = self.total_num_of_inserts - self.table.get_acked_inserts_cnt();
+        let increment = self.total_num_of_inserts - self.acked_inserts;
         if increment > 0 {
             DecoderInstruction::InsertCountIncrement { increment }.marshal(&mut self.send_buf);
-            self.table
-                .increment_acked(increment)
-                .expect("This should never happen");
+            self.acked_inserts = self.total_num_of_inserts;
         }
         if self.send_buf.len() != 0 && self.local_stream_id.is_some() {
-            let r = conn.stream_send(self.local_stream_id.unwrap(), &self.send_buf[..])?;
+            let r = conn
+                .stream_send(self.local_stream_id.unwrap(), &self.send_buf[..])
+                .map_err(|_| Error::DecoderStream)?;
             qdebug!([self], "{} bytes sent.", r);
             self.send_buf.read(r as usize);
         }
@@ -351,7 +359,7 @@ mod tests {
         test_instruction(
             0,
             &[0xc4, 0x04, 0x31, 0x32, 0x33, 0x34],
-            &Err(Error::DecoderStream),
+            &Err(Error::EncoderStream),
             &[0x03],
             0,
         );

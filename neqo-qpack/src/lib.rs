@@ -29,18 +29,6 @@ mod table;
 pub type Header = (String, String);
 type Res<T> = Result<T, Error>;
 
-#[derive(Debug)]
-enum QPackSide {
-    Encoder,
-    Decoder,
-}
-
-impl ::std::fmt::Display for QPackSide {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Error {
     DecompressionFailed,
@@ -53,11 +41,14 @@ pub enum Error {
     HeaderLookup,
     HuffmanDecompressionFailed,
     ToStringFailed,
+    ChangeCapacity,
+    DynamicTableFull,
+    IncrementAck,
     IntegerOverflow,
     WrongStreamCount,
-    Internal, //TODO to be removed when PR598 lands.
     Decoding, // Decoding internal error that is not one of the above.
     EncoderStreamBlocked,
+    Internal,
 
     TransportError(neqo_transport::Error),
     QlogError,
