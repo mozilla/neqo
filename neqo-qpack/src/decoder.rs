@@ -70,23 +70,30 @@ impl QPackDecoder {
     /// May return: `ClosedCriticalStream` if stream has been closed or `EncoderStream`
     /// in case of any other transport error.
     pub fn receive(&mut self, conn: &mut Connection, stream_id: u64) -> Res<Vec<u64>> {
-        self.read_instructions(conn, stream_id)?;
-        let base = self.table.base();
+        let base_old = self.table.base();
+        self.read_instructions(conn, stream_id)
+            .map_err(|e| map_error(&e))?;
+        let base_new = self.table.base();
+        if base_old == base_new {
+            return Ok(Vec::new());
+        }
+
         let r = self
             .blocked_streams
             .iter()
-            .filter_map(|(id, req)| if *req <= base { Some(*id) } else { None })
+            .filter_map(|(id, req)| if *req <= base_new { Some(*id) } else { None })
             .collect::<Vec<_>>();
-        self.blocked_streams.retain(|(_, req)| *req > base);
+        self.blocked_streams.retain(|(_, req)| *req > base_new);
         Ok(r)
     }
 
     fn read_instructions(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
+        let mut recv = ReceiverConnWrapper::new(conn, stream_id);
         loop {
-            let mut recv = ReceiverConnWrapper::new(conn, stream_id);
-            match self.instruction_reader.read_instructions(&mut recv)? {
-                Some(instruction) => self.execute_instruction(instruction)?,
-                None => break Ok(()),
+            match self.instruction_reader.read_instructions(&mut recv) {
+                Ok(instruction) => self.execute_instruction(instruction)?,
+                Err(Error::NeedMoreData) => break Ok(()),
+                Err(e) => break Err(e),
             }
         }
     }
@@ -122,9 +129,7 @@ impl QPackDecoder {
         if cap > self.max_table_size {
             return Err(Error::EncoderStream);
         }
-        self.table
-            .set_capacity(cap)
-            .map_err(|_| Error::EncoderStream)
+        self.table.set_capacity(cap)
     }
 
     fn header_ack(&mut self, stream_id: u64, required_inserts: u64) {
@@ -142,7 +147,7 @@ impl QPackDecoder {
     }
 
     /// # Errors
-    ///     May return DecoderStream in case of any transport error.
+    ///     May return an error in case of any transport error. TODO: define transport errors.
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         // Encode increment instruction if needed.
         let increment = self.total_num_of_inserts - self.table.get_acked_inserts_cnt();
@@ -152,20 +157,12 @@ impl QPackDecoder {
                 .increment_acked(increment)
                 .expect("This should never happen");
         }
-        if self.send_buf.len() == 0 {
-            Ok(())
-        } else if let Some(stream_id) = self.local_stream_id {
-            match conn.stream_send(stream_id, &self.send_buf[..]) {
-                Err(_) => Err(Error::DecoderStream),
-                Ok(r) => {
-                    qdebug!([self], "{} bytes sent.", r);
-                    self.send_buf.read(r as usize);
-                    Ok(())
-                }
-            }
-        } else {
-            Ok(())
+        if self.send_buf.len() != 0 && self.local_stream_id.is_some() {
+            let r = conn.stream_send(self.local_stream_id.unwrap(), &self.send_buf[..])?;
+            qdebug!([self], "{} bytes sent.", r);
+            self.send_buf.read(r as usize);
         }
+        Ok(())
     }
 
     /// This function returns None if the stream is blocked waiting for table insertions.
@@ -176,12 +173,9 @@ impl QPackDecoder {
         qdebug!([self], "decode header block.");
         let mut decoder = HeaderDecoder::new(buf);
 
-        match decoder.decode_header_block(
-            &self.table,
-            self.max_entries,
-            self.total_num_of_inserts,
-        )? {
-            HeaderDecoderResult::Blocked(req_insert_cnt) => {
+        match decoder.decode_header_block(&self.table, self.max_entries, self.total_num_of_inserts)
+        {
+            Ok(HeaderDecoderResult::Blocked(req_insert_cnt)) => {
                 self.blocked_streams.push((stream_id, req_insert_cnt));
                 if self.blocked_streams.len() > self.max_blocked_streams {
                     Err(Error::DecompressionFailed)
@@ -189,12 +183,13 @@ impl QPackDecoder {
                     Ok(None)
                 }
             }
-            HeaderDecoderResult::Headers(h) => {
+            Ok(HeaderDecoderResult::Headers(h)) => {
                 if decoder.get_req_insert_cnt() != 0 {
                     self.header_ack(stream_id, decoder.get_req_insert_cnt());
                 }
                 Ok(Some(h))
             }
+            Err(_) => Err(Error::DecompressionFailed),
         }
     }
 
@@ -239,6 +234,14 @@ impl QPackDecoder {
 impl ::std::fmt::Display for QPackDecoder {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "QPackDecoder {}", self.capacity())
+    }
+}
+
+fn map_error(err: &Error) -> Error {
+    if *err == Error::ClosedCriticalStream {
+        Error::ClosedCriticalStream
+    } else {
+        Error::EncoderStream
     }
 }
 

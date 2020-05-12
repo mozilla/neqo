@@ -6,10 +6,10 @@
 
 // Tracking of received packets and generating acks thereof.
 
-use std::cmp::min;
+#![deny(clippy::pedantic)]
+
 use std::collections::VecDeque;
 use std::convert::TryInto;
-use std::ops::{Index, IndexMut};
 use std::time::{Duration, Instant};
 
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};
@@ -18,6 +18,8 @@ use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 use crate::frame::{AckRange, Frame};
 use crate::packet::{PacketNumber, PacketType};
 use crate::recovery::RecoveryToken;
+
+use smallvec::{smallvec, SmallVec};
 
 // TODO(mt) look at enabling EnumMap for this: https://stackoverflow.com/a/44905797/1375574
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq)]
@@ -66,11 +68,11 @@ pub struct SentPacket {
     pub time_sent: Instant,
     pub tokens: Vec<RecoveryToken>,
 
-    pub time_declared_lost: Option<Instant>,
+    time_declared_lost: Option<Instant>,
     /// After a PTO, the packet has been released.
     pto: bool,
 
-    pub in_flight: bool,
+    in_flight: bool,
     pub size: usize,
 }
 
@@ -93,10 +95,49 @@ impl SentPacket {
         }
     }
 
+    /// Returns `true` if the packet counts requires congestion control accounting.
+    /// The specification uses the term "in flight" for this.
+    pub fn cc_in_flight(&self) -> bool {
+        self.in_flight
+    }
+
+    /// Whether the packet has been declared lost.
+    pub fn lost(&self) -> bool {
+        self.time_declared_lost.is_some()
+    }
+
+    /// Whether accounting for the loss or acknowledgement in the
+    /// congestion controller is pending.
+    /// Returns `true` if the packet counts as being "in flight",
+    /// and has not previously been declared lost.
+    pub fn cc_outstanding(&self) -> bool {
+        self.cc_in_flight() && !self.lost()
+    }
+
+    /// Declare the packet as lost.  Returns `true` if this is the first time.
+    pub fn declare_lost(&mut self, now: Instant) -> bool {
+        if self.lost() {
+            false
+        } else {
+            self.time_declared_lost = Some(now);
+            true
+        }
+    }
+
+    /// Ask whether this tracked packet has been declared lost for long enough
+    /// that it can be expired and no longer tracked.
+    pub fn expired(&self, now: Instant, expiration_period: Duration) -> bool {
+        if let Some(loss_time) = self.time_declared_lost {
+            (loss_time + expiration_period) <= now
+        } else {
+            false
+        }
+    }
+
     /// On PTO, we need to get the recovery tokens so that we can ensure that
     /// the frames we sent can be sent again in the PTO packet(s).  Do that just once.
     pub fn pto(&mut self) -> bool {
-        if self.pto {
+        if self.pto || self.lost() {
             false
         } else {
             self.pto = true;
@@ -177,7 +218,7 @@ impl PacketRange {
     }
 
     /// When a packet containing the range `other` is acknowledged,
-    /// clear the ack_needed attribute on this.
+    /// clear the `ack_needed` attribute on this.
     /// Requires that other is equal to this, or a larger range.
     pub fn acknowledged(&mut self, other: &Self) {
         if (other.smallest <= self.smallest) && (other.largest >= self.largest) {
@@ -222,7 +263,7 @@ pub struct RecvdPackets {
 }
 
 impl RecvdPackets {
-    /// Make a new RecvdPackets for the indicated packet number space.
+    /// Make a new `RecvdPackets` for the indicated packet number space.
     pub fn new(space: PNSpace) -> Self {
         Self {
             space,
@@ -313,6 +354,7 @@ impl RecvdPackets {
             } else {
                 self.ack_time = Some(now);
             }
+            qdebug!([self], "Set ACK timer to {:?}", self.ack_time);
         }
     }
 
@@ -344,33 +386,8 @@ impl RecvdPackets {
             cur.acknowledged(&ack);
         }
     }
-}
 
-impl ::std::fmt::Display for RecvdPackets {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Recvd-{}", self.space)
-    }
-}
-
-#[derive(Debug)]
-pub struct AckTracker {
-    spaces: [RecvdPackets; 3],
-}
-
-impl AckTracker {
-    pub fn ack_time(&self) -> Option<Instant> {
-        let mut iter = self.spaces.iter().filter_map(RecvdPackets::ack_time);
-        match iter.next() {
-            Some(v) => Some(iter.fold(v, min)),
-            _ => None,
-        }
-    }
-
-    pub fn acked(&mut self, token: &AckToken) {
-        self.spaces[token.space as usize].acknowledged(&token.ranges);
-    }
-
-    /// Generate an ACK frame.
+    /// Generate an ACK frame for this packet number space.
     ///
     /// Unlike other frame generators this doesn't modify the underlying instance
     /// to track what has been sent. This only clears the delayed ACK timer.
@@ -380,21 +397,15 @@ impl AckTracker {
     ///
     /// We don't send ranges that have been acknowledged, but they still need
     /// to be tracked so that duplicates can be detected.
-    pub(crate) fn get_frame(
-        &mut self,
-        now: Instant,
-        pn_space: PNSpace,
-    ) -> Option<(Frame, Option<RecoveryToken>)> {
-        let space = &mut self[pn_space];
-
+    fn get_frame(&mut self, now: Instant) -> Option<(Frame, Option<RecoveryToken>)> {
         // Check that we aren't delaying ACKs.
-        if !space.ack_now(now) {
+        if !self.ack_now(now) {
             return None;
         }
 
         // Limit the number of ACK ranges we send so that we'll always
         // have space for data in packets.
-        let ranges: Vec<PacketRange> = space
+        let ranges: Vec<PacketRange> = self
             .ranges
             .iter()
             .filter(|r| r.ack_needed())
@@ -421,10 +432,10 @@ impl AckTracker {
         }
 
         // We've sent an ACK, reset the timer.
-        space.ack_time = None;
-        space.pkts_since_last_ack = 0;
+        self.ack_time = None;
+        self.pkts_since_last_ack = 0;
 
-        let ack_delay = now.duration_since(space.largest_pn_time.unwrap());
+        let ack_delay = now.duration_since(self.largest_pn_time.unwrap());
         // We use the default exponent so
         // ack_delay is in multiples of 8 microseconds.
         if let Ok(delay) = (ack_delay.as_micros() / 8).try_into() {
@@ -434,13 +445,11 @@ impl AckTracker {
                 first_ack_range: first.len() - 1,
                 ack_ranges,
             };
-            Some((
-                ack,
-                Some(RecoveryToken::Ack(AckToken {
-                    space: pn_space,
-                    ranges,
-                })),
-            ))
+            let token = RecoveryToken::Ack(AckToken {
+                space: self.space,
+                ranges,
+            });
+            Some((ack, Some(token)))
         } else {
             qwarn!(
                 "ack_delay.as_micros() did not fit a u64 {:?}",
@@ -451,29 +460,72 @@ impl AckTracker {
     }
 }
 
+impl ::std::fmt::Display for RecvdPackets {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Recvd-{}", self.space)
+    }
+}
+
+#[derive(Debug)]
+pub struct AckTracker {
+    /// This stores information about received packets in *reverse* order
+    /// by spaces.  Why reverse?  Because we ultimately only want to keep
+    /// `ApplicationData` and this allows us to drop other spaces easily.
+    spaces: SmallVec<[RecvdPackets; 1]>,
+}
+
+impl AckTracker {
+    pub fn drop_space(&mut self, space: PNSpace) {
+        let sp = match space {
+            PNSpace::Initial => self.spaces.pop(),
+            PNSpace::Handshake => {
+                let sp = self.spaces.pop();
+                self.spaces.shrink_to_fit();
+                sp
+            }
+            _ => panic!("discarding application space"),
+        };
+        assert_eq!(sp.unwrap().space, space, "dropping spaces out of order");
+    }
+
+    pub fn get_mut(&mut self, space: PNSpace) -> Option<&mut RecvdPackets> {
+        self.spaces.get_mut(match space {
+            PNSpace::ApplicationData => 0,
+            PNSpace::Handshake => 1,
+            PNSpace::Initial => 2,
+        })
+    }
+
+    pub fn ack_time(&self) -> Option<Instant> {
+        self.spaces.iter().filter_map(RecvdPackets::ack_time).min()
+    }
+
+    pub fn acked(&mut self, token: &AckToken) {
+        if let Some(space) = self.get_mut(token.space) {
+            space.acknowledged(&token.ranges);
+        }
+    }
+
+    pub(crate) fn get_frame(
+        &mut self,
+        now: Instant,
+        pn_space: PNSpace,
+    ) -> Option<(Frame, Option<RecoveryToken>)> {
+        self.get_mut(pn_space)
+            .map(|space| space.get_frame(now))
+            .flatten()
+    }
+}
+
 impl Default for AckTracker {
     fn default() -> Self {
         Self {
-            spaces: [
-                RecvdPackets::new(PNSpace::Initial),
-                RecvdPackets::new(PNSpace::Handshake),
+            spaces: smallvec![
                 RecvdPackets::new(PNSpace::ApplicationData),
+                RecvdPackets::new(PNSpace::Handshake),
+                RecvdPackets::new(PNSpace::Initial),
             ],
         }
-    }
-}
-
-impl Index<PNSpace> for AckTracker {
-    type Output = RecvdPackets;
-
-    fn index(&self, space: PNSpace) -> &Self::Output {
-        &self.spaces[space as usize]
-    }
-}
-
-impl IndexMut<PNSpace> for AckTracker {
-    fn index_mut(&mut self, space: PNSpace) -> &mut Self::Output {
-        &mut self.spaces[space as usize]
     }
 }
 
@@ -513,7 +565,7 @@ mod tests {
 
         // Check that the ranges include the right values.
         let mut in_ranges = HashSet::new();
-        for range in rp.ranges.iter() {
+        for range in &rp.ranges {
             for included in range.smallest..=range.largest {
                 in_ranges.insert(included);
             }
@@ -616,16 +668,64 @@ mod tests {
     fn aggregate_ack_time() {
         let mut tracker = AckTracker::default();
         // This packet won't trigger an ACK.
-        tracker[PNSpace::Handshake].set_received(*NOW, 0, false);
+        tracker
+            .get_mut(PNSpace::Handshake)
+            .unwrap()
+            .set_received(*NOW, 0, false);
         assert_eq!(None, tracker.ack_time());
 
         // This should be delayed.
-        tracker[PNSpace::ApplicationData].set_received(*NOW, 0, true);
+        tracker
+            .get_mut(PNSpace::ApplicationData)
+            .unwrap()
+            .set_received(*NOW, 0, true);
         assert_eq!(Some(*NOW + ACK_DELAY), tracker.ack_time());
 
         // This should move the time forward.
         let later = *NOW + ACK_DELAY.checked_div(2).unwrap();
-        tracker[PNSpace::Initial].set_received(later, 0, true);
+        tracker
+            .get_mut(PNSpace::Initial)
+            .unwrap()
+            .set_received(later, 0, true);
         assert_eq!(Some(later), tracker.ack_time());
+    }
+
+    #[test]
+    #[should_panic(expected = "discarding application space")]
+    fn drop_app() {
+        let mut tracker = AckTracker::default();
+        tracker.drop_space(PNSpace::ApplicationData);
+    }
+
+    #[test]
+    #[should_panic(expected = "dropping spaces out of order")]
+    fn drop_out_of_order() {
+        let mut tracker = AckTracker::default();
+        tracker.drop_space(PNSpace::Handshake);
+    }
+
+    #[test]
+    fn drop_spaces() {
+        let mut tracker = AckTracker::default();
+        if let Some(recvd) = tracker.get_mut(PNSpace::Initial) {
+            recvd.set_received(*NOW, 0, true);
+        } else {
+            panic!("no initial space");
+        }
+        assert!(tracker.ack_time().is_some());
+        let (_ack, token) = tracker.get_frame(*NOW, PNSpace::Initial).unwrap();
+        assert!(token.is_some());
+
+        // Now drop that space.
+        tracker.drop_space(PNSpace::Initial);
+
+        assert!(tracker.get_mut(PNSpace::Initial).is_none());
+        assert!(tracker.get_frame(*NOW, PNSpace::Initial).is_none());
+        assert!(tracker.ack_time().is_none());
+        if let RecoveryToken::Ack(tok) = token.as_ref().unwrap() {
+            tracker.acked(tok); // Should be a noop.
+        } else {
+            panic!("not an ACK token");
+        }
     }
 }

@@ -83,11 +83,7 @@ impl CongestionControl {
 
     // Multi-packet version of OnPacketAckedCC
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket]) {
-        for pkt in acked_pkts
-            .iter()
-            .filter(|pkt| pkt.in_flight)
-            .filter(|pkt| pkt.time_declared_lost.is_none())
-        {
+        for pkt in acked_pkts.iter().filter(|pkt| pkt.cc_outstanding()) {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
 
@@ -121,7 +117,7 @@ impl CongestionControl {
             return;
         }
 
-        for pkt in lost_packets.iter().filter(|pkt| pkt.in_flight) {
+        for pkt in lost_packets.iter().filter(|pkt| pkt.cc_in_flight()) {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
         }
@@ -150,7 +146,7 @@ impl CongestionControl {
     }
 
     pub fn discard(&mut self, pkt: &SentPacket) {
-        if pkt.in_flight && pkt.time_declared_lost.is_none() {
+        if pkt.cc_outstanding() {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
             qtrace!([self], "Ignore pkt with size {}", pkt.size);
@@ -163,7 +159,7 @@ impl CongestionControl {
             .unwrap()
             .spend(pkt.time_sent, rtt, self.congestion_window, pkt.size);
 
-        if !pkt.in_flight {
+        if !pkt.cc_in_flight() {
             return;
         }
 
@@ -211,7 +207,11 @@ impl CongestionControl {
 
     pub fn start_pacer(&mut self, now: Instant) {
         // Start the pacer with a small burst size of 2 packets.
-        self.pacer = Some(Pacer::new(now, MAX_DATAGRAM_SIZE * PACING_BURST_SIZE, MAX_DATAGRAM_SIZE));
+        self.pacer = Some(Pacer::new(
+            now,
+            MAX_DATAGRAM_SIZE * PACING_BURST_SIZE,
+            MAX_DATAGRAM_SIZE,
+        ));
     }
 
     pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {

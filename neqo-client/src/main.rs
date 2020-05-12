@@ -85,6 +85,10 @@ pub struct Args {
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
+    #[structopt(name = "download-in-series", long)]
+    /// Download resources in series using separate connections
+    download_in_series: bool,
+
     #[structopt(name = "output-read-data", long)]
     /// Output received data to stdout
     output_read_data: bool,
@@ -415,6 +419,10 @@ fn main() -> Res<()> {
             Ok(s) if s == "handshake" || s == "transfer" => {
                 args.use_old_http = true;
             }
+            Ok(s) if s == "multiconnect" => {
+                args.use_old_http = true;
+                args.download_in_series = true;
+            }
             Ok(_) => exit(127),
             Err(_) => exit(1),
         }
@@ -468,15 +476,26 @@ fn main() -> Res<()> {
                 &format!("{}", host),
                 &urls,
             )?;
-        } else {
+        } else if !args.download_in_series {
             old::old_client(
                 &args,
-                socket,
+                &socket,
                 local_addr,
                 remote_addr,
                 &format!("{}", host),
                 &urls,
             )?;
+        } else {
+            for url in urls {
+                old::old_client(
+                    &args,
+                    &socket,
+                    local_addr,
+                    remote_addr,
+                    &format!("{}", host),
+                    &[url],
+                )?;
+            }
         }
     }
 
@@ -500,7 +519,7 @@ mod old {
     use neqo_common::{matches, Datagram};
     use neqo_crypto::AuthenticationStatus;
     use neqo_transport::{
-        Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
+        Connection, ConnectionEvent, FixedConnectionIdManager, Output, State, StreamType,
     };
 
     use super::{emit_datagram, get_output_file, Args};
@@ -543,10 +562,10 @@ mod old {
                             .expect("Read should succeed");
 
                         let mut have_out_file = false;
-                        if let Some(out_file) = out_file {
+                        if let Some(Some(out_file)) = out_file {
                             have_out_file = true;
                             if sz > 0 {
-                                out_file.as_ref().unwrap().write_all(&data[..sz])?;
+                                out_file.write_all(&data[..sz])?;
                             }
                         } else if !args.output_read_data {
                             println!("READ[{}]: {} bytes", stream_id, sz);
@@ -595,10 +614,24 @@ mod old {
                 return Ok(client.state().clone());
             }
 
-            let exiting = !handler.handle(args, client)?;
+            let mut exiting = !handler.handle(args, client)?;
 
-            let out_dgram = client.process_output(Instant::now());
-            emit_datagram(&socket, out_dgram.dgram());
+            loop {
+                let output = client.process_output(Instant::now());
+                match output {
+                    Output::Datagram(dgram) => emit_datagram(&socket, Some(dgram)),
+                    Output::Callback(duration) => {
+                        socket.set_read_timeout(Some(duration)).unwrap();
+                        break;
+                    }
+                    Output::None => {
+                        // Not strictly necessary, since we're about to exit
+                        socket.set_read_timeout(None).unwrap();
+                        exiting = true;
+                        break;
+                    }
+                }
+            }
 
             if exiting {
                 return Ok(client.state().clone());
@@ -630,7 +663,7 @@ mod old {
 
     pub fn old_client(
         args: &Args,
-        socket: UdpSocket,
+        socket: &UdpSocket,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         origin: &str,

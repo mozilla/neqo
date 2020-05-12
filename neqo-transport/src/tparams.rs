@@ -92,11 +92,14 @@ impl TransportParameter {
             | INITIAL_MAX_STREAM_DATA_BIDI_LOCAL
             | INITIAL_MAX_STREAM_DATA_BIDI_REMOTE
             | INITIAL_MAX_STREAM_DATA_UNI
-            | INITIAL_MAX_STREAMS_BIDI
-            | INITIAL_MAX_STREAMS_UNI
             | MAX_ACK_DELAY => match d.decode_varint() {
                 Some(v) => Self::Integer(v),
                 None => return Err(Error::TransportParameterError),
+            },
+
+            INITIAL_MAX_STREAMS_BIDI | INITIAL_MAX_STREAMS_UNI => match d.decode_varint() {
+                Some(v) if v <= (1 << 60) => Self::Integer(v),
+                _ => return Err(Error::StreamLimitError),
             },
 
             MAX_PACKET_SIZE => match d.decode_varint() {
