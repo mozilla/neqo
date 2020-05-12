@@ -26,13 +26,13 @@ impl<'a> BitReader<'a> {
 
     pub fn read_bit(&mut self) -> Res<u8> {
         if self.input.len() == self.offset {
-            return Err(Error::NoMoreData);
+            return Err(Error::NeedMoreData);
         }
 
         if self.current_bit == 0 {
             self.offset += 1;
             if self.offset == self.input.len() {
-                return Err(Error::NoMoreData);
+                return Err(Error::NeedMoreData);
             }
             self.current_bit = 8;
         }
@@ -42,20 +42,20 @@ impl<'a> BitReader<'a> {
 
     pub fn verify_ending(&mut self, i: u8) -> Res<()> {
         if (i + self.current_bit) > 7 {
-            return Err(Error::DecompressionFailed);
+            return Err(Error::HuffmanDecompressionFailed);
         }
 
         if self.input.is_empty() {
             Ok(())
         } else if self.offset != self.input.len() {
-            Err(Error::DecompressionFailed)
+            Err(Error::HuffmanDecompressionFailed)
         } else if self.input[self.input.len() - 1] & ((0x1 << (i + self.current_bit)) - 1)
             == ((0x1 << (i + self.current_bit)) - 1)
         {
             self.current_bit = 0;
             Ok(())
         } else {
-            Err(Error::DecompressionFailed)
+            Err(Error::HuffmanDecompressionFailed)
         }
     }
 
@@ -66,14 +66,14 @@ impl<'a> BitReader<'a> {
 
 /// Decodes huffman encoded input.
 /// ### Errors
-/// This function may return `DecompressionFailed` if `input` is not a correct huffman-encoded array of bits.
+/// This function may return `HuffmanDecompressionFailed` if `input` is not a correct huffman-encoded array of bits.
 pub fn decode_huffman(input: &[u8]) -> Res<Vec<u8>> {
     let mut reader = BitReader::new(input);
     let mut output = Vec::new();
     while reader.has_more_data() {
         if let Some(c) = decode_character(&mut reader)? {
             if c == 256 {
-                return Err(Error::DecompressionFailed);
+                return Err(Error::HuffmanDecompressionFailed);
             }
             output.push(u8::try_from(c).unwrap());
         }
@@ -244,6 +244,9 @@ mod tests {
 
     #[test]
     fn decoder_error_wrong_ending() {
-        assert_eq!(decode_huffman(WRONG_END), Err(Error::DecompressionFailed));
+        assert_eq!(
+            decode_huffman(WRONG_END),
+            Err(Error::HuffmanDecompressionFailed)
+        );
     }
 }

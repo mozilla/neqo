@@ -48,13 +48,15 @@ pub enum Error {
     DecoderStream,
     ClosedCriticalStream,
 
-    // These are internal errors, they will be transfromed into one of the above.
+    // These are internal errors, they will be transformed into one of the above.
+    NeedMoreData, // Return when an input stream does not have more data that a decoder needs.(It does not mean that a stream is closed.)
     HeaderLookup,
-    NoMoreData,
+    HuffmanDecompressionFailed,
+    ToStringFailed,
     IntegerOverflow,
     WrongStreamCount,
-    Internal,
-    Decoding, // this will be translated into Encoder/DecoderStreamError or DecompressionFailed depending on the caller
+    Internal, //TODO to be removed when PR598 lands.
+    Decoding, // Decoding internal error that is not one of the above.
     EncoderStreamBlocked,
 
     TransportError(neqo_transport::Error),
