@@ -1279,7 +1279,7 @@ impl Connection {
             let limit = profile.limit() - tx.expansion();
             let (tokens, ack_eliciting) =
                 self.add_frames(&mut builder, *space, limit, &profile, now);
-            if builder.is_empty() {
+            if builder.len() == payload_start {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
                 continue;
@@ -3773,7 +3773,7 @@ mod tests {
     /// This fills the congestion window from a single source.
     /// As the pacer will interfere with this, this moves time forward
     /// as `Output::Callback` is received.  Because it is hard to tell
-    /// from the return value whether a timeout is to ACK delay, PTO, or
+    /// from the return value whether a timeout is an ACK delay, PTO, or
     /// pacing, this looks at the congestion window to tell when to stop.
     /// Returns a list of datagrams and the new time.
     fn fill_cwnd(src: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagram>, Instant) {

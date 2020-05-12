@@ -206,7 +206,7 @@ impl CongestionControl {
     }
 
     pub fn start_pacer(&mut self, now: Instant) {
-        // Start the pacer with a small burst size of 2 packets.
+        // Start the pacer with a small burst size.
         self.pacer = Some(Pacer::new(
             now,
             MAX_DATAGRAM_SIZE * PACING_BURST_SIZE,

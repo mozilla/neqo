@@ -90,7 +90,7 @@ impl Pacer {
         // Increase the capacity by:
         //    `(now - self.t) * PACER_SPEEDUP * cwnd / rtt`
         // That is, the elapsed fraction of the RTT times rate that data is added.
-        let incr = (now - self.t)
+        let incr = now.saturating_duration_since(self.t)
             .as_nanos()
             .saturating_mul(u128::try_from(cwnd * PACER_SPEEDUP).unwrap())
             .checked_div(rtt.as_nanos())
@@ -133,4 +133,14 @@ mod tests {
         p.spend(n, RTT, CWND, PACKET);
         assert_eq!(p.next(RTT, CWND), Some(n + (RTT / 10)));
     }
+
+    #[test]
+    fn backwards_in_time() {
+        let mut n = now();
+        let p = Pacer::new(n + RTT, PACKET, PACKET);
+        assert_eq!(p.next(RTT, CWND), None);
+        // Now spend some credit in the past using a time machine.
+        p.spend(n, RTT, CWND, PACKET);
+        assert_eq!(p.next(RTT, CWND), Some(n + (RTT / 10)));
+    } 
 }
