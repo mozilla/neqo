@@ -10,6 +10,7 @@ use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvent
 use crate::transaction_server::TransactionServer;
 use crate::{Error, Header, Res};
 use neqo_common::{qdebug, qinfo, qtrace};
+use neqo_qpack::QpackSettings;
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamType};
 use std::time::Instant;
 
@@ -27,9 +28,9 @@ impl ::std::fmt::Display for Http3ServerHandler {
 }
 
 impl Http3ServerHandler {
-    pub(crate) fn new(max_table_size: u64, max_blocked_streams: u16) -> Self {
+    pub(crate) fn new(qpack_settings: QpackSettings) -> Self {
         Self {
-            base_handler: Http3Connection::new(max_table_size, max_blocked_streams),
+            base_handler: Http3Connection::new(qpack_settings),
             events: Http3ServerConnEvents::default(),
             needs_processing: false,
         }

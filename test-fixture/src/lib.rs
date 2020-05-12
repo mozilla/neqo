@@ -10,6 +10,7 @@
 use neqo_common::matches;
 use neqo_crypto::{init_db, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Server};
+use neqo_qpack::QpackSettings;
 use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
 
 use std::cell::RefCell;
@@ -143,8 +144,11 @@ pub fn default_http3_client() -> Http3Client {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
-        100,
-        100,
+        QpackSettings {
+            max_table_size_encoder: 100,
+            max_table_size_decoder: 100,
+            max_blocked_streams: 100,
+        },
     )
     .expect("create a default client")
 }
@@ -159,8 +163,11 @@ pub fn default_http3_server() -> Http3Server {
         DEFAULT_ALPN,
         anti_replay(),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-        100,
-        100,
+        QpackSettings {
+            max_table_size_encoder: 100,
+            max_table_size_decoder: 100,
+            max_blocked_streams: 100,
+        },
     )
     .expect("create a default server")
 }
