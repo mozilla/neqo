@@ -31,7 +31,7 @@ const INITIAL_RTT: Duration = Duration::from_millis(100);
 const PACKET_THRESHOLD: u64 = 3;
 /// The number of packets we send on a PTO.
 /// And the number to declare lost when the PTO timer is hit.
-const PTO_PACKET_COUNT: usize = 2;
+pub const PTO_PACKET_COUNT: usize = 2;
 
 #[derive(Debug, Clone)]
 #[allow(clippy::module_name_repetitions)]
