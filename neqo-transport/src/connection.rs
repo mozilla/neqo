@@ -1279,7 +1279,7 @@ impl Connection {
             let limit = profile.limit() - tx.expansion();
             let (tokens, ack_eliciting) =
                 self.add_frames(&mut builder, *space, limit, &profile, now);
-            if builder.len() == payload_start {
+            if builder.is_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
                 continue;
