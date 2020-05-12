@@ -110,13 +110,14 @@ trait Handler {
     fn handle(&mut self, args: &Args, client: &mut Http3Client) -> Res<bool>;
 }
 
-fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) {
+fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) -> io::Result<()> {
     if let Some(d) = d {
-        let sent = socket.send(&d[..]).expect("Error sending datagram");
+        let sent = socket.send(&d[..])?;
         if sent != d.len() {
             eprintln!("Unable to send all {} bytes of datagram", d.len());
         }
     }
+    Ok(())
 }
 
 fn get_output_file(
@@ -179,7 +180,14 @@ fn process_loop(
         loop {
             let output = client.process_output(Instant::now());
             match output {
-                Output::Datagram(dgram) => emit_datagram(&socket, Some(dgram)),
+                Output::Datagram(dgram) => {
+                    if let Err(e) = emit_datagram(&socket, Some(dgram)) {
+                        eprintln!("UDP write error: {}", e);
+                        client.close(Instant::now(), 0, e.to_string());
+                        exiting = true;
+                        break;
+                    }
+                }
                 Output::Callback(duration) => {
                     socket.set_read_timeout(Some(duration)).unwrap();
                     break;
@@ -619,7 +627,14 @@ mod old {
             loop {
                 let output = client.process_output(Instant::now());
                 match output {
-                    Output::Datagram(dgram) => emit_datagram(&socket, Some(dgram)),
+                    Output::Datagram(dgram) => {
+                        if let Err(e) = emit_datagram(&socket, Some(dgram)) {
+                            eprintln!("UDP write error: {}", e);
+                            client.close(Instant::now(), 0, e.to_string());
+                            exiting = true;
+                            break;
+                        }
+                    }
                     Output::Callback(duration) => {
                         socket.set_read_timeout(Some(duration)).unwrap();
                         break;
