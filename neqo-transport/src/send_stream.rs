@@ -643,7 +643,7 @@ impl SendStream {
             return Err(Error::FinalSizeError);
         }
 
-        let buf = if (buf.len() == 0) || (self.avail() == 0) {
+        let buf = if buf.is_empty() || (self.avail() == 0) {
             return Ok(0);
         } else if self.avail() < buf.len() as u64 {
             self.send_blocked(buf.len() as u64);
