@@ -126,18 +126,23 @@ impl LossRecoverySpace {
         self.space
     }
 
+    /// Find the time we sent the first packet that isn't yet declared lost.
     #[must_use]
     pub fn earliest_sent_time(&self) -> Option<Instant> {
-        // Lowest PN must have been sent earliest
-        let earliest = self.sent_packets.values().next().map(|sp| sp.time_sent);
-        debug_assert_eq!(
-            earliest,
-            self.sent_packets
-                .values()
-                .min_by_key(|sp| sp.time_sent)
-                .map(|sp| sp.time_sent)
-        );
-        earliest
+        // Sent packets should be ordered by packet number, so pick the first that isn't lost.
+        for sent in self.sent_packets.values() {
+            if !sent.lost() {
+                debug_assert_eq!(
+                    Some(sent.time_sent),
+                    self.sent_packets
+                        .values()
+                        .filter_map(|sp| if sp.lost() { None } else { Some(sp.time_sent) })
+                        .min()
+                );
+                return Some(sent.time_sent);
+            }
+        }
+        None
     }
 
     pub fn ack_eliciting_outstanding(&self) -> bool {
@@ -232,7 +237,8 @@ impl LossRecoverySpace {
         // Packets sent before this time are deemed lost.
         let lost_deadline = now - loss_delay;
         qtrace!(
-            "detect lost packets = now {:?} loss delay {:?} lost_deadline {:?}",
+            "detect lost {} = now {:?} loss delay {:?} lost_deadline {:?}",
+            self.space,
             now,
             loss_delay,
             lost_deadline
