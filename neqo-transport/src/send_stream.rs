@@ -643,18 +643,18 @@ impl SendStream {
             return Err(Error::FinalSizeError);
         }
 
-        let can_send_bytes = min(self.avail(), buf.len() as u64);
-
-        if can_send_bytes == 0 {
+        let buf = if (buf.len() == 0) || (self.avail() == 0) {
             return Ok(0);
-        }
-
-        if atomic && (can_send_bytes < buf.len() as u64) {
+        } else if self.avail() < buf.len() as u64 {
             self.send_blocked(buf.len() as u64);
-            return Ok(0);
-        }
-
-        let buf = &buf[..can_send_bytes.try_into()?];
+            if atomic {
+                return Ok(0);
+            } else {
+                &buf[..self.avail() as usize]
+            }
+        } else {
+            buf
+        };
 
         let sent = match &mut self.state {
             SendStreamState::Ready => unreachable!(),
@@ -1271,15 +1271,44 @@ mod tests {
         // and will not accept atomic write of 3 bytes.
         assert_eq!(s.send_atomic(b"abc").unwrap(), 0);
 
+        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(
+            flow_mgr.borrow_mut().next().unwrap(),
+            Frame::StreamDataBlocked {
+                stream_id: 4.into(),
+                stream_data_limit: 0x2
+            }
+        );
+
         // assert non-atomic write works
         assert_eq!(s.send(b"abc").unwrap(), 2);
+        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(
+            flow_mgr.borrow_mut().next().unwrap(),
+            Frame::StreamDataBlocked {
+                stream_id: 4.into(),
+                stream_data_limit: 0x2
+            }
+        );
 
         // increasing to (conn:5, stream:10)
         s.set_max_stream_data(10);
         // will not accept atomic write of 4 bytes.
         assert_eq!(s.send_atomic(b"abcd").unwrap(), 0);
+
+        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(
+            flow_mgr.borrow_mut().next().unwrap(),
+            Frame::DataBlocked { data_limit: 0x5 }
+        );
+
         // assert non-atomic write works
         assert_eq!(s.send(b"abcd").unwrap(), 3);
+        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(
+            flow_mgr.borrow_mut().next().unwrap(),
+            Frame::DataBlocked { data_limit: 0x5 }
+        );
 
         // increasing to (conn:15, stream:15)
         s.set_max_stream_data(15);

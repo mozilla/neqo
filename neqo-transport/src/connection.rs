@@ -3385,10 +3385,14 @@ mod tests {
         for d in dgrams {
             assert_eq!(d.len(), PATH_MTU_V6);
             let frames = server.test_process_input(d, now);
-            assert!(matches!(
-                frames[0],
-                (Frame::Stream { .. }, PNSpace::ApplicationData)
-            ));
+            assert_eq!(
+                frames
+                    .iter()
+                    .filter(|i| matches!(i, (Frame::Stream { .. }, PNSpace::ApplicationData)))
+                    .collect::<Vec<_>>()
+                    .len(),
+                1
+            );
         }
     }
 
