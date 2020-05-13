@@ -4611,4 +4611,51 @@ mod tests {
         let res = client.process(None, now);
         assert_ne!(res.callback(), Duration::from_secs(0));
     }
+
+    /// When we declare a packet as lost, we keep it around for a while for another loss period.
+    /// Those packets should not affect how we report the loss recovery timer.
+    /// As the loss recovery timer based on RTT we use that to drive the state.
+    #[test]
+    fn lost_but_kept_and_lr_timer() {
+        const RTT: Duration = Duration::from_secs(1);
+        let mut client = default_client();
+        let mut server = default_server();
+        let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
+
+        // Two packets (p1, p2) are sent at around t=0.  The first is lost.
+        let _p1 = send_something(&mut client, now);
+        let p2 = send_something(&mut client, now);
+
+        // At t=RTT/2 the server receives the packet and ACKs it.
+        now += RTT / 2;
+        let ack = server.process(Some(p2), now).dgram();
+        assert!(ack.is_some());
+        // The client also sends another two packets (p3, p4), again losing the first.
+        let _p3 = send_something(&mut client, now);
+        let p4 = send_something(&mut client, now);
+
+        // At t=RTT the client receives the ACK and goes into timed loss recovery.
+        // The client doesn't call p1 lost at this stage, but it will soon.
+        now += RTT / 2;
+        let res = client.process(ack, now);
+        // The client should be on a loss recovery timer as p1 is missing.
+        let lr_timer = res.callback();
+        // Loss recovery timer should be RTT/8, but only check for 0 or >=RTT/2.
+        assert_ne!(lr_timer, Duration::from_secs(0));
+        assert!(lr_timer < (RTT / 2));
+        // The server also receives and acknowledges p4, again sending an ACK.
+        let ack = server.process(Some(p4), now).dgram();
+        assert!(ack.is_some());
+
+        // At t=RTT*3/2 the client should declare p1 to be lost.
+        now += RTT / 2;
+        // So the client will send the data from p1 again.
+        let res = client.process(None, now);
+        assert!(res.dgram().is_some());
+        // When the client processes the ACK, it should engage the
+        // loss recovery timer for p3, not p1 (even though it still tracks p1).
+        let res = client.process(ack, now);
+        let lr_timer2 = res.callback();
+        assert_eq!(lr_timer, lr_timer2);
+    }
 }
