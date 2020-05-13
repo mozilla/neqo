@@ -10,6 +10,8 @@ use neqo_common::qtrace;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 
+pub const ADDITIONAL_TABLE_ENTRY_SIZE: usize = 32;
+
 pub struct LookupResult {
     pub index: u64,
     pub static_table: bool,
@@ -31,8 +33,8 @@ impl DynamicTableEntry {
         self.refs == 0 && self.base < first_not_acked
     }
 
-    pub fn size(&self) -> u64 {
-        (self.name.len() + self.value.len() + 32) as u64
+    pub fn size(&self) -> usize {
+        self.name.len() + self.value.len() + ADDITIONAL_TABLE_ENTRY_SIZE
     }
 
     pub fn add_ref(&mut self) {
@@ -241,22 +243,40 @@ impl HeaderTable {
     }
 
     fn evict_to(&mut self, reduce: u64) -> bool {
+        self.evict_to_internal(reduce, false)
+    }
+
+    fn test_evict_to(&mut self, reduce: u64) -> bool {
+        self.evict_to_internal(reduce, true)
+    }
+
+    pub fn evict_to_internal(&mut self, reduce: u64, only_check: bool) -> bool {
         qtrace!(
             [self],
-            "reduce table to {}, currently used:{}",
+            "reduce table to {}, currently used:{} only_check:{}",
             reduce,
-            self.used
+            self.used,
+            only_check
         );
-        while (!self.dynamic.is_empty()) && self.used > reduce {
+        let mut used = self.used;
+        while (!self.dynamic.is_empty()) && used > reduce {
             if let Some(e) = self.dynamic.back() {
                 if !e.can_reduce(self.acked_inserts_cnt) {
                     return false;
                 }
-                self.used -= e.size();
-                self.dynamic.pop_back();
+                used -= u64::try_from(e.size()).unwrap();
+                if !only_check {
+                    self.used -= u64::try_from(e.size()).unwrap();
+                    self.dynamic.pop_back();
+                }
             }
         }
         true
+    }
+
+    pub fn insert_possible(&mut self, size: usize) -> bool {
+        u64::try_from(size).unwrap() <= self.capacity
+            && self.test_evict_to(self.capacity - u64::try_from(size).unwrap())
     }
 
     /// Insert a new entry.
@@ -271,11 +291,13 @@ impl HeaderTable {
             base: self.base,
             refs: 0,
         };
-        if entry.size() > self.capacity || !self.evict_to(self.capacity - entry.size()) {
+        if u64::try_from(entry.size()).unwrap() > self.capacity
+            || !self.evict_to(self.capacity - u64::try_from(entry.size()).unwrap())
+        {
             return Err(Error::DynamicTableFull);
         }
         self.base += 1;
-        self.used += entry.size();
+        self.used += u64::try_from(entry.size()).unwrap();
         let index = entry.index();
         self.dynamic.push_front(entry);
         Ok(index)

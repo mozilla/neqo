@@ -608,6 +608,26 @@ impl SendStream {
     }
 
     pub fn send(&mut self, buf: &[u8]) -> Res<usize> {
+        self.send_internal(buf, false)
+    }
+
+    pub fn send_atomic(&mut self, buf: &[u8]) -> Res<usize> {
+        self.send_internal(buf, true)
+    }
+
+    fn send_blocked(&mut self, len: u64) {
+        if self.credit_avail() < len {
+            self.flow_mgr
+                .borrow_mut()
+                .stream_data_blocked(self.stream_id, self.max_stream_data);
+        }
+
+        if self.flow_mgr.borrow().conn_credit_avail() < len {
+            self.flow_mgr.borrow_mut().data_blocked();
+        }
+    }
+
+    pub fn send_internal(&mut self, buf: &[u8], atomic: bool) -> Res<usize> {
         if buf.is_empty() {
             qerror!("zero-length send on stream {}", self.stream_id.as_u64());
             return Err(Error::InvalidInput);
@@ -623,13 +643,18 @@ impl SendStream {
             return Err(Error::FinalSizeError);
         }
 
-        let can_send_bytes = min(self.avail(), buf.len() as u64);
-
-        if can_send_bytes == 0 {
+        let buf = if buf.is_empty() || (self.avail() == 0) {
             return Ok(0);
-        }
-
-        let buf = &buf[..can_send_bytes.try_into()?];
+        } else if self.avail() < buf.len() as u64 {
+            self.send_blocked(buf.len() as u64);
+            if atomic {
+                return Ok(0);
+            } else {
+                &buf[..self.avail() as usize]
+            }
+        } else {
+            buf
+        };
 
         let sent = match &mut self.state {
             SendStreamState::Ready => unreachable!(),
@@ -1231,5 +1256,65 @@ mod tests {
         assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.offset == 0));
         assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.length == 10));
         assert!(matches!(&f4_token, Some(RecoveryToken::Stream(x)) if x.fin));
+    }
+
+    #[test]
+    fn send_atomic() {
+        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
+        flow_mgr.borrow_mut().conn_increase_max_credit(5);
+        let conn_events = ConnectionEvents::default();
+
+        let mut s = SendStream::new(4.into(), 0, Rc::clone(&flow_mgr), conn_events);
+        s.set_max_stream_data(2);
+
+        // Stream is initially blocked (conn:5, stream:2)
+        // and will not accept atomic write of 3 bytes.
+        assert_eq!(s.send_atomic(b"abc").unwrap(), 0);
+
+        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(
+            flow_mgr.borrow_mut().next().unwrap(),
+            Frame::StreamDataBlocked {
+                stream_id: 4.into(),
+                stream_data_limit: 0x2
+            }
+        );
+
+        // assert non-atomic write works
+        assert_eq!(s.send(b"abc").unwrap(), 2);
+        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(
+            flow_mgr.borrow_mut().next().unwrap(),
+            Frame::StreamDataBlocked {
+                stream_id: 4.into(),
+                stream_data_limit: 0x2
+            }
+        );
+
+        // increasing to (conn:5, stream:10)
+        s.set_max_stream_data(10);
+        // will not accept atomic write of 4 bytes.
+        assert_eq!(s.send_atomic(b"abcd").unwrap(), 0);
+
+        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(
+            flow_mgr.borrow_mut().next().unwrap(),
+            Frame::DataBlocked { data_limit: 0x5 }
+        );
+
+        // assert non-atomic write works
+        assert_eq!(s.send(b"abcd").unwrap(), 3);
+        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(
+            flow_mgr.borrow_mut().next().unwrap(),
+            Frame::DataBlocked { data_limit: 0x5 }
+        );
+
+        // increasing to (conn:15, stream:15)
+        s.set_max_stream_data(15);
+        flow_mgr.borrow_mut().conn_increase_max_credit(15);
+
+        // assert that atomic writing 10 byte works
+        assert_eq!(s.send_atomic(b"abcdefghij").unwrap(), 10);
     }
 }

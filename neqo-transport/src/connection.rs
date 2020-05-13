@@ -1495,11 +1495,6 @@ impl Connection {
         }
     }
 
-    // TODO: this should be #[cfg(test)], but it is not acceptable from a different crate.
-    pub fn handle_max_data_test(&mut self, maximum_data: u64) {
-        self.handle_max_data(maximum_data);
-    }
-
     fn input_frame(&mut self, ptype: PacketType, frame: Frame, now: Instant) -> Res<()> {
         if !frame.is_allowed(ptype) {
             qerror!("frame not allowed: {:?} {:?}", frame, ptype);
@@ -2092,6 +2087,16 @@ impl Connection {
     /// than total, based on receiver credit space available, etc.
     pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
         self.send_streams.get_mut(stream_id.into())?.send(data)
+    }
+
+    /// Send all data or nothing on a stream. If no data can be send DATA_BLOCKED or
+    /// STREAM_DATA_BLOCKED will be sent.
+    /// Returns how many bytes were successfully sent. It can only return 0 or exactly amount of data
+    /// supply in the buffer.
+    pub fn stream_send_atomic(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
+        self.send_streams
+            .get_mut(stream_id.into())?
+            .send_atomic(data)
     }
 
     /// Bytes that stream_send() is guaranteed to accept for sending.
@@ -3380,10 +3385,13 @@ mod tests {
         for d in dgrams {
             assert_eq!(d.len(), PATH_MTU_V6);
             let frames = server.test_process_input(d, now);
-            assert!(matches!(
-                frames[0],
-                (Frame::Stream { .. }, PNSpace::ApplicationData)
-            ));
+            assert_eq!(
+                frames
+                    .iter()
+                    .filter(|i| matches!(i, (Frame::Stream { .. }, PNSpace::ApplicationData)))
+                    .count(),
+                1
+            );
         }
     }
 
