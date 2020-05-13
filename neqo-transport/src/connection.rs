@@ -2102,7 +2102,7 @@ impl Connection {
     /// Bytes that stream_send() is guaranteed to accept for sending.
     /// i.e. that will not be blocked by flow credits or send buffer max
     /// capacity.
-    pub fn stream_avail_send_space(&self, stream_id: u64) -> Res<u64> {
+    pub fn stream_avail_send_space(&self, stream_id: u64) -> Res<usize> {
         Ok(self.send_streams.get(stream_id.into())?.avail())
     }
 
@@ -2174,6 +2174,7 @@ mod tests {
     use crate::path::PATH_MTU_V6;
     use crate::recovery::PTO_PACKET_COUNT;
     use crate::tracking::MAX_UNACKED_PKTS;
+    use std::convert::TryInto;
 
     use neqo_common::matches;
     use std::mem;
@@ -3088,12 +3089,12 @@ mod tests {
         let mut client = default_client();
         let mut server = default_server();
 
-        const SMALL_MAX_DATA: u64 = 16383;
+        const SMALL_MAX_DATA: usize = 16383;
 
         server
             .set_local_tparam(
                 tparams::INITIAL_MAX_DATA,
-                TransportParameter::Integer(SMALL_MAX_DATA),
+                TransportParameter::Integer(SMALL_MAX_DATA.try_into().unwrap()),
             )
             .unwrap();
 
@@ -3109,7 +3110,7 @@ mod tests {
             client
                 .stream_send(stream_id, &[b'a'; RX_STREAM_DATA_WINDOW as usize])
                 .unwrap(),
-            usize::try_from(SMALL_MAX_DATA).unwrap()
+            SMALL_MAX_DATA
         );
         let evts = client.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 2); // SendStreamWritable, StateChange(connected)

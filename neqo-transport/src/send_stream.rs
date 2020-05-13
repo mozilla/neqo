@@ -571,11 +571,13 @@ impl SendStream {
 
     /// Bytes sendable on stream. Constrained by stream credit available,
     /// connection credit available, and space in the tx buffer.
-    pub fn avail(&self) -> u64 {
+    pub fn avail(&self) -> usize {
         min(
             min(self.state.tx_avail(), self.credit_avail()),
             self.flow_mgr.borrow().conn_credit_avail(),
         )
+        .try_into()
+        .unwrap()
     }
 
     pub fn max_stream_data(&self) -> u64 {
@@ -645,12 +647,12 @@ impl SendStream {
 
         let buf = if buf.is_empty() || (self.avail() == 0) {
             return Ok(0);
-        } else if self.avail() < buf.len() as u64 {
+        } else if self.avail() < buf.len() {
             self.send_blocked(buf.len() as u64);
             if atomic {
                 return Ok(0);
             } else {
-                &buf[..self.avail() as usize]
+                &buf[..self.avail()]
             }
         } else {
             buf
@@ -1125,7 +1127,7 @@ mod tests {
 
         // Unblocking both by a large amount will cause avail() to be limited by
         // tx buffer size.
-        assert_eq!(s.avail(), u64::try_from(TxBuffer::BUFFER_SIZE - 4).unwrap());
+        assert_eq!(s.avail(), TxBuffer::BUFFER_SIZE - 4);
 
         assert_eq!(
             s.send(&[b'a'; TxBuffer::BUFFER_SIZE]).unwrap(),
