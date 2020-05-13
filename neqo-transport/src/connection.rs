@@ -710,7 +710,7 @@ impl Connection {
         }
 
         let mut delays = SmallVec::<[_; 4]>::new();
-        if let Some(ack_time) = self.acks.ack_time() {
+        if let Some(ack_time) = self.acks.ack_time(now) {
             qtrace!([self], "Delayed ACK timer {:?}", ack_time);
             delays.push(ack_time);
         }
