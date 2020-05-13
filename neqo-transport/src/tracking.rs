@@ -720,14 +720,20 @@ mod tests {
     #[test]
     fn drop_spaces() {
         let mut tracker = AckTracker::default();
-        tracker.get_mut(PNSpace::Initial).unwrap().set_received(*NOW, 0, true);
+        tracker
+            .get_mut(PNSpace::Initial)
+            .unwrap()
+            .set_received(*NOW, 0, true);
         // The reference time for `ack_time` has to be in the past or we filter out the timer.
         assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
         let (_ack, token) = tracker.get_frame(*NOW, PNSpace::Initial).unwrap();
         assert!(token.is_some());
 
         // Mark another packet as received so we have cause to send another ACK in that space.
-        tracker.get_mut(PNSpace::Initial).unwrap().set_received(*NOW, 1, true);
+        tracker
+            .get_mut(PNSpace::Initial)
+            .unwrap()
+            .set_received(*NOW, 1, true);
         assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
 
         // Now drop that space.
@@ -749,7 +755,10 @@ mod tests {
 
         // While we have multiple PN spaces, we ignore ACK timers from the past.
         // Send out of order to cause the delayed ack timer to be set to `*NOW`.
-        tracker.get_mut(PNSpace::ApplicationData).unwrap().set_received(*NOW, 3, true);
+        tracker
+            .get_mut(PNSpace::ApplicationData)
+            .unwrap()
+            .set_received(*NOW, 3, true);
         assert!(tracker.ack_time(*NOW + Duration::from_millis(1)).is_none());
 
         // When we are reduced to one space, that filter is off.
