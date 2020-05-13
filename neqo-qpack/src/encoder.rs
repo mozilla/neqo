@@ -223,10 +223,9 @@ impl QPackEncoder {
             return Err(Error::EncoderStreamBlocked);
         }
 
-        let entry_size =
-            u64::try_from(name.len() + value.len() + ADDITIONAL_TABLE_ENTRY_SIZE).unwrap();
+        let entry_size = name.len() + value.len() + ADDITIONAL_TABLE_ENTRY_SIZE;
 
-        if !self.table.check_insert_possible(entry_size) {
+        if !self.table.insert_possible(entry_size) {
             return Err(Error::DynamicTableFull);
         }
 

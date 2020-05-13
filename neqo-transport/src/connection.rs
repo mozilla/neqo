@@ -3389,8 +3389,7 @@ mod tests {
                 frames
                     .iter()
                     .filter(|i| matches!(i, (Frame::Stream { .. }, PNSpace::ApplicationData)))
-                    .collect::<Vec<_>>()
-                    .len(),
+                    .count(),
                 1
             );
         }
