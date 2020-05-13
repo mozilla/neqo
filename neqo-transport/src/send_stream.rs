@@ -629,7 +629,7 @@ impl SendStream {
         }
     }
 
-    pub fn send_internal(&mut self, buf: &[u8], atomic: bool) -> Res<usize> {
+    fn send_internal(&mut self, buf: &[u8], atomic: bool) -> Res<usize> {
         if buf.is_empty() {
             qerror!("zero-length send on stream {}", self.stream_id.as_u64());
             return Err(Error::InvalidInput);
