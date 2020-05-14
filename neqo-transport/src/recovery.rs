@@ -126,23 +126,25 @@ impl LossRecoverySpace {
         self.space
     }
 
-    /// Find the time we sent the first packet that isn't yet declared lost.
+    /// Find the time we sent the first packet that is lower than the
+    /// largest acknowledged and that isn't yet declared lost.
+    /// The logic here needs to match the logic in `detect_lost_packets`.
     #[must_use]
-    pub fn earliest_sent_time(&self) -> Option<Instant> {
-        // Sent packets should be ordered by packet number, so pick the first that isn't lost.
-        for sent in self.sent_packets.values() {
-            if !sent.lost() {
-                debug_assert_eq!(
-                    Some(sent.time_sent),
-                    self.sent_packets
-                        .values()
-                        .filter_map(|sp| if sp.lost() { None } else { Some(sp.time_sent) })
-                        .min()
-                );
-                return Some(sent.time_sent);
-            }
-        }
-        None
+    pub fn loss_recovery_timer_start(&self) -> Option<Instant> {
+        let largest_acked = self.largest_acked;
+        self.sent_packets
+            .iter()
+            // Note that largest_acked is Option<u64>, and None always compares low,
+            // so this stops immediately if there are no acknowledged packets.
+            .take_while(|(&k, _)| Some(k) < largest_acked)
+            // Sent packets should be ordered by packet number, so pick the first.
+            .find_map(|(_, sent)| {
+                if sent.lost() {
+                    None
+                } else {
+                    Some(sent.time_sent)
+                }
+            })
     }
 
     pub fn ack_eliciting_outstanding(&self) -> bool {
@@ -596,7 +598,7 @@ impl LossRecovery {
         if self.enable_timed_loss_detection {
             self.spaces
                 .iter()
-                .filter_map(LossRecoverySpace::earliest_sent_time)
+                .filter_map(LossRecoverySpace::loss_recovery_timer_start)
                 .min()
                 .map(|val| val + self.loss_delay())
         } else {
@@ -627,7 +629,7 @@ impl LossRecovery {
     }
 
     /// Find the earliest PTO time for all active packet number spaces.
-    /// Only consider Initial and Handshake spaces if those have a PTO active.
+    /// Ignore Application if either Initial or Handshake have an active PTO.
     fn earliest_pto(&self) -> Option<Instant> {
         self.pto_time(PNSpace::Initial)
             .iter()
@@ -747,7 +749,7 @@ mod tests {
         let est = |sp| {
             lr.spaces
                 .get(sp)
-                .map(LossRecoverySpace::earliest_sent_time)
+                .map(LossRecoverySpace::loss_recovery_timer_start)
                 .flatten()
         };
         println!(

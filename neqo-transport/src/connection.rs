@@ -4695,8 +4695,10 @@ mod tests {
 
     /// We should not be setting the loss recovery timer based on packets
     /// that are sent prior to the largest acknowledged.
-    /// This requires that there be a gap in one packet number space so that
-    /// the packets sent in another space can be counted.
+    /// Testing this requires that we construct a case where one packet
+    /// number space causes the loss recovery timer to be engaged.  At the same time,
+    /// there is a packet in another space that hasn't been acknowledged AND
+    /// that packet number space has not received acknowledgments for later packets.
     #[test]
     fn loss_time_past_largest_acked() {
         const RTT: Duration = Duration::from_secs(10);
@@ -4773,8 +4775,6 @@ mod tests {
         // mark packets as lost and retransmit, after which we should be on the PTO
         // timer.
         now += lr_time;
-        let retrans = client.process(None, now).dgram();
-        assert!(retrans.is_some());
         let delay = client.process(None, now).callback();
         assert_ne!(delay, Duration::from_secs(0));
         assert!(delay > lr_time);
