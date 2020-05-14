@@ -4706,7 +4706,6 @@ mod tests {
         let mut client = default_client();
         let mut server = default_server();
 
-        // Maintain a timer for each endpoint.
         let mut now = now();
 
         // Start the handshake.
