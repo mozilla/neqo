@@ -237,7 +237,7 @@ impl LossRecoverySpace {
         // Packets sent before this time are deemed lost.
         let lost_deadline = now - loss_delay;
         qtrace!(
-            "detect lost {} = now {:?} loss delay {:?} lost_deadline {:?}",
+            "detect lost {}: now={:?} delay={:?} deadline={:?}",
             self.space,
             now,
             loss_delay,
