@@ -105,7 +105,10 @@ pub(crate) struct LossRecoverySpace {
     time_of_last_sent_ack_eliciting_packet: Option<Instant>,
     ack_eliciting_outstanding: u64,
     sent_packets: BTreeMap<u64, SentPacket>,
-    out_of_order_found: bool,
+    /// The time that the first out-of-order packet was sent.
+    /// This is `None` if there were no out-of-order packets detected.
+    /// When set to `Some(T)`, time-based loss detection should be enabled.
+    first_ooo_time: Option<Instant>,
 }
 
 impl LossRecoverySpace {
@@ -117,7 +120,7 @@ impl LossRecoverySpace {
             time_of_last_sent_ack_eliciting_packet: None,
             ack_eliciting_outstanding: 0,
             sent_packets: BTreeMap::default(),
-            out_of_order_found: false,
+            first_ooo_time: None,
         }
     }
 
@@ -131,20 +134,7 @@ impl LossRecoverySpace {
     /// The logic here needs to match the logic in `detect_lost_packets`.
     #[must_use]
     pub fn loss_recovery_timer_start(&self) -> Option<Instant> {
-        let largest_acked = self.largest_acked;
-        self.sent_packets
-            .iter()
-            // Note that largest_acked is Option<u64>, and None always compares low,
-            // so this stops immediately if there are no acknowledged packets.
-            .take_while(|(&k, _)| Some(k) < largest_acked)
-            // Sent packets should be ordered by packet number, so pick the first.
-            .find_map(|(_, sent)| {
-                if sent.lost() {
-                    None
-                } else {
-                    Some(sent.time_sent)
-                }
-            })
+        self.first_ooo_time
     }
 
     pub fn ack_eliciting_outstanding(&self) -> bool {
@@ -226,8 +216,9 @@ impl LossRecoverySpace {
     }
 
     /// This returns a boolean indicating whether out-of-order packets were found.
+    #[must_use]
     pub fn has_out_of_order(&self) -> bool {
-        self.out_of_order_found
+        self.first_ooo_time.is_some()
     }
 
     pub fn detect_lost_packets(
@@ -245,7 +236,7 @@ impl LossRecoverySpace {
             loss_delay,
             lost_deadline
         );
-        self.out_of_order_found = false;
+        self.first_ooo_time = None;
 
         let largest_acked = self.largest_acked;
 
@@ -276,7 +267,7 @@ impl LossRecoverySpace {
                     largest_acked
                 );
             } else {
-                self.out_of_order_found = true;
+                self.first_ooo_time = Some(packet.time_sent);
                 // No more packets can be declared lost after this one.
                 break;
             };
