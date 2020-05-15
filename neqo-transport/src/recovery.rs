@@ -167,7 +167,10 @@ pub(crate) struct LossRecoverySpace {
     time_of_last_sent_ack_eliciting_packet: Option<Instant>,
     ack_eliciting_outstanding: u64,
     sent_packets: BTreeMap<u64, SentPacket>,
-    out_of_order_found: bool,
+    /// The time that the first out-of-order packet was sent.
+    /// This is `None` if there were no out-of-order packets detected.
+    /// When set to `Some(T)`, time-based loss detection should be enabled.
+    first_ooo_time: Option<Instant>,
 }
 
 impl LossRecoverySpace {
@@ -179,7 +182,7 @@ impl LossRecoverySpace {
             time_of_last_sent_ack_eliciting_packet: None,
             ack_eliciting_outstanding: 0,
             sent_packets: BTreeMap::default(),
-            out_of_order_found: false,
+            first_ooo_time: None,
         }
     }
 
@@ -188,18 +191,12 @@ impl LossRecoverySpace {
         self.space
     }
 
+    /// Find the time we sent the first packet that is lower than the
+    /// largest acknowledged and that isn't yet declared lost.
+    /// Use the value we prepared earlier in `detect_lost_packets`.
     #[must_use]
-    pub fn earliest_sent_time(&self) -> Option<Instant> {
-        // Lowest PN must have been sent earliest
-        let earliest = self.sent_packets.values().next().map(|sp| sp.time_sent);
-        debug_assert_eq!(
-            earliest,
-            self.sent_packets
-                .values()
-                .min_by_key(|sp| sp.time_sent)
-                .map(|sp| sp.time_sent)
-        );
-        earliest
+    pub fn loss_recovery_timer_start(&self) -> Option<Instant> {
+        self.first_ooo_time
     }
 
     pub fn ack_eliciting_outstanding(&self) -> bool {
@@ -280,11 +277,6 @@ impl LossRecoverySpace {
             .map(|(_, v)| v)
     }
 
-    /// This returns a boolean indicating whether out-of-order packets were found.
-    pub fn has_out_of_order(&self) -> bool {
-        self.out_of_order_found
-    }
-
     pub fn detect_lost_packets(
         &mut self,
         now: Instant,
@@ -294,12 +286,13 @@ impl LossRecoverySpace {
         // Packets sent before this time are deemed lost.
         let lost_deadline = now - loss_delay;
         qtrace!(
-            "detect lost packets = now {:?} loss delay {:?} lost_deadline {:?}",
+            "detect lost {}: now={:?} delay={:?} deadline={:?}",
+            self.space,
             now,
             loss_delay,
             lost_deadline
         );
-        self.out_of_order_found = false;
+        self.first_ooo_time = None;
 
         let largest_acked = self.largest_acked;
 
@@ -330,7 +323,7 @@ impl LossRecoverySpace {
                     largest_acked
                 );
             } else {
-                self.out_of_order_found = true;
+                self.first_ooo_time = Some(packet.time_sent);
                 // No more packets can be declared lost after this one.
                 break;
             };
@@ -453,7 +446,6 @@ pub(crate) struct LossRecovery {
     rtt_vals: RttVals,
     cc: CongestionControl,
 
-    enable_timed_loss_detection: bool,
     spaces: LossRecoverySpaces,
 }
 
@@ -468,7 +460,6 @@ impl LossRecovery {
             },
             pto_state: None,
             cc: CongestionControl::default(),
-            enable_timed_loss_detection: false,
             spaces: LossRecoverySpaces::new(),
         }
     }
@@ -650,15 +641,11 @@ impl LossRecovery {
 
     /// Find when the earliest sent packet should be considered lost.
     fn earliest_loss_time(&self) -> Option<Instant> {
-        if self.enable_timed_loss_detection {
-            self.spaces
-                .iter()
-                .filter_map(LossRecoverySpace::earliest_sent_time)
-                .min()
-                .map(|val| val + self.loss_delay())
-        } else {
-            None
-        }
+        self.spaces
+            .iter()
+            .filter_map(LossRecoverySpace::loss_recovery_timer_start)
+            .min()
+            .map(|val| val + self.loss_delay())
     }
 
     /// Get the Base PTO value, which is derived only from the `RTT` and `RTTvar` values.
@@ -684,7 +671,7 @@ impl LossRecovery {
     }
 
     /// Find the earliest PTO time for all active packet number spaces.
-    /// Only consider Initial and Handshake spaces if those have a PTO active.
+    /// Ignore Application if either Initial or Handshake have an active PTO.
     fn earliest_pto(&self) -> Option<Instant> {
         self.pto_time(PNSpace::Initial)
             .iter()
@@ -743,8 +730,6 @@ impl LossRecovery {
             )
         }
 
-        self.enable_timed_loss_detection =
-            self.spaces.iter().any(LossRecoverySpace::has_out_of_order);
         self.maybe_fire_pto(now, &mut lost_packets);
         lost_packets
     }
@@ -822,13 +807,10 @@ mod tests {
         handshake: Option<Instant>,
         app_data: Option<Instant>,
     ) {
-        if !lr.enable_timed_loss_detection {
-            return;
-        }
         let est = |sp| {
             lr.spaces
                 .get(sp)
-                .map(LossRecoverySpace::earliest_sent_time)
+                .map(LossRecoverySpace::loss_recovery_timer_start)
                 .flatten()
         };
         println!(
@@ -1115,6 +1097,19 @@ mod tests {
             0,
             SentPacket::new(pn_time(2), true, Vec::new(), ON_SENT_SIZE, true),
         );
+
+        // Now put all spaces on the LR timer so we can see them.
+        let pkt = SentPacket::new(pn_time(3), true, vec![], ON_SENT_SIZE, true);
+        for sp in PNSpace::iter() {
+            lr.on_packet_sent(*sp, 1, pkt.clone());
+            lr.on_ack_received(*sp, 1, vec![(1, 1)], Duration::from_secs(0), pn_time(3));
+            let mut lost = Vec::new();
+            lr.spaces
+                .get_mut(*sp)
+                .unwrap()
+                .detect_lost_packets(pn_time(3), INITIAL_RTT, &mut lost);
+            assert!(lost.is_empty());
+        }
 
         lr.discard(PNSpace::Initial);
         assert_sent_times(&lr, None, Some(pn_time(1)), Some(pn_time(2)));

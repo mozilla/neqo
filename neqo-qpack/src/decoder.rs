@@ -10,8 +10,7 @@ use crate::header_block::{HeaderDecoder, HeaderDecoderResult};
 use crate::qpack_send_buf::QPData;
 use crate::reader::ReceiverConnWrapper;
 use crate::table::HeaderTable;
-use crate::Header;
-use crate::{Error, Res};
+use crate::{Error, Header, QpackSettings, Res};
 use neqo_common::qdebug;
 use neqo_transport::Connection;
 use std::convert::TryInto;
@@ -22,7 +21,7 @@ pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
 pub struct QPackDecoder {
     instruction_reader: EncoderInstructionReader,
     table: HeaderTable,
-    total_num_of_inserts: u64,
+    acked_inserts: u64,
     max_entries: u64,
     send_buf: QPData,
     local_stream_id: Option<u64>,
@@ -34,18 +33,18 @@ pub struct QPackDecoder {
 
 impl QPackDecoder {
     #[must_use]
-    pub fn new(max_table_size: u64, max_blocked_streams: u16) -> Self {
+    pub fn new(qpack_settings: QpackSettings) -> Self {
         qdebug!("Decoder: creating a new qpack decoder.");
         Self {
             instruction_reader: EncoderInstructionReader::new(),
             table: HeaderTable::new(false),
-            total_num_of_inserts: 0,
-            max_entries: max_table_size >> 5,
+            acked_inserts: 0,
+            max_entries: qpack_settings.max_table_size_decoder >> 5,
             send_buf: QPData::default(),
             local_stream_id: None,
             remote_stream_id: None,
-            max_table_size,
-            max_blocked_streams: max_blocked_streams.try_into().unwrap(),
+            max_table_size: qpack_settings.max_table_size_decoder,
+            max_blocked_streams: qpack_settings.max_blocked_streams.try_into().unwrap(),
             blocked_streams: Vec::new(),
         }
     }
@@ -102,20 +101,25 @@ impl QPackDecoder {
         match instruction {
             DecodedEncoderInstruction::Capacity { value } => self.set_capacity(value)?,
             DecodedEncoderInstruction::InsertWithNameRefStatic { index, value } => {
-                self.table.insert_with_name_ref(true, index, &value)?;
-                self.total_num_of_inserts += 1;
+                self.table
+                    .insert_with_name_ref(true, index, &value)
+                    .map_err(|_| Error::EncoderStream)?;
             }
             DecodedEncoderInstruction::InsertWithNameRefDynamic { index, value } => {
-                self.table.insert_with_name_ref(false, index, &value)?;
-                self.total_num_of_inserts += 1;
+                self.table
+                    .insert_with_name_ref(false, index, &value)
+                    .map_err(|_| Error::EncoderStream)?;
             }
             DecodedEncoderInstruction::InsertWithNameLiteral { name, value } => {
-                self.table.insert(&name, &value).map(|_| ())?;
-                self.total_num_of_inserts += 1;
+                self.table
+                    .insert(&name, &value)
+                    .map(|_| ())
+                    .map_err(|_| Error::EncoderStream)?;
             }
             DecodedEncoderInstruction::Duplicate { index } => {
-                self.table.duplicate(index)?;
-                self.total_num_of_inserts += 1;
+                self.table
+                    .duplicate(index)
+                    .map_err(|_| Error::EncoderStream)?;
             }
             DecodedEncoderInstruction::NoInstruction => {
                 unreachable!("This can be call only with an instruction.")
@@ -134,11 +138,8 @@ impl QPackDecoder {
 
     fn header_ack(&mut self, stream_id: u64, required_inserts: u64) {
         DecoderInstruction::HeaderAck { stream_id }.marshal(&mut self.send_buf);
-        if required_inserts > self.table.get_acked_inserts_cnt() {
-            let ack_increment_delta = required_inserts - self.table.get_acked_inserts_cnt();
-            self.table
-                .increment_acked(ack_increment_delta)
-                .expect("This should never happen");
+        if required_inserts > self.acked_inserts {
+            self.acked_inserts = required_inserts;
         }
     }
 
@@ -150,15 +151,15 @@ impl QPackDecoder {
     ///     May return an error in case of any transport error. TODO: define transport errors.
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         // Encode increment instruction if needed.
-        let increment = self.total_num_of_inserts - self.table.get_acked_inserts_cnt();
+        let increment = self.table.base() - self.acked_inserts;
         if increment > 0 {
             DecoderInstruction::InsertCountIncrement { increment }.marshal(&mut self.send_buf);
-            self.table
-                .increment_acked(increment)
-                .expect("This should never happen");
+            self.acked_inserts = self.table.base();
         }
         if self.send_buf.len() != 0 && self.local_stream_id.is_some() {
-            let r = conn.stream_send(self.local_stream_id.unwrap(), &self.send_buf[..])?;
+            let r = conn
+                .stream_send(self.local_stream_id.unwrap(), &self.send_buf[..])
+                .map_err(|_| Error::DecoderStream)?;
             qdebug!([self], "{} bytes sent.", r);
             self.send_buf.read(r as usize);
         }
@@ -173,8 +174,7 @@ impl QPackDecoder {
         qdebug!([self], "decode header block.");
         let mut decoder = HeaderDecoder::new(buf);
 
-        match decoder.decode_header_block(&self.table, self.max_entries, self.total_num_of_inserts)
-        {
+        match decoder.decode_header_block(&self.table, self.max_entries, self.table.base()) {
             Ok(HeaderDecoderResult::Blocked(req_insert_cnt)) => {
                 self.blocked_streams.push((stream_id, req_insert_cnt));
                 if self.blocked_streams.len() > self.max_blocked_streams {
@@ -248,6 +248,7 @@ fn map_error(err: &Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::{Connection, Error, Header, QPackDecoder, Res};
+    use crate::QpackSettings;
     use neqo_transport::StreamType;
     use std::convert::TryInto;
     use test_fixture::now;
@@ -268,7 +269,11 @@ mod tests {
         let send_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
 
         // create a decoder
-        let mut decoder = QPackDecoder::new(300, 100);
+        let mut decoder = QPackDecoder::new(QpackSettings {
+            max_table_size_encoder: 0,
+            max_table_size_decoder: 300,
+            max_blocked_streams: 100,
+        });
         decoder.add_send_stream(send_stream_id);
 
         TestDecoder {
@@ -351,7 +356,7 @@ mod tests {
         test_instruction(
             0,
             &[0xc4, 0x04, 0x31, 0x32, 0x33, 0x34],
-            &Err(Error::DecoderStream),
+            &Err(Error::EncoderStream),
             &[0x03],
             0,
         );

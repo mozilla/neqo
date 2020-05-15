@@ -24,6 +24,7 @@ use structopt::StructOpt;
 use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Http3Server, Http3ServerEvent};
+use neqo_qpack::QpackSettings;
 use neqo_transport::{FixedConnectionIdManager, Output};
 
 const TIMER_TOKEN: Token = Token(0xffff_ffff);
@@ -35,8 +36,11 @@ struct Args {
     #[structopt(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[structopt(short = "t", long, default_value = "128")]
-    max_table_size: u64,
+    #[structopt(name = "encoder-table-size", short = "e", long, default_value = "128")]
+    max_table_size_encoder: u64,
+
+    #[structopt(name = "decoder-table-size", short = "d", long, default_value = "128")]
+    max_table_size_decoder: u64,
 
     #[structopt(short = "b", long, default_value = "128")]
     max_blocked_streams: u16,
@@ -221,8 +225,11 @@ fn main() -> Result<(), io::Error> {
                         AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
                             .expect("unable to setup anti-replay"),
                         Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-                        args.max_table_size,
-                        args.max_blocked_streams,
+                        QpackSettings {
+                            max_table_size_encoder: args.max_table_size_encoder,
+                            max_table_size_decoder: args.max_table_size_decoder,
+                            max_blocked_streams: args.max_blocked_streams,
+                        },
                     )
                     .expect("We cannot make a server!");
                     svr.set_qlog_dir(args.qlog_dir.clone());

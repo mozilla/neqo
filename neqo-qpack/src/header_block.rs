@@ -192,7 +192,7 @@ impl Deref for HeaderEncoder {
     }
 }
 
-pub struct HeaderDecoder<'a> {
+pub(crate) struct HeaderDecoder<'a> {
     buf: ReceiverBufferWrapper<'a>,
     base: u64,
     req_insert_cnt: u64,
@@ -225,7 +225,8 @@ impl<'a> HeaderDecoder<'a> {
         max_entries: u64,
         total_num_of_inserts: u64,
     ) -> Res<HeaderDecoderResult> {
-        self.read_base(max_entries, total_num_of_inserts)?;
+        self.read_base(max_entries, total_num_of_inserts)
+            .map_err(|_| Error::DecompressionFailed)?;
 
         if table.base() < self.req_insert_cnt {
             qtrace!(
@@ -238,21 +239,42 @@ impl<'a> HeaderDecoder<'a> {
         let mut h: Vec<Header> = Vec::new();
 
         while !self.buf.done() {
-            let b = self.buf.peek()?;
+            let b = self.buf.peek().map_err(|_| Error::DecompressionFailed)?;
             if HEADER_FIELD_INDEX_STATIC.cmp_prefix(b) {
-                h.push(self.read_indexed_static()?);
+                h.push(
+                    self.read_indexed_static()
+                        .map_err(|_| Error::DecompressionFailed)?,
+                );
             } else if HEADER_FIELD_INDEX_DYNAMIC.cmp_prefix(b) {
-                h.push(self.read_indexed_dynamic(table)?);
+                h.push(
+                    self.read_indexed_dynamic(table)
+                        .map_err(|_| Error::DecompressionFailed)?,
+                );
             } else if HEADER_FIELD_INDEX_DYNAMIC_POST.cmp_prefix(b) {
-                h.push(self.read_indexed_dynamic_post(table)?);
+                h.push(
+                    self.read_indexed_dynamic_post(table)
+                        .map_err(|_| Error::DecompressionFailed)?,
+                );
             } else if HEADER_FIELD_LITERAL_NAME_REF_STATIC.cmp_prefix(b) {
-                h.push(self.read_literal_with_name_ref_static()?);
+                h.push(
+                    self.read_literal_with_name_ref_static()
+                        .map_err(|_| Error::DecompressionFailed)?,
+                );
             } else if HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC.cmp_prefix(b) {
-                h.push(self.read_literal_with_name_ref_dynamic(table)?);
+                h.push(
+                    self.read_literal_with_name_ref_dynamic(table)
+                        .map_err(|_| Error::DecompressionFailed)?,
+                );
             } else if HEADER_FIELD_LITERAL_NAME_LITERAL.cmp_prefix(b) {
-                h.push(self.read_literal_with_name_literal()?);
+                h.push(
+                    self.read_literal_with_name_literal()
+                        .map_err(|_| Error::DecompressionFailed)?,
+                );
             } else if HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST.cmp_prefix(b) {
-                h.push(self.read_literal_with_name_ref_dynamic_post(table)?);
+                h.push(
+                    self.read_literal_with_name_ref_dynamic_post(table)
+                        .map_err(|_| Error::DecompressionFailed)?,
+                );
             } else {
                 unreachable!("All prefixes are covered");
             }
@@ -319,7 +341,6 @@ impl<'a> HeaderDecoder<'a> {
             .buf
             .read_prefixed_int(HEADER_FIELD_INDEX_STATIC.len())?;
         qtrace!([self], "decoder static indexed {}.", index);
-
         let entry = HeaderTable::get_static(index)?;
         Ok((to_string(entry.name())?, to_string(entry.value())?))
     }
