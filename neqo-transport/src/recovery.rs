@@ -215,12 +215,6 @@ impl LossRecoverySpace {
             .map(|(_, v)| v)
     }
 
-    /// This returns a boolean indicating whether out-of-order packets were found.
-    #[must_use]
-    pub fn has_out_of_order(&self) -> bool {
-        self.first_ooo_time.is_some()
-    }
-
     pub fn detect_lost_packets(
         &mut self,
         now: Instant,
@@ -390,7 +384,6 @@ pub(crate) struct LossRecovery {
     rtt_vals: RttVals,
     cc: CongestionControl,
 
-    enable_timed_loss_detection: bool,
     spaces: LossRecoverySpaces,
 }
 
@@ -405,7 +398,6 @@ impl LossRecovery {
             },
             pto_state: None,
             cc: CongestionControl::default(),
-            enable_timed_loss_detection: false,
             spaces: LossRecoverySpaces::new(),
         }
     }
@@ -586,15 +578,11 @@ impl LossRecovery {
 
     /// Find when the earliest sent packet should be considered lost.
     fn earliest_loss_time(&self) -> Option<Instant> {
-        if self.enable_timed_loss_detection {
-            self.spaces
-                .iter()
-                .filter_map(LossRecoverySpace::loss_recovery_timer_start)
-                .min()
-                .map(|val| val + self.loss_delay())
-        } else {
-            None
-        }
+        self.spaces
+            .iter()
+            .filter_map(LossRecoverySpace::loss_recovery_timer_start)
+            .min()
+            .map(|val| val + self.loss_delay())
     }
 
     /// Get the Base PTO value, which is derived only from the `RTT` and `RTTvar` values.
@@ -679,8 +667,6 @@ impl LossRecovery {
             )
         }
 
-        self.enable_timed_loss_detection =
-            self.spaces.iter().any(LossRecoverySpace::has_out_of_order);
         self.maybe_fire_pto(now, &mut lost_packets);
         lost_packets
     }
@@ -734,9 +720,6 @@ mod tests {
         handshake: Option<Instant>,
         app_data: Option<Instant>,
     ) {
-        if !lr.enable_timed_loss_detection {
-            return;
-        }
         let est = |sp| {
             lr.spaces
                 .get(sp)
@@ -1022,6 +1005,20 @@ mod tests {
             0,
             SentPacket::new(pn_time(2), true, Vec::new(), ON_SENT_SIZE, true),
         );
+
+        // Now put all spaces on the LR timer so we can see them.
+        let pkt = SentPacket::new(pn_time(3), true, vec![], ON_SENT_SIZE, true);
+        for sp in PNSpace::iter() {
+            lr.on_packet_sent(*sp, 1, pkt.clone());
+            lr.on_ack_received(*sp, 1, vec![(1, 1)], Duration::from_secs(0), pn_time(3));
+            let mut lost = Vec::new();
+            lr.spaces.get_mut(*sp).unwrap().detect_lost_packets(
+                pn_time(3),
+                INITIAL_RTT,
+                &mut lost,
+            );
+            assert!(lost.is_empty());
+        }
 
         lr.discard(PNSpace::Initial);
         assert_sent_times(&lr, None, Some(pn_time(1)), Some(pn_time(2)));
