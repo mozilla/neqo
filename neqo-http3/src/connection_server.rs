@@ -9,7 +9,7 @@ use crate::hframe::HFrame;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
 use crate::transaction_server::TransactionServer;
 use crate::{Error, Header, Res};
-use neqo_common::{qdebug, qinfo, qtrace};
+use neqo_common::{matches, qdebug, qinfo, qtrace};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamType};
 use std::time::Instant;
@@ -69,20 +69,19 @@ impl Http3ServerHandler {
     /// Process HTTTP3 layer.
     pub fn process_http3(&mut self, conn: &mut Connection, now: Instant) {
         qtrace!([self], "Process http3 internal.");
-        match self.base_handler.state() {
-            Http3State::Connected | Http3State::GoingAway(..) => {
-                let res = self.check_connection_events(conn);
-                if self.check_result(conn, now, &res) {
-                    return;
-                }
-                let res = self.base_handler.process_sending(conn);
-                self.check_result(conn, now, &res);
-            }
-            Http3State::Closed { .. } => {}
-            _ => {
-                let res = self.check_connection_events(conn);
-                let _ = self.check_result(conn, now, &res);
-            }
+        if matches!(self.base_handler.state(), Http3State::Closed(..)) {
+            return;
+        }
+
+        let res = self.check_connection_events(conn);
+        if !self.check_result(conn, now, &res)
+            && matches!(
+                self.base_handler.state(),
+                Http3State::Connected | Http3State::GoingAway(..)
+            )
+        {
+            let res = self.base_handler.process_sending(conn);
+            self.check_result(conn, now, &res);
         }
     }
 
