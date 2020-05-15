@@ -9,7 +9,9 @@ use crate::agentio::{AgentIo, METHODS};
 use crate::assert_initialized;
 use crate::auth::AuthenticationStatus;
 pub use crate::cert::CertificateInfo;
-use crate::constants::*;
+use crate::constants::{
+    Alert, Cipher, Epoch, Extension, Group, SignatureScheme, Version, TLS_VERSION_1_3,
+};
 use crate::err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
 use crate::p11;
@@ -94,7 +96,7 @@ macro_rules! preinfo_arg {
         pub fn $v(&self) -> Option<$t> {
             match self.info.valuesSet & ssl::$m {
                 0 => None,
-                _ => Some(self.info.$f as $t)
+                _ => Some(self.info.$f as $t),
             }
         }
     };

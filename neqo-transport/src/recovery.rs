@@ -688,7 +688,7 @@ impl ::std::fmt::Display for LossRecovery {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{LossRecovery, LossRecoverySpace, PNSpace, SentPacket};
     use std::convert::TryInto;
     use std::time::{Duration, Instant};
 
