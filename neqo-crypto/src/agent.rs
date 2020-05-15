@@ -94,7 +94,7 @@ macro_rules! preinfo_arg {
         pub fn $v(&self) -> Option<$t> {
             match self.info.valuesSet & ssl::$m {
                 0 => None,
-                _ => Some(self.info.$f as $t)
+                _ => Some(self.info.$f as $t),
             }
         }
     };

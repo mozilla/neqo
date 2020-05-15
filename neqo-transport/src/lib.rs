@@ -87,6 +87,7 @@ pub enum Error {
     NoMoreData,
     NotConnected,
     PacketNumberOverlap,
+    PeerApplicationError(AppError),
     PeerError(TransportError),
     TooMuchData,
     UnexpectedMessage,
@@ -99,7 +100,10 @@ pub enum Error {
 impl Error {
     pub fn code(&self) -> TransportError {
         match self {
-            Self::NoError | Self::IdleTimeout => 0,
+            Self::NoError
+            | Self::IdleTimeout
+            | Self::PeerError(_)
+            | Self::PeerApplicationError(_) => 0,
             Self::ServerBusy => 2,
             Self::FlowControlError => 3,
             Self::StreamLimitError => 4,
@@ -111,7 +115,6 @@ impl Error {
             Self::InvalidToken => 11,
             Self::ApplicationError => ERROR_APPLICATION_CLOSE,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),
-            Self::PeerError(a) => *a,
             // All the rest are internal errors.
             _ => 1,
         }

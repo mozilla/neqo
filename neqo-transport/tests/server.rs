@@ -664,11 +664,15 @@ fn bad_client_initial() {
     assert!(close_dgram.len() < 200); // Too small for anything real.
 
     // The client should accept this new and stop trying to connect.
-    let response = client.process(Some(close_dgram), now());
-    assert_eq!(response, Output::None);
+    // It will generate a CONNECTION_CLOSE first though.
+    let response = client.process(Some(close_dgram), now()).dgram();
+    assert!(response.is_some());
+    // The client will now wait out its closing period.
+    let delay = client.process(None, now()).callback();
+    assert_ne!(delay, Duration::from_secs(0));
     assert!(matches!(
         *client.state(),
-        State::Closed(ConnectionError::Transport(Error::PeerError(code))) if code == Error::ProtocolViolation.code()
+        State::Draining { error: ConnectionError::Transport(Error::PeerError(code)), .. } if code == Error::ProtocolViolation.code()
     ));
 
     for server in server.active_connections() {

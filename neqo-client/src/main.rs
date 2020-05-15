@@ -12,6 +12,7 @@ use qlog::QlogStreamer;
 use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_qpack::QpackSettings;
 use neqo_transport::FixedConnectionIdManager;
 
 use std::cell::RefCell;
@@ -75,8 +76,11 @@ pub struct Args {
     #[structopt(short = "h", long, number_of_values = 2)]
     header: Vec<String>,
 
-    #[structopt(name = "max-table-size", short = "t", long, default_value = "128")]
-    max_table_size: u64,
+    #[structopt(name = "encoder-table-size", short = "e", long, default_value = "128")]
+    max_table_size_encoder: u64,
+
+    #[structopt(name = "decoder-table-size", short = "d", long, default_value = "128")]
+    max_table_size_decoder: u64,
 
     #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "128")]
     max_blocked_streams: u16,
@@ -110,13 +114,14 @@ trait Handler {
     fn handle(&mut self, args: &Args, client: &mut Http3Client) -> Res<bool>;
 }
 
-fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) {
+fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) -> io::Result<()> {
     if let Some(d) = d {
-        let sent = socket.send(&d[..]).expect("Error sending datagram");
+        let sent = socket.send(&d[..])?;
         if sent != d.len() {
             eprintln!("Unable to send all {} bytes of datagram", d.len());
         }
     }
+    Ok(())
 }
 
 fn get_output_file(
@@ -179,7 +184,14 @@ fn process_loop(
         loop {
             let output = client.process_output(Instant::now());
             match output {
-                Output::Datagram(dgram) => emit_datagram(&socket, Some(dgram)),
+                Output::Datagram(dgram) => {
+                    if let Err(e) = emit_datagram(&socket, Some(dgram)) {
+                        eprintln!("UDP write error: {}", e);
+                        client.close(Instant::now(), 0, e.to_string());
+                        exiting = true;
+                        break;
+                    }
+                }
                 Output::Callback(duration) => {
                     socket.set_read_timeout(Some(duration)).unwrap();
                     break;
@@ -333,8 +345,11 @@ fn client(
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
         remote_addr,
-        args.max_table_size,
-        args.max_blocked_streams,
+        QpackSettings {
+            max_table_size_encoder: args.max_table_size_encoder,
+            max_table_size_decoder: args.max_table_size_decoder,
+            max_blocked_streams: args.max_blocked_streams,
+        },
     )
     .expect("must succeed");
     client.set_qlog(qlog_new(args, origin)?);
@@ -562,10 +577,10 @@ mod old {
                             .expect("Read should succeed");
 
                         let mut have_out_file = false;
-                        if let Some(out_file) = out_file {
+                        if let Some(Some(out_file)) = out_file {
                             have_out_file = true;
                             if sz > 0 {
-                                out_file.as_ref().unwrap().write_all(&data[..sz])?;
+                                out_file.write_all(&data[..sz])?;
                             }
                         } else if !args.output_read_data {
                             println!("READ[{}]: {} bytes", stream_id, sz);
@@ -619,7 +634,14 @@ mod old {
             loop {
                 let output = client.process_output(Instant::now());
                 match output {
-                    Output::Datagram(dgram) => emit_datagram(&socket, Some(dgram)),
+                    Output::Datagram(dgram) => {
+                        if let Err(e) = emit_datagram(&socket, Some(dgram)) {
+                            eprintln!("UDP write error: {}", e);
+                            client.close(Instant::now(), 0, e.to_string());
+                            exiting = true;
+                            break;
+                        }
+                    }
                     Output::Callback(duration) => {
                         socket.set_read_timeout(Some(duration)).unwrap();
                         break;

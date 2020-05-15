@@ -29,16 +29,11 @@ mod table;
 pub type Header = (String, String);
 type Res<T> = Result<T, Error>;
 
-#[derive(Debug)]
-enum QPackSide {
-    Encoder,
-    Decoder,
-}
-
-impl ::std::fmt::Display for QPackSide {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
+#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
+pub struct QpackSettings {
+    pub max_table_size_decoder: u64,
+    pub max_table_size_encoder: u64,
+    pub max_blocked_streams: u16,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -48,14 +43,19 @@ pub enum Error {
     DecoderStream,
     ClosedCriticalStream,
 
-    // These are internal errors, they will be transfromed into one of the above.
+    // These are internal errors, they will be transformed into one of the above.
+    NeedMoreData, // Return when an input stream does not have more data that a decoder needs.(It does not mean that a stream is closed.)
     HeaderLookup,
-    NoMoreData,
+    HuffmanDecompressionFailed,
+    ToStringFailed,
+    ChangeCapacity,
+    DynamicTableFull,
+    IncrementAck,
     IntegerOverflow,
     WrongStreamCount,
-    Internal,
-    Decoding, // this will be translated into Encoder/DecoderStreamError or DecompressionFailed depending on the caller
+    Decoding, // Decoding internal error that is not one of the above.
     EncoderStreamBlocked,
+    Internal,
 
     TransportError(neqo_transport::Error),
     QlogError,

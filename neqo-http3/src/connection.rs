@@ -14,6 +14,7 @@ use crate::stream_type_reader::NewStreamTypeReader;
 use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
+use neqo_qpack::QpackSettings;
 use neqo_transport::{AppError, CloseError, Connection, State, StreamType};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Debug;
@@ -22,6 +23,7 @@ use std::mem;
 use crate::{Error, Res};
 
 const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
+const QPACK_TABLE_SIZE_LIMIT: u64 = 1 << 30;
 
 pub(crate) enum HandleReadableOutput {
     NoOutput,
@@ -47,12 +49,6 @@ enum Http3RemoteSettingsState {
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone)]
-struct LocalSettings {
-    max_table_size: u64,
-    max_blocked_streams: u16,
-}
-
-#[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone)]
 pub enum Http3State {
     Initializing,
     ZeroRtt,
@@ -65,7 +61,7 @@ pub enum Http3State {
 #[derive(Debug)]
 pub(crate) struct Http3Connection<T: Http3Transaction> {
     pub state: Http3State,
-    local_settings: LocalSettings,
+    local_qpack_settings: QpackSettings,
     control_stream_local: ControlStreamLocal,
     control_stream_remote: ControlStreamRemote,
     new_streams: HashMap<u64, NewStreamTypeReader>,
@@ -84,21 +80,20 @@ impl<T: Http3Transaction> ::std::fmt::Display for Http3Connection<T> {
 
 impl<T: Http3Transaction> Http3Connection<T> {
     /// Create a new connection.
-    pub fn new(max_table_size: u64, max_blocked_streams: u16) -> Self {
-        if max_table_size > (1 << 30) - 1 {
+    pub fn new(local_qpack_settings: QpackSettings) -> Self {
+        if (local_qpack_settings.max_table_size_encoder >= QPACK_TABLE_SIZE_LIMIT)
+            || (local_qpack_settings.max_table_size_decoder >= QPACK_TABLE_SIZE_LIMIT)
+        {
             panic!("Wrong max_table_size");
         }
         Self {
             state: Http3State::Initializing,
-            local_settings: LocalSettings {
-                max_table_size,
-                max_blocked_streams,
-            },
+            local_qpack_settings,
             control_stream_local: ControlStreamLocal::default(),
             control_stream_remote: ControlStreamRemote::new(),
             new_streams: HashMap::new(),
-            qpack_encoder: QPackEncoder::new(true),
-            qpack_decoder: QPackDecoder::new(max_table_size, max_blocked_streams),
+            qpack_encoder: QPackEncoder::new(local_qpack_settings, true),
+            qpack_decoder: QPackDecoder::new(local_qpack_settings),
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_have_data_to_send: BTreeSet::new(),
             transactions: HashMap::new(),
@@ -411,11 +406,8 @@ impl<T: Http3Transaction> Http3Connection<T> {
             self.control_stream_local = ControlStreamLocal::default();
             self.control_stream_remote = ControlStreamRemote::new();
             self.new_streams.clear();
-            self.qpack_encoder = QPackEncoder::new(true);
-            self.qpack_decoder = QPackDecoder::new(
-                self.local_settings.max_table_size,
-                self.local_settings.max_blocked_streams,
-            );
+            self.qpack_encoder = QPackEncoder::new(self.local_qpack_settings, true);
+            self.qpack_decoder = QPackDecoder::new(self.local_qpack_settings);
             self.settings_state = Http3RemoteSettingsState::NotReceived;
             self.streams_have_data_to_send.clear();
             // TODO: investigate whether this code can automatically retry failed transactions.

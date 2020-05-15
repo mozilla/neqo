@@ -10,10 +10,14 @@ use crate::prefix::{
 };
 use crate::qpack_send_buf::QPData;
 use crate::reader::{IntReader, LiteralReader, ReadByte, Reader};
-use crate::{Error, Res};
+use crate::Res;
 use neqo_common::{matches, qdebug, qtrace};
 use std::mem;
 
+// The encoder only uses InsertWithNameLiteral, therefore clippy is complaining about dead_code.
+// We may decide to use othe instruction in the future.
+// All instructions are used for testing, therefore they are defined.
+#[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 pub enum EncoderInstruction<'a> {
     Capacity { value: u64 },
@@ -147,141 +151,111 @@ impl EncoderInstructionReader {
         qdebug!([self], "instruction decoded");
     }
 
-    fn decode_instruction_type<T: ReadByte + Reader>(&mut self, recv: &mut T) -> Res<bool> {
-        match recv.read_byte() {
-            Ok(b) => {
-                self.decode_instruction_from_byte(b);
-                match self.instruction {
-                    DecodedEncoderInstruction::Capacity { .. }
-                    | DecodedEncoderInstruction::Duplicate { .. } => {
-                        self.state = EncoderInstructionReaderState::ReadFirstInt {
-                            reader: IntReader::new(b, ENCODER_CAPACITY.len()),
-                        }
-                    }
-                    DecodedEncoderInstruction::InsertWithNameRefStatic { .. }
-                    | DecodedEncoderInstruction::InsertWithNameRefDynamic { .. } => {
-                        self.state = EncoderInstructionReaderState::ReadFirstInt {
-                            reader: IntReader::new(b, ENCODER_INSERT_WITH_NAME_REF_STATIC.len()),
-                        }
-                    }
-                    DecodedEncoderInstruction::InsertWithNameLiteral { .. } => {
-                        self.state = EncoderInstructionReaderState::ReadFirstLiteral {
-                            reader: LiteralReader::new_with_first_byte(
-                                b,
-                                ENCODER_INSERT_WITH_NAME_LITERAL.len(),
-                            ),
-                        }
-                    }
-                    DecodedEncoderInstruction::NoInstruction => {
-                        unreachable!("We must have instruction at this point.")
-                    }
+    fn decode_instruction_type<T: ReadByte + Reader>(&mut self, recv: &mut T) -> Res<()> {
+        let b = recv.read_byte()?;
+
+        self.decode_instruction_from_byte(b);
+        match self.instruction {
+            DecodedEncoderInstruction::Capacity { .. }
+            | DecodedEncoderInstruction::Duplicate { .. } => {
+                self.state = EncoderInstructionReaderState::ReadFirstInt {
+                    reader: IntReader::new(b, ENCODER_CAPACITY.len()),
                 }
-                Ok(true)
             }
-            Err(Error::NoMoreData) => Ok(false),
-            Err(Error::ClosedCriticalStream) => Err(Error::ClosedCriticalStream),
-            Err(_) => Err(Error::EncoderStream),
+            DecodedEncoderInstruction::InsertWithNameRefStatic { .. }
+            | DecodedEncoderInstruction::InsertWithNameRefDynamic { .. } => {
+                self.state = EncoderInstructionReaderState::ReadFirstInt {
+                    reader: IntReader::new(b, ENCODER_INSERT_WITH_NAME_REF_STATIC.len()),
+                }
+            }
+            DecodedEncoderInstruction::InsertWithNameLiteral { .. } => {
+                self.state = EncoderInstructionReaderState::ReadFirstLiteral {
+                    reader: LiteralReader::new_with_first_byte(
+                        b,
+                        ENCODER_INSERT_WITH_NAME_LITERAL.len(),
+                    ),
+                }
+            }
+            DecodedEncoderInstruction::NoInstruction => {
+                unreachable!("We must have instruction at this point.")
+            }
         }
+        Ok(())
     }
 
+    /// ### Errors
+    ///  1) `NeedMoreData` if the reader needs more data
+    ///  2) `ClosedCriticalStream`
+    ///  3) other errors will be translated to `EncoderStream` by the caller of this function.
     pub fn read_instructions<T: ReadByte + Reader>(
         &mut self,
         recv: &mut T,
-    ) -> Res<Option<DecodedEncoderInstruction>> {
+    ) -> Res<DecodedEncoderInstruction> {
         qdebug!([self], "reading instructions");
         loop {
             match &mut self.state {
                 EncoderInstructionReaderState::ReadInstruction => {
-                    if !self.decode_instruction_type(recv)? {
-                        break Ok(None);
+                    self.decode_instruction_type(recv)?
+                }
+                EncoderInstructionReaderState::ReadFirstInt { reader } => {
+                    let val = reader.read(recv)?;
+
+                    qtrace!([self], "First varint read {}", val);
+                    match &mut self.instruction {
+                        DecodedEncoderInstruction::Capacity { value: v, .. }
+                        | DecodedEncoderInstruction::Duplicate { index: v } => {
+                            *v = val;
+                            self.state = EncoderInstructionReaderState::Done;
+                        }
+                        DecodedEncoderInstruction::InsertWithNameRefStatic { index, .. }
+                        | DecodedEncoderInstruction::InsertWithNameRefDynamic { index, .. } => {
+                            *index = val;
+                            self.state = EncoderInstructionReaderState::ReadFirstLiteral {
+                                reader: LiteralReader::default(),
+                            };
+                        }
+                        _ => unreachable!("This instruction cannot be in this state."),
                     }
                 }
-                EncoderInstructionReaderState::ReadFirstInt { reader } => match reader.read(recv) {
-                    Ok(Some(val)) => {
-                        qtrace!([self], "First varint read {}", val);
-                        match &mut self.instruction {
-                            DecodedEncoderInstruction::Capacity { value: v, .. }
-                            | DecodedEncoderInstruction::Duplicate { index: v } => {
-                                *v = val;
-                                self.state = EncoderInstructionReaderState::Done;
-                            }
-                            DecodedEncoderInstruction::InsertWithNameRefStatic {
-                                index, ..
-                            }
-                            | DecodedEncoderInstruction::InsertWithNameRefDynamic {
-                                index, ..
-                            } => {
-                                *index = val;
-                                self.state = EncoderInstructionReaderState::ReadFirstLiteral {
-                                    reader: LiteralReader::default(),
-                                };
-                            }
-                            _ => unreachable!("This instruction cannot be in this state."),
-                        }
-                    }
-                    Ok(None) => break Ok(None),
-                    Err(Error::ClosedCriticalStream) => break Err(Error::ClosedCriticalStream),
-                    Err(_) => break Err(Error::EncoderStream),
-                },
                 EncoderInstructionReaderState::ReadFirstLiteral { reader } => {
-                    match reader.read(recv) {
-                        Ok(Some(val)) => {
-                            qtrace!([self], "first literal read {:?}", val);
-                            match &mut self.instruction {
-                                DecodedEncoderInstruction::InsertWithNameRefStatic {
-                                    value,
-                                    ..
-                                }
-                                | DecodedEncoderInstruction::InsertWithNameRefDynamic {
-                                    value,
-                                    ..
-                                } => {
-                                    *value = val;
-                                    self.state = EncoderInstructionReaderState::Done;
-                                }
-                                DecodedEncoderInstruction::InsertWithNameLiteral {
-                                    name, ..
-                                } => {
-                                    *name = val;
-                                    self.state = EncoderInstructionReaderState::ReadSecondLiteral {
-                                        reader: LiteralReader::default(),
-                                    };
-                                }
-                                _ => unreachable!("This instruction cannot be in this state."),
-                            }
+                    let val = reader.read(recv)?;
+
+                    qtrace!([self], "first literal read {:?}", val);
+                    match &mut self.instruction {
+                        DecodedEncoderInstruction::InsertWithNameRefStatic { value, .. }
+                        | DecodedEncoderInstruction::InsertWithNameRefDynamic { value, .. } => {
+                            *value = val;
+                            self.state = EncoderInstructionReaderState::Done;
                         }
-                        Ok(None) => break Ok(None),
-                        Err(Error::ClosedCriticalStream) => break Err(Error::ClosedCriticalStream),
-                        Err(_) => break Err(Error::EncoderStream),
+                        DecodedEncoderInstruction::InsertWithNameLiteral { name, .. } => {
+                            *name = val;
+                            self.state = EncoderInstructionReaderState::ReadSecondLiteral {
+                                reader: LiteralReader::default(),
+                            };
+                        }
+                        _ => unreachable!("This instruction cannot be in this state."),
                     }
                 }
                 EncoderInstructionReaderState::ReadSecondLiteral { reader } => {
-                    match reader.read(recv) {
-                        Ok(Some(val)) => {
-                            qtrace!([self], "second literal read {:?}", val);
-                            match &mut self.instruction {
-                                DecodedEncoderInstruction::InsertWithNameLiteral {
-                                    value, ..
-                                } => {
-                                    *value = val;
-                                    self.state = EncoderInstructionReaderState::Done;
-                                }
-                                _ => unreachable!("This instruction cannot be in this state."),
-                            }
+                    let val = reader.read(recv)?;
+
+                    qtrace!([self], "second literal read {:?}", val);
+                    match &mut self.instruction {
+                        DecodedEncoderInstruction::InsertWithNameLiteral { value, .. } => {
+                            *value = val;
+                            self.state = EncoderInstructionReaderState::Done;
                         }
-                        Ok(None) => break Ok(None),
-                        Err(Error::ClosedCriticalStream) => break Err(Error::ClosedCriticalStream),
-                        Err(_) => break Err(Error::EncoderStream),
+                        _ => unreachable!("This instruction cannot be in this state."),
                     }
                 }
                 EncoderInstructionReaderState::Done => {}
             }
             if matches!(self.state, EncoderInstructionReaderState::Done) {
                 self.state = EncoderInstructionReaderState::ReadInstruction;
-                break Ok(Some(mem::replace(
+                break Ok(mem::replace(
                     &mut self.instruction,
                     DecodedEncoderInstruction::NoInstruction,
-                )));
+                ));
             }
         }
     }
@@ -290,8 +264,9 @@ impl EncoderInstructionReader {
 #[cfg(test)]
 mod test {
 
-    use super::{EncoderInstruction, EncoderInstructionReader, Error, QPData};
+    use super::{EncoderInstruction, EncoderInstructionReader, QPData};
     use crate::reader::test_receiver::TestReceiver;
+    use crate::Error;
 
     fn test_encoding_decoding(instruction: &EncoderInstruction, use_huffman: bool) {
         let mut buf = QPData::default();
@@ -300,10 +275,7 @@ mod test {
         test_receiver.write(&buf);
         let mut reader = EncoderInstructionReader::new();
         assert_eq!(
-            reader
-                .read_instructions(&mut test_receiver)
-                .unwrap()
-                .unwrap(),
+            reader.read_instructions(&mut test_receiver).unwrap(),
             instruction.into()
         );
     }
@@ -397,17 +369,14 @@ mod test {
         let mut decoder = EncoderInstructionReader::new();
         for i in 0..buf.len() - 1 {
             test_receiver.write(&buf[i..=i]);
-            assert!(decoder
-                .read_instructions(&mut test_receiver)
-                .unwrap()
-                .is_none());
+            assert_eq!(
+                decoder.read_instructions(&mut test_receiver),
+                Err(Error::NeedMoreData)
+            );
         }
         test_receiver.write(&buf[buf.len() - 1..buf.len()]);
         assert_eq!(
-            decoder
-                .read_instructions(&mut test_receiver)
-                .unwrap()
-                .unwrap(),
+            decoder.read_instructions(&mut test_receiver).unwrap(),
             instruction.into()
         );
     }
@@ -504,7 +473,7 @@ mod test {
         let mut decoder = EncoderInstructionReader::new();
         assert_eq!(
             decoder.read_instructions(&mut test_receiver),
-            Err(Error::EncoderStream)
+            Err(Error::IntegerOverflow)
         );
 
         let mut test_receiver: TestReceiver = TestReceiver::default();
@@ -515,16 +484,16 @@ mod test {
         let mut decoder = EncoderInstructionReader::new();
         assert_eq!(
             decoder.read_instructions(&mut test_receiver),
-            Err(Error::EncoderStream)
+            Err(Error::IntegerOverflow)
         );
 
         let mut test_receiver: TestReceiver = TestReceiver::default();
-        // EncoderInstruction::InsertWithNameRefStatic with overflow of garbage value.
+        // EncoderInstruction::InsertWithNameRefStatic with a garbage value.
         test_receiver.write(&[0xc1, 0x81, 0x00]);
         let mut decoder = EncoderInstructionReader::new();
         assert_eq!(
             decoder.read_instructions(&mut test_receiver),
-            Err(Error::EncoderStream)
+            Err(Error::HuffmanDecompressionFailed)
         );
     }
 }
