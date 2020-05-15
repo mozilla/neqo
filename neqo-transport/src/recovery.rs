@@ -1012,11 +1012,10 @@ mod tests {
             lr.on_packet_sent(*sp, 1, pkt.clone());
             lr.on_ack_received(*sp, 1, vec![(1, 1)], Duration::from_secs(0), pn_time(3));
             let mut lost = Vec::new();
-            lr.spaces.get_mut(*sp).unwrap().detect_lost_packets(
-                pn_time(3),
-                INITIAL_RTT,
-                &mut lost,
-            );
+            lr.spaces
+                .get_mut(*sp)
+                .unwrap()
+                .detect_lost_packets(pn_time(3), INITIAL_RTT, &mut lost);
             assert!(lost.is_empty());
         }
 
