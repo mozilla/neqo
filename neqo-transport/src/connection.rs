@@ -2085,6 +2085,10 @@ impl Connection {
     /// Send data on a stream.
     /// Returns how many bytes were successfully sent. Could be less
     /// than total, based on receiver credit space available, etc.
+    /// # Errors
+    /// `InvalidStreamId` the stream does not exist,
+    /// `InvalidInput` if length of `data` is zero,
+    /// `FinalSizeError` if the stream has already been closed.
     pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
         self.send_streams.get_mut(stream_id.into())?.send(data)
     }
@@ -2093,6 +2097,10 @@ impl Connection {
     /// STREAM_DATA_BLOCKED will be sent.
     /// Returns how many bytes were successfully sent. It can only return 0 or exactly amount of data
     /// supply in the buffer.
+    /// # Errors
+    /// `InvalidStreamId` the stream does not exist,
+    /// `InvalidInput` if length of `data` is zero,
+    /// `FinalSizeError` if the stream has already been closed.
     pub fn stream_send_atomic(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
         self.send_streams
             .get_mut(stream_id.into())?
