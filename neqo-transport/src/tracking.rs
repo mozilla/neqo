@@ -544,7 +544,10 @@ impl Default for AckTracker {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        AckTracker, Duration, Instant, PNSpace, RecoveryToken, RecvdPackets, ACK_DELAY,
+        MAX_TRACKED_RANGES, MAX_UNACKED_PKTS,
+    };
     use lazy_static::lazy_static;
     use std::collections::HashSet;
 

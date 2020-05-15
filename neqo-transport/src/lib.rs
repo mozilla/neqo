@@ -8,7 +8,6 @@
 #![warn(clippy::use_self)]
 
 use neqo_common::qinfo;
-use neqo_crypto;
 
 mod cc;
 mod cid;
