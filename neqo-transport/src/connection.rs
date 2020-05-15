@@ -302,11 +302,11 @@ impl StateSignaling {
     where
         S: AsRef<str>,
     {
-        let msg: &[u8] = message.as_ref().as_ref();
+        let msg = message.as_ref().as_bytes().to_owned();
         let frame = Frame::ConnectionClose {
             error_code: CloseError::from(error),
             frame_type,
-            reason_phrase: msg.to_vec(),
+            reason_phrase: msg,
         };
         *self = Self::ConnectionClose(frame);
     }
