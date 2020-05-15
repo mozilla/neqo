@@ -3383,7 +3383,7 @@ mod tests {
         let (dgrams, now) = fill_cwnd(&mut client, 2, now + AT_LEAST_PTO);
         assert_eq!(dgrams.len(), 2); // Two packets in the PTO.
 
-        // All (2) datagrams contain PING and STREAM frames.
+        // All (2) datagrams contain one PING frame and at least one STREAM frame.
         for d in dgrams {
             assert_eq!(d.len(), PATH_MTU_V6);
             let frames = server.test_process_input(d, now);
