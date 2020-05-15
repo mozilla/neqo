@@ -131,7 +131,7 @@ impl LossRecoverySpace {
 
     /// Find the time we sent the first packet that is lower than the
     /// largest acknowledged and that isn't yet declared lost.
-    /// The logic here needs to match the logic in `detect_lost_packets`.
+    /// Use the value we prepared earlier in `detect_lost_packets`.
     #[must_use]
     pub fn loss_recovery_timer_start(&self) -> Option<Instant> {
         self.first_ooo_time
