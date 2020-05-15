@@ -357,6 +357,7 @@ fn reject_zero_rtt() {
 
 #[test]
 fn close() {
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     connect(&mut client, &mut server);
@@ -366,6 +367,7 @@ fn close() {
 
 #[test]
 fn close_client_twice() {
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     connect(&mut client, &mut server);
