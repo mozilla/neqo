@@ -36,13 +36,23 @@ struct Args {
     #[structopt(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[structopt(name = "encoder-table-size", short = "e", long, default_value = "128")]
+    #[structopt(
+        name = "encoder-table-size",
+        short = "e",
+        long,
+        default_value = "16384"
+    )]
     max_table_size_encoder: u64,
 
-    #[structopt(name = "decoder-table-size", short = "d", long, default_value = "128")]
+    #[structopt(
+        name = "decoder-table-size",
+        short = "f",
+        long,
+        default_value = "16384"
+    )]
     max_table_size_decoder: u64,
 
-    #[structopt(short = "b", long, default_value = "128")]
+    #[structopt(short = "b", long, default_value = "10")]
     max_blocked_streams: u16,
 
     #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
