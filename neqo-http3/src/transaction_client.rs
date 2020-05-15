@@ -8,7 +8,7 @@ use crate::hframe::HFrame;
 
 use crate::client_events::Http3ClientEvents;
 use crate::connection::Http3Transaction;
-use crate::response_stream::ResponseStream;
+use crate::recv_message::RecvMessage;
 use crate::Header;
 use neqo_common::{matches, qinfo, Encoder};
 use neqo_qpack::decoder::QPackDecoder;
@@ -127,7 +127,7 @@ enum TransactionSendState {
 #[derive(Debug)]
 pub(crate) struct TransactionClient {
     send_state: TransactionSendState,
-    response_stream: ResponseStream,
+    response: RecvMessage,
     stream_id: u64,
     conn_events: Http3ClientEvents,
 }
@@ -148,7 +148,7 @@ impl TransactionClient {
                 request: Request::new(method, scheme, host, path, headers),
                 fin: false,
             },
-            response_stream: ResponseStream::new(stream_id, conn_events.clone()),
+            response: RecvMessage::new(stream_id, conn_events.clone()),
             stream_id,
             conn_events,
         }
@@ -224,7 +224,7 @@ impl TransactionClient {
         decoder: &mut QPackDecoder,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        self.response_stream.read_response_data(conn, decoder, buf)
+        self.response.read_response_data(conn, decoder, buf)
     }
 
     pub fn is_state_sending_data(&self) -> bool {
@@ -262,7 +262,7 @@ impl Http3Transaction for TransactionClient {
     }
 
     fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
-        self.response_stream.receive(conn, decoder, true)
+        self.response.receive(conn, decoder, true)
     }
 
     // TransactionClient owns headers and sends them. This method returns if
@@ -273,7 +273,7 @@ impl Http3Transaction for TransactionClient {
     }
 
     fn reset_receiving_side(&mut self) {
-        self.response_stream.close();
+        self.response.close();
     }
 
     fn stop_sending(&mut self) {
@@ -281,7 +281,7 @@ impl Http3Transaction for TransactionClient {
     }
 
     fn done(&self) -> bool {
-        self.send_state == TransactionSendState::Closed && self.response_stream.is_closed()
+        self.send_state == TransactionSendState::Closed && self.response.is_closed()
     }
 
     fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
