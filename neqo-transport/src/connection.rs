@@ -2104,18 +2104,27 @@ impl Connection {
         self.send_streams.get_mut(stream_id.into())?.send(data)
     }
 
-    /// Send all data or nothing on a stream. If no data can be send DATA_BLOCKED or
-    /// STREAM_DATA_BLOCKED will be sent.
-    /// Returns how many bytes were successfully sent. It can only return 0 or exactly amount of data
-    /// supply in the buffer.
+    /// Send all data or nothing on a stream. May cause DATA_BLOCKED or
+    /// STREAM_DATA_BLOCKED frames to be sent.
+    /// Returns true if data was successfully sent, otherwise false.
     /// # Errors
     /// `InvalidStreamId` the stream does not exist,
     /// `InvalidInput` if length of `data` is zero,
     /// `FinalSizeError` if the stream has already been closed.
-    pub fn stream_send_atomic(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
-        self.send_streams
+    pub fn stream_send_atomic(&mut self, stream_id: u64, data: &[u8]) -> Res<bool> {
+        let val = self
+            .send_streams
             .get_mut(stream_id.into())?
-            .send_atomic(data)
+            .send_atomic(data);
+        if let Ok(val) = val {
+            debug_assert!(
+                val == 0 || val == data.len(),
+                "Unexpected value {} when trying to send {} bytes atomically",
+                val,
+                data.len()
+            );
+        }
+        val.map(|v| v == data.len())
     }
 
     /// Bytes that stream_send() is guaranteed to accept for sending.
