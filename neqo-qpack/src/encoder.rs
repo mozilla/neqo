@@ -243,13 +243,9 @@ impl QPackEncoder {
 
         let stream_id = self.local_stream_id.ok_or(Error::Internal)?;
 
-        let amount = conn.stream_send_atomic(stream_id, &buf)?;
-        if amount == 0 {
+        let sent = conn.stream_send_atomic(stream_id, &buf)?;
+        if !sent {
             return Err(Error::EncoderStreamBlocked);
-        }
-        if amount < buf.len() {
-            debug_assert!(false);
-            return Err(Error::Internal);
         }
 
         match self.table.insert(name, value) {
