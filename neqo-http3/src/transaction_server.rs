@@ -130,7 +130,7 @@ impl Http3Transaction for TransactionServer {
     fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
         self.ensure_response_encoded(conn, encoder)?;
         qtrace!([self], "Sending response.");
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
+        let label = if ::neqo_common::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
             String::new()
@@ -153,7 +153,7 @@ impl Http3Transaction for TransactionServer {
 
     #[allow(clippy::too_many_lines)]
     fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
+        let label = if ::neqo_common::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
             String::new()

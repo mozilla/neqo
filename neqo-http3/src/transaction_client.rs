@@ -81,7 +81,7 @@ impl Request {
         encoder: &mut QPackEncoder,
         stream_id: u64,
     ) -> Res<bool> {
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
+        let label = if ::neqo_common::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
             String::new()
@@ -244,7 +244,7 @@ impl ::std::fmt::Display for TransactionClient {
 
 impl Http3Transaction for TransactionClient {
     fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
+        let label = if ::neqo_common::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
             String::new()
