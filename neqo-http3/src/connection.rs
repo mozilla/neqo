@@ -233,7 +233,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     ) -> Res<HandleReadableOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
 
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
+        let label = if ::neqo_common::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
             String::new()
@@ -414,7 +414,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     }
 
     fn handle_read_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
+        let label = if ::neqo_common::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
         } else {
             String::new()
