@@ -5,29 +5,20 @@
 // except according to those terms.
 
 use crate::connection::Http3Transaction;
-use crate::hframe::HFrame;
 use crate::recv_message::RecvMessage;
+use crate::send_message::SendMessage;
 use crate::server_connection_events::Http3ServerConnEvents;
 use crate::Header;
-use crate::Res;
-use neqo_common::{matches, qdebug, qinfo, qtrace, Encoder};
+use crate::{Error, Res};
+use neqo_common::qinfo;
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
-use std::mem;
-
-#[derive(PartialEq, Debug)]
-enum TransactionSendState {
-    Initial,
-    ResponseInitiated { headers: Vec<Header>, data: Vec<u8> },
-    SendingResponse { buf: Vec<u8> },
-    Closed,
-}
 
 #[derive(Debug)]
 pub struct TransactionServer {
     request: RecvMessage,
-    send_state: TransactionSendState,
+    response: Option<SendMessage>,
     stream_id: u64,
     conn_events: Http3ServerConnEvents,
 }
@@ -38,44 +29,28 @@ impl TransactionServer {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
             request: RecvMessage::new(stream_id, Box::new(conn_events.clone()), None),
-            send_state: TransactionSendState::Initial,
+            response: None,
             stream_id,
             conn_events,
         }
     }
 
-    pub fn set_response(&mut self, headers: &[Header], data: &[u8]) {
-        self.send_state = TransactionSendState::ResponseInitiated {
-            headers: headers.to_vec(),
-            data: data.to_vec(),
-        };
-    }
-
-    fn ensure_response_encoded(
+    pub fn set_response(
         &mut self,
         conn: &mut Connection,
-        encoder: &mut QPackEncoder,
+        headers: &[Header],
+        data: &[u8],
     ) -> Res<()> {
-        if let TransactionSendState::ResponseInitiated { headers, data } = &self.send_state {
-            qdebug!([self], "Encoding headers");
-            let header_block = encoder.encode_header_block(conn, &headers, self.stream_id)?;
-            let hframe = HFrame::Headers {
-                header_block: header_block.to_vec(),
-            };
-            let mut d = Encoder::default();
-            hframe.encode(&mut d);
-            if !data.is_empty() {
-                qdebug!([self], "Encoding data");
-                let d_frame = HFrame::Data {
-                    len: data.len() as u64,
-                };
-                d_frame.encode(&mut d);
-                d.encode(&data);
-            }
-
-            self.send_state = TransactionSendState::SendingResponse { buf: d.into() };
+        if self.response.is_some() {
+            return Err(Error::AlreadyInitialized);
         }
-        Ok(())
+        self.response = Some(SendMessage::new(
+            self.stream_id,
+            headers.to_vec(),
+            Some(data.to_vec()),
+            Box::new(self.conn_events.clone()),
+        ));
+        self.close_send(conn)
     }
 
     pub fn read_request_data(
@@ -96,23 +71,11 @@ impl ::std::fmt::Display for TransactionServer {
 
 impl Http3Transaction for TransactionServer {
     fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
-        self.ensure_response_encoded(conn, encoder)?;
-        qtrace!([self], "Sending response.");
-        let label = ::neqo_common::log_subject!(::log::Level::Info, self);
-        if let TransactionSendState::SendingResponse { ref mut buf } = self.send_state {
-            let sent = conn.stream_send(self.stream_id, &buf[..])?;
-            qinfo!([label], "{} bytes sent", sent);
-            if sent == buf.len() {
-                conn.stream_close_send(self.stream_id)?;
-                self.send_state = TransactionSendState::Closed;
-                qinfo!([label], "done sending request");
-            } else {
-                let mut b = buf.split_off(sent);
-                mem::swap(buf, &mut b);
-            }
+        if let Some(response) = &mut self.response {
+            response.send(conn, encoder)
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 
     #[allow(clippy::too_many_lines)]
@@ -121,7 +84,11 @@ impl Http3Transaction for TransactionServer {
     }
 
     fn has_data_to_send(&self) -> bool {
-        matches!(self.send_state, TransactionSendState::SendingResponse { .. })
+        if let Some(response) = &self.response {
+            response.has_data_to_send()
+        } else {
+            false
+        }
     }
 
     fn reset_receiving_side(&mut self) {
@@ -131,10 +98,18 @@ impl Http3Transaction for TransactionServer {
     fn stop_sending(&mut self) {}
 
     fn done(&self) -> bool {
-        self.send_state == TransactionSendState::Closed && self.request.is_closed()
+        if let Some(response) = &self.response {
+            response.done()
+        } else {
+            false
+        }
     }
 
-    fn close_send(&mut self, _conn: &mut Connection) -> Res<()> {
-        Ok(())
+    fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
+        if let Some(response) = &mut self.response {
+            response.close(conn)
+        } else {
+            Err(Error::Unexpected)
+        }
     }
 }

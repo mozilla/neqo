@@ -51,9 +51,12 @@ impl ClientRequestStream {
     /// Supply a response to a request.
     pub fn set_response(&mut self, headers: &[Header], data: &[u8]) -> Res<()> {
         qinfo!([self], "Set new response.");
-        self.handler
-            .borrow_mut()
-            .set_response(self.stream_id, headers, data)
+        self.handler.borrow_mut().set_response(
+            &mut self.conn.borrow_mut(),
+            self.stream_id,
+            headers,
+            data,
+        )
     }
 
     /// Request a peer to stop sending a request.

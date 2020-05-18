@@ -8,6 +8,7 @@
 
 use crate::connection::Http3State;
 use crate::recv_message::RecvMessageEvents;
+use crate::send_message::SendMessageEvents;
 use crate::Header;
 use neqo_common::matches;
 use neqo_transport::{AppError, StreamType};
@@ -67,12 +68,14 @@ impl RecvMessageEvents for Http3ClientEvents {
     }
 }
 
-impl Http3ClientEvents {
+impl SendMessageEvents for Http3ClientEvents {
     /// Add a new `DataWritable` event.
-    pub(crate) fn data_writable(&self, stream_id: u64) {
+    fn data_writable(&self, stream_id: u64) {
         self.insert(Http3ClientEvent::DataWritable { stream_id });
     }
+}
 
+impl Http3ClientEvents {
     /// Add a new `StopSending` event
     pub(crate) fn stop_sending(&self, stream_id: u64, error: AppError) {
         // Remove DataWritable event if any.
