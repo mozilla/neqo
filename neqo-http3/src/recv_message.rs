@@ -4,14 +4,22 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::client_events::Http3ClientEvents;
 use crate::hframe::{HFrame, HFrameReader};
+use crate::push_controller::PushController;
 use crate::{Error, Header, Res};
 use neqo_common::{matches, qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::Connection;
+use std::cell::RefCell;
 use std::cmp::min;
 use std::convert::TryFrom;
+use std::fmt::Debug;
+use std::rc::Rc;
+
+pub(crate) trait RecvMessageEvents: Debug {
+    fn header_ready(&self, stream_id: u64, headers: Option<Vec<Header>>, fin: bool);
+    fn data_readable(&self, stream_id: u64);
+}
 
 /*
  * Response stream state:
@@ -44,7 +52,8 @@ enum RecvMessageState {
 pub(crate) struct RecvMessage {
     state: RecvMessageState,
     frame_reader: HFrameReader,
-    conn_events: Http3ClientEvents,
+    conn_events: Box<dyn RecvMessageEvents>,
+    push_handler: Option<Rc<RefCell<PushController>>>,
     stream_id: u64,
 }
 
@@ -55,11 +64,16 @@ impl ::std::fmt::Display for RecvMessage {
 }
 
 impl RecvMessage {
-    pub fn new(stream_id: u64, conn_events: Http3ClientEvents) -> Self {
+    pub fn new(
+        stream_id: u64,
+        conn_events: Box<dyn RecvMessageEvents>,
+        push_handler: Option<Rc<RefCell<PushController>>>,
+    ) -> Self {
         Self {
             state: RecvMessageState::WaitingForResponseHeaders,
             frame_reader: HFrameReader::new(),
-            conn_events,
+            conn_events: conn_events,
+            push_handler,
             stream_id,
         }
     }
@@ -152,7 +166,7 @@ impl RecvMessage {
         }
     }
 
-    pub fn read_response_data(
+    pub fn read_data(
         &mut self,
         conn: &mut Connection,
         decoder: &mut QPackDecoder,
@@ -225,9 +239,21 @@ impl RecvMessage {
                                     self.handle_headers_frame(header_block, fin)?
                                 }
                                 HFrame::Data { len } => self.handle_data_frame(len, fin)?,
-                                HFrame::PushPromise { .. } | HFrame::DuplicatePush { .. } => {
-                                    break Err(Error::HttpId)
-                                }
+                                HFrame::PushPromise {
+                                    push_id,
+                                    header_block,
+                                } => self
+                                    .push_handler
+                                    .as_ref()
+                                    .ok_or(Error::HttpId)?
+                                    .borrow()
+                                    .new_push_promise(push_id, header_block)?,
+                                HFrame::DuplicatePush { push_id } => self
+                                    .push_handler
+                                    .as_ref()
+                                    .ok_or(Error::HttpId)?
+                                    .borrow()
+                                    .new_duplicate_push(push_id)?,
                                 _ => break Err(Error::HttpFrameUnexpected),
                             }
                             if matches!(self.state, RecvMessageState::Closed) {

@@ -16,6 +16,7 @@ mod control_stream_local;
 mod control_stream_remote;
 pub mod hframe;
 mod hsettings_frame;
+mod push_controller;
 mod recv_message;
 pub mod server;
 mod server_connection_events;
@@ -63,6 +64,7 @@ pub enum Error {
     AlreadyClosed,
     DecodingFrame,
     HttpGoaway,
+    Internal,
     InvalidResumptionToken,
     InvalidStreamId,
     InvalidState,

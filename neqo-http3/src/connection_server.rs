@@ -99,15 +99,19 @@ impl Http3ServerHandler {
     fn check_result<ERR>(&mut self, conn: &mut Connection, now: Instant, res: &Res<ERR>) -> bool {
         match &res {
             Err(e) => {
-                qinfo!([self], "Connection error: {}.", e);
-                conn.close(now, e.code(), &format!("{}", e));
-                self.base_handler.close(e.code());
-                self.events
-                    .connection_state_change(self.base_handler.state());
+                self.close(conn, now, e);
                 true
             }
             _ => false,
         }
+    }
+
+    fn close(&mut self, conn: &mut Connection, now: Instant, err: &Error) {
+        qinfo!([self], "Connection error: {}.", err);
+        conn.close(now, err.code(), &format!("{}", err));
+        self.base_handler.close(err.code());
+        self.events
+            .connection_state_change(self.base_handler.state());
     }
 
     // If this return an error the connection must be closed.
@@ -202,5 +206,41 @@ impl Http3ServerHandler {
         }
 
         Ok(())
+    }
+
+    /// Response data are read directly into a buffer supplied as a parameter of this function to avoid copying
+    /// data.
+    /// # Errors
+    /// It returns an error if a stream does not exist or an error happen while reading a stream, e.g.
+    /// early close, protocol error, etc.
+    pub fn read_request_data(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+        stream_id: u64,
+        buf: &mut [u8],
+    ) -> Res<(usize, bool)> {
+        qinfo!([self], "read_data from stream {}.", stream_id);
+        match self.base_handler.transactions.get_mut(&stream_id) {
+            None => {
+                self.close(conn, now, &Error::Internal);
+                Err(Error::Internal)
+            }
+            Some(transaction) => {
+                match transaction.read_request_data(conn, &mut self.base_handler.qpack_decoder, buf)
+                {
+                    Ok((amount, fin)) => {
+                        if transaction.done() {
+                            self.base_handler.transactions.remove(&stream_id);
+                        }
+                        Ok((amount, fin))
+                    }
+                    Err(e) => {
+                        self.close(conn, now, &e);
+                        Err(e)
+                    }
+                }
+            }
+        }
     }
 }

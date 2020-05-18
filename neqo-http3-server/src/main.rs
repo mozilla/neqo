@@ -102,14 +102,17 @@ fn process_events(server: &mut Http3Server) {
 
                 let default_ret = b"Hello World".to_vec();
 
-                let response = match headers.iter().find(|&(k, _)| k == ":path") {
-                    Some((_, path)) if !path.is_empty() => {
-                        match path.trim_matches(|p| p == '/').parse::<usize>() {
-                            Ok(v) => vec![b'a'; v],
-                            Err(_) => default_ret,
+                let response = match headers {
+                    None => default_ret,
+                    Some(h) => match h.iter().find(|&(k, _)| k == ":path") {
+                        Some((_, path)) if !path.is_empty() => {
+                            match path.trim_matches(|p| p == '/').parse::<usize>() {
+                                Ok(v) => vec![b'a'; v],
+                                Err(_) => default_ret,
+                            }
                         }
-                    }
-                    _ => default_ret,
+                        _ => default_ret,
+                    },
                 };
 
                 request

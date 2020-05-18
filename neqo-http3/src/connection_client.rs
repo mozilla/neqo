@@ -8,6 +8,7 @@ use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::{HandleReadableOutput, Http3Connection, Http3State, Http3Transaction};
 use crate::hframe::HFrame;
 use crate::hsettings_frame::HSettings;
+use crate::push_controller::PushController;
 use crate::transaction_client::TransactionClient;
 use crate::Header;
 use neqo_common::{
@@ -32,6 +33,7 @@ pub struct Http3Client {
     conn: Connection,
     base_handler: Http3Connection<TransactionClient>,
     events: Http3ClientEvents,
+    push_handler: Rc<RefCell<PushController>>,
 }
 
 impl Display for Http3Client {
@@ -64,6 +66,7 @@ impl Http3Client {
             conn: c,
             base_handler: Http3Connection::new(qpack_settings),
             events: Http3ClientEvents::default(),
+            push_handler: Rc::new(RefCell::new(PushController::new())),
         }
     }
 
@@ -187,7 +190,16 @@ impl Http3Client {
         let id = self.conn.stream_create(StreamType::BiDi)?;
         self.base_handler.add_transaction(
             id,
-            TransactionClient::new(id, method, scheme, host, path, headers, self.events.clone()),
+            TransactionClient::new(
+                id,
+                method,
+                scheme,
+                host,
+                path,
+                headers,
+                self.events.clone(),
+                self.push_handler.clone(),
+            ),
         );
         Ok(id)
     }
@@ -233,7 +245,7 @@ impl Http3Client {
     /// Response data are read directly into a buffer supplied as a parameter of this function to avoid copying
     /// data.
     /// # Errors
-    /// It will be return an error if a stream does not exist or an error happen while reading a stream, e.g.
+    /// It returns an error if a stream does not exist or an error happen while reading a stream, e.g.
     /// early close, protocol error, etc.
     pub fn read_response_data(
         &mut self,
