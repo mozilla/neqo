@@ -34,7 +34,7 @@ impl TransactionClient {
     ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
-            request: SendMessage::new(stream_id, headers, conn_events.clone()),
+            request: SendMessage::new(stream_id, headers, None, Box::new(conn_events.clone())),
             response: RecvMessage::new(stream_id, Box::new(conn_events), Some(push_handler)),
         }
     }
@@ -96,6 +96,6 @@ impl Http3Transaction for TransactionClient {
     }
 
     fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
-        self.request.close_send(conn)
+        self.request.close(conn)
     }
 }

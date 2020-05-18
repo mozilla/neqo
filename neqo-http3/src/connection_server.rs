@@ -39,6 +39,7 @@ impl Http3ServerHandler {
     /// Supply a response for a request.
     pub(crate) fn set_response(
         &mut self,
+        conn: &mut Connection,
         stream_id: u64,
         headers: &[Header],
         data: &[u8],
@@ -47,7 +48,7 @@ impl Http3ServerHandler {
             .transactions
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .set_response(headers, data);
+            .set_response(conn, headers, data)?;
         self.base_handler
             .insert_streams_have_data_to_send(stream_id);
         Ok(())

@@ -4,7 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::client_events::Http3ClientEvents;
 use crate::hframe::HFrame;
 use crate::Header;
 use crate::{Error, Res};
@@ -13,6 +12,7 @@ use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
 use std::cmp::min;
 use std::convert::TryFrom;
+use std::fmt::Debug;
 
 const MAX_DATA_HEADER_SIZE_2: usize = (1 << 6) - 1; // Maximal amount of data with DATA frame header size 2
 const MAX_DATA_HEADER_SIZE_2_LIMIT: usize = MAX_DATA_HEADER_SIZE_2 + 3; // 63 + 3 (size of the next buffer data frame header)
@@ -21,11 +21,18 @@ const MAX_DATA_HEADER_SIZE_3_LIMIT: usize = MAX_DATA_HEADER_SIZE_3 + 5; // 16383
 const MAX_DATA_HEADER_SIZE_5: usize = (1 << 30) - 1; // Maximal amount of data with DATA frame header size 3
 const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 1073741823 + 9 (size of the next buffer data frame header)
 
+pub(crate) trait SendMessageEvents: Debug {
+    fn data_writable(&self, stream_id: u64);
+}
+
 /*
  *  Transaction send states:
- *    HeaderInitialized : Headers are present but still nott encoded.
- *    SendingInitialMessage : sending headers. From here we may switch to SendingData
- *                     or Closed (if the app does not want to send data and
+ *    Initialized : Headers are present but still not encoded. A message body may be present as well.
+ *                  The lcient side send message body using the send_body() function that directly
+ *                  writes into a transport stream. The server side sets headers and body when
+ *                  initializing a send message (TODO: make server use send_body as well)
+ *    SendingInitialMessage : sending headers and maybe meassage body. From here we may switch to
+ *                     SendingData or Closed (if the app does not want to send data and
  *                     has already closed the send stream).
  *    SendingData : We are sending request data until the app closes the stream.
  *    Closed
@@ -50,16 +57,21 @@ enum SendMessageState {
 pub(crate) struct SendMessage {
     state: SendMessageState,
     stream_id: u64,
-    conn_events: Http3ClientEvents,
+    conn_events: Box<dyn SendMessageEvents>,
 }
 
 impl SendMessage {
-    pub fn new(stream_id: u64, headers: Vec<Header>, conn_events: Http3ClientEvents) -> Self {
+    pub fn new(
+        stream_id: u64,
+        headers: Vec<Header>,
+        data: Option<Vec<u8>>,
+        conn_events: Box<dyn SendMessageEvents>,
+    ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
             state: SendMessageState::Initialized {
                 headers,
-                data: None,
+                data,
                 fin: false,
             },
             stream_id,
@@ -213,7 +225,7 @@ impl SendMessage {
         self.state = SendMessageState::Closed;
     }
 
-    pub fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
+    pub fn close(&mut self, conn: &mut Connection) -> Res<()> {
         match self.state {
             SendMessageState::SendingInitialMessage { ref mut fin, .. }
             | SendMessageState::Initialized { ref mut fin, .. } => {

@@ -63,6 +63,7 @@ pub enum Error {
 
     // Internal errors from here.
     AlreadyClosed,
+    AlreadyInitialized,
     DecodingFrame,
     HttpGoaway,
     Internal,

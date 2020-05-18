@@ -9,6 +9,7 @@ use crate::connection::{HandleReadableOutput, Http3Connection, Http3State, Http3
 use crate::hframe::HFrame;
 use crate::hsettings_frame::HSettings;
 use crate::push_controller::PushController;
+use crate::send_message::SendMessageEvents;
 use crate::transaction_client::TransactionClient;
 use crate::Header;
 use neqo_common::{

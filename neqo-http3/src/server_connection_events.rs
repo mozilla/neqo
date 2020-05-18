@@ -6,6 +6,7 @@
 
 use crate::connection::Http3State;
 use crate::recv_message::RecvMessageEvents;
+use crate::send_message::SendMessageEvents;
 use crate::Header;
 use neqo_common::matches;
 
@@ -48,6 +49,12 @@ impl RecvMessageEvents for Http3ServerConnEvents {
     /// Add a new `DataReadable` event
     fn data_readable(&self, stream_id: u64) {
         self.insert(Http3ServerConnEvent::DataReadable { stream_id });
+    }
+}
+
+impl SendMessageEvents for Http3ServerConnEvents {
+    fn data_writable(&self, _stream_id: u64) {
+        // Curently not used on the server side.
     }
 }
 
