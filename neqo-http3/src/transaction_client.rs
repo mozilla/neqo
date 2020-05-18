@@ -8,6 +8,7 @@ use crate::hframe::HFrame;
 
 use crate::client_events::Http3ClientEvents;
 use crate::connection::Http3Transaction;
+use crate::push_controller::PushController;
 use crate::recv_message::RecvMessage;
 use crate::Header;
 use neqo_common::{matches, qinfo, Encoder};
@@ -16,8 +17,10 @@ use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
 
 use crate::{Error, Res};
+use std::cell::RefCell;
 use std::cmp::min;
 use std::convert::TryFrom;
+use std::rc::Rc;
 
 const MAX_DATA_HEADER_SIZE_2: usize = (1 << 6) - 1; // Maximal amount of data with DATA frame header size 2
 const MAX_DATA_HEADER_SIZE_2_LIMIT: usize = MAX_DATA_HEADER_SIZE_2 + 3; // 63 + 3 (size of the next buffer data frame header)
@@ -145,6 +148,7 @@ impl TransactionClient {
         path: &str,
         headers: &[Header],
         conn_events: Http3ClientEvents,
+        push_handler: Rc<RefCell<PushController>>,
     ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
@@ -152,7 +156,11 @@ impl TransactionClient {
                 request: Request::new(method, scheme, host, path, headers),
                 fin: false,
             },
-            response: RecvMessage::new(stream_id, conn_events.clone()),
+            response: RecvMessage::new(
+                stream_id,
+                Box::new(conn_events.clone()),
+                Some(push_handler),
+            ),
             stream_id,
             conn_events,
         }
@@ -228,7 +236,7 @@ impl TransactionClient {
         decoder: &mut QPackDecoder,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        self.response.read_response_data(conn, decoder, buf)
+        self.response.read_data(conn, decoder, buf)
     }
 
     pub fn is_state_sending_data(&self) -> bool {
