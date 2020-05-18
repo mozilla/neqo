@@ -188,15 +188,20 @@ impl Http3Client {
         }
 
         let id = self.conn.stream_create(StreamType::BiDi)?;
+
+        // Transform pseudo-header fields
+        let mut final_headers = Vec::new();
+        final_headers.push((":method".into(), method.to_owned()));
+        final_headers.push((":scheme".into(), scheme.to_owned()));
+        final_headers.push((":authority".into(), host.to_owned()));
+        final_headers.push((":path".into(), path.to_owned()));
+        final_headers.extend_from_slice(headers);
+
         self.base_handler.add_transaction(
             id,
             TransactionClient::new(
                 id,
-                method,
-                scheme,
-                host,
-                path,
-                headers,
+                final_headers,
                 self.events.clone(),
                 self.push_handler.clone(),
             ),
