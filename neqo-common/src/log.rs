@@ -7,7 +7,6 @@
 use std::io::Write;
 use std::sync::Once;
 use std::time::Instant;
-extern crate log;
 
 #[macro_export]
 macro_rules! do_log {
@@ -24,12 +23,11 @@ macro_rules! do_log {
     ($lvl:expr, $($arg:tt)+) => ($crate::do_log!(target: ::log::__log_module_path!(), $lvl, $($arg)+))
 }
 
-#[macro_export(local_inner_macros)]
+#[macro_export]
 macro_rules! log_enabled {
     (target: $target:expr, $lvl:expr) => {{
         let lvl = $lvl;
-        lvl <= ::log::max_level()
-            && ::log::__private_api_enabled(lvl, $target)
+        lvl <= ::log::max_level() && ::log::__private_api_enabled(lvl, $target)
     }};
     ($lvl:expr) => {
         $crate::log_enabled!(target: ::log::__log_module_path!(), $lvl)
