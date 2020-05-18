@@ -18,6 +18,7 @@ pub mod hframe;
 mod hsettings_frame;
 mod push_controller;
 mod recv_message;
+mod send_message;
 pub mod server;
 mod server_connection_events;
 mod server_events;

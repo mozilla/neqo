@@ -4,118 +4,25 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::hframe::HFrame;
-
 use crate::client_events::Http3ClientEvents;
 use crate::connection::Http3Transaction;
 use crate::push_controller::PushController;
 use crate::recv_message::RecvMessage;
+use crate::send_message::SendMessage;
 use crate::Header;
-use neqo_common::{matches, qinfo, Encoder};
+use neqo_common::qinfo;
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
 
-use crate::{Error, Res};
+use crate::Res;
 use std::cell::RefCell;
-use std::cmp::min;
-use std::convert::TryFrom;
 use std::rc::Rc;
 
-const MAX_DATA_HEADER_SIZE_2: usize = (1 << 6) - 1; // Maximal amount of data with DATA frame header size 2
-const MAX_DATA_HEADER_SIZE_2_LIMIT: usize = MAX_DATA_HEADER_SIZE_2 + 3; // 63 + 3 (size of the next buffer data frame header)
-const MAX_DATA_HEADER_SIZE_3: usize = (1 << 14) - 1; // Maximal amount of data with DATA frame header size 3
-const MAX_DATA_HEADER_SIZE_3_LIMIT: usize = MAX_DATA_HEADER_SIZE_3 + 5; // 16383 + 5 (size of the next buffer data frame header)
-const MAX_DATA_HEADER_SIZE_5: usize = (1 << 30) - 1; // Maximal amount of data with DATA frame header size 3
-const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 1073741823 + 9 (size of the next buffer data frame header)
-
-#[derive(PartialEq, Debug)]
-struct Request {
-    headers: Vec<Header>,
-    buf: Option<Vec<u8>>,
-}
-
-impl Request {
-    pub fn new(headers: Vec<Header>) -> Self {
-        Self { headers, buf: None }
-    }
-
-    fn encode(
-        &mut self,
-        conn: &mut Connection,
-        encoder: &mut QPackEncoder,
-        stream_id: u64,
-    ) -> Res<()> {
-        if self.buf.is_some() {
-            return Ok(());
-        }
-
-        qinfo!([self], "Encoding headers");
-        let header_block = encoder.encode_header_block(conn, &self.headers, stream_id)?;
-        let f = HFrame::Headers {
-            header_block: header_block.to_vec(),
-        };
-        let mut d = Encoder::default();
-        f.encode(&mut d);
-        self.buf = Some(d.into());
-        Ok(())
-    }
-
-    fn send(
-        &mut self,
-        conn: &mut Connection,
-        encoder: &mut QPackEncoder,
-        stream_id: u64,
-    ) -> Res<bool> {
-        let label = ::neqo_common::log_subject!(::log::Level::Info, self);
-        self.encode(conn, encoder, stream_id)?;
-        if let Some(buf) = &mut self.buf {
-            let sent = conn.stream_send(stream_id, &buf)?;
-            qinfo!([label], "{} bytes sent", sent);
-
-            if sent == buf.len() {
-                qinfo!([label], "done sending request");
-                Ok(true)
-            } else {
-                let b = buf.split_off(sent);
-                self.buf = Some(b);
-                Ok(false)
-            }
-        } else {
-            panic!("We must have buffer in this state")
-        }
-    }
-}
-
-impl ::std::fmt::Display for Request {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Request {:?}", self.headers)
-    }
-}
-
-/*
- *  Transaction send states:
- *    SendingHeaders : sending headers. From here we may switch to SendingData
- *                     or Closed (if the app does not want to send data and
- *                     has already closed the send stream).
- *    SendingData : We are sending request data until the app closes the stream.
- *    Closed
- */
-
-#[derive(PartialEq, Debug)]
-enum TransactionSendState {
-    SendingHeaders { request: Request, fin: bool },
-    SendingData,
-    Closed,
-}
-
-//  This is used for normal request/responses.
 #[derive(Debug)]
 pub(crate) struct TransactionClient {
-    send_state: TransactionSendState,
+    request: SendMessage,
     response: RecvMessage,
-    stream_id: u64,
-    conn_events: Http3ClientEvents,
 }
 
 impl TransactionClient {
@@ -127,82 +34,17 @@ impl TransactionClient {
     ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
-            send_state: TransactionSendState::SendingHeaders {
-                request: Request::new(headers),
-                fin: false,
-            },
-            response: RecvMessage::new(
-                stream_id,
-                Box::new(conn_events.clone()),
-                Some(push_handler),
-            ),
-            stream_id,
-            conn_events,
+            request: SendMessage::new(stream_id, headers, conn_events.clone()),
+            response: RecvMessage::new(stream_id, Box::new(conn_events), Some(push_handler)),
         }
     }
 
     pub fn send_request_body(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
-        qinfo!(
-            [self],
-            "send_request_body: send_state={:?} len={}",
-            self.send_state,
-            buf.len()
-        );
-        match self.send_state {
-            TransactionSendState::SendingHeaders { .. } => Ok(0),
-            TransactionSendState::SendingData => {
-                let available = usize::try_from(conn.stream_avail_send_space(self.stream_id)?)
-                    .unwrap_or(usize::max_value());
-                if available <= 2 {
-                    return Ok(0);
-                }
-                let to_send;
-                if available <= MAX_DATA_HEADER_SIZE_2_LIMIT {
-                    // 63 + 3
-                    to_send = min(min(buf.len(), available - 2), MAX_DATA_HEADER_SIZE_2);
-                } else if available <= MAX_DATA_HEADER_SIZE_3_LIMIT {
-                    // 16383 + 5
-                    to_send = min(min(buf.len(), available - 3), MAX_DATA_HEADER_SIZE_3);
-                } else if available <= MAX_DATA_HEADER_SIZE_5 {
-                    // 1073741823 + 9
-                    to_send = min(min(buf.len(), available - 5), MAX_DATA_HEADER_SIZE_5_LIMIT);
-                } else {
-                    to_send = min(buf.len(), available - 9);
-                }
-
-                qinfo!(
-                    [self],
-                    "send_request_body: available={} to_send={}.",
-                    available,
-                    to_send
-                );
-
-                let data_frame = HFrame::Data {
-                    len: to_send as u64,
-                };
-                let mut enc = Encoder::default();
-                data_frame.encode(&mut enc);
-                match conn.stream_send(self.stream_id, &enc) {
-                    Ok(sent) => {
-                        debug_assert_eq!(sent, enc.len());
-                    }
-                    Err(e) => return Err(Error::TransportError(e)),
-                }
-                match conn.stream_send(self.stream_id, &buf[..to_send]) {
-                    Ok(sent) => Ok(sent),
-                    Err(e) => Err(Error::TransportError(e)),
-                }
-            }
-            TransactionSendState::Closed => Err(Error::AlreadyClosed),
-        }
+        self.request.send_body(conn, buf)
     }
 
     pub fn is_sending_closed(&self) -> bool {
-        match self.send_state {
-            TransactionSendState::SendingHeaders { fin, .. } => fin,
-            TransactionSendState::SendingData => false,
-            _ => true,
-        }
+        self.request.is_sending_closed()
     }
 
     pub fn read_response_data(
@@ -215,37 +57,19 @@ impl TransactionClient {
     }
 
     pub fn is_state_sending_data(&self) -> bool {
-        self.send_state == TransactionSendState::SendingData
+        self.request.is_state_sending_data()
     }
 }
 
 impl ::std::fmt::Display for TransactionClient {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "TransactionClient {}", self.stream_id)
+        write!(f, "TransactionClient {} {}", self.request, self.response)
     }
 }
 
 impl Http3Transaction for TransactionClient {
     fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
-        let label = ::neqo_common::log_subject!(::log::Level::Info, self);
-        if let TransactionSendState::SendingHeaders {
-            ref mut request,
-            fin,
-        } = self.send_state
-        {
-            if request.send(conn, encoder, self.stream_id)? {
-                if fin {
-                    conn.stream_close_send(self.stream_id)?;
-                    self.send_state = TransactionSendState::Closed;
-                    qinfo!([label], "done sending request");
-                } else {
-                    self.send_state = TransactionSendState::SendingData;
-                    self.conn_events.data_writable(self.stream_id);
-                    qinfo!([label], "change to state SendingData");
-                }
-            }
-        }
-        Ok(())
+        self.request.send(conn, encoder)
     }
 
     fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
@@ -256,7 +80,7 @@ impl Http3Transaction for TransactionClient {
     // they're still being sent. Request body (if any) is sent by http client
     // afterwards using `send_request_body` after receiving DataWritable event.
     fn has_data_to_send(&self) -> bool {
-        matches!(self.send_state, TransactionSendState::SendingHeaders { .. } )
+        self.request.has_data_to_send()
     }
 
     fn reset_receiving_side(&mut self) {
@@ -264,20 +88,14 @@ impl Http3Transaction for TransactionClient {
     }
 
     fn stop_sending(&mut self) {
-        self.send_state = TransactionSendState::Closed;
+        self.request.stop_sending()
     }
 
     fn done(&self) -> bool {
-        self.send_state == TransactionSendState::Closed && self.response.is_closed()
+        self.request.done() && self.response.is_closed()
     }
 
     fn close_send(&mut self, conn: &mut Connection) -> Res<()> {
-        if let TransactionSendState::SendingHeaders { ref mut fin, .. } = self.send_state {
-            *fin = true;
-        } else {
-            self.send_state = TransactionSendState::Closed;
-            conn.stream_close_send(self.stream_id)?;
-        }
-        Ok(())
+        self.request.close_send(conn)
     }
 }
