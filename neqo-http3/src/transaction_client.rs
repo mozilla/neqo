@@ -31,30 +31,13 @@ const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 10737
 
 #[derive(PartialEq, Debug)]
 struct Request {
-    method: String,
-    scheme: String,
-    host: String,
-    path: String,
     headers: Vec<Header>,
     buf: Option<Vec<u8>>,
 }
 
 impl Request {
-    pub fn new(method: &str, scheme: &str, host: &str, path: &str, headers: &[Header]) -> Self {
-        let mut r = Self {
-            method: method.to_owned(),
-            scheme: scheme.to_owned(),
-            host: host.to_owned(),
-            path: path.to_owned(),
-            headers: Vec::new(),
-            buf: None,
-        };
-        r.headers.push((":method".into(), method.to_owned()));
-        r.headers.push((":scheme".into(), r.scheme.clone()));
-        r.headers.push((":authority".into(), r.host.clone()));
-        r.headers.push((":path".into(), r.path.clone()));
-        r.headers.extend_from_slice(headers);
-        r
+    pub fn new(headers: Vec<Header>) -> Self {
+        Self { headers, buf: None }
     }
 
     fn encode(
@@ -67,7 +50,7 @@ impl Request {
             return Ok(());
         }
 
-        qinfo!([self], "Encoding headers for {}/{}", self.host, self.path);
+        qinfo!([self], "Encoding headers");
         let header_block = encoder.encode_header_block(conn, &self.headers, stream_id)?;
         let f = HFrame::Headers {
             header_block: header_block.to_vec(),
@@ -110,7 +93,7 @@ impl Request {
 
 impl ::std::fmt::Display for Request {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Request {} {}/{}", self.method, self.host, self.path)
+        write!(f, "Request {:?}", self.headers)
     }
 }
 
@@ -142,18 +125,14 @@ pub(crate) struct TransactionClient {
 impl TransactionClient {
     pub fn new(
         stream_id: u64,
-        method: &str,
-        scheme: &str,
-        host: &str,
-        path: &str,
-        headers: &[Header],
+        headers: Vec<Header>,
         conn_events: Http3ClientEvents,
         push_handler: Rc<RefCell<PushController>>,
     ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
             send_state: TransactionSendState::SendingHeaders {
-                request: Request::new(method, scheme, host, path, headers),
+                request: Request::new(headers),
                 fin: false,
             },
             response: RecvMessage::new(
