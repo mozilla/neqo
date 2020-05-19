@@ -135,31 +135,28 @@ impl Http3Server {
                                     stream_id,
                                     &mut data,
                                 );
-                                match res {
-                                    Ok((amount, fin)) => {
-                                        if amount > 0 {
-                                            if amount < MAX_EVENT_DATA_SIZE {
-                                                data.resize(amount, 0);
-                                            }
-                                            self.events.data(
-                                                ClientRequestStream::new(
-                                                    conn.clone(),
-                                                    handler.clone(),
-                                                    stream_id,
-                                                ),
-                                                data,
-                                                fin,
-                                            );
+                                if let Ok((amount, fin)) = res {
+                                    if amount > 0 {
+                                        if amount < MAX_EVENT_DATA_SIZE {
+                                            data.resize(amount, 0);
                                         }
-                                        if amount < MAX_EVENT_DATA_SIZE || fin {
-                                            break;
-                                        }
+                                        self.events.data(
+                                            ClientRequestStream::new(
+                                                conn.clone(),
+                                                handler.clone(),
+                                                stream_id,
+                                            ),
+                                            data,
+                                            fin,
+                                        );
                                     }
-                                    Err(_) => {
-                                        // Any error will closed the handler, just ignore this event, the next event must
-                                        // be a state change event.
+                                    if amount < MAX_EVENT_DATA_SIZE || fin {
                                         break;
                                     }
+                                } else {
+                                    // Any error will closed the handler, just ignore this event, the next event must
+                                    // be a state change event.
+                                    break;
                                 }
                             }
                         }

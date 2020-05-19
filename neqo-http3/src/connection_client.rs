@@ -493,18 +493,18 @@ impl Http3Client {
 
         // if error is not Error::HttpNoError we will close receiving part as well.
         if app_err != Error::HttpNoError.code() {
-            if self
+            found |= self
                 .base_handler
                 .recv_streams
                 .remove(&stop_stream_id)
-                .is_some()
-            {
+                .is_some();
+            if found {
                 self.events.reset(stop_stream_id, app_err);
-                // The server may close its sending side as well, but just to be sure
-                // we will do it ourselves.
-                let _ = self.conn.stream_stop_sending(stop_stream_id, app_err);
-                found = true;
             }
+
+            // The server may close its sending side as well, but just to be sure
+            // we will do it ourselves.
+            let _ = self.conn.stream_stop_sending(stop_stream_id, app_err);
         }
 
         if !found && self.base_handler.is_critical_stream(stop_stream_id) {

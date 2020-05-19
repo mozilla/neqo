@@ -7,6 +7,7 @@
 use crate::{Error, Res};
 use neqo_common::qtrace;
 use std::fmt::Debug;
+use std::fmt::Display;
 
 #[derive(Debug)]
 pub(crate) struct PushController {}
@@ -17,14 +18,27 @@ impl PushController {
     }
 }
 
+impl Display for PushController {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "Push controler")
+    }
+}
+
 impl PushController {
+    #[allow(clippy::needless_pass_by_value)]
     pub fn new_push_promise(&self, push_id: u64, header_block: Vec<u8>) -> Res<()> {
+        qtrace!(
+            [self],
+            "New push promise push_id={} header_block={:?}",
+            push_id,
+            header_block
+        );
         qtrace!("A new push promise {} {:?}", push_id, header_block);
         Err(Error::HttpId)
     }
 
     pub fn new_duplicate_push(&self, push_id: u64) -> Res<()> {
-        qtrace!("A new duplicate push {}", push_id);
+        qtrace!([self], "A new duplicate push {}", push_id);
         Err(Error::HttpId)
     }
 }
