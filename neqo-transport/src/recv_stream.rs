@@ -219,7 +219,7 @@ impl RxStreamOrderer {
     }
 
     /// Copy received data (if any) into the buffer. Returns bytes copied.
-    fn read(&mut self, buf: &mut [u8]) -> Res<u64> {
+    fn read(&mut self, buf: &mut [u8]) -> Res<usize> {
         qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
         let mut buf_remaining = buf.len() as usize;
         let mut copied = 0;
@@ -253,11 +253,11 @@ impl RxStreamOrderer {
             self.data_ranges.remove(&key);
         }
 
-        Ok(copied as u64)
+        Ok(copied)
     }
 
     /// Extend the given Vector with any available data.
-    pub fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Res<u64> {
+    pub fn read_to_end(&mut self, buf: &mut Vec<u8>) -> Res<usize> {
         let orig_len = buf.len();
         buf.resize(orig_len + self.bytes_ready(), 0);
         self.read(&mut buf[orig_len..])
@@ -501,7 +501,7 @@ impl RecvStream {
             .map_or(false, RxStreamOrderer::data_ready)
     }
 
-    pub fn read(&mut self, buf: &mut [u8]) -> Res<(u64, bool)> {
+    pub fn read(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
         let res = match &mut self.state {
             RecvStreamState::Recv { recv_buf, .. }
             | RecvStreamState::SizeKnown { recv_buf, .. } => Ok((recv_buf.read(buf)?, false)),
