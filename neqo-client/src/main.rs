@@ -108,6 +108,11 @@ pub struct Args {
     #[structopt(name = "qns-mode", long)]
     /// Enable special behavior for use with QUIC Network Simulator
     qns_mode: bool,
+
+    #[structopt(short = "r", long)]
+    /// Pre-connect to the server and attempt to resume for the test.
+    /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
+    resume: bool,
 }
 
 trait Handler {
@@ -237,7 +242,8 @@ impl Handler for PreConnectHandler {
         if client.events().any(authentication_needed) {
             client.authenticated(AuthenticationStatus::Ok, Instant::now());
         }
-        Ok(Http3State::Connected != client.state())
+        // Keep going until we can send a request.
+        Ok(!client.state().active())
     }
 }
 
@@ -252,6 +258,9 @@ impl Handler for PostConnectHandler {
         let mut data = vec![0; 4000];
         while let Some(event) = client.next_event() {
             match event {
+                Http3ClientEvent::AuthenticationNeeded => {
+                    client.authenticated(AuthenticationStatus::Ok, Instant::now());
+                }
                 Http3ClientEvent::HeaderReady {
                     stream_id,
                     headers,
@@ -308,6 +317,10 @@ impl Handler for PostConnectHandler {
                         }
                     }
                 }
+                Http3ClientEvent::ZeroRttRejected => {
+                    self.streams.clear();
+                    eprintln!("TODO: resend requests");
+                }
                 _ => {}
             }
         }
@@ -331,16 +344,69 @@ fn to_headers(values: &[impl AsRef<str>]) -> Vec<Header> {
         .collect()
 }
 
+fn pre_connect(
+    args: &Args,
+    socket: &UdpSocket,
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
+    hostname: &str,
+) -> Res<Option<Vec<u8>>> {
+    let mut client = Http3Client::new(
+        hostname,
+        &args.alpn,
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+        local_addr,
+        remote_addr,
+        QpackSettings {
+            max_table_size_encoder: args.max_table_size_encoder,
+            max_table_size_decoder: args.max_table_size_decoder,
+            max_blocked_streams: args.max_blocked_streams,
+        },
+    )?;
+    let mut handler = PreConnectHandler {};
+    process_loop(
+        &local_addr,
+        &remote_addr,
+        socket,
+        &mut client,
+        &mut handler,
+        &args,
+    )?;
+
+    let mut handler = PostConnectHandler::default();
+    let client_stream_id = client.fetch("OPTIONS", "https", &hostname, "*", &[])?;
+    client.stream_close_send(client_stream_id)?;
+    handler.streams.insert(client_stream_id, None);
+
+    process_loop(
+        &local_addr,
+        &remote_addr,
+        socket,
+        &mut client,
+        &mut handler,
+        &args,
+    )?;
+
+    Ok(client.resumption_token().to_owned())
+}
+
 fn client(
     args: &Args,
     socket: UdpSocket,
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
-    origin: &str,
+    hostname: &str,
     urls: &[Url],
 ) -> Res<()> {
+    let resumption_token = if args.resume {
+        eprintln!("Pre-connect to {}", hostname);
+        pre_connect(args, &socket, local_addr, remote_addr, hostname)?
+    } else {
+        None
+    };
+
     let mut client = Http3Client::new(
-        origin,
+        hostname,
         &args.alpn,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
@@ -352,7 +418,13 @@ fn client(
         },
     )
     .expect("must succeed");
-    client.set_qlog(qlog_new(args, origin)?);
+    if let Some(token) = resumption_token {
+        eprintln!("Enabling resumption for {}", hostname);
+        client.set_resumption_token(Instant::now(), &token)?;
+    } else if args.resume {
+        eprintln!("Unable to resume");
+    }
+    client.set_qlog(qlog_new(args, hostname)?);
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     process_loop(
@@ -376,11 +448,9 @@ fn client(
             &url.path(),
             &to_headers(&args.header),
         )?;
-
-        let _ = client.stream_close_send(client_stream_id);
+        client.stream_close_send(client_stream_id)?;
 
         let out_file = get_output_file(url, &args.output_dir, &mut open_paths);
-
         h2.streams.insert(client_stream_id, out_file);
     }
 
@@ -482,34 +552,14 @@ fn main() -> Res<()> {
             remote_addr
         );
 
+        let hostname = format!("{}", host);
         if !args.use_old_http {
-            client(
-                &args,
-                socket,
-                local_addr,
-                remote_addr,
-                &format!("{}", host),
-                &urls,
-            )?;
+            client(&args, socket, local_addr, remote_addr, &hostname, &urls)?;
         } else if !args.download_in_series {
-            old::old_client(
-                &args,
-                &socket,
-                local_addr,
-                remote_addr,
-                &format!("{}", host),
-                &urls,
-            )?;
+            old::client(&args, &socket, local_addr, remote_addr, &hostname, &urls)?;
         } else {
             for url in urls {
-                old::old_client(
-                    &args,
-                    &socket,
-                    local_addr,
-                    remote_addr,
-                    &format!("{}", host),
-                    &[url],
-                )?;
+                old::client(&args, &socket, local_addr, remote_addr, &hostname, &[url])?;
             }
         }
     }
@@ -683,7 +733,7 @@ mod old {
         }
     }
 
-    pub fn old_client(
+    pub fn client(
         args: &Args,
         socket: &UdpSocket,
         local_addr: SocketAddr,
