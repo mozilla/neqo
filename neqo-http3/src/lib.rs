@@ -62,14 +62,15 @@ pub enum Error {
     // Internal errors from here.
     AlreadyClosed,
     DecodingFrame,
+    HttpGoaway,
+    InvalidResumptionToken,
     InvalidStreamId,
+    InvalidState,
     NoMoreData,
     NotEnoughData,
     TransportError(TransportError),
     Unavailable,
     Unexpected,
-    InvalidResumptionToken,
-    HttpGoaway,
 }
 
 impl Error {
