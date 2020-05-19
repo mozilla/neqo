@@ -72,7 +72,7 @@ impl RecvMessage {
         Self {
             state: RecvMessageState::WaitingForResponseHeaders,
             frame_reader: HFrameReader::new(),
-            conn_events: conn_events,
+            conn_events,
             push_handler,
             stream_id,
         }
