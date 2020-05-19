@@ -45,7 +45,12 @@ struct Args {
     #[structopt(short = "b", long, default_value = "128")]
     max_blocked_streams: u16,
 
-    #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
+    #[structopt(
+        short = "d",
+        long,
+        default_value = "./test-fixture/db",
+        parse(from_os_str)
+    )]
     /// NSS database directory.
     db: PathBuf,
 
