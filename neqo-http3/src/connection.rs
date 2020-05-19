@@ -58,6 +58,13 @@ pub enum Http3State {
     Closed(CloseError),
 }
 
+impl Http3State {
+    #[must_use]
+    pub fn active(&self) -> bool {
+        matches!(self, Http3State::Connected | Http3State::GoingAway(_) | Http3State::ZeroRtt)
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Http3Connection<T: Http3Transaction> {
     pub state: Http3State,
@@ -191,7 +198,6 @@ impl<T: Http3Transaction> Http3Connection<T> {
     /// If a Push stream has been discovered, return true and let the `Http3Client`/`Server` handle it.
     pub fn handle_new_unidi_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         qtrace!([self], "A new stream: {}.", stream_id);
-        debug_assert!(self.state_active());
         let stream_type;
         let fin;
         {
@@ -226,8 +232,6 @@ impl<T: Http3Transaction> Http3Connection<T> {
         stream_id: u64,
     ) -> Res<HandleReadableOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
-
-        debug_assert!(self.state_active());
 
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
@@ -336,8 +340,6 @@ impl<T: Http3Transaction> Http3Connection<T> {
             app_err
         );
 
-        debug_assert!(self.state_active());
-
         if let Some(t) = self.transactions.get_mut(&stream_id) {
             // Close both sides of the transaction_client.
             t.reset_receiving_side();
@@ -418,9 +420,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
             String::new()
         };
 
-        debug_assert!(self.state_active());
         let t = self.transactions.get_mut(&stream_id);
-
         if t.is_none() {
             return Ok(false);
         }
@@ -510,7 +510,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     /// This is called when an application wants to close a sending side of a stream.
     pub fn stream_close_send(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
         qinfo!([self], "Close sending side for stream {}.", stream_id);
-        debug_assert!(self.state_active() || self.state_zero_rtt());
+        debug_assert!(self.state.active());
         let transaction = self
             .transactions
             .get_mut(&stream_id)
@@ -613,14 +613,6 @@ impl<T: Http3Transaction> Http3Connection<T> {
             }
             Http3RemoteSettingsState::Received { .. } => Err(Error::HttpFrameUnexpected),
         }
-    }
-
-    fn state_active(&self) -> bool {
-        matches!(self.state, Http3State::Connected | Http3State::GoingAway(_))
-    }
-
-    fn state_zero_rtt(&self) -> bool {
-        matches!(self.state, Http3State::ZeroRtt)
     }
 
     /// Return the current state on `Http3Connection`.
