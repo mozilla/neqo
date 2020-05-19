@@ -74,12 +74,7 @@ impl Http3ServerHandler {
         }
 
         let res = self.check_connection_events(conn);
-        if !self.check_result(conn, now, &res)
-            && matches!(
-                self.base_handler.state(),
-                Http3State::Connected | Http3State::GoingAway(..)
-            )
-        {
+        if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
             let res = self.base_handler.process_sending(conn);
             self.check_result(conn, now, &res);
         }
