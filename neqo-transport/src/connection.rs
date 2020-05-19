@@ -11,6 +11,7 @@ use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{self, Debug};
+use std::mem;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -83,7 +84,7 @@ impl State {
 impl PartialOrd for State {
     #[allow(clippy::match_same_arms)] // Lint bug: rust-lang/rust-clippy#860
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if std::mem::discriminant(self) == std::mem::discriminant(other) {
+        if mem::discriminant(self) == mem::discriminant(other) {
             return Some(Ordering::Equal);
         }
         Some(match (self, other) {
@@ -1820,8 +1821,11 @@ impl Connection {
                 _ => {}
             }
             self.events.connection_state_change(state);
-        } else {
-            assert_eq!(state, self.state);
+        } else if mem::discriminant(state) != mem::discriminant(self.state) {
+            // Only tolerate a regression in state if the new state is closing
+            // and the connection is already closed.
+            debug_assert!(matches!(state, State::Closing { .. }));
+            debug_assert!(matches!(self.state, State::Closing { .. } | State::Closed(..)));
         }
     }
 
