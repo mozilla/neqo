@@ -40,6 +40,7 @@ pub(crate) trait SendMessageEvents: Debug {
 
 #[derive(PartialEq, Debug)]
 enum SendMessageState {
+    Uninitialized,
     Initialized {
         headers: Vec<Header>,
         data: Option<Vec<u8>>,
@@ -61,22 +62,47 @@ pub(crate) struct SendMessage {
 }
 
 impl SendMessage {
-    pub fn new(
+    pub fn new(stream_id: u64, conn_events: Box<dyn SendMessageEvents>) -> Self {
+        qinfo!("Create a request stream_id={}", stream_id);
+        Self {
+            state: SendMessageState::Uninitialized,
+            stream_id,
+            conn_events,
+        }
+    }
+
+    pub fn new_with_headers(
         stream_id: u64,
         headers: Vec<Header>,
-        data: Option<Vec<u8>>,
         conn_events: Box<dyn SendMessageEvents>,
     ) -> Self {
         qinfo!("Create a request stream_id={}", stream_id);
         Self {
             state: SendMessageState::Initialized {
                 headers,
-                data,
+                data: None,
                 fin: false,
             },
             stream_id,
             conn_events,
         }
+    }
+
+    pub fn set_message(&mut self, headers: &[Header], data: Option<&[u8]>) -> Res<()> {
+        if !matches!(self.state, SendMessageState::Uninitialized) {
+            return Err(Error::AlreadyInitialized);
+        }
+
+        self.state = SendMessageState::Initialized {
+            headers: headers.to_vec(),
+            data: if let Some(d) = data {
+                Some(d.to_vec())
+            } else {
+                None
+            },
+            fin: true,
+        };
+        Ok(())
     }
 
     pub fn send_body(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
@@ -87,7 +113,8 @@ impl SendMessage {
             buf.len()
         );
         match self.state {
-            SendMessageState::Initialized { .. }
+            SendMessageState::Uninitialized
+            | SendMessageState::Initialized { .. }
             | SendMessageState::SendingInitialMessage { .. } => Ok(0),
             SendMessageState::SendingData => {
                 let available = usize::try_from(conn.stream_avail_send_space(self.stream_id)?)
@@ -219,10 +246,6 @@ impl SendMessage {
     // afterwards using `send_request_body` after receiving DataWritable event.
     pub fn has_data_to_send(&self) -> bool {
         matches!(self.state, SendMessageState::Initialized {..} | SendMessageState::SendingInitialMessage { .. } )
-    }
-
-    pub fn stop_sending(&mut self) {
-        self.state = SendMessageState::Closed;
     }
 
     pub fn close(&mut self, conn: &mut Connection) -> Res<()> {
