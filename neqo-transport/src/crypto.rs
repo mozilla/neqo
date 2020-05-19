@@ -910,7 +910,7 @@ impl CryptoStreams {
         self.get(space).map_or(false, |cs| cs.rx.data_ready())
     }
 
-    pub fn read_to_end(&mut self, space: PNSpace, buf: &mut Vec<u8>) -> Res<u64> {
+    pub fn read_to_end(&mut self, space: PNSpace, buf: &mut Vec<u8>) -> Res<usize> {
         self.get_mut(space).unwrap().rx.read_to_end(buf)
     }
 
