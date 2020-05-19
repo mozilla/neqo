@@ -441,7 +441,7 @@ fn main() -> Res<()> {
     if args.qns_mode {
         match env::var("TESTCASE") {
             Ok(s) if s == "http3" => {}
-            Ok(s) if s == "handshake" || s == "transfer" => {
+            Ok(s) if s == "handshake" || s == "transfer" || s == "retry" => {
                 args.use_old_http = true;
             }
             Ok(s) if s == "multiconnect" => {
