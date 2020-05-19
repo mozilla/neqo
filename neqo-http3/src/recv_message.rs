@@ -193,7 +193,7 @@ impl RecvMessage {
                         break Ok((written, fin));
                     } else if *remaining_data_len == 0 {
                         self.state = RecvMessageState::WaitingForData;
-                        self.receive(conn, decoder, false)?;
+                        self.receive_internal(conn, decoder, false)?;
                     } else {
                         break Ok((written, false));
                     }
@@ -207,7 +207,7 @@ impl RecvMessage {
         }
     }
 
-    pub fn receive(
+    fn receive_internal(
         &mut self,
         conn: &mut Connection,
         decoder: &mut QPackDecoder,
@@ -295,11 +295,11 @@ impl RecvMessage {
         }
     }
 
-    pub fn is_closed(&self) -> bool {
-        self.state == RecvMessageState::Closed
+    pub fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
+        self.receive_internal(conn, decoder, true)
     }
 
-    pub fn close(&mut self) {
-        self.state = RecvMessageState::Closed;
+    pub fn done(&self) -> bool {
+        self.state == RecvMessageState::Closed
     }
 }

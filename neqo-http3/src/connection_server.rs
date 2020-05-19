@@ -4,10 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::{HandleReadableOutput, Http3Connection, Http3State, Http3Transaction};
+use crate::connection::{HandleReadableOutput, Http3Connection, Http3State};
 use crate::hframe::HFrame;
+use crate::recv_message::RecvMessage;
+use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
-use crate::transaction_server::TransactionServer;
 use crate::{Error, Header, Res};
 use neqo_common::{matches, qdebug, qinfo, qtrace};
 use neqo_qpack::QpackSettings;
@@ -16,7 +17,7 @@ use std::time::Instant;
 
 #[derive(Debug)]
 pub struct Http3ServerHandler {
-    base_handler: Http3Connection<TransactionServer>,
+    base_handler: Http3Connection,
     events: Http3ServerConnEvents,
     needs_processing: bool,
 }
@@ -39,16 +40,15 @@ impl Http3ServerHandler {
     /// Supply a response for a request.
     pub(crate) fn set_response(
         &mut self,
-        conn: &mut Connection,
         stream_id: u64,
         headers: &[Header],
         data: &[u8],
     ) -> Res<()> {
         self.base_handler
-            .transactions
+            .send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .set_response(conn, headers, data)?;
+            .set_message(headers, Some(data))?;
         self.base_handler
             .insert_streams_have_data_to_send(stream_id);
         Ok(())
@@ -125,9 +125,10 @@ impl Http3ServerHandler {
                     stream_id,
                     stream_type,
                 } => match stream_type {
-                    StreamType::BiDi => self.base_handler.add_transaction(
+                    StreamType::BiDi => self.base_handler.add_streams(
                         stream_id,
-                        TransactionServer::new(stream_id, self.events.clone()),
+                        SendMessage::new(stream_id, Box::new(self.events.clone())),
+                        RecvMessage::new(stream_id, Box::new(self.events.clone()), None),
                     ),
                     StreamType::UniDi => {
                         if self.base_handler.handle_new_unidi_stream(conn, stream_id)? {
@@ -195,13 +196,15 @@ impl Http3ServerHandler {
         stop_stream_id: u64,
         app_err: AppError,
     ) -> Res<()> {
-        if let Some(t) = self.base_handler.transactions.get_mut(&stop_stream_id) {
-            // close sending side.
-            t.stop_sending();
+        if self
+            .base_handler
+            .send_streams
+            .remove(&stop_stream_id)
+            .is_some()
+        {
             // receiving side may be closed already, just ignore an error in the following line.
             let _ = conn.stream_stop_sending(stop_stream_id, app_err);
-            t.reset_receiving_side();
-            self.base_handler.transactions.remove(&stop_stream_id);
+            self.base_handler.recv_streams.remove(&stop_stream_id);
         } else if self.base_handler.is_critical_stream(stop_stream_id) {
             return Err(Error::HttpClosedCriticalStream);
         }
@@ -222,17 +225,16 @@ impl Http3ServerHandler {
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
         qinfo!([self], "read_data from stream {}.", stream_id);
-        match self.base_handler.transactions.get_mut(&stream_id) {
+        match self.base_handler.recv_streams.get_mut(&stream_id) {
             None => {
                 self.close(conn, now, &Error::Internal);
                 Err(Error::Internal)
             }
-            Some(transaction) => {
-                match transaction.read_request_data(conn, &mut self.base_handler.qpack_decoder, buf)
-                {
+            Some(recv_stream) => {
+                match recv_stream.read_data(conn, &mut self.base_handler.qpack_decoder, buf) {
                     Ok((amount, fin)) => {
-                        if transaction.done() {
-                            self.base_handler.transactions.remove(&stream_id);
+                        if recv_stream.done() {
+                            self.base_handler.recv_streams.remove(&stream_id);
                         }
                         Ok((amount, fin))
                     }
