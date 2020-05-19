@@ -438,11 +438,17 @@ fn main() -> Res<()> {
 
     let mut args = Args::from_args();
 
+    let mut resumption_test = false;
+
     if args.qns_mode {
         match env::var("TESTCASE") {
             Ok(s) if s == "http3" => {}
             Ok(s) if s == "handshake" || s == "transfer" || s == "retry" => {
                 args.use_old_http = true;
+            }
+            Ok(s) if s == "zerortt" || s == "resumption" => {
+                args.use_old_http = true;
+                resumption_test = true;
             }
             Ok(s) if s == "multiconnect" => {
                 args.use_old_http = true;
@@ -459,7 +465,8 @@ fn main() -> Res<()> {
         entry.push(url.clone());
     }
 
-    for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
+    for ((_scheme, host, port), mut urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k
+    {
         Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
         Origin::Opaque(x) => {
             eprintln!("Opaque origin {:?}", x);
@@ -502,6 +509,28 @@ fn main() -> Res<()> {
                 &urls,
             )?;
         } else if !args.download_in_series {
+            let mut token: Vec<u8> = Vec::new();
+
+            if resumption_test {
+                // Download first URL using a separate connection and save the token
+                if urls.len() < 2 {
+                    eprintln!("Resumption test needs at least 2 URLs");
+                    exit(1)
+                }
+
+                let first_url = urls.remove(0);
+
+                old::old_client(
+                    &args,
+                    &socket,
+                    local_addr,
+                    remote_addr,
+                    &format!("{}", host),
+                    &[first_url],
+                    Some(&mut token),
+                )?;
+            }
+
             old::old_client(
                 &args,
                 &socket,
@@ -509,6 +538,7 @@ fn main() -> Res<()> {
                 remote_addr,
                 &format!("{}", host),
                 &urls,
+                Some(&mut token),
             )?;
         } else {
             for url in urls {
@@ -519,6 +549,7 @@ fn main() -> Res<()> {
                     remote_addr,
                     &format!("{}", host),
                     &[url],
+                    None,
                 )?;
             }
         }
@@ -566,6 +597,7 @@ mod old {
 
     #[derive(Default)]
     struct PostConnectHandlerOld {
+        resumption_token: Option<Vec<u8>>,
         streams: HashMap<u64, Option<File>>,
     }
 
@@ -614,6 +646,9 @@ mod old {
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
                         println!("stream {} writable", stream_id)
+                    }
+                    ConnectionEvent::StateChange(State::Confirmed) => {
+                        self.resumption_token = client.resumption_token();
                     }
                     _ => {
                         println!("Unexpected event {:?}", event);
@@ -700,6 +735,7 @@ mod old {
         remote_addr: SocketAddr,
         origin: &str,
         urls: &[Url],
+        token: Option<&mut Vec<u8>>,
     ) -> Res<()> {
         let mut open_paths = Vec::new();
 
@@ -711,6 +747,13 @@ mod old {
             remote_addr,
         )
         .expect("must succeed");
+
+        if token.is_some() && token.as_ref().unwrap().len() != 0 {
+            client
+                .set_resumption_token(Instant::now(), token.as_ref().unwrap())
+                .expect("should set token");
+        }
+
         client.set_qlog(qlog_new(args, origin)?);
         // Temporary here to help out the type inference engine
         let mut h = PreConnectHandlerOld {};
@@ -744,6 +787,13 @@ mod old {
             &mut h2,
             &args,
         )?;
+
+        if let Some(tok) = token {
+            if h2.resumption_token.is_some() {
+                tok.clear();
+                tok.append(&mut h2.resumption_token.unwrap());
+            }
+        }
 
         Ok(())
     }
