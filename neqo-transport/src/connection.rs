@@ -1821,7 +1821,7 @@ impl Connection {
                 _ => {}
             }
             self.events.connection_state_change(state);
-        } else if mem::discriminant(state) != mem::discriminant(self.state) {
+        } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
             // and the connection is already closed.
             debug_assert!(matches!(state, State::Closing { .. }));
