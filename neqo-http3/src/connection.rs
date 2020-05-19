@@ -169,20 +169,12 @@ impl<T: Http3Transaction> Http3Connection<T> {
     }
 
     /// We have a resumption token which remembers previous settings. Update the setting.
-    pub fn set_resumption_settings(
-        &mut self,
-        conn: &mut Connection,
-        settings: HSettings,
-    ) -> Res<()> {
-        if let Http3State::Initializing = &self.state {
-            self.state = Http3State::ZeroRtt;
-            self.initialize_http3_connection(conn)?;
-            self.set_qpack_settings(&settings)?;
-            self.settings_state = Http3RemoteSettingsState::ZeroRtt(settings);
-            Ok(())
-        } else {
-            Err(Error::Unexpected)
-        }
+    pub fn set_0rtt_settings(&mut self, conn: &mut Connection, settings: HSettings) -> Res<()> {
+        self.state = Http3State::ZeroRtt;
+        self.initialize_http3_connection(conn)?;
+        self.set_qpack_settings(&settings)?;
+        self.settings_state = Http3RemoteSettingsState::ZeroRtt(settings);
+        Ok(())
     }
 
     /// Returns the settings for a connection. This is used for creating a resumption token.

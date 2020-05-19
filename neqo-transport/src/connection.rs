@@ -105,8 +105,8 @@ impl PartialOrd for State {
     }
 }
 
-#[derive(Debug)]
-enum ZeroRttState {
+#[derive(Debug, PartialEq, Eq)]
+pub enum ZeroRttState {
     Init,
     Sending,
     AcceptedClient,
@@ -513,7 +513,7 @@ impl Connection {
 
     /// Access the latest resumption token on the connection.
     pub fn resumption_token(&self) -> Option<Vec<u8>> {
-        if !self.state.connected() {
+        if self.state < State::Connected {
             return None;
         }
         match self.crypto.tls {
@@ -628,6 +628,11 @@ impl Connection {
     /// Get the state of the connection.
     pub fn state(&self) -> &State {
         &self.state
+    }
+
+    /// Get the 0-RTT state of the connection.
+    pub fn zero_rtt_state(&self) -> &ZeroRttState {
+        &self.zero_rtt_state
     }
 
     /// Get collected statistics.
@@ -854,7 +859,7 @@ impl Connection {
                 match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
-                        qinfo!([self], "Garbage packet: {} {}", e, hex(slc));
+                        qdebug!([self], "Garbage packet: {} {}", e, hex(slc));
                         self.stats.dropped_rx += 1;
                         return Ok(frames);
                     }
@@ -1112,7 +1117,6 @@ impl Connection {
         };
         if pt == PacketType::Initial {
             builder.initial_token(if let Some(info) = retry_info {
-                qtrace!("Initial token {}", hex(&info.token));
                 &info.token
             } else {
                 &[]

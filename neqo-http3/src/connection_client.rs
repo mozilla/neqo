@@ -18,6 +18,7 @@ use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo}
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, StreamId, StreamType,
+    ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -118,6 +119,9 @@ impl Http3Client {
     /// # Errors
     /// An error is return if token cannot be decoded or a connection is is a wrong state.
     pub fn set_resumption_token(&mut self, now: Instant, token: &[u8]) -> Res<()> {
+        if self.base_handler.state != Http3State::Initializing {
+            return Err(Error::InvalidState);
+        }
         let mut dec = Decoder::from(token);
         let settings_slice = match dec.decode_vvec() {
             Some(v) => v,
@@ -130,8 +134,11 @@ impl Http3Client {
         let tok = dec.decode_remainder();
         qtrace!([self], "  Transport token {}", hex(&tok));
         self.conn.set_resumption_token(now, tok)?;
-        self.base_handler
-            .set_resumption_settings(&mut self.conn, settings)
+        if *self.conn.zero_rtt_state() == ZeroRttState::Sending {
+            self.base_handler
+                .set_0rtt_settings(&mut self.conn, settings)?;
+        }
+        Ok(())
     }
 
     /// This is call to close a connection.
