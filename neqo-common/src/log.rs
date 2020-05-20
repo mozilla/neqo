@@ -24,14 +24,14 @@ macro_rules! do_log {
 }
 
 #[macro_export]
-macro_rules! log_enabled {
-    (target: $target:expr, $lvl:expr) => {{
-        let lvl = $lvl;
-        lvl <= ::log::max_level() && ::log::__private_api_enabled(lvl, $target)
+macro_rules! log_subject {
+    ($lvl:expr, $subject:expr) => {{
+        if $lvl <= ::log::max_level() {
+            format!("{}", $subject)
+        } else {
+            String::new()
+        }
     }};
-    ($lvl:expr) => {
-        $crate::log_enabled!(target: ::log::__log_module_path!(), $lvl)
-    };
 }
 
 use env_logger::Builder;
