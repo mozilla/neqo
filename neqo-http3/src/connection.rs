@@ -406,15 +406,9 @@ impl Http3Connection {
     fn handle_read_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         let label = ::neqo_common::log_subject!(::log::Level::Info, self);
 
-<<<<<<< HEAD
-        let t = self.transactions.get_mut(&stream_id);
-        if t.is_none() {
-=======
-        debug_assert!(self.state_active());
         let r = self.recv_streams.get_mut(&stream_id);
 
         if r.is_none() {
->>>>>>> Http3 connecion should use send/recv_message directly
             return Ok(false);
         }
 
@@ -505,17 +499,10 @@ impl Http3Connection {
 
     /// This is called when an application wants to close the sending side of a stream.
     pub fn stream_close_send(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
-<<<<<<< HEAD
-        qinfo!([self], "Close sending side for stream {}.", stream_id);
-        debug_assert!(self.state.active());
-        let transaction = self
-            .transactions
-=======
         qinfo!([self], "Close the sending side for stream {}.", stream_id);
-        debug_assert!(self.state_active() || self.state_zero_rtt());
+        debug_assert!(self.state.active());
         let send_stream = self
             .send_streams
->>>>>>> Http3 connecion should use send/recv_message directly
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?;
         send_stream.close(conn)?;
