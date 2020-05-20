@@ -76,13 +76,13 @@ pub struct Args {
     #[structopt(short = "h", long, number_of_values = 2)]
     header: Vec<String>,
 
-    #[structopt(name = "encoder-table-size", short = "e", long, default_value = "128")]
+    #[structopt(name = "encoder-table-size", short = "e", long, default_value = "16384")]
     max_table_size_encoder: u64,
 
-    #[structopt(name = "decoder-table-size", short = "d", long, default_value = "128")]
+    #[structopt(name = "decoder-table-size", short = "f", long, default_value = "16384")]
     max_table_size_decoder: u64,
 
-    #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "128")]
+    #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "10")]
     max_blocked_streams: u16,
 
     #[structopt(name = "use-old-http", short = "o", long)]
