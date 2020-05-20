@@ -314,7 +314,7 @@ fn zero_rtt_no_eoed() {
         .set_resumption_token(&token[..])
         .expect("should accept token");
     client.enable_0rtt().expect("should enable 0-RTT");
-    client.disable_end_of_early_data();
+    client.disable_end_of_early_data().expect("should disable EOED");
     server
         .enable_0rtt(
             anti_replay.as_ref().unwrap(),
@@ -322,7 +322,7 @@ fn zero_rtt_no_eoed() {
             Box::new(PermissiveZeroRttChecker::default()),
         )
         .expect("should enable 0-RTT");
-    server.disable_end_of_early_data();
+    server.disable_end_of_early_data().expect("should disable EOED");
 
     connect(&mut client, &mut server);
     assert!(client.info().unwrap().early_data_accepted());
