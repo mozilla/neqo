@@ -509,10 +509,11 @@ fn main() -> Res<()> {
                 &urls,
             )?;
         } else if !args.download_in_series {
-            let mut token: Vec<u8> = Vec::new();
+            let mut token: Option<Vec<u8>> = None;
 
             if resumption_test {
-                // Download first URL using a separate connection and save the token
+                // Download first URL using a separate connection, save the token and use it for
+                // the remaining URLs
                 if urls.len() < 2 {
                     eprintln!("Resumption test needs at least 2 URLs");
                     exit(1)
@@ -520,14 +521,14 @@ fn main() -> Res<()> {
 
                 let first_url = urls.remove(0);
 
-                old::old_client(
+                token = old::old_client(
                     &args,
                     &socket,
                     local_addr,
                     remote_addr,
                     &format!("{}", host),
                     &[first_url],
-                    Some(&mut token),
+                    None,
                 )?;
             }
 
@@ -538,7 +539,7 @@ fn main() -> Res<()> {
                 remote_addr,
                 &format!("{}", host),
                 &urls,
-                Some(&mut token),
+                token,
             )?;
         } else {
             for url in urls {
@@ -597,7 +598,6 @@ mod old {
 
     #[derive(Default)]
     struct PostConnectHandlerOld {
-        resumption_token: Option<Vec<u8>>,
         streams: HashMap<u64, Option<File>>,
     }
 
@@ -646,9 +646,6 @@ mod old {
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
                         println!("stream {} writable", stream_id)
-                    }
-                    ConnectionEvent::StateChange(State::Confirmed) => {
-                        self.resumption_token = client.resumption_token();
                     }
                     _ => {
                         println!("Unexpected event {:?}", event);
@@ -735,8 +732,8 @@ mod old {
         remote_addr: SocketAddr,
         origin: &str,
         urls: &[Url],
-        token: Option<&mut Vec<u8>>,
-    ) -> Res<()> {
+        token: Option<Vec<u8>>,
+    ) -> Res<Option<Vec<u8>>> {
         let mut open_paths = Vec::new();
 
         let mut client = Connection::new_client(
@@ -748,10 +745,8 @@ mod old {
         )
         .expect("must succeed");
 
-        if token.is_some() && token.as_ref().unwrap().len() != 0 {
-            client
-                .set_resumption_token(Instant::now(), token.as_ref().unwrap())
-                .expect("should set token");
+        if let Some(tok) = token {
+            client.set_resumption_token(Instant::now(), &tok).expect("should set token");
         }
 
         client.set_qlog(qlog_new(args, origin)?);
@@ -788,13 +783,6 @@ mod old {
             &args,
         )?;
 
-        if let Some(tok) = token {
-            if h2.resumption_token.is_some() {
-                tok.clear();
-                tok.append(&mut h2.resumption_token.unwrap());
-            }
-        }
-
-        Ok(())
+        Ok(client.resumption_token())
     }
 }
