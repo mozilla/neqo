@@ -746,7 +746,9 @@ mod old {
         .expect("must succeed");
 
         if let Some(tok) = token {
-            client.set_resumption_token(Instant::now(), &tok).expect("should set token");
+            client
+                .set_resumption_token(Instant::now(), &tok)
+                .expect("should set token");
         }
 
         client.set_qlog(qlog_new(args, origin)?);
