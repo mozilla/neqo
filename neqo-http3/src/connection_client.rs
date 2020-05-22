@@ -7,7 +7,7 @@
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::{HandleReadableOutput, Http3Connection, Http3State, Http3Transaction};
 use crate::hframe::HFrame;
-use crate::hsettings_frame::HSettings;
+use crate::settings::HSettings;
 use crate::transaction_client::TransactionClient;
 use crate::Header;
 use neqo_common::{
@@ -542,9 +542,9 @@ mod tests {
         Http3State, QpackSettings, Rc, RefCell, StreamType,
     };
     use crate::hframe::HFrame;
-    use crate::hsettings_frame::{HSetting, HSettingType};
+    use crate::settings::{HSetting, HSettingType};
     use neqo_common::{matches, Encoder};
-    use neqo_crypto::AntiReplay;
+    use neqo_crypto::{AllowZeroRtt, AntiReplay};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{CloseError, ConnectionEvent, FixedConnectionIdManager, State};
     use test_fixture::{
@@ -2920,17 +2920,19 @@ mod tests {
 
         let mut client = default_http3_client();
 
+        let mut server = Connection::new_server(
+            test_fixture::DEFAULT_KEYS,
+            test_fixture::DEFAULT_ALPN,
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+        )
+        .unwrap();
         // Using a freshly initialized anti-replay context
         // should result in the server rejecting 0-RTT.
         let ar = AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3)
             .expect("setup anti-replay");
-        let mut server = Connection::new_server(
-            test_fixture::DEFAULT_KEYS,
-            test_fixture::DEFAULT_ALPN,
-            &ar,
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-        )
-        .unwrap();
+        server
+            .server_enable_0rtt(&ar, AllowZeroRtt {})
+            .expect("enable 0-RTT");
 
         assert_eq!(client.state(), Http3State::Initializing);
         client

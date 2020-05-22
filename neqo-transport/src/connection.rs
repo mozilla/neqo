@@ -24,6 +24,7 @@ use neqo_common::{
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
     Agent, AntiReplay, AuthenticationStatus, Client, HandshakeState, SecretAgentInfo, Server,
+    ZeroRttChecker,
 };
 
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
@@ -377,7 +378,6 @@ impl Connection {
             Role::Client,
             Client::new(server_name)?.into(),
             cid_manager,
-            None,
             protocols,
             Some(Path::new(local_addr, remote_addr, scid, dcid.clone())),
         );
@@ -390,17 +390,24 @@ impl Connection {
     pub fn new_server(
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
-        anti_replay: &AntiReplay,
         cid_manager: CidMgr,
     ) -> Res<Self> {
         Ok(Self::new(
             Role::Server,
             Server::new(certs)?.into(),
             cid_manager,
-            Some(anti_replay),
             protocols,
             None,
         ))
+    }
+
+    pub fn server_enable_0rtt(
+        &mut self,
+        anti_replay: &AntiReplay,
+        zero_rtt_checker: impl ZeroRttChecker + 'static,
+    ) -> Res<()> {
+        self.crypto
+            .server_enable_0rtt(self.tps.clone(), anti_replay, zero_rtt_checker)
     }
 
     fn set_tp_defaults(tps: &mut TransportParameters) {
@@ -427,13 +434,12 @@ impl Connection {
         role: Role,
         agent: Agent,
         cid_manager: CidMgr,
-        anti_replay: Option<&AntiReplay>,
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
     ) -> Self {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
-        let crypto = Crypto::new(agent, protocols, tphandler.clone(), anti_replay)
+        let crypto = Crypto::new(agent, protocols, tphandler.clone())
             .expect("TLS should be configured successfully");
 
         Self {
@@ -2185,6 +2191,7 @@ mod tests {
     use std::convert::TryInto;
 
     use neqo_common::matches;
+    use neqo_crypto::AllowZeroRtt;
     use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
 
@@ -2209,13 +2216,15 @@ mod tests {
     }
     pub fn default_server() -> Connection {
         fixture_init();
-        Connection::new_server(
+        let mut c = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
-            &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         )
-        .expect("create a default server")
+        .expect("create a default server");
+        c.server_enable_0rtt(&test_fixture::anti_replay(), AllowZeroRtt {})
+            .expect("enable 0-RTT");
+        c
     }
 
     /// If state is AuthenticationNeeded call authenticated(). This function will
@@ -2792,17 +2801,19 @@ mod tests {
         client
             .set_resumption_token(now(), &token[..])
             .expect("should set token");
+        let mut server = Connection::new_server(
+            test_fixture::DEFAULT_KEYS,
+            test_fixture::DEFAULT_ALPN,
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+        )
+        .unwrap();
         // Using a freshly initialized anti-replay context
         // should result in the server rejecting 0-RTT.
         let ar = AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3)
             .expect("setup anti-replay");
-        let mut server = Connection::new_server(
-            test_fixture::DEFAULT_KEYS,
-            test_fixture::DEFAULT_ALPN,
-            &ar,
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-        )
-        .unwrap();
+        server
+            .server_enable_0rtt(&ar, AllowZeroRtt {})
+            .expect("enable 0-RTT");
 
         // Send ClientHello.
         let client_hs = client.process(None, now());
@@ -3142,12 +3153,11 @@ mod tests {
     // Test that we split crypto data if they cannot fit into one packet.
     // To test this we will use a long server certificate.
     #[test]
-    fn test_crypto_frame_split() {
+    fn crypto_frame_split() {
         let mut client = default_client();
         let mut server = Connection::new_server(
             test_fixture::LONG_CERT_KEYS,
             test_fixture::DEFAULT_ALPN,
-            &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
         )
         .expect("create a server");

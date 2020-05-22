@@ -13,7 +13,7 @@ use neqo_common::{
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     selfencrypt::SelfEncrypt,
-    AntiReplay,
+    AntiReplay, ZeroRttCheckResult, ZeroRttChecker,
 };
 
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
@@ -191,12 +191,33 @@ struct AttemptKey {
     odcid: ConnectionId,
 }
 
+#[derive(Clone, Debug)]
+pub struct ServerZeroRttChecker {
+    checker: Rc<RefCell<Box<dyn ZeroRttChecker>>>,
+}
+impl ServerZeroRttChecker {
+    pub fn new(checker: Box<dyn ZeroRttChecker>) -> Self {
+        Self {
+            checker: Rc::new(RefCell::new(checker)),
+        }
+    }
+}
+
+impl ZeroRttChecker for ServerZeroRttChecker {
+    fn check(&self, token: &[u8]) -> ZeroRttCheckResult {
+        self.checker.borrow().check(token)
+    }
+}
+
 pub struct Server {
     /// The names of certificates.
     certs: Vec<String>,
     /// The ALPN values that the server supports.
     protocols: Vec<String>,
+    /// Anti-replay configuration for 0-RTT.
     anti_replay: AntiReplay,
+    /// A function for determining if 0-RTT can be accepted.
+    zero_rtt_checker: ServerZeroRttChecker,
     /// A connection ID manager.
     cid_manager: CidMgr,
     /// Active connection attempts, keyed by `AttemptKey`.  Initial packets with
@@ -220,23 +241,28 @@ pub struct Server {
 
 impl Server {
     /// Construct a new server.
-    /// `now` is the time that the server is instantiated.
-    /// `cid_manager` is responsible for generating connection IDs and parsing them;
-    /// connection IDs produced by the manager cannot be zero-length.
-    /// `certs` is a list of the certificates that should be configured.
-    /// `protocols` is the preference list of ALPN values.
-    /// `anti_replay` is an anti-replay context.
+    /// * `now` is the time that the server is instantiated.
+    /// * `certs` is a list of the certificates that should be configured.
+    /// * `protocols` is the preference list of ALPN values.
+    /// * `anti_replay` is an anti-replay context.
+    /// * `zero_rtt_checker` determines whether 0-RTT should be accepted. This
+    ///   will be passed the value of the `extra` argument that was passed to
+    ///   `Connection::send_ticket` to see if it is OK.
+    /// * `cid_manager` is responsible for generating connection IDs and parsing them;
+    ///   connection IDs produced by the manager cannot be zero-length.
     pub fn new(
         now: Instant,
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
+        zero_rtt_checker: Box<dyn ZeroRttChecker>,
         cid_manager: CidMgr,
     ) -> Res<Self> {
         Ok(Self {
             certs: certs.iter().map(|x| String::from(x.as_ref())).collect(),
             protocols: protocols.iter().map(|x| String::from(x.as_ref())).collect(),
             anti_replay,
+            zero_rtt_checker: ServerZeroRttChecker::new(zero_rtt_checker),
             cid_manager,
             active_attempts: HashMap::default(),
             connections: Rc::default(),
@@ -444,14 +470,12 @@ impl Server {
             connections: self.connections.clone(),
         }));
 
-        let sconn = Connection::new_server(
-            &self.certs,
-            &self.protocols,
-            &self.anti_replay,
-            cid_mgr.clone(),
-        );
-
+        let sconn = Connection::new_server(&self.certs, &self.protocols, cid_mgr.clone());
         if let Ok(mut c) = sconn {
+            let zcheck = self.zero_rtt_checker.clone();
+            if c.server_enable_0rtt(&self.anti_replay, zcheck).is_err() {
+                qwarn!([self], "Unable to enable 0-RTT");
+            }
             if let Some(odcid) = orig_dcid {
                 c.original_connection_id(&odcid);
             }

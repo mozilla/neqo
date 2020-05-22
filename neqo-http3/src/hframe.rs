@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::hsettings_frame::HSettings;
+use crate::settings::HSettings;
 use neqo_common::{
     hex_with_len, qdebug, qtrace, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
 };
@@ -373,7 +373,7 @@ impl HFrameReader {
 #[cfg(test)]
 mod tests {
     use super::{Encoder, Error, HFrame, HFrameReader, HSettings};
-    use crate::hsettings_frame::{HSetting, HSettingType};
+    use crate::settings::{HSetting, HSettingType};
     use neqo_crypto::AuthenticationStatus;
     use neqo_transport::StreamType;
     use num_traits::Num;

@@ -8,7 +8,7 @@
 #![warn(clippy::use_self)]
 
 use neqo_common::Datagram;
-use neqo_crypto::{init_db, AntiReplay};
+use neqo_crypto::{init_db, AllowZeroRtt, AntiReplay};
 use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
 use regex::Regex;
 
@@ -155,11 +155,13 @@ fn main() {
             Connection::new_server(
                 &args.key,
                 &args.alpn,
-                &anti_replay,
                 Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
             )
             .expect("can't create connection")
         });
+        server
+            .server_enable_0rtt(&anti_replay, AllowZeroRtt {})
+            .expect("couldn't enable 0-RTT");
 
         if sz > 0 {
             let dgram = Datagram::new(remote_addr, local_addr, &buf[..sz]);

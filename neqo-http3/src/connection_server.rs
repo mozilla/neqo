@@ -153,9 +153,8 @@ impl Http3ServerHandler {
                 ConnectionEvent::StateChange(state) => {
                     if self.base_handler.handle_state_change(conn, &state)? {
                         if self.base_handler.state() == Http3State::Connected {
-                            // TODO(mt) send a snapshot of the server settings in the
-                            // ticket so that we don't resume when we shouldn't.
-                            conn.send_ticket(now, &[])?;
+                            let settings = self.base_handler.save_settings();
+                            conn.send_ticket(now, &settings)?;
                         }
                         self.events
                             .connection_state_change(self.base_handler.state());

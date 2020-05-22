@@ -9,7 +9,7 @@
 use crate::control_stream_local::{ControlStreamLocal, HTTP3_UNI_STREAM_TYPE_CONTROL};
 use crate::control_stream_remote::ControlStreamRemote;
 use crate::hframe::HFrame;
-use crate::hsettings_frame::{HSetting, HSettingType, HSettings};
+use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamTypeReader;
 use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
@@ -123,6 +123,11 @@ impl<T: Http3Transaction> Http3Connection<T> {
                 },
             ]),
         });
+    }
+
+    /// Save settings for adding to the session ticket.
+    pub(crate) fn save_settings(&self) -> Vec<u8> {
+        HttpZeroRttChecker::save(self.local_qpack_settings)
     }
 
     fn create_qpack_streams(&mut self, conn: &mut Connection) -> Res<()> {

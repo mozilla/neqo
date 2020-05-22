@@ -10,6 +10,7 @@ use crate::connection::Http3State;
 use crate::connection_server::Http3ServerHandler;
 use crate::server_connection_events::Http3ServerConnEvent;
 use crate::server_events::{ClientRequestStream, Http3ServerEvent, Http3ServerEvents};
+use crate::settings::HttpZeroRttChecker;
 use crate::Res;
 use neqo_common::{qtrace, Datagram};
 use neqo_crypto::AntiReplay;
@@ -50,7 +51,14 @@ impl Http3Server {
         qpack_settings: QpackSettings,
     ) -> Res<Self> {
         Ok(Self {
-            server: Server::new(now, certs, protocols, anti_replay, cid_manager)?,
+            server: Server::new(
+                now,
+                certs,
+                protocols,
+                anti_replay,
+                Box::new(HttpZeroRttChecker::new(qpack_settings)),
+                cid_manager,
+            )?,
             qpack_settings,
             http3_handlers: HashMap::new(),
             events: Http3ServerEvents::default(),
