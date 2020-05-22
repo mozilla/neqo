@@ -233,12 +233,7 @@ impl<T: Http3Transaction> Http3Connection<T> {
     ) -> Res<HandleReadableOutput> {
         qtrace!([self], "Readable stream {}.", stream_id);
 
-        let label = if ::neqo_common::log_enabled!(::log::Level::Debug) {
-            format!("{}", self)
-        } else {
-            String::new()
-        };
-
+        let label = ::neqo_common::log_subject!(::log::Level::Debug, self);
         if self.handle_read_stream(conn, stream_id)? {
             qdebug!([label], "Request/response stream {} read.", stream_id);
             Ok(HandleReadableOutput::NoOutput)
