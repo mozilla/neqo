@@ -391,7 +391,7 @@ impl DerefMut for Encoder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Decoder, Encoder};
 
     #[test]
     fn decode() {

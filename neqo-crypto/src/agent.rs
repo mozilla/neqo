@@ -9,7 +9,9 @@ use crate::agentio::{AgentIo, METHODS};
 use crate::assert_initialized;
 use crate::auth::AuthenticationStatus;
 pub use crate::cert::CertificateInfo;
-use crate::constants::*;
+use crate::constants::{
+    Alert, Cipher, Epoch, Extension, Group, SignatureScheme, Version, TLS_VERSION_1_3,
+};
 use crate::err::{is_blocked, secstatus_to_res, Error, PRErrorCode, Res};
 use crate::ext::{ExtensionHandler, ExtensionTracker};
 use crate::p11;
@@ -19,7 +21,7 @@ use crate::secrets::SecretHolder;
 use crate::ssl::{self, PRBool};
 use crate::time::TimeHolder;
 
-use neqo_common::{matches, qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{hex, matches, qdebug, qinfo, qtrace, qwarn};
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::ffi::CString;
@@ -747,7 +749,7 @@ impl Client {
         let resumption = resumption_ptr.as_mut().unwrap();
         let mut v = Vec::with_capacity(len as usize);
         v.extend_from_slice(std::slice::from_raw_parts(token, len as usize));
-        qdebug!([format!("{:p}", fd)], "Got resumption token");
+        qinfo!([format!("{:p}", fd)], "Got resumption token {}", hex(&v));
         *resumption = Some(v);
         ssl::SECSuccess
     }
