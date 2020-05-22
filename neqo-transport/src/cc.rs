@@ -120,17 +120,15 @@ impl CongestionControl {
 
         let congestion_period = pto * PERSISTENT_CONG_THRESH;
 
-        let first_lost_pkt_after_largest_acked = lost_packets
+        // Simpler to ignore any acked pkts in between first and last lost pkts
+        if let Some(first) = lost_packets
             .iter()
-            .find(|pkt| Some(pkt.time_sent) > prev_largest_acked_sent);
-
-        let starting_time_sent = first_lost_pkt_after_largest_acked
-            .unwrap_or_else(|| lost_packets.first().unwrap())
-            .time_sent;
-
-        if starting_time_sent < last_lost_pkt.time_sent - congestion_period {
-            qinfo!([self], "persistent congestion");
-            self.congestion_window = MIN_CONG_WINDOW;
+            .find(|p| Some(p.time_sent) > prev_largest_acked_sent)
+        {
+            if last_lost_pkt.time_sent.duration_since(first.time_sent) > congestion_period {
+                self.congestion_window = MIN_CONG_WINDOW;
+                qinfo!([self], "persistent congestion");
+            }
         }
     }
 
