@@ -76,10 +76,20 @@ pub struct Args {
     #[structopt(short = "h", long, number_of_values = 2)]
     header: Vec<String>,
 
-    #[structopt(name = "encoder-table-size", short = "e", long, default_value = "16384")]
+    #[structopt(
+        name = "encoder-table-size",
+        short = "e",
+        long,
+        default_value = "16384"
+    )]
     max_table_size_encoder: u64,
 
-    #[structopt(name = "decoder-table-size", short = "f", long, default_value = "16384")]
+    #[structopt(
+        name = "decoder-table-size",
+        short = "f",
+        long,
+        default_value = "16384"
+    )]
     max_table_size_decoder: u64,
 
     #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "10")]
