@@ -105,8 +105,8 @@ impl PartialOrd for State {
     }
 }
 
-#[derive(Debug)]
-enum ZeroRttState {
+#[derive(Debug, PartialEq, Eq)]
+pub enum ZeroRttState {
     Init,
     Sending,
     AcceptedClient,
@@ -513,7 +513,7 @@ impl Connection {
 
     /// Access the latest resumption token on the connection.
     pub fn resumption_token(&self) -> Option<Vec<u8>> {
-        if !self.state.connected() {
+        if self.state < State::Connected {
             return None;
         }
         match self.crypto.tls {
@@ -630,6 +630,11 @@ impl Connection {
         &self.state
     }
 
+    /// Get the 0-RTT state of the connection.
+    pub fn zero_rtt_state(&self) -> &ZeroRttState {
+        &self.zero_rtt_state
+    }
+
     /// Get collected statistics.
     pub fn stats(&self) -> &Stats {
         &self.stats
@@ -710,7 +715,7 @@ impl Connection {
         }
 
         let mut delays = SmallVec::<[_; 4]>::new();
-        if let Some(ack_time) = self.acks.ack_time() {
+        if let Some(ack_time) = self.acks.ack_time(now) {
             qtrace!([self], "Delayed ACK timer {:?}", ack_time);
             delays.push(ack_time);
         }
@@ -835,8 +840,8 @@ impl Connection {
     }
 
     fn discard_keys(&mut self, space: PNSpace) {
-        qinfo!([self], "Drop packet number space {}", space);
         if self.crypto.discard(space) {
+            qinfo!([self], "Drop packet number space {}", space);
             self.loss_recovery.discard(space);
             self.acks.drop_space(space);
         }
@@ -854,7 +859,7 @@ impl Connection {
                 match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
-                        qinfo!([self], "Garbage packet: {} {}", e, hex(slc));
+                        qdebug!([self], "Garbage packet: {} {}", e, hex(slc));
                         self.stats.dropped_rx += 1;
                         return Ok(frames);
                     }
@@ -984,7 +989,11 @@ impl Connection {
                 f = Frame::decode(&mut d)?;
             }
             if consecutive_padding > 0 {
-                qdebug!("PADDING frame repeated {} times", consecutive_padding);
+                qdebug!(
+                    [self],
+                    "PADDING frame repeated {} times",
+                    consecutive_padding
+                );
                 consecutive_padding = 0;
             }
 
@@ -1108,7 +1117,6 @@ impl Connection {
         };
         if pt == PacketType::Initial {
             builder.initial_token(if let Some(info) = retry_info {
-                qtrace!("Initial token {}", hex(&info.token));
                 &info.token
             } else {
                 &[]
@@ -1554,7 +1562,7 @@ impl Connection {
                 self.crypto.streams.inbound_frame(space, offset, data)?;
                 if self.crypto.streams.data_ready(space) {
                     let mut buf = Vec::new();
-                    let read = self.crypto.streams.read_to_end(space, &mut buf)?;
+                    let read = self.crypto.streams.read_to_end(space, &mut buf);
                     qdebug!("Read {} bytes", read);
                     self.handshake(now, space, Some(&buf))?;
                 }
@@ -4619,5 +4627,172 @@ mod tests {
                                         // zero-duration wait driven by the (now defunct) loss recovery timer.
         let res = client.process(None, now);
         assert_ne!(res.callback(), Duration::from_secs(0));
+    }
+
+    /// When we declare a packet as lost, we keep it around for a while for another loss period.
+    /// Those packets should not affect how we report the loss recovery timer.
+    /// As the loss recovery timer based on RTT we use that to drive the state.
+    #[test]
+    fn lost_but_kept_and_lr_timer() {
+        const RTT: Duration = Duration::from_secs(1);
+        let mut client = default_client();
+        let mut server = default_server();
+        let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
+
+        // Two packets (p1, p2) are sent at around t=0.  The first is lost.
+        let _p1 = send_something(&mut client, now);
+        let p2 = send_something(&mut client, now);
+
+        // At t=RTT/2 the server receives the packet and ACKs it.
+        now += RTT / 2;
+        let ack = server.process(Some(p2), now).dgram();
+        assert!(ack.is_some());
+        // The client also sends another two packets (p3, p4), again losing the first.
+        let _p3 = send_something(&mut client, now);
+        let p4 = send_something(&mut client, now);
+
+        // At t=RTT the client receives the ACK and goes into timed loss recovery.
+        // The client doesn't call p1 lost at this stage, but it will soon.
+        now += RTT / 2;
+        let res = client.process(ack, now);
+        // The client should be on a loss recovery timer as p1 is missing.
+        let lr_timer = res.callback();
+        // Loss recovery timer should be RTT/8, but only check for 0 or >=RTT/2.
+        assert_ne!(lr_timer, Duration::from_secs(0));
+        assert!(lr_timer < (RTT / 2));
+        // The server also receives and acknowledges p4, again sending an ACK.
+        let ack = server.process(Some(p4), now).dgram();
+        assert!(ack.is_some());
+
+        // At t=RTT*3/2 the client should declare p1 to be lost.
+        now += RTT / 2;
+        // So the client will send the data from p1 again.
+        let res = client.process(None, now);
+        assert!(res.dgram().is_some());
+        // When the client processes the ACK, it should engage the
+        // loss recovery timer for p3, not p1 (even though it still tracks p1).
+        let res = client.process(ack, now);
+        let lr_timer2 = res.callback();
+        assert_eq!(lr_timer, lr_timer2);
+    }
+
+    /// Split the first packet off a coalesced packet.
+    fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
+        if buf[0] & 0x80 == 0 {
+            // Short header: easy.
+            return (buf, None);
+        }
+        let mut dec = Decoder::from(buf);
+        let first = dec.decode_byte().unwrap();
+        dec.skip(4); // Version.
+        dec.skip_vec(1); // DCID
+        dec.skip_vec(1); // SCID
+        if first & 0x30 == 0 {
+            // Initial
+            dec.skip_vvec();
+        }
+        dec.skip_vvec(); // The rest of the packet.
+        let p1 = &buf[..dec.offset()];
+        let p2 = if dec.remaining() > 0 {
+            Some(dec.decode_remainder())
+        } else {
+            None
+        };
+        (p1, p2)
+    }
+
+    /// Split the first datagram off a coalesced datagram.
+    fn split_datagram(d: Datagram) -> (Datagram, Option<Datagram>) {
+        let (a, b) = split_packet(&d[..]);
+        (
+            Datagram::new(d.source(), d.destination(), a),
+            b.map(|b| Datagram::new(d.source(), d.destination(), b)),
+        )
+    }
+
+    /// We should not be setting the loss recovery timer based on packets
+    /// that are sent prior to the largest acknowledged.
+    /// Testing this requires that we construct a case where one packet
+    /// number space causes the loss recovery timer to be engaged.  At the same time,
+    /// there is a packet in another space that hasn't been acknowledged AND
+    /// that packet number space has not received acknowledgments for later packets.
+    #[test]
+    fn loss_time_past_largest_acked() {
+        const RTT: Duration = Duration::from_secs(10);
+        const INCR: Duration = Duration::from_millis(1);
+        let mut client = default_client();
+        let mut server = default_server();
+
+        let mut now = now();
+
+        // Start the handshake.
+        let c_in = client.process(None, now).dgram();
+        now += RTT / 2;
+        let s_hs1 = server.process(c_in, now).dgram();
+
+        // Get some spare server handshake packets for the client to ACK.
+        // This involves a time machine, so be a little cautious.
+        // This test uses an RTT of 10s, but our server starts
+        // with a much lower RTT estimate, so the PTO at this point should
+        // be much smaller than an RTT and so the server shouldn't see
+        // time go backwards.
+        let s_pto = server.process(None, now).callback();
+        assert_ne!(s_pto, Duration::from_secs(0));
+        assert!(s_pto < RTT);
+        let s_hs2 = server.process(None, now + s_pto).dgram();
+        assert!(s_hs2.is_some());
+        let s_hs3 = server.process(None, now + s_pto).dgram();
+        assert!(s_hs3.is_some());
+
+        // Get some Handshake packets from the client.
+        // We need one to be left unacknowledged before one that is acknowledged.
+        // So that the client engages the loss recovery timer.
+        // This is complicated by the fact that it is hard to cause the client
+        // to generate an ack-eliciting packet.  For that, we use the Finished message.
+        // Reordering delivery ensures that the later packet is also acknowledged.
+        now += RTT / 2;
+        let c_hs1 = client.process(s_hs1, now).dgram();
+        assert!(c_hs1.is_some()); // This comes first, so it's useless.
+        maybe_authenticate(&mut client);
+        let c_hs2 = client.process(None, now).dgram();
+        assert!(c_hs2.is_some()); // This one will elicit an ACK.
+
+        // The we need the outstanding packet to be sent after the
+        // application data packet, so space these out a tiny bit.
+        let _p1 = send_something(&mut client, now + INCR);
+        let c_hs3 = client.process(s_hs2, now + (INCR * 2)).dgram();
+        assert!(c_hs3.is_some()); // This will be left outstanding.
+        let c_hs4 = client.process(s_hs3, now + (INCR * 3)).dgram();
+        assert!(c_hs4.is_some()); // This will be acknowledged.
+
+        // Get an ACK for the client.
+        now += RTT / 2;
+        // Deliver the last one first, so that gets acknowledged.
+        // This won't generate an ACK, because it only contains an ACK.
+        let s_ack1 = server.process(c_hs4, now).dgram();
+        assert!(s_ack1.is_none());
+        // This includes an ACK, but it also includes HANDSHAKE_DONE,
+        // which we need to remove because that will cause the Handshake loss recovery
+        // state to be dropped.
+        let s_ack2 = server.process(c_hs2, now).dgram();
+        assert!(s_ack2.is_some());
+        let (s_hs_ack, _s_ap_ack) = split_datagram(s_ack2.unwrap());
+
+        // Now the client should start its loss recovery timer based on the ACK.
+        now += RTT / 2;
+        let c_ack = client.process(Some(s_hs_ack), now).dgram();
+        assert!(c_ack.is_none());
+        // The client should now have the loss recovery timer active.
+        let lr_time = client.process(None, now).callback();
+        assert_ne!(lr_time, Duration::from_secs(0));
+        assert!(lr_time < (RTT / 2));
+
+        // Skipping forward by the loss recovery timer should cause the client to
+        // mark packets as lost and retransmit, after which we should be on the PTO
+        // timer.
+        now += lr_time;
+        let delay = client.process(None, now).callback();
+        assert_ne!(delay, Duration::from_secs(0));
+        assert!(delay > lr_time);
     }
 }

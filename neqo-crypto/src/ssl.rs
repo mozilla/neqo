@@ -7,7 +7,7 @@
 #![allow(dead_code, non_upper_case_globals, non_snake_case)]
 #![allow(clippy::cognitive_complexity, clippy::too_many_lines)]
 
-use crate::constants::*;
+use crate::constants::Epoch;
 use crate::err::{secstatus_to_res, Res};
 
 use std::os::raw::{c_uint, c_void};
