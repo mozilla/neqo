@@ -480,12 +480,6 @@ mod tests {
         test_wrong_frame_on_control_stream(&[0x5, 0x2, 0x1, 0x2]);
     }
 
-    // send DUPLICATE_PUSH frame on a cortrol stream
-    #[test]
-    fn test_server_duplicate_push_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(&[0xe, 0x2, 0x1, 0x2]);
-    }
-
     // Server: receive unkonwn stream type
     // also test getting stream id that does not fit into a single byte.
     #[test]

@@ -252,12 +252,6 @@ impl RecvMessage {
                                     .ok_or(Error::HttpId)?
                                     .borrow()
                                     .new_push_promise(push_id, header_block)?,
-                                HFrame::DuplicatePush { push_id } => self
-                                    .push_handler
-                                    .as_ref()
-                                    .ok_or(Error::HttpId)?
-                                    .borrow()
-                                    .new_duplicate_push(push_id)?,
                                 _ => break Err(Error::HttpFrameUnexpected),
                             }
                             if matches!(self.state, RecvMessageState::Closed) {
