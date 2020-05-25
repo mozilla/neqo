@@ -118,6 +118,11 @@ pub struct Args {
     #[structopt(name = "qns-mode", long)]
     /// Enable special behavior for use with QUIC Network Simulator
     qns_mode: bool,
+
+    #[structopt(short = "r", long)]
+    /// Client attemps to resume connections when there are multiple connections made.
+    /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
+    resume: bool,
 }
 
 trait Handler {
@@ -447,7 +452,12 @@ fn main() -> Res<()> {
                 args.use_old_http = true;
             }
             Ok(s) if s == "zerortt" || s == "resumption" => {
+                if args.urls.len() < 2 {
+                    eprintln!("Warning: resumption tests won't work without >1 URL");
+                    exit(127)
+                }
                 args.use_old_http = true;
+                args.resume = true;
                 resumption_test = true;
             }
             Ok(s) if s == "multiconnect" => {
@@ -509,19 +519,17 @@ fn main() -> Res<()> {
                 &urls,
             )?;
         } else if !args.download_in_series {
-            let mut token: Option<Vec<u8>> = None;
-
-            if resumption_test {
+            let token = if resumption_test {
                 // Download first URL using a separate connection, save the token and use it for
                 // the remaining URLs
                 if urls.len() < 2 {
-                    eprintln!("Resumption test needs at least 2 URLs");
-                    exit(1)
+                    eprintln!("Warning: resumption tests won't work without >1 URL");
+                    exit(127)
                 }
 
                 let first_url = urls.remove(0);
 
-                token = old::old_client(
+                old::old_client(
                     &args,
                     &socket,
                     local_addr,
@@ -529,8 +537,10 @@ fn main() -> Res<()> {
                     &format!("{}", host),
                     &[first_url],
                     None,
-                )?;
-            }
+                )?
+            } else {
+                None
+            };
 
             old::old_client(
                 &args,
@@ -542,15 +552,17 @@ fn main() -> Res<()> {
                 token,
             )?;
         } else {
+            let mut token: Option<Vec<u8>> = None;
+
             for url in urls {
-                old::old_client(
+                token = old::old_client(
                     &args,
                     &socket,
                     local_addr,
                     remote_addr,
                     &format!("{}", host),
                     &[url],
-                    None,
+                    token,
                 )?;
             }
         }
@@ -785,6 +797,10 @@ mod old {
             &args,
         )?;
 
-        Ok(client.resumption_token())
+        Ok(if args.resume {
+            client.resumption_token()
+        } else {
+            None
+        })
     }
 }
