@@ -54,10 +54,8 @@ impl Pacer {
 
     /// Determine when the next packet will be available based on the provided RTT
     /// and congestion window.  This doesn't update state.
-    /// This returns an option, with a value of `None` returned when there is
-    /// enough credit available to send.  That sounds counterintuitive, but it
-    /// avoids registering a zero-duration timer when there is credit for
-    /// multiple packets available, but fewer packets than that to send.
+    /// This returns a time, which could be in the past (this object doesn't know what
+    /// the current time is).
     pub fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
         if self.c >= self.p {
             qtrace!([self], "next {}/{:?} no wait: {:?}", cwnd, rtt, self.t);
