@@ -876,7 +876,9 @@ impl Connection {
                     self.handle_retry(packet)?;
                     return Ok(frames);
                 }
-                (PacketType::VersionNegotiation, ..) | (PacketType::Retry, ..) => {
+                (PacketType::VersionNegotiation, ..)
+                | (PacketType::Retry, ..)
+                | (PacketType::OtherVersion, ..) => {
                     qwarn!("dropping {:?}", packet.packet_type());
                     self.stats.dropped_rx += 1;
                     return Ok(frames);
@@ -4790,5 +4792,24 @@ mod tests {
         let delay = client.process(None, now).callback();
         assert_ne!(delay, Duration::from_secs(0));
         assert!(delay > lr_time);
+    }
+
+    #[test]
+    fn unknown_version() {
+        let mut client = default_client();
+        // Start the handshake.
+        let _ = client.process(None, now()).dgram();
+
+        let mut unknown_version_packet = vec![0x80, 0x1a, 0x1a, 0x1a, 0x1a];
+        unknown_version_packet.resize(1200, 0x0);
+        client.process(
+            Some(Datagram::new(
+                loopback(),
+                loopback(),
+                unknown_version_packet,
+            )),
+            now(),
+        );
+        assert_eq!(1, client.stats().dropped_rx);
     }
 }
