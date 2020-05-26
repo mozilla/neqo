@@ -161,7 +161,7 @@ impl LossRecoverySpace {
             .take(count)
     }
 
-    pub fn pto_time(&self) -> Option<Instant> {
+    pub fn pto_base_time(&self) -> Option<Instant> {
         if self.in_flight_outstanding() {
             debug_assert!(self.pto_base_time.is_some());
             self.pto_base_time
@@ -603,7 +603,7 @@ impl LossRecovery {
     // Calculate PTO time for the given space.
     fn pto_time(&self, pn_space: PNSpace) -> Option<Instant> {
         if let Some(space) = self.spaces.get(pn_space) {
-            space.pto_time().map(|t| {
+            space.pto_base_time().map(|t| {
                 t + self
                     .rtt_vals
                     .pto(pn_space)
