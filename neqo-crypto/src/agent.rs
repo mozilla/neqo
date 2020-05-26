@@ -409,6 +409,9 @@ impl SecretAgent {
     }
 
     /// Disable the `EndOfEarlyData` message.
+    ///
+    /// # Errors
+    /// See `set_option`.
     pub fn disable_end_of_early_data(&mut self) -> Res<()> {
         self.set_option(ssl::Opt::SuppressEndOfEarlyData, true)
     }
