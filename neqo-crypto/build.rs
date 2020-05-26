@@ -94,36 +94,26 @@ fn nss_dir() -> PathBuf {
             Command::new("hg")
                 .args(&[
                     "clone",
+                    "-u",
+                    "c7a1c91cd9be",
                     "https://hg.mozilla.org/projects/nss",
                     dir.to_str().unwrap(),
                 ])
                 .status()
                 .expect("can't clone nss");
-            let orig_dir = env::current_dir().unwrap();
-            env::set_current_dir(&dir).unwrap();
-            Command::new("hg")
-                .args(&["up", "NSS_3_50_RTM"])
-                .status()
-                .expect("can't update to tag for NSS");
-            env::set_current_dir(&orig_dir).unwrap();
         }
         let nspr_dir = Path::new(&out_dir).join("nspr");
         if !nspr_dir.exists() {
             Command::new("hg")
                 .args(&[
                     "clone",
+                    "-u",
+                    "NSPR_4_25_RTM",
                     "https://hg.mozilla.org/projects/nspr",
                     nspr_dir.to_str().unwrap(),
                 ])
                 .status()
                 .expect("can't clone nspr");
-            let orig_dir = env::current_dir().unwrap();
-            env::set_current_dir(&nspr_dir).unwrap();
-            Command::new("hg")
-                .args(&["up", "NSPR_4_25_RTM"])
-                .status()
-                .expect("can't update to tag for NSPR");
-            env::set_current_dir(&orig_dir).unwrap();
         }
         dir
     };
