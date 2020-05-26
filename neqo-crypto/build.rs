@@ -14,7 +14,6 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use toml;
 
 const BINDINGS_DIR: &str = "bindings";
 const BINDINGS_CONFIG: &str = "bindings.toml";
@@ -388,7 +387,7 @@ fn main() {
     let config_file = PathBuf::from(BINDINGS_DIR).join(BINDINGS_CONFIG);
     println!("cargo:rerun-if-changed={}", config_file.to_str().unwrap());
     let config = fs::read_to_string(config_file).expect("unable to read binding configuration");
-    let config: HashMap<String, Bindings> = toml::from_str(&config).unwrap();
+    let config: HashMap<String, Bindings> = ::toml::from_str(&config).unwrap();
 
     for (k, v) in &config {
         build_bindings(k, v, &flags[..], cfg!(feature = "gecko"));
