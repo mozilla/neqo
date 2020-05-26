@@ -10,7 +10,7 @@
 use qlog::QlogStreamer;
 
 use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
-use neqo_crypto::{init, AuthenticationStatus};
+use neqo_crypto::{init, AuthenticationStatus, Cipher, TLS_CHACHA20_POLY1305_SHA256};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_qpack::QpackSettings;
 use neqo_transport::FixedConnectionIdManager;
@@ -445,6 +445,8 @@ fn main() -> Res<()> {
 
     let mut resumption_test = false;
 
+    let mut ciphers: Option<&[Cipher]> = None;
+
     if args.qns_mode {
         match env::var("TESTCASE") {
             Ok(s) if s == "http3" => {}
@@ -463,6 +465,10 @@ fn main() -> Res<()> {
             Ok(s) if s == "multiconnect" => {
                 args.use_old_http = true;
                 args.download_in_series = true;
+            }
+            Ok(s) if s == "chacha20" => {
+                args.use_old_http = true;
+                ciphers = Some(&[TLS_CHACHA20_POLY1305_SHA256]);
             }
             Ok(_) => exit(127),
             Err(_) => exit(1),
@@ -537,6 +543,7 @@ fn main() -> Res<()> {
                     &format!("{}", host),
                     &[first_url],
                     None,
+                    ciphers,
                 )?
             } else {
                 None
@@ -550,6 +557,7 @@ fn main() -> Res<()> {
                 &format!("{}", host),
                 &urls,
                 token,
+                ciphers,
             )?;
         } else {
             let mut token: Option<Vec<u8>> = None;
@@ -563,6 +571,7 @@ fn main() -> Res<()> {
                     &format!("{}", host),
                     &[url],
                     token,
+                    ciphers,
                 )?;
             }
         }
@@ -586,7 +595,7 @@ mod old {
     use super::{qlog_new, Res};
 
     use neqo_common::{matches, Datagram};
-    use neqo_crypto::AuthenticationStatus;
+    use neqo_crypto::{AuthenticationStatus, Cipher};
     use neqo_transport::{
         Connection, ConnectionEvent, FixedConnectionIdManager, Output, State, StreamType,
     };
@@ -737,6 +746,7 @@ mod old {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn old_client(
         args: &Args,
         socket: &UdpSocket,
@@ -745,6 +755,7 @@ mod old {
         origin: &str,
         urls: &[Url],
         token: Option<Vec<u8>>,
+        ciphers: Option<&[Cipher]>,
     ) -> Res<Option<Vec<u8>>> {
         let mut open_paths = Vec::new();
 
@@ -761,6 +772,10 @@ mod old {
             client
                 .set_resumption_token(Instant::now(), &tok)
                 .expect("should set token");
+        }
+
+        if let Some(cip) = ciphers {
+            client.enable_ciphers(cip).expect("Cannot enable ciphers");
         }
 
         client.set_qlog(qlog_new(args, origin)?);

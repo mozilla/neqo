@@ -23,7 +23,8 @@ use neqo_common::{
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, AuthenticationStatus, Client, HandshakeState, SecretAgentInfo, Server,
+    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, HandshakeState, SecretAgentInfo,
+    Server,
 };
 
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
@@ -508,6 +509,16 @@ impl Connection {
     /// higher preference.
     pub fn set_alpn(&mut self, protocols: &[impl AsRef<str>]) -> Res<()> {
         self.crypto.tls.set_alpn(protocols)?;
+        Ok(())
+    }
+
+    /// Enable a set of ciphers.
+    pub fn enable_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
+        if self.state != State::Init {
+            qerror!([self], "Cannot enable ciphers in state {:?}", self.state);
+            return Err(Error::ConnectionState);
+        }
+        self.crypto.tls.enable_ciphers(ciphers)?;
         Ok(())
     }
 
