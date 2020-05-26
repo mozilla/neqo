@@ -41,5 +41,5 @@ ENV NSS_DIR=$HOME/nss \
     LD_LIBRARY_PATH=$HOME/dist/Debug/lib
 
 RUN set -eux; \
-    hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"; \
-    hg clone https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
+    hg clone -u c7a1c91cd9be https://hg.mozilla.org/projects/nss "$NSS_DIR"; \
+    hg clone -u NSPR_4_25_RTM https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
