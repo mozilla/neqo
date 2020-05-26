@@ -1406,11 +1406,8 @@ impl Connection {
     }
 
     /// Close the connection.
-    pub fn close<S>(&mut self, now: Instant, error: AppError, msg: S)
-    where
-        S: AsRef<str>,
-    {
-        let msg: &[u8] = msg.as_ref().as_ref();
+    pub fn close(&mut self, now: Instant, error: AppError, msg: impl AsRef<str>) {
+        let msg = msg.as_ref().as_bytes();
         self.set_state(State::Closing {
             error: ConnectionError::Application(error),
             frame_type: 0,
