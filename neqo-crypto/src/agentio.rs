@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::constants::*;
+use crate::constants::{ContentType, Epoch};
 use crate::err::{nspr, Error, PR_SetError, Res};
 use crate::prio;
 use crate::ssl;

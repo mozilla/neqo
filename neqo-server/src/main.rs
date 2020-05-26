@@ -33,7 +33,12 @@ struct Args {
     /// A resource to request.
     request: Vec<String>,
 
-    #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
+    #[structopt(
+        short = "d",
+        long,
+        default_value = "./test-fixture/db",
+        parse(from_os_str)
+    )]
     /// NSS database directory.
     db: PathBuf,
     #[structopt(short = "k", long, default_value = "key")]

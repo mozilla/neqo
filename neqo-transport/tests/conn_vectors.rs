@@ -10,7 +10,7 @@
 
 use neqo_common::{Datagram, Encoder};
 use neqo_transport::State;
-use test_fixture::*;
+use test_fixture::{default_server, loopback, now};
 
 const INITIAL_PACKET: &str = "c0ff00001b088394c8f03e5157080000\
                               449e3b343aa8535064a4268a0d9d7b1c\

@@ -484,9 +484,9 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         h3: Http3Client::new_with_conn(
             client,
             QpackSettings {
-                max_table_size_encoder: 128,
-                max_table_size_decoder: 128,
-                max_blocked_streams: 128,
+                max_table_size_encoder: 16384,
+                max_table_size_decoder: 16384,
+                max_blocked_streams: 10,
             },
         ),
         host: String::from(peer.host),

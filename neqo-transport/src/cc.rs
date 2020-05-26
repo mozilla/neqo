@@ -109,7 +109,7 @@ impl CongestionControl {
     pub fn on_packets_lost(
         &mut self,
         now: Instant,
-        largest_acked_sent: Option<Instant>,
+        prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
         lost_packets: &[SentPacket],
     ) {
@@ -127,21 +127,17 @@ impl CongestionControl {
         let last_lost_pkt = lost_packets.last().unwrap();
         self.on_congestion_event(now, last_lost_pkt.time_sent);
 
-        let in_persistent_congestion = {
-            let congestion_period = pto * PERSISTENT_CONG_THRESH;
+        let congestion_period = pto * PERSISTENT_CONG_THRESH;
 
-            match largest_acked_sent {
-                Some(las) => las < last_lost_pkt.time_sent - congestion_period,
-                None => {
-                    // Nothing has ever been acked. Could still be PC.
-                    let first_lost_pkt_sent = lost_packets.first().unwrap().time_sent;
-                    last_lost_pkt.time_sent - first_lost_pkt_sent > congestion_period
-                }
+        // Simpler to ignore any acked pkts in between first and last lost pkts
+        if let Some(first) = lost_packets
+            .iter()
+            .find(|p| Some(p.time_sent) > prev_largest_acked_sent)
+        {
+            if last_lost_pkt.time_sent.duration_since(first.time_sent) > congestion_period {
+                self.congestion_window = MIN_CONG_WINDOW;
+                qinfo!([self], "persistent congestion");
             }
-        };
-        if in_persistent_congestion {
-            qinfo!([self], "persistent congestion");
-            self.congestion_window = MIN_CONG_WINDOW;
         }
     }
 

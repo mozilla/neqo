@@ -214,8 +214,8 @@ impl QPackEncoder {
     /// blocked by the flow control (or stream internal buffer(this is very unlikely)).
     /// ### Errors
     /// `EncoderStreamBlocked` if the encoder stream is blocked by the flow control.
-    /// The function can return transport errors.
     /// `DynamicTableFull` if the dynamic table does not have enough space for the entry.
+    /// The function can return transport errors: `InvalidStreamId`, `InvalidInput` and `FinalSizeError`.
     pub fn insert(&mut self, conn: &mut Connection, name: &[u8], value: &[u8]) -> Res<u64> {
         qdebug!([self], "insert {:?} {:?}.", name, value);
         self.send(conn)?;
@@ -357,7 +357,12 @@ impl QPackEncoder {
                         encoder_blocked = true;
                         encoded_h.encode_literal_with_name_literal(&name, &value)
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        // These errors should never happen:
+                        // `Internal`, `InvalidStreamId`, `InvalidInput`, `FinalSizeError`
+                        debug_assert!(false, "Unexpected error: {:?}", e);
+                        return Err(e);
+                    }
                 }
             } else {
                 encoded_h.encode_literal_with_name_literal(&name, &value);

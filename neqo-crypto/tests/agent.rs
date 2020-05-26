@@ -1,12 +1,19 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
-use neqo_crypto::*;
+use neqo_crypto::{
+    AuthenticationStatus, Client, HandshakeState, SecretAgentPreInfo, Server, ZeroRttCheckResult,
+    ZeroRttChecker, TLS_AES_128_GCM_SHA256, TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP256R1,
+    TLS_VERSION_1_3,
+};
 
 use std::boxed::Box;
 
 mod handshake;
-use crate::handshake::*;
+use crate::handshake::{
+    connect, connect_fail, forward_records, resumption_setup, PermissiveZeroRttChecker, Resumption,
+    ZERO_RTT_TOKEN_DATA,
+};
 use test_fixture::{fixture_init, now};
 
 #[test]
@@ -357,6 +364,7 @@ fn reject_zero_rtt() {
 
 #[test]
 fn close() {
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     connect(&mut client, &mut server);
@@ -366,6 +374,7 @@ fn close() {
 
 #[test]
 fn close_client_twice() {
+    fixture_init();
     let mut client = Client::new("server.example").expect("should create client");
     let mut server = Server::new(&["key"]).expect("should create server");
     connect(&mut client, &mut server);
