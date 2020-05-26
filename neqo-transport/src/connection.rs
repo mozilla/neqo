@@ -2189,7 +2189,7 @@ mod tests {
     use crate::frame::{CloseError, StreamType};
     use crate::path::PATH_MTU_V6;
     use crate::recovery::PTO_PACKET_COUNT;
-    use crate::tracking::MAX_UNACKED_PKTS;
+    use crate::tracking::{ACK_DELAY, MAX_UNACKED_PKTS};
     use std::convert::TryInto;
 
     use neqo_common::matches;
@@ -3557,8 +3557,8 @@ mod tests {
         let mut server = default_server();
 
         let pkt = client.process(None, now).dgram();
-        let out = client.process(None, now);
-        assert_eq!(out, Output::Callback(Duration::from_millis(120)));
+        let cb = client.process(None, now).callback();
+        assert_eq!(cb, Duration::from_millis(120));
 
         now += Duration::from_millis(10);
         let pkt = server.process(pkt, now).dgram();
@@ -3566,8 +3566,8 @@ mod tests {
         now += Duration::from_millis(10);
         let pkt = client.process(pkt, now).dgram();
 
-        let out = client.process(None, now);
-        assert_eq!(out, Output::Callback(LOCAL_IDLE_TIMEOUT));
+        let cb = client.process(None, now).callback();
+        assert_eq!(cb, LOCAL_IDLE_TIMEOUT);
 
         now += Duration::from_millis(10);
         let pkt = server.process(pkt, now).dgram();
@@ -3580,8 +3580,8 @@ mod tests {
         let pkt1 = client.process(None, now).dgram();
         assert!(pkt1.is_some());
 
-        let out = client.process(None, now);
-        assert_eq!(out, Output::Callback(Duration::from_millis(60)));
+        let cb = client.process(None, now).callback();
+        assert_eq!(cb, Duration::from_millis(60));
 
         // Wait for PTO to expire and resend a handshake packet
         now += Duration::from_millis(60);
@@ -3593,8 +3593,8 @@ mod tests {
         assert!(pkt3.is_some());
 
         // PTO has been doubled.
-        let out = client.process(None, now);
-        assert_eq!(out, Output::Callback(Duration::from_millis(120)));
+        let cb = client.process(None, now).callback();
+        assert_eq!(cb, Duration::from_millis(120));
 
         now += Duration::from_millis(10);
         // Server receives the first packet.
@@ -3609,40 +3609,28 @@ mod tests {
         let dropped_before = server.stats().dropped_rx;
         let frames = server.test_process_input(pkt2.unwrap(), now);
         assert_eq!(1, server.stats().dropped_rx - dropped_before);
-        assert!(matches!(frames[0], (Frame::Ping, PNSpace::ApplicationData)));
+        assert_eq!(frames[0], (Frame::Ping, PNSpace::ApplicationData));
 
         let dropped_before = server.stats().dropped_rx;
         let frames = server.test_process_input(pkt3.unwrap(), now);
         assert_eq!(1, server.stats().dropped_rx - dropped_before);
-        assert!(matches!(frames[0], (Frame::Ping, PNSpace::ApplicationData)));
+        assert_eq!(frames[0], (Frame::Ping, PNSpace::ApplicationData));
 
         now += Duration::from_millis(10);
         // Client receive ack for the first packet
-        let out = client.process(pkt, now);
+        let cb = client.process(pkt, now).callback();
         // Ack delay timer for the packet carrying HANDSHAKE_DONE.
-        assert_eq!(out, Output::Callback(Duration::from_millis(20)));
+        assert_eq!(cb, ACK_DELAY);
 
         // Let the ack timer expire.
-        now += Duration::from_millis(20);
+        now += cb;
         let out = client.process(None, now).dgram();
         assert!(out.is_some());
-        let out = client.process(None, now);
-        // The handshake keys are discarded
-        // Return PTO timer for an app pn space packet (when the Handshake PTO timer has expired,
-        // a PING in the app pn space has been send as well).
-        // pto=142.5ms, the PTO packet was sent 40ms ago. The timer will be 102.5ms.
-        assert_eq!(out, Output::Callback(Duration::from_micros(102_500)));
-
-        // Let PTO expire. We will send a PING only in the APP pn space, the client has discarded
-        // Handshshake keys.
-        now += Duration::from_micros(102_500);
-        let out = client.process(None, now).dgram();
-        assert!(out.is_some());
-
-        now += Duration::from_millis(10);
-        let frames = server.test_process_input(out.unwrap(), now);
-
-        assert_eq!(frames[0], (Frame::Ping, PNSpace::ApplicationData));
+        let cb = client.process(None, now).callback();
+        // The handshake keys are discarded, but now we're back to the idle timeout.
+        // We don't send another PING because the handshake space is done and there
+        // is nothing to probe for.
+        assert_eq!(cb, LOCAL_IDLE_TIMEOUT - ACK_DELAY);
     }
 
     #[test]

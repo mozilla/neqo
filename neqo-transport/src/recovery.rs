@@ -102,8 +102,14 @@ pub(crate) struct LossRecoverySpace {
     space: PNSpace,
     largest_acked: Option<u64>,
     largest_acked_sent_time: Option<Instant>,
-    time_of_last_sent_ack_eliciting_packet: Option<Instant>,
-    ack_eliciting_outstanding: u64,
+    /// The time used to calculate the PTO timer for this space.
+    /// This is the time that the last ACK-eliciting packet in this space
+    /// was sent.  This might be the time that a probe was sent.
+    pto_base_time: Option<Instant>,
+    /// The number of outstanding packets in this space that are in flight.
+    /// This might be less than the number of ACK-eliciting packets,
+    /// because PTO packets don't count.
+    in_flight_outstanding: u64,
     sent_packets: BTreeMap<u64, SentPacket>,
     /// The time that the first out-of-order packet was sent.
     /// This is `None` if there were no out-of-order packets detected.
@@ -117,8 +123,8 @@ impl LossRecoverySpace {
             space,
             largest_acked: None,
             largest_acked_sent_time: None,
-            time_of_last_sent_ack_eliciting_packet: None,
-            ack_eliciting_outstanding: 0,
+            pto_base_time: None,
+            in_flight_outstanding: 0,
             sent_packets: BTreeMap::default(),
             first_ooo_time: None,
         }
@@ -137,8 +143,8 @@ impl LossRecoverySpace {
         self.first_ooo_time
     }
 
-    pub fn ack_eliciting_outstanding(&self) -> bool {
-        self.ack_eliciting_outstanding > 0
+    pub fn in_flight_outstanding(&self) -> bool {
+        self.in_flight_outstanding > 0
     }
 
     pub fn pto_packets(&mut self, count: usize) -> impl Iterator<Item = &SentPacket> {
@@ -155,28 +161,30 @@ impl LossRecoverySpace {
             .take(count)
     }
 
-    pub fn time_of_last_sent_ack_eliciting_packet(&self) -> Option<Instant> {
-        if self.ack_eliciting_outstanding() {
-            debug_assert!(self.time_of_last_sent_ack_eliciting_packet.is_some());
-            self.time_of_last_sent_ack_eliciting_packet
+    pub fn pto_base_time(&self) -> Option<Instant> {
+        if self.in_flight_outstanding() {
+            debug_assert!(self.pto_base_time.is_some());
+            self.pto_base_time
         } else {
             None
         }
     }
 
     pub fn on_packet_sent(&mut self, packet_number: u64, sent_packet: SentPacket) {
-        if sent_packet.ack_eliciting {
-            self.time_of_last_sent_ack_eliciting_packet = Some(sent_packet.time_sent);
-            self.ack_eliciting_outstanding += 1;
+        if sent_packet.ack_eliciting() {
+            self.pto_base_time = Some(sent_packet.time_sent);
+            if sent_packet.cc_in_flight() {
+                self.in_flight_outstanding += 1;
+            }
         }
         self.sent_packets.insert(packet_number, sent_packet);
     }
 
     pub fn remove_packet(&mut self, pn: u64) -> Option<SentPacket> {
         if let Some(sent) = self.sent_packets.remove(&pn) {
-            if sent.ack_eliciting {
-                debug_assert!(self.ack_eliciting_outstanding > 0);
-                self.ack_eliciting_outstanding -= 1;
+            if sent.cc_in_flight() {
+                debug_assert!(self.in_flight_outstanding > 0);
+                self.in_flight_outstanding -= 1;
             }
             Some(sent)
         } else {
@@ -194,7 +202,7 @@ impl LossRecoverySpace {
             for pn in start..=end {
                 if let Some(sent) = self.remove_packet(pn) {
                     qdebug!("acked={}", pn);
-                    eliciting |= sent.ack_eliciting;
+                    eliciting |= sent.ack_eliciting();
                     acked_packets.insert(pn, sent);
                 }
             }
@@ -209,7 +217,7 @@ impl LossRecoverySpace {
     /// This is called by a client when 0-RTT packets are dropped, when a Retry is received
     /// and when keys are dropped.
     fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
-        self.ack_eliciting_outstanding = 0;
+        self.in_flight_outstanding = 0;
         std::mem::take(&mut self.sent_packets)
             .into_iter()
             .map(|(_, v)| v)
@@ -595,7 +603,7 @@ impl LossRecovery {
     // Calculate PTO time for the given space.
     fn pto_time(&self, pn_space: PNSpace) -> Option<Instant> {
         if let Some(space) = self.spaces.get(pn_space) {
-            space.time_of_last_sent_ack_eliciting_packet().map(|t| {
+            space.pto_base_time().map(|t| {
                 t + self
                     .rtt_vals
                     .pto(pn_space)
