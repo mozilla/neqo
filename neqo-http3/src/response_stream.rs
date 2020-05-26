@@ -200,11 +200,7 @@ impl ResponseStream {
         decoder: &mut QPackDecoder,
         post_readable_event: bool,
     ) -> Res<()> {
-        let label = if ::log::log_enabled!(::log::Level::Debug) {
-            format!("{}", self)
-        } else {
-            String::new()
-        };
+        let label = ::neqo_common::log_subject!(::log::Level::Debug, self);
         loop {
             qdebug!([label], "state={:?}.", self.state);
             match self.state {
