@@ -30,6 +30,20 @@ use std::time::Instant;
 
 use crate::{Error, Res};
 
+fn id_gte<T, U>(base: T) -> impl FnMut((&T, &U)) -> Option<T> + 'static
+where
+    T: PartialOrd + Copy + 'static,
+    U: ?Sized,
+{
+    move |(id, _)| {
+        if *id >= base {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+}
+
 pub struct Http3Client {
     conn: Connection,
     base_handler: Http3Connection,
@@ -536,29 +550,23 @@ impl Http3Client {
         }
 
         // Issue reset events for streams >= goaway stream id
-        let mut ids: Vec<u64> = self
+        for id in self
             .base_handler
             .send_streams
             .iter()
-            .filter_map(|(id, _)| {
-                if *id >= goaway_stream_id {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
-            .chain(self.base_handler.recv_streams.iter().filter_map(|(id, _)| {
-                if *id >= goaway_stream_id {
-                    Some(*id)
-                } else {
-                    None
-                }
-            }))
-            .collect();
+            .filter_map(id_gte(goaway_stream_id))
+        {
+            self.events.reset(id, Error::HttpRequestRejected.code());
+        }
 
-        ids.dedup();
-        ids.iter()
-            .for_each(|id| self.events.reset(*id, Error::HttpRequestRejected.code()));
+        for id in self
+            .base_handler
+            .recv_streams
+            .iter()
+            .filter_map(id_gte(goaway_stream_id))
+        {
+            self.events.reset(id, Error::HttpRequestRejected.code());
+        }
 
         self.events.goaway_received();
 

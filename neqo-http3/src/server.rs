@@ -17,6 +17,7 @@ use neqo_qpack::QpackSettings;
 use neqo_transport::server::{ActiveConnectionRef, Server};
 use neqo_transport::{ConnectionIdManager, Output};
 use std::cell::RefCell;
+use std::cell::RefMut;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -127,38 +128,14 @@ impl Http3Server {
                             fin,
                         ),
                         Http3ServerConnEvent::DataReadable { stream_id } => {
-                            loop {
-                                let mut data = vec![0; MAX_EVENT_DATA_SIZE];
-                                let res = handler_borrowed.read_request_data(
-                                    &mut conn.borrow_mut(),
-                                    now,
-                                    stream_id,
-                                    &mut data,
-                                );
-                                if let Ok((amount, fin)) = res {
-                                    if amount > 0 {
-                                        if amount < MAX_EVENT_DATA_SIZE {
-                                            data.resize(amount, 0);
-                                        }
-                                        self.events.data(
-                                            ClientRequestStream::new(
-                                                conn.clone(),
-                                                handler.clone(),
-                                                stream_id,
-                                            ),
-                                            data,
-                                            fin,
-                                        );
-                                    }
-                                    if amount < MAX_EVENT_DATA_SIZE || fin {
-                                        break;
-                                    }
-                                } else {
-                                    // Any error will closed the handler, just ignore this event, the next event must
-                                    // be a state change event.
-                                    break;
-                                }
-                            }
+                            prepare_data(
+                                stream_id,
+                                &mut handler_borrowed,
+                                &mut conn,
+                                &handler,
+                                now,
+                                &mut self.events,
+                            );
                         }
                         Http3ServerConnEvent::StateChange(state) => {
                             self.events
@@ -193,6 +170,39 @@ impl Http3Server {
     /// previously-queued events, or cause new events to be generated.
     pub fn next_event(&mut self) -> Option<Http3ServerEvent> {
         self.events.next_event()
+    }
+}
+fn prepare_data(
+    stream_id: u64,
+    handler_borrowed: &mut RefMut<Http3ServerHandler>,
+    conn: &mut ActiveConnectionRef,
+    handler: &HandlerRef,
+    now: Instant,
+    events: &mut Http3ServerEvents,
+) {
+    loop {
+        let mut data = vec![0; MAX_EVENT_DATA_SIZE];
+        let res =
+            handler_borrowed.read_request_data(&mut conn.borrow_mut(), now, stream_id, &mut data);
+        if let Ok((amount, fin)) = res {
+            if amount > 0 {
+                if amount < MAX_EVENT_DATA_SIZE {
+                    data.resize(amount, 0);
+                }
+                events.data(
+                    ClientRequestStream::new(conn.clone(), handler.clone(), stream_id),
+                    data,
+                    fin,
+                );
+            }
+            if amount < MAX_EVENT_DATA_SIZE || fin {
+                break;
+            }
+        } else {
+            // Any error will closed the handler, just ignore this event, the next event must
+            // be a state change event.
+            break;
+        }
     }
 }
 

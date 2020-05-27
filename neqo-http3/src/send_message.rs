@@ -26,7 +26,8 @@ pub(crate) trait SendMessageEvents: Debug {
 }
 
 /*
- *  Transaction send states:
+ *  SendMessage states:
+ *    Uninitialized
  *    Initialized : Headers are present but still not encoded. A message body may be present as well.
  *                  The lcient side send message body using the send_body() function that directly
  *                  writes into a transport stream. The server side sets headers and body when
@@ -52,6 +53,24 @@ enum SendMessageState {
     },
     SendingData,
     Closed,
+}
+
+impl SendMessageState {
+    pub fn is_sending_closed(&self) -> bool {
+        match self {
+            Self::Initialized { fin, .. } | Self::SendingInitialMessage { fin, .. } => *fin,
+            Self::SendingData => false,
+            _ => true,
+        }
+    }
+
+    pub fn done(&self) -> bool {
+        matches!(self, Self::Closed)
+    }
+
+    pub fn is_state_sending_data(&self) -> bool {
+        matches!(self, Self::SendingData)
+    }
 }
 
 #[derive(Debug)]
@@ -164,27 +183,18 @@ impl SendMessage {
     }
 
     pub fn is_sending_closed(&self) -> bool {
-        match self.state {
-            SendMessageState::Initialized { fin, .. }
-            | SendMessageState::SendingInitialMessage { fin, .. } => fin,
-            SendMessageState::SendingData => false,
-            _ => true,
-        }
+        self.state.is_sending_closed()
     }
 
     pub fn done(&self) -> bool {
-        matches!(self.state, SendMessageState::Closed)
+        self.state.done()
     }
 
     pub fn is_state_sending_data(&self) -> bool {
-        matches!(self.state, SendMessageState::SendingData)
+        self.state.is_state_sending_data()
     }
 
-    fn ensure_response_encoded(
-        &mut self,
-        conn: &mut Connection,
-        encoder: &mut QPackEncoder,
-    ) -> Res<()> {
+    fn ensure_encoded(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
         if let SendMessageState::Initialized { headers, data, fin } = &self.state {
             qdebug!([self], "Encoding headers");
             let header_block = encoder.encode_header_block(conn, &headers, self.stream_id)?;
@@ -211,7 +221,7 @@ impl SendMessage {
     }
 
     pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
-        self.ensure_response_encoded(conn, encoder)?;
+        self.ensure_encoded(conn, encoder)?;
 
         let label = if ::log::log_enabled!(::log::Level::Debug) {
             format!("{}", self)
@@ -241,9 +251,9 @@ impl SendMessage {
         Ok(())
     }
 
-    // TransactionClient owns headers and sends them. This method returns if
-    // they're still being sent. Request body (if any) is sent by http client
-    // afterwards using `send_request_body` after receiving DataWritable event.
+    // SendMessage owns headers and sends them. It may also own data for the server side.
+    // This method returns if they're still being sent. Request body (if any) is sent by
+    // http client afterwards using `send_request_body` after receiving DataWritable event.
     pub fn has_data_to_send(&self) -> bool {
         matches!(self.state, SendMessageState::Initialized {..} | SendMessageState::SendingInitialMessage { .. } )
     }

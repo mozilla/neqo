@@ -329,9 +329,9 @@ impl Http3Connection {
             app_err
         );
 
-        let mut found = self.recv_streams.remove(&stream_id).is_some();
-
-        found |= self.send_streams.remove(&stream_id).is_some();
+        // We want to execute both statements, therefore we use | instead of ||.
+        let found = self.recv_streams.remove(&stream_id).is_some()
+            | self.send_streams.remove(&stream_id).is_some();
 
         // close sending side of the transport stream as well. The server may have done
         // it as well, but just to be sure.
@@ -468,7 +468,7 @@ impl Http3Connection {
         qinfo!([self], "Close connection error {:?}.", error);
         self.state = Http3State::Closing(CloseError::Application(error));
         if (!self.send_streams.is_empty() || !self.recv_streams.is_empty()) && (error == 0) {
-            qwarn!("close() called when streams still active");
+            qwarn!("close(0) called when streams still active");
         }
         self.send_streams.clear();
         self.recv_streams.clear();
@@ -482,9 +482,10 @@ impl Http3Connection {
         error: AppError,
     ) -> Res<()> {
         qinfo!([self], "Reset stream {} error={}.", stream_id, error);
-        let mut found = self.send_streams.remove(&stream_id).is_some();
 
-        found |= self.recv_streams.remove(&stream_id).is_some();
+        // We want to execute both statements, therefore we use | instead of ||.
+        let found = self.send_streams.remove(&stream_id).is_some()
+            | self.recv_streams.remove(&stream_id).is_some();
 
         // Stream maybe already be closed and we may get an error here, but we do not care.
         let _ = conn.stream_reset_send(stream_id, error);
