@@ -36,9 +36,4 @@ impl PushController {
         qtrace!("A new push promise {} {:?}", push_id, header_block);
         Err(Error::HttpId)
     }
-
-    pub fn new_duplicate_push(&self, push_id: u64) -> Res<()> {
-        qtrace!([self], "A new duplicate push {}", push_id);
-        Err(Error::HttpId)
-    }
 }
