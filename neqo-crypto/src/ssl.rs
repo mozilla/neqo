@@ -39,6 +39,7 @@ pub enum Opt {
     RecordSizeLimit,
     Tls13CompatMode,
     HelloDowngradeCheck,
+    SuppressEndOfEarlyData,
 }
 
 impl Opt {
@@ -56,6 +57,7 @@ impl Opt {
             Self::RecordSizeLimit => SSLOption::SSL_RECORD_SIZE_LIMIT,
             Self::Tls13CompatMode => SSLOption::SSL_ENABLE_TLS13_COMPAT_MODE,
             Self::HelloDowngradeCheck => SSLOption::SSL_ENABLE_HELLO_DOWNGRADE_CHECK,
+            Self::SuppressEndOfEarlyData => SSLOption::SSL_SUPPRESS_END_OF_EARLY_DATA,
         };
         i as PRInt32
     }

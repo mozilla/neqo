@@ -118,6 +118,11 @@ pub struct Args {
     #[structopt(name = "qns-mode", long)]
     /// Enable special behavior for use with QUIC Network Simulator
     qns_mode: bool,
+
+    #[structopt(short = "r", long)]
+    /// Client attemps to resume connections when there are multiple connections made.
+    /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
+    resume: bool,
 }
 
 trait Handler {
@@ -438,11 +443,22 @@ fn main() -> Res<()> {
 
     let mut args = Args::from_args();
 
+    let mut resumption_test = false;
+
     if args.qns_mode {
         match env::var("TESTCASE") {
             Ok(s) if s == "http3" => {}
-            Ok(s) if s == "handshake" || s == "transfer" => {
+            Ok(s) if s == "handshake" || s == "transfer" || s == "retry" => {
                 args.use_old_http = true;
+            }
+            Ok(s) if s == "zerortt" || s == "resumption" => {
+                if args.urls.len() < 2 {
+                    eprintln!("Warning: resumption tests won't work without >1 URL");
+                    exit(127)
+                }
+                args.use_old_http = true;
+                args.resume = true;
+                resumption_test = true;
             }
             Ok(s) if s == "multiconnect" => {
                 args.use_old_http = true;
@@ -459,7 +475,8 @@ fn main() -> Res<()> {
         entry.push(url.clone());
     }
 
-    for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
+    for ((_scheme, host, port), mut urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k
+    {
         Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
         Origin::Opaque(x) => {
             eprintln!("Opaque origin {:?}", x);
@@ -502,6 +519,29 @@ fn main() -> Res<()> {
                 &urls,
             )?;
         } else if !args.download_in_series {
+            let token = if resumption_test {
+                // Download first URL using a separate connection, save the token and use it for
+                // the remaining URLs
+                if urls.len() < 2 {
+                    eprintln!("Warning: resumption tests won't work without >1 URL");
+                    exit(127)
+                }
+
+                let first_url = urls.remove(0);
+
+                old::old_client(
+                    &args,
+                    &socket,
+                    local_addr,
+                    remote_addr,
+                    &format!("{}", host),
+                    &[first_url],
+                    None,
+                )?
+            } else {
+                None
+            };
+
             old::old_client(
                 &args,
                 &socket,
@@ -509,16 +549,20 @@ fn main() -> Res<()> {
                 remote_addr,
                 &format!("{}", host),
                 &urls,
+                token,
             )?;
         } else {
+            let mut token: Option<Vec<u8>> = None;
+
             for url in urls {
-                old::old_client(
+                token = old::old_client(
                     &args,
                     &socket,
                     local_addr,
                     remote_addr,
                     &format!("{}", host),
                     &[url],
+                    token,
                 )?;
             }
         }
@@ -700,7 +744,8 @@ mod old {
         remote_addr: SocketAddr,
         origin: &str,
         urls: &[Url],
-    ) -> Res<()> {
+        token: Option<Vec<u8>>,
+    ) -> Res<Option<Vec<u8>>> {
         let mut open_paths = Vec::new();
 
         let mut client = Connection::new_client(
@@ -711,6 +756,13 @@ mod old {
             remote_addr,
         )
         .expect("must succeed");
+
+        if let Some(tok) = token {
+            client
+                .set_resumption_token(Instant::now(), &tok)
+                .expect("should set token");
+        }
+
         client.set_qlog(qlog_new(args, origin)?);
         // Temporary here to help out the type inference engine
         let mut h = PreConnectHandlerOld {};
@@ -745,6 +797,10 @@ mod old {
             &args,
         )?;
 
-        Ok(())
+        Ok(if args.resume {
+            client.resumption_token()
+        } else {
+            None
+        })
     }
 }
