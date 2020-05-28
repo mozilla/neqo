@@ -355,6 +355,11 @@ impl SecretAgent {
     /// # Errors
     /// If NSS can't enable or disable ciphers.
     pub fn enable_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
+        if self.state != HandshakeState::New {
+            qwarn!([self], "Cannot enable ciphers in state {:?}", self.state);
+            return Err(Error::InternalError);
+        }
+
         let all_ciphers = unsafe { ssl::SSL_GetImplementedCiphers() };
         let cipher_count = usize::from(unsafe { ssl::SSL_GetNumImplementedCiphers() });
         for i in 0..cipher_count {
