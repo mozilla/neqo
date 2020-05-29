@@ -7,6 +7,8 @@
 use crate::hframe::{HFrame, HFrameReader};
 use crate::push_controller::PushController;
 use crate::qlog;
+use crate::RecvMessageEvents;
+use crate::RecvStream;
 use crate::{Error, Header, Res};
 
 use neqo_common::{matches, qdebug, qinfo, qtrace};
@@ -17,12 +19,6 @@ use std::cmp::min;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::rc::Rc;
-
-pub(crate) trait RecvMessageEvents: Debug {
-    fn header_ready(&self, stream_id: u64, headers: Option<Vec<Header>>, fin: bool);
-    fn data_readable(&self, stream_id: u64);
-    fn reset(&self, stream_id: u64, app_error: AppError);
-}
 
 /*
  * Response stream state:
@@ -161,51 +157,6 @@ impl RecvMessage {
         }
     }
 
-    pub fn read_data(
-        &mut self,
-        conn: &mut Connection,
-        decoder: &mut QPackDecoder,
-        buf: &mut [u8],
-    ) -> Res<(usize, bool)> {
-        let mut written = 0;
-        loop {
-            match self.state {
-                RecvMessageState::ReadingData {
-                    ref mut remaining_data_len,
-                } => {
-                    let to_read = min(*remaining_data_len, buf.len() - written);
-                    let (amount, fin) =
-                        conn.stream_recv(self.stream_id, &mut buf[written..written + to_read])?;
-                    qlog::h3_data_moved_up(conn.qlog_mut(), self.stream_id, amount);
-
-                    debug_assert!(amount <= to_read);
-                    *remaining_data_len -= amount;
-                    written += amount;
-
-                    if fin {
-                        if *remaining_data_len > 0 {
-                            return Err(Error::HttpFrame);
-                        }
-                        self.state = RecvMessageState::Closed;
-                        break Ok((written, fin));
-                    } else if *remaining_data_len == 0 {
-                        self.state = RecvMessageState::WaitingForData {
-                            frame_reader: HFrameReader::new(),
-                        };
-                        self.receive_internal(conn, decoder, false)?;
-                    } else {
-                        break Ok((written, false));
-                    }
-                }
-                RecvMessageState::ClosePending => {
-                    self.state = RecvMessageState::Closed;
-                    break Ok((written, true));
-                }
-                _ => break Ok((written, false)),
-            }
-        }
-    }
-
     fn receive_internal(
         &mut self,
         conn: &mut Connection,
@@ -244,9 +195,9 @@ impl RecvMessage {
                                 } => self
                                     .push_handler
                                     .as_ref()
-                                    .ok_or(Error::HttpId)?
-                                    .borrow()
-                                    .new_push_promise(push_id, header_block)?,
+                                    .ok_or(Error::HttpFrameUnexpected)?
+                                    .borrow_mut()
+                                    .new_push_promise(push_id, self.stream_id, header_block)?,
                                 _ => break Err(Error::HttpFrameUnexpected),
                             }
                             if matches!(self.state, RecvMessageState::Closed) {
@@ -288,16 +239,63 @@ impl RecvMessage {
             };
         }
     }
+}
 
-    pub fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
+impl RecvStream for RecvMessage {
+    fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
         self.receive_internal(conn, decoder, true)
     }
 
-    pub fn done(&self) -> bool {
+    fn done(&self) -> bool {
         matches!(self.state, RecvMessageState::Closed)
     }
 
-    pub fn stream_reset(&mut self, app_error: AppError) {
+    fn stream_reset(&self, app_error: AppError) {
         self.conn_events.reset(self.stream_id, app_error);
+    }
+
+    pub fn read_data(
+        &mut self,
+        conn: &mut Connection,
+        decoder: &mut QPackDecoder,
+        buf: &mut [u8],
+    ) -> Res<(usize, bool)> {
+        let mut written = 0;
+        loop {
+            match self.state {
+                RecvMessageState::ReadingData {
+                    ref mut remaining_data_len,
+                } => {
+                    let to_read = min(*remaining_data_len, buf.len() - written);
+                    let (amount, fin) =
+                        conn.stream_recv(self.stream_id, &mut buf[written..written + to_read])?;
+                    qlog::h3_data_moved_up(conn.qlog_mut(), self.stream_id, amount);
+
+                    debug_assert!(amount <= to_read);
+                    *remaining_data_len -= amount;
+                    written += amount;
+
+                    if fin {
+                        if *remaining_data_len > 0 {
+                            return Err(Error::HttpFrame);
+                        }
+                       self.state = RecvMessageState::Closed;
+                        break Ok((written, fin));
+                    } else if *remaining_data_len == 0 {
+                        self.state = RecvMessageState::WaitingForData {
+                            frame_reader: HFrameReader::new(),
+                        };
+                        self.receive_internal(conn, decoder, false)?;
+                    } else {
+                        break Ok((written, false));
+                    }
+                }
+                RecvMessageState::ClosePending => {
+                    self.state = RecvMessageState::Closed;
+                    break Ok((written, true));
+                }
+                _ => break Ok((written, false)),
+            }
+        }
     }
 }

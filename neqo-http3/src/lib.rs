@@ -17,6 +17,7 @@ mod control_stream_remote;
 pub mod hframe;
 mod push_controller;
 mod qlog;
+mod push_stream;
 mod recv_message;
 mod send_message;
 pub mod server;
@@ -25,9 +26,11 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
+use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::Error as QpackError;
 pub use neqo_transport::Output;
-use neqo_transport::{AppError, Error as TransportError};
+use neqo_transport::{AppError, Connection, Error as TransportError};
+use std::fmt::Debug;
 
 pub use client_events::Http3ClientEvent;
 pub use connection::Http3State;
@@ -99,6 +102,24 @@ impl Error {
             _ => 3,
         }
     }
+
+    // TODO: dragana look into http3 errors
+    #[must_use]
+    pub fn connection_error(&self) -> bool {
+        match self {
+            Self::HttpGeneralProtocol
+            | Self::HttpInternal
+            | Self::HttpStreamCreation
+            | Self::HttpClosedCriticalStream
+            | Self::HttpFrameUnexpected
+            | Self::HttpFrame
+            | Self::HttpExcessiveLoad
+            | Self::HttpId
+            | Self::HttpSettings
+            | Self::HttpMissingSettings => true,
+            _ => false,
+        }
+    }
 }
 
 impl From<TransportError> for Error {
@@ -153,4 +174,26 @@ impl ::std::fmt::Display for Error {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "HTTP/3 error: {:?}", self)
     }
+}
+
+pub trait RecvStream: Debug {
+    fn stream_reset(&self, app_error: AppError);
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
+    fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()>;
+    fn done(&self) -> bool;
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
+    fn read_data(
+        &mut self,
+        conn: &mut Connection,
+        decoder: &mut QPackDecoder,
+        buf: &mut [u8],
+    ) -> Res<(usize, bool)>;
+}
+
+pub(crate) trait RecvMessageEvents: Debug {
+    fn header_ready(&self, stream_id: u64, headers: Option<Vec<Header>>, fin: bool);
+    fn data_readable(&self, stream_id: u64);
+    fn reset(&self, stream_id: u64, error: AppError);
 }
