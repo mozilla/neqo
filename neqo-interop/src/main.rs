@@ -511,6 +511,7 @@ fn connect_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<H3Ha
                 max_table_size_decoder: 16384,
                 max_blocked_streams: 10,
             },
+            10,
         ),
         host: String::from(peer.host),
         path: String::from("/"),

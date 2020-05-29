@@ -154,6 +154,7 @@ pub fn default_http3_client() -> Http3Client {
             max_table_size_decoder: 100,
             max_blocked_streams: 100,
         },
+        10,
         QuicVersion::default(),
     )
     .expect("create a default client")

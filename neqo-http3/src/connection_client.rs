@@ -69,6 +69,7 @@ impl Http3Client {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         qpack_settings: QpackSettings,
+        max_concurent_push_streams: u64,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
@@ -81,16 +82,23 @@ impl Http3Client {
                 quic_version,
             )?,
             qpack_settings,
+            max_concurent_push_streams,
         ))
     }
 
     #[must_use]
-    pub fn new_with_conn(c: Connection, qpack_settings: QpackSettings) -> Self {
+    pub fn new_with_conn(
+        c: Connection,
+        qpack_settings: QpackSettings,
+        max_concurent_push_streams: u64,
+    ) -> Self {
         Self {
             conn: c,
             base_handler: Http3Connection::new(qpack_settings),
             events: Http3ClientEvents::default(),
-            push_handler: Rc::new(RefCell::new(PushController::new())),
+            push_handler: Rc::new(RefCell::new(PushController::new(
+                max_concurent_push_streams,
+            ))),
         }
     }
 
@@ -601,6 +609,7 @@ mod tests {
                 max_table_size_decoder: 100,
                 max_blocked_streams: 100,
             },
+            10,
             QuicVersion::default(),
         )
         .expect("create a default client")
