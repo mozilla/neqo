@@ -11,7 +11,7 @@ use crate::{Error, Header, Res};
 
 use neqo_common::{matches, qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
-use neqo_transport::Connection;
+use neqo_transport::{AppError, Connection};
 use std::cell::RefCell;
 use std::cmp::min;
 use std::convert::TryFrom;
@@ -21,6 +21,7 @@ use std::rc::Rc;
 pub(crate) trait RecvMessageEvents: Debug {
     fn header_ready(&self, stream_id: u64, headers: Option<Vec<Header>>, fin: bool);
     fn data_readable(&self, stream_id: u64);
+    fn reset(&self, stream_id: u64, app_error: AppError);
 }
 
 /*
@@ -294,5 +295,9 @@ impl RecvMessage {
 
     pub fn done(&self) -> bool {
         matches!(self.state, RecvMessageState::Closed)
+    }
+
+    pub fn stream_reset(&mut self, app_error: AppError) {
+        self.conn_events.reset(self.stream_id, app_error);
     }
 }

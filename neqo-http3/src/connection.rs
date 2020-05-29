@@ -325,7 +325,7 @@ impl Http3Connection {
         }
     }
 
-    pub fn is_critical_stream(&self, stream_id: u64) -> bool {
+    fn is_critical_stream(&self, stream_id: u64) -> bool {
         self.qpack_encoder
             .local_stream_id()
             .iter()
@@ -338,33 +338,39 @@ impl Http3Connection {
     }
 
     /// This is called when a RESET frame has been received.
-    pub fn handle_stream_reset(
-        &mut self,
-        conn: &mut Connection,
-        stream_id: u64,
-        app_err: AppError,
-    ) -> Res<bool> {
+    pub fn handle_stream_reset(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
         qinfo!(
             [self],
             "Handle a stream reset stream_id={} app_err={}",
             stream_id,
-            app_err
+            app_error
         );
 
-        // We want to execute both statements, therefore we use | instead of ||.
-        let found = self.recv_streams.remove(&stream_id).is_some()
-            | self.send_streams.remove(&stream_id).is_some();
-
-        // close sending side of the transport stream as well. The server may have done
-        // it as well, but just to be sure.
-        let _ = conn.stream_reset_send(stream_id, app_err);
-
-        if found {
-            Ok(true)
+        if let Some(mut s) = self.recv_streams.remove(&stream_id) {
+            s.stream_reset(app_error);
+            Ok(())
         } else if self.is_critical_stream(stream_id) {
             Err(Error::HttpClosedCriticalStream)
         } else {
-            Ok(false)
+            Ok(())
+        }
+    }
+
+    pub fn handle_stream_stop_sending(&mut self, stream_id: u64, app_error: AppError) -> Res<()> {
+        qinfo!(
+            [self],
+            "Handle stream_stop_sending stream_id={} app_err={}",
+            stream_id,
+            app_error
+        );
+
+        if let Some(mut s) = self.send_streams.remove(&stream_id) {
+            s.stop_sending(app_error);
+            Ok(())
+        } else if self.is_critical_stream(stream_id) {
+            Err(Error::HttpClosedCriticalStream)
+        } else {
+            Ok(())
         }
     }
 
@@ -496,7 +502,7 @@ impl Http3Connection {
         self.recv_streams.clear();
     }
 
-    /// This is called when an application resets a stream.
+    /// This is called when an application resets a stream. The application reset will close both sides.
     pub fn stream_reset(
         &mut self,
         conn: &mut Connection,

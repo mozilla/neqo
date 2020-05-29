@@ -66,6 +66,18 @@ impl RecvMessageEvents for Http3ClientEvents {
     fn data_readable(&self, stream_id: u64) {
         self.insert(Http3ClientEvent::DataReadable { stream_id });
     }
+
+    /// Add a new `Reset` event.
+    fn reset(&self, stream_id: u64, error: AppError) {
+        self.remove(|evt| {
+            matches!(evt,
+                Http3ClientEvent::HeaderReady { stream_id: x, .. }
+                | Http3ClientEvent::DataReadable { stream_id: x }
+                | Http3ClientEvent::NewPushStream { stream_id: x }
+                | Http3ClientEvent::Reset { stream_id: x, .. } if *x == stream_id)
+        });
+        self.insert(Http3ClientEvent::Reset { stream_id, error });
+    }
 }
 
 impl SendMessageEvents for Http3ClientEvents {
@@ -73,19 +85,24 @@ impl SendMessageEvents for Http3ClientEvents {
     fn data_writable(&self, stream_id: u64) {
         self.insert(Http3ClientEvent::DataWritable { stream_id });
     }
+
+    fn remove_send_side_event(&self, stream_id: u64) {
+        self.remove(|evt| {
+            matches!(evt,
+                Http3ClientEvent::DataWritable { stream_id: x }
+                | Http3ClientEvent::StopSending { stream_id: x, .. } if *x == stream_id)
+        });
+    }
+
+    /// Add a new `StopSending` event
+    fn stop_sending(&self, stream_id: u64, error: AppError) {
+        // Remove DataWritable event if any.
+        self.remove_send_side_event(stream_id);
+        self.insert(Http3ClientEvent::StopSending { stream_id, error });
+    }
 }
 
 impl Http3ClientEvents {
-    /// Add a new `StopSending` event
-    pub(crate) fn stop_sending(&self, stream_id: u64, error: AppError) {
-        // Remove DataWritable event if any.
-        self.remove(|evt| {
-            matches!(evt, Http3ClientEvent::DataWritable {
-                    stream_id: x } if *x == stream_id)
-        });
-        self.insert(Http3ClientEvent::StopSending { stream_id, error });
-    }
-
     // TODO: implement push.
     // pub fn new_push_stream(&self, stream_id: u64) {
     //     self.insert(Http3ClientEvent::NewPushStream { stream_id });
@@ -138,12 +155,6 @@ impl Http3ClientEvents {
         F: Fn(&Http3ClientEvent) -> bool,
     {
         self.events.borrow_mut().retain(|evt| !f(evt))
-    }
-
-    /// Add a new `Reset` event.
-    pub(crate) fn reset(&self, stream_id: u64, error: AppError) {
-        self.remove_events_for_stream_id(stream_id);
-        self.insert(Http3ClientEvent::Reset { stream_id, error });
     }
 
     /// Add a new `StateChange` event.

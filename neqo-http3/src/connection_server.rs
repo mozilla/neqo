@@ -143,14 +143,15 @@ impl Http3ServerHandler {
                     stream_id,
                     app_error,
                 } => {
-                    let _ = self
-                        .base_handler
-                        .handle_stream_reset(conn, stream_id, app_error)?;
+                    self.base_handler
+                        .handle_stream_reset(stream_id, app_error)?;
                 }
                 ConnectionEvent::SendStreamStopSending {
                     stream_id,
                     app_error,
-                } => self.handle_stream_stop_sending(conn, stream_id, app_error)?,
+                } => self
+                    .base_handler
+                    .handle_stream_stop_sending(stream_id, app_error)?,
                 ConnectionEvent::StateChange(state) => {
                     if self.base_handler.handle_state_change(conn, &state)? {
                         if self.base_handler.state() == Http3State::Connected {
@@ -192,28 +193,6 @@ impl Http3ServerHandler {
             }
             _ => Ok(()),
         }
-    }
-
-    fn handle_stream_stop_sending(
-        &mut self,
-        conn: &mut Connection,
-        stop_stream_id: u64,
-        app_err: AppError,
-    ) -> Res<()> {
-        if self
-            .base_handler
-            .send_streams
-            .remove(&stop_stream_id)
-            .is_some()
-        {
-            // receiving side may be closed already, just ignore an error in the following line.
-            let _ = conn.stream_stop_sending(stop_stream_id, app_err);
-            self.base_handler.recv_streams.remove(&stop_stream_id);
-        } else if self.base_handler.is_critical_stream(stop_stream_id) {
-            return Err(Error::HttpClosedCriticalStream);
-        }
-
-        Ok(())
     }
 
     /// Response data are read directly into a buffer supplied as a parameter of this function to avoid copying
