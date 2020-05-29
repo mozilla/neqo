@@ -96,7 +96,7 @@ macro_rules! preinfo_arg {
         pub fn $v(&self) -> Option<$t> {
             match self.info.valuesSet & ssl::$m {
                 0 => None,
-                _ => Some(self.info.$f as $t),
+                _ => Some($t::from(self.info.$f)),
             }
         }
     };
@@ -346,10 +346,7 @@ impl SecretAgent {
     /// # Errors
     /// If the range of versions isn't supported.
     pub fn set_version_range(&mut self, min: Version, max: Version) -> Res<()> {
-        let range = ssl::SSLVersionRange {
-            min: min as ssl::PRUint16,
-            max: max as ssl::PRUint16,
-        };
+        let range = ssl::SSLVersionRange { min, max };
         secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &range) })
     }
 
@@ -364,17 +361,17 @@ impl SecretAgent {
         }
 
         let all_ciphers = unsafe { ssl::SSL_GetImplementedCiphers() };
-        let cipher_count = unsafe { ssl::SSL_GetNumImplementedCiphers() } as usize;
+        let cipher_count = usize::from(unsafe { ssl::SSL_GetNumImplementedCiphers() });
         for i in 0..cipher_count {
             let p = all_ciphers.wrapping_add(i);
             secstatus_to_res(unsafe {
-                ssl::SSL_CipherPrefSet(self.fd, i32::from(*p), false as ssl::PRBool)
+                ssl::SSL_CipherPrefSet(self.fd, i32::from(*p), ssl::PRBool::from(false))
             })?;
         }
 
         for c in ciphers {
             secstatus_to_res(unsafe {
-                ssl::SSL_CipherPrefSet(self.fd, i32::from(*c), true as ssl::PRBool)
+                ssl::SSL_CipherPrefSet(self.fd, i32::from(*c), ssl::PRBool::from(true))
             })?;
         }
         Ok(())
