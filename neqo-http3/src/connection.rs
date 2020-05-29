@@ -9,10 +9,10 @@
 use crate::control_stream_local::{ControlStreamLocal, HTTP3_UNI_STREAM_TYPE_CONTROL};
 use crate::control_stream_remote::ControlStreamRemote;
 use crate::hframe::HFrame;
-use crate::recv_message::RecvMessage;
 use crate::send_message::SendMessage;
 use crate::settings::{HSetting, HSettingType, HSettings, HttpZeroRttChecker};
 use crate::stream_type_reader::NewStreamTypeReader;
+use crate::RecvStream;
 use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
@@ -28,6 +28,7 @@ const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 const QPACK_TABLE_SIZE_LIMIT: u64 = 1 << 30;
 
 pub(crate) enum HandleReadableOutput {
+    StreamNotFound,
     NoOutput,
     PushStream,
     ControlFrames(Vec<HFrame>),
@@ -69,7 +70,7 @@ pub(crate) struct Http3Connection {
     settings_state: Http3RemoteSettingsState,
     streams_have_data_to_send: BTreeSet<u64>,
     pub send_streams: HashMap<u64, SendMessage>,
-    pub recv_streams: HashMap<u64, RecvMessage>,
+    pub recv_streams: HashMap<u64, Box<dyn RecvStream>>,
 }
 
 impl ::std::fmt::Display for Http3Connection {
@@ -320,8 +321,8 @@ impl Http3Connection {
             // event and remove it from self.new_streams.
             // Therefore, while processing RecvStreamReadable there will be no
             // entry for the stream in self.new_streams.
-            qdebug!("Unknown stream.");
-            Ok(HandleReadableOutput::NoOutput)
+            // This can be a push stream as well.
+            Ok(HandleReadableOutput::StreamNotFound)
         }
     }
 
@@ -346,7 +347,7 @@ impl Http3Connection {
             app_error
         );
 
-        if let Some(mut s) = self.recv_streams.remove(&stream_id) {
+        if let Some(s) = self.recv_streams.remove(&stream_id) {
             s.stream_reset(app_error);
             Ok(())
         } else if self.is_critical_stream(stream_id) {
@@ -557,7 +558,9 @@ impl Http3Connection {
                 self.handle_settings(settings)?;
                 Ok(None)
             }
-            HFrame::Goaway { .. } | HFrame::MaxPushId { .. } => Ok(Some(f)),
+            HFrame::Goaway { .. } | HFrame::MaxPushId { .. } | HFrame::CancelPush { .. } => {
+                Ok(Some(f))
+            }
             _ => Err(Error::HttpFrameUnexpected),
         }
     }
@@ -634,17 +637,26 @@ impl Http3Connection {
         self.state.clone()
     }
 
-    /// Adds a new transaction.
+    /// Adds a new send and receive stream.
     pub fn add_streams(
         &mut self,
         stream_id: u64,
         send_stream: SendMessage,
-        recv_stream: RecvMessage,
+        recv_stream: Box<dyn RecvStream>,
     ) {
         if send_stream.has_data_to_send() {
             self.streams_have_data_to_send.insert(stream_id);
         }
         self.send_streams.insert(stream_id, send_stream);
         self.recv_streams.insert(stream_id, recv_stream);
+    }
+
+    /// Add a new recv stream. This is used for push streams.
+    pub fn add_recv_stream(&mut self, stream_id: u64, recv_stream: Box<dyn RecvStream>) {
+        self.recv_streams.insert(stream_id, recv_stream);
+    }
+
+    pub fn queue_control_frame(&mut self, frame: &HFrame) {
+        self.control_stream_local.queue_frame(frame);
     }
 }

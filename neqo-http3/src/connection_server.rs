@@ -125,7 +125,11 @@ impl Http3ServerHandler {
                     StreamType::BiDi => self.base_handler.add_streams(
                         stream_id.as_u64(),
                         SendMessage::new(stream_id.as_u64(), Box::new(self.events.clone())),
-                        RecvMessage::new(stream_id.as_u64(), Box::new(self.events.clone()), None),
+                        Box::new(RecvMessage::new(
+                            stream_id.as_u64(),
+                            Box::new(self.events.clone()),
+                            None,
+                        )),
                     ),
                     StreamType::UniDi => {
                         if self
@@ -183,7 +187,9 @@ impl Http3ServerHandler {
                             // TODO implement push
                             Ok(())
                         }
-                        HFrame::Goaway { .. } => Err(Error::HttpFrameUnexpected),
+                        HFrame::Goaway { .. } | HFrame::CancelPush { .. } => {
+                            Err(Error::HttpFrameUnexpected)
+                        }
                         _ => unreachable!(
                             "we should only put MaxPushId and Goaway into control_frames."
                         ),
