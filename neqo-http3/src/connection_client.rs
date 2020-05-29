@@ -5,10 +5,12 @@
 // except according to those terms.
 
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
-use crate::connection::{HandleReadableOutput, Http3Connection, Http3State, Http3Transaction};
+use crate::connection::{HandleReadableOutput, Http3Connection, Http3State};
 use crate::hframe::HFrame;
 use crate::hsettings_frame::HSettings;
-use crate::transaction_client::TransactionClient;
+use crate::push_controller::PushController;
+use crate::recv_message::RecvMessage;
+use crate::send_message::{SendMessage, SendMessageEvents};
 use crate::Header;
 use neqo_common::{
     hex, hex_with_len, matches, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Decoder, Encoder,
@@ -28,10 +30,26 @@ use std::time::Instant;
 
 use crate::{Error, Res};
 
+// This is used for filtering send_streams and recv_Streams with a stream_ids greater that a given id.
+fn id_gte<T, U>(base: T) -> impl FnMut((&T, &U)) -> Option<T> + 'static
+where
+    T: PartialOrd + Copy + 'static,
+    U: ?Sized,
+{
+    move |(id, _)| {
+        if *id >= base {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+}
+
 pub struct Http3Client {
     conn: Connection,
-    base_handler: Http3Connection<TransactionClient>,
+    base_handler: Http3Connection,
     events: Http3ClientEvents,
+    push_handler: Rc<RefCell<PushController>>,
 }
 
 impl Display for Http3Client {
@@ -64,6 +82,7 @@ impl Http3Client {
             conn: c,
             base_handler: Http3Connection::new(qpack_settings),
             events: Http3ClientEvents::default(),
+            push_handler: Rc::new(RefCell::new(PushController::new())),
         }
     }
 
@@ -185,9 +204,23 @@ impl Http3Client {
         }
 
         let id = self.conn.stream_create(StreamType::BiDi)?;
-        self.base_handler.add_transaction(
+
+        // Transform pseudo-header fields
+        let mut final_headers = Vec::new();
+        final_headers.push((":method".into(), method.to_owned()));
+        final_headers.push((":scheme".into(), scheme.to_owned()));
+        final_headers.push((":authority".into(), host.to_owned()));
+        final_headers.push((":path".into(), path.to_owned()));
+        final_headers.extend_from_slice(headers);
+
+        self.base_handler.add_streams(
             id,
-            TransactionClient::new(id, method, scheme, host, path, headers, self.events.clone()),
+            SendMessage::new_with_headers(id, final_headers, Box::new(self.events.clone())),
+            RecvMessage::new(
+                id,
+                Box::new(self.events.clone()),
+                Some(self.push_handler.clone()),
+            ),
         );
         Ok(id)
     }
@@ -224,16 +257,16 @@ impl Http3Client {
             buf.len()
         );
         self.base_handler
-            .transactions
+            .send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .send_request_body(&mut self.conn, buf)
+            .send_body(&mut self.conn, buf)
     }
 
     /// Response data are read directly into a buffer supplied as a parameter of this function to avoid copying
     /// data.
     /// # Errors
-    /// It will be return an error if a stream does not exist or an error happen while reading a stream, e.g.
+    /// It returns an error if a stream does not exist or an error happen while reading a stream, e.g.
     /// early close, protocol error, etc.
     pub fn read_response_data(
         &mut self,
@@ -242,20 +275,16 @@ impl Http3Client {
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
         qinfo!([self], "read_data from stream {}.", stream_id);
-        let transaction = self
+        let recv_stream = self
             .base_handler
-            .transactions
+            .recv_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?;
 
-        match transaction.read_response_data(
-            &mut self.conn,
-            &mut self.base_handler.qpack_decoder,
-            buf,
-        ) {
+        match recv_stream.read_data(&mut self.conn, &mut self.base_handler.qpack_decoder, buf) {
             Ok((amount, fin)) => {
-                if transaction.done() {
-                    self.base_handler.transactions.remove(&stream_id);
+                if recv_stream.done() {
+                    self.base_handler.recv_streams.remove(&stream_id);
                 }
                 Ok((amount, fin))
             }
@@ -386,8 +415,8 @@ impl Http3Client {
                     }
                 },
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    if let Some(t) = self.base_handler.transactions.get_mut(&stream_id) {
-                        if t.is_state_sending_data() {
+                    if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id) {
+                        if s.is_state_sending_data() {
                             self.events.data_writable(stream_id);
                         }
                     }
@@ -467,26 +496,33 @@ impl Http3Client {
             app_err
         );
 
-        if let Some(t) = self.base_handler.transactions.get_mut(&stop_stream_id) {
+        let mut found = false;
+        if let Some(s) = self.base_handler.send_streams.remove(&stop_stream_id) {
             // If error is Error::HttpNoError we will post StopSending event,
             // otherwise post reset.
-            if app_err == Error::HttpNoError.code() && !t.is_sending_closed() {
+            if app_err == Error::HttpNoError.code() && !s.is_sending_closed() {
                 self.events.stop_sending(stop_stream_id, app_err);
             }
-            // close sending side.
-            t.stop_sending();
-            // if error is not Error::HttpNoError we will close receiving part as well.
-            if app_err != Error::HttpNoError.code() {
+            found = true;
+        }
+
+        // if error is not Error::HttpNoError we will close receiving part as well.
+        if app_err != Error::HttpNoError.code() {
+            found |= self
+                .base_handler
+                .recv_streams
+                .remove(&stop_stream_id)
+                .is_some();
+            if found {
                 self.events.reset(stop_stream_id, app_err);
-                // The server may close its sending side as well, but just to be sure
-                // we will do it ourselves.
-                let _ = self.conn.stream_stop_sending(stop_stream_id, app_err);
-                t.reset_receiving_side();
             }
-            if t.done() {
-                self.base_handler.transactions.remove(&stop_stream_id);
-            }
-        } else if self.base_handler.is_critical_stream(stop_stream_id) {
+
+            // The server may close its sending side as well, but just to be sure
+            // we will do it ourselves.
+            let _ = self.conn.stream_stop_sending(stop_stream_id, app_err);
+        }
+
+        if !found && self.base_handler.is_critical_stream(stop_stream_id) {
             return Err(Error::HttpClosedCriticalStream);
         }
         Ok(())
@@ -515,20 +551,33 @@ impl Http3Client {
         }
 
         // Issue reset events for streams >= goaway stream id
-        for id in self.base_handler.transactions.iter().filter_map(|(id, _)| {
-            if *id >= goaway_stream_id {
-                Some(*id)
-            } else {
-                None
-            }
-        }) {
-            self.events.reset(id, Error::HttpRequestRejected.code())
+        for id in self
+            .base_handler
+            .send_streams
+            .iter()
+            .filter_map(id_gte(goaway_stream_id))
+        {
+            self.events.reset(id, Error::HttpRequestRejected.code());
         }
+
+        for id in self
+            .base_handler
+            .recv_streams
+            .iter()
+            .filter_map(id_gte(goaway_stream_id))
+        {
+            self.events.reset(id, Error::HttpRequestRejected.code());
+        }
+
         self.events.goaway_received();
 
         // Actually remove (i.e. don't retain) these streams
         self.base_handler
-            .transactions
+            .send_streams
+            .retain(|id, _| *id < goaway_stream_id);
+
+        self.base_handler
+            .recv_streams
             .retain(|id, _| *id < goaway_stream_id);
 
         Ok(())
@@ -1070,12 +1119,6 @@ mod tests {
     #[test]
     fn test_push_promise_frame_on_control_stream() {
         test_wrong_frame_on_control_stream(&[0x5, 0x2, 0x1, 0x2]);
-    }
-
-    // send DUPLICATE_PUSH frame on a cortrol stream
-    #[test]
-    fn test_duplicate_push_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(&[0xe, 0x2, 0x1, 0x2]);
     }
 
     // Client: receive unknown stream type
@@ -1667,7 +1710,7 @@ mod tests {
                     assert_eq!(error, Error::HttpNoError.code());
                     // assert that we cannot send any more request data.
                     assert_eq!(
-                        Err(Error::AlreadyClosed),
+                        Err(Error::InvalidStreamId),
                         client.send_request_body(request_stream_id, &[0_u8; 10])
                     );
                     stop_sending = true;
