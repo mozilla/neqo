@@ -10,11 +10,15 @@ use std::fmt::Debug;
 use std::fmt::Display;
 
 #[derive(Debug)]
-pub(crate) struct PushController {}
+pub(crate) struct PushController {
+    max_concurent_push_streams: u64,
+}
 
 impl PushController {
-    pub fn new() -> Self {
-        PushController {}
+    pub fn new(max_concurent_push_streams: u64) -> Self {
+        PushController {
+            max_concurent_push_streams,
+        }
     }
 }
 
@@ -29,9 +33,10 @@ impl PushController {
     pub fn new_push_promise(&self, push_id: u64, header_block: Vec<u8>) -> Res<()> {
         qtrace!(
             [self],
-            "New push promise push_id={} header_block={:?}",
+            "New push promise push_id={} header_block={:?} max_push={}",
             push_id,
-            header_block
+            header_block,
+            self.max_concurent_push_streams
         );
         qtrace!("A new push promise {} {:?}", push_id, header_block);
         Err(Error::HttpId)

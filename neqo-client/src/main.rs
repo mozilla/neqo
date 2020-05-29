@@ -105,6 +105,9 @@ pub struct Args {
     #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "10")]
     max_blocked_streams: u16,
 
+    #[structopt(name = "max-concurent-push", short = "p", long, default_value = "10")]
+    max_concurent_push_streams: u64,
+
     #[structopt(name = "use-old-http", short = "o", long)]
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
@@ -451,6 +454,7 @@ fn client(
             max_table_size_decoder: args.max_table_size_decoder,
             max_blocked_streams: args.max_blocked_streams,
         },
+        args.max_concurent_push_streams,
     );
 
     let qlog = qlog_new(args, hostname, client.conn())?;
