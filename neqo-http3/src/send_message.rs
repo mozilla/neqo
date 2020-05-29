@@ -29,10 +29,10 @@ pub(crate) trait SendMessageEvents: Debug {
  *  SendMessage states:
  *    Uninitialized
  *    Initialized : Headers are present but still not encoded. A message body may be present as well.
- *                  The lcient side send message body using the send_body() function that directly
+ *                  The client side sends a message body using the send_body() function that directly
  *                  writes into a transport stream. The server side sets headers and body when
  *                  initializing a send message (TODO: make server use send_body as well)
- *    SendingInitialMessage : sending headers and maybe meassage body. From here we may switch to
+ *    SendingInitialMessage : sending headers and maybe message body. From here we may switch to
  *                     SendingData or Closed (if the app does not want to send data and
  *                     has already closed the send stream).
  *    SendingData : We are sending request data until the app closes the stream.

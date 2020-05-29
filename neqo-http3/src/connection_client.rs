@@ -30,6 +30,7 @@ use std::time::Instant;
 
 use crate::{Error, Res};
 
+// This is used for filtering send_streams and recv_Streams with a stream_ids greater that a given id.
 fn id_gte<T, U>(base: T) -> impl FnMut((&T, &U)) -> Option<T> + 'static
 where
     T: PartialOrd + Copy + 'static,
