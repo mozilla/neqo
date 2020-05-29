@@ -8,7 +8,7 @@ use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::{HandleReadableOutput, Http3Connection, Http3State};
 use crate::hframe::HFrame;
 use crate::push_controller::PushController;
-use crate::recv_message::RecvMessage;
+use crate::recv_message::{RecvMessage, RecvMessageEvents};
 use crate::send_message::{SendMessage, SendMessageEvents};
 use crate::settings::HSettings;
 use crate::Header;
@@ -184,6 +184,8 @@ impl Http3Client {
         }
     }
 
+    // Request/respone API
+
     /// This is call to make a new http request. Each request can have headers and they are added when request
     /// is created. A response body may be added by calling `send_request_body`.
     /// # Errors
@@ -236,6 +238,7 @@ impl Http3Client {
     }
 
     /// An application may reset a stream(request).
+    /// Both sides, sending and receiving side, will be closed.
     /// # Errors
     /// An error will be return if a stream does not exist.
     pub fn stream_reset(&mut self, stream_id: u64, error: AppError) -> Res<()> {
@@ -306,6 +309,8 @@ impl Http3Client {
             }
         }
     }
+
+    // Events API
 
     /// Get all current events. Best used just in debug/testing code, use
     /// `next_event` instead.
@@ -423,9 +428,7 @@ impl Http3Client {
                 },
                 ConnectionEvent::SendStreamWritable { stream_id } => {
                     if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id.as_u64()) {
-                        if s.is_state_sending_data() {
-                            self.events.data_writable(stream_id.as_u64());
-                        }
+                        s.stream_writable();
                     }
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
@@ -434,20 +437,15 @@ impl Http3Client {
                 ConnectionEvent::RecvStreamReset {
                     stream_id,
                     app_error,
-                } => {
-                    if self.base_handler.handle_stream_reset(
-                        &mut self.conn,
-                        stream_id,
-                        app_error,
-                    )? {
-                        // Post the reset event.
-                        self.events.reset(stream_id, app_error);
-                    }
-                }
+                } => self
+                    .base_handler
+                    .handle_stream_reset(stream_id, app_error)?,
                 ConnectionEvent::SendStreamStopSending {
                     stream_id,
                     app_error,
-                } => self.handle_stream_stop_sending(stream_id, app_error)?,
+                } => self
+                    .base_handler
+                    .handle_stream_stop_sending(stream_id, app_error)?,
                 ConnectionEvent::SendStreamComplete { .. } => {}
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
                     self.events.new_requests_creatable(stream_type)
@@ -495,46 +493,6 @@ impl Http3Client {
         }
     }
 
-    fn handle_stream_stop_sending(&mut self, stop_stream_id: u64, app_err: AppError) -> Res<()> {
-        qinfo!(
-            [self],
-            "Handle stream_stop_sending stream_id={} app_err={}",
-            stop_stream_id,
-            app_err
-        );
-
-        let mut found = false;
-        if let Some(s) = self.base_handler.send_streams.remove(&stop_stream_id) {
-            // If error is Error::HttpNoError we will post StopSending event,
-            // otherwise post reset.
-            if app_err == Error::HttpNoError.code() && !s.is_sending_closed() {
-                self.events.stop_sending(stop_stream_id, app_err);
-            }
-            found = true;
-        }
-
-        // if error is not Error::HttpNoError we will close receiving part as well.
-        if app_err != Error::HttpNoError.code() {
-            found |= self
-                .base_handler
-                .recv_streams
-                .remove(&stop_stream_id)
-                .is_some();
-            if found {
-                self.events.reset(stop_stream_id, app_err);
-            }
-
-            // The server may close its sending side as well, but just to be sure
-            // we will do it ourselves.
-            let _ = self.conn.stream_stop_sending(stop_stream_id, app_err);
-        }
-
-        if !found && self.base_handler.is_critical_stream(stop_stream_id) {
-            return Err(Error::HttpClosedCriticalStream);
-        }
-        Ok(())
-    }
-
     fn handle_goaway(&mut self, goaway_stream_id: u64) -> Res<()> {
         qinfo!([self], "handle_goaway {}", goaway_stream_id);
 
@@ -573,7 +531,8 @@ impl Http3Client {
             .iter()
             .filter_map(id_gte(goaway_stream_id))
         {
-            self.events.reset(id, Error::HttpRequestRejected.code());
+            self.events
+                .stop_sending(id, Error::HttpRequestRejected.code());
         }
 
         self.events.goaway_received();
@@ -1861,10 +1820,13 @@ mod tests {
         client.process(out.dgram(), now());
 
         let mut reset = false;
+        let mut stop_sending = false;
         while let Some(e) = client.next_event() {
             match e {
-                Http3ClientEvent::StopSending { .. } => {
-                    panic!("We should not get StopSending.");
+                Http3ClientEvent::StopSending { stream_id, error } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    assert_eq!(error, Error::HttpRequestRejected.code());
+                    stop_sending = true;
                 }
                 Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
@@ -1879,6 +1841,7 @@ mod tests {
         }
 
         assert!(reset);
+        assert!(stop_sending);
 
         // after this stream will be removed from client. We will check this by trying to read
         // from the stream and that should fail.
@@ -1891,7 +1854,6 @@ mod tests {
     }
 
     // Server sends stop sending with RequestRejected, but it does not send reset.
-    // We will reset the stream anyway.
     #[test]
     fn test_stop_sending_other_error_wo_reset() {
         // Connect exchange headers and send a request. Also check if the correct header frame has been sent.
@@ -1908,17 +1870,17 @@ mod tests {
         let out = server.conn.process(None, now());
         client.process(out.dgram(), now());
 
-        let mut reset = false;
+        let mut stop_sending = false;
 
         while let Some(e) = client.next_event() {
             match e {
-                Http3ClientEvent::StopSending { .. } => {
-                    panic!("We should not get StopSending.");
-                }
-                Http3ClientEvent::Reset { stream_id, error } => {
+                Http3ClientEvent::StopSending { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::HttpRequestRejected.code());
-                    reset = true;
+                    stop_sending = true;
+                }
+                Http3ClientEvent::Reset { .. } => {
+                    panic!("We should not get StopSending.");
                 }
                 Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
                     panic!("We should not get any headers or data");
@@ -1927,14 +1889,12 @@ mod tests {
             }
         }
 
-        assert!(reset);
+        assert!(stop_sending);
 
-        // after this stream will be removed from client. We will check this by trying to read
-        // from the stream and that should fail.
+        // after this we can still read from a stream.
         let mut buf = [0_u8; 100];
         let res = client.read_response_data(now(), request_stream_id, &mut buf);
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
+        assert!(res.is_ok());
 
         client.close(now(), 0, "");
     }
@@ -1975,8 +1935,9 @@ mod tests {
 
         while let Some(e) = client.next_event() {
             match e {
-                Http3ClientEvent::StopSending { .. } => {
-                    panic!("We should not get StopSending.");
+                Http3ClientEvent::StopSending { stream_id, error } => {
+                    assert_eq!(stream_id, request_stream_id);
+                    assert_eq!(error, Error::HttpRequestCancelled.code());
                 }
                 Http3ClientEvent::Reset { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
@@ -2029,33 +1990,33 @@ mod tests {
         let out = server.conn.process(None, now());
         client.process(out.dgram(), now());
 
-        let mut reset = false;
+        let mut stop_sending = false;
+        let mut header_ready = false;
 
         while let Some(e) = client.next_event() {
             match e {
-                Http3ClientEvent::StopSending { .. } => {
-                    panic!("We should not get StopSending.");
-                }
-                Http3ClientEvent::Reset { stream_id, error } => {
+                Http3ClientEvent::StopSending { stream_id, error } => {
                     assert_eq!(stream_id, request_stream_id);
                     assert_eq!(error, Error::HttpRequestCancelled.code());
-                    reset = true;
+                    stop_sending = true;
+                }
+                Http3ClientEvent::Reset { .. } => {
+                    panic!("We should not get StopSending.");
                 }
                 Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
-                    panic!("We should not get any headers or data");
+                    header_ready = true;
                 }
                 _ => {}
             }
         }
 
-        assert!(reset);
+        assert!(stop_sending);
+        assert!(header_ready);
 
-        // after this stream will be removed from client. We will check this by trying to read
-        // from the stream and that should fail.
+        // after this, we can sill read data from a sttream.
         let mut buf = [0_u8; 100];
         let res = client.read_response_data(now(), request_stream_id, &mut buf);
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
+        assert!(res.is_ok());
 
         client.close(now(), 0, "");
     }
