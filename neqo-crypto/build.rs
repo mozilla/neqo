@@ -94,7 +94,7 @@ fn nss_dir() -> PathBuf {
                 .args(&[
                     "clone",
                     "-u",
-                    "c7a1c91cd9be",
+                    "NSS_3_53_RTM",
                     "https://hg.mozilla.org/projects/nss",
                     dir.to_str().unwrap(),
                 ])
