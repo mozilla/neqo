@@ -10,7 +10,7 @@
 use qlog::QlogStreamer;
 
 use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
-use neqo_crypto::{init, AuthenticationStatus};
+use neqo_crypto::{init, AuthenticationStatus, Cipher, TLS_CHACHA20_POLY1305_SHA256};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_qpack::QpackSettings;
 use neqo_transport::FixedConnectionIdManager;
@@ -76,13 +76,23 @@ pub struct Args {
     #[structopt(short = "h", long, number_of_values = 2)]
     header: Vec<String>,
 
-    #[structopt(name = "encoder-table-size", short = "e", long, default_value = "128")]
+    #[structopt(
+        name = "encoder-table-size",
+        short = "e",
+        long,
+        default_value = "16384"
+    )]
     max_table_size_encoder: u64,
 
-    #[structopt(name = "decoder-table-size", short = "d", long, default_value = "128")]
+    #[structopt(
+        name = "decoder-table-size",
+        short = "f",
+        long,
+        default_value = "16384"
+    )]
     max_table_size_decoder: u64,
 
-    #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "128")]
+    #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "10")]
     max_blocked_streams: u16,
 
     #[structopt(name = "use-old-http", short = "o", long)]
@@ -108,6 +118,11 @@ pub struct Args {
     #[structopt(name = "qns-mode", long)]
     /// Enable special behavior for use with QUIC Network Simulator
     qns_mode: bool,
+
+    #[structopt(short = "r", long)]
+    /// Client attemps to resume connections when there are multiple connections made.
+    /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
+    resume: bool,
 }
 
 trait Handler {
@@ -428,15 +443,32 @@ fn main() -> Res<()> {
 
     let mut args = Args::from_args();
 
+    let mut resumption_test = false;
+
+    let mut ciphers: Option<&[Cipher]> = None;
+
     if args.qns_mode {
         match env::var("TESTCASE") {
             Ok(s) if s == "http3" => {}
-            Ok(s) if s == "handshake" || s == "transfer" => {
+            Ok(s) if s == "handshake" || s == "transfer" || s == "retry" => {
                 args.use_old_http = true;
+            }
+            Ok(s) if s == "zerortt" || s == "resumption" => {
+                if args.urls.len() < 2 {
+                    eprintln!("Warning: resumption tests won't work without >1 URL");
+                    exit(127)
+                }
+                args.use_old_http = true;
+                args.resume = true;
+                resumption_test = true;
             }
             Ok(s) if s == "multiconnect" => {
                 args.use_old_http = true;
                 args.download_in_series = true;
+            }
+            Ok(s) if s == "chacha20" => {
+                args.use_old_http = true;
+                ciphers = Some(&[TLS_CHACHA20_POLY1305_SHA256]);
             }
             Ok(_) => exit(127),
             Err(_) => exit(1),
@@ -449,7 +481,8 @@ fn main() -> Res<()> {
         entry.push(url.clone());
     }
 
-    for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
+    for ((_scheme, host, port), mut urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k
+    {
         Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
         Origin::Opaque(x) => {
             eprintln!("Opaque origin {:?}", x);
@@ -492,6 +525,30 @@ fn main() -> Res<()> {
                 &urls,
             )?;
         } else if !args.download_in_series {
+            let token = if resumption_test {
+                // Download first URL using a separate connection, save the token and use it for
+                // the remaining URLs
+                if urls.len() < 2 {
+                    eprintln!("Warning: resumption tests won't work without >1 URL");
+                    exit(127)
+                }
+
+                let first_url = urls.remove(0);
+
+                old::old_client(
+                    &args,
+                    &socket,
+                    local_addr,
+                    remote_addr,
+                    &format!("{}", host),
+                    &[first_url],
+                    None,
+                    ciphers,
+                )?
+            } else {
+                None
+            };
+
             old::old_client(
                 &args,
                 &socket,
@@ -499,16 +556,22 @@ fn main() -> Res<()> {
                 remote_addr,
                 &format!("{}", host),
                 &urls,
+                token,
+                ciphers,
             )?;
         } else {
+            let mut token: Option<Vec<u8>> = None;
+
             for url in urls {
-                old::old_client(
+                token = old::old_client(
                     &args,
                     &socket,
                     local_addr,
                     remote_addr,
                     &format!("{}", host),
                     &[url],
+                    token,
+                    ciphers,
                 )?;
             }
         }
@@ -532,7 +595,7 @@ mod old {
     use super::{qlog_new, Res};
 
     use neqo_common::{matches, Datagram};
-    use neqo_crypto::AuthenticationStatus;
+    use neqo_crypto::{AuthenticationStatus, Cipher};
     use neqo_transport::{
         Connection, ConnectionEvent, FixedConnectionIdManager, Output, State, StreamType,
     };
@@ -683,6 +746,7 @@ mod old {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn old_client(
         args: &Args,
         socket: &UdpSocket,
@@ -690,7 +754,9 @@ mod old {
         remote_addr: SocketAddr,
         origin: &str,
         urls: &[Url],
-    ) -> Res<()> {
+        token: Option<Vec<u8>>,
+        ciphers: Option<&[Cipher]>,
+    ) -> Res<Option<Vec<u8>>> {
         let mut open_paths = Vec::new();
 
         let mut client = Connection::new_client(
@@ -701,6 +767,17 @@ mod old {
             remote_addr,
         )
         .expect("must succeed");
+
+        if let Some(tok) = token {
+            client
+                .set_resumption_token(Instant::now(), &tok)
+                .expect("should set token");
+        }
+
+        if let Some(cip) = ciphers {
+            client.enable_ciphers(cip).expect("Cannot enable ciphers");
+        }
+
         client.set_qlog(qlog_new(args, origin)?);
         // Temporary here to help out the type inference engine
         let mut h = PreConnectHandlerOld {};
@@ -735,6 +812,10 @@ mod old {
             &args,
         )?;
 
-        Ok(())
+        Ok(if args.resume {
+            client.resumption_token()
+        } else {
+            None
+        })
     }
 }

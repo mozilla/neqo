@@ -29,6 +29,9 @@ pub const MAX_ACK_DELAY: Duration = Duration::from_millis(25);
 // caching. See https://github.com/mozilla/neqo/issues/79
 const INITIAL_RTT: Duration = Duration::from_millis(100);
 const PACKET_THRESHOLD: u64 = 3;
+/// `ACK_ONLY_SIZE_LIMIT` is the minimum size of the congestion window.
+/// If the congestion window is this small, we will only send ACK frames.
+pub(crate) const ACK_ONLY_SIZE_LIMIT: usize = 256;
 /// The number of packets we send on a PTO.
 /// And the number to declare lost when the PTO timer is hit.
 pub const PTO_PACKET_COUNT: usize = 2;
@@ -97,13 +100,78 @@ impl RttVals {
     }
 }
 
+/// `SendProfile` tells a sender how to send packets.
+#[derive(Debug)]
+pub struct SendProfile {
+    limit: usize,
+    pto: Option<PNSpace>,
+    paced: bool,
+}
+
+impl SendProfile {
+    pub fn new_limited(limit: usize) -> Self {
+        // When the limit is too low, we only send ACK frames.
+        // Set the limit to `ACK_ONLY_SIZE_LIMIT - 1` to ensure that
+        // ACK-only packets are still limited in size.
+        Self {
+            limit: max(ACK_ONLY_SIZE_LIMIT - 1, limit),
+            pto: None,
+            paced: false,
+        }
+    }
+
+    pub fn new_paced() -> Self {
+        // When pacing, we still allow ACK frames to be sent.
+        Self {
+            limit: ACK_ONLY_SIZE_LIMIT - 1,
+            pto: None,
+            paced: true,
+        }
+    }
+
+    pub fn new_pto(pn_space: PNSpace, mtu: usize) -> Self {
+        debug_assert!(mtu > ACK_ONLY_SIZE_LIMIT);
+        Self {
+            limit: mtu,
+            pto: Some(pn_space),
+            paced: false,
+        }
+    }
+
+    pub fn pto(&self) -> bool {
+        self.pto.is_some()
+    }
+
+    /// Determine whether an ACK-only packet should be sent for the given packet
+    /// number space.
+    /// Send only ACKs either: when the space available is too small, or when a PTO
+    /// exists for a later packet number space (which could use extra space for data).
+    pub fn ack_only(&self, space: PNSpace) -> bool {
+        self.limit < ACK_ONLY_SIZE_LIMIT || self.pto.map_or(false, |sp| space < sp)
+    }
+
+    pub fn paced(&self) -> bool {
+        self.paced
+    }
+
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct LossRecoverySpace {
     space: PNSpace,
     largest_acked: Option<u64>,
     largest_acked_sent_time: Option<Instant>,
-    time_of_last_sent_ack_eliciting_packet: Option<Instant>,
-    ack_eliciting_outstanding: u64,
+    /// The time used to calculate the PTO timer for this space.
+    /// This is the time that the last ACK-eliciting packet in this space
+    /// was sent.  This might be the time that a probe was sent.
+    pto_base_time: Option<Instant>,
+    /// The number of outstanding packets in this space that are in flight.
+    /// This might be less than the number of ACK-eliciting packets,
+    /// because PTO packets don't count.
+    in_flight_outstanding: u64,
     sent_packets: BTreeMap<u64, SentPacket>,
     /// The time that the first out-of-order packet was sent.
     /// This is `None` if there were no out-of-order packets detected.
@@ -117,8 +185,8 @@ impl LossRecoverySpace {
             space,
             largest_acked: None,
             largest_acked_sent_time: None,
-            time_of_last_sent_ack_eliciting_packet: None,
-            ack_eliciting_outstanding: 0,
+            pto_base_time: None,
+            in_flight_outstanding: 0,
             sent_packets: BTreeMap::default(),
             first_ooo_time: None,
         }
@@ -137,8 +205,8 @@ impl LossRecoverySpace {
         self.first_ooo_time
     }
 
-    pub fn ack_eliciting_outstanding(&self) -> bool {
-        self.ack_eliciting_outstanding > 0
+    pub fn in_flight_outstanding(&self) -> bool {
+        self.in_flight_outstanding > 0
     }
 
     pub fn pto_packets(&mut self, count: usize) -> impl Iterator<Item = &SentPacket> {
@@ -155,28 +223,30 @@ impl LossRecoverySpace {
             .take(count)
     }
 
-    pub fn time_of_last_sent_ack_eliciting_packet(&self) -> Option<Instant> {
-        if self.ack_eliciting_outstanding() {
-            debug_assert!(self.time_of_last_sent_ack_eliciting_packet.is_some());
-            self.time_of_last_sent_ack_eliciting_packet
+    pub fn pto_base_time(&self) -> Option<Instant> {
+        if self.in_flight_outstanding() {
+            debug_assert!(self.pto_base_time.is_some());
+            self.pto_base_time
         } else {
             None
         }
     }
 
     pub fn on_packet_sent(&mut self, packet_number: u64, sent_packet: SentPacket) {
-        if sent_packet.ack_eliciting {
-            self.time_of_last_sent_ack_eliciting_packet = Some(sent_packet.time_sent);
-            self.ack_eliciting_outstanding += 1;
+        if sent_packet.ack_eliciting() {
+            self.pto_base_time = Some(sent_packet.time_sent);
+            if sent_packet.cc_in_flight() {
+                self.in_flight_outstanding += 1;
+            }
         }
         self.sent_packets.insert(packet_number, sent_packet);
     }
 
     pub fn remove_packet(&mut self, pn: u64) -> Option<SentPacket> {
         if let Some(sent) = self.sent_packets.remove(&pn) {
-            if sent.ack_eliciting {
-                debug_assert!(self.ack_eliciting_outstanding > 0);
-                self.ack_eliciting_outstanding -= 1;
+            if sent.cc_in_flight() {
+                debug_assert!(self.in_flight_outstanding > 0);
+                self.in_flight_outstanding -= 1;
             }
             Some(sent)
         } else {
@@ -194,7 +264,7 @@ impl LossRecoverySpace {
             for pn in start..=end {
                 if let Some(sent) = self.remove_packet(pn) {
                     qdebug!("acked={}", pn);
-                    eliciting |= sent.ack_eliciting;
+                    eliciting |= sent.ack_eliciting();
                     acked_packets.insert(pn, sent);
                 }
             }
@@ -209,7 +279,7 @@ impl LossRecoverySpace {
     /// This is called by a client when 0-RTT packets are dropped, when a Retry is received
     /// and when keys are dropped.
     fn remove_ignored(&mut self) -> impl Iterator<Item = SentPacket> {
-        self.ack_eliciting_outstanding = 0;
+        self.in_flight_outstanding = 0;
         std::mem::take(&mut self.sent_packets)
             .into_iter()
             .map(|(_, v)| v)
@@ -366,14 +436,14 @@ impl PtoState {
         self.packets = PTO_PACKET_COUNT;
     }
 
-    /// Take a packet, indicating what space it should be from.
-    /// Returns `None` if there are no packets left.
-    pub fn take_packet(&mut self) -> Option<PNSpace> {
+    /// Generate a sending profile, indicating what space it should be from.
+    /// This takes a packet from the supply or returns an ack-only profile if it can't.
+    pub fn send_profile(&mut self, mtu: usize) -> SendProfile {
         if self.packets > 0 {
             self.packets -= 1;
-            Some(self.space)
+            SendProfile::new_pto(self.space, mtu)
         } else {
-            None
+            SendProfile::new_limited(0)
         }
     }
 }
@@ -455,8 +525,9 @@ impl LossRecovery {
 
     pub fn on_packet_sent(&mut self, pn_space: PNSpace, pn: u64, sent_packet: SentPacket) {
         qdebug!([self], "packet {}-{} sent", pn_space, pn);
+        let rtt = self.rtt();
         if let Some(space) = self.spaces.get_mut(pn_space) {
-            self.cc.on_packet_sent(&sent_packet);
+            self.cc.on_packet_sent(&sent_packet, rtt);
             space.on_packet_sent(pn, sent_packet);
         } else {
             qinfo!([self], "ignoring {}-{} from dropped space", pn_space, pn);
@@ -595,7 +666,7 @@ impl LossRecovery {
     // Calculate PTO time for the given space.
     fn pto_time(&self, pn_space: PNSpace) -> Option<Instant> {
         if let Some(space) = self.spaces.get(pn_space) {
-            space.time_of_last_sent_ack_eliciting_packet().map(|t| {
+            space.pto_base_time().map(|t| {
                 t + self
                     .rtt_vals
                     .pto(pn_space)
@@ -671,12 +742,35 @@ impl LossRecovery {
         lost_packets
     }
 
-    pub fn pto_active(&self) -> bool {
-        self.pto_state.is_some()
+    /// Start the packet pacer.
+    pub fn start_pacer(&mut self, now: Instant) {
+        self.cc.start_pacer(now);
     }
 
-    pub fn take_pto_packet(&mut self) -> Option<PNSpace> {
-        self.pto_state.as_mut().unwrap().take_packet()
+    /// Get the next time that a paced packet might be sent.
+    pub fn next_paced(&self) -> Option<Instant> {
+        self.cc.next_paced(self.rtt())
+    }
+
+    /// Check how packets should be sent, based on whether there is a PTO,
+    /// what the current congestion window is, and what the pacer says.
+    pub fn send_profile(&mut self, now: Instant, mtu: usize) -> SendProfile {
+        qdebug!([self], "get send profile {:?}", now);
+        if let Some(pto) = self.pto_state.as_mut() {
+            pto.send_profile(mtu)
+        } else {
+            let cwnd = self.cwnd_avail();
+            if cwnd > mtu {
+                // More than an MTU available; we might need to pace.
+                if self.next_paced().map_or(false, |t| t > now) {
+                    SendProfile::new_paced()
+                } else {
+                    SendProfile::new_limited(mtu)
+                }
+            } else {
+                SendProfile::new_limited(cwnd)
+            }
+        }
     }
 }
 
@@ -691,6 +785,7 @@ mod tests {
     use super::{LossRecovery, LossRecoverySpace, PNSpace, SentPacket};
     use std::convert::TryInto;
     use std::time::{Duration, Instant};
+    use test_fixture::now;
 
     const ON_SENT_SIZE: usize = 100;
 
@@ -759,7 +854,7 @@ mod tests {
     // In most of the tests below, packets are sent at a fixed cadence, with PACING between each.
     const PACING: Duration = ms!(7);
     fn pn_time(pn: u64) -> Instant {
-        ::test_fixture::now() + (PACING * pn.try_into().unwrap())
+        now() + (PACING * pn.try_into().unwrap())
     }
 
     fn pace(lr: &mut LossRecovery, count: u64) {
@@ -787,6 +882,7 @@ mod tests {
     #[test]
     fn initial_rtt() {
         let mut lr = LossRecovery::new();
+        lr.start_pacer(now());
         pace(&mut lr, 1);
         let rtt = ms!(100);
         ack(&mut lr, 0, rtt);
@@ -801,6 +897,7 @@ mod tests {
     /// Send `n` packets (using PACING), then acknowledge the first.
     fn setup_lr(n: u64) -> LossRecovery {
         let mut lr = LossRecovery::new();
+        lr.start_pacer(now());
         pace(&mut lr, n);
         ack(&mut lr, 0, INITIAL_RTT);
         assert_rtts(&lr, INITIAL_RTT, INITIAL_RTT, INITIAL_RTTVAR, INITIAL_RTT);
@@ -877,6 +974,7 @@ mod tests {
     #[test]
     fn time_loss_detection_gap() {
         let mut lr = LossRecovery::new();
+        lr.start_pacer(now());
         // Create a single packet gap, and have pn 0 time out.
         // This can't use the default pacing, which is too tight.
         // So send two packets with 1/4 RTT between them.  Acknowledge pn 1 after 1 RTT.
@@ -977,6 +1075,7 @@ mod tests {
     #[should_panic(expected = "ACK on discarded space")]
     fn ack_after_drop() {
         let mut lr = LossRecovery::new();
+        lr.start_pacer(now());
         lr.discard(PNSpace::Initial);
         lr.on_ack_received(
             PNSpace::Initial,
@@ -990,6 +1089,7 @@ mod tests {
     #[test]
     fn drop_spaces() {
         let mut lr = LossRecovery::new();
+        lr.start_pacer(now());
         lr.on_packet_sent(
             PNSpace::Initial,
             0,

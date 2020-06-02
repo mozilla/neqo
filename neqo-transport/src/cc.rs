@@ -10,6 +10,7 @@ use std::cmp::max;
 use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
+use crate::pace::Pacer;
 use crate::path::PATH_MTU_V6;
 use crate::tracking::SentPacket;
 use neqo_common::{const_max, const_min, qdebug, qinfo, qtrace};
@@ -21,6 +22,8 @@ const INITIAL_WINDOW: usize = const_min(
     const_max(2 * MAX_DATAGRAM_SIZE, 14720),
 );
 pub const MIN_CONG_WINDOW: usize = MAX_DATAGRAM_SIZE * 2;
+/// The number of packets we allow to burst from the pacer.
+pub(crate) const PACING_BURST_SIZE: usize = 2;
 const PERSISTENT_CONG_THRESH: u32 = 3;
 
 #[derive(Debug)]
@@ -29,6 +32,7 @@ pub struct CongestionControl {
     bytes_in_flight: usize,
     congestion_recovery_start_time: Option<Instant>,
     ssthresh: usize,
+    pacer: Option<Pacer>,
 }
 
 impl Default for CongestionControl {
@@ -38,6 +42,7 @@ impl Default for CongestionControl {
             bytes_in_flight: 0,
             congestion_recovery_start_time: None,
             ssthresh: std::usize::MAX,
+            pacer: None,
         }
     }
 }
@@ -47,8 +52,12 @@ impl Display for CongestionControl {
         write!(
             f,
             "CongCtrl {}/{} ssthresh {}",
-            self.bytes_in_flight, self.congestion_window, self.ssthresh
-        )
+            self.bytes_in_flight, self.congestion_window, self.ssthresh,
+        )?;
+        if let Some(p) = &self.pacer {
+            write!(f, " {}", p)?;
+        }
+        Ok(())
     }
 }
 
@@ -100,7 +109,7 @@ impl CongestionControl {
     pub fn on_packets_lost(
         &mut self,
         now: Instant,
-        largest_acked_sent: Option<Instant>,
+        prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
         lost_packets: &[SentPacket],
     ) {
@@ -118,21 +127,17 @@ impl CongestionControl {
         let last_lost_pkt = lost_packets.last().unwrap();
         self.on_congestion_event(now, last_lost_pkt.time_sent);
 
-        let in_persistent_congestion = {
-            let congestion_period = pto * PERSISTENT_CONG_THRESH;
+        let congestion_period = pto * PERSISTENT_CONG_THRESH;
 
-            match largest_acked_sent {
-                Some(las) => las < last_lost_pkt.time_sent - congestion_period,
-                None => {
-                    // Nothing has ever been acked. Could still be PC.
-                    let first_lost_pkt_sent = lost_packets.first().unwrap().time_sent;
-                    last_lost_pkt.time_sent - first_lost_pkt_sent > congestion_period
-                }
+        // Simpler to ignore any acked pkts in between first and last lost pkts
+        if let Some(first) = lost_packets
+            .iter()
+            .find(|p| Some(p.time_sent) > prev_largest_acked_sent)
+        {
+            if last_lost_pkt.time_sent.duration_since(first.time_sent) > congestion_period {
+                self.congestion_window = MIN_CONG_WINDOW;
+                qinfo!([self], "persistent congestion");
             }
-        };
-        if in_persistent_congestion {
-            qinfo!([self], "persistent congestion");
-            self.congestion_window = MIN_CONG_WINDOW;
         }
     }
 
@@ -144,7 +149,12 @@ impl CongestionControl {
         }
     }
 
-    pub fn on_packet_sent(&mut self, pkt: &SentPacket) {
+    pub fn on_packet_sent(&mut self, pkt: &SentPacket, rtt: Duration) {
+        self.pacer
+            .as_mut()
+            .unwrap()
+            .spend(pkt.time_sent, rtt, self.congestion_window, pkt.size);
+
         if !pkt.cc_in_flight() {
             return;
         }
@@ -189,5 +199,28 @@ impl CongestionControl {
     fn app_limited(&self) -> bool {
         //TODO(agrover): how do we get this info??
         false
+    }
+
+    pub fn start_pacer(&mut self, now: Instant) {
+        // Start the pacer with a small burst size.
+        self.pacer = Some(Pacer::new(
+            now,
+            MAX_DATAGRAM_SIZE * PACING_BURST_SIZE,
+            MAX_DATAGRAM_SIZE,
+        ));
+    }
+
+    pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {
+        // Only pace if there are bytes in flight.
+        if self.bytes_in_flight > 0 {
+            Some(
+                self.pacer
+                    .as_ref()
+                    .unwrap()
+                    .next(rtt, self.congestion_window),
+            )
+        } else {
+            None
+        }
     }
 }

@@ -15,7 +15,6 @@ use qlog::{
 };
 
 use crate::Role;
-
 #[allow(clippy::module_name_repetitions)]
 pub struct NeqoQlog {
     qlog_path: PathBuf,
@@ -49,7 +48,7 @@ impl fmt::Debug for NeqoQlog {
 impl Drop for NeqoQlog {
     fn drop(&mut self) {
         if let Err(e) = self.streamer.finish_log() {
-            ::log::log!(::log::Level::Error, "Error dropping NeqoQlog: {}", e)
+            crate::do_log!(::log::Level::Error, "Error dropping NeqoQlog: {}", e)
         }
     }
 }

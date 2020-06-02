@@ -17,6 +17,7 @@ mod dump;
 mod events;
 mod flow_mgr;
 mod frame;
+mod pace;
 mod packet;
 mod path;
 mod qlog;

@@ -48,7 +48,7 @@ impl Crypto {
         agent.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
         agent.enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])?;
         agent.set_alpn(protocols)?;
-        agent.disable_end_of_early_data();
+        agent.disable_end_of_early_data()?;
         match &mut agent {
             Agent::Client(c) => c.enable_0rtt()?,
             Agent::Server(s) => s.enable_0rtt(

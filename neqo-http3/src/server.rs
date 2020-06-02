@@ -17,12 +17,15 @@ use neqo_qpack::QpackSettings;
 use neqo_transport::server::{ActiveConnectionRef, Server};
 use neqo_transport::{ConnectionIdManager, Output};
 use std::cell::RefCell;
+use std::cell::RefMut;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Instant;
 
 type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
+
+const MAX_EVENT_DATA_SIZE: usize = 1024;
 
 pub struct Http3Server {
     server: Server,
@@ -111,31 +114,35 @@ impl Http3Server {
                 .borrow_mut()
                 .process_http3(&mut conn.borrow_mut(), now);
             let mut remove = false;
-            while let Some(e) = handler.borrow_mut().next_event() {
-                match e {
-                    Http3ServerConnEvent::Headers {
-                        stream_id,
-                        headers,
-                        fin,
-                    } => self.events.headers(
-                        ClientRequestStream::new(conn.clone(), handler.clone(), stream_id),
-                        headers,
-                        fin,
-                    ),
-                    Http3ServerConnEvent::Data {
-                        stream_id,
-                        data,
-                        fin,
-                    } => self.events.data(
-                        ClientRequestStream::new(conn.clone(), handler.clone(), stream_id),
-                        data,
-                        fin,
-                    ),
-                    Http3ServerConnEvent::StateChange(state) => {
-                        self.events
-                            .connection_state_change(conn.clone(), state.clone());
-                        if let Http3State::Closed { .. } = state {
-                            remove = true;
+            {
+                let mut handler_borrowed = handler.borrow_mut();
+                while let Some(e) = handler_borrowed.next_event() {
+                    match e {
+                        Http3ServerConnEvent::Headers {
+                            stream_id,
+                            headers,
+                            fin,
+                        } => self.events.headers(
+                            ClientRequestStream::new(conn.clone(), handler.clone(), stream_id),
+                            headers,
+                            fin,
+                        ),
+                        Http3ServerConnEvent::DataReadable { stream_id } => {
+                            prepare_data(
+                                stream_id,
+                                &mut handler_borrowed,
+                                &mut conn,
+                                &handler,
+                                now,
+                                &mut self.events,
+                            );
+                        }
+                        Http3ServerConnEvent::StateChange(state) => {
+                            self.events
+                                .connection_state_change(conn.clone(), state.clone());
+                            if let Http3State::Closed { .. } = state {
+                                remove = true;
+                            }
                         }
                     }
                 }
@@ -163,6 +170,39 @@ impl Http3Server {
     /// previously-queued events, or cause new events to be generated.
     pub fn next_event(&mut self) -> Option<Http3ServerEvent> {
         self.events.next_event()
+    }
+}
+fn prepare_data(
+    stream_id: u64,
+    handler_borrowed: &mut RefMut<Http3ServerHandler>,
+    conn: &mut ActiveConnectionRef,
+    handler: &HandlerRef,
+    now: Instant,
+    events: &mut Http3ServerEvents,
+) {
+    loop {
+        let mut data = vec![0; MAX_EVENT_DATA_SIZE];
+        let res =
+            handler_borrowed.read_request_data(&mut conn.borrow_mut(), now, stream_id, &mut data);
+        if let Ok((amount, fin)) = res {
+            if amount > 0 {
+                if amount < MAX_EVENT_DATA_SIZE {
+                    data.resize(amount, 0);
+                }
+                events.data(
+                    ClientRequestStream::new(conn.clone(), handler.clone(), stream_id),
+                    data,
+                    fin,
+                );
+            }
+            if amount < MAX_EVENT_DATA_SIZE || fin {
+                break;
+            }
+        } else {
+            // Any error will closed the handler, just ignore this event, the next event must
+            // be a state change event.
+            break;
+        }
     }
 }
 
@@ -450,12 +490,6 @@ mod tests {
         test_wrong_frame_on_control_stream(&[0x5, 0x2, 0x1, 0x2]);
     }
 
-    // send DUPLICATE_PUSH frame on a cortrol stream
-    #[test]
-    fn test_server_duplicate_push_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(&[0xe, 0x2, 0x1, 0x2]);
-    }
-
     // Server: receive unkonwn stream type
     // also test getting stream id that does not fit into a single byte.
     #[test]
@@ -613,6 +647,7 @@ mod tests {
         0x0, 0x3, 0x61, 0x62, 0x63, // the second data frame.
         0x0, 0x3, 0x64, 0x65, 0x66,
     ];
+    const REQUEST_BODY: &[u8] = &[0x61, 0x62, 0x63, 0x64, 0x65, 0x66];
 
     const RESPONSE_BODY: &[u8] = &[0x67, 0x68, 0x69];
 
@@ -659,11 +694,11 @@ mod tests {
 
         // Check connection event. There should be 1 Header and 2 data events.
         let mut headers_frames = 0;
-        let mut data_frames = 0;
+        let mut data_received = 0;
         while let Some(event) = hconn.next_event() {
             match event {
                 Http3ServerEvent::Headers { headers, fin, .. } => {
-                    check_request_header(&headers);
+                    check_request_header(&headers.unwrap());
                     assert_eq!(fin, false);
                     headers_frames += 1;
                 }
@@ -672,28 +707,24 @@ mod tests {
                     data,
                     fin,
                 } => {
-                    if data_frames == 0 {
-                        assert_eq!(data, &REQUEST_WITH_BODY[20..23]);
-                    } else {
-                        assert_eq!(data, &REQUEST_WITH_BODY[25..]);
-                        assert_eq!(fin, true);
-                        request
-                            .set_response(
-                                &[
-                                    (String::from(":status"), String::from("200")),
-                                    (String::from("content-length"), String::from("3")),
-                                ],
-                                RESPONSE_BODY,
-                            )
-                            .unwrap();
-                    }
-                    data_frames += 1;
+                    assert_eq!(data, REQUEST_BODY);
+                    assert_eq!(fin, true);
+                    request
+                        .set_response(
+                            &[
+                                (String::from(":status"), String::from("200")),
+                                (String::from("content-length"), String::from("3")),
+                            ],
+                            RESPONSE_BODY,
+                        )
+                        .unwrap();
+                    data_received += 1;
                 }
                 _ => {}
             }
         }
         assert_eq!(headers_frames, 1);
-        assert_eq!(data_frames, 2);
+        assert_eq!(data_received, 1);
     }
 
     #[test]
@@ -719,7 +750,7 @@ mod tests {
                     headers,
                     fin,
                 } => {
-                    check_request_header(&headers);
+                    check_request_header(&headers.unwrap());
                     assert_eq!(fin, false);
                     headers_frames += 1;
                     request
@@ -791,7 +822,7 @@ mod tests {
                     headers,
                     fin,
                 } => {
-                    check_request_header(&headers);
+                    check_request_header(&headers.unwrap());
                     assert_eq!(fin, false);
                     headers_frames += 1;
                     request
