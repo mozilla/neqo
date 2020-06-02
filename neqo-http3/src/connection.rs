@@ -503,7 +503,8 @@ impl Http3Connection {
         self.recv_streams.clear();
     }
 
-    /// This is called when an application resets a stream. The application reset will close both sides.
+    /// This is called when an application resets a stream.
+    /// The application reset will close both sides.
     pub fn stream_reset(
         &mut self,
         conn: &mut Connection,

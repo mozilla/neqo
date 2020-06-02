@@ -18,6 +18,14 @@ use std::fmt::Display;
 use std::mem;
 use std::rc::Rc;
 
+/// `PushStates`:
+///   `Init`: there is no push stream nor a push promise. This state is only used to keep track of opened and closed
+///           push streams.
+///   `PushPromise`: the push has only ever receive a pushpromise frame
+///   `OnlyPushStream`: there is only a push stream. All push stream events, i.e. `PushHeaderReady` and
+///                     `PushDataReadable` will be delayed until a push promise is received (they are kept in
+///                     `events`).
+///   `Active`: there is a push steam and at least one push promise frame.
 #[derive(Debug, PartialEq)]
 enum PushState {
     Init,
@@ -34,35 +42,26 @@ enum PushState {
     },
 }
 
-// PushController keeps information about push stream states.
-//
-// PushStates:
-//   Init: there is no push stream nor a push_promise. This state is only used to keep track of opened and closed
-//         push streams.
-//   PushPromise: the push has only ever receive a push_promise frame
-//   OnlyPushStream: there is only a push stream. All push stream events, i.e. PushHeaderReady and PushDataReadable
-//                   will be delayed until a push_promise is received (they are kept in `events`).
-//   Active: there is a push steam and at least one push_promise frame.
-//
-// push_ids smaller than next_push_id_to_open are all in one of the above state or they are closed. The closed pushes
-// are removed from push_streams. push_ids >= next_push_id_to_open have not been opened yet.
-//
-// A PushStream calls `add_new_push_stream` that may change the push state from Init to OnlyPushStream or from
-// PushPromise to Active. If a stream has already been closed `add_new_push_stream` returns false (the PushStream
-// will close the transport stream).
-// A PushStream calls `push_stream_reset` if the transport stream has been canceled.
-// When a push stream is done it calls `close`.
-//
-// The PushController handles:
-//  PUSH_PROMISE frame: frames may change the push state from Init to PushPromise and from OnlyPushStream to
-//                      Active. Frames for a closed steam is ignored.
-//  CANCEL_PUSH frame: (`handle_cancel_push` will be called). If a push is in state PushPromise or Active, any
-//                     posted events will be removed and a push_canceled event will be posted. If a push is in
-//                     state `OnlyPushStream` or `Active` the transport stream and the `PushStream` will be closed.
-//                     The frame will be ignored for already closed pushes.
-//  Application calling cancel: the actions are similar to the CANCEL_PUSH frame. The difference is that
-//                              `push_canceled` will not be posted and a CANCEL_PUSH frame may be sent.
-
+/// `PushController` keeps information about push stream states.
+///
+/// `push_ids` smaller than `next_push_id_to_open` are all in one of the above state or they are closed. The closed
+/// pushes are removed from `push_streams`. `push_ids` >= `next_push_id_to_open` have not been opened yet.
+///
+/// A `PushStream` calls `add_new_push_stream` that may change the push state from Init to `OnlyPushStream` or from
+/// `PushPromise` to `Active`. If a stream has already been closed `add_new_push_stream` returns false (the `PushStream`
+/// will close the transport stream).
+/// A `PushStream` calls `push_stream_reset` if the transport stream has been canceled.
+/// When a push stream is done it calls `close`.
+///
+/// The `PushController` handles:
+///  `PUSH_PROMISE` frame: frames may change the push state from Init to `PushPromise` and from `OnlyPushStream` to
+///                        `Active`. Frames for a closed steam is ignored.
+///  `CANCEL_PUSH` frame: (`handle_cancel_push` will be called). If a push is in state `PushPromise` or `Active`, any
+///                       posted events will be removed and a `PushCanceled` event will be posted. If a push is in
+///                       state `OnlyPushStream` or `Active` the transport stream and the `PushStream` will be closed.
+///                       The frame will be ignored for already closed pushes.
+///  Application calling cancel: the actions are similar to the `CANCEL_PUSH` frame. The difference is that
+///                              `PushCanceled` will not be posted and a `CANCEL_PUSH` frame may be sent.
 #[derive(Debug)]
 pub(crate) struct PushController {
     max_concurent_push: u64,

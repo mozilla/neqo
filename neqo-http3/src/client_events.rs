@@ -31,12 +31,12 @@ pub enum Http3ClientEvent {
     DataReadable { stream_id: u64 },
     /// Peer reset the stream.
     Reset { stream_id: u64, error: AppError },
-    /// Peer has send a STOP_SENDING.
+    /// Peer has sent a STOP_SENDING.
     StopSending { stream_id: u64, error: AppError },
     /// A new push promise.
     PushPromise {
         push_id: u64,
-        referenced_stream_id: u64,
+        request_stream_id: u64,
         headers: Vec<u8>,
     },
     /// A push response headers are ready.
@@ -87,7 +87,7 @@ impl RecvMessageEvents for Http3ClientEvents {
             matches!(evt,
                 Http3ClientEvent::HeaderReady { stream_id: x, .. }
                 | Http3ClientEvent::DataReadable { stream_id: x }
-                | Http3ClientEvent::PushPromise { referenced_stream_id: x, .. }
+                | Http3ClientEvent::PushPromise { request_stream_id: x, .. }
                 | Http3ClientEvent::Reset { stream_id: x, .. } if *x == stream_id)
         });
         self.insert(Http3ClientEvent::Reset { stream_id, error });
@@ -117,10 +117,10 @@ impl SendMessageEvents for Http3ClientEvents {
 }
 
 impl Http3ClientEvents {
-    pub fn push_promise(&self, push_id: u64, referenced_stream_id: u64, headers: Vec<u8>) {
+    pub fn push_promise(&self, push_id: u64, request_stream_id: u64, headers: Vec<u8>) {
         self.insert(Http3ClientEvent::PushPromise {
             push_id,
-            referenced_stream_id,
+            request_stream_id,
             headers,
         });
     }
@@ -196,7 +196,7 @@ impl Http3ClientEvents {
                 Http3ClientEvent::HeaderReady { stream_id: x, .. }
                 | Http3ClientEvent::DataWritable { stream_id: x }
                 | Http3ClientEvent::DataReadable { stream_id: x }
-                | Http3ClientEvent::PushPromise { referenced_stream_id: x, .. }
+                | Http3ClientEvent::PushPromise { request_stream_id: x, .. }
                 | Http3ClientEvent::Reset { stream_id: x, .. }
                 | Http3ClientEvent::StopSending { stream_id: x, .. } if *x == stream_id)
         });
