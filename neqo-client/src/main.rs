@@ -582,10 +582,11 @@ fn main() -> Res<()> {
 
 mod old {
     use std::cell::RefCell;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, VecDeque};
     use std::fs::File;
     use std::io::{ErrorKind, Write};
     use std::net::{SocketAddr, UdpSocket};
+    use std::path::PathBuf;
     use std::process::exit;
     use std::rc::Rc;
     use std::time::Instant;
@@ -597,18 +598,18 @@ mod old {
     use neqo_common::{matches, Datagram};
     use neqo_crypto::{AuthenticationStatus, Cipher};
     use neqo_transport::{
-        Connection, ConnectionEvent, FixedConnectionIdManager, Output, State, StreamType,
+        Connection, ConnectionEvent, Error, FixedConnectionIdManager, Output, State, StreamType,
     };
 
     use super::{emit_datagram, get_output_file, Args};
 
     trait HandlerOld {
-        fn handle(&mut self, args: &Args, client: &mut Connection) -> Res<bool>;
+        fn handle(&mut self, client: &mut Connection) -> Res<bool>;
     }
 
     struct PreConnectHandlerOld {}
     impl HandlerOld for PreConnectHandlerOld {
-        fn handle(&mut self, _args: &Args, client: &mut Connection) -> Res<bool> {
+        fn handle(&mut self, client: &mut Connection) -> Res<bool> {
             let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
             if client.events().any(authentication_needed) {
                 client.authenticated(AuthenticationStatus::Ok, Instant::now());
@@ -617,14 +618,47 @@ mod old {
         }
     }
 
-    #[derive(Default)]
-    struct PostConnectHandlerOld {
+    struct PostConnectHandlerOld<'a> {
         streams: HashMap<u64, Option<File>>,
+        url_queue: VecDeque<Url>,
+        all_paths: Vec<PathBuf>,
+        args: &'a Args,
+    }
+
+    impl<'a> PostConnectHandlerOld<'a> {
+        fn download_next(&mut self, client: &mut Connection) -> bool {
+            let url = self
+                .url_queue
+                .pop_front()
+                .expect("download_next called with empty queue");
+            match client.stream_create(StreamType::BiDi) {
+                Ok(client_stream_id) => {
+                    println!("Successfully created stream id {}", client_stream_id);
+                    let req = format!("GET {}\r\n", url.path());
+                    client
+                        .stream_send(client_stream_id, req.as_bytes())
+                        .unwrap();
+                    let _ = client.stream_close_send(client_stream_id);
+                    let out_file =
+                        get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
+                    self.streams.insert(client_stream_id, out_file);
+                    true
+                }
+                Err(Error::StreamLimitError) => {
+                    println!("Cannot create stream (StreamLimitError)");
+                    self.url_queue.push_front(url);
+                    false
+                }
+                Err(e) => {
+                    panic!("Can't create stream {}", e);
+                }
+            }
+        }
     }
 
     // This is a bit fancier than actually needed.
-    impl HandlerOld for PostConnectHandlerOld {
-        fn handle(&mut self, args: &Args, client: &mut Connection) -> Res<bool> {
+    impl HandlerOld for PostConnectHandlerOld<'_> {
+        fn handle(&mut self, client: &mut Connection) -> Res<bool> {
             let mut data = vec![0; 4000];
             while let Some(event) = client.next_event() {
                 match event {
@@ -645,7 +679,7 @@ mod old {
                             if sz > 0 {
                                 out_file.write_all(&data[..sz])?;
                             }
-                        } else if !args.output_read_data {
+                        } else if !self.args.output_read_data {
                             println!("READ[{}]: {} bytes", stream_id, sz);
                         } else {
                             println!(
@@ -659,7 +693,7 @@ mod old {
                                 println!("<FIN[{}]>", stream_id);
                             }
                             self.streams.remove(&stream_id);
-                            if self.streams.is_empty() {
+                            if self.streams.is_empty() && self.url_queue.is_empty() {
                                 client.close(Instant::now(), 0, "kthxbye!");
                                 return Ok(false);
                             }
@@ -667,6 +701,22 @@ mod old {
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
                         println!("stream {} writable", stream_id)
+                    }
+                    ConnectionEvent::SendStreamComplete { stream_id } => {
+                        println!("stream {} complete", stream_id);
+                    }
+                    ConnectionEvent::SendStreamCreatable { stream_type } => {
+                        println!("stream {:?} creatable", stream_type);
+                        if stream_type == StreamType::BiDi {
+                            loop {
+                                if self.url_queue.is_empty() {
+                                    break;
+                                }
+                                if !self.download_next(client) {
+                                    break;
+                                }
+                            }
+                        }
                     }
                     _ => {
                         println!("Unexpected event {:?}", event);
@@ -684,7 +734,6 @@ mod old {
         socket: &UdpSocket,
         client: &mut Connection,
         handler: &mut dyn HandlerOld,
-        args: &Args,
     ) -> Res<State> {
         let buf = &mut [0u8; 2048];
         loop {
@@ -692,7 +741,7 @@ mod old {
                 return Ok(client.state().clone());
             }
 
-            let mut exiting = !handler.handle(args, client)?;
+            let mut exiting = !handler.handle(client)?;
 
             loop {
                 let output = client.process_output(Instant::now());
@@ -757,8 +806,6 @@ mod old {
         token: Option<Vec<u8>>,
         ciphers: Option<&[Cipher]>,
     ) -> Res<Option<Vec<u8>>> {
-        let mut open_paths = Vec::new();
-
         let mut client = Connection::new_client(
             origin,
             &["hq-27"],
@@ -781,36 +828,25 @@ mod old {
         client.set_qlog(qlog_new(args, origin)?);
         // Temporary here to help out the type inference engine
         let mut h = PreConnectHandlerOld {};
-        process_loop_old(
-            &local_addr,
-            &remote_addr,
-            &socket,
-            &mut client,
-            &mut h,
-            &args,
-        )?;
+        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
-        let mut h2 = PostConnectHandlerOld::default();
+        let mut h2 = PostConnectHandlerOld {
+            streams: HashMap::new(),
+            url_queue: VecDeque::from(urls.to_vec()),
+            all_paths: Vec::new(),
+            args: &args,
+        };
 
-        for url in urls {
-            let client_stream_id = client.stream_create(StreamType::BiDi).unwrap();
-            let req = format!("GET {}\r\n", url.path());
-            client
-                .stream_send(client_stream_id, req.as_bytes())
-                .unwrap();
-            let _ = client.stream_close_send(client_stream_id);
-            let out_file = get_output_file(url, &args.output_dir, &mut open_paths);
-            h2.streams.insert(client_stream_id, out_file);
+        loop {
+            if h2.url_queue.is_empty() {
+                break;
+            }
+            if !h2.download_next(&mut client) {
+                break;
+            }
         }
 
-        process_loop_old(
-            &local_addr,
-            &remote_addr,
-            &socket,
-            &mut client,
-            &mut h2,
-            &args,
-        )?;
+        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h2)?;
 
         Ok(if args.resume {
             client.resumption_token()
