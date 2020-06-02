@@ -7,7 +7,7 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
-use neqo_common::{hex, matches, qdebug, qtrace, Datagram, Decoder, Encoder};
+use neqo_common::{hex_with_len, matches, qdebug, qtrace, Datagram, Decoder, Encoder};
 use neqo_crypto::{
     aead::Aead,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
@@ -25,6 +25,7 @@ use test_fixture::{self, assertions, default_client, now};
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::ops::Range;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -444,6 +445,71 @@ fn client_initial_aead_and_hp(dcid: &[u8]) -> (Aead, HpKey) {
     )
 }
 
+// Decode the header of a client Initial packet, returning three values:
+// * the entire header short of the packet number,
+// * just the DCID,
+// * just the SCID, and
+// * the protected payload including the packet number.
+// Any token is thrown away.
+fn decode_initial_header(dgram: &Datagram) -> (&[u8], &[u8], &[u8], &[u8]) {
+    let mut dec = Decoder::new(&dgram[..]);
+    let type_and_ver = dec.decode(5).unwrap().to_vec();
+    assert_eq!(type_and_ver[0] & 0xf0, 0xc0);
+    let dest_cid = dec.decode_vec(1).unwrap();
+    let src_cid = dec.decode_vec(1).unwrap();
+    dec.skip_vvec(); // Ignore any the token.
+
+    // Need to read of the length separately so that we can find the packet number.
+    let payload_len = usize::try_from(dec.decode_varint().unwrap()).unwrap();
+    let pn_offset = dgram.len() - dec.remaining();
+    (
+        &dgram[..pn_offset],
+        dest_cid,
+        src_cid,
+        dec.decode(payload_len).unwrap(),
+    )
+}
+
+// Remove header protection, returning the unmasked header and the packet number.
+fn remove_header_protection(hp: &HpKey, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
+    // Make a copy of the header that can be modified.
+    let mut fixed_header = header.to_vec();
+    let pn_offset = header.len();
+    // Save 4 extra in case the packet number is that long.
+    fixed_header.extend_from_slice(&payload[..4]);
+
+    // Sample for masking and apply the mask.
+    let mask = hp.mask(&payload[4..20]).unwrap();
+    fixed_header[0] ^= mask[0] & 0xf;
+    let pn_len = 1 + usize::from(fixed_header[0] & 0x3);
+    for i in 0..pn_len {
+        fixed_header[pn_offset + i] ^= mask[1 + i];
+    }
+    // Trim down to size.
+    fixed_header.truncate(pn_offset + pn_len);
+    // The packet number should be 1.
+    let pn = Decoder::new(&fixed_header[pn_offset..])
+        .decode_uint(pn_len)
+        .unwrap();
+
+    (fixed_header, pn)
+}
+
+fn apply_header_protection(hp: &HpKey, packet: &mut [u8], pn_bytes: Range<usize>) {
+    let sample_start = pn_bytes.start + 4;
+    let sample_end = sample_start + 16;
+    let mask = hp.mask(&packet[sample_start..sample_end]).unwrap();
+    qtrace!(
+        "sample={} mask={}",
+        hex_with_len(&packet[sample_start..sample_end]),
+        hex_with_len(&mask)
+    );
+    packet[0] ^= mask[0] & 0xf;
+    for i in 0..(pn_bytes.end - pn_bytes.start) {
+        packet[pn_bytes.start + i] ^= mask[1 + i];
+    }
+}
+
 // This tests a simulated on-path attacker that intercepts the first
 // client Initial packet and spoofs a retry.
 // The tricky part is in rewriting the second client Initial so that
@@ -473,60 +539,30 @@ fn mitm_retry() {
     // Now to start the epic process of decrypting the packet,
     // rewriting the header to remove the token, and then re-encrypting.
     let client_initial2 = client_initial2.unwrap();
-    // First, decode the initial up to the packet number.
-    let ci = &client_initial2[..];
-    let mut dec = Decoder::new(&ci);
-    let type_and_ver = dec.decode(5).unwrap().to_vec();
-    assert_eq!(type_and_ver[0] & 0xf0, 0xc0);
-    let dcid = dec.decode_vec(1).unwrap().to_vec();
-    let scid = dec.decode_vec(1).unwrap().to_vec();
-    dec.skip_vvec(); // Token.
-    let mut payload_len = usize::try_from(dec.decode_varint().unwrap()).unwrap();
-    let pn_offset = ci.len() - dec.remaining();
+    let (protected_header, dcid, scid, payload) = decode_initial_header(&client_initial2);
 
     // Now we have enough information to make keys.
     let (aead, hp) = client_initial_aead_and_hp(&dcid);
-    // Make a copy of the header that can be modified.
-    // Save 4 extra in case the packet number is that long.
-    let mut header = ci[0..pn_offset + 4].to_vec();
-
-    // Sample for masking and apply the mask.
-    let sample_start = pn_offset + 4;
-    let sample_end = sample_start + 16;
-    let mask = hp.mask(&ci[sample_start..sample_end]).unwrap();
-    header[0] ^= mask[0] & 0xf;
-    let pn_len = 1 + usize::from(header[0] & 0x3);
-    for i in 0..pn_len {
-        header[pn_offset + i] ^= mask[1 + i];
-    }
-    // Trim down to size.
-    header.truncate(pn_offset + pn_len);
-    dec.skip(pn_len);
-    payload_len -= pn_len;
+    let (header, pn) = remove_header_protection(&hp, protected_header, payload);
+    let pn_len = header.len() - protected_header.len();
 
     // Decrypt.
-    // The packet number should be 1.
-    let pn = Decoder::new(&header[pn_offset..])
-        .decode_uint(pn_len)
-        .unwrap();
     assert_eq!(pn, 1);
-    let mut plaintext_buf = Vec::with_capacity(ci.len());
-    plaintext_buf.resize_with(ci.len(), u8::default);
-    let input = dec.decode(payload_len).unwrap();
+    let mut plaintext_buf = vec![0; client_initial2.len()];
     let plaintext = aead
-        .decrypt(pn, &header, input, &mut plaintext_buf)
+        .decrypt(pn, &header, &payload[pn_len..], &mut plaintext_buf)
         .unwrap();
 
     // Now re-encode without the token.
     let mut enc = Encoder::with_capacity(header.len());
     enc.encode(&header[..5])
-        .encode_vec(1, &dcid)
-        .encode_vec(1, &scid)
+        .encode_vec(1, dcid)
+        .encode_vec(1, scid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_len + pn_len).unwrap());
+        .encode_varint(u64::try_from(payload.len()).unwrap());
     let pn_offset = enc.len();
     let notoken_header = enc.encode_uint(pn_len, pn).to_vec();
-    qtrace!("notoken_header={}", hex(&notoken_header));
+    qtrace!("notoken_header={}", hex_with_len(&notoken_header));
 
     // Encrypt.
     let mut notoken_packet = Encoder::with_capacity(1200)
@@ -543,20 +579,8 @@ fn mitm_retry() {
     // Unlike with decryption, don't truncate.
     // All 1200 bytes are needed to reach the minimum datagram size.
 
-    // Mask header[0] and packet number.
-    let sample_start = pn_offset + 4;
-    let sample_end = sample_start + 16;
-    let mask = hp.mask(&notoken_packet[sample_start..sample_end]).unwrap();
-    qtrace!(
-        "sample={} mask={}",
-        hex(&notoken_packet[sample_start..sample_end]),
-        hex(&mask)
-    );
-    notoken_packet[0] ^= mask[0] & 0xf;
-    for i in 0..pn_len {
-        notoken_packet[pn_offset + i] ^= mask[1 + i];
-    }
-    qtrace!("packet={}", hex(&notoken_packet));
+    apply_header_protection(&hp, &mut notoken_packet, pn_offset..(pn_offset + pn_len));
+    qtrace!("packet={}", hex_with_len(&notoken_packet));
 
     let new_datagram = Datagram::new(
         client_initial2.source(),
@@ -581,6 +605,86 @@ fn mitm_retry() {
             ..
         }
     ));
+}
+
+#[test]
+fn bad_client_initial() {
+    let mut client = default_client();
+    let mut server = default_server();
+
+    let dgram = client.process(None, now()).dgram().expect("a datagram");
+    let (header, dcid, scid, payload) = decode_initial_header(&dgram);
+    let (aead, hp) = client_initial_aead_and_hp(dcid);
+    let (fixed_header, pn) = remove_header_protection(&hp, header, payload);
+    let payload = &payload[(fixed_header.len() - header.len())..];
+
+    let mut plaintext_buf = vec![0; dgram.len()];
+    let plaintext = aead
+        .decrypt(pn, &fixed_header, payload, &mut plaintext_buf)
+        .unwrap();
+
+    let mut payload_enc = Encoder::from(plaintext);
+    payload_enc.encode(&[0x08, 0x02, 0x00, 0x00]); // Add a stream frame.
+
+    // Make a new header with a 1 byte packet number length.
+    let mut header_enc = Encoder::new();
+    header_enc
+        .encode_byte(0xc0) // Initial with 1 byte packet number.
+        .encode_uint(4, QUIC_VERSION)
+        .encode_vec(1, dcid)
+        .encode_vec(1, scid)
+        .encode_vvec(&[])
+        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
+        .encode_byte(u8::try_from(pn).unwrap());
+
+    let mut ciphertext = header_enc.to_vec();
+    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
+    let v = aead
+        .encrypt(
+            pn,
+            &header_enc,
+            &payload_enc,
+            &mut ciphertext[header_enc.len()..],
+        )
+        .unwrap();
+    assert_eq!(header_enc.len() + v.len(), ciphertext.len());
+    // Pad with zero to get up to 1200.
+    ciphertext.resize(1200, 0);
+
+    apply_header_protection(
+        &hp,
+        &mut ciphertext,
+        (header_enc.len() - 1)..header_enc.len(),
+    );
+    let bad_dgram = Datagram::new(dgram.source(), dgram.destination(), ciphertext);
+
+    // The server should reject this.
+    let response = server.process(Some(bad_dgram), now());
+    let close_dgram = response.dgram().unwrap();
+    assert!(close_dgram.len() < 200); // Too small for anything real.
+
+    // The client should accept this new and stop trying to connect.
+    // It will generate a CONNECTION_CLOSE first though.
+    let response = client.process(Some(close_dgram), now()).dgram();
+    assert!(response.is_some());
+    // The client will now wait out its closing period.
+    let delay = client.process(None, now()).callback();
+    assert_ne!(delay, Duration::from_secs(0));
+    assert!(matches!(
+        *client.state(),
+        State::Draining { error: ConnectionError::Transport(Error::PeerError(code)), .. } if code == Error::ProtocolViolation.code()
+    ));
+
+    for server in server.active_connections() {
+        assert_eq!(
+            *server.borrow().state(),
+            State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
+        );
+    }
+
+    // After sending the CONNECTION_CLOSE, the server goes idle.
+    let res = server.process(None, now());
+    assert_eq!(res, Output::None);
 }
 
 #[test]

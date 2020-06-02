@@ -44,6 +44,7 @@ pub const QUIC_VERSION: Version = 0xff00_0000 + 27;
 const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30); // 30 second
 
 type TransportError = u64;
+const ERROR_APPLICATION_CLOSE: TransportError = 12;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]
 #[allow(clippy::pub_enum_variant_names)]
@@ -58,7 +59,8 @@ pub enum Error {
     FrameEncodingError,
     TransportParameterError,
     ProtocolViolation,
-    InvalidMigration,
+    InvalidToken,
+    ApplicationError,
     CryptoError(neqo_crypto::Error),
     QlogError,
     CryptoAlert(u8),
@@ -72,6 +74,7 @@ pub enum Error {
     IdleTimeout,
     IntegerOverflow,
     InvalidInput,
+    InvalidMigration,
     InvalidPacket,
     InvalidResumptionToken,
     InvalidRetry,
@@ -84,6 +87,7 @@ pub enum Error {
     NoMoreData,
     NotConnected,
     PacketNumberOverlap,
+    PeerApplicationError(AppError),
     PeerError(TransportError),
     TooMuchData,
     UnexpectedMessage,
@@ -96,7 +100,10 @@ pub enum Error {
 impl Error {
     pub fn code(&self) -> TransportError {
         match self {
-            Self::NoError | Self::IdleTimeout => 0,
+            Self::NoError
+            | Self::IdleTimeout
+            | Self::PeerError(_)
+            | Self::PeerApplicationError(_) => 0,
             Self::ServerBusy => 2,
             Self::FlowControlError => 3,
             Self::StreamLimitError => 4,
@@ -105,9 +112,9 @@ impl Error {
             Self::FrameEncodingError => 7,
             Self::TransportParameterError => 8,
             Self::ProtocolViolation => 10,
-            Self::InvalidMigration => 12,
+            Self::InvalidToken => 11,
+            Self::ApplicationError => ERROR_APPLICATION_CLOSE,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),
-            Self::PeerError(a) => *a,
             // All the rest are internal errors.
             _ => 1,
         }

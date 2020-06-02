@@ -33,7 +33,10 @@ use crate::crypto::{Crypto, CryptoDxState};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
-use crate::frame::{AckRange, Frame, FrameType, StreamType};
+use crate::frame::{
+    AckRange, CloseError, Frame, FrameType, StreamType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
+    FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
+};
 use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
 use crate::path::Path;
 use crate::qlog;
@@ -66,8 +69,10 @@ pub enum State {
     Confirmed,
     Closing {
         error: ConnectionError,
-        frame_type: FrameType,
-        msg: Vec<u8>,
+        timeout: Instant,
+    },
+    Draining {
+        error: ConnectionError,
         timeout: Instant,
     },
     Closed(ConnectionError),
@@ -77,6 +82,11 @@ impl State {
     #[must_use]
     pub fn connected(&self) -> bool {
         matches!(self, Self::Connected | Self::Confirmed)
+    }
+
+    #[must_use]
+    pub fn closed(&self) -> bool {
+        matches!(self, Self::Closing { .. } | Self::Draining { .. } | Self::Closed(_))
     }
 }
 
@@ -100,6 +110,8 @@ impl PartialOrd for State {
             (_, Self::Confirmed) => Ordering::Greater,
             (Self::Closing { .. }, _) => Ordering::Less,
             (_, Self::Closing { .. }) => Ordering::Greater,
+            (Self::Draining { .. }, _) => Ordering::Less,
+            (_, Self::Draining { .. }) => Ordering::Greater,
             (Self::Closed(_), _) => unreachable!(),
         })
     }
@@ -277,15 +289,19 @@ impl IdleTimeout {
 /// Valid state transitions are:
 /// * Idle -> HandshakeDone: at the server when the handshake completes
 /// * HandshakeDone -> Idle: when a HANDSHAKE_DONE frame is sent
-/// * Idle/HandshakeDone -> ConnectionClose: when closing
-/// * ConnectionClose -> CloseSent: after sending CONNECTION_CLOSE
-/// * CloseSent -> ConnectionClose: any time a new CONNECTION_CLOSE is needed
+/// * Idle/HandshakeDone -> Closing/Draining: when closing or draining
+/// * Closing/Draining -> CloseSent: after sending CONNECTION_CLOSE
+/// * CloseSent -> Closing: any time a new CONNECTION_CLOSE is needed
 #[derive(Debug, Clone, PartialEq)]
 enum StateSignaling {
     Idle,
     HandshakeDone,
-    ConnectionClose,
-    CloseSent,
+    /// These states save the frame that needs to be sent.
+    Closing(Frame),
+    Draining(Frame),
+    /// This state saves the frame that might need to be sent again.
+    /// If it is `None`, then we are draining and don't send.
+    CloseSent(Option<Frame>),
 }
 
 impl StateSignaling {
@@ -306,17 +322,62 @@ impl StateSignaling {
         }
     }
 
-    pub fn closing(&self) -> bool {
-        *self == Self::ConnectionClose
+    fn make_close_frame(
+        error: ConnectionError,
+        frame_type: FrameType,
+        message: impl AsRef<str>,
+    ) -> Frame {
+        let reason_phrase = message.as_ref().as_bytes().to_owned();
+        Frame::ConnectionClose {
+            error_code: CloseError::from(error),
+            frame_type,
+            reason_phrase,
+        }
     }
 
-    pub fn close(&mut self) {
-        *self = Self::ConnectionClose
+    pub fn close(
+        &mut self,
+        error: ConnectionError,
+        frame_type: FrameType,
+        message: impl AsRef<str>,
+    ) {
+        *self = Self::Closing(Self::make_close_frame(error, frame_type, message));
     }
 
-    pub fn close_sent(&mut self) {
-        debug_assert!(self.closing());
-        *self = Self::CloseSent
+    pub fn drain(
+        &mut self,
+        error: ConnectionError,
+        frame_type: FrameType,
+        message: impl AsRef<str>,
+    ) {
+        *self = Self::Draining(Self::make_close_frame(error, frame_type, message));
+    }
+
+    /// If a close is pending, take a frame.
+    pub fn close_frame(&mut self) -> Option<Frame> {
+        match self {
+            Self::Closing(frame) => {
+                // When we are closing, we might need to send the close frame again.
+                let frame = mem::replace(frame, Frame::Padding);
+                *self = Self::CloseSent(Some(frame.clone()));
+                Some(frame)
+            }
+            Self::Draining(frame) => {
+                // When we are draining, just send once.
+                let frame = mem::replace(frame, Frame::Padding);
+                *self = Self::CloseSent(None);
+                Some(frame)
+            }
+            _ => None,
+        }
+    }
+
+    /// If a close can be sent again, prepare to send it again.
+    pub fn send_close(&mut self) {
+        if let Self::CloseSent(Some(frame)) = self {
+            let frame = mem::replace(frame, Frame::Padding);
+            *self = Self::Closing(frame);
+        }
     }
 }
 
@@ -663,18 +724,29 @@ impl Connection {
     fn capture_error<T>(&mut self, now: Instant, frame_type: FrameType, res: Res<T>) -> Res<T> {
         if let Err(v) = &res {
             #[cfg(debug_assertions)]
-            let msg = Vec::from(format!("{:?}", v));
+            let msg = format!("{:?}", v);
             #[cfg(not(debug_assertions))]
-            let msg = Vec::new();
-            if let State::Closed(err) | State::Closing { error: err, .. } = &self.state {
-                qwarn!([self], "Closing again after error {:?}", err);
-            } else {
-                self.set_state(State::Closing {
-                    error: ConnectionError::Transport(v.clone()),
-                    frame_type,
-                    msg,
-                    timeout: self.get_closing_period_time(now),
-                });
+            let msg = "";
+            let error = ConnectionError::Transport(v.clone());
+            match &self.state {
+                State::Closing { error: err, .. }
+                | State::Draining { error: err, .. }
+                | State::Closed(err) => {
+                    qwarn!([self], "Closing again after error {:?}", err);
+                }
+                State::WaitInitial => {
+                    // We don't have any state yet, so don't bother with
+                    // the closing state, just send one CONNECTION_CLOSE.
+                    self.state_signaling.close(error.clone(), frame_type, msg);
+                    self.set_state(State::Closed(error));
+                }
+                _ => {
+                    self.state_signaling.close(error.clone(), frame_type, msg);
+                    self.set_state(State::Closing {
+                        error,
+                        timeout: self.get_closing_period_time(now),
+                    });
+                }
             }
         }
         res
@@ -687,10 +759,21 @@ impl Connection {
     }
 
     pub fn process_timer(&mut self, now: Instant) {
-        if matches!(self.state(), State::Closing{..} | State::Closed{..}) {
-            qinfo!([self], "Timer fired while closing/closed");
+        if let State::Closing { error, timeout } | State::Draining { error, timeout } = &self.state
+        {
+            if *timeout <= now {
+                // Close timeout expired, move to Closed
+                let st = State::Closed(error.clone());
+                self.set_state(st);
+                qinfo!("Closing timer expired");
+                return;
+            }
+        }
+        if let State::Closed(_) = self.state {
+            qdebug!("Timer fired while closed");
             return;
         }
+
         if self.idle_timeout.expired(now, self.loss_recovery.raw_pto()) {
             qinfo!([self], "idle timeout expired");
             self.set_state(State::Closed(ConnectionError::Transport(
@@ -728,7 +811,7 @@ impl Connection {
         qtrace!([self], "Get callback delay {:?}", now);
 
         // Only one timer matters when closing...
-        if let State::Closing { timeout, .. } = self.state {
+        if let State::Closing { timeout, .. } | State::Draining { timeout, .. } = self.state {
             return timeout.duration_since(now);
         }
 
@@ -780,38 +863,24 @@ impl Connection {
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
     pub fn process_output(&mut self, now: Instant) -> Output {
-        qtrace!([self], "process_output {:?}", now);
-        self.process_timer(now);
-        let option = match &self.state {
-            State::Init => {
-                if self.role == Role::Client {
-                    let res = self.client_start(now);
-                    self.absorb_error(now, res);
-                    self.output(now)
-                } else {
-                    qinfo!([self], "Invalid packet received: no response");
-                    SendOption::default()
-                }
-            }
-            State::Closing { error, timeout, .. } => {
-                if *timeout > now {
-                    self.output(now)
-                } else {
-                    // Close timeout expired, move to Closed
-                    let st = State::Closed(error.clone());
-                    self.set_state(st);
-                    SendOption::default()
-                }
-            }
-            State::Closed(..) => SendOption::default(),
-            _ => self.output(now),
-        };
+        qtrace!([self], "process_output {:?} {:?}", self.state, now);
 
-        match option {
+        if self.state == State::Init {
+            if self.role == Role::Client {
+                let res = self.client_start(now);
+                self.absorb_error(now, res);
+            }
+        } else {
+            self.process_timer(now);
+        }
+
+        match self.output(now) {
             SendOption::Yes(dgram) => Output::Datagram(dgram),
             SendOption::No(paced) => match self.state {
                 State::Closed(_) => Output::None,
-                State::Closing { timeout, .. } => Output::Callback(timeout - now),
+                State::Closing { timeout, .. } | State::Draining { timeout, .. } => {
+                    Output::Callback(timeout.duration_since(now))
+                }
                 _ => Output::Callback(self.next_delay(now, paced)),
             },
         }
@@ -947,10 +1016,10 @@ impl Connection {
                 State::Closing { .. } => {
                     // Don't bother processing the packet. Instead ask to get a
                     // new close frame.
-                    self.state_signaling.close();
+                    self.state_signaling.send_close();
                     return Ok(frames);
                 }
-                State::Closed(..) => {
+                State::Draining { .. } | State::Closed(..) => {
                     // Do nothing.
                     self.stats.dropped_rx += 1;
                     return Ok(frames);
@@ -976,8 +1045,12 @@ impl Connection {
                     &payload[..],
                 );
                 qlog::packet_received(&mut self.qlog, &payload)?;
-                frames.extend(self.process_packet(&payload, now)?);
-                if matches!(self.state, State::WaitInitial) {
+                let res = self.process_packet(&payload, now);
+                if res.is_err() && self.path.is_none() {
+                    self.initialize_path(&packet, &d);
+                }
+                frames.extend(res?);
+                if self.state == State::WaitInitial {
                     self.start_handshake(&packet, &d)?;
                 }
                 self.process_migrations(&d)?;
@@ -1046,16 +1119,20 @@ impl Connection {
         Ok(frames)
     }
 
+    fn initialize_path(&mut self, packet: &PublicPacket, d: &Datagram) {
+        debug_assert!(self.path.is_none());
+        let mut p = Path::from_datagram(&d, ConnectionId::from(packet.scid()));
+        p.add_local_cid(self.cid_manager.borrow_mut().generate_cid());
+        self.path = Some(p);
+    }
+
     fn start_handshake(&mut self, packet: &PublicPacket, d: &Datagram) -> Res<()> {
         if self.role == Role::Server {
             assert_eq!(packet.packet_type(), PacketType::Initial);
             // A server needs to accept the client's selected CID during the handshake.
             self.valid_cids.push(ConnectionId::from(packet.dcid()));
             // Install a path.
-            assert!(self.path.is_none());
-            let mut p = Path::from_datagram(&d, ConnectionId::from(packet.scid()));
-            p.add_local_cid(self.cid_manager.borrow_mut().generate_cid());
-            self.path = Some(p);
+            self.initialize_path(packet, d);
 
             self.zero_rtt_state = match self.crypto.enable_0rtt(self.role) {
                 Ok(true) => {
@@ -1096,18 +1173,13 @@ impl Connection {
                 | State::Handshaking
                 | State::Connected
                 | State::Confirmed => self.output_path(&mut path, now),
-                State::Closing {
-                    error,
-                    frame_type,
-                    msg,
-                    ..
-                } => {
-                    let err = error.clone();
-                    let frame_type = *frame_type;
-                    let msg = msg.clone();
-                    self.output_close(&path, err, frame_type, msg)
+                State::Closing { .. } | State::Draining { .. } | State::Closed(_) => {
+                    if let Some(frame) = self.state_signaling.close_frame() {
+                        self.output_close(&path, &frame)
+                    } else {
+                        Ok(SendOption::default())
+                    }
                 }
-                State::Closed(_) => Ok(SendOption::default()),
             };
             let out = self.absorb_error(now, res).unwrap_or_default();
             self.path = Some(path);
@@ -1161,17 +1233,7 @@ impl Connection {
         (pt, pn, builder)
     }
 
-    fn output_close(
-        &mut self,
-        path: &Path,
-        error: ConnectionError,
-        frame_type: FrameType,
-        msg: Vec<u8>,
-    ) -> Res<SendOption> {
-        if !self.state_signaling.closing() {
-            return Ok(SendOption::default());
-        }
-        let mut close_sent = false;
+    fn output_close(&mut self, path: &Path, frame: &Frame) -> Res<SendOption> {
         let mut encoder = Encoder::with_capacity(path.mtu());
         for space in PNSpace::iter() {
             let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
@@ -1185,26 +1247,17 @@ impl Connection {
                 continue;
             }
 
-            // ConnectionError::Application only allowed at 1RTT.
-            if *space != PNSpace::ApplicationData
-                && matches!(error, ConnectionError::Application(_))
-            {
-                continue;
-            }
             let (_, _, mut builder) = Self::build_packet_header(path, *space, encoder, tx, &None);
-            let frame = Frame::ConnectionClose {
-                error_code: error.clone().into(),
-                frame_type,
-                reason_phrase: msg.clone(), // TODO(mt) Pointless clone.
-            };
-            frame.marshal(&mut builder);
+            // ConnectionError::Application is only allowed at 1RTT.
+            if *space == PNSpace::ApplicationData {
+                frame.marshal(&mut builder);
+            } else {
+                frame.sanitize_close().marshal(&mut builder);
+            }
+
             encoder = builder.build(tx)?;
-            close_sent = true;
         }
 
-        if close_sent {
-            self.state_signaling.close_sent();
-        }
         Ok(SendOption::Yes(path.datagram(encoder)))
     }
 
@@ -1387,6 +1440,7 @@ impl Connection {
 
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self], "client_start");
+        debug_assert_eq!(self.role, Role::Client);
         qlog::client_connection_started(&mut self.qlog, self.path.as_ref().unwrap())?;
         self.loss_recovery.start_pacer(now);
 
@@ -1407,14 +1461,11 @@ impl Connection {
     }
 
     /// Close the connection.
-    pub fn close(&mut self, now: Instant, error: AppError, msg: impl AsRef<str>) {
-        let msg = msg.as_ref().as_bytes();
-        self.set_state(State::Closing {
-            error: ConnectionError::Application(error),
-            frame_type: 0,
-            msg: msg.to_vec(),
-            timeout: self.get_closing_period_time(now),
-        });
+    pub fn close(&mut self, now: Instant, app_error: AppError, msg: impl AsRef<str>) {
+        let error = ConnectionError::Application(app_error);
+        let timeout = self.get_closing_period_time(now);
+        self.state_signaling.close(error.clone(), 0, msg);
+        self.set_state(State::Closing { error, timeout });
     }
 
     fn set_initial_limits(&mut self) {
@@ -1667,7 +1718,25 @@ impl Connection {
                     frame_type,
                     reason_phrase
                 );
-                self.set_state(State::Closed(error_code.into()));
+                let (detail, frame_type) = if let CloseError::Application(_) = error_code {
+                    // Use a transport error here because we want to send
+                    // NO_ERROR in this case.
+                    (
+                        Error::PeerApplicationError(error_code.code()),
+                        FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
+                    )
+                } else {
+                    (
+                        Error::PeerError(error_code.code()),
+                        FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
+                    )
+                };
+                let error = ConnectionError::Transport(detail);
+                self.state_signaling.drain(error.clone(), frame_type, "");
+                self.set_state(State::Draining {
+                    error,
+                    timeout: self.get_closing_period_time(now),
+                });
             }
             Frame::HandshakeDone => {
                 if self.role == Role::Server || !self.state.connected() {
@@ -1807,25 +1876,16 @@ impl Connection {
         if state > self.state {
             qinfo!([self], "State change from {:?} -> {:?}", self.state, state);
             self.state = state.clone();
-            match &self.state {
-                State::Closing { .. } => {
-                    self.send_streams.clear();
-                    self.recv_streams.clear();
-                    self.state_signaling.close();
-                }
-                State::Closed(..) => {
-                    // Equivalent to spec's "draining" state -- never send anything.
-                    self.send_streams.clear();
-                    self.recv_streams.clear();
-                }
-                _ => {}
+            if self.state.closed() {
+                self.send_streams.clear();
+                self.recv_streams.clear();
             }
             self.events.connection_state_change(state);
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
             // and the connection is already closed.
-            debug_assert!(matches!(state, State::Closing { .. }));
-            debug_assert!(matches!(self.state, State::Closing { .. } | State::Closed(..)));
+            debug_assert!(matches!(state, State::Closing { .. } | State::Draining { .. }));
+            debug_assert!(self.state.closed());
         }
     }
 
@@ -2361,7 +2421,7 @@ mod tests {
     }
 
     #[test]
-    fn test_conn_handshake_failed_authentication() {
+    fn handshake_failed_authentication() {
         qdebug!("---- client: generate CH");
         let mut client = default_client();
         let out = client.process(None, now());
@@ -2395,7 +2455,7 @@ mod tests {
 
         qdebug!("---- server: Alert(certificate_revoked)");
         let out = server.process(out.dgram(), now());
-        assert!(out.as_dgram_ref().is_none());
+        assert!(out.as_dgram_ref().is_some());
         qdebug!("Output={:0x?}", out.as_dgram_ref());
         assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(44)));
         assert_error(&server, ConnectionError::Transport(Error::PeerError(300)));
@@ -2551,7 +2611,7 @@ mod tests {
 
     fn assert_error(c: &Connection, err: ConnectionError) {
         match c.state() {
-            State::Closing { error, .. } | State::Closed(error) => {
+            State::Closing { error, .. } | State::Draining { error, .. } | State::Closed(error) => {
                 assert_eq!(*error, err);
             }
             _ => panic!("bad state {:?}", c.state()),
@@ -4582,6 +4642,68 @@ mod tests {
         assert!(!client.events().any(readable_stream_evt));
     }
 
+    // During the handshake, an application close should be sanitized.
+    #[test]
+    fn early_application_close() {
+        let mut client = default_client();
+        let mut server = default_server();
+
+        // One flight each.
+        let dgram = client.process(None, now()).dgram();
+        assert!(dgram.is_some());
+        let dgram = server.process(dgram, now()).dgram();
+        assert!(dgram.is_some());
+
+        server.close(now(), 77, String::from(""));
+        assert!(server.state().closed());
+        let dgram = server.process(None, now()).dgram();
+        assert!(dgram.is_some());
+
+        let frames = client.test_process_input(dgram.unwrap(), now());
+        assert!(matches!(
+            frames[0],
+            (
+                Frame::ConnectionClose {
+                    error_code: CloseError::Transport(code),
+                    ..
+                },
+                PNSpace::Initial,
+            ) if code == Error::ApplicationError.code()
+        ));
+        assert!(client.state().closed());
+    }
+
+    #[test]
+    fn bad_tls_version() {
+        let mut client = default_client();
+        // Do a bad, bad thing.
+        client
+            .crypto
+            .tls
+            .set_option(neqo_crypto::Opt::Tls13CompatMode, true)
+            .unwrap();
+        let mut server = default_server();
+        let dgram = client.process(None, now()).dgram();
+        assert!(dgram.is_some());
+        let dgram = server.process(dgram, now()).dgram();
+        assert_eq!(
+            *server.state(),
+            State::Closed(ConnectionError::Transport(Error::ProtocolViolation))
+        );
+        assert!(dgram.is_some());
+        let frames = client.test_process_input(dgram.unwrap(), now());
+        assert!(matches!(
+            frames[0],
+            (
+                Frame::ConnectionClose {
+                    error_code: CloseError::Transport(_),
+                    ..
+                },
+                PNSpace::Initial,
+            )
+        ));
+    }
+
     #[test]
     fn pace() {
         const RTT: Duration = Duration::from_millis(1000);
@@ -4691,8 +4813,10 @@ mod tests {
         }
     }
 
+    /// Test the interaction between the loss recovery timer
+    /// and the closing timer.
     #[test]
-    fn closing_timers() {
+    fn closing_timers_interation() {
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -4712,12 +4836,66 @@ mod tests {
 
         // Rather than let the timer pop, close the connection.
         client.close(now, 0, "");
-        let res = client.process(None, now);
-        assert!(res.dgram().is_some()); // CONNECTION_CLOSE
-                                        // This should now report the end of the closing period, not a
-                                        // zero-duration wait driven by the (now defunct) loss recovery timer.
-        let res = client.process(None, now);
-        assert_ne!(res.callback(), Duration::from_secs(0));
+        let client_close = client.process(None, now).dgram();
+        assert!(client_close.is_some());
+        // This should now report the end of the closing period, not a
+        // zero-duration wait driven by the (now defunct) loss recovery timer.
+        let client_close_timer = client.process(None, now).callback();
+        assert_ne!(client_close_timer, Duration::from_secs(0));
+    }
+
+    #[test]
+    fn closing_and_draining() {
+        const APP_ERROR: AppError = 7;
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        // Save a packet from the client for later.
+        let p1 = send_something(&mut client, now());
+
+        // Close the connection.
+        client.close(now(), APP_ERROR, "");
+        let client_close = client.process(None, now()).dgram();
+        assert!(client_close.is_some());
+        let client_close_timer = client.process(None, now()).callback();
+        assert_ne!(client_close_timer, Duration::from_secs(0));
+
+        // The client will spit out the same packet in response to anything it receives.
+        let p3 = send_something(&mut server, now());
+        let client_close2 = client.process(Some(p3), now()).dgram();
+        assert_eq!(
+            client_close.as_ref().unwrap().len(),
+            client_close2.as_ref().unwrap().len()
+        );
+
+        // After this time, the client should transition to closed.
+        let end = client.process(None, now() + client_close_timer);
+        assert_eq!(end, Output::None);
+        assert_eq!(
+            *client.state(),
+            State::Closed(ConnectionError::Application(APP_ERROR))
+        );
+
+        // When the server receives the close, it too should generate CONNECTION_CLOSE.
+        let server_close = server.process(client_close, now()).dgram();
+        assert!(server.state().closed());
+        assert!(server_close.is_some());
+        // .. but it ignores any further close packets.
+        let server_close_timer = server.process(client_close2, now()).callback();
+        assert_ne!(server_close_timer, Duration::from_secs(0));
+        // Even a legitimate packet without a close in it.
+        let server_close_timer2 = server.process(Some(p1), now()).callback();
+        assert_eq!(server_close_timer, server_close_timer2);
+
+        let end = server.process(None, now() + server_close_timer);
+        assert_eq!(end, Output::None);
+        assert_eq!(
+            *server.state(),
+            State::Closed(ConnectionError::Transport(Error::PeerApplicationError(
+                APP_ERROR
+            )))
+        );
     }
 
     /// When we declare a packet as lost, we keep it around for a while for another loss period.

@@ -11,8 +11,7 @@ use neqo_common::{matches, qdebug, qtrace, Decoder, Encoder};
 use crate::cid::MAX_CONNECTION_ID_LEN;
 use crate::packet::PacketType;
 use crate::stream_id::{StreamId, StreamIndex};
-use crate::{AppError, TransportError};
-use crate::{ConnectionError, Error, Res};
+use crate::{AppError, ConnectionError, Error, Res, TransportError, ERROR_APPLICATION_CLOSE};
 
 use std::cmp::{min, Ordering};
 use std::convert::TryFrom;
@@ -42,13 +41,22 @@ const FRAME_TYPE_NEW_CONNECTION_ID: FrameType = 0x18;
 const FRAME_TYPE_RETIRE_CONNECTION_ID: FrameType = 0x19;
 const FRAME_TYPE_PATH_CHALLENGE: FrameType = 0x1a;
 const FRAME_TYPE_PATH_RESPONSE: FrameType = 0x1b;
-const FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: FrameType = 0x1c;
-const FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: FrameType = 0x1d;
+pub const FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: FrameType = 0x1c;
+pub const FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: FrameType = 0x1d;
 const FRAME_TYPE_HANDSHAKE_DONE: FrameType = 0x1e;
 
 const STREAM_FRAME_BIT_FIN: u64 = 0x01;
 const STREAM_FRAME_BIT_LEN: u64 = 0x02;
 const STREAM_FRAME_BIT_OFF: u64 = 0x04;
+
+/// `FRAME_APPLICATION_CLOSE` is the default CONNECTION_CLOSE frame that
+/// is sent when an application error code needs to be sent in an
+/// Initial or Handshake packet.
+const FRAME_APPLICATION_CLOSE: &Frame = &Frame::ConnectionClose {
+    error_code: CloseError::Transport(ERROR_APPLICATION_CLOSE),
+    frame_type: 0,
+    reason_phrase: Vec::new(),
+};
 
 #[derive(PartialEq, Debug, Copy, Clone, PartialOrd, Eq, Ord, Hash)]
 /// Bi-Directional or Uni-Directional.
@@ -443,6 +451,19 @@ impl Frame {
                 enc.encode_vvec(reason_phrase);
             }
             Self::HandshakeDone => (),
+        }
+    }
+
+    /// Convert a CONNECTION_CLOSE into a nicer CONNECTION_CLOSE.
+    pub fn sanitize_close(&self) -> &Self {
+        if let Self::ConnectionClose { error_code, .. } = &self {
+            if let CloseError::Application(_) = error_code {
+                FRAME_APPLICATION_CLOSE
+            } else {
+                self
+            }
+        } else {
+            panic!("Attempted to sanitize a non-close frame");
         }
     }
 
