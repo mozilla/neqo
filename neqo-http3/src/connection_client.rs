@@ -32,19 +32,28 @@ use std::time::Instant;
 
 use crate::{Error, Res};
 
-// This is used for filtering send_streams and recv_Streams with a stream_ids greater that a given id.
-// Only bidirectional streams are filtered.
-fn id_gte_bidi<U>(base: u64) -> impl FnMut((&u64, &U)) -> Option<u64> + 'static
+// This is used for filtering send_streams and recv_Streams with a stream_ids greater than or equal a given id.
+// Only the same type (bidirectional or unidirectionsl) streams are filtered.
+fn id_gte<U>(base: StreamId) -> impl FnMut((&u64, &U)) -> Option<u64> + 'static
 where
     U: ?Sized,
 {
     move |(id, _)| {
-        if *id >= base && StreamId::from(*id).is_bidi() {
+        if *id >= base.as_u64() && !(StreamId::from(*id).is_bidi() ^ base.is_bidi()) {
             Some(*id)
         } else {
             None
         }
     }
+}
+
+// This is used for filtering send_streams and recv_Streams with a stream_ids less than a given id.
+// Only the same type (bidirectional or unidirectionsl) streams are filtered.
+fn id_lt<U>(base: StreamId) -> impl FnMut(&u64, &mut U) -> bool
+where
+    U: ?Sized,
+{
+    move |id, _| *id < base.as_u64() || (StreamId::from(*id).is_bidi() ^ base.is_bidi())
 }
 
 pub struct Http3Client {
@@ -593,12 +602,13 @@ impl Http3Client {
             _ => unreachable!("Should not receive Goaway frame in this state."),
         }
 
+        let goaway_stream_id = StreamId::from(goaway_stream_id);
         // Issue reset events for streams >= goaway stream id
         for id in self
             .base_handler
             .send_streams
             .iter()
-            .filter_map(id_gte_bidi(goaway_stream_id))
+            .filter_map(id_gte(goaway_stream_id))
         {
             self.events.reset(id, Error::HttpRequestRejected.code());
         }
@@ -607,7 +617,7 @@ impl Http3Client {
             .base_handler
             .recv_streams
             .iter()
-            .filter_map(id_gte_bidi(goaway_stream_id))
+            .filter_map(id_gte(goaway_stream_id))
         {
             self.events
                 .stop_sending(id, Error::HttpRequestRejected.code());
@@ -618,11 +628,11 @@ impl Http3Client {
         // Actually remove (i.e. don't retain) these streams
         self.base_handler
             .send_streams
-            .retain(|id, _| *id < goaway_stream_id);
+            .retain(id_lt(goaway_stream_id));
 
         self.base_handler
             .recv_streams
-            .retain(|id, _| *id < goaway_stream_id);
+            .retain(id_lt(goaway_stream_id));
 
         Ok(())
     }
@@ -1083,12 +1093,25 @@ mod tests {
         (client, server, request_stream_id)
     }
 
+    fn server_send_response_and_exchange_packet(
+        client: &mut Http3Client,
+        server: &mut TestServer,
+        stream_id: u64,
+        response: &[u8],
+    ) {
+        let _ = server.conn.stream_send(stream_id, response).unwrap();
+        server.conn.stream_close_send(stream_id).unwrap();
+        let out = server.conn.process(None, now());
+        let out = client.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
+    }
+
     const PUSH_PROMISE_DATA: &[u8] = &[
         0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67, 0x35, 0x53, 0x2e, 0x43, 0xd3,
         0xc1,
     ];
 
-    // Send a push promise with push_id ane referenced stream_id.
+    // Send a push promise with push_id and request_stream_id.
     fn send_push_promise(conn: &mut Connection, stream_id: u64, push_id: u64) {
         let frame = HFrame::PushPromise {
             push_id,
@@ -1197,7 +1220,7 @@ mod tests {
         client: &mut Http3Client,
         push_promises: &[PushPromiseInfo],
         push_streams: &[u64],
-        request_stream_id: u64,
+        response_stream_id: u64,
     ) {
         let mut num_push_promises = 0;
         let mut num_push_stream_headers = 0;
@@ -1206,12 +1229,12 @@ mod tests {
             match e {
                 Http3ClientEvent::PushPromise {
                     push_id,
-                    referenced_stream_id,
+                    request_stream_id,
                     headers,
                 } => {
                     assert!(push_promises
                         .iter()
-                        .any(|p| p.push_id == push_id && p.ref_stream_id == referenced_stream_id));
+                        .any(|p| p.push_id == push_id && p.ref_stream_id == request_stream_id));
                     // TODO push promise header_block should be qpack decoded.
                     assert_eq!(&headers[..], PUSH_PROMISE_DATA);
                     num_push_promises += 1;
@@ -1240,12 +1263,12 @@ mod tests {
                     headers,
                     fin,
                 } => {
-                    assert_eq!(stream_id, request_stream_id);
+                    assert_eq!(stream_id, response_stream_id);
                     check_response_header_2(&headers.unwrap());
                     assert_eq!(fin, false);
                 }
                 Http3ClientEvent::DataReadable { stream_id } => {
-                    assert_eq!(stream_id, request_stream_id);
+                    assert_eq!(stream_id, response_stream_id);
                     let mut buf = [0_u8; 100];
                     let (amount, _) = client
                         .read_response_data(now(), stream_id, &mut buf)
@@ -1434,7 +1457,6 @@ mod tests {
     fn test_wrong_frame_on_push_stream(v: &[u8]) {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(false);
 
-        // Send a push promise with push_id 0
         send_push_promise(&mut server.conn, request_stream_id, 0);
         // Create a push stream
         let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
@@ -1476,6 +1498,12 @@ mod tests {
     #[test]
     fn test_max_push_id_frame_on_push_stream() {
         test_wrong_frame_on_push_stream(&[0xd, 0x1, 0x5]);
+    }
+
+    // send DATA frame before a header frame
+    #[test]
+    fn test_data_frame_on_push_stream() {
+        test_wrong_frame_on_push_stream(&[0x0, 0x2, 0x1, 0x2]);
     }
 
     // Client: receive unknown stream type
@@ -2312,8 +2340,12 @@ mod tests {
 
         // after this, we can sill read data from a sttream.
         let mut buf = [0_u8; 100];
-        let res = client.read_response_data(now(), request_stream_id, &mut buf);
-        assert!(res.is_ok());
+        let (amount, fin) = client
+            .read_response_data(now(), request_stream_id, &mut buf)
+            .unwrap();
+        assert_eq!(fin, false);
+        assert_eq!(amount, EXPECTED_RESPONSE_DATA_2_FRAME_1.len());
+        assert_eq!(&buf[..amount], EXPECTED_RESPONSE_DATA_2_FRAME_1);
 
         client.close(now(), 0, "");
     }
@@ -2969,7 +3001,7 @@ mod tests {
 
         let out = server.conn.process(None, now());
         client.process(out.dgram(), now());
-        client.process(None, now());
+        //        client.process(None, now());
 
         // Read first frame
         match client.events().nth(1).unwrap() {
@@ -3942,7 +3974,7 @@ mod tests {
 
     // Client: receive a push stream
     #[test]
-    fn test_client_received_push_stream() {
+    fn push_single() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
@@ -3952,11 +3984,12 @@ mod tests {
         // create a push stream.
         let _ = send_push_data(&mut server.conn, 0, true);
 
-        let _ = server.conn.stream_send(request_stream_id, HTTP_RESPONSE_2);
-        server.conn.stream_close_send(request_stream_id).unwrap();
-        let out = server.conn.process(None, now());
-        let out = client.process(out.dgram(), now());
-        let _ = server.conn.process(out.dgram(), now());
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            HTTP_RESPONSE_2,
+        );
 
         read_response_and_push_events(
             &mut client,
@@ -3975,7 +4008,7 @@ mod tests {
     }
 
     #[test]
-    fn test_client_received_multiple_push_streams() {
+    fn push_multiple() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
@@ -3989,11 +4022,12 @@ mod tests {
         // create a second push stream.
         let _ = send_push_data(&mut server.conn, 1, true);
 
-        let _ = server.conn.stream_send(request_stream_id, HTTP_RESPONSE_2);
-        server.conn.stream_close_send(request_stream_id).unwrap();
-        let out = server.conn.process(None, now());
-        let out = client.process(out.dgram(), now());
-        let _ = server.conn.process(out.dgram(), now());
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            HTTP_RESPONSE_2,
+        );
 
         read_response_and_push_events(
             &mut client,
@@ -4019,7 +4053,7 @@ mod tests {
     }
 
     #[test]
-    fn test_client_push_after_stream_headers() {
+    fn push_after_headers() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
@@ -4057,7 +4091,7 @@ mod tests {
     }
 
     #[test]
-    fn test_client_push_after_a_stream_data_frame() {
+    fn push_after_response() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
@@ -4082,8 +4116,19 @@ mod tests {
         assert_eq!(client.state(), Http3State::Connected);
     }
 
+    fn check_push_events(client: &mut Http3Client) -> bool {
+        let any_push_event = |e| {
+            matches!(
+                e,
+                Http3ClientEvent::PushPromise{..}
+                | Http3ClientEvent::PushHeaderReady{..}
+                | Http3ClientEvent::PushDataReadable{..})
+        };
+        client.events().any(any_push_event)
+    }
+
     #[test]
-    fn test_client_receive_push_stream_before_promise() {
+    fn push_stream_before_promise() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
@@ -4091,18 +4136,17 @@ mod tests {
         send_push_data_and_exchange_packets(&mut client, &mut server, 0, true);
 
         // Assert that we do not have any push event.
-        let any_push_event = |e| matches!(e, Http3ClientEvent::PushPromise{..} |Http3ClientEvent::PushHeaderReady{..} | Http3ClientEvent::PushDataReadable{..});
-        assert!(!client.events().any(any_push_event));
+        assert!(!check_push_events(&mut client));
 
         // Now send push_promise
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 0);
 
-        // Send response data
-        let _ = server.conn.stream_send(request_stream_id, HTTP_RESPONSE_2);
-        server.conn.stream_close_send(request_stream_id).unwrap();
-        let out = server.conn.process(None, now());
-        let out = client.process(out.dgram(), now());
-        let _ = server.conn.process(out.dgram(), now());
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            HTTP_RESPONSE_2,
+        );
 
         read_response_and_push_events(
             &mut client,
@@ -4121,14 +4165,12 @@ mod tests {
     // Push_id 5 is received first, therefore Push_id 3 will be in the PushState:Init state.
     // Start push_id 3 by receiving a push_promise and then a push stream with the push_id 3.
     #[test]
-    fn test_receiving_out_of_order_push_id_1() {
+    fn push_out_of_order_1() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 5
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 5);
 
-        // Send a push promise with push_id 3.
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 3);
         // Start a push stream with push_id 3.
         send_push_data_and_exchange_packets(&mut client, &mut server, 3, true);
@@ -4157,16 +4199,13 @@ mod tests {
     // Push_id 5 is received first, therefore Push_id 3 will be in the PushState:Init state.
     // Start push_id 3 by receiving a push stream with push_id 3 and then a push_promise.
     #[test]
-    fn test_receiving_out_of_order_push_id_2() {
+    fn push_out_of_order_2() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 5
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 5);
 
-        // Start a push stream with push_id 3.
         send_push_data_and_exchange_packets(&mut client, &mut server, 3, true);
-        // Send a push promise with push_id 3
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 3);
 
         read_response_and_push_events(
@@ -4192,13 +4231,11 @@ mod tests {
     // therefore Push_id 3 will be in the PushState:Init state.
     // Start push_id 3 by receiving a push stream with the push_id 3 and then a push_promise.
     #[test]
-    fn test_receiving_out_of_order_push_id_3() {
+    fn push_out_of_order_3() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 5
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 5);
-        // Start a push stream with push_id 5.
         send_push_data_and_exchange_packets(&mut client, &mut server, 5, true);
         assert_eq!(client.state(), Http3State::Connected);
 
@@ -4213,53 +4250,8 @@ mod tests {
             request_stream_id,
         );
 
-        // Send a push promise with push_id 3
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 3);
-        // Start a push stream with push_id 3.
         send_push_data_and_exchange_packets(&mut client, &mut server, 3, true);
-
-        read_response_and_push_events(
-            &mut client,
-            &[PushPromiseInfo {
-                push_id: 3,
-                ref_stream_id: request_stream_id,
-            }],
-            &[3],
-            request_stream_id,
-        );
-        assert_eq!(client.state(), Http3State::Connected);
-    }
-
-    // Test receiving pushes out of order.
-    // Push_id 5 is received first and read so that it is removed from the list,
-    // therefore Push_id 3 will be in the PushState:Init state.
-    // Start push_id 3 by receiving a push_promise and then a push stream.
-    #[test]
-    fn test_receiving_out_of_order_push_id_4() {
-        // Connect and send a request
-        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
-
-        // Send a push promise with push_id 5
-        send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 5);
-        // Start a push stream with push_id 5.
-        send_push_data_and_exchange_packets(&mut client, &mut server, 5, true);
-        assert_eq!(client.state(), Http3State::Connected);
-
-        // Read push stream with push_id 5 to make it change to closed state.
-        read_response_and_push_events(
-            &mut client,
-            &[PushPromiseInfo {
-                push_id: 5,
-                ref_stream_id: request_stream_id,
-            }],
-            &[5],
-            request_stream_id,
-        );
-
-        // Start a push stream with push_id 3.
-        send_push_data_and_exchange_packets(&mut client, &mut server, 3, true);
-        // Send a push promise with push_id 3
-        send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 3);
 
         read_response_and_push_events(
             &mut client,
@@ -4275,11 +4267,10 @@ mod tests {
 
     // The next test is for receiving a second PushPromise when Push is in the PushPromise state.
     #[test]
-    fn multiple_push_promise_1() {
+    fn multiple_push_promise() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 5
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 5);
 
         // make a second request.
@@ -4289,7 +4280,6 @@ mod tests {
         let out = client.process(None, now());
         let _ = server.conn.process(out.dgram(), now());
 
-        // Send a push promise with push_id 5
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id_2, 5);
 
         read_response_and_push_events(
@@ -4312,13 +4302,11 @@ mod tests {
 
     // The next test is for receiving a second PushPromise when Push is in the Active state.
     #[test]
-    fn multiple_push_promise_2() {
+    fn multiple_push_promise_active() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 5
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 5);
-        // Start a push stream with push_id 5.
         send_push_data_and_exchange_packets(&mut client, &mut server, 5, true);
 
         // make a second request.
@@ -4328,7 +4316,6 @@ mod tests {
         let out = client.process(None, now());
         let _ = server.conn.process(out.dgram(), now());
 
-        // Send a push promise with push_id 5
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id_2, 5);
 
         read_response_and_push_events(
@@ -4350,12 +4337,12 @@ mod tests {
     }
 
     // The next test is for receiving a second PushPromise when the push is already closed.
+    // PushPromise will be ignored for the push streams that are consumed.
     #[test]
-    fn multiple_push_promise_3() {
+    fn multiple_push_promise_closed() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 5
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 5);
         // Start a push stream with push_id 5.
         send_push_data_and_exchange_packets(&mut client, &mut server, 5, true);
@@ -4377,17 +4364,16 @@ mod tests {
         let out = client.process(None, now());
         let _ = server.conn.process(out.dgram(), now());
 
-        // Send a push promise with push_id 5
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id_2, 5);
 
-        // Check that we do not have a Http3ClientEvent::PushDuplicate.
+        // Check that we do not have a Http3ClientEvent::PushPromise.
         let push_event = |e| matches!(e, Http3ClientEvent::PushPromise{ .. });
         assert!(!client.events().any(push_event));
     }
 
     //  Test that max_push_id is enforced when a push promise frame is received.
     #[test]
-    fn test_client_receive_push_promise_with_push_id_gt_max_push_id() {
+    fn exceed_max_push_id_promise() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
@@ -4399,7 +4385,7 @@ mod tests {
 
     // Test that max_push_id is enforced when a push stream is received.
     #[test]
-    fn test_client_receive_push_stream_with_push_id_gt_max_push_id() {
+    fn exceed_max_push_id_push_stream() {
         // Connect and send a request
         let (mut client, mut server) = connect();
 
@@ -4411,11 +4397,11 @@ mod tests {
 
     // Test that max_push_id is enforced when a cancel push frame is received.
     #[test]
-    fn test_client_receive_cancel_push_with_push_id_gt_max_push_id() {
+    fn exceed_max_push_id_cancel_push() {
         // Connect and send a request
         let (mut client, mut server, _request_stream_id) = connect_and_send_request(true);
 
-        // Send CANCEL_PUSH for push_id 0.
+        // Send CANCEL_PUSH for push_id 6.
         send_cancel_push_and_exchange_packets(&mut client, &mut server, 6);
 
         assert_closed(&client, &Error::HttpId);
@@ -4423,7 +4409,7 @@ mod tests {
 
     // Test that max_push_id is enforced when an app calls cancel_push.
     #[test]
-    fn test_client_call_cancel_push_with_push_id_gt_max_push_id() {
+    fn exceed_max_push_id_cancel_api() {
         // Connect and send a request
         let (mut client, _, _) = connect_and_send_request(true);
 
@@ -4507,7 +4493,7 @@ mod tests {
 
     // Test that 2 push streams with the same push_id are caught.
     #[test]
-    fn test_dup_push_stream_state_only_push_stream() {
+    fn duplicate_push_stream() {
         // Connect and send a request
         let (mut client, mut server, _request_stream_id) = connect_and_send_request(true);
 
@@ -4522,48 +4508,58 @@ mod tests {
 
     // Test that 2 push streams with the same push_id are caught.
     #[test]
-    fn test_dup_push_stream_state_active() {
+    fn duplicate_push_stream_active() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 0
         send_push_promise(&mut server.conn, request_stream_id, 0);
-        // Start a push stream with push_id 0.
         send_push_data_and_exchange_packets(&mut client, &mut server, 0, true);
         // Now the push_stream is in the PushState::Active state
 
-        // send a PUSH_PROMISE frame with the same push_id
         send_push_data_and_exchange_packets(&mut client, &mut server, 0, true);
 
         assert_closed(&client, &Error::HttpId);
     }
 
+    fn assert_stop_sending_event(
+        server: &mut TestServer,
+        push_stream_id: u64,
+        expected_error: u64,
+    ) {
+        assert!(server.conn.events().any(|e| matches!(
+            e,
+            ConnectionEvent::SendStreamStopSending {
+                stream_id,
+                app_error,
+            } if stream_id == push_stream_id && app_error == expected_error
+        )));
+    }
+
     // Test CANCEL_PUSH frame: after cancel push any new PUSH_PROMISE or push stream will be ignored.
     #[test]
-    fn cancel_push_frame_before_push_promise_and_push_stream() {
+    fn cancel_push_ignore_promise() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
         send_cancel_push_and_exchange_packets(&mut client, &mut server, 0);
 
-        // Send a push promise with push_id 0
         send_push_promise(&mut server.conn, request_stream_id, 0);
         // Start a push stream with push_id 0.
         let push_stream_id =
             send_push_data_and_exchange_packets(&mut client, &mut server, 0, false);
 
         // Assert that we do not have any push event.
-        let any_push_event = |e| matches!(e, Http3ClientEvent::PushPromise{..} |Http3ClientEvent::PushHeaderReady{..} | Http3ClientEvent::PushDataReadable{..});
-        assert!(!client.events().any(any_push_event));
+        assert!(!check_push_events(&mut client));
 
         // Check that the push has been closed, e.g. calling cancel_push should return InvalidStreamId.
         assert_eq!(client.cancel_push(0), Err(Error::InvalidStreamId));
 
         // Check that the push has been canceled by the client.
-        assert!(server.conn.events().any(|e| matches!(e, ConnectionEvent::SendStreamStopSending {
-                    stream_id,
-                    app_error} if stream_id== push_stream_id && app_error == Error::HttpRequestCancelled.code()
-                )));
+        assert_stop_sending_event(
+            &mut server,
+            push_stream_id,
+            Error::HttpRequestCancelled.code(),
+        );
 
         assert_eq!(client.state(), Http3State::Connected);
     }
@@ -4571,35 +4567,33 @@ mod tests {
     // Test CANCEL_PUSH frame: after cancel push any already received PUSH_PROMISE or push stream
     // events will be removed.
     #[test]
-    fn cancel_push_frame_after_push_promise_and_push_stream() {
+    fn cancel_push_removes_push_events() {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 0
         send_push_promise(&mut server.conn, request_stream_id, 0);
-        // Start a push stream with push_id 0.
         let push_stream_id =
             send_push_data_and_exchange_packets(&mut client, &mut server, 0, false);
 
         send_cancel_push_and_exchange_packets(&mut client, &mut server, 0);
 
         // Assert that we do not have any push event.
-        let any_push_event = |e| matches!(e, Http3ClientEvent::PushPromise{..} |Http3ClientEvent::PushHeaderReady{..} | Http3ClientEvent::PushDataReadable{..});
-        assert!(!client.events().any(any_push_event));
+        assert!(!check_push_events(&mut client));
 
         // Check that the push has been closed, e.g. calling cancel_push should return InvalidStreamId.
         assert_eq!(client.cancel_push(0), Err(Error::InvalidStreamId));
 
         // Check that the push has been canceled by the client.
-        assert!(server.conn.events().any(|e| matches!(e, ConnectionEvent::SendStreamStopSending {
-                    stream_id,
-                    app_error} if stream_id== push_stream_id && app_error == Error::HttpRequestCancelled.code()
-                )));
+        assert_stop_sending_event(
+            &mut server,
+            push_stream_id,
+            Error::HttpRequestCancelled.code(),
+        );
 
         assert_eq!(client.state(), Http3State::Connected);
     }
 
-    // Test CANCEL_PUSH frame: after cancel push any already received push streamis will be canceled.
+    // Test CANCEL_PUSH frame: after cancel push any already received push stream will be canceled.
     #[test]
     fn cancel_push_frame_after_push_stream() {
         // Connect and send a request
@@ -4612,17 +4606,17 @@ mod tests {
         send_cancel_push_and_exchange_packets(&mut client, &mut server, 0);
 
         // Assert that we do not have any push event.
-        let any_push_event = |e| matches!(e, Http3ClientEvent::PushPromise{..} |Http3ClientEvent::PushHeaderReady{..} | Http3ClientEvent::PushDataReadable{..});
-        assert!(!client.events().any(any_push_event));
+        assert!(!check_push_events(&mut client));
 
         // Check that the push has been closed, e.g. calling cancel_push should return InvalidStreamId.
         assert_eq!(client.cancel_push(0), Err(Error::InvalidStreamId));
 
         // Check that the push has been canceled by the client.
-        assert!(server.conn.events().any(|e| matches!(e, ConnectionEvent::SendStreamStopSending {
-                    stream_id,
-                    app_error} if stream_id== push_stream_id && app_error == Error::HttpRequestCancelled.code()
-                )));
+        assert_stop_sending_event(
+            &mut server,
+            push_stream_id,
+            Error::HttpRequestCancelled.code(),
+        );
 
         assert_eq!(client.state(), Http3State::Connected);
     }
@@ -4633,7 +4627,6 @@ mod tests {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 0
         send_push_promise(&mut server.conn, request_stream_id, 0);
         // Start a push stream with push_id 0.
         let push_stream_id =
@@ -4647,8 +4640,7 @@ mod tests {
         client.process(out, now());
 
         // Assert that we do not have any push event.
-        let any_push_event = |e| matches!(e, Http3ClientEvent::PushPromise{..} |Http3ClientEvent::PushHeaderReady{..} | Http3ClientEvent::PushDataReadable{..});
-        assert!(!client.events().any(any_push_event));
+        assert!(!check_push_events(&mut client));
 
         // Check that the push has been closed, e.g. calling cancel_push should return InvalidStreamId.
         assert_eq!(client.cancel_push(0), Err(Error::InvalidStreamId));
@@ -4673,12 +4665,10 @@ mod tests {
         let out = server.conn.process(None, now()).dgram();
         client.process(out, now());
 
-        // Send a push promise with push_id 0
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 0);
 
         // Assert that we do not have any push event.
-        let any_push_event = |e| matches!(e, Http3ClientEvent::PushPromise{..} |Http3ClientEvent::PushHeaderReady{..} | Http3ClientEvent::PushDataReadable{..});
-        assert!(!client.events().any(any_push_event));
+        assert!(!check_push_events(&mut client));
 
         // Check that the push has been closed, e.g. calling cancel_push should return InvalidStreamId.
         assert_eq!(client.cancel_push(0), Err(Error::InvalidStreamId));
@@ -4692,14 +4682,12 @@ mod tests {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 0
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 0);
 
         assert!(client.cancel_push(0).is_ok());
 
         // Assert that we do not have any push event.
-        let any_push_event = |e| matches!(e, Http3ClientEvent::PushPromise{..} |Http3ClientEvent::PushHeaderReady{..} | Http3ClientEvent::PushDataReadable{..});
-        assert!(!client.events().any(any_push_event));
+        assert!(!check_push_events(&mut client));
 
         // Check that the push has been closed, e.g. calling cancel_push should return InvalidStreamId.
         assert_eq!(client.cancel_push(0), Err(Error::InvalidStreamId));
@@ -4713,7 +4701,6 @@ mod tests {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise with push_id 0
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 0);
         let push_stream_id =
             send_push_data_and_exchange_packets(&mut client, &mut server, 0, false);
@@ -4723,17 +4710,17 @@ mod tests {
         let _ = server.conn.process(out, now());
 
         // Assert that we do not have any push event.
-        let any_push_event = |e| matches!(e, Http3ClientEvent::PushPromise{..} |Http3ClientEvent::PushHeaderReady{..} | Http3ClientEvent::PushDataReadable{..});
-        assert!(!client.events().any(any_push_event));
+        assert!(!check_push_events(&mut client));
 
         // Check that the push has been closed, e.g. calling cancel_push should return InvalidStreamId.
         assert_eq!(client.cancel_push(0), Err(Error::InvalidStreamId));
 
         // Check that the push has been canceled by the client.
-        assert!(server.conn.events().any(|e| matches!(e, ConnectionEvent::SendStreamStopSending {
-                    stream_id,
-                    app_error} if stream_id== push_stream_id && app_error == Error::HttpRequestCancelled.code()
-                )));
+        assert_stop_sending_event(
+            &mut server,
+            push_stream_id,
+            Error::HttpRequestCancelled.code(),
+        );
 
         assert_eq!(client.state(), Http3State::Connected);
     }
@@ -4752,21 +4739,20 @@ mod tests {
         let out = client.process(None, now()).dgram();
         let _ = server.conn.process(out, now());
 
-        // Send a push promise with push_id 0
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 0);
 
         // Assert that we do not have any push event.
-        let any_push_event = |e| matches!(e, Http3ClientEvent::PushPromise{..} |Http3ClientEvent::PushHeaderReady{..} | Http3ClientEvent::PushDataReadable{..});
-        assert!(!client.events().any(any_push_event));
+        assert!(!check_push_events(&mut client));
 
         // Check that the push has been closed, e.g. calling cancel_push should return InvalidStreamId.
         assert_eq!(client.cancel_push(0), Err(Error::InvalidStreamId));
 
         // Check that the push has been canceled by the client.
-        assert!(server.conn.events().any(|e| matches!(e, ConnectionEvent::SendStreamStopSending {
-                    stream_id,
-                    app_error} if stream_id== push_stream_id && app_error == Error::HttpRequestCancelled.code()
-                )));
+        assert_stop_sending_event(
+            &mut server,
+            push_stream_id,
+            Error::HttpRequestCancelled.code(),
+        );
 
         assert_eq!(client.state(), Http3State::Connected);
     }
