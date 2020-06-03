@@ -24,12 +24,12 @@ fn process_server_events(server: &mut Http3Server) {
         {
             assert_eq!(
                 headers,
-                vec![
+                Some(vec![
                     (String::from(":method"), String::from("GET")),
                     (String::from(":scheme"), String::from("https")),
                     (String::from(":authority"), String::from("something.com")),
                     (String::from(":path"), String::from("/"))
-                ]
+                ])
             );
             assert_eq!(fin, true);
             request

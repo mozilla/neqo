@@ -64,7 +64,7 @@ impl From<PacketType> for PNSpace {
 
 #[derive(Debug, Clone)]
 pub struct SentPacket {
-    pub ack_eliciting: bool,
+    ack_eliciting: bool,
     pub time_sent: Instant,
     pub tokens: Vec<RecoveryToken>,
 
@@ -93,6 +93,11 @@ impl SentPacket {
             size,
             in_flight,
         }
+    }
+
+    /// Returns `true` if the packet will elicit an ACK.
+    pub fn ack_eliciting(&self) -> bool {
+        self.ack_eliciting
     }
 
     /// Returns `true` if the packet counts requires congestion control accounting.
@@ -235,7 +240,7 @@ impl ::std::fmt::Display for PacketRange {
 }
 
 /// The ACK delay we use.
-const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
+pub const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
 pub const MAX_UNACKED_PKTS: u64 = 1;
 const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;

@@ -4,10 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use crate::connection::{HandleReadableOutput, Http3Connection, Http3State, Http3Transaction};
+use crate::connection::{HandleReadableOutput, Http3Connection, Http3State};
 use crate::hframe::HFrame;
+use crate::recv_message::RecvMessage;
+use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
-use crate::transaction_server::TransactionServer;
 use crate::{Error, Header, Res};
 use neqo_common::{matches, qdebug, qinfo, qtrace};
 use neqo_qpack::QpackSettings;
@@ -16,7 +17,7 @@ use std::time::Instant;
 
 #[derive(Debug)]
 pub struct Http3ServerHandler {
-    base_handler: Http3Connection<TransactionServer>,
+    base_handler: Http3Connection,
     events: Http3ServerConnEvents,
     needs_processing: bool,
 }
@@ -44,10 +45,10 @@ impl Http3ServerHandler {
         data: &[u8],
     ) -> Res<()> {
         self.base_handler
-            .transactions
+            .send_streams
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
-            .set_response(headers, data);
+            .set_message(headers, Some(data))?;
         self.base_handler
             .insert_streams_have_data_to_send(stream_id);
         Ok(())
@@ -74,12 +75,7 @@ impl Http3ServerHandler {
         }
 
         let res = self.check_connection_events(conn, now);
-        if !self.check_result(conn, now, &res)
-            && matches!(
-                self.base_handler.state(),
-                Http3State::Connected | Http3State::GoingAway(..)
-            )
-        {
+        if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
             let res = self.base_handler.process_sending(conn);
             self.check_result(conn, now, &res);
         }
@@ -104,15 +100,19 @@ impl Http3ServerHandler {
     fn check_result<ERR>(&mut self, conn: &mut Connection, now: Instant, res: &Res<ERR>) -> bool {
         match &res {
             Err(e) => {
-                qinfo!([self], "Connection error: {}.", e);
-                conn.close(now, e.code(), &format!("{}", e));
-                self.base_handler.close(e.code());
-                self.events
-                    .connection_state_change(self.base_handler.state());
+                self.close(conn, now, e);
                 true
             }
             _ => false,
         }
+    }
+
+    fn close(&mut self, conn: &mut Connection, now: Instant, err: &Error) {
+        qinfo!([self], "Connection error: {}.", err);
+        conn.close(now, err.code(), &format!("{}", err));
+        self.base_handler.close(err.code());
+        self.events
+            .connection_state_change(self.base_handler.state());
     }
 
     // If this return an error the connection must be closed.
@@ -125,9 +125,10 @@ impl Http3ServerHandler {
                     stream_id,
                     stream_type,
                 } => match stream_type {
-                    StreamType::BiDi => self.base_handler.add_transaction(
+                    StreamType::BiDi => self.base_handler.add_streams(
                         stream_id,
-                        TransactionServer::new(stream_id, self.events.clone()),
+                        SendMessage::new(stream_id, Box::new(self.events.clone())),
+                        RecvMessage::new(stream_id, Box::new(self.events.clone()), None),
                     ),
                     StreamType::UniDi => {
                         if self.base_handler.handle_new_unidi_stream(conn, stream_id)? {
@@ -199,17 +200,54 @@ impl Http3ServerHandler {
         stop_stream_id: u64,
         app_err: AppError,
     ) -> Res<()> {
-        if let Some(t) = self.base_handler.transactions.get_mut(&stop_stream_id) {
-            // close sending side.
-            t.stop_sending();
+        if self
+            .base_handler
+            .send_streams
+            .remove(&stop_stream_id)
+            .is_some()
+        {
             // receiving side may be closed already, just ignore an error in the following line.
             let _ = conn.stream_stop_sending(stop_stream_id, app_err);
-            t.reset_receiving_side();
-            self.base_handler.transactions.remove(&stop_stream_id);
+            self.base_handler.recv_streams.remove(&stop_stream_id);
         } else if self.base_handler.is_critical_stream(stop_stream_id) {
             return Err(Error::HttpClosedCriticalStream);
         }
 
         Ok(())
+    }
+
+    /// Response data are read directly into a buffer supplied as a parameter of this function to avoid copying
+    /// data.
+    /// # Errors
+    /// It returns an error if a stream does not exist or an error happen while reading a stream, e.g.
+    /// early close, protocol error, etc.
+    pub fn read_request_data(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+        stream_id: u64,
+        buf: &mut [u8],
+    ) -> Res<(usize, bool)> {
+        qinfo!([self], "read_data from stream {}.", stream_id);
+        match self.base_handler.recv_streams.get_mut(&stream_id) {
+            None => {
+                self.close(conn, now, &Error::Internal);
+                Err(Error::Internal)
+            }
+            Some(recv_stream) => {
+                match recv_stream.read_data(conn, &mut self.base_handler.qpack_decoder, buf) {
+                    Ok((amount, fin)) => {
+                        if recv_stream.done() {
+                            self.base_handler.recv_streams.remove(&stream_id);
+                        }
+                        Ok((amount, fin))
+                    }
+                    Err(e) => {
+                        self.close(conn, now, &e);
+                        Err(e)
+                    }
+                }
+            }
+        }
     }
 }

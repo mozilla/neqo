@@ -214,9 +214,14 @@ impl QPackEncoder {
     /// blocked by the flow control (or stream internal buffer(this is very unlikely)).
     /// ### Errors
     /// `EncoderStreamBlocked` if the encoder stream is blocked by the flow control.
-    /// The function can return transport errors.
     /// `DynamicTableFull` if the dynamic table does not have enough space for the entry.
-    pub fn insert(&mut self, conn: &mut Connection, name: &[u8], value: &[u8]) -> Res<u64> {
+    /// The function can return transport errors: `InvalidStreamId`, `InvalidInput` and `FinalSizeError`.
+    pub fn send_and_insert(
+        &mut self,
+        conn: &mut Connection,
+        name: &[u8],
+        value: &[u8],
+    ) -> Res<u64> {
         qdebug!([self], "insert {:?} {:?}.", name, value);
         self.send(conn)?;
         if self.send_buf.len() != 0 {
@@ -238,13 +243,9 @@ impl QPackEncoder {
 
         let stream_id = self.local_stream_id.ok_or(Error::Internal)?;
 
-        let amount = conn.stream_send_atomic(stream_id, &buf)?;
-        if amount == 0 {
+        let sent = conn.stream_send_atomic(stream_id, &buf)?;
+        if !sent {
             return Err(Error::EncoderStreamBlocked);
-        }
-        if amount < buf.len() {
-            debug_assert!(false);
-            return Err(Error::Internal);
         }
 
         match self.table.insert(name, value) {
@@ -346,7 +347,7 @@ impl QPackEncoder {
             } else if can_block & !encoder_blocked {
                 // Insert using an InsertWithNameLiteral instruction. This entry name does not match any name in the
                 // tables therefore we cannot use any other instruction.
-                match self.insert(conn, &name, &value) {
+                match self.send_and_insert(conn, &name, &value) {
                     Ok(index) => {
                         encoded_h.encode_indexed_dynamic(index);
                         ref_entries.insert(index);
@@ -357,7 +358,12 @@ impl QPackEncoder {
                         encoder_blocked = true;
                         encoded_h.encode_literal_with_name_literal(&name, &value)
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        // These errors should never happen:
+                        // `Internal`, `InvalidStreamId`, `InvalidInput`, `FinalSizeError`
+                        debug_assert!(false, "Unexpected error: {:?}", e);
+                        return Err(e);
+                    }
                 }
             } else {
                 encoded_h.encode_literal_with_name_literal(&name, &value);
@@ -566,9 +572,10 @@ mod tests {
         let mut encoder = connect(false);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
         assert_eq!(Error::DynamicTableFull, res.unwrap_err());
         send_instructions(&mut encoder, &[0x02]);
     }
@@ -583,9 +590,10 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_200);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
     }
@@ -765,16 +773,18 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_60);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // insert "content-length: 12345 which will fail because the ntry in the table cannot be evicted.
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
         assert!(res.is_err());
         send_instructions(&mut encoder, &[]);
 
@@ -782,9 +792,10 @@ mod tests {
         recv_instruction(&mut encoder, &[0x01]);
 
         // insert "content-length: 12345 again it will succeed.
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
     }
@@ -801,9 +812,10 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_60);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
@@ -823,9 +835,10 @@ mod tests {
         send_instructions(&mut encoder, &[]);
 
         // insert "content-length: 12345 which will fail because the entry in the table cannot be evicted
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
         assert!(res.is_err());
         send_instructions(&mut encoder, &[]);
 
@@ -838,9 +851,10 @@ mod tests {
         }
 
         // insert "content-length: 12345 again it will succeed.
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
     }
@@ -881,9 +895,10 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_60);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -944,17 +959,19 @@ mod tests {
         send_instructions(&mut encoder, CAP_INSTRUCTION_200);
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // insert "content-length: 12345
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_2);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
@@ -1299,9 +1316,10 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1345,9 +1363,10 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1391,9 +1410,10 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1420,9 +1440,10 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(2).unwrap();
 
         // insert "content-length: 1234
-        let res = encoder
-            .encoder
-            .insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
+        let res =
+            encoder
+                .encoder
+                .send_and_insert(&mut encoder.conn, HEADER_CONTENT_LENGTH, VALUE_1);
 
         assert!(res.is_ok());
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
@@ -1552,7 +1573,7 @@ mod tests {
 
         encoder
             .encoder
-            .insert(&mut encoder.conn, b"something5", b"1234")
+            .send_and_insert(&mut encoder.conn, b"something5", b"1234")
             .unwrap();
 
         encoder.encoder.send(&mut encoder.conn).unwrap();

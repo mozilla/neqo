@@ -96,7 +96,7 @@ macro_rules! preinfo_arg {
         pub fn $v(&self) -> Option<$t> {
             match self.info.valuesSet & ssl::$m {
                 0 => None,
-                _ => Some(self.info.$f as $t),
+                _ => Some($t::from(self.info.$f)),
             }
         }
     };
@@ -222,9 +222,6 @@ pub struct SecretAgent {
 
     extension_handlers: Vec<ExtensionTracker>,
     inf: Option<SecretAgentInfo>,
-
-    /// Whether or not EndOfEarlyData should be suppressed.
-    no_eoed: bool,
 }
 
 impl SecretAgent {
@@ -244,8 +241,6 @@ impl SecretAgent {
 
             extension_handlers: Vec::new(),
             inf: None,
-
-            no_eoed: false,
         })
     }
 
@@ -351,10 +346,7 @@ impl SecretAgent {
     /// # Errors
     /// If the range of versions isn't supported.
     pub fn set_version_range(&mut self, min: Version, max: Version) -> Res<()> {
-        let range = ssl::SSLVersionRange {
-            min: min as ssl::PRUint16,
-            max: max as ssl::PRUint16,
-        };
+        let range = ssl::SSLVersionRange { min, max };
         secstatus_to_res(unsafe { ssl::SSL_VersionRangeSet(self.fd, &range) })
     }
 
@@ -363,18 +355,23 @@ impl SecretAgent {
     /// # Errors
     /// If NSS can't enable or disable ciphers.
     pub fn enable_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
+        if self.state != HandshakeState::New {
+            qwarn!([self], "Cannot enable ciphers in state {:?}", self.state);
+            return Err(Error::InternalError);
+        }
+
         let all_ciphers = unsafe { ssl::SSL_GetImplementedCiphers() };
-        let cipher_count = unsafe { ssl::SSL_GetNumImplementedCiphers() } as usize;
+        let cipher_count = usize::from(unsafe { ssl::SSL_GetNumImplementedCiphers() });
         for i in 0..cipher_count {
             let p = all_ciphers.wrapping_add(i);
             secstatus_to_res(unsafe {
-                ssl::SSL_CipherPrefSet(self.fd, i32::from(*p), false as ssl::PRBool)
+                ssl::SSL_CipherPrefSet(self.fd, i32::from(*p), ssl::PRBool::from(false))
             })?;
         }
 
         for c in ciphers {
             secstatus_to_res(unsafe {
-                ssl::SSL_CipherPrefSet(self.fd, i32::from(*c), true as ssl::PRBool)
+                ssl::SSL_CipherPrefSet(self.fd, i32::from(*c), ssl::PRBool::from(true))
             })?;
         }
         Ok(())
@@ -414,8 +411,11 @@ impl SecretAgent {
     }
 
     /// Disable the `EndOfEarlyData` message.
-    pub fn disable_end_of_early_data(&mut self) {
-        self.no_eoed = true;
+    ///
+    /// # Errors
+    /// See `set_option`.
+    pub fn disable_end_of_early_data(&mut self) -> Res<()> {
+        self.set_option(ssl::Opt::SuppressEndOfEarlyData, true)
     }
 
     /// `set_alpn` sets a list of preferred protocols, starting with the most preferred.
@@ -602,28 +602,6 @@ impl SecretAgent {
         self.capture_error(RecordList::setup(self.fd))
     }
 
-    fn inject_eoed(&mut self) -> Res<()> {
-        // EndOfEarlyData is as follows:
-        // struct {
-        //    HandshakeType msg_type = end_of_early_data(5);
-        //    uint24 length = 0;
-        // };
-        const END_OF_EARLY_DATA: &[u8] = &[5, 0, 0, 0];
-
-        if self.no_eoed {
-            let mut read_epoch: u16 = 0;
-            unsafe { ssl::SSL_GetCurrentEpoch(self.fd, &mut read_epoch, null_mut()) }?;
-            if read_epoch == 1 {
-                // It's waiting for EndOfEarlyData, so feed one in.
-                // Note that this is the test that ensures that we only do this for the server.
-                let eoed = Record::new(1, 22, END_OF_EARLY_DATA);
-                self.capture_error(eoed.write(self.fd))?;
-                self.no_eoed = false;
-            }
-        }
-        Ok(())
-    }
-
     /// Drive the TLS handshake, but get the raw content of records, not
     /// protected records as bytes. This function is incompatible with
     /// `handshake()`; use either this or `handshake()` exclusively.
@@ -635,7 +613,7 @@ impl SecretAgent {
     /// When the handshake fails this returns an error.
     pub fn handshake_raw(&mut self, now: Instant, input: Option<Record>) -> Res<RecordList> {
         self.now.set(now)?;
-        let mut records = self.setup_raw()?;
+        let records = self.setup_raw()?;
 
         // Fire off any authentication we might need to complete.
         if let HandshakeState::Authenticated(ref err) = self.state {
@@ -648,19 +626,12 @@ impl SecretAgent {
 
         // Feed in any records.
         if let Some(rec) = input {
-            if rec.epoch == 2 {
-                self.inject_eoed()?;
-            }
             self.capture_error(rec.write(self.fd))?;
         }
 
         // Drive the handshake once more.
         let rv = secstatus_to_res(unsafe { ssl::SSL_ForceHandshake(self.fd) });
         self.update_state(rv)?;
-
-        if self.no_eoed {
-            records.remove_eoed();
-        }
 
         Ok(*Pin::into_inner(records))
     }

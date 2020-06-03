@@ -23,7 +23,7 @@ use structopt::StructOpt;
 
 use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_http3::{Http3Server, Http3ServerEvent};
+use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{FixedConnectionIdManager, Output};
 
@@ -36,16 +36,31 @@ struct Args {
     #[structopt(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[structopt(name = "encoder-table-size", short = "e", long, default_value = "128")]
+    #[structopt(
+        name = "encoder-table-size",
+        short = "e",
+        long,
+        default_value = "16384"
+    )]
     max_table_size_encoder: u64,
 
-    #[structopt(name = "decoder-table-size", short = "d", long, default_value = "128")]
+    #[structopt(
+        name = "decoder-table-size",
+        short = "f",
+        long,
+        default_value = "16384"
+    )]
     max_table_size_decoder: u64,
 
-    #[structopt(short = "b", long, default_value = "128")]
+    #[structopt(short = "b", long, default_value = "10")]
     max_blocked_streams: u16,
 
-    #[structopt(short = "d", long, default_value = "./db", parse(from_os_str))]
+    #[structopt(
+        short = "d",
+        long,
+        default_value = "./test-fixture/db",
+        parse(from_os_str)
+    )]
     /// NSS database directory.
     db: PathBuf,
 
@@ -87,15 +102,21 @@ fn process_events(server: &mut Http3Server) {
 
                 let default_ret = b"Hello World".to_vec();
 
-                let response = match headers.iter().find(|&(k, _)| k == ":path") {
-                    Some((_, path)) if !path.is_empty() => {
+                let response = headers.and_then(|h| {
+                    h.iter().find(|&(k, _)| k == ":path").and_then(|(_, path)| {
                         match path.trim_matches(|p| p == '/').parse::<usize>() {
-                            Ok(v) => vec![b'a'; v],
-                            Err(_) => default_ret,
+                            Ok(v) => Some(vec![b'a'; v]),
+                            Err(_) => Some(default_ret),
                         }
-                    }
-                    _ => default_ret,
-                };
+                    })
+                });
+
+                if response.is_none() {
+                    let _ = request.stream_reset(Error::HttpRequestIncomplete.code());
+                    continue;
+                }
+
+                let response = response.unwrap();
 
                 request
                     .set_response(

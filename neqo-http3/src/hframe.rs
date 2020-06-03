@@ -23,7 +23,6 @@ const H3_FRAME_TYPE_SETTINGS: HFrameType = 0x4;
 const H3_FRAME_TYPE_PUSH_PROMISE: HFrameType = 0x5;
 const H3_FRAME_TYPE_GOAWAY: HFrameType = 0x7;
 const H3_FRAME_TYPE_MAX_PUSH_ID: HFrameType = 0xd;
-const H3_FRAME_TYPE_DUPLICATE_PUSH: HFrameType = 0xe;
 
 // data for DATA frame is not read into HFrame::Data.
 #[derive(PartialEq, Debug)]
@@ -50,9 +49,6 @@ pub(crate) enum HFrame {
     MaxPushId {
         push_id: u64,
     },
-    DuplicatePush {
-        push_id: u64,
-    },
 }
 
 impl HFrame {
@@ -65,7 +61,6 @@ impl HFrame {
             Self::PushPromise { .. } => H3_FRAME_TYPE_PUSH_PROMISE,
             Self::Goaway { .. } => H3_FRAME_TYPE_GOAWAY,
             Self::MaxPushId { .. } => H3_FRAME_TYPE_MAX_PUSH_ID,
-            Self::DuplicatePush { .. } => H3_FRAME_TYPE_DUPLICATE_PUSH,
         }
     }
 
@@ -102,11 +97,6 @@ impl HFrame {
                 });
             }
             Self::MaxPushId { push_id } => {
-                enc.encode_vvec_with(|enc_inner| {
-                    enc_inner.encode_varint(*push_id);
-                });
-            }
-            Self::DuplicatePush { push_id } => {
                 enc.encode_vvec_with(|enc_inner| {
                     enc_inner.encode_varint(*push_id);
                 });
@@ -230,7 +220,6 @@ impl HFrameReader {
                                 | H3_FRAME_TYPE_SETTINGS
                                 | H3_FRAME_TYPE_GOAWAY
                                 | H3_FRAME_TYPE_MAX_PUSH_ID
-                                | H3_FRAME_TYPE_DUPLICATE_PUSH
                                 | H3_FRAME_TYPE_PUSH_PROMISE
                                 | H3_FRAME_TYPE_HEADERS => {
                                     if len == 0 {
@@ -357,12 +346,6 @@ impl HFrameReader {
                     _ => return Err(Error::NotEnoughData),
                 },
             },
-            H3_FRAME_TYPE_DUPLICATE_PUSH => HFrame::DuplicatePush {
-                push_id: match dec.decode_varint() {
-                    Some(v) => v,
-                    _ => return Err(Error::NotEnoughData),
-                },
-            },
             _ => panic!("We should not be in state Done with unknown frame type!"),
         };
         self.reset();
@@ -480,12 +463,6 @@ mod tests {
     fn test_max_push_id_frame4() {
         let f = HFrame::MaxPushId { push_id: 5 };
         enc_dec(&f, "0d0105", 0);
-    }
-
-    #[test]
-    fn test_duplicate_push_frame4() {
-        let f = HFrame::DuplicatePush { push_id: 5 };
-        enc_dec(&f, "0e0105", 0);
     }
 
     // We have 2 code paths in frame_reader:
@@ -981,13 +958,6 @@ mod tests {
 
         // H3_FRAME_TYPE_MAX_PUSH_ID
         let f = HFrame::MaxPushId { push_id: 5 };
-        let mut enc = Encoder::default();
-        f.encode(&mut enc);
-        let buf: Vec<_> = enc.into();
-        test_complete_and_incomplete_frame(&buf, buf.len());
-
-        // H3_FRAME_TYPE_DUPLICATE_PUSH
-        let f = HFrame::DuplicatePush { push_id: 5 };
         let mut enc = Encoder::default();
         f.encode(&mut enc);
         let buf: Vec<_> = enc.into();

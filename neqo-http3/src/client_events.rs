@@ -7,6 +7,8 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::connection::Http3State;
+use crate::recv_message::RecvMessageEvents;
+use crate::send_message::SendMessageEvents;
 use crate::Header;
 use neqo_common::matches;
 use neqo_transport::{AppError, StreamType};
@@ -50,9 +52,9 @@ pub struct Http3ClientEvents {
     events: Rc<RefCell<VecDeque<Http3ClientEvent>>>,
 }
 
-impl Http3ClientEvents {
+impl RecvMessageEvents for Http3ClientEvents {
     /// Add a new `HeaderReady` event.
-    pub(crate) fn header_ready(&self, stream_id: u64, headers: Option<Vec<Header>>, fin: bool) {
+    fn header_ready(&self, stream_id: u64, headers: Option<Vec<Header>>, fin: bool) {
         self.insert(Http3ClientEvent::HeaderReady {
             stream_id,
             headers,
@@ -60,16 +62,20 @@ impl Http3ClientEvents {
         });
     }
 
-    /// Add a new `DataWritable` event.
-    pub(crate) fn data_writable(&self, stream_id: u64) {
-        self.insert(Http3ClientEvent::DataWritable { stream_id });
-    }
-
     /// Add a new `DataReadable` event
-    pub(crate) fn data_readable(&self, stream_id: u64) {
+    fn data_readable(&self, stream_id: u64) {
         self.insert(Http3ClientEvent::DataReadable { stream_id });
     }
+}
 
+impl SendMessageEvents for Http3ClientEvents {
+    /// Add a new `DataWritable` event.
+    fn data_writable(&self, stream_id: u64) {
+        self.insert(Http3ClientEvent::DataWritable { stream_id });
+    }
+}
+
+impl Http3ClientEvents {
     /// Add a new `StopSending` event
     pub(crate) fn stop_sending(&self, stream_id: u64, error: AppError) {
         // Remove DataWritable event if any.

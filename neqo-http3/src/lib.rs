@@ -15,15 +15,14 @@ mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod hframe;
-mod response_stream;
+mod push_controller;
+mod recv_message;
+mod send_message;
 pub mod server;
 mod server_connection_events;
 mod server_events;
 mod settings;
 mod stream_type_reader;
-mod transaction_client;
-pub mod transaction_server;
-//pub mod server;
 
 use neqo_qpack::Error as QpackError;
 pub use neqo_transport::Output;
@@ -35,7 +34,6 @@ pub use connection_client::Http3Client;
 pub use neqo_qpack::Header;
 pub use server::Http3Server;
 pub use server_events::Http3ServerEvent;
-pub use transaction_server::TransactionServer;
 
 type Res<T> = Result<T, Error>;
 
@@ -61,8 +59,10 @@ pub enum Error {
 
     // Internal errors from here.
     AlreadyClosed,
+    AlreadyInitialized,
     DecodingFrame,
     HttpGoaway,
+    Internal,
     InvalidResumptionToken,
     InvalidStreamId,
     InvalidState,
