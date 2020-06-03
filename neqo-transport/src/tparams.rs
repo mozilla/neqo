@@ -30,7 +30,7 @@ tpids! {
     ORIGINAL_CONNECTION_ID = 0,
     IDLE_TIMEOUT = 1,
     STATELESS_RESET_TOKEN = 2,
-    MAX_PACKET_SIZE = 3,
+    MAX_UDP_PAYLOAD_SIZE = 3,
     INITIAL_MAX_DATA = 4,
     INITIAL_MAX_STREAM_DATA_BIDI_LOCAL = 5,
     INITIAL_MAX_STREAM_DATA_BIDI_REMOTE = 6,
@@ -103,7 +103,7 @@ impl TransportParameter {
                 _ => return Err(Error::StreamLimitError),
             },
 
-            MAX_PACKET_SIZE => match d.decode_varint() {
+            MAX_UDP_PAYLOAD_SIZE => match d.decode_varint() {
                 Some(v) if v >= 1200 => Self::Integer(v),
                 _ => return Err(Error::TransportParameterError),
             },
@@ -175,7 +175,7 @@ impl TransportParameters {
             | INITIAL_MAX_STREAM_DATA_UNI
             | INITIAL_MAX_STREAMS_BIDI
             | INITIAL_MAX_STREAMS_UNI => 0,
-            MAX_PACKET_SIZE => 65527,
+            MAX_UDP_PAYLOAD_SIZE => 65527,
             ACK_DELAY_EXPONENT => 3,
             MAX_ACK_DELAY => 25,
             _ => panic!("Transport parameter not known or not an Integer"),
@@ -197,7 +197,7 @@ impl TransportParameters {
             | INITIAL_MAX_STREAM_DATA_UNI
             | INITIAL_MAX_STREAMS_BIDI
             | INITIAL_MAX_STREAMS_UNI
-            | MAX_PACKET_SIZE
+            | MAX_UDP_PAYLOAD_SIZE
             | ACK_DELAY_EXPONENT
             | MAX_ACK_DELAY => {
                 self.set(tp, TransportParameter::Integer(value));
@@ -454,7 +454,7 @@ mod tests {
             INITIAL_MAX_STREAM_DATA_UNI,
             INITIAL_MAX_STREAMS_BIDI,
             INITIAL_MAX_STREAMS_UNI,
-            MAX_PACKET_SIZE,
+            MAX_UDP_PAYLOAD_SIZE,
         ];
         for i in INTEGER_KEYS {
             tps_a.set(*i, TransportParameter::Integer(12));
