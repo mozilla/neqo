@@ -147,7 +147,7 @@ impl ZeroRttChecker for HttpZeroRttChecker {
     fn check(&self, token: &[u8]) -> ZeroRttCheckResult {
         let mut dec = Decoder::from(token);
 
-        // Read and checm the version.
+        // Read and check the version.
         if let Some(version) = dec.decode_varint() {
             if version != SETTINGS_ZERO_RTT_VERSION {
                 return ZeroRttCheckResult::Reject;
