@@ -19,8 +19,8 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, StreamId, StreamType,
-    ZeroRttState,
+    AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, QuicVersion, StreamId,
+    StreamType, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -69,9 +69,17 @@ impl Http3Client {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         qpack_settings: QpackSettings,
+        quic_ver: QuicVersion,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
-            Connection::new_client(server_name, protocols, cid_manager, local_addr, remote_addr)?,
+            Connection::new_client(
+                server_name,
+                protocols,
+                cid_manager,
+                local_addr,
+                remote_addr,
+                quic_ver,
+            )?,
             qpack_settings,
         ))
     }
@@ -595,7 +603,9 @@ mod tests {
     use neqo_common::{matches, Encoder};
     use neqo_crypto::AntiReplay;
     use neqo_qpack::encoder::QPackEncoder;
-    use neqo_transport::{CloseError, ConnectionEvent, FixedConnectionIdManager, State};
+    use neqo_transport::{
+        CloseError, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State,
+    };
     use test_fixture::{
         default_server, fixture_init, loopback, now, DEFAULT_ALPN, DEFAULT_SERVER_NAME,
     };
@@ -623,6 +633,7 @@ mod tests {
                 max_table_size_decoder: 100,
                 max_blocked_streams: 100,
             },
+            QuicVersion::Draft28,
         )
         .expect("create a default client")
     }
@@ -2972,6 +2983,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+            QuicVersion::Draft28,
         )
         .unwrap();
 
