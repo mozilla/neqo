@@ -9,7 +9,7 @@
 
 use neqo_common::Datagram;
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
+use neqo_transport::{Connection, ConnectionEvent, DraftVersion, FixedConnectionIdManager, State};
 use regex::Regex;
 
 use std::cell::RefCell;
@@ -45,7 +45,7 @@ struct Args {
     /// Name of keys from NSS database.
     key: Vec<String>,
 
-    #[structopt(short = "a", long, default_value = "hq-27")]
+    #[structopt(short = "a", long, default_value = "hq-28")]
     /// ALPN labels to negotiate.
     ///
     /// This server still only does HTTP/0.9 no matter what the ALPN says.
@@ -162,6 +162,7 @@ fn main() {
                 &args.alpn,
                 &anti_replay,
                 Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+                DraftVersion::Draft28,
             )
             .expect("can't create connection")
         });

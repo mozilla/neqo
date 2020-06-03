@@ -31,7 +31,9 @@ pub mod tparams;
 mod tracking;
 
 pub use self::cid::{ConnectionId, ConnectionIdManager};
-pub use self::connection::{Connection, FixedConnectionIdManager, Output, State, ZeroRttState};
+pub use self::connection::{
+    Connection, DraftVersion, FixedConnectionIdManager, Output, State, ZeroRttState,
+};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
@@ -39,7 +41,9 @@ pub use self::stream_id::StreamId;
 
 /// The supported version of the QUIC protocol.
 pub type Version = u32;
-pub const QUIC_VERSION: Version = 0xff00_0000 + 27;
+
+/// Supporting more than one version, it's helpful to have a default.
+pub const DEFAULT_QUIC_VERSION: Version = 0xff00_0000 + 28;
 
 const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30); // 30 second
 
@@ -95,6 +99,7 @@ pub enum Error {
     VersionNegotiation,
     WrongRole,
     KeysDiscarded,
+    NoValidProtocolVersion,
 }
 
 impl Error {

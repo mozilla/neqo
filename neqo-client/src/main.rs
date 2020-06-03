@@ -13,7 +13,7 @@ use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{init, AuthenticationStatus, Cipher, TLS_CHACHA20_POLY1305_SHA256};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_qpack::QpackSettings;
-use neqo_transport::FixedConnectionIdManager;
+use neqo_transport::{DraftVersion, FixedConnectionIdManager};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -62,7 +62,7 @@ type Res<T> = Result<T, ClientError>;
     about = "A basic QUIC HTTP/0.9 and HTTP3 client."
 )]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3-27")]
+    #[structopt(short = "a", long, default_value = "h3-28")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP3 no matter what the ALPN says.
@@ -365,6 +365,7 @@ fn client(
             max_table_size_decoder: args.max_table_size_decoder,
             max_blocked_streams: args.max_blocked_streams,
         },
+        DraftVersion::Draft28,
     )
     .expect("must succeed");
     client.set_qlog(qlog_new(args, origin)?);
@@ -597,7 +598,8 @@ mod old {
     use neqo_common::{matches, Datagram};
     use neqo_crypto::{AuthenticationStatus, Cipher};
     use neqo_transport::{
-        Connection, ConnectionEvent, FixedConnectionIdManager, Output, State, StreamType,
+        Connection, ConnectionEvent, DraftVersion, FixedConnectionIdManager, Output, State,
+        StreamType,
     };
 
     use super::{emit_datagram, get_output_file, Args};
@@ -761,10 +763,11 @@ mod old {
 
         let mut client = Connection::new_client(
             origin,
-            &["hq-27"],
+            &["hq-28"],
             Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
             local_addr,
             remote_addr,
+            DraftVersion::Draft28,
         )
         .expect("must succeed");
 

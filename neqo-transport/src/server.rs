@@ -19,7 +19,7 @@ use neqo_crypto::{
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
 use crate::connection::{Connection, Output, State};
 use crate::packet::{PacketBuilder, PacketType, PublicPacket};
-use crate::Res;
+use crate::{DraftVersion, Res, Version};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -324,13 +324,14 @@ impl Server {
         token: Vec<u8>,
         dgram: Datagram,
         now: Instant,
+        quic_version: Version,
     ) -> Option<Datagram> {
         qdebug!([self], "Handle initial packet");
         match self.retry.validate(&token, dgram.source(), now) {
             RetryTokenResult::Invalid => None,
-            RetryTokenResult::Pass => self.connection_attempt(dcid, None, dgram, now),
+            RetryTokenResult::Pass => self.connection_attempt(dcid, None, dgram, now, quic_version),
             RetryTokenResult::Valid(orig_dcid) => {
-                self.connection_attempt(dcid, Some(orig_dcid), dgram, now)
+                self.connection_attempt(dcid, Some(orig_dcid), dgram, now, quic_version)
             }
             RetryTokenResult::Validate => {
                 qinfo!([self], "Send retry for {:?}", dcid);
@@ -343,7 +344,7 @@ impl Server {
                     return None;
                 };
                 let new_dcid = self.cid_manager.borrow_mut().generate_cid();
-                let packet = PacketBuilder::retry(&scid, &new_dcid, &token, &dcid);
+                let packet = PacketBuilder::retry(&scid, &new_dcid, &token, &dcid, quic_version);
                 if let Ok(p) = packet {
                     let retry = Datagram::new(dgram.destination(), dgram.source(), p);
                     Some(retry)
@@ -361,6 +362,7 @@ impl Server {
         orig_dcid: Option<ConnectionId>,
         dgram: Datagram,
         now: Instant,
+        quic_version: Version,
     ) -> Option<Datagram> {
         let attempt_key = AttemptKey {
             remote_address: dgram.source(),
@@ -375,7 +377,7 @@ impl Server {
             let c = Rc::clone(c);
             self.process_connection(c, Some(dgram), now)
         } else {
-            self.accept_connection(attempt_key, orig_dcid, dgram, now)
+            self.accept_connection(attempt_key, orig_dcid, dgram, now, quic_version)
         }
     }
 
@@ -435,6 +437,7 @@ impl Server {
         orig_dcid: Option<ConnectionId>,
         dgram: Datagram,
         now: Instant,
+        quic_version: Version,
     ) -> Option<Datagram> {
         qinfo!([self], "Accept connection {:?}", attempt_key);
         // The internal connection ID manager that we use is not used directly.
@@ -445,16 +448,23 @@ impl Server {
             connections: self.connections.clone(),
         }));
 
+        let draft_version = if quic_version == 0xff00_0000 + 27 {
+            DraftVersion::Draft27
+        } else {
+            DraftVersion::Draft28
+        };
+
         let sconn = Connection::new_server(
             &self.certs,
             &self.protocols,
             &self.anti_replay,
             cid_mgr.clone(),
+            draft_version,
         );
 
         if let Ok(mut c) = sconn {
             if let Some(odcid) = orig_dcid {
-                c.original_connection_id(&odcid);
+                c.set_original_connection_id(&odcid);
             }
             c.set_qlog(self.create_qlog_trace(&attempt_key));
             let c = Rc::new(RefCell::new(ServerConnectionState {
@@ -507,7 +517,8 @@ impl Server {
                 let dcid = ConnectionId::from(packet.dcid());
                 let scid = ConnectionId::from(packet.scid());
                 let token = packet.token().to_vec();
-                self.handle_initial(dcid, scid, token, dgram, now)
+                let quic_version = packet.version().expect("Initial must have version field");
+                self.handle_initial(dcid, scid, token, dgram, now, quic_version)
             }
             PacketType::OtherVersion => {
                 let vn = PacketBuilder::version_negotiation(packet.scid(), packet.dcid());

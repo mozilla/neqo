@@ -7,7 +7,7 @@
 use std::convert::TryInto;
 
 use neqo_common::Decoder;
-use neqo_transport::{Version, QUIC_VERSION};
+use neqo_transport::{Version, DEFAULT_QUIC_VERSION};
 
 // Do a simple decode of the datagram to verify that it is coalesced.
 pub fn assert_coalesced_0rtt(payload: &[u8]) {
@@ -16,7 +16,7 @@ pub fn assert_coalesced_0rtt(payload: &[u8]) {
     let initial_type = dec.decode_byte().unwrap(); // Initial
     assert_eq!(initial_type & 0b1111_0000, 0b1100_0000);
     let version: Version = dec.decode_uint(4).unwrap().try_into().unwrap();
-    assert_eq!(version, QUIC_VERSION);
+    assert_eq!(version, DEFAULT_QUIC_VERSION);
     dec.skip_vec(1); // DCID
     dec.skip_vec(1); // SCID
     dec.skip_vvec();

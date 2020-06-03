@@ -12,8 +12,8 @@ use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output, State,
-    StreamType,
+    Connection, ConnectionError, ConnectionEvent, DraftVersion, Error, FixedConnectionIdManager,
+    Output, State, StreamType,
 };
 
 use std::cell::RefCell;
@@ -399,8 +399,8 @@ enum Test {
 impl Test {
     fn alpn(&self) -> Vec<String> {
         match self {
-            Self::H3 => vec![String::from("h3-27")],
-            _ => vec![String::from("hq-27")],
+            Self::H3 => vec![String::from("h3-28")],
+            _ => vec![String::from("hq-28")],
         }
     }
 
@@ -436,6 +436,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
+        DraftVersion::Draft28,
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -527,10 +528,11 @@ impl Handler for VnHandler {
 fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
     let mut client = Connection::new_client(
         peer.host,
-        &["hq-27"],
+        &["hq-28"],
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
+        DraftVersion::Draft28,
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine

@@ -6,6 +6,8 @@
 
 // The class implementing a QUIC connection.
 
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
@@ -49,7 +51,7 @@ use crate::tparams::{
     self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
 };
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
-use crate::{AppError, ConnectionError, Error, Res, LOCAL_IDLE_TIMEOUT};
+use crate::{AppError, ConnectionError, Error, Res, Version, LOCAL_IDLE_TIMEOUT};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -209,15 +211,11 @@ impl ConnectionIdManager for FixedConnectionIdManager {
 
 struct RetryInfo {
     token: Vec<u8>,
-    odcid: ConnectionId,
 }
 
 impl RetryInfo {
-    fn new(odcid: ConnectionId) -> Self {
-        Self {
-            token: Vec::new(),
-            odcid,
-        }
+    fn new() -> Self {
+        Self { token: Vec::new() }
     }
 }
 
@@ -381,6 +379,35 @@ impl StateSignaling {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum DraftVersion {
+    Unknown,
+    Draft27,
+    Draft28,
+}
+
+impl DraftVersion {
+    pub fn as_u32(&self) -> Version {
+        match self {
+            Self::Unknown => panic!("Cannot encode unknown ProtocolVersion"),
+            Self::Draft27 => 0xff00_0000 + 27,
+            Self::Draft28 => 0xff00_0000 + 28,
+        }
+    }
+}
+
+impl From<Version> for DraftVersion {
+    fn from(ver: Version) -> Self {
+        if ver == 0xff00_0000 + 27 {
+            Self::Draft27
+        } else if ver == 0xff00_0000 + 28 {
+            Self::Draft28
+        } else {
+            Self::Unknown
+        }
+    }
+}
+
 /// A QUIC Connection
 ///
 /// First, create a new connection using `new_client()` or `new_server()`.
@@ -411,6 +438,8 @@ pub struct Connection {
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     valid_cids: Vec<ConnectionId>,
     retry_info: Option<RetryInfo>,
+    odcid: Option<ConnectionId>,
+    rscid: Option<ConnectionId>,
     pub(crate) crypto: Crypto,
     pub(crate) acks: AckTracker,
     idle_timeout: IdleTimeout,
@@ -425,6 +454,9 @@ pub struct Connection {
     token: Option<Vec<u8>>,
     stats: Stats,
     qlog: Option<NeqoQlog>,
+
+    // TODO: Remove once spec is final
+    quic_version: DraftVersion,
 }
 
 impl Debug for Connection {
@@ -445,6 +477,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
+        quic_ver: DraftVersion,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let scid = cid_manager.borrow_mut().generate_cid();
@@ -455,9 +488,15 @@ impl Connection {
             None,
             protocols,
             Some(Path::new(local_addr, remote_addr, scid, dcid.clone())),
-        );
+            quic_ver,
+        )?;
         c.crypto.states.init(Role::Client, &dcid);
-        c.retry_info = Some(RetryInfo::new(dcid));
+        c.retry_info = Some(RetryInfo::new());
+        c.odcid = Some(dcid);
+        c.tps
+            .borrow_mut()
+            .local
+            .set_bytes(tparams::INITIAL_SOURCE_CONNECTION_ID, Vec::new());
         Ok(c)
     }
 
@@ -467,15 +506,17 @@ impl Connection {
         protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
         cid_manager: CidMgr,
+        quic_ver: DraftVersion,
     ) -> Res<Self> {
-        Ok(Self::new(
+        Self::new(
             Role::Server,
             Server::new(certs)?.into(),
             cid_manager,
             Some(anti_replay),
             protocols,
             None,
-        ))
+            quic_ver,
+        )
     }
 
     fn set_tp_defaults(tps: &mut TransportParameters) {
@@ -505,13 +546,14 @@ impl Connection {
         anti_replay: Option<&AntiReplay>,
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
-    ) -> Self {
+        quic_version: DraftVersion,
+    ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
         let crypto = Crypto::new(agent, protocols, tphandler.clone(), anti_replay)
             .expect("TLS should be configured successfully");
 
-        Self {
+        Ok(Self {
             role,
             state: State::Init,
             cid_manager,
@@ -520,6 +562,8 @@ impl Connection {
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
             retry_info: None,
+            odcid: None,
+            rscid: None,
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::default(),
@@ -534,7 +578,8 @@ impl Connection {
             token: None,
             stats: Stats::default(),
             qlog: None,
-        }
+            quic_version,
+        })
     }
 
     /// Get the local path.
@@ -565,7 +610,7 @@ impl Connection {
     }
 
     /// Set the connection ID that was originally chosen by the client.
-    pub(crate) fn original_connection_id(&mut self, odcid: &ConnectionId) {
+    pub(crate) fn set_original_connection_id(&mut self, odcid: &ConnectionId) {
         assert_eq!(self.role, Role::Server);
         self.tps
             .borrow_mut()
@@ -911,7 +956,7 @@ impl Connection {
             self.stats.dropped_rx += 1;
             return Ok(());
         }
-        if !packet.is_valid_retry(&self.retry_info.as_ref().unwrap().odcid) {
+        if !packet.is_valid_retry(&self.odcid.as_ref().unwrap()) {
             qinfo!([self], "Dropping Retry with bad integrity tag");
             self.stats.dropped_rx += 1;
             return Ok(());
@@ -1195,6 +1240,7 @@ impl Connection {
         encoder: Encoder,
         tx: &CryptoDxState,
         retry_info: &Option<RetryInfo>,
+        quic_version: Version,
     ) -> (PacketType, PacketNumber, PacketBuilder) {
         let pt = match space {
             PNSpace::Initial => PacketType::Initial,
@@ -1218,7 +1264,13 @@ impl Connection {
                 path.local_cid(),
             );
 
-            PacketBuilder::long(encoder, pt, path.remote_cid(), path.local_cid())
+            PacketBuilder::long(
+                encoder,
+                pt,
+                path.remote_cid(),
+                path.local_cid(),
+                quic_version,
+            )
         };
         if pt == PacketType::Initial {
             builder.initial_token(if let Some(info) = retry_info {
@@ -1247,7 +1299,14 @@ impl Connection {
                 continue;
             }
 
-            let (_, _, mut builder) = Self::build_packet_header(path, *space, encoder, tx, &None);
+            let (_, _, mut builder) = Self::build_packet_header(
+                path,
+                *space,
+                encoder,
+                tx,
+                &None,
+                self.quic_version.as_u32(),
+            );
             // ConnectionError::Application is only allowed at 1RTT.
             if *space == PNSpace::ApplicationData {
                 frame.marshal(&mut builder);
@@ -1339,8 +1398,14 @@ impl Connection {
             };
 
             let header_start = encoder.len();
-            let (pt, pn, mut builder) =
-                Self::build_packet_header(path, *space, encoder, tx, &self.retry_info);
+            let (pt, pn, mut builder) = Self::build_packet_header(
+                path,
+                *space,
+                encoder,
+                tx,
+                &self.retry_info,
+                self.quic_version.as_u32(),
+            );
             let payload_start = builder.len();
 
             // Work out if we have space left.
@@ -1495,7 +1560,7 @@ impl Connection {
                 let tph = self.tps.borrow();
                 let tp = tph.remote().get_bytes(tparams::ORIGINAL_CONNECTION_ID);
                 if let Some(odcid_tp) = tp {
-                    if odcid_tp[..] == info.odcid[..] {
+                    if self.odcid.as_ref().map(|c| c.as_ref()) == Some((*odcid_tp).into()) {
                         Ok(())
                     } else {
                         Err(Error::InvalidRetry)
@@ -2286,6 +2351,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
+            DraftVersion::Draft28,
         )
         .expect("create a default client")
     }
@@ -2296,6 +2362,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+            DraftVersion::Draft28,
         )
         .expect("create a default server")
     }
@@ -2627,6 +2694,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
             loopback(),
             loopback(),
+            DraftVersion::Draft28,
         )
         .unwrap();
         let mut server = default_server();
@@ -2883,6 +2951,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+            DraftVersion::Draft28,
         )
         .unwrap();
 
@@ -3240,6 +3309,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
+            DraftVersion::Draft28,
         )
         .expect("create a server");
 
