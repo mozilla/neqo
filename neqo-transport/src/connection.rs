@@ -2679,8 +2679,8 @@ mod tests {
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
-        assert!(client.crypto.tls.info().unwrap().resumed());
-        assert!(server.crypto.tls.info().unwrap().resumed());
+        assert!(client.tls_info().unwrap().resumed());
+        assert!(server.tls_info().unwrap().resumed());
     }
 
     #[test]
@@ -2726,8 +2726,8 @@ mod tests {
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
-        assert!(client.crypto.tls.info().unwrap().early_data_accepted());
-        assert!(server.crypto.tls.info().unwrap().early_data_accepted());
+        assert!(client.tls_info().unwrap().early_data_accepted());
+        assert!(server.tls_info().unwrap().early_data_accepted());
     }
 
     #[test]

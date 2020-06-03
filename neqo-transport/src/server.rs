@@ -191,10 +191,14 @@ struct AttemptKey {
     odcid: ConnectionId,
 }
 
+/// A `ServerZeroRttChecker` is a simple wrapper around a single checker.
+/// It uses `RefCell` so that the wrapped checker can be shared between
+/// multiple connections created by the server.
 #[derive(Clone, Debug)]
-pub struct ServerZeroRttChecker {
+struct ServerZeroRttChecker {
     checker: Rc<RefCell<Box<dyn ZeroRttChecker>>>,
 }
+
 impl ServerZeroRttChecker {
     pub fn new(checker: Box<dyn ZeroRttChecker>) -> Self {
         Self {
