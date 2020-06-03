@@ -8,7 +8,7 @@
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN};
 use crate::crypto::{CryptoDxState, CryptoStates};
 use crate::tracking::PNSpace;
-use crate::{Error, Res, Version, QUIC_VERSION};
+use crate::{Error, QuicVersion, Res, DEFAULT_QUIC_VERSION};
 
 use neqo_common::{hex, hex_with_len, qerror, qtrace, Decoder, Encoder};
 use neqo_crypto::{aead::Aead, hkdf, random, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
@@ -37,6 +37,7 @@ const SAMPLE_SIZE: usize = 16;
 const SAMPLE_OFFSET: usize = 4;
 
 pub type PacketNumber = u64;
+pub type Version = u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PacketType {
@@ -133,10 +134,11 @@ impl PacketBuilder {
         pt: PacketType,
         dcid: &ConnectionId,
         scid: &ConnectionId,
+        quic_version: QuicVersion,
     ) -> Self {
         let header_start = encoder.len();
         encoder.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | pt.code() << 4);
-        encoder.encode_uint(4, QUIC_VERSION);
+        encoder.encode_uint(4, quic_version.as_u32());
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
         Self {
@@ -239,7 +241,13 @@ impl PacketBuilder {
     /// As this is a simple packet, this is just an associated function.
     /// As Retry is odd (it has to be constructed with leading bytes),
     /// this returns a Vec<u8> rather than building on an encoder.
-    pub fn retry(dcid: &[u8], scid: &[u8], token: &[u8], odcid: &[u8]) -> Res<Vec<u8>> {
+    pub fn retry(
+        dcid: &[u8],
+        scid: &[u8],
+        token: &[u8],
+        odcid: &[u8],
+        quic_version: QuicVersion,
+    ) -> Res<Vec<u8>> {
         let mut encoder = Encoder::default();
         encoder.encode_vec(1, odcid);
         let start = encoder.len();
@@ -249,7 +257,7 @@ impl PacketBuilder {
                 | (PACKET_TYPE_RETRY << 4)
                 | (random(1)[0] & 0xf),
         );
-        encoder.encode_uint(4, QUIC_VERSION);
+        encoder.encode_uint(4, quic_version.as_u32());
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
         debug_assert_ne!(token.len(), 0);
@@ -277,7 +285,7 @@ impl PacketBuilder {
         encoder.encode(&[0; 4]); // Zero version == VN.
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
-        encoder.encode_uint(4, QUIC_VERSION);
+        encoder.encode_uint(4, DEFAULT_QUIC_VERSION.as_u32());
         // Add a greased version, using the randomness already generated.
         for g in &mut grease[..4] {
             *g = *g & 0xf0 | 0x0a;
@@ -321,6 +329,8 @@ pub struct PublicPacket<'a> {
     token: &'a [u8],
     /// The size of the header, not including the packet number.
     header_len: usize,
+    /// Protocol version, if present in header.
+    quic_version: Option<QuicVersion>,
     /// A reference to the entire packet, including the header.
     data: &'a [u8],
 }
@@ -382,6 +392,7 @@ impl<'a> PublicPacket<'a> {
                         scid: None,
                         token: &[],
                         header_len,
+                        quic_version: None,
                         data,
                     },
                     &[],
@@ -405,6 +416,7 @@ impl<'a> PublicPacket<'a> {
                     scid: Some(scid),
                     token: &[],
                     header_len: decoder.offset(),
+                    quic_version: None,
                     data,
                 },
                 &[],
@@ -412,19 +424,24 @@ impl<'a> PublicPacket<'a> {
         }
 
         // Check that this is a long header from this version.
-        if version != QUIC_VERSION {
-            return Ok((
-                Self {
-                    packet_type: PacketType::OtherVersion,
-                    dcid,
-                    scid: Some(scid),
-                    token: &[],
-                    header_len: decoder.offset(),
-                    data,
-                },
-                &[],
-            ));
-        }
+        let quic_version = match QuicVersion::try_from(version) {
+            Err(_) => {
+                return Ok((
+                    Self {
+                        packet_type: PacketType::OtherVersion,
+                        dcid,
+                        scid: Some(scid),
+                        token: &[],
+                        header_len: decoder.offset(),
+                        quic_version: None,
+                        data,
+                    },
+                    &[],
+                ));
+            }
+            Ok(v) => v,
+        };
+
         if (first & PACKET_BIT_FIXED_QUIC) != PACKET_BIT_FIXED_QUIC {
             return Err(Error::InvalidPacket);
         }
@@ -450,6 +467,7 @@ impl<'a> PublicPacket<'a> {
                 scid: Some(scid),
                 token,
                 header_len,
+                quic_version: Some(quic_version),
                 data,
             },
             remainder,
@@ -507,6 +525,10 @@ impl<'a> PublicPacket<'a> {
 
     pub fn token(&self) -> &'a [u8] {
         self.token
+    }
+
+    pub fn version(&self) -> Option<QuicVersion> {
+        self.quic_version
     }
 
     fn decode_pn(expected: PacketNumber, pn: u64, w: usize) -> PacketNumber {
@@ -678,15 +700,15 @@ mod tests {
         0xda, 0x1a, 0x00, 0x2b, 0x00, 0x02, 0x03, 0x04,
     ];
     const SAMPLE_INITIAL: &[u8] = &[
-        0xc9, 0xff, 0x00, 0x00, 0x1b, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
+        0xc9, 0xff, 0x00, 0x00, 0x1c, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
         0x00, 0x40, 0x74, 0x16, 0x8b, 0xf2, 0x2b, 0x70, 0x02, 0x59, 0x6f, 0x99, 0xae, 0x67, 0xab,
         0xf6, 0x5a, 0x58, 0x52, 0xf5, 0x4f, 0x58, 0xc3, 0x7c, 0x80, 0x86, 0x82, 0xe2, 0xe4, 0x04,
         0x92, 0xd8, 0xa3, 0x89, 0x9f, 0xb0, 0x4f, 0xc0, 0xaf, 0xe9, 0xaa, 0xbc, 0x87, 0x67, 0xb1,
         0x8a, 0x0a, 0xa4, 0x93, 0x53, 0x74, 0x26, 0x37, 0x3b, 0x48, 0xd5, 0x02, 0x21, 0x4d, 0xd8,
         0x56, 0xd6, 0x3b, 0x78, 0xce, 0xe3, 0x7b, 0xc6, 0x64, 0xb3, 0xfe, 0x86, 0xd4, 0x87, 0xac,
         0x7a, 0x77, 0xc5, 0x30, 0x38, 0xa3, 0xcd, 0x32, 0xf0, 0xb5, 0x00, 0x4d, 0x9f, 0x57, 0x54,
-        0xc4, 0xf7, 0xf2, 0xd1, 0xf3, 0x5c, 0xf3, 0xf7, 0x11, 0x63, 0x51, 0xc9, 0x2b, 0xd8, 0xc3,
-        0xa9, 0x52, 0x8d, 0x2b, 0x6a, 0xca, 0x20, 0xf0, 0x80, 0x47, 0xd9, 0xf0, 0x17, 0xf0,
+        0xc4, 0xf7, 0xf2, 0xd1, 0xf3, 0x5c, 0xf3, 0xf7, 0x11, 0x63, 0x51, 0xc9, 0x2b, 0xda, 0x5b,
+        0x23, 0xc8, 0x10, 0x34, 0xab, 0x74, 0xf5, 0x4c, 0xb1, 0xbd, 0x72, 0x95, 0x12, 0x56,
     ];
 
     #[test]
@@ -704,6 +726,7 @@ mod tests {
             PacketType::Initial,
             &ConnectionId::from(&[][..]),
             &ConnectionId::from(SERVER_CID),
+            DEFAULT_QUIC_VERSION,
         );
         builder.initial_token(&[]);
         builder.pn(1, 2);
@@ -736,7 +759,7 @@ mod tests {
     fn disallow_long_dcid() {
         let mut enc = Encoder::new();
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
-        enc.encode_uint(4, QUIC_VERSION);
+        enc.encode_uint(4, DEFAULT_QUIC_VERSION.as_u32());
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 1]);
         enc.encode_vec(1, &[]);
         enc.encode(&[0xff; 40]); // junk
@@ -748,7 +771,7 @@ mod tests {
     fn disallow_long_scid() {
         let mut enc = Encoder::new();
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
-        enc.encode_uint(4, QUIC_VERSION);
+        enc.encode_uint(4, DEFAULT_QUIC_VERSION.as_u32());
         enc.encode_vec(1, &[]);
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 2]);
         enc.encode(&[0xff; 40]); // junk
@@ -821,6 +844,7 @@ mod tests {
             PacketType::Handshake,
             &ConnectionId::from(SERVER_CID),
             &ConnectionId::from(CLIENT_CID),
+            DEFAULT_QUIC_VERSION,
         );
         builder.pn(0, 1);
         builder.encode(&[0; 3]);
@@ -847,6 +871,7 @@ mod tests {
             PacketType::Initial,
             &ConnectionId::from(&[][..]),
             &ConnectionId::from(SERVER_CID),
+            DEFAULT_QUIC_VERSION,
         );
         builder.initial_token(&[]);
         builder.pn(1, 2);
@@ -855,16 +880,23 @@ mod tests {
     }
 
     const SAMPLE_RETRY: &[u8] = &[
-        0xff, 0xff, 0x00, 0x00, 0x1b, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
-        0x74, 0x6f, 0x6b, 0x65, 0x6e, 0xa5, 0x23, 0xcb, 0x5b, 0xa5, 0x24, 0x69, 0x5f, 0x65, 0x69,
-        0xf2, 0x93, 0xa1, 0x35, 0x9d, 0x8e,
+        0xff, 0xff, 0x00, 0x00, 0x1c, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
+        0x74, 0x6f, 0x6b, 0x65, 0x6e, 0xf7, 0x1a, 0x5f, 0x12, 0xaf, 0xe3, 0xec, 0xf8, 0x00, 0x1a,
+        0x92, 0x0e, 0x6f, 0xdf, 0x1d, 0x63,
     ];
     const RETRY_TOKEN: &[u8] = b"token";
 
     #[test]
-    fn build_retry() {
+    fn build_retry_single() {
         fixture_init();
-        let retry = PacketBuilder::retry(&[], SERVER_CID, RETRY_TOKEN, CLIENT_CID).unwrap();
+        let retry = PacketBuilder::retry(
+            &[],
+            SERVER_CID,
+            RETRY_TOKEN,
+            CLIENT_CID,
+            DEFAULT_QUIC_VERSION,
+        )
+        .unwrap();
 
         let (packet, remainder) = PublicPacket::decode(&retry, &cid_mgr()).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
@@ -899,7 +931,7 @@ mod tests {
         // Run the build_retry test a few times.
         // This increases the chance that the full comparison happens.
         for _ in 0..32 {
-            build_retry();
+            build_retry_single();
         }
     }
 
@@ -938,7 +970,7 @@ mod tests {
 
     const SAMPLE_VN: &[u8] = &[
         0x80, 0x00, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x08,
-        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0xff, 0x00, 0x00, 0x1b, 0x0a, 0x0a, 0x0a,
+        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0xff, 0x00, 0x00, 0x1c, 0x0a, 0x0a, 0x0a,
         0x0a,
     ];
 
@@ -975,7 +1007,7 @@ mod tests {
         enc.encode_vec(1, BIG_DCID);
         enc.encode_vec(1, BIG_SCID);
         enc.encode_uint(4, 0x1a2a_3a4a_u64);
-        enc.encode_uint(4, QUIC_VERSION);
+        enc.encode_uint(4, DEFAULT_QUIC_VERSION.as_u32());
         enc.encode_uint(4, 0x5a6a_7a8a_u64);
 
         let (packet, remainder) =
