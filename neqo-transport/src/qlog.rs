@@ -49,7 +49,7 @@ pub fn connection_tparams_set(
                 None
             },
             Some(remote.get_integer(tparams::IDLE_TIMEOUT)),
-            Some(remote.get_integer(tparams::MAX_PACKET_SIZE)),
+            Some(remote.get_integer(tparams::MAX_UDP_PAYLOAD_SIZE)),
             Some(remote.get_integer(tparams::ACK_DELAY_EXPONENT)),
             Some(remote.get_integer(tparams::MAX_ACK_DELAY)),
             // TODO(hawkinsw@obs.cr): We do not yet handle ACTIVE_CONNECTION_ID_LIMIT in tparams yet.
