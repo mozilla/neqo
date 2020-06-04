@@ -34,12 +34,12 @@ pub fn connection_tparams_set(
             if let Some(ocid) = remote.get_bytes(tparams::ORIGINAL_CONNECTION_ID) {
                 // Cannot use packet::ConnectionId's Display trait implementation
                 // because it does not include the 0x prefix.
-                Some(hex(&ocid))
+                Some(hex(ocid))
             } else {
                 None
             },
             if let Some(srt) = remote.get_bytes(tparams::STATELESS_RESET_TOKEN) {
-                Some(hex(&srt))
+                Some(hex(srt))
             } else {
                 None
             },

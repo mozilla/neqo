@@ -285,13 +285,14 @@ impl IdleTimeout {
     }
 }
 
-/// StateManagement manages whether we need to send HANDSHAKE_DONE and CONNECTION_CLOSE.
+/// `StateSignaling` manages whether we need to send HANDSHAKE_DONE and CONNECTION_CLOSE.
 /// Valid state transitions are:
 /// * Idle -> HandshakeDone: at the server when the handshake completes
 /// * HandshakeDone -> Idle: when a HANDSHAKE_DONE frame is sent
 /// * Idle/HandshakeDone -> Closing/Draining: when closing or draining
 /// * Closing/Draining -> CloseSent: after sending CONNECTION_CLOSE
 /// * CloseSent -> Closing: any time a new CONNECTION_CLOSE is needed
+/// * -> Reset: from any state in case of a stateless reset
 #[derive(Debug, Clone, PartialEq)]
 enum StateSignaling {
     Idle,
@@ -302,6 +303,7 @@ enum StateSignaling {
     /// This state saves the frame that might need to be sent again.
     /// If it is `None`, then we are draining and don't send.
     CloseSent(Option<Frame>),
+    Reset,
 }
 
 impl StateSignaling {
@@ -341,7 +343,9 @@ impl StateSignaling {
         frame_type: FrameType,
         message: impl AsRef<str>,
     ) {
-        *self = Self::Closing(Self::make_close_frame(error, frame_type, message));
+        if *self != Self::Reset {
+            *self = Self::Closing(Self::make_close_frame(error, frame_type, message));
+        }
     }
 
     pub fn drain(
@@ -350,7 +354,9 @@ impl StateSignaling {
         frame_type: FrameType,
         message: impl AsRef<str>,
     ) {
-        *self = Self::Draining(Self::make_close_frame(error, frame_type, message));
+        if *self != Self::Reset {
+            *self = Self::Draining(Self::make_close_frame(error, frame_type, message));
+        }
     }
 
     /// If a close is pending, take a frame.
@@ -378,6 +384,11 @@ impl StateSignaling {
             let frame = mem::replace(frame, Frame::Padding);
             *self = Self::Closing(frame);
         }
+    }
+
+    /// We just got a stateless reset.  Terminate.
+    pub fn reset(&mut self) {
+        *self = Self::Reset;
     }
 }
 
@@ -791,8 +802,8 @@ impl Connection {
 
     /// Call in to process activity on the connection. Either new packets have
     /// arrived or a timeout has expired (or both).
-    pub fn process_input(&mut self, dgram: Datagram, now: Instant) {
-        let res = self.input(dgram, now);
+    pub fn process_input(&mut self, d: Datagram, now: Instant) {
+        let res = self.input(d, now);
         self.absorb_error(now, res);
         self.cleanup_streams();
     }
@@ -946,6 +957,45 @@ impl Connection {
         }
     }
 
+    fn token_equal(a: &[u8; 16], b: &[u8; 16]) -> bool {
+        // rustc might decide to optimize this and make this non-constant-time
+        // with respect to `t`, but it doesn't appear to currently.
+        let mut c = 0;
+        for (&a, &b) in a.iter().zip(b) {
+            c |= a ^ b;
+        }
+        c == 0
+    }
+
+    fn is_stateless_reset(&self, d: &Datagram) -> bool {
+        if d.len() < 16 {
+            return false;
+        }
+        let token = <&[u8; 16]>::try_from(&d[d.len() - 16..]).unwrap();
+        // TODO(mt) only check the path that matches the datagram.
+        self.path
+            .as_ref()
+            .map(|p| p.reset_token())
+            .flatten()
+            .map_or(false, |t| Self::token_equal(t, token))
+    }
+
+    fn check_stateless_reset(&mut self, d: &Datagram, now: Instant) -> Res<()> {
+        if self.is_stateless_reset(d) {
+            // Failing to process a packet in a datagram might
+            // indicate that there is a stateless reset present.
+            qdebug!([self], "Stateless reset: {}", hex(&d[d.len() - 16..]));
+            self.state_signaling.reset();
+            self.set_state(State::Draining {
+                error: ConnectionError::Transport(Error::StatelessReset),
+                timeout: self.get_closing_period_time(now),
+            });
+            Err(Error::StatelessReset)
+        } else {
+            Ok(())
+        }
+    }
+
     fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, PNSpace)>> {
         let mut slc = &d[..];
         let mut frames = Vec::new();
@@ -960,15 +1010,15 @@ impl Connection {
                     Err(e) => {
                         qdebug!([self], "Garbage packet: {} {}", e, hex(slc));
                         self.stats.dropped_rx += 1;
-                        return Ok(frames);
+                        break;
                     }
-                }; // TODO(mt) use in place of res, and allow errors
+                };
             self.stats.packets_rx += 1;
             match (packet.packet_type(), &self.state, &self.role) {
                 (PacketType::Initial, State::Init, Role::Server) => {
                     if !packet.is_valid_initial() {
                         self.stats.dropped_rx += 1;
-                        return Ok(frames);
+                        break;
                     }
                     qinfo!([self], "Received valid Initial packet");
                     self.set_state(State::WaitInitial);
@@ -983,14 +1033,14 @@ impl Connection {
                 }
                 (PacketType::Retry, State::WaitInitial, Role::Client) => {
                     self.handle_retry(packet)?;
-                    return Ok(frames);
+                    break;
                 }
                 (PacketType::VersionNegotiation, ..)
                 | (PacketType::Retry, ..)
                 | (PacketType::OtherVersion, ..) => {
                     qwarn!("dropping {:?}", packet.packet_type());
                     self.stats.dropped_rx += 1;
-                    return Ok(frames);
+                    break;
                 }
                 _ => {}
             };
@@ -999,14 +1049,14 @@ impl Connection {
                 State::Init => {
                     qinfo!([self], "Received message while in Init state");
                     self.stats.dropped_rx += 1;
-                    return Ok(frames);
+                    break;
                 }
                 State::WaitInitial => {}
                 State::Handshaking | State::Connected | State::Confirmed => {
                     if !self.is_valid_cid(packet.dcid()) {
                         qinfo!([self], "Ignoring packet with CID {:?}", packet.dcid());
                         self.stats.dropped_rx += 1;
-                        return Ok(frames);
+                        break;
                     }
                     if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
                         // Server has received a Handshake packet -> discard Initial keys and states
@@ -1017,12 +1067,12 @@ impl Connection {
                     // Don't bother processing the packet. Instead ask to get a
                     // new close frame.
                     self.state_signaling.send_close();
-                    return Ok(frames);
+                    break;
                 }
                 State::Draining { .. } | State::Closed(..) => {
                     // Do nothing.
                     self.stats.dropped_rx += 1;
-                    return Ok(frames);
+                    break;
                 }
             }
 
@@ -1030,7 +1080,6 @@ impl Connection {
 
             let pto = self.loss_recovery.pto();
             let payload = packet.decrypt(&mut self.crypto.states, now + pto);
-            slc = remainder;
             if let Ok(payload) = payload {
                 // TODO(ekr@rtfm.com): Have the server blow away the initial
                 // crypto state if this fails? Otherwise, we will get a panic
@@ -1059,7 +1108,14 @@ impl Connection {
                 // If the state isn't available, or we can't decrypt the packet, drop
                 // the rest of the datagram on the floor, but don't generate an error.
                 self.stats.dropped_rx += 1;
+                if slc.len() == d.len() {
+                    self.check_stateless_reset(&d, now)?
+                }
             }
+            slc = remainder;
+        }
+        if slc.len() == d.len() {
+            self.check_stateless_reset(&d, now)?
         }
         Ok(frames)
     }
@@ -1510,6 +1566,24 @@ impl Connection {
         }
     }
 
+    /// Process the final set of transport parameters.
+    fn process_tps(&mut self) -> Res<()> {
+        self.validate_odcid()?;
+        if let Some(token) = self
+            .tps
+            .borrow()
+            .remote
+            .as_ref()
+            .unwrap()
+            .get_bytes(tparams::STATELESS_RESET_TOKEN)
+        {
+            let reset_token = <[u8; 16]>::try_from(token).unwrap().to_owned();
+            self.path.as_mut().unwrap().set_reset_token(reset_token);
+        }
+        self.set_initial_limits();
+        Ok(())
+    }
+
     fn handshake(&mut self, now: Instant, space: PNSpace, data: Option<&[u8]>) -> Res<()> {
         qtrace!([self], "Handshake space={} data={:0x?}", space, data);
 
@@ -1860,8 +1934,7 @@ impl Connection {
         // Setting application keys has to occur after 0-RTT rejection.
         let pto = self.loss_recovery.pto();
         self.crypto.install_application_keys(now + pto)?;
-        self.validate_odcid()?;
-        self.set_initial_limits();
+        self.process_tps()?;
         self.set_state(State::Connected);
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
@@ -5082,5 +5155,22 @@ mod tests {
             now(),
         );
         assert_eq!(1, client.stats().dropped_rx);
+    }
+
+    /// Test that a client can handle a stateless reset correctly.
+    #[test]
+    fn stateless_reset_client() {
+        let mut client = default_client();
+        let mut server = default_server();
+        server
+            .set_local_tparam(
+                tparams::STATELESS_RESET_TOKEN,
+                TransportParameter::Bytes(vec![77; 16]),
+            )
+            .unwrap();
+        connect_force_idle(&mut client, &mut server);
+
+        client.process_input(Datagram::new(loopback(), loopback(), vec![77; 21]), now());
+        assert!(matches!(client.state(), State::Draining { .. }));
     }
 }
