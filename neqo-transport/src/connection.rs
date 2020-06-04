@@ -943,7 +943,7 @@ impl Connection {
         match self.output(now) {
             SendOption::Yes(dgram) => Output::Datagram(dgram),
             SendOption::No(paced) => match self.state {
-                State::Closed(_) => Output::None,
+                State::Init | State::Closed(_) => Output::None,
                 State::Closing { timeout, .. } | State::Draining { timeout, .. } => {
                     Output::Callback(timeout.duration_since(now))
                 }
@@ -1102,10 +1102,24 @@ impl Connection {
                     }
                 }
                 (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
-                    self.set_state(State::Closed(ConnectionError::Transport(
-                        Error::VersionNegotiation,
-                    )));
-                    return Err(Error::VersionNegotiation);
+                    match packet.supported_versions() {
+                        Ok(versions) => {
+                            if versions.is_empty() || versions.contains(&self.quic_version.as_u32())
+                            {
+                                // Ignore VersionNegotiation packets that contain the current version.
+                                self.stats.dropped_rx += 1;
+                                return Ok(frames);
+                            }
+                            self.set_state(State::Closed(ConnectionError::Transport(
+                                Error::VersionNegotiation,
+                            )));
+                            return Err(Error::VersionNegotiation);
+                        }
+                        Err(_) => {
+                            self.stats.dropped_rx += 1;
+                            return Ok(frames);
+                        }
+                    }
                 }
                 (PacketType::Retry, State::WaitInitial, Role::Client) => {
                     self.handle_retry(packet)?;
@@ -2495,6 +2509,7 @@ mod tests {
     use crate::cc::PACING_BURST_SIZE;
     use crate::cc::{INITIAL_CWND_PKTS, MIN_CONG_WINDOW};
     use crate::frame::{CloseError, StreamType};
+    use crate::packet::PACKET_BIT_LONG;
     use crate::path::PATH_MTU_V6;
     use crate::recovery::ACK_ONLY_SIZE_LIMIT;
     use crate::recovery::PTO_PACKET_COUNT;
@@ -5340,5 +5355,158 @@ mod tests {
 
         client.process_input(Datagram::new(loopback(), loopback(), vec![77; 21]), now());
         assert!(matches!(client.state(), State::Draining { .. }));
+    }
+
+    #[test]
+    fn server_receive_unknown_first_packet() {
+        let mut server = default_server();
+
+        let mut unknown_version_packet = vec![0x80, 0x1a, 0x1a, 0x1a, 0x1a];
+        unknown_version_packet.resize(1200, 0x0);
+
+        assert_eq!(
+            server.process(
+                Some(Datagram::new(
+                    loopback(),
+                    loopback(),
+                    unknown_version_packet,
+                )),
+                now(),
+            ),
+            Output::None
+        );
+
+        assert_eq!(1, server.stats().dropped_rx);
+    }
+
+    fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
+        let mut dec = Decoder::from(&initial_pkt[5..]); // Skip past version.
+        let dcid = dec.decode_vec(1).expect("client DCID");
+        let scid = dec.decode_vec(1).expect("client SCID");
+
+        let mut encoder = Encoder::default();
+        encoder.encode_byte(PACKET_BIT_LONG);
+        encoder.encode(&[0; 4]); // Zero version == VN.
+        encoder.encode_vec(1, dcid);
+        encoder.encode_vec(1, scid);
+
+        for v in versions {
+            encoder.encode_uint(4, *v);
+        }
+        encoder.into()
+    }
+
+    #[test]
+    fn version_negotiation_current_version() {
+        let mut client = default_client();
+        // Start the handshake.
+        let initial_pkt = client
+            .process(None, now())
+            .dgram()
+            .expect("a datagram")
+            .to_vec();
+
+        let vn = create_vn(
+            &initial_pkt,
+            &[0x1a1_a1a1a, QuicVersion::default().as_u32()],
+        );
+
+        assert_eq!(
+            client.process(Some(Datagram::new(loopback(), loopback(), vn,)), now(),),
+            Output::Callback(Duration::from_millis(120))
+        );
+        assert_eq!(*client.state(), State::WaitInitial);
+        assert_eq!(1, client.stats().dropped_rx);
+    }
+
+    #[test]
+    fn version_negotiation_only_reserved() {
+        let mut client = default_client();
+        // Start the handshake.
+        let initial_pkt = client
+            .process(None, now())
+            .dgram()
+            .expect("a datagram")
+            .to_vec();
+
+        let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
+
+        assert_eq!(
+            client.process(Some(Datagram::new(loopback(), loopback(), vn,)), now(),),
+            Output::None
+        );
+        match client.state() {
+            State::Closed(err) => {
+                assert_eq!(*err, ConnectionError::Transport(Error::VersionNegotiation))
+            }
+            _ => panic!("Invalid client state"),
+        }
+    }
+
+    #[test]
+    fn version_negotiation_corrupted() {
+        let mut client = default_client();
+        // Start the handshake.
+        let initial_pkt = client
+            .process(None, now())
+            .dgram()
+            .expect("a datagram")
+            .to_vec();
+
+        let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
+
+        assert_eq!(
+            client.process(
+                Some(Datagram::new(loopback(), loopback(), &vn[..vn.len() - 1])),
+                now(),
+            ),
+            Output::Callback(Duration::from_millis(120))
+        );
+        assert_eq!(*client.state(), State::WaitInitial);
+        assert_eq!(1, client.stats().dropped_rx);
+    }
+
+    #[test]
+    fn version_negotiation_empty() {
+        let mut client = default_client();
+        // Start the handshake.
+        let initial_pkt = client
+            .process(None, now())
+            .dgram()
+            .expect("a datagram")
+            .to_vec();
+
+        let vn = create_vn(&initial_pkt, &[]);
+
+        assert_eq!(
+            client.process(Some(Datagram::new(loopback(), loopback(), vn)), now(),),
+            Output::Callback(Duration::from_millis(120))
+        );
+        assert_eq!(*client.state(), State::WaitInitial);
+        assert_eq!(1, client.stats().dropped_rx);
+    }
+
+    #[test]
+    fn version_negotiation_not_supported() {
+        let mut client = default_client();
+        // Start the handshake.
+        let initial_pkt = client
+            .process(None, now())
+            .dgram()
+            .expect("a datagram")
+            .to_vec();
+
+        let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a, 0xff00_0001]);
+
+        assert_eq!(
+            client.process(Some(Datagram::new(loopback(), loopback(), vn)), now(),),
+            Output::None
+        );
+        match client.state() {
+            State::Closed(err) => {
+                assert_eq!(*err, ConnectionError::Transport(Error::VersionNegotiation))
+            }
+            _ => panic!("Invalid client state"),
+        }
     }
 }
