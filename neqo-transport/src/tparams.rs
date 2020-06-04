@@ -205,7 +205,7 @@ impl TransportParameters {
         }
     }
 
-    pub fn get_bytes(&self, tp: TransportParameterId) -> Option<Vec<u8>> {
+    pub fn get_bytes(&self, tp: TransportParameterId) -> Option<&[u8]> {
         match tp {
             ORIGINAL_CONNECTION_ID | STATELESS_RESET_TOKEN => {}
             _ => panic!("Transport parameter not known or not type bytes"),
@@ -213,7 +213,7 @@ impl TransportParameters {
 
         match self.params.get(&tp) {
             None => None,
-            Some(TransportParameter::Bytes(x)) => Some(x.to_vec()),
+            Some(TransportParameter::Bytes(x)) => Some(&x),
             _ => panic!("Internal error"),
         }
     }
@@ -388,11 +388,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_basic_tps() {
+    fn basic_tps() {
+        const RESET_TOKEN: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8];
         let mut tps = TransportParameters::default();
         tps.set(
             STATELESS_RESET_TOKEN,
-            TransportParameter::Bytes(vec![1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8]),
+            TransportParameter::Bytes(RESET_TOKEN.to_vec()),
         );
         tps.params
             .insert(INITIAL_MAX_STREAMS_BIDI, TransportParameter::Integer(10));
@@ -407,10 +408,7 @@ mod tests {
         assert_eq!(tps2.get_integer(IDLE_TIMEOUT), 0); // Default
         assert_eq!(tps2.get_integer(MAX_ACK_DELAY), 25); // Default
         assert_eq!(tps2.get_integer(INITIAL_MAX_STREAMS_BIDI), 10); // Sent
-        assert_eq!(
-            tps2.get_bytes(STATELESS_RESET_TOKEN),
-            Some(vec![1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8])
-        );
+        assert_eq!(tps2.get_bytes(STATELESS_RESET_TOKEN), Some(RESET_TOKEN));
         assert_eq!(tps2.get_bytes(ORIGINAL_CONNECTION_ID), None);
         assert_eq!(tps2.was_sent(ORIGINAL_CONNECTION_ID), false);
         assert_eq!(tps2.was_sent(STATELESS_RESET_TOKEN), true);

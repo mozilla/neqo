@@ -89,12 +89,12 @@ pub enum Error {
     PacketNumberOverlap,
     PeerApplicationError(AppError),
     PeerError(TransportError),
+    StatelessReset,
     TooMuchData,
     UnexpectedMessage,
     UnknownFrameType,
     VersionNegotiation,
     WrongRole,
-    KeysDiscarded,
 }
 
 impl Error {
