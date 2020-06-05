@@ -508,12 +508,12 @@ impl Connection {
             quic_version,
         )?;
         c.crypto.states.init(Role::Client, &dcid);
-        c.initial_source_cid = Some(scid);
         c.original_destination_cid = Some(dcid);
         c.tps
             .borrow_mut()
             .local
-            .set_bytes(tparams::INITIAL_SOURCE_CONNECTION_ID, Vec::new());
+            .set_bytes(tparams::INITIAL_SOURCE_CONNECTION_ID, scid.to_vec());
+        c.initial_source_cid = Some(scid);
         Ok(c)
     }
 
@@ -627,21 +627,23 @@ impl Connection {
     }
 
     /// Set the connection ID that was originally chosen by the client.
-    pub(crate) fn set_original_destination_cid(&mut self, odcid: &ConnectionId) {
+    pub(crate) fn set_original_destination_cid(&mut self, odcid: ConnectionId) {
         assert_eq!(self.role, Role::Server);
         self.tps
             .borrow_mut()
             .local
             .set_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID, odcid.to_vec());
+        self.original_destination_cid = Some(odcid);
     }
 
-    /// Set the connection ID that was originally chosen by the client.
-    pub(crate) fn set_initial_source_cid(&mut self, initial_source_cid: &ConnectionId) {
+    /// Set the connection ID that was initially used by the client.
+    pub(crate) fn set_initial_source_cid(&mut self, initial_source_cid: ConnectionId) {
         assert_eq!(self.role, Role::Server);
         self.tps.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
             initial_source_cid.to_vec(),
         );
+        self.initial_source_cid = Some(initial_source_cid);
     }
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
@@ -1047,6 +1049,9 @@ impl Connection {
                     self.set_state(State::WaitInitial);
                     self.loss_recovery.start_pacer(now);
                     self.crypto.states.init(self.role, &packet.dcid());
+                    qerror!("ASG scid {:?} dcid {:?}", packet.scid(), packet.dcid());
+                    self.set_initial_source_cid(ConnectionId::from(packet.scid()));
+                    self.set_original_destination_cid(ConnectionId::from(packet.dcid()));
                 }
                 (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
                     self.set_state(State::Closed(ConnectionError::Transport(
@@ -1619,6 +1624,12 @@ impl Connection {
             None => return Err(Error::ProtocolViolation),
             // Mismatch between values
             Some(tp) => {
+                qerror!(
+                    "ASG2 {:?} self iscid {:?} tp iscid {:?}",
+                    self.role,
+                    self.initial_source_cid,
+                    tp
+                );
                 if self.initial_source_cid.as_ref().map(|c| c.as_ref()) != Some((*tp).into()) {
                     return Err(Error::ProtocolViolation);
                 }

@@ -434,8 +434,8 @@ impl Server {
     fn accept_connection(
         &mut self,
         attempt_key: AttemptKey,
-        scid: ConnectionId,
-        orig_dcid: ConnectionId,
+        _scid: ConnectionId,
+        _orig_dcid: ConnectionId,
         dgram: Datagram,
         now: Instant,
         quic_version: QuicVersion,
@@ -458,8 +458,8 @@ impl Server {
         );
 
         if let Ok(mut c) = sconn {
-            c.set_original_destination_cid(&orig_dcid);
-            c.set_initial_source_cid(&scid);
+            // c.set_original_destination_cid(orig_dcid);
+            // c.set_initial_source_cid(scid);
             c.set_qlog(self.create_qlog_trace(&attempt_key));
             let c = Rc::new(RefCell::new(ServerConnectionState {
                 c,
