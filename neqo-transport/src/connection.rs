@@ -388,7 +388,7 @@ pub enum QuicVersion {
 }
 
 impl QuicVersion {
-    pub fn as_u32(&self) -> Version {
+    pub fn as_u32(self) -> Version {
         match self {
             Self::Draft27 => 0xff00_0000 + 27,
             Self::Draft28 => 0xff00_0000 + 28,
