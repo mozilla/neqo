@@ -19,7 +19,7 @@ use neqo_crypto::{
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
 use crate::connection::{Connection, Output, State};
 use crate::packet::{PacketBuilder, PacketType, PublicPacket};
-use crate::{DraftVersion, Res, Version};
+use crate::{QuicVersion, Res};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -324,7 +324,7 @@ impl Server {
         token: Vec<u8>,
         dgram: Datagram,
         now: Instant,
-        quic_version: Version,
+        quic_version: QuicVersion,
     ) -> Option<Datagram> {
         qdebug!([self], "Handle initial packet");
         match self.retry.validate(&token, dgram.source(), now) {
@@ -362,7 +362,7 @@ impl Server {
         orig_dcid: Option<ConnectionId>,
         dgram: Datagram,
         now: Instant,
-        quic_version: Version,
+        quic_version: QuicVersion,
     ) -> Option<Datagram> {
         let attempt_key = AttemptKey {
             remote_address: dgram.source(),
@@ -437,7 +437,7 @@ impl Server {
         orig_dcid: Option<ConnectionId>,
         dgram: Datagram,
         now: Instant,
-        quic_version: Version,
+        quic_version: QuicVersion,
     ) -> Option<Datagram> {
         qinfo!([self], "Accept connection {:?}", attempt_key);
         // The internal connection ID manager that we use is not used directly.
@@ -448,18 +448,12 @@ impl Server {
             connections: self.connections.clone(),
         }));
 
-        let draft_version = if quic_version == 0xff00_0000 + 27 {
-            DraftVersion::Draft27
-        } else {
-            DraftVersion::Draft28
-        };
-
         let sconn = Connection::new_server(
             &self.certs,
             &self.protocols,
             &self.anti_replay,
             cid_mgr.clone(),
-            draft_version,
+            quic_version,
         );
 
         if let Ok(mut c) = sconn {

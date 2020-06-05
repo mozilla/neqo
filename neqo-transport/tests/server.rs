@@ -210,7 +210,7 @@ fn drop_non_initial() {
     let mut header = neqo_common::Encoder::with_capacity(1200);
     header
         .encode_byte(0xfa)
-        .encode_uint(4, DEFAULT_QUIC_VERSION)
+        .encode_uint(4, DEFAULT_QUIC_VERSION.as_u32())
         .encode_vec(1, CID)
         .encode_vec(1, CID);
     let mut bogus_data: Vec<u8> = header.into();
@@ -630,7 +630,7 @@ fn bad_client_initial() {
     let mut header_enc = Encoder::new();
     header_enc
         .encode_byte(0xc0) // Initial with 1 byte packet number.
-        .encode_uint(4, DEFAULT_QUIC_VERSION)
+        .encode_uint(4, DEFAULT_QUIC_VERSION.as_u32())
         .encode_vec(1, dcid)
         .encode_vec(1, scid)
         .encode_vvec(&[])
@@ -713,7 +713,7 @@ fn version_negotiation() {
     let mut found = false;
     while dec.remaining() > 0 {
         let v = dec.decode_uint(4).expect("supported version");
-        found |= v == u64::from(DEFAULT_QUIC_VERSION);
+        found |= v == u64::from(DEFAULT_QUIC_VERSION.as_u32());
     }
     assert!(found, "valid version not found");
 

@@ -9,7 +9,7 @@
 
 use neqo_common::Datagram;
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_transport::{Connection, ConnectionEvent, DraftVersion, FixedConnectionIdManager, State};
+use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State};
 use regex::Regex;
 
 use std::cell::RefCell;
@@ -162,7 +162,7 @@ fn main() {
                 &args.alpn,
                 &anti_replay,
                 Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-                DraftVersion::Draft28,
+                QuicVersion::Draft28,
             )
             .expect("can't create connection")
         });

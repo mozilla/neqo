@@ -39,7 +39,9 @@ use crate::frame::{
     AckRange, CloseError, Frame, FrameType, StreamType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
 };
-use crate::packet::{DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket};
+use crate::packet::{
+    DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, Version,
+};
 use crate::path::Path;
 use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile, GRANULARITY};
@@ -51,7 +53,7 @@ use crate::tparams::{
     self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
 };
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
-use crate::{AppError, ConnectionError, Error, Res, Version, LOCAL_IDLE_TIMEOUT};
+use crate::{AppError, ConnectionError, Error, Res, LOCAL_IDLE_TIMEOUT};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
@@ -379,31 +381,31 @@ impl StateSignaling {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum DraftVersion {
-    Unknown,
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum QuicVersion {
     Draft27,
     Draft28,
 }
 
-impl DraftVersion {
+impl QuicVersion {
     pub fn as_u32(&self) -> Version {
         match self {
-            Self::Unknown => panic!("Cannot encode unknown ProtocolVersion"),
             Self::Draft27 => 0xff00_0000 + 27,
             Self::Draft28 => 0xff00_0000 + 28,
         }
     }
 }
 
-impl From<Version> for DraftVersion {
-    fn from(ver: Version) -> Self {
+impl TryFrom<Version> for QuicVersion {
+    type Error = Error;
+
+    fn try_from(ver: Version) -> Res<Self> {
         if ver == 0xff00_0000 + 27 {
-            Self::Draft27
+            Ok(Self::Draft27)
         } else if ver == 0xff00_0000 + 28 {
-            Self::Draft28
+            Ok(Self::Draft28)
         } else {
-            Self::Unknown
+            Err(Error::NoValidProtocolVersion)
         }
     }
 }
@@ -456,7 +458,7 @@ pub struct Connection {
     qlog: Option<NeqoQlog>,
 
     // TODO: Remove once spec is final
-    quic_version: DraftVersion,
+    quic_version: QuicVersion,
 }
 
 impl Debug for Connection {
@@ -477,7 +479,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        quic_ver: DraftVersion,
+        quic_ver: QuicVersion,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let scid = cid_manager.borrow_mut().generate_cid();
@@ -506,7 +508,7 @@ impl Connection {
         protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
         cid_manager: CidMgr,
-        quic_ver: DraftVersion,
+        quic_ver: QuicVersion,
     ) -> Res<Self> {
         Self::new(
             Role::Server,
@@ -546,7 +548,7 @@ impl Connection {
         anti_replay: Option<&AntiReplay>,
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
-        quic_version: DraftVersion,
+        quic_version: QuicVersion,
     ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
@@ -1240,7 +1242,7 @@ impl Connection {
         encoder: Encoder,
         tx: &CryptoDxState,
         retry_info: &Option<RetryInfo>,
-        quic_version: Version,
+        quic_version: QuicVersion,
     ) -> (PacketType, PacketNumber, PacketBuilder) {
         let pt = match space {
             PNSpace::Initial => PacketType::Initial,
@@ -1299,14 +1301,8 @@ impl Connection {
                 continue;
             }
 
-            let (_, _, mut builder) = Self::build_packet_header(
-                path,
-                *space,
-                encoder,
-                tx,
-                &None,
-                self.quic_version.as_u32(),
-            );
+            let (_, _, mut builder) =
+                Self::build_packet_header(path, *space, encoder, tx, &None, self.quic_version);
             // ConnectionError::Application is only allowed at 1RTT.
             if *space == PNSpace::ApplicationData {
                 frame.marshal(&mut builder);
@@ -1404,7 +1400,7 @@ impl Connection {
                 encoder,
                 tx,
                 &self.retry_info,
-                self.quic_version.as_u32(),
+                self.quic_version,
             );
             let payload_start = builder.len();
 
@@ -2351,7 +2347,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
-            DraftVersion::Draft28,
+            QuicVersion::Draft28,
         )
         .expect("create a default client")
     }
@@ -2362,7 +2358,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-            DraftVersion::Draft28,
+            QuicVersion::Draft28,
         )
         .expect("create a default server")
     }
@@ -2694,7 +2690,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
             loopback(),
             loopback(),
-            DraftVersion::Draft28,
+            QuicVersion::Draft28,
         )
         .unwrap();
         let mut server = default_server();
@@ -2951,7 +2947,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-            DraftVersion::Draft28,
+            QuicVersion::Draft28,
         )
         .unwrap();
 
@@ -3309,7 +3305,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
-            DraftVersion::Draft28,
+            QuicVersion::Draft28,
         )
         .expect("create a server");
 

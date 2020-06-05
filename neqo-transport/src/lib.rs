@@ -32,18 +32,15 @@ mod tracking;
 
 pub use self::cid::{ConnectionId, ConnectionIdManager};
 pub use self::connection::{
-    Connection, DraftVersion, FixedConnectionIdManager, Output, State, ZeroRttState,
+    Connection, FixedConnectionIdManager, Output, QuicVersion, State, ZeroRttState,
 };
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
 pub use self::stream_id::StreamId;
 
-/// The supported version of the QUIC protocol.
-pub type Version = u32;
-
 /// Supporting more than one version, it's helpful to have a default.
-pub const DEFAULT_QUIC_VERSION: Version = 0xff00_0000 + 28;
+pub const DEFAULT_QUIC_VERSION: QuicVersion = QuicVersion::Draft28;
 
 const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30); // 30 second
 

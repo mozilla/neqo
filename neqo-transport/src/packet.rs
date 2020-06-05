@@ -8,7 +8,7 @@
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN};
 use crate::crypto::{CryptoDxState, CryptoStates};
 use crate::tracking::PNSpace;
-use crate::{DraftVersion, Error, Res, Version, DEFAULT_QUIC_VERSION};
+use crate::{Error, QuicVersion, Res, DEFAULT_QUIC_VERSION};
 
 use neqo_common::{hex, hex_with_len, qerror, qtrace, Decoder, Encoder};
 use neqo_crypto::{aead::Aead, hkdf, random, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
@@ -37,6 +37,7 @@ const SAMPLE_SIZE: usize = 16;
 const SAMPLE_OFFSET: usize = 4;
 
 pub type PacketNumber = u64;
+pub type Version = u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PacketType {
@@ -133,11 +134,11 @@ impl PacketBuilder {
         pt: PacketType,
         dcid: &ConnectionId,
         scid: &ConnectionId,
-        quic_version: Version,
+        quic_version: QuicVersion,
     ) -> Self {
         let header_start = encoder.len();
         encoder.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | pt.code() << 4);
-        encoder.encode_uint(4, quic_version);
+        encoder.encode_uint(4, quic_version.as_u32());
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
         Self {
@@ -245,7 +246,7 @@ impl PacketBuilder {
         scid: &[u8],
         token: &[u8],
         odcid: &[u8],
-        quic_version: Version,
+        quic_version: QuicVersion,
     ) -> Res<Vec<u8>> {
         let mut encoder = Encoder::default();
         encoder.encode_vec(1, odcid);
@@ -256,7 +257,7 @@ impl PacketBuilder {
                 | (PACKET_TYPE_RETRY << 4)
                 | (random(1)[0] & 0xf),
         );
-        encoder.encode_uint(4, quic_version);
+        encoder.encode_uint(4, quic_version.as_u32());
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
         debug_assert_ne!(token.len(), 0);
@@ -284,7 +285,7 @@ impl PacketBuilder {
         encoder.encode(&[0; 4]); // Zero version == VN.
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
-        encoder.encode_uint(4, DEFAULT_QUIC_VERSION);
+        encoder.encode_uint(4, DEFAULT_QUIC_VERSION.as_u32());
         // Add a greased version, using the randomness already generated.
         for g in &mut grease[..4] {
             *g = *g & 0xf0 | 0x0a;
@@ -329,7 +330,7 @@ pub struct PublicPacket<'a> {
     /// The size of the header, not including the packet number.
     header_len: usize,
     /// Protocol version, if present in header.
-    quic_version: Option<Version>,
+    quic_version: Option<QuicVersion>,
     /// A reference to the entire packet, including the header.
     data: &'a [u8],
 }
@@ -423,20 +424,24 @@ impl<'a> PublicPacket<'a> {
         }
 
         // Check that this is a long header from this version.
-        if DraftVersion::from(version) == DraftVersion::Unknown {
-            return Ok((
-                Self {
-                    packet_type: PacketType::OtherVersion,
-                    dcid,
-                    scid: Some(scid),
-                    token: &[],
-                    header_len: decoder.offset(),
-                    quic_version: Some(version),
-                    data,
-                },
-                &[],
-            ));
-        }
+        let quic_version = match QuicVersion::try_from(version) {
+            Err(_) => {
+                return Ok((
+                    Self {
+                        packet_type: PacketType::OtherVersion,
+                        dcid,
+                        scid: Some(scid),
+                        token: &[],
+                        header_len: decoder.offset(),
+                        quic_version: None,
+                        data,
+                    },
+                    &[],
+                ));
+            }
+            Ok(v) => v,
+        };
+
         if (first & PACKET_BIT_FIXED_QUIC) != PACKET_BIT_FIXED_QUIC {
             return Err(Error::InvalidPacket);
         }
@@ -462,7 +467,7 @@ impl<'a> PublicPacket<'a> {
                 scid: Some(scid),
                 token,
                 header_len,
-                quic_version: Some(version),
+                quic_version: Some(quic_version),
                 data,
             },
             remainder,
@@ -522,7 +527,7 @@ impl<'a> PublicPacket<'a> {
         self.token
     }
 
-    pub fn version(&self) -> Option<Version> {
+    pub fn version(&self) -> Option<QuicVersion> {
         self.quic_version
     }
 
@@ -754,7 +759,7 @@ mod tests {
     fn disallow_long_dcid() {
         let mut enc = Encoder::new();
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
-        enc.encode_uint(4, DEFAULT_QUIC_VERSION);
+        enc.encode_uint(4, DEFAULT_QUIC_VERSION.as_u32());
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 1]);
         enc.encode_vec(1, &[]);
         enc.encode(&[0xff; 40]); // junk
@@ -766,7 +771,7 @@ mod tests {
     fn disallow_long_scid() {
         let mut enc = Encoder::new();
         enc.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC);
-        enc.encode_uint(4, DEFAULT_QUIC_VERSION);
+        enc.encode_uint(4, DEFAULT_QUIC_VERSION.as_u32());
         enc.encode_vec(1, &[]);
         enc.encode_vec(1, &[0x00; MAX_CONNECTION_ID_LEN + 2]);
         enc.encode(&[0xff; 40]); // junk
@@ -1002,7 +1007,7 @@ mod tests {
         enc.encode_vec(1, BIG_DCID);
         enc.encode_vec(1, BIG_SCID);
         enc.encode_uint(4, 0x1a2a_3a4a_u64);
-        enc.encode_uint(4, DEFAULT_QUIC_VERSION);
+        enc.encode_uint(4, DEFAULT_QUIC_VERSION.as_u32());
         enc.encode_uint(4, 0x5a6a_7a8a_u64);
 
         let (packet, remainder) =

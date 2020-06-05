@@ -13,7 +13,7 @@ use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{init, AuthenticationStatus, Cipher, TLS_CHACHA20_POLY1305_SHA256};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{DraftVersion, FixedConnectionIdManager};
+use neqo_transport::{FixedConnectionIdManager, QuicVersion};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -365,7 +365,7 @@ fn client(
             max_table_size_decoder: args.max_table_size_decoder,
             max_blocked_streams: args.max_blocked_streams,
         },
-        DraftVersion::Draft28,
+        QuicVersion::Draft28,
     )
     .expect("must succeed");
     client.set_qlog(qlog_new(args, origin)?);
@@ -598,7 +598,7 @@ mod old {
     use neqo_common::{matches, Datagram};
     use neqo_crypto::{AuthenticationStatus, Cipher};
     use neqo_transport::{
-        Connection, ConnectionEvent, DraftVersion, FixedConnectionIdManager, Output, State,
+        Connection, ConnectionEvent, FixedConnectionIdManager, Output, QuicVersion, State,
         StreamType,
     };
 
@@ -767,7 +767,7 @@ mod old {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
             local_addr,
             remote_addr,
-            DraftVersion::Draft28,
+            QuicVersion::Draft28,
         )
         .expect("must succeed");
 

@@ -163,7 +163,7 @@ fn connection_started(qlog: &mut Option<NeqoQlog>, path: &Path) -> Res<()> {
             Some("QUIC".into()),
             path.local_address().port().into(),
             path.remote_address().port().into(),
-            Some(format!("{:x}", DEFAULT_QUIC_VERSION)),
+            Some(format!("{:x}", DEFAULT_QUIC_VERSION.as_u32())),
             Some(format!("{}", path.local_cid())),
             Some(format!("{}", path.remote_cid())),
         ))?;

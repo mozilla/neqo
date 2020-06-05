@@ -12,8 +12,8 @@ use neqo_crypto::{init, AuthenticationStatus};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    Connection, ConnectionError, ConnectionEvent, DraftVersion, Error, FixedConnectionIdManager,
-    Output, State, StreamType,
+    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output,
+    QuicVersion, State, StreamType,
 };
 
 use std::cell::RefCell;
@@ -436,7 +436,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
-        DraftVersion::Draft28,
+        QuicVersion::Draft28,
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -532,7 +532,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
-        DraftVersion::Draft28,
+        QuicVersion::Draft28,
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
