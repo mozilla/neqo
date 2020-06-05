@@ -329,9 +329,9 @@ impl Server {
         qdebug!([self], "Handle initial packet");
         match self.retry.validate(&token, dgram.source(), now) {
             RetryTokenResult::Invalid => None,
-            RetryTokenResult::Pass => self.connection_attempt(dcid, None, dgram, now, quic_version),
+            RetryTokenResult::Pass => self.connection_attempt(scid, dcid, dgram, now, quic_version),
             RetryTokenResult::Valid(orig_dcid) => {
-                self.connection_attempt(dcid, Some(orig_dcid), dgram, now, quic_version)
+                self.connection_attempt(scid, orig_dcid, dgram, now, quic_version)
             }
             RetryTokenResult::Validate => {
                 qinfo!([self], "Send retry for {:?}", dcid);
@@ -358,15 +358,15 @@ impl Server {
 
     fn connection_attempt(
         &mut self,
-        dcid: ConnectionId,
-        orig_dcid: Option<ConnectionId>,
+        scid: ConnectionId,
+        orig_dcid: ConnectionId,
         dgram: Datagram,
         now: Instant,
         quic_version: QuicVersion,
     ) -> Option<Datagram> {
         let attempt_key = AttemptKey {
             remote_address: dgram.source(),
-            odcid: orig_dcid.as_ref().unwrap_or(&dcid).clone(),
+            odcid: orig_dcid.clone(),
         };
         if let Some(c) = self.active_attempts.get(&attempt_key) {
             qdebug!(
@@ -377,7 +377,7 @@ impl Server {
             let c = Rc::clone(c);
             self.process_connection(c, Some(dgram), now)
         } else {
-            self.accept_connection(attempt_key, orig_dcid, dgram, now, quic_version)
+            self.accept_connection(attempt_key, scid, orig_dcid, dgram, now, quic_version)
         }
     }
 
@@ -434,7 +434,8 @@ impl Server {
     fn accept_connection(
         &mut self,
         attempt_key: AttemptKey,
-        orig_dcid: Option<ConnectionId>,
+        scid: ConnectionId,
+        orig_dcid: ConnectionId,
         dgram: Datagram,
         now: Instant,
         quic_version: QuicVersion,
@@ -457,9 +458,8 @@ impl Server {
         );
 
         if let Ok(mut c) = sconn {
-            if let Some(odcid) = orig_dcid {
-                c.set_original_connection_id(&odcid);
-            }
+            c.set_original_destination_cid(&orig_dcid);
+            c.set_initial_source_cid(&scid);
             c.set_qlog(self.create_qlog_trace(&attempt_key));
             let c = Rc::new(RefCell::new(ServerConnectionState {
                 c,

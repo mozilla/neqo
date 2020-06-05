@@ -27,7 +27,7 @@ macro_rules! tpids {
         };
     }
 tpids! {
-    ORIGINAL_CONNECTION_ID = 0x00,
+    ORIGINAL_DESTINATION_CONNECTION_ID = 0x00,
     IDLE_TIMEOUT = 0x01,
     STATELESS_RESET_TOKEN = 0x02,
     MAX_UDP_PAYLOAD_SIZE = 0x03,
@@ -83,9 +83,9 @@ impl TransportParameter {
         qtrace!("TP {:x} length {:x}", tp, content.len());
         let mut d = Decoder::from(content);
         let value = match tp {
-            ORIGINAL_CONNECTION_ID | INITIAL_SOURCE_CONNECTION_ID | RETRY_SOURCE_CONNECTION_ID => {
-                Self::Bytes(d.decode_remainder().to_vec())
-            }
+            ORIGINAL_DESTINATION_CONNECTION_ID
+            | INITIAL_SOURCE_CONNECTION_ID
+            | RETRY_SOURCE_CONNECTION_ID => Self::Bytes(d.decode_remainder().to_vec()),
             STATELESS_RESET_TOKEN => {
                 if d.remaining() != 16 {
                     return Err(Error::TransportParameterError);
@@ -218,7 +218,7 @@ impl TransportParameters {
 
     pub fn get_bytes(&self, tp: TransportParameterId) -> Option<Vec<u8>> {
         match tp {
-            ORIGINAL_CONNECTION_ID
+            ORIGINAL_DESTINATION_CONNECTION_ID
             | INITIAL_SOURCE_CONNECTION_ID
             | RETRY_SOURCE_CONNECTION_ID
             | STATELESS_RESET_TOKEN => {}
@@ -234,7 +234,7 @@ impl TransportParameters {
 
     pub fn set_bytes(&mut self, tp: TransportParameterId, value: Vec<u8>) {
         match tp {
-            ORIGINAL_CONNECTION_ID
+            ORIGINAL_DESTINATION_CONNECTION_ID
             | INITIAL_SOURCE_CONNECTION_ID
             | RETRY_SOURCE_CONNECTION_ID
             | STATELESS_RESET_TOKEN => {
@@ -273,7 +273,7 @@ impl TransportParameters {
             // Skip checks for these, which don't affect 0-RTT.
             if matches!(
                 *k,
-                ORIGINAL_CONNECTION_ID
+                ORIGINAL_DESTINATION_CONNECTION_ID
                     | INITIAL_SOURCE_CONNECTION_ID
                     | RETRY_SOURCE_CONNECTION_ID
                     | STATELESS_RESET_TOKEN
@@ -432,10 +432,10 @@ mod tests {
             tps2.get_bytes(STATELESS_RESET_TOKEN),
             Some(vec![1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8])
         );
-        assert_eq!(tps2.get_bytes(ORIGINAL_CONNECTION_ID), None);
+        assert_eq!(tps2.get_bytes(ORIGINAL_DESTINATION_CONNECTION_ID), None);
         assert_eq!(tps2.get_bytes(INITIAL_SOURCE_CONNECTION_ID), None);
         assert_eq!(tps2.get_bytes(RETRY_SOURCE_CONNECTION_ID), None);
-        assert_eq!(tps2.was_sent(ORIGINAL_CONNECTION_ID), false);
+        assert_eq!(tps2.was_sent(ORIGINAL_DESTINATION_CONNECTION_ID), false);
         assert_eq!(tps2.was_sent(INITIAL_SOURCE_CONNECTION_ID), false);
         assert_eq!(tps2.was_sent(RETRY_SOURCE_CONNECTION_ID), false);
         assert_eq!(tps2.was_sent(STATELESS_RESET_TOKEN), true);

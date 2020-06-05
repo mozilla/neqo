@@ -213,11 +213,15 @@ impl ConnectionIdManager for FixedConnectionIdManager {
 
 struct RetryInfo {
     token: Vec<u8>,
+    retry_source_cid: ConnectionId,
 }
 
 impl RetryInfo {
-    fn new() -> Self {
-        Self { token: Vec::new() }
+    fn new(retry_source_cid: ConnectionId) -> Self {
+        Self {
+            token: Vec::new(),
+            retry_source_cid,
+        }
     }
 }
 
@@ -446,8 +450,8 @@ pub struct Connection {
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     valid_cids: Vec<ConnectionId>,
     retry_info: Option<RetryInfo>,
-    odcid: Option<ConnectionId>,
-    rscid: Option<ConnectionId>,
+    initial_source_cid: Option<ConnectionId>,
+    original_destination_cid: Option<ConnectionId>,
     pub(crate) crypto: Crypto,
     pub(crate) acks: AckTracker,
     idle_timeout: IdleTimeout,
@@ -485,7 +489,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        quic_ver: QuicVersion,
+        quic_version: QuicVersion,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let scid = cid_manager.borrow_mut().generate_cid();
@@ -495,12 +499,17 @@ impl Connection {
             cid_manager,
             None,
             protocols,
-            Some(Path::new(local_addr, remote_addr, scid, dcid.clone())),
-            quic_ver,
+            Some(Path::new(
+                local_addr,
+                remote_addr,
+                scid.clone(),
+                dcid.clone(),
+            )),
+            quic_version,
         )?;
         c.crypto.states.init(Role::Client, &dcid);
-        c.retry_info = Some(RetryInfo::new());
-        c.odcid = Some(dcid);
+        c.initial_source_cid = Some(scid);
+        c.original_destination_cid = Some(dcid);
         c.tps
             .borrow_mut()
             .local
@@ -570,8 +579,8 @@ impl Connection {
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
             retry_info: None,
-            odcid: None,
-            rscid: None,
+            initial_source_cid: None,
+            original_destination_cid: None,
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::default(),
@@ -618,12 +627,21 @@ impl Connection {
     }
 
     /// Set the connection ID that was originally chosen by the client.
-    pub(crate) fn set_original_connection_id(&mut self, odcid: &ConnectionId) {
+    pub(crate) fn set_original_destination_cid(&mut self, odcid: &ConnectionId) {
         assert_eq!(self.role, Role::Server);
         self.tps
             .borrow_mut()
             .local
-            .set_bytes(tparams::ORIGINAL_CONNECTION_ID, odcid.to_vec());
+            .set_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID, odcid.to_vec());
+    }
+
+    /// Set the connection ID that was originally chosen by the client.
+    pub(crate) fn set_initial_source_cid(&mut self, initial_source_cid: &ConnectionId) {
+        assert_eq!(self.role, Role::Server);
+        self.tps.borrow_mut().local.set_bytes(
+            tparams::INITIAL_SOURCE_CONNECTION_ID,
+            initial_source_cid.to_vec(),
+        );
     }
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
@@ -953,7 +971,9 @@ impl Connection {
 
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
         qdebug!([self], "received Retry");
-        debug_assert!(self.retry_info.is_some());
+        if self.retry_info.is_none() {
+            self.retry_info = Some(RetryInfo::new(packet.scid().into()));
+        }
         if !self.retry_info.as_ref().unwrap().token.is_empty() {
             qinfo!([self], "Dropping extra Retry");
             self.stats.dropped_rx += 1;
@@ -964,7 +984,7 @@ impl Connection {
             self.stats.dropped_rx += 1;
             return Ok(());
         }
-        if !packet.is_valid_retry(&self.odcid.as_ref().unwrap()) {
+        if !packet.is_valid_retry(&self.original_destination_cid.as_ref().unwrap()) {
             qinfo!([self], "Dropping Retry with bad integrity tag");
             self.stats.dropped_rx += 1;
             return Ok(());
@@ -1553,16 +1573,27 @@ impl Connection {
         }
     }
 
-    fn validate_odcid(&mut self) -> Res<()> {
+    fn validate_cids(&mut self) -> Res<()> {
+        match self.quic_version {
+            QuicVersion::Draft27 => self.validate_cids_draft_27(),
+            _ => self.validate_cids_draft_28(),
+        }
+    }
+
+    fn validate_cids_draft_27(&mut self) -> Res<()> {
         // Here we drop our Retry state then validate it.
-        if let Some(info) = self.retry_info.take() {
+        if let Some(info) = &self.retry_info {
             if info.token.is_empty() {
                 Ok(())
             } else {
                 let tph = self.tps.borrow();
-                let tp = tph.remote().get_bytes(tparams::ORIGINAL_CONNECTION_ID);
+                let tp = tph
+                    .remote()
+                    .get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
                 if let Some(odcid_tp) = tp {
-                    if self.odcid.as_ref().map(|c| c.as_ref()) == Some((*odcid_tp).into()) {
+                    if self.original_destination_cid.as_ref().map(|c| c.as_ref())
+                        == Some((*odcid_tp).into())
+                    {
                         Ok(())
                     } else {
                         Err(Error::InvalidRetry)
@@ -1572,9 +1603,65 @@ impl Connection {
                 }
             }
         } else {
-            debug_assert_eq!(self.role, Role::Server);
             Ok(())
         }
+    }
+
+    fn validate_cids_draft_28(&mut self) -> Res<()> {
+        let tph = self.tps.borrow();
+
+        let tp = tph
+            .remote()
+            .get_bytes(tparams::INITIAL_SOURCE_CONNECTION_ID);
+        match tp {
+            // Absence of the initial_source_connection_id transport parameter
+            // from either endpoint
+            None => return Err(Error::ProtocolViolation),
+            // Mismatch between values
+            Some(tp) => {
+                if self.initial_source_cid.as_ref().map(|c| c.as_ref()) != Some((*tp).into()) {
+                    return Err(Error::ProtocolViolation);
+                }
+            }
+        }
+
+        if self.role == Role::Client {
+            let tp = tph
+                .remote()
+                .get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
+            match tp {
+                // Absence of the original_destination_connection_id transport
+                // parameter from the server
+                None => return Err(Error::ProtocolViolation),
+                // Mismatch between values
+                Some(tp) => {
+                    if self.original_destination_cid.as_ref().map(|c| c.as_ref())
+                        != Some((*tp).into())
+                    {
+                        return Err(Error::ProtocolViolation);
+                    }
+                }
+            }
+
+            let tp = tph.remote().get_bytes(tparams::RETRY_SOURCE_CONNECTION_ID);
+            match (&tp, &self.retry_info) {
+                (None, None) => {}
+                // Absence of the retry_source_connection_id transport parameter
+                // from the server after receiving a Retry packet,
+                (None, Some(_ri)) => return Err(Error::ProtocolViolation),
+                // Presence of the retry_source_connection_id transport parameter
+                // when no Retry packet was received
+                (Some(_tp), None) => return Err(Error::ProtocolViolation),
+                // Mismatch between values
+                (Some(tp), Some(ri)) => {
+                    if *ri.retry_source_cid != **tp {
+                        return Err(Error::ProtocolViolation);
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn handshake(&mut self, now: Instant, space: PNSpace, data: Option<&[u8]>) -> Res<()> {
@@ -1927,7 +2014,7 @@ impl Connection {
         // Setting application keys has to occur after 0-RTT rejection.
         let pto = self.loss_recovery.pto();
         self.crypto.install_application_keys(now + pto)?;
-        self.validate_odcid()?;
+        self.validate_cids()?;
         self.set_initial_limits();
         self.set_state(State::Connected);
         if self.role == Role::Server {

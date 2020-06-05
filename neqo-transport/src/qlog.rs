@@ -31,7 +31,7 @@ pub fn connection_tparams_set(
             None,
             None,
             None,
-            if let Some(ocid) = remote.get_bytes(tparams::ORIGINAL_CONNECTION_ID) {
+            if let Some(ocid) = remote.get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID) {
                 // Cannot use packet::ConnectionId's Display trait implementation
                 // because it does not include the 0x prefix.
                 Some(hex(&ocid))
