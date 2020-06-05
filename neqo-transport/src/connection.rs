@@ -6,8 +6,6 @@
 
 // The class implementing a QUIC connection.
 
-#![allow(dead_code)]
-
 use std::cell::RefCell;
 use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
@@ -40,7 +38,7 @@ use crate::frame::{
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
 };
 use crate::packet::{
-    DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, Version,
+    DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, QuicVersion,
 };
 use crate::path::Path;
 use crate::qlog;
@@ -213,11 +211,15 @@ impl ConnectionIdManager for FixedConnectionIdManager {
 
 struct RetryInfo {
     token: Vec<u8>,
+    retry_source_cid: ConnectionId,
 }
 
 impl RetryInfo {
-    fn new() -> Self {
-        Self { token: Vec::new() }
+    fn new(retry_source_cid: ConnectionId, token: Vec<u8>) -> Self {
+        Self {
+            token,
+            retry_source_cid,
+        }
     }
 }
 
@@ -392,35 +394,6 @@ impl StateSignaling {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum QuicVersion {
-    Draft27,
-    Draft28,
-}
-
-impl QuicVersion {
-    pub fn as_u32(self) -> Version {
-        match self {
-            Self::Draft27 => 0xff00_0000 + 27,
-            Self::Draft28 => 0xff00_0000 + 28,
-        }
-    }
-}
-
-impl TryFrom<Version> for QuicVersion {
-    type Error = Error;
-
-    fn try_from(ver: Version) -> Res<Self> {
-        if ver == 0xff00_0000 + 27 {
-            Ok(Self::Draft27)
-        } else if ver == 0xff00_0000 + 28 {
-            Ok(Self::Draft28)
-        } else {
-            Err(Error::NoValidProtocolVersion)
-        }
-    }
-}
-
 /// A QUIC Connection
 ///
 /// First, create a new connection using `new_client()` or `new_server()`.
@@ -451,8 +424,8 @@ pub struct Connection {
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     valid_cids: Vec<ConnectionId>,
     retry_info: Option<RetryInfo>,
-    odcid: Option<ConnectionId>,
-    rscid: Option<ConnectionId>,
+    initial_source_cid: Option<ConnectionId>,
+    original_destination_cid: Option<ConnectionId>,
     pub(crate) crypto: Crypto,
     pub(crate) acks: AckTracker,
     idle_timeout: IdleTimeout,
@@ -490,7 +463,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        quic_ver: QuicVersion,
+        quic_version: QuicVersion,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let scid = cid_manager.borrow_mut().generate_cid();
@@ -500,16 +473,17 @@ impl Connection {
             cid_manager,
             None,
             protocols,
-            Some(Path::new(local_addr, remote_addr, scid, dcid.clone())),
-            quic_ver,
+            Some(Path::new(
+                local_addr,
+                remote_addr,
+                scid.clone(),
+                dcid.clone(),
+            )),
+            quic_version,
         )?;
         c.crypto.states.init(Role::Client, &dcid);
-        c.retry_info = Some(RetryInfo::new());
-        c.odcid = Some(dcid);
-        c.tps
-            .borrow_mut()
-            .local
-            .set_bytes(tparams::INITIAL_SOURCE_CONNECTION_ID, Vec::new());
+        c.set_initial_source_cid(scid);
+        c.original_destination_cid = Some(dcid);
         Ok(c)
     }
 
@@ -519,7 +493,7 @@ impl Connection {
         protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
         cid_manager: CidMgr,
-        quic_ver: QuicVersion,
+        quic_version: QuicVersion,
     ) -> Res<Self> {
         Self::new(
             Role::Server,
@@ -528,7 +502,7 @@ impl Connection {
             Some(anti_replay),
             protocols,
             None,
-            quic_ver,
+            quic_version,
         )
     }
 
@@ -575,8 +549,8 @@ impl Connection {
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
             retry_info: None,
-            odcid: None,
-            rscid: None,
+            initial_source_cid: None,
+            original_destination_cid: None,
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::default(),
@@ -622,13 +596,36 @@ impl Connection {
         }
     }
 
-    /// Set the connection ID that was originally chosen by the client.
-    pub(crate) fn set_original_connection_id(&mut self, odcid: &ConnectionId) {
+    /// Set the initial source connection ID that was originally chosen by the
+    /// client.
+    pub(crate) fn set_initial_source_cid(&mut self, initial_source_cid: ConnectionId) {
+        qtrace!("Called set_initial_source_cid {}", initial_source_cid);
+        self.tps.borrow_mut().local.set_bytes(
+            tparams::INITIAL_SOURCE_CONNECTION_ID,
+            initial_source_cid.to_vec(),
+        );
+        self.initial_source_cid = Some(initial_source_cid);
+    }
+
+    /// Set the dest connection ID that was originally chosen by the client.
+    pub(crate) fn set_original_destination_cid(&mut self, odcid: ConnectionId) {
         assert_eq!(self.role, Role::Server);
+        qtrace!("Called set_original_destination_cid {}", odcid);
         self.tps
             .borrow_mut()
             .local
-            .set_bytes(tparams::ORIGINAL_CONNECTION_ID, odcid.to_vec());
+            .set_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID, odcid.to_vec());
+        self.original_destination_cid = Some(odcid);
+    }
+
+    /// Set the connection ID that was retryly used by the client.
+    pub(crate) fn set_retry_source_cid(&mut self, retry_source_cid: ConnectionId) {
+        assert_eq!(self.role, Role::Server);
+        qtrace!("Called set_retry_source_cid {}", retry_source_cid);
+        self.tps.borrow_mut().local.set_bytes(
+            tparams::RETRY_SOURCE_CONNECTION_ID,
+            retry_source_cid.to_vec(),
+        );
     }
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
@@ -957,19 +954,20 @@ impl Connection {
     }
 
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
-        qdebug!([self], "received Retry");
-        debug_assert!(self.retry_info.is_some());
-        if !self.retry_info.as_ref().unwrap().token.is_empty() {
-            qinfo!([self], "Dropping extra Retry");
-            self.stats.dropped_rx += 1;
-            return Ok(());
+        qinfo!([self], "received Retry");
+        if let Some(ri) = self.retry_info.as_ref() {
+            if !ri.token.is_empty() {
+                qinfo!([self], "Dropping extra Retry");
+                self.stats.dropped_rx += 1;
+                return Ok(());
+            }
         }
         if packet.token().is_empty() {
             qinfo!([self], "Dropping Retry without a token");
             self.stats.dropped_rx += 1;
             return Ok(());
         }
-        if !packet.is_valid_retry(&self.odcid.as_ref().unwrap()) {
+        if !packet.is_valid_retry(&self.original_destination_cid.as_ref().unwrap()) {
             qinfo!([self], "Dropping Retry with bad integrity tag");
             self.stats.dropped_rx += 1;
             return Ok(());
@@ -981,12 +979,20 @@ impl Connection {
             qinfo!([self], "No path, but we received a Retry");
             return Err(Error::InternalError);
         };
-        self.retry_info.as_mut().unwrap().token = packet.token().to_vec();
+
         qinfo!(
             [self],
-            "Valid Retry received, token={}",
-            hex(packet.token())
+            "Valid Retry received, token={} scid={}",
+            hex(packet.token()),
+            packet.scid()
         );
+
+        debug_assert!(self.retry_info.is_none());
+        self.retry_info = Some(RetryInfo::new(
+            packet.scid().into(),
+            packet.token().to_vec(),
+        ));
+
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
@@ -1055,7 +1061,8 @@ impl Connection {
                 match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
-                        qdebug!([self], "Garbage packet: {} {}", e, hex(slc));
+                        qdebug!([self], "Garbage packet: {}", e);
+                        qtrace!([self], "Garbage packet contents: {}", hex(slc));
                         self.stats.dropped_rx += 1;
                         break;
                     }
@@ -1067,10 +1074,20 @@ impl Connection {
                         self.stats.dropped_rx += 1;
                         break;
                     }
-                    qinfo!([self], "Received valid Initial packet");
+                    qinfo!(
+                        [self],
+                        "Received valid Initial packet with scid {:?} dcid {:?}",
+                        packet.scid(),
+                        packet.dcid()
+                    );
                     self.set_state(State::WaitInitial);
                     self.loss_recovery.start_pacer(now);
                     self.crypto.states.init(self.role, &packet.dcid());
+
+                    self.set_initial_source_cid(ConnectionId::from(packet.scid()));
+                    if self.original_destination_cid.is_none() {
+                        self.set_original_destination_cid(ConnectionId::from(packet.dcid()));
+                    }
                 }
                 (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
                     self.set_state(State::Closed(ConnectionError::Transport(
@@ -1234,8 +1251,15 @@ impl Connection {
             assert_eq!(packet.packet_type(), PacketType::Initial);
             // A server needs to accept the client's selected CID during the handshake.
             self.valid_cids.push(ConnectionId::from(packet.dcid()));
+
             // Install a path.
             self.initialize_path(packet, d);
+
+            qinfo!(
+                "HS:server: setting iscid to {}",
+                self.path.as_ref().unwrap().local_cid()
+            );
+            self.set_initial_source_cid(self.path.as_ref().unwrap().local_cid().clone());
 
             self.zero_rtt_state = match self.crypto.enable_0rtt(self.role) {
                 Ok(true) => {
@@ -1252,6 +1276,8 @@ impl Connection {
                 .find(|p| p.received_on(&d))
                 .expect("should have a path for sending Initial");
             p.set_remote_cid(packet.scid());
+            qinfo!("HS:client: setting iscid to {}", packet.scid());
+            self.set_initial_source_cid(ConnectionId::from(packet.scid()));
         }
         self.set_state(State::Handshaking);
         Ok(())
@@ -1325,9 +1351,9 @@ impl Connection {
             PacketBuilder::long(
                 encoder,
                 pt,
+                quic_version,
                 path.remote_cid(),
                 path.local_cid(),
-                quic_version,
             )
         };
         if pt == PacketType::Initial {
@@ -1603,33 +1629,9 @@ impl Connection {
         }
     }
 
-    fn validate_odcid(&mut self) -> Res<()> {
-        // Here we drop our Retry state then validate it.
-        if let Some(info) = self.retry_info.take() {
-            if info.token.is_empty() {
-                Ok(())
-            } else {
-                let tph = self.tps.borrow();
-                let tp = tph.remote().get_bytes(tparams::ORIGINAL_CONNECTION_ID);
-                if let Some(odcid_tp) = tp {
-                    if self.odcid.as_ref().map(|c| c.as_ref()) == Some((*odcid_tp).into()) {
-                        Ok(())
-                    } else {
-                        Err(Error::InvalidRetry)
-                    }
-                } else {
-                    Err(Error::InvalidRetry)
-                }
-            }
-        } else {
-            debug_assert_eq!(self.role, Role::Server);
-            Ok(())
-        }
-    }
-
     /// Process the final set of transport parameters.
     fn process_tps(&mut self) -> Res<()> {
-        self.validate_odcid()?;
+        self.validate_cids()?;
         if let Some(token) = self
             .tps
             .borrow()
@@ -1642,6 +1644,138 @@ impl Connection {
             self.path.as_mut().unwrap().set_reset_token(reset_token);
         }
         self.set_initial_limits();
+        Ok(())
+    }
+
+    fn validate_cids(&mut self) -> Res<()> {
+        match self.quic_version {
+            QuicVersion::Draft27 => self.validate_cids_draft_27(),
+            _ => self.validate_cids_draft_28_plus(),
+        }
+    }
+
+    fn validate_cids_draft_27(&mut self) -> Res<()> {
+        if let Some(info) = &self.retry_info {
+            if info.token.is_empty() {
+                Ok(())
+            } else {
+                let tph = self.tps.borrow();
+                let tp = tph
+                    .remote()
+                    .get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
+                if let Some(odcid_tp) = tp {
+                    if self.original_destination_cid.as_ref().map(|c| c.as_ref())
+                        == Some((*odcid_tp).into())
+                    {
+                        Ok(())
+                    } else {
+                        Err(Error::InvalidRetry)
+                    }
+                } else {
+                    Err(Error::InvalidRetry)
+                }
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_cids_draft_28_plus(&mut self) -> Res<()> {
+        let tph = self.tps.borrow();
+
+        let tp = tph
+            .remote()
+            .get_bytes(tparams::INITIAL_SOURCE_CONNECTION_ID);
+        match tp {
+            // Absence of the initial_source_connection_id transport parameter
+            // from either endpoint
+            None => {
+                qinfo!(
+                    "{} ISCID test failed: ISCID not found in tparams",
+                    self.role
+                );
+                return Err(Error::ProtocolViolation);
+            }
+            // Mismatch between values
+            Some(tp) => {
+                if self.initial_source_cid.as_ref().map(|c| c.as_ref()) != Some((*tp).into()) {
+                    qinfo!(
+                        "{} ISCID test failed: self cid {:?} != tp cid {}",
+                        self.role,
+                        self.initial_source_cid,
+                        hex(&tp)
+                    );
+                    return Err(Error::ProtocolViolation);
+                }
+            }
+        }
+
+        if self.role == Role::Client {
+            let tp = tph
+                .remote()
+                .get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
+            match tp {
+                // Absence of the original_destination_connection_id transport
+                // parameter from the server
+                None => {
+                    qinfo!(
+                        "{} ODCID test failed: ODCID not found in tparams",
+                        self.role
+                    );
+                    return Err(Error::ProtocolViolation);
+                }
+                // Mismatch between values
+                Some(tp) => {
+                    if self.original_destination_cid.as_ref().map(|c| c.as_ref())
+                        != Some((*tp).into())
+                    {
+                        qinfo!(
+                            "{} ODCID test failed: self cid {:?} != tp cid {}",
+                            self.role,
+                            self.original_destination_cid,
+                            hex(&tp)
+                        );
+                        return Err(Error::ProtocolViolation);
+                    }
+                }
+            }
+
+            let tp = tph.remote().get_bytes(tparams::RETRY_SOURCE_CONNECTION_ID);
+            match (&tp, &self.retry_info) {
+                (None, None) => {}
+                // Absence of the retry_source_connection_id transport parameter
+                // from the server after receiving a Retry packet,
+                (None, Some(_ri)) => {
+                    qinfo!(
+                        "{} RSCID test failed: RSCID not found in tparams",
+                        self.role
+                    );
+                    return Err(Error::ProtocolViolation);
+                }
+                // Presence of the retry_source_connection_id transport parameter
+                // when no Retry packet was received
+                (Some(_tp), None) => {
+                    qinfo!(
+                        "{} RSCID test failed: tparam found but no retry packet received",
+                        self.role
+                    );
+                    return Err(Error::ProtocolViolation);
+                }
+                // Mismatch between values
+                (Some(tp), Some(ri)) => {
+                    if **tp != *ri.retry_source_cid {
+                        qinfo!(
+                            "{} RSCID test failed. self cid {:?} != tp cid {}",
+                            self.role,
+                            ri.retry_source_cid,
+                            hex(&**tp),
+                        );
+                        return Err(Error::ProtocolViolation);
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -2420,7 +2554,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
-            QuicVersion::Draft28,
+            QuicVersion::default(),
         )
         .expect("create a default client")
     }
@@ -2431,7 +2565,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-            QuicVersion::Draft28,
+            QuicVersion::default(),
         )
         .expect("create a default server")
     }
@@ -3020,7 +3154,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-            QuicVersion::Draft28,
+            QuicVersion::Draft27,
         )
         .unwrap();
 
@@ -3378,7 +3512,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
-            QuicVersion::Draft28,
+            QuicVersion::Draft27,
         )
         .expect("create a server");
 

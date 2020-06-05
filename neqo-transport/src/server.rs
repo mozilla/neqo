@@ -344,7 +344,7 @@ impl Server {
                     return None;
                 };
                 let new_dcid = self.cid_manager.borrow_mut().generate_cid();
-                let packet = PacketBuilder::retry(&scid, &new_dcid, &token, &dcid, quic_version);
+                let packet = PacketBuilder::retry(quic_version, &scid, &new_dcid, &token, &dcid);
                 if let Ok(p) = packet {
                     let retry = Datagram::new(dgram.destination(), dgram.source(), p);
                     Some(retry)
@@ -377,7 +377,7 @@ impl Server {
             let c = Rc::clone(c);
             self.process_connection(c, Some(dgram), now)
         } else {
-            self.accept_connection(attempt_key, orig_dcid, dgram, now, quic_version)
+            self.accept_connection(attempt_key, dcid, orig_dcid, dgram, now, quic_version)
         }
     }
 
@@ -434,6 +434,7 @@ impl Server {
     fn accept_connection(
         &mut self,
         attempt_key: AttemptKey,
+        dcid: ConnectionId,
         orig_dcid: Option<ConnectionId>,
         dgram: Datagram,
         now: Instant,
@@ -458,7 +459,9 @@ impl Server {
 
         if let Ok(mut c) = sconn {
             if let Some(odcid) = orig_dcid {
-                c.set_original_connection_id(&odcid);
+                // There was a retry.
+                c.set_original_destination_cid(odcid);
+                c.set_retry_source_cid(dcid);
             }
             c.set_qlog(self.create_qlog_trace(&attempt_key));
             let c = Rc::new(RefCell::new(ServerConnectionState {

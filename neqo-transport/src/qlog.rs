@@ -16,7 +16,7 @@ use crate::frame::{self, Frame};
 use crate::packet::{DecryptedPacket, PacketNumber, PacketType};
 use crate::path::Path;
 use crate::tparams::{self, TransportParametersHandler};
-use crate::{Res, DEFAULT_QUIC_VERSION};
+use crate::{QuicVersion, Res};
 
 pub fn connection_tparams_set(
     qlog: &mut Option<NeqoQlog>,
@@ -31,7 +31,7 @@ pub fn connection_tparams_set(
             None,
             None,
             None,
-            if let Some(ocid) = remote.get_bytes(tparams::ORIGINAL_CONNECTION_ID) {
+            if let Some(ocid) = remote.get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID) {
                 // Cannot use packet::ConnectionId's Display trait implementation
                 // because it does not include the 0x prefix.
                 Some(hex(ocid))
@@ -163,7 +163,7 @@ fn connection_started(qlog: &mut Option<NeqoQlog>, path: &Path) -> Res<()> {
             Some("QUIC".into()),
             path.local_address().port().into(),
             path.remote_address().port().into(),
-            Some(format!("{:x}", DEFAULT_QUIC_VERSION.as_u32())),
+            Some(format!("{:x}", QuicVersion::default().as_u32())),
             Some(format!("{}", path.local_cid())),
             Some(format!("{}", path.remote_cid())),
         ))?;

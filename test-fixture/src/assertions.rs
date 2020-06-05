@@ -8,7 +8,7 @@ use std::convert::TryFrom;
 use std::convert::TryInto;
 
 use neqo_common::Decoder;
-use neqo_transport::{QuicVersion, DEFAULT_QUIC_VERSION};
+use neqo_transport::QuicVersion;
 
 // Do a simple decode of the datagram to verify that it is coalesced.
 pub fn assert_coalesced_0rtt(payload: &[u8]) {
@@ -20,7 +20,7 @@ pub fn assert_coalesced_0rtt(payload: &[u8]) {
         .unwrap()
         .try_into()
         .unwrap();
-    assert_eq!(version, DEFAULT_QUIC_VERSION);
+    assert_eq!(version, QuicVersion::default());
     dec.skip_vec(1); // DCID
     dec.skip_vec(1); // SCID
     dec.skip_vvec();

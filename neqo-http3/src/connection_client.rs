@@ -69,7 +69,7 @@ impl Http3Client {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         qpack_settings: QpackSettings,
-        quic_ver: QuicVersion,
+        quic_version: QuicVersion,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
             Connection::new_client(
@@ -78,7 +78,7 @@ impl Http3Client {
                 cid_manager,
                 local_addr,
                 remote_addr,
-                quic_ver,
+                quic_version,
             )?,
             qpack_settings,
         ))
@@ -633,7 +633,7 @@ mod tests {
                 max_table_size_decoder: 100,
                 max_blocked_streams: 100,
             },
-            QuicVersion::Draft28,
+            QuicVersion::Draft27,
         )
         .expect("create a default client")
     }
@@ -2983,7 +2983,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-            QuicVersion::Draft28,
+            QuicVersion::Draft27,
         )
         .unwrap();
 
