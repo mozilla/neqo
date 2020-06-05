@@ -8,7 +8,7 @@
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECTION_ID_LEN};
 use crate::crypto::{CryptoDxState, CryptoStates};
 use crate::tracking::PNSpace;
-use crate::{Error, QuicVersion, Res, DEFAULT_QUIC_VERSION};
+use crate::{Error, QuicVersion, Res};
 
 use neqo_common::{hex, hex_with_len, qerror, qtrace, Decoder, Encoder};
 use neqo_crypto::{aead::Aead, hkdf, random, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3};
@@ -285,7 +285,8 @@ impl PacketBuilder {
         encoder.encode(&[0; 4]); // Zero version == VN.
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
-        encoder.encode_uint(4, DEFAULT_QUIC_VERSION.as_u32());
+        encoder.encode_uint(4, QuicVersion::Draft27.as_u32());
+        encoder.encode_uint(4, QuicVersion::Draft28.as_u32());
         // Add a greased version, using the randomness already generated.
         for g in &mut grease[..4] {
             *g = *g & 0xf0 | 0x0a;
@@ -678,7 +679,7 @@ impl Deref for DecryptedPacket {
 mod tests {
     use super::*;
     use crate::crypto::{CryptoDxState, CryptoStates};
-    use crate::FixedConnectionIdManager;
+    use crate::{FixedConnectionIdManager, DEFAULT_QUIC_VERSION};
     use neqo_common::Encoder;
     use test_fixture::{fixture_init, now};
 
@@ -982,8 +983,8 @@ mod tests {
 
     const SAMPLE_VN: &[u8] = &[
         0x80, 0x00, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x08,
-        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0xff, 0x00, 0x00, 0x1c, 0x0a, 0x0a, 0x0a,
-        0x0a,
+        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0xff, 0x00, 0x00, 0x1b, 0xff, 0x00, 0x00,
+        0x1c, 0x0a, 0x0a, 0x0a, 0x0a,
     ];
 
     #[test]
