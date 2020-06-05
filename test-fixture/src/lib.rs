@@ -82,7 +82,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
-        QuicVersion::Draft28,
+        QuicVersion::Draft27,
     )
     .expect("create a default client")
 }
@@ -96,7 +96,7 @@ pub fn default_server() -> Connection {
         DEFAULT_ALPN,
         &anti_replay(),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-        QuicVersion::Draft28,
+        QuicVersion::Draft27,
     )
     .expect("create a default server")
 }
@@ -151,7 +151,7 @@ pub fn default_http3_client() -> Http3Client {
             max_table_size_decoder: 100,
             max_blocked_streams: 100,
         },
-        QuicVersion::Draft28,
+        QuicVersion::Draft27,
     )
     .expect("create a default client")
 }
