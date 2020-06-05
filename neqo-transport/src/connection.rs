@@ -396,6 +396,12 @@ impl QuicVersion {
     }
 }
 
+impl Default for QuicVersion {
+    fn default() -> Self {
+        Self::Draft28
+    }
+}
+
 impl TryFrom<Version> for QuicVersion {
     type Error = Error;
 
@@ -508,7 +514,7 @@ impl Connection {
         protocols: &[impl AsRef<str>],
         anti_replay: &AntiReplay,
         cid_manager: CidMgr,
-        quic_ver: QuicVersion,
+        quic_version: QuicVersion,
     ) -> Res<Self> {
         Self::new(
             Role::Server,
@@ -517,7 +523,7 @@ impl Connection {
             Some(anti_replay),
             protocols,
             None,
-            quic_ver,
+            quic_version,
         )
     }
 
