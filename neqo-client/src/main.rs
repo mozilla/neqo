@@ -66,7 +66,7 @@ pub struct Args {
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP3 no matter what the ALPN says.
-    alpn: Vec<String>,
+    alpn: String,
 
     urls: Vec<Url>,
 
@@ -354,10 +354,16 @@ fn client(
     origin: &str,
     urls: &[Url],
 ) -> Res<()> {
+    let quic_protocol = if args.alpn == "h3-27" {
+        QuicVersion::Draft27
+    } else {
+        QuicVersion::Draft28
+    };
+
     let mut client = Http3Client::new(
         origin,
-        &args.alpn,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+        &[&args.alpn],
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         local_addr,
         remote_addr,
         QpackSettings {
@@ -365,7 +371,7 @@ fn client(
             max_table_size_decoder: args.max_table_size_decoder,
             max_blocked_streams: args.max_blocked_streams,
         },
-        QuicVersion::Draft28,
+        quic_protocol,
     )
     .expect("must succeed");
     client.set_qlog(qlog_new(args, origin)?);
@@ -808,13 +814,19 @@ mod old {
         token: Option<Vec<u8>>,
         ciphers: Option<&[Cipher]>,
     ) -> Res<Option<Vec<u8>>> {
+        let (quic_protocol, alpn) = if args.alpn == "hq-27" {
+            (QuicVersion::Draft27, "hq-27")
+        } else {
+            (QuicVersion::Draft28, "hq-28")
+        };
+
         let mut client = Connection::new_client(
             origin,
-            &["hq-28"],
+            &[alpn],
             Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
             local_addr,
             remote_addr,
-            QuicVersion::Draft28,
+            quic_protocol,
         )
         .expect("must succeed");
 
