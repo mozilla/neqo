@@ -217,9 +217,9 @@ struct RetryInfo {
 }
 
 impl RetryInfo {
-    fn new(retry_source_cid: ConnectionId) -> Self {
+    fn new(retry_source_cid: ConnectionId, token: Vec<u8>) -> Self {
         Self {
-            token: Vec::new(),
+            token,
             retry_source_cid,
         }
     }
@@ -509,11 +509,7 @@ impl Connection {
         )?;
         c.crypto.states.init(Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
-        c.tps
-            .borrow_mut()
-            .local
-            .set_bytes(tparams::INITIAL_SOURCE_CONNECTION_ID, scid.to_vec());
-        c.initial_source_cid = Some(scid);
+        c.set_initial_source_cid(scid);
         Ok(c)
     }
 
@@ -626,9 +622,10 @@ impl Connection {
         }
     }
 
-    /// Set the connection ID that was originally chosen by the client.
+    /// Set the dest connection ID that was originally chosen by the client.
     pub(crate) fn set_original_destination_cid(&mut self, odcid: ConnectionId) {
         assert_eq!(self.role, Role::Server);
+        qerror!("CALLED SODCID {}", odcid);
         self.tps
             .borrow_mut()
             .local
@@ -636,14 +633,25 @@ impl Connection {
         self.original_destination_cid = Some(odcid);
     }
 
-    /// Set the connection ID that was initially used by the client.
+    /// Set the source connection ID that was originally chosen by the client.
     pub(crate) fn set_initial_source_cid(&mut self, initial_source_cid: ConnectionId) {
-        assert_eq!(self.role, Role::Server);
+        //assert_eq!(self.role, Role::Server);
+        qerror!("CALLED ISCID {}", initial_source_cid);
         self.tps.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
             initial_source_cid.to_vec(),
         );
         self.initial_source_cid = Some(initial_source_cid);
+    }
+
+    /// Set the connection ID that was retryly used by the client.
+    pub(crate) fn set_retry_source_cid(&mut self, retry_source_cid: ConnectionId) {
+        assert_eq!(self.role, Role::Server);
+        qerror!("CALLED RSCID {}", retry_source_cid);
+        self.tps.borrow_mut().local.set_bytes(
+            tparams::RETRY_SOURCE_CONNECTION_ID,
+            retry_source_cid.to_vec(),
+        );
     }
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
@@ -973,13 +981,12 @@ impl Connection {
 
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
         qdebug!([self], "received Retry");
-        if self.retry_info.is_none() {
-            self.retry_info = Some(RetryInfo::new(packet.scid().into()));
-        }
-        if !self.retry_info.as_ref().unwrap().token.is_empty() {
-            qinfo!([self], "Dropping extra Retry");
-            self.stats.dropped_rx += 1;
-            return Ok(());
+        if let Some(ri) = self.retry_info.as_ref() {
+            if !ri.token.is_empty() {
+                qinfo!([self], "Dropping extra Retry");
+                self.stats.dropped_rx += 1;
+                return Ok(());
+            }
         }
         if packet.token().is_empty() {
             qinfo!([self], "Dropping Retry without a token");
@@ -998,12 +1005,20 @@ impl Connection {
             qinfo!([self], "No path, but we received a Retry");
             return Err(Error::InternalError);
         };
-        self.retry_info.as_mut().unwrap().token = packet.token().to_vec();
+
         qinfo!(
             [self],
             "Valid Retry received, token={}",
             hex(packet.token())
         );
+
+        debug_assert!(self.retry_info.is_none());
+        qerror!("handle_retry scid {:?}", packet.scid());
+        self.retry_info = Some(RetryInfo::new(
+            packet.scid().into(),
+            packet.token().to_vec(),
+        ));
+
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
@@ -1051,7 +1066,9 @@ impl Connection {
                     self.crypto.states.init(self.role, &packet.dcid());
                     qerror!("ASG scid {:?} dcid {:?}", packet.scid(), packet.dcid());
                     self.set_initial_source_cid(ConnectionId::from(packet.scid()));
-                    self.set_original_destination_cid(ConnectionId::from(packet.dcid()));
+                    if self.original_destination_cid.is_none() {
+                        self.set_original_destination_cid(ConnectionId::from(packet.dcid()));
+                    }
                 }
                 (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
                     self.set_state(State::Closed(ConnectionError::Transport(
@@ -1586,7 +1603,6 @@ impl Connection {
     }
 
     fn validate_cids_draft_27(&mut self) -> Res<()> {
-        // Here we drop our Retry state then validate it.
         if let Some(info) = &self.retry_info {
             if info.token.is_empty() {
                 Ok(())
@@ -1608,6 +1624,7 @@ impl Connection {
                 }
             }
         } else {
+            //debug_assert_eq!(self.role, Role::Server);
             Ok(())
         }
     }
@@ -1624,12 +1641,6 @@ impl Connection {
             None => return Err(Error::ProtocolViolation),
             // Mismatch between values
             Some(tp) => {
-                qerror!(
-                    "ASG2 {:?} self iscid {:?} tp iscid {:?}",
-                    self.role,
-                    self.initial_source_cid,
-                    tp
-                );
                 if self.initial_source_cid.as_ref().map(|c| c.as_ref()) != Some((*tp).into()) {
                     return Err(Error::ProtocolViolation);
                 }
@@ -1646,6 +1657,13 @@ impl Connection {
                 None => return Err(Error::ProtocolViolation),
                 // Mismatch between values
                 Some(tp) => {
+                    qerror!(
+                        "ASG2 {:?} self cid {:?} tp cid {}",
+                        self.role,
+                        self.original_destination_cid,
+                        hex(&tp)
+                    );
+
                     if self.original_destination_cid.as_ref().map(|c| c.as_ref())
                         != Some((*tp).into())
                     {
@@ -1665,7 +1683,8 @@ impl Connection {
                 (Some(_tp), None) => return Err(Error::ProtocolViolation),
                 // Mismatch between values
                 (Some(tp), Some(ri)) => {
-                    if *ri.retry_source_cid != **tp {
+                    qerror!("ASG3 {} {}", hex(&**tp), ri.retry_source_cid);
+                    if **tp != *ri.retry_source_cid {
                         return Err(Error::ProtocolViolation);
                     }
                 }
