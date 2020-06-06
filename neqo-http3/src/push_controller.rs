@@ -27,7 +27,7 @@ use std::slice::SliceIndex;
 ///                     `PushDataReadable` will be delayed until a push promise is received (they are kept in
 ///                     `events`).
 ///   `Active`: there is a push steam and at least one push promise frame.
-///   `Close`: the push stream has been closed or reset alread.
+///   `Close`: the push stream has been closed or reset already.
 #[derive(Debug, PartialEq, Clone)]
 enum PushState {
     Init,
@@ -45,6 +45,11 @@ enum PushState {
     Closed,
 }
 
+/// `ActivePushStreams` holds information about push streams.
+///
+/// `first_push_id` holds a push_id of the first element in `push_streams` if it is present.
+/// `push_id` smaller than `first_push_id` have been already closed. `push_id` => `first_push_id`
+/// are in `push_streams` or they are not yet opened.
 #[derive(Debug)]
 struct ActivePushStreams {
     push_streams: VecDeque<PushState>,
@@ -59,6 +64,7 @@ impl ActivePushStreams {
         }
     }
 
+    /// Returns None if a stream has been closed already.
     pub fn get_mut(
         &mut self,
         push_id: u64,
@@ -77,10 +83,12 @@ impl ActivePushStreams {
         }
     }
 
+    /// Returns None if a stream has been closed already.
     pub fn get(&mut self, push_id: u64) -> Option<&mut <usize as SliceIndex<[PushState]>>::Output> {
         self.get_mut(push_id)
     }
 
+    /// Returns the State of a closed push stream or None for already closed streams.
     pub fn close(&mut self, push_id: u64) -> Option<PushState> {
         match self.get_mut(push_id) {
             None | Some(PushState::Closed) => None,
@@ -116,9 +124,6 @@ impl ActivePushStreams {
 
 /// `PushController` keeps information about push stream states.
 ///
-/// `push_ids` smaller than `next_push_id_to_open` are all in one of the above state or they are closed. The closed
-/// pushes are removed from `push_streams`. `push_ids` >= `next_push_id_to_open` have not been opened yet.
-///
 /// A `PushStream` calls `add_new_push_stream` that may change the push state from Init to `OnlyPushStream` or from
 /// `PushPromise` to `Active`. If a stream has already been closed `add_new_push_stream` returns false (the `PushStream`
 /// will close the transport stream).
@@ -127,7 +132,7 @@ impl ActivePushStreams {
 ///
 /// The `PushController` handles:
 ///  `PUSH_PROMISE` frame: frames may change the push state from Init to `PushPromise` and from `OnlyPushStream` to
-///                        `Active`. Frames for a closed steam is ignored.
+///                        `Active`. Frames for a closed steams are ignored.
 ///  `CANCEL_PUSH` frame: (`handle_cancel_push` will be called). If a push is in state `PushPromise` or `Active`, any
 ///                       posted events will be removed and a `PushCanceled` event will be posted. If a push is in
 ///                       state `OnlyPushStream` or `Active` the transport stream and the `PushStream` will be closed.
