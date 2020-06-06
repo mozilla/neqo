@@ -52,6 +52,7 @@ pub enum TransportParameter {
 
 impl TransportParameter {
     fn encode(&self, enc: &mut Encoder, tp: TransportParameterId) {
+        qdebug!("TP encoded; type 0x{:02x} val {:?}", tp, self);
         enc.encode_varint(tp);
         match self {
             Self::Bytes(a) => {
@@ -119,7 +120,7 @@ impl TransportParameter {
         if d.remaining() > 0 {
             return Err(Error::TooMuchData);
         }
-        qtrace!("TP decoded; type {:x} val {:?}", tp, value);
+        qdebug!("TP decoded; type 0x{:02x} val {:?}", tp, value);
         Ok(Some((tp, value)))
     }
 }
