@@ -225,7 +225,7 @@ fn drop_non_initial() {
 }
 
 #[test]
-fn retry() {
+fn retry_basic() {
     let mut server = default_server();
     server.set_retry_required(true);
     let mut client = default_client();
