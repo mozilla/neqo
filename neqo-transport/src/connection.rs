@@ -6,8 +6,6 @@
 
 // The class implementing a QUIC connection.
 
-#![allow(dead_code)]
-
 use std::cell::RefCell;
 use std::cmp::{max, min, Ordering};
 use std::collections::HashMap;
