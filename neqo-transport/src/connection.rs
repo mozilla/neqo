@@ -509,7 +509,6 @@ impl Connection {
         )?;
         c.crypto.states.init(Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
-        c.set_initial_source_cid(scid);
         Ok(c)
     }
 
@@ -622,6 +621,18 @@ impl Connection {
         }
     }
 
+    /// Set the initial source connection ID that was originally chosen by the
+    /// client.
+    pub(crate) fn set_initial_source_cid(&mut self, initial_source_cid: ConnectionId) {
+        assert_eq!(self.role, Role::Server);
+        qerror!("CALLED ISCID {}", initial_source_cid);
+        self.tps.borrow_mut().local.set_bytes(
+            tparams::INITIAL_SOURCE_CONNECTION_ID,
+            initial_source_cid.to_vec(),
+        );
+        self.initial_source_cid = Some(initial_source_cid);
+    }
+
     /// Set the dest connection ID that was originally chosen by the client.
     pub(crate) fn set_original_destination_cid(&mut self, odcid: ConnectionId) {
         assert_eq!(self.role, Role::Server);
@@ -631,17 +642,6 @@ impl Connection {
             .local
             .set_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID, odcid.to_vec());
         self.original_destination_cid = Some(odcid);
-    }
-
-    /// Set the source connection ID that was originally chosen by the client.
-    pub(crate) fn set_initial_source_cid(&mut self, initial_source_cid: ConnectionId) {
-        //assert_eq!(self.role, Role::Server);
-        qerror!("CALLED ISCID {}", initial_source_cid);
-        self.tps.borrow_mut().local.set_bytes(
-            tparams::INITIAL_SOURCE_CONNECTION_ID,
-            initial_source_cid.to_vec(),
-        );
-        self.initial_source_cid = Some(initial_source_cid);
     }
 
     /// Set the connection ID that was retryly used by the client.
@@ -1048,7 +1048,8 @@ impl Connection {
                 match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
-                        qdebug!([self], "Garbage packet: {} {}", e, hex(slc));
+                        qdebug!([self], "Garbage packet: {}", e);
+                        qtrace!([self], "Garbage packet contents: {}", hex(slc));
                         self.stats.dropped_rx += 1;
                         return Ok(frames);
                     }
@@ -1064,7 +1065,11 @@ impl Connection {
                     self.set_state(State::WaitInitial);
                     self.loss_recovery.start_pacer(now);
                     self.crypto.states.init(self.role, &packet.dcid());
-                    qerror!("ASG scid {:?} dcid {:?}", packet.scid(), packet.dcid());
+                    qerror!(
+                        "RX'd initial with scid {:?} dcid {:?}",
+                        packet.scid(),
+                        packet.dcid()
+                    );
                     self.set_initial_source_cid(ConnectionId::from(packet.scid()));
                     if self.original_destination_cid.is_none() {
                         self.set_original_destination_cid(ConnectionId::from(packet.dcid()));
@@ -1226,8 +1231,15 @@ impl Connection {
             assert_eq!(packet.packet_type(), PacketType::Initial);
             // A server needs to accept the client's selected CID during the handshake.
             self.valid_cids.push(ConnectionId::from(packet.dcid()));
+
             // Install a path.
             self.initialize_path(packet, d);
+
+            qerror!(
+                "HS:server: setting iscid to {}",
+                self.path.as_ref().unwrap().local_cid()
+            );
+            self.set_initial_source_cid(self.path.as_ref().unwrap().local_cid().clone());
 
             self.zero_rtt_state = match self.crypto.enable_0rtt(self.role) {
                 Ok(true) => {
@@ -1244,6 +1256,8 @@ impl Connection {
                 .find(|p| p.received_on(&d))
                 .expect("should have a path for sending Initial");
             p.set_remote_cid(packet.scid());
+            qerror!("HS:client: setting iscid to {}", packet.scid());
+            self.initial_source_cid = Some(ConnectionId::from(packet.scid()));
         }
         self.set_state(State::Handshaking);
         Ok(())
@@ -1638,10 +1652,22 @@ impl Connection {
         match tp {
             // Absence of the initial_source_connection_id transport parameter
             // from either endpoint
-            None => return Err(Error::ProtocolViolation),
+            None => {
+                qinfo!(
+                    "{} ISCID test failed: ISCID not found in tparams",
+                    self.role
+                );
+                return Err(Error::ProtocolViolation);
+            }
             // Mismatch between values
             Some(tp) => {
                 if self.initial_source_cid.as_ref().map(|c| c.as_ref()) != Some((*tp).into()) {
+                    qinfo!(
+                        "{} ISCID test failed: self cid {:?} != tp cid {}",
+                        self.role,
+                        self.initial_source_cid,
+                        hex(&tp)
+                    );
                     return Err(Error::ProtocolViolation);
                 }
             }
@@ -1654,19 +1680,24 @@ impl Connection {
             match tp {
                 // Absence of the original_destination_connection_id transport
                 // parameter from the server
-                None => return Err(Error::ProtocolViolation),
+                None => {
+                    qinfo!(
+                        "{} ODCID test failed: ODCID not found in tparams",
+                        self.role
+                    );
+                    return Err(Error::ProtocolViolation);
+                }
                 // Mismatch between values
                 Some(tp) => {
-                    qerror!(
-                        "ASG2 {:?} self cid {:?} tp cid {}",
-                        self.role,
-                        self.original_destination_cid,
-                        hex(&tp)
-                    );
-
                     if self.original_destination_cid.as_ref().map(|c| c.as_ref())
                         != Some((*tp).into())
                     {
+                        qinfo!(
+                            "{} ODCID test failed: self cid {:?} != tp cid {}",
+                            self.role,
+                            self.original_destination_cid,
+                            hex(&tp)
+                        );
                         return Err(Error::ProtocolViolation);
                     }
                 }
@@ -1677,14 +1708,31 @@ impl Connection {
                 (None, None) => {}
                 // Absence of the retry_source_connection_id transport parameter
                 // from the server after receiving a Retry packet,
-                (None, Some(_ri)) => return Err(Error::ProtocolViolation),
+                (None, Some(_ri)) => {
+                    qinfo!(
+                        "{} RSCID test failed: RSCID not found in tparams",
+                        self.role
+                    );
+                    return Err(Error::ProtocolViolation);
+                }
                 // Presence of the retry_source_connection_id transport parameter
                 // when no Retry packet was received
-                (Some(_tp), None) => return Err(Error::ProtocolViolation),
+                (Some(_tp), None) => {
+                    qinfo!(
+                        "{} RSCID test failed: tparam found but no retry packet received",
+                        self.role
+                    );
+                    return Err(Error::ProtocolViolation);
+                }
                 // Mismatch between values
                 (Some(tp), Some(ri)) => {
-                    qerror!("ASG3 {} {}", hex(&**tp), ri.retry_source_cid);
                     if **tp != *ri.retry_source_cid {
+                        qinfo!(
+                            "{} RSCID test failed. self cid {:?} != tp cid {}",
+                            self.role,
+                            ri.retry_source_cid,
+                            hex(&**tp),
+                        );
                         return Err(Error::ProtocolViolation);
                     }
                 }
