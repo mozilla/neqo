@@ -497,12 +497,7 @@ impl Connection {
             cid_manager,
             None,
             protocols,
-            Some(Path::new(
-                local_addr,
-                remote_addr,
-                scid.clone(),
-                dcid.clone(),
-            )),
+            Some(Path::new(local_addr, remote_addr, scid, dcid.clone())),
             quic_version,
         )?;
         c.crypto.states.init(Role::Client, &dcid);
