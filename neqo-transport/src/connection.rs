@@ -506,7 +506,7 @@ impl Connection {
             quic_version,
         )?;
         c.crypto.states.init(Role::Client, &dcid);
-        c.set_initial_source_cid(ConnectionId::from(scid));
+        c.set_initial_source_cid(scid);
         c.original_destination_cid = Some(dcid);
         Ok(c)
     }
