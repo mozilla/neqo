@@ -38,7 +38,7 @@ use crate::frame::{
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
 };
 use crate::packet::{
-    DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, Version,
+    DecryptedPacket, PacketBuilder, PacketNumber, PacketType, PublicPacket, QuicVersion,
 };
 use crate::path::Path;
 use crate::qlog;
@@ -379,41 +379,6 @@ impl StateSignaling {
         if let Self::CloseSent(Some(frame)) = self {
             let frame = mem::replace(frame, Frame::Padding);
             *self = Self::Closing(frame);
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum QuicVersion {
-    Draft27,
-    Draft28,
-}
-
-impl QuicVersion {
-    pub fn as_u32(self) -> Version {
-        match self {
-            Self::Draft27 => 0xff00_0000 + 27,
-            Self::Draft28 => 0xff00_0000 + 28,
-        }
-    }
-}
-
-impl Default for QuicVersion {
-    fn default() -> Self {
-        Self::Draft28
-    }
-}
-
-impl TryFrom<Version> for QuicVersion {
-    type Error = Error;
-
-    fn try_from(ver: Version) -> Res<Self> {
-        if ver == 0xff00_0000 + 27 {
-            Ok(Self::Draft27)
-        } else if ver == 0xff00_0000 + 28 {
-            Ok(Self::Draft28)
-        } else {
-            Err(Error::NoValidProtocolVersion)
         }
     }
 }
@@ -1331,9 +1296,9 @@ impl Connection {
             PacketBuilder::long(
                 encoder,
                 pt,
+                quic_version,
                 path.remote_cid(),
                 path.local_cid(),
-                quic_version,
             )
         };
         if pt == PacketType::Initial {
@@ -1612,7 +1577,7 @@ impl Connection {
     fn validate_cids(&mut self) -> Res<()> {
         match self.quic_version {
             QuicVersion::Draft27 => self.validate_cids_draft_27(),
-            _ => self.validate_cids_draft_28(),
+            _ => self.validate_cids_draft_28_plus(),
         }
     }
 
@@ -1638,12 +1603,11 @@ impl Connection {
                 }
             }
         } else {
-            //debug_assert_eq!(self.role, Role::Server);
             Ok(())
         }
     }
 
-    fn validate_cids_draft_28(&mut self) -> Res<()> {
+    fn validate_cids_draft_28_plus(&mut self) -> Res<()> {
         let tph = self.tps.borrow();
 
         let tp = tph
@@ -2518,7 +2482,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
-            QuicVersion::Draft27,
+            QuicVersion::default(),
         )
         .expect("create a default client")
     }
@@ -2529,7 +2493,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-            QuicVersion::Draft27,
+            QuicVersion::default(),
         )
         .expect("create a default server")
     }

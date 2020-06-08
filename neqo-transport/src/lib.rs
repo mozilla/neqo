@@ -31,16 +31,12 @@ pub mod tparams;
 mod tracking;
 
 pub use self::cid::{ConnectionId, ConnectionIdManager};
-pub use self::connection::{
-    Connection, FixedConnectionIdManager, Output, QuicVersion, State, ZeroRttState,
-};
+pub use self::connection::{Connection, FixedConnectionIdManager, Output, State, ZeroRttState};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
+pub use self::packet::QuicVersion;
 pub use self::stream_id::StreamId;
-
-/// Supporting more than one version, it's helpful to have a default.
-pub const DEFAULT_QUIC_VERSION: QuicVersion = QuicVersion::Draft27;
 
 const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30); // 30 second
 
@@ -96,7 +92,6 @@ pub enum Error {
     VersionNegotiation,
     WrongRole,
     KeysDiscarded,
-    NoValidProtocolVersion,
 }
 
 impl Error {

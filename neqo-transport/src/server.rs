@@ -344,7 +344,7 @@ impl Server {
                     return None;
                 };
                 let new_dcid = self.cid_manager.borrow_mut().generate_cid();
-                let packet = PacketBuilder::retry(&scid, &new_dcid, &token, &dcid, quic_version);
+                let packet = PacketBuilder::retry(quic_version, &scid, &new_dcid, &token, &dcid);
                 if let Ok(p) = packet {
                     let retry = Datagram::new(dgram.destination(), dgram.source(), p);
                     Some(retry)
