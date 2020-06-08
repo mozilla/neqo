@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use neqo_common::{
-    hex, matches, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder,
-    Role,
+    hex, hex_snip_middle, matches, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram,
+    Decoder, Encoder, Role,
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
@@ -686,7 +686,7 @@ impl Connection {
                             .encode(enc_inner);
                     });
                     enc.encode(&t[..]);
-                    qinfo!("resumption token {}", hex(&enc[..]));
+                    qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
                     Some(enc.into())
                 }
                 None => None,
@@ -704,7 +704,7 @@ impl Connection {
             qerror!([self], "set token in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
-        qinfo!([self], "resumption token {}", hex(token));
+        qinfo!([self], "resumption token {}", hex_snip_middle(token));
         let mut dec = Decoder::from(token);
 
         let smoothed_rtt = match dec.decode_varint() {
