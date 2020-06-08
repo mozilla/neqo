@@ -497,10 +497,16 @@ impl Connection {
             cid_manager,
             None,
             protocols,
-            Some(Path::new(local_addr, remote_addr, scid, dcid.clone())),
+            Some(Path::new(
+                local_addr,
+                remote_addr,
+                scid.clone(),
+                dcid.clone(),
+            )),
             quic_version,
         )?;
         c.crypto.states.init(Role::Client, &dcid);
+        c.set_initial_source_cid(ConnectionId::from(scid));
         c.original_destination_cid = Some(dcid);
         Ok(c)
     }
@@ -617,7 +623,7 @@ impl Connection {
     /// Set the initial source connection ID that was originally chosen by the
     /// client.
     pub(crate) fn set_initial_source_cid(&mut self, initial_source_cid: ConnectionId) {
-        assert_eq!(self.role, Role::Server);
+        //        assert_eq!(self.role, Role::Server);
         qerror!("CALLED ISCID {}", initial_source_cid);
         self.tps.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
@@ -1250,7 +1256,8 @@ impl Connection {
                 .expect("should have a path for sending Initial");
             p.set_remote_cid(packet.scid());
             qerror!("HS:client: setting iscid to {}", packet.scid());
-            self.initial_source_cid = Some(ConnectionId::from(packet.scid()));
+            self.set_initial_source_cid(ConnectionId::from(packet.scid()));
+            //self.initial_source_cid = Some(ConnectionId::from(packet.scid()));
         }
         self.set_state(State::Handshaking);
         Ok(())
