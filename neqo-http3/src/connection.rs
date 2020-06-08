@@ -230,7 +230,7 @@ impl Http3Connection {
             let unblocked_streams = self.qpack_decoder.receive(conn, stream_id)?;
             for stream_id in unblocked_streams {
                 qdebug!([self], "Stream {} is unblocked", stream_id);
-                self.handle_read_stream(conn, stream_id)?;
+                self.handle_read_stream(conn, stream_id, true)?;
             }
             Ok(true)
         } else {
@@ -269,7 +269,7 @@ impl Http3Connection {
         qtrace!([self], "Readable stream {}.", stream_id);
 
         let label = ::neqo_common::log_subject!(::log::Level::Debug, self);
-        if self.handle_read_stream(conn, stream_id)? {
+        if self.handle_read_stream(conn, stream_id, false)? {
             qdebug!([label], "Request/response stream {} read.", stream_id);
             Ok(HandleReadableOutput::NoOutput)
         } else if self.control_stream_remote.is_recv_stream(stream_id) {
@@ -432,7 +432,12 @@ impl Http3Connection {
         }
     }
 
-    fn handle_read_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
+    fn handle_read_stream(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: u64,
+        header_unblocked: bool,
+    ) -> Res<bool> {
         let label = ::neqo_common::log_subject!(::log::Level::Info, self);
 
         let r = self.recv_streams.get_mut(&stream_id);
@@ -447,7 +452,11 @@ impl Http3Connection {
             "Request/response stream {} is readable.",
             stream_id
         );
-        recv_stream.receive(conn, &mut self.qpack_decoder)?;
+        if header_unblocked {
+            recv_stream.header_unblocked(conn, &mut self.qpack_decoder)?;
+        } else {
+            recv_stream.receive(conn, &mut self.qpack_decoder)?;
+        }
         if recv_stream.done() {
             self.recv_streams.remove(&stream_id);
         }

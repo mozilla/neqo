@@ -133,6 +133,9 @@ impl RecvStream for PushStream {
         }
     }
 
+    fn header_unblocked(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()> {
+        self.receive(conn, decoder)
+    }
     fn done(&self) -> bool {
         matches!(self.state, PushStreamState::Closed)
     }

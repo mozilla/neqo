@@ -182,6 +182,9 @@ pub trait RecvStream: Debug {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()>;
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
+    fn header_unblocked(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()>;
     fn done(&self) -> bool;
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
