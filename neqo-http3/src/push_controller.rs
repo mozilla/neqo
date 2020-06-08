@@ -32,7 +32,7 @@ use std::slice::SliceIndex;
 enum PushState {
     Init,
     PushPromise {
-        headers: Vec<u8>,
+        headers: Vec<Header>,
     },
     OnlyPushStream {
         stream_id: u64,
@@ -40,7 +40,7 @@ enum PushState {
     },
     Active {
         stream_id: u64,
-        headers: Vec<u8>,
+        headers: Vec<Header>,
     },
     Closed,
 }
@@ -84,7 +84,7 @@ impl ActivePushStreams {
     }
 
     /// Returns None if a stream has been closed already.
-    pub fn get(&mut self, push_id: u64) -> Option<&mut <usize as SliceIndex<[PushState]>>::Output> {
+    pub fn get(&mut self, push_id: u64) -> Option<&mut PushState> {
         self.get_mut(push_id)
     }
 
@@ -105,6 +105,7 @@ impl ActivePushStreams {
         }
     }
 
+    #[must_use]
     pub fn number_done(&self) -> u64 {
         self.first_push_id
             + u64::try_from(
@@ -177,16 +178,15 @@ impl PushController {
         &mut self,
         push_id: u64,
         ref_stream_id: u64,
-        header_block: Vec<u8>,
+        new_headers: Vec<Header>,
     ) -> Res<()> {
         qtrace!(
             [self],
-            "New push promise push_id={} header_block={:?} max_push={}",
+            "New push promise push_id={} headers={:?} max_push={}",
             push_id,
-            header_block,
+            new_headers,
             self.max_concurent_push
         );
-        qtrace!("A new push promise {} {:?}", push_id, header_block);
 
         self.check_push_id(push_id)?;
 
@@ -198,31 +198,31 @@ impl PushController {
             Some(push_state) => match push_state {
                 PushState::Init => {
                     self.conn_events
-                        .push_promise(push_id, ref_stream_id, header_block.clone());
+                        .push_promise(push_id, ref_stream_id, new_headers.clone());
                     *push_state = PushState::PushPromise {
-                        headers: header_block,
+                        headers: new_headers,
                     };
                     Ok(())
                 }
                 PushState::PushPromise { headers } | PushState::Active { headers, .. } => {
-                    if header_block != *headers {
+                    if new_headers != *headers {
                         return Err(Error::HttpGeneralProtocol);
                     }
                     self.conn_events
-                        .push_promise(push_id, ref_stream_id, header_block);
+                        .push_promise(push_id, ref_stream_id, new_headers);
                     Ok(())
                 }
                 PushState::OnlyPushStream { stream_id, events } => {
                     let stream_id_tmp = *stream_id;
                     self.conn_events
-                        .push_promise(push_id, ref_stream_id, header_block.clone());
+                        .push_promise(push_id, ref_stream_id, new_headers.clone());
 
                     for e in events.drain(..) {
                         self.conn_events.insert(e);
                     }
                     *push_state = PushState::Active {
                         stream_id: stream_id_tmp,
-                        headers: header_block,
+                        headers: new_headers,
                     };
                     Ok(())
                 }
@@ -303,21 +303,8 @@ impl PushController {
                     self.conn_events.push_canceled(push_id);
                     Ok(())
                 }
-                PushState::OnlyPushStream { stream_id, .. } => {
-                    qerror!(
-                        "A server should not send CANCEL_PUSH after a push stream has been opened."
-                    );
-                    let _ = base_handler.stream_reset(
-                        conn,
-                        stream_id,
-                        Error::HttpRequestCancelled.code(),
-                    );
-                    Ok(())
-                }
-                PushState::Active { stream_id, .. } => {
-                    qerror!(
-                        "A server should not send CANCEL_PUSH after a push stream has been opened."
-                    );
+                PushState::OnlyPushStream { stream_id, .. }
+                | PushState::Active { stream_id, .. } => {
                     let _ = base_handler.stream_reset(
                         conn,
                         stream_id,

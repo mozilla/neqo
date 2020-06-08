@@ -37,7 +37,7 @@ pub enum Http3ClientEvent {
     PushPromise {
         push_id: u64,
         request_stream_id: u64,
-        headers: Vec<u8>,
+        headers: Vec<Header>,
     },
     /// A push response headers are ready.
     PushHeaderReady {
@@ -110,14 +110,14 @@ impl SendMessageEvents for Http3ClientEvents {
 
     /// Add a new `StopSending` event
     fn stop_sending(&self, stream_id: u64, error: AppError) {
-        // Remove DataWritable event if any.
+        // The stream has received a STOP_SENDING frame, we should remove any DataWritable event.
         self.remove_send_side_event(stream_id);
         self.insert(Http3ClientEvent::StopSending { stream_id, error });
     }
 }
 
 impl Http3ClientEvents {
-    pub fn push_promise(&self, push_id: u64, request_stream_id: u64, headers: Vec<u8>) {
+    pub fn push_promise(&self, push_id: u64, request_stream_id: u64, headers: Vec<Header>) {
         self.insert(Http3ClientEvent::PushPromise {
             push_id,
             request_stream_id,
