@@ -2511,7 +2511,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
-            QuicVersion::Draft28,
+            QuicVersion::Draft27,
         )
         .expect("create a default client")
     }
@@ -2522,7 +2522,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-            QuicVersion::Draft28,
+            QuicVersion::Draft27,
         )
         .expect("create a default server")
     }
@@ -3111,7 +3111,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-            QuicVersion::Draft28,
+            QuicVersion::Draft27,
         )
         .unwrap();
 
@@ -3469,7 +3469,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
             Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
-            QuicVersion::Draft28,
+            QuicVersion::Draft27,
         )
         .expect("create a server");
 

@@ -727,7 +727,7 @@ mod tests {
             PacketType::Initial,
             &ConnectionId::from(&[][..]),
             &ConnectionId::from(SERVER_CID),
-            DEFAULT_QUIC_VERSION,
+            QuicVersion::Draft28,
         );
         builder.initial_token(&[]);
         builder.pn(1, 2);

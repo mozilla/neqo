@@ -40,7 +40,7 @@ pub use self::frame::StreamType;
 pub use self::stream_id::StreamId;
 
 /// Supporting more than one version, it's helpful to have a default.
-pub const DEFAULT_QUIC_VERSION: QuicVersion = QuicVersion::Draft28;
+pub const DEFAULT_QUIC_VERSION: QuicVersion = QuicVersion::Draft27;
 
 const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30); // 30 second
 

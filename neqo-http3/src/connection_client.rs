@@ -633,7 +633,7 @@ mod tests {
                 max_table_size_decoder: 100,
                 max_blocked_streams: 100,
             },
-            QuicVersion::Draft28,
+            QuicVersion::Draft27,
         )
         .expect("create a default client")
     }
@@ -2983,7 +2983,7 @@ mod tests {
             test_fixture::DEFAULT_ALPN,
             &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-            QuicVersion::Draft28,
+            QuicVersion::Draft27,
         )
         .unwrap();
 
