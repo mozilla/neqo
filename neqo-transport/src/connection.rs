@@ -588,8 +588,7 @@ impl Connection {
     /// Set the initial source connection ID that was originally chosen by the
     /// client.
     pub(crate) fn set_initial_source_cid(&mut self, initial_source_cid: ConnectionId) {
-        //        assert_eq!(self.role, Role::Server);
-        qerror!("CALLED ISCID {}", initial_source_cid);
+        qtrace!("Called set_initial_source_cid {}", initial_source_cid);
         self.tps.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
             initial_source_cid.to_vec(),
@@ -600,7 +599,7 @@ impl Connection {
     /// Set the dest connection ID that was originally chosen by the client.
     pub(crate) fn set_original_destination_cid(&mut self, odcid: ConnectionId) {
         assert_eq!(self.role, Role::Server);
-        qerror!("CALLED SODCID {}", odcid);
+        qtrace!("Called set_original_destination_cid {}", odcid);
         self.tps
             .borrow_mut()
             .local
@@ -611,7 +610,7 @@ impl Connection {
     /// Set the connection ID that was retryly used by the client.
     pub(crate) fn set_retry_source_cid(&mut self, retry_source_cid: ConnectionId) {
         assert_eq!(self.role, Role::Server);
-        qerror!("CALLED RSCID {}", retry_source_cid);
+        qtrace!("Called set_retry_source_cid {}", retry_source_cid);
         self.tps.borrow_mut().local.set_bytes(
             tparams::RETRY_SOURCE_CONNECTION_ID,
             retry_source_cid.to_vec(),
@@ -944,7 +943,7 @@ impl Connection {
     }
 
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
-        qdebug!([self], "received Retry");
+        qinfo!([self], "received Retry");
         if let Some(ri) = self.retry_info.as_ref() {
             if !ri.token.is_empty() {
                 qinfo!([self], "Dropping extra Retry");
@@ -972,12 +971,12 @@ impl Connection {
 
         qinfo!(
             [self],
-            "Valid Retry received, token={}",
-            hex(packet.token())
+            "Valid Retry received, token={} scid={}",
+            hex(packet.token()),
+            packet.scid()
         );
 
         debug_assert!(self.retry_info.is_none());
-        qerror!("handle_retry scid {:?}", packet.scid());
         self.retry_info = Some(RetryInfo::new(
             packet.scid().into(),
             packet.token().to_vec(),
@@ -1025,15 +1024,16 @@ impl Connection {
                         self.stats.dropped_rx += 1;
                         return Ok(frames);
                     }
-                    qinfo!([self], "Received valid Initial packet");
-                    self.set_state(State::WaitInitial);
-                    self.loss_recovery.start_pacer(now);
-                    self.crypto.states.init(self.role, &packet.dcid());
-                    qerror!(
-                        "RX'd initial with scid {:?} dcid {:?}",
+                    qinfo!(
+                        [self],
+                        "Received valid Initial packet with scid {:?} dcid {:?}",
                         packet.scid(),
                         packet.dcid()
                     );
+                    self.set_state(State::WaitInitial);
+                    self.loss_recovery.start_pacer(now);
+                    self.crypto.states.init(self.role, &packet.dcid());
+
                     self.set_initial_source_cid(ConnectionId::from(packet.scid()));
                     if self.original_destination_cid.is_none() {
                         self.set_original_destination_cid(ConnectionId::from(packet.dcid()));
@@ -1199,7 +1199,7 @@ impl Connection {
             // Install a path.
             self.initialize_path(packet, d);
 
-            qerror!(
+            qinfo!(
                 "HS:server: setting iscid to {}",
                 self.path.as_ref().unwrap().local_cid()
             );
@@ -1220,9 +1220,8 @@ impl Connection {
                 .find(|p| p.received_on(&d))
                 .expect("should have a path for sending Initial");
             p.set_remote_cid(packet.scid());
-            qerror!("HS:client: setting iscid to {}", packet.scid());
+            qinfo!("HS:client: setting iscid to {}", packet.scid());
             self.set_initial_source_cid(ConnectionId::from(packet.scid()));
-            //self.initial_source_cid = Some(ConnectionId::from(packet.scid()));
         }
         self.set_state(State::Handshaking);
         Ok(())
