@@ -65,7 +65,7 @@ pub struct Args {
     #[structopt(short = "a", long, default_value = "h3-28")]
     /// ALPN labels to negotiate.
     ///
-    /// This client still only does HTTP3 no matter what the ALPN says.
+    /// This client still only does HTTP/3 no matter what the ALPN says.
     alpn: String,
 
     urls: Vec<Url>,

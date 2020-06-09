@@ -441,7 +441,6 @@ pub struct Connection {
     stats: Stats,
     qlog: Option<NeqoQlog>,
 
-    // TODO: Remove once spec is final
     quic_version: QuicVersion,
 }
 
@@ -599,7 +598,7 @@ impl Connection {
     /// Set the initial source connection ID that was originally chosen by the
     /// client.
     pub(crate) fn set_initial_source_cid(&mut self, initial_source_cid: ConnectionId) {
-        qtrace!("Called set_initial_source_cid {}", initial_source_cid);
+        qtrace!([self], "Called set_initial_source_cid {}", initial_source_cid);
         self.tps.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
             initial_source_cid.to_vec(),
@@ -610,7 +609,7 @@ impl Connection {
     /// Set the dest connection ID that was originally chosen by the client.
     pub(crate) fn set_original_destination_cid(&mut self, odcid: ConnectionId) {
         assert_eq!(self.role, Role::Server);
-        qtrace!("Called set_original_destination_cid {}", odcid);
+        qtrace!([self], "Called set_original_destination_cid {}", odcid);
         self.tps
             .borrow_mut()
             .local
@@ -621,7 +620,7 @@ impl Connection {
     /// Set the connection ID that was retryly used by the client.
     pub(crate) fn set_retry_source_cid(&mut self, retry_source_cid: ConnectionId) {
         assert_eq!(self.role, Role::Server);
-        qtrace!("Called set_retry_source_cid {}", retry_source_cid);
+        qtrace!([self], "Called set_retry_source_cid {}", retry_source_cid);
         self.tps.borrow_mut().local.set_bytes(
             tparams::RETRY_SOURCE_CONNECTION_ID,
             retry_source_cid.to_vec(),
@@ -989,7 +988,7 @@ impl Connection {
 
         debug_assert!(self.retry_info.is_none());
         self.retry_info = Some(RetryInfo::new(
-            packet.scid().into(),
+            ConnectionId::from(packet.scid()),
             packet.token().to_vec(),
         ));
 
