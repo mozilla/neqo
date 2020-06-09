@@ -604,7 +604,8 @@ mod tests {
     use neqo_crypto::AntiReplay;
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
-        CloseError, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State,
+        CloseError, ConnectionEvent, ConnectionIdManager, FixedConnectionIdManager, QuicVersion,
+        State,
     };
     use test_fixture::{
         default_server, fixture_init, loopback, now, DEFAULT_ALPN, DEFAULT_SERVER_NAME,
@@ -633,7 +634,7 @@ mod tests {
                 max_table_size_decoder: 100,
                 max_blocked_streams: 100,
             },
-            QuicVersion::Draft27,
+            QuicVersion::default(),
         )
         .expect("create a default client")
     }
@@ -2978,12 +2979,17 @@ mod tests {
         // should result in the server rejecting 0-RTT.
         let ar = AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3)
             .expect("setup anti-replay");
+
+        let mut cid_mgr = FixedConnectionIdManager::new(10);
+        let initial_source_cid = cid_mgr.generate_cid();
+
         let mut server = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &ar,
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-            QuicVersion::Draft27,
+            Rc::new(RefCell::new(cid_mgr)),
+            QuicVersion::default(),
+            initial_source_cid,
         )
         .unwrap();
 

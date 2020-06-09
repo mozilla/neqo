@@ -80,7 +80,7 @@ impl QuicVersion {
 
 impl Default for QuicVersion {
     fn default() -> Self {
-        Self::Draft27
+        Self::Draft28
     }
 }
 
@@ -759,7 +759,7 @@ mod tests {
         let mut builder = PacketBuilder::long(
             Encoder::new(),
             PacketType::Initial,
-            QuicVersion::Draft28,
+            QuicVersion::default(),
             &ConnectionId::from(&[][..]),
             &ConnectionId::from(SERVER_CID),
         );

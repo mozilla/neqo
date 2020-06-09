@@ -601,7 +601,7 @@ fn mitm_retry() {
     assert!(matches!(
         *client.state(),
         State::Closing{
-            error: ConnectionError::Transport(Error::InvalidRetry),
+            error: ConnectionError::Transport(Error::ProtocolViolation),
             ..
         }
     ));
