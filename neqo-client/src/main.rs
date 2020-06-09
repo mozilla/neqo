@@ -363,7 +363,7 @@ fn client(
     let mut client = Http3Client::new(
         origin,
         &[&args.alpn],
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
         remote_addr,
         QpackSettings {

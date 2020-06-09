@@ -536,8 +536,7 @@ impl Connection {
     ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
-        let crypto = Crypto::new(agent, protocols, tphandler.clone(), anti_replay)
-            .expect("TLS should be configured successfully");
+        let crypto = Crypto::new(agent, protocols, tphandler.clone(), anti_replay)?;
 
         Ok(Self {
             role,
@@ -617,7 +616,7 @@ impl Connection {
         self.original_destination_cid = Some(odcid);
     }
 
-    /// Set the connection ID that was retryly used by the client.
+    /// Set the connection ID that was sent in retry.
     pub(crate) fn set_retry_source_cid(&mut self, retry_source_cid: ConnectionId) {
         assert_eq!(self.role, Role::Server);
         qtrace!([self], "Called set_retry_source_cid {}", retry_source_cid);

@@ -92,7 +92,6 @@ pub enum Error {
     UnknownFrameType,
     VersionNegotiation,
     WrongRole,
-    KeysDiscarded,
 }
 
 impl Error {
