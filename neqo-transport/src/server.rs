@@ -443,6 +443,9 @@ impl Server {
         qinfo!([self], "Accept connection {:?}", attempt_key);
         // The internal connection ID manager that we use is not used directly.
         // Instead, wrap it so that we can save connection IDs.
+
+        let local_initial_source_cid = self.cid_manager.borrow_mut().generate_cid();
+
         let cid_mgr = Rc::new(RefCell::new(ServerConnectionIdManager {
             c: None,
             cid_manager: self.cid_manager.clone(),
@@ -453,8 +456,9 @@ impl Server {
             &self.certs,
             &self.protocols,
             &self.anti_replay,
-            cid_mgr.clone(),
+            self.cid_manager.clone(),
             quic_version,
+            local_initial_source_cid.clone(),
         );
 
         if let Ok(mut c) = sconn {
@@ -470,6 +474,7 @@ impl Server {
                 active_attempt: Some(attempt_key.clone()),
             }));
             cid_mgr.borrow_mut().c = Some(c.clone());
+            cid_mgr.borrow_mut().insert_cid(local_initial_source_cid);
             let previous_attempt = self.active_attempts.insert(attempt_key, c.clone());
             debug_assert!(previous_attempt.is_none());
             self.process_connection(c, Some(dgram), now)
@@ -630,24 +635,32 @@ struct ServerConnectionIdManager {
     cid_manager: CidMgr,
 }
 
+impl ServerConnectionIdManager {
+    fn insert_cid(&mut self, cid: ConnectionId) {
+        assert!(!cid.is_empty());
+        let v = self
+            .connections
+            .borrow_mut()
+            .insert(cid, self.c.as_ref().unwrap().clone());
+        if let Some(v) = v {
+            debug_assert!(Rc::ptr_eq(&v, self.c.as_ref().unwrap()));
+        }
+    }
+}
+
 impl ConnectionIdDecoder for ServerConnectionIdManager {
     fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
         self.cid_manager.borrow_mut().decode_cid(dec)
     }
 }
+
 impl ConnectionIdManager for ServerConnectionIdManager {
     fn generate_cid(&mut self) -> ConnectionId {
         let cid = self.cid_manager.borrow_mut().generate_cid();
-        assert!(!cid.is_empty());
-        let v = self
-            .connections
-            .borrow_mut()
-            .insert(cid.clone(), self.c.as_ref().unwrap().clone());
-        if let Some(v) = v {
-            debug_assert!(Rc::ptr_eq(&v, self.c.as_ref().unwrap()));
-        }
+        self.insert_cid(cid.clone());
         cid
     }
+
     fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
         self
     }
