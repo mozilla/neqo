@@ -177,8 +177,16 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
     match frame {
         Frame::Padding => QuicFrame::padding(),
         Frame::Ping => QuicFrame::ping(),
-        Frame::Ack { ack_delay, .. } => {
-            QuicFrame::ack(Some(ack_delay.to_string()), None, None, None, None)
+        Frame::Ack {
+            largest_acknowledged,
+            ack_delay,
+            first_ack_range,
+            ack_ranges,
+        } => {
+            let ack_ranges =
+                Frame::decode_ack_frame(*largest_acknowledged, *first_ack_range, ack_ranges).ok();
+
+            QuicFrame::ack(Some(ack_delay.to_string()), ack_ranges, None, None, None)
         }
         Frame::ResetStream {
             stream_id,

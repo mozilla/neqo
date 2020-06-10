@@ -2027,7 +2027,7 @@ impl Connection {
         );
 
         let acked_ranges =
-            Frame::decode_ack_frame(largest_acknowledged, first_ack_range, ack_ranges)?;
+            Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             space,
             largest_acknowledged,
