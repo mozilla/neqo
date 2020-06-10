@@ -17,7 +17,7 @@ use neqo_common::{
     Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
-use neqo_qpack::QpackSettings;
+use neqo_qpack::{stats::Stats, QpackSettings};
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, QuicVersion, StreamId,
     StreamType, ZeroRttState,
@@ -589,6 +589,16 @@ impl Http3Client {
             .retain(|id, _| *id < goaway_stream_id);
 
         Ok(())
+    }
+
+    #[must_use]
+    pub fn qpack_decoder_stats(&self) -> &Stats {
+        self.base_handler.qpack_decoder.stats()
+    }
+
+    #[must_use]
+    pub fn qpack_encoder_stats(&self) -> &Stats {
+        self.base_handler.qpack_encoder.stats()
     }
 }
 
