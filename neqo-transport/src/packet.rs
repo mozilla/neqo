@@ -931,7 +931,7 @@ mod tests {
     fn build_retry_single(quic_version: QuicVersion, sample_retry: &[u8]) {
         fixture_init();
         let retry =
-        PacketBuilder::retry(quic_version, &[], SERVER_CID, RETRY_TOKEN, CLIENT_CID).unwrap();
+            PacketBuilder::retry(quic_version, &[], SERVER_CID, RETRY_TOKEN, CLIENT_CID).unwrap();
 
         let (packet, remainder) = PublicPacket::decode(&retry, &cid_mgr()).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
@@ -972,7 +972,7 @@ mod tests {
     fn decode_retry(quic_version: QuicVersion, sample_retry: &[u8]) {
         fixture_init();
         let (packet, remainder) =
-        PublicPacket::decode(sample_retry, &FixedConnectionIdManager::new(5)).unwrap();
+            PublicPacket::decode(sample_retry, &FixedConnectionIdManager::new(5)).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
         assert_eq!(Some(quic_version), packet.quic_version);
         assert!(packet.dcid().is_empty());
@@ -1023,7 +1023,6 @@ mod tests {
         damaged_retry.truncate(last - 1);
         assert!(PublicPacket::decode(&damaged_retry, &cid_mgr).is_err());
     }
-
 
     const SAMPLE_VN: &[u8] = &[
         0x80, 0x00, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x08,
