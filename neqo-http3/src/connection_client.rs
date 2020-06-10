@@ -604,8 +604,7 @@ mod tests {
     use neqo_crypto::{AllowZeroRtt, AntiReplay};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
-        CloseError, ConnectionEvent, ConnectionIdManager, FixedConnectionIdManager, QuicVersion,
-        State,
+        CloseError, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State,
     };
     use test_fixture::{
         default_server, fixture_init, loopback, now, DEFAULT_ALPN, DEFAULT_SERVER_NAME,
@@ -2974,15 +2973,11 @@ mod tests {
         let token = exchange_token(&mut client, &mut server.conn);
 
         let mut client = default_http3_client();
-
-        let mut cid_mgr = FixedConnectionIdManager::new(10);
-        let initial_source_cid = cid_mgr.generate_cid();
         let mut server = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
-            Rc::new(RefCell::new(cid_mgr)),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
             QuicVersion::default(),
-            initial_source_cid,
         )
         .unwrap();
         // Using a freshly initialized anti-replay context

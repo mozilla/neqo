@@ -119,9 +119,10 @@ impl RetryToken {
         peer_address: SocketAddr,
         now: Instant,
     ) -> Res<Vec<u8>> {
+        const EXPIRATION: Duration = Duration::from_secs(5);
+
         // TODO(mt) rotate keys on a fixed schedule.
         let mut token = Encoder::default();
-        const EXPIRATION: Duration = Duration::from_secs(5);
         let end = now + EXPIRATION;
         let end_millis = u32::try_from(end.duration_since(self.start_time).as_millis())?;
         token.encode_uint(4, end_millis);
@@ -210,6 +211,25 @@ impl ServerZeroRttChecker {
 impl ZeroRttChecker for ServerZeroRttChecker {
     fn check(&self, token: &[u8]) -> ZeroRttCheckResult {
         self.checker.borrow().check(token)
+    }
+}
+
+/// `InitialDetails` holds important information for processing `Initial` packets.
+struct InitialDetails {
+    src_cid: ConnectionId,
+    dst_cid: ConnectionId,
+    token: Vec<u8>,
+    quic_version: QuicVersion,
+}
+
+impl InitialDetails {
+    fn new(packet: &PublicPacket) -> Self {
+        Self {
+            src_cid: ConnectionId::from(packet.scid()),
+            dst_cid: ConnectionId::from(packet.dcid()),
+            token: packet.token().to_vec(),
+            quic_version: packet.version().unwrap(),
+        }
     }
 }
 
@@ -349,24 +369,23 @@ impl Server {
 
     fn handle_initial(
         &mut self,
-        dcid: ConnectionId,
-        scid: ConnectionId,
-        token: Vec<u8>,
+        initial: InitialDetails,
         dgram: Datagram,
         now: Instant,
-        quic_version: QuicVersion,
     ) -> Option<Datagram> {
-        qdebug!([self], "Handle initial packet");
-        match self.retry.validate(&token, dgram.source(), now) {
+        qdebug!([self], "Handle initial");
+        match self.retry.validate(&initial.token, dgram.source(), now) {
             RetryTokenResult::Invalid => None,
-            RetryTokenResult::Pass => self.connection_attempt(dcid, None, dgram, now, quic_version),
+            RetryTokenResult::Pass => self.connection_attempt(initial, dgram, None, now),
             RetryTokenResult::Valid(orig_dcid) => {
-                self.connection_attempt(dcid, Some(orig_dcid), dgram, now, quic_version)
+                self.connection_attempt(initial, dgram, Some(orig_dcid), now)
             }
             RetryTokenResult::Validate => {
-                qinfo!([self], "Send retry for {:?}", dcid);
+                qinfo!([self], "Send retry for {:?}", initial.dst_cid);
 
-                let res = self.retry.generate_token(&dcid, dgram.source(), now);
+                let res = self
+                    .retry
+                    .generate_token(&initial.dst_cid, dgram.source(), now);
                 let token = if let Ok(t) = res {
                     t
                 } else {
@@ -374,7 +393,13 @@ impl Server {
                     return None;
                 };
                 let new_dcid = self.cid_manager.borrow_mut().generate_cid();
-                let packet = PacketBuilder::retry(quic_version, &scid, &new_dcid, &token, &dcid);
+                let packet = PacketBuilder::retry(
+                    initial.quic_version,
+                    &initial.src_cid,
+                    &new_dcid,
+                    &token,
+                    &initial.dst_cid,
+                );
                 if let Ok(p) = packet {
                     let retry = Datagram::new(dgram.destination(), dgram.source(), p);
                     Some(retry)
@@ -388,15 +413,14 @@ impl Server {
 
     fn connection_attempt(
         &mut self,
-        dcid: ConnectionId,
-        orig_dcid: Option<ConnectionId>,
+        initial: InitialDetails,
         dgram: Datagram,
+        orig_dcid: Option<ConnectionId>,
         now: Instant,
-        quic_version: QuicVersion,
     ) -> Option<Datagram> {
         let attempt_key = AttemptKey {
             remote_address: dgram.source(),
-            odcid: orig_dcid.as_ref().unwrap_or(&dcid).clone(),
+            odcid: orig_dcid.as_ref().unwrap_or(&initial.dst_cid).clone(),
         };
         if let Some(c) = self.active_attempts.get(&attempt_key) {
             qdebug!(
@@ -407,7 +431,7 @@ impl Server {
             let c = Rc::clone(c);
             self.process_connection(c, Some(dgram), now)
         } else {
-            self.accept_connection(attempt_key, dcid, orig_dcid, dgram, now, quic_version)
+            self.accept_connection(attempt_key, initial, dgram, orig_dcid, now)
         }
     }
 
@@ -464,30 +488,27 @@ impl Server {
     fn accept_connection(
         &mut self,
         attempt_key: AttemptKey,
-        dcid: ConnectionId,
-        orig_dcid: Option<ConnectionId>,
+        initial: InitialDetails,
         dgram: Datagram,
+        orig_dcid: Option<ConnectionId>,
         now: Instant,
-        quic_version: QuicVersion,
     ) -> Option<Datagram> {
         qinfo!([self], "Accept connection {:?}", attempt_key);
         // The internal connection ID manager that we use is not used directly.
         // Instead, wrap it so that we can save connection IDs.
 
-        let local_initial_source_cid = self.cid_manager.borrow_mut().generate_cid();
-
         let cid_mgr = Rc::new(RefCell::new(ServerConnectionIdManager {
             c: None,
             cid_manager: self.cid_manager.clone(),
             connections: self.connections.clone(),
+            saved_cids: Vec::new(),
         }));
 
         let sconn = Connection::new_server(
             &self.certs,
             &self.protocols,
-            self.cid_manager.clone(),
-            quic_version,
-            local_initial_source_cid.clone(),
+            cid_mgr.clone(),
+            initial.quic_version,
         );
 
         if let Ok(mut c) = sconn {
@@ -496,9 +517,8 @@ impl Server {
                 qwarn!([self], "Unable to enable 0-RTT");
             }
             if let Some(odcid) = orig_dcid {
-                // There was a retry.
-                c.set_original_destination_cid(odcid);
-                c.set_retry_source_cid(dcid);
+                // There was a retry, so set the connection IDs for.
+                c.set_retry_cids(odcid, initial.src_cid, initial.dst_cid);
             }
             c.set_qlog(self.create_qlog_trace(&attempt_key));
             let c = Rc::new(RefCell::new(ServerConnectionState {
@@ -506,8 +526,7 @@ impl Server {
                 last_timer: now,
                 active_attempt: Some(attempt_key.clone()),
             }));
-            cid_mgr.borrow_mut().c = Some(c.clone());
-            cid_mgr.borrow_mut().insert_cid(local_initial_source_cid);
+            cid_mgr.borrow_mut().set_connection(c.clone());
             let previous_attempt = self.active_attempts.insert(attempt_key, c.clone());
             debug_assert!(previous_attempt.is_none());
             self.process_connection(c, Some(dgram), now)
@@ -549,11 +568,8 @@ impl Server {
         match packet.packet_type() {
             PacketType::Initial => {
                 // Copy values from `packet` because they are currently still borrowing from `dgram`.
-                let dcid = ConnectionId::from(packet.dcid());
-                let scid = ConnectionId::from(packet.scid());
-                let token = packet.token().to_vec();
-                let quic_version = packet.version().expect("Initial must have version field");
-                self.handle_initial(dcid, scid, token, dgram, now, quic_version)
+                let initial = InitialDetails::new(&packet);
+                self.handle_initial(initial, dgram, now)
             }
             PacketType::OtherVersion => {
                 let vn = PacketBuilder::version_negotiation(packet.scid(), packet.dcid());
@@ -666,11 +682,21 @@ struct ServerConnectionIdManager {
     c: Option<StateRef>,
     connections: ConnectionTableRef,
     cid_manager: CidMgr,
+    saved_cids: Vec<ConnectionId>,
 }
 
 impl ServerConnectionIdManager {
+    pub fn set_connection(&mut self, c: StateRef) {
+        self.c = Some(c);
+        let saved = std::mem::replace(&mut self.saved_cids, Vec::with_capacity(0));
+        for cid in saved {
+            qtrace!("inserting saved cid {}", cid);
+            self.insert_cid(cid);
+        }
+    }
+
     fn insert_cid(&mut self, cid: ConnectionId) {
-        assert!(!cid.is_empty());
+        debug_assert!(!cid.is_empty());
         let v = self
             .connections
             .borrow_mut()
@@ -690,7 +716,12 @@ impl ConnectionIdDecoder for ServerConnectionIdManager {
 impl ConnectionIdManager for ServerConnectionIdManager {
     fn generate_cid(&mut self) -> ConnectionId {
         let cid = self.cid_manager.borrow_mut().generate_cid();
-        self.insert_cid(cid.clone());
+        if self.c.is_some() {
+            self.insert_cid(cid.clone());
+        } else {
+            qtrace!("saving cid {}", cid);
+            self.saved_cids.push(cid.clone());
+        }
         cid
     }
 
