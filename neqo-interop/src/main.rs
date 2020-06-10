@@ -9,7 +9,7 @@
 
 use neqo_common::{hex, matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3Client, Http3ClientEvent};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output,
@@ -258,13 +258,19 @@ struct H3Handler {
 }
 
 // TODO(ekr@rtfm.com): Figure out how to merge this.
-fn process_loop_h3(nctx: &NetworkCtx, handler: &mut H3Handler) -> Result<State, String> {
+fn process_loop_h3(nctx: &NetworkCtx, handler: &mut H3Handler, connect: bool) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
     let timer = Timer::new();
 
     loop {
         if let State::Closed(..) = handler.h3.conn().state() {
             return Ok(handler.h3.conn().state().clone());
+        }
+
+        if connect {
+            if let Http3State::Connected = handler.h3.state() {
+                return Ok(handler.h3.conn().state().clone());
+            }
         }
 
         loop {
@@ -493,6 +499,11 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         host: String::from(peer.host),
         path: String::from("/"),
     };
+
+    if let Err(e) = process_loop_h3(nctx, &mut hc, true) {
+        return Err(format!("ERROR: {}", e));
+    }
+
     let client_stream_id = hc
         .h3
         .fetch("GET", "https", &hc.host, &hc.path, &[])
@@ -500,7 +511,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
     let _ = hc.h3.stream_close_send(client_stream_id);
 
     hc.streams.insert(client_stream_id);
-    if let Err(e) = process_loop_h3(nctx, &mut hc) {
+    if let Err(e) = process_loop_h3(nctx, &mut hc, false) {
         return Err(format!("ERROR: {}", e));
     }
 
@@ -631,6 +642,21 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
 
 const PEERS: &[Peer] = &[
     Peer {
+        label: "quiche",
+        host: "quic.tech",
+        port: 4433,
+    },
+    Peer {
+        label: "quiche2",
+        host: "quic.tech",
+        port: 8443,
+    },
+    Peer {
+        label: "quiche3",
+        host: "quic.tech",
+        port: 8444,
+    },
+    Peer {
         label: "quant",
         host: "quant.eggert.org",
         port: 4433,
@@ -639,6 +665,11 @@ const PEERS: &[Peer] = &[
         label: "quicly",
         host: "quic.examp1e.net",
         port: 443,
+    },
+    Peer {
+        label: "quicly2",
+        host: "quic.examp1e.net",
+        port: 4433,
     },
     Peer {
         label: "local",
