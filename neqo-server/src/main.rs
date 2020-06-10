@@ -9,9 +9,7 @@
 
 use neqo_common::Datagram;
 use neqo_crypto::{init_db, AntiReplay};
-use neqo_transport::{
-    Connection, ConnectionEvent, ConnectionIdManager, FixedConnectionIdManager, QuicVersion, State,
-};
+use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State};
 use regex::Regex;
 
 use std::cell::RefCell;
@@ -159,17 +157,12 @@ fn main() {
 
         let mut server = connections.entry(remote_addr).or_insert_with(|| {
             println!("New connection from {:?}", remote_addr);
-
-            let mut cid_mgr = FixedConnectionIdManager::new(10);
-            let local_initial_source_cid = cid_mgr.generate_cid();
-
             Connection::new_server(
                 &args.key,
                 &args.alpn,
                 &anti_replay,
-                Rc::new(RefCell::new(cid_mgr)),
+                Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
                 QuicVersion::default(),
-                local_initial_source_cid,
             )
             .expect("can't create connection")
         });

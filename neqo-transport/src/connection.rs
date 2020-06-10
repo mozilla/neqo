@@ -472,24 +472,18 @@ impl Connection {
         quic_version: QuicVersion,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
-        let scid = cid_manager.borrow_mut().generate_cid();
         let mut c = Self::new(
             Role::Client,
             Client::new(server_name)?.into(),
             cid_manager,
             None,
             protocols,
-            Some(Path::new(
-                local_addr,
-                remote_addr,
-                scid.clone(),
-                dcid.clone(),
-            )),
+            None,
             quic_version,
-            scid,
         )?;
         c.crypto.states.init(Role::Client, &dcid);
         c.remote_original_destination_cid = Some(dcid);
+        c.initialize_path(local_addr, remote_addr);
         Ok(c)
     }
 
@@ -500,7 +494,6 @@ impl Connection {
         anti_replay: &AntiReplay,
         cid_manager: CidMgr,
         quic_version: QuicVersion,
-        local_initial_source_cid: ConnectionId,
     ) -> Res<Self> {
         Self::new(
             Role::Server,
@@ -510,7 +503,6 @@ impl Connection {
             protocols,
             None,
             quic_version,
-            local_initial_source_cid,
         )
     }
 
@@ -543,10 +535,10 @@ impl Connection {
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
         quic_version: QuicVersion,
-        local_initial_source_cid: ConnectionId,
     ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
+        let local_initial_source_cid = cid_manager.borrow_mut().generate_cid();
         tphandler.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
             local_initial_source_cid.to_vec(),
@@ -611,25 +603,39 @@ impl Connection {
         }
     }
 
-    /// Set the dest connection ID that was originally chosen by the client.
-    pub(crate) fn set_original_destination_cid(&mut self, odcid: ConnectionId) {
-        assert_eq!(self.role, Role::Server);
-        qtrace!([self], "Called set_original_destination_cid {}", odcid);
-        self.tps
-            .borrow_mut()
-            .local
-            .set_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID, odcid.to_vec());
-        self.remote_original_destination_cid = Some(odcid);
+    /// `odcid` is their original choice for our CID, which we get from the Retry token.
+    /// `remote_cid` is the value from the Source Connection ID field of
+    ///   an incoming packet: what the peer wants us to use now.
+    /// `retry_cid` is what we asked them to use when we sent the Retry.
+    pub(crate) fn set_retry_cids(
+        &mut self,
+        odcid: ConnectionId,
+        remote_cid: ConnectionId,
+        retry_cid: ConnectionId,
+    ) {
+        debug_assert_eq!(self.role, Role::Server);
+        qtrace!(
+            [self],
+            "Retry CIDs: odcid={} remote={} retry={}",
+            odcid,
+            remote_cid,
+            retry_cid
+        );
+        // We advertise "our" choices in transport parameters.
+        let local_tps = &mut self.tps.borrow_mut().local;
+        local_tps.set_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID, odcid.to_vec());
+        local_tps.set_bytes(tparams::RETRY_SOURCE_CONNECTION_ID, retry_cid.to_vec());
+
+        // ...and save their choices for later validation.
+        self.remote_initial_source_cid = Some(remote_cid);
     }
 
-    /// Set the connection ID that was sent in retry.
-    pub(crate) fn set_retry_source_cid(&mut self, retry_source_cid: ConnectionId) {
-        assert_eq!(self.role, Role::Server);
-        qtrace!([self], "Called set_retry_source_cid {}", retry_source_cid);
-        self.tps.borrow_mut().local.set_bytes(
-            tparams::RETRY_SOURCE_CONNECTION_ID,
-            retry_source_cid.to_vec(),
-        );
+    fn retry_sent(&self) -> bool {
+        self.tps
+            .borrow()
+            .local
+            .get_bytes(tparams::RETRY_SOURCE_CONNECTION_ID)
+            .is_some()
     }
 
     /// Set ALPN preferences. Strings that appear earlier in the list are given
@@ -1085,9 +1091,14 @@ impl Connection {
                     self.loss_recovery.start_pacer(now);
                     self.crypto.states.init(self.role, &packet.dcid());
 
-                    self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
-                    if self.remote_original_destination_cid.is_none() {
-                        self.set_original_destination_cid(ConnectionId::from(packet.dcid()));
+                    // We need to make sure that we set this transport parameter.
+                    // This has to happen prior to processing the packet so that
+                    // the TLS handshake has all it needs.
+                    if !self.retry_sent() {
+                        self.tps.borrow_mut().local.set_bytes(
+                            tparams::ORIGINAL_DESTINATION_CONNECTION_ID,
+                            packet.dcid().to_vec(),
+                        )
                     }
                 }
                 (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
@@ -1161,7 +1172,10 @@ impl Connection {
                 qlog::packet_received(&mut self.qlog, &payload)?;
                 let res = self.process_packet(&payload, now);
                 if res.is_err() && self.path.is_none() {
-                    self.initialize_path(&packet, &d);
+                    // We need to make a path for sending an error message.
+                    // But this connection is going to be closed.
+                    self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
+                    self.initialize_path(d.destination(), d.source());
                 }
                 frames.extend(res?);
                 if self.state == State::WaitInitial {
@@ -1240,21 +1254,31 @@ impl Connection {
         Ok(frames)
     }
 
-    fn initialize_path(&mut self, packet: &PublicPacket, d: &Datagram) {
+    fn initialize_path(&mut self, local_addr: SocketAddr, remote_addr: SocketAddr) {
         debug_assert!(self.path.is_none());
-        let mut p = Path::from_datagram(&d, ConnectionId::from(packet.scid()));
-        p.add_local_cid(self.local_initial_source_cid.clone());
-        self.path = Some(p);
+        self.path = Some(Path::new(
+            local_addr,
+            remote_addr,
+            self.local_initial_source_cid.clone(),
+            // Ideally we know what the peer wants us to use for the remote CID.
+            // But we will use our own guess if necessary.
+            self.remote_initial_source_cid
+                .as_ref()
+                .or_else(|| self.remote_original_destination_cid.as_ref())
+                .unwrap()
+                .clone(),
+        ));
     }
 
     fn start_handshake(&mut self, packet: &PublicPacket, d: &Datagram) -> Res<()> {
+        self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
         if self.role == Role::Server {
             assert_eq!(packet.packet_type(), PacketType::Initial);
+
             // A server needs to accept the client's selected CID during the handshake.
             self.valid_cids.push(ConnectionId::from(packet.dcid()));
-
             // Install a path.
-            self.initialize_path(packet, d);
+            self.initialize_path(d.destination(), d.source());
 
             self.zero_rtt_state = match self.crypto.enable_0rtt(self.role) {
                 Ok(true) => {
@@ -1271,7 +1295,6 @@ impl Connection {
                 .find(|p| p.received_on(&d))
                 .expect("should have a path for sending Initial");
             p.set_remote_cid(packet.scid());
-            self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
         }
         self.set_state(State::Handshaking);
         Ok(())
@@ -1672,89 +1695,51 @@ impl Connection {
         let remote_tps = tph.remote.as_ref().unwrap();
 
         let tp = remote_tps.get_bytes(tparams::INITIAL_SOURCE_CONNECTION_ID);
-        match tp {
-            None => {
-                qwarn!(
-                    "{} ISCID test failed: ISCID not found in tparams",
-                    self.role
-                );
-                return Err(Error::ProtocolViolation);
-            }
-            Some(tp) => {
-                if self
-                    .remote_initial_source_cid
-                    .as_ref()
-                    .unwrap()
-                    .as_cid_ref()
-                    != ConnectionIdRef::from(tp)
-                {
-                    qwarn!(
-                        "{} ISCID test failed: self cid {:?} != tp cid {}",
-                        self.role,
-                        self.remote_initial_source_cid,
-                        hex(&tp)
-                    );
-                    return Err(Error::ProtocolViolation);
-                }
-            }
+        if self
+            .remote_initial_source_cid
+            .as_ref()
+            .map(ConnectionId::as_cid_ref)
+            != tp.map(ConnectionIdRef::from)
+        {
+            qwarn!(
+                "{} ISCID test failed: self cid {:?} != tp cid {:?}",
+                self.role,
+                self.remote_initial_source_cid,
+                tp.map(hex),
+            );
+            return Err(Error::ProtocolViolation);
         }
 
         if self.role == Role::Client {
             let tp = remote_tps.get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
-            match tp {
-                None => {
-                    qwarn!(
-                        "{} ODCID test failed: ODCID not found in tparams",
-                        self.role
-                    );
-                    return Err(Error::ProtocolViolation);
-                }
-                Some(tp) => {
-                    if self
-                        .remote_original_destination_cid
-                        .as_ref()
-                        .map(ConnectionId::as_cid_ref)
-                        != Some(ConnectionIdRef::from(tp))
-                    {
-                        qwarn!(
-                            "{} ODCID test failed: self cid {:?} != tp cid {}",
-                            self.role,
-                            self.remote_original_destination_cid,
-                            hex(&tp)
-                        );
-                        return Err(Error::ProtocolViolation);
-                    }
-                }
+            if self
+                .remote_original_destination_cid
+                .as_ref()
+                .map(ConnectionId::as_cid_ref)
+                != tp.map(ConnectionIdRef::from)
+            {
+                qwarn!(
+                    "{} ODCID test failed: self cid {:?} != tp cid {:?}",
+                    self.role,
+                    self.remote_original_destination_cid,
+                    tp.map(hex),
+                );
+                return Err(Error::ProtocolViolation);
             }
 
             let tp = remote_tps.get_bytes(tparams::RETRY_SOURCE_CONNECTION_ID);
-            match (&tp, &self.retry_info) {
-                (None, None) => {}
-                (None, Some(_ri)) => {
-                    qwarn!(
-                        "{} RSCID test failed: RSCID not found in tparams",
-                        self.role
-                    );
-                    return Err(Error::ProtocolViolation);
-                }
-                (Some(_tp), None) => {
-                    qwarn!(
-                        "{} RSCID test failed: tparam found but no retry packet received",
-                        self.role
-                    );
-                    return Err(Error::ProtocolViolation);
-                }
-                (Some(tp), Some(ri)) => {
-                    if **tp != *ri.retry_source_cid {
-                        qwarn!(
-                            "{} RSCID test failed. self cid {:?} != tp cid {}",
-                            self.role,
-                            ri.retry_source_cid,
-                            hex(&**tp),
-                        );
-                        return Err(Error::ProtocolViolation);
-                    }
-                }
+            let expected = self
+                .retry_info
+                .as_ref()
+                .map(|ri| ri.retry_source_cid.as_cid_ref());
+            if expected != tp.map(ConnectionIdRef::from) {
+                qwarn!(
+                    "{} RSCID test failed. self cid {:?} != tp cid {:?}",
+                    self.role,
+                    expected,
+                    tp.map(hex),
+                );
+                return Err(Error::ProtocolViolation);
             }
         }
 
@@ -2095,7 +2080,7 @@ impl Connection {
         }
         if self.role == Role::Server {
             // Remove the randomized client CID from the list of acceptable CIDs.
-            assert_eq!(1, self.valid_cids.len());
+            debug_assert_eq!(1, self.valid_cids.len());
             self.valid_cids.clear();
             // Generate a qlog event that the server connection started.
             qlog::server_connection_started(&mut self.qlog, self.path.as_ref().unwrap())?;
@@ -2544,16 +2529,12 @@ mod tests {
     pub fn default_server() -> Connection {
         fixture_init();
 
-        let mut cid_mgr = FixedConnectionIdManager::new(5);
-        let local_initial_source_cid = cid_mgr.generate_cid();
-
         Connection::new_server(
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
-            Rc::new(RefCell::new(cid_mgr)),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
             QuicVersion::default(),
-            local_initial_source_cid,
         )
         .expect("create a default server")
     }
@@ -3137,17 +3118,12 @@ mod tests {
         // should result in the server rejecting 0-RTT.
         let ar = AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3)
             .expect("setup anti-replay");
-
-        let mut cid_mgr = FixedConnectionIdManager::new(10);
-        let local_initial_source_cid = cid_mgr.generate_cid();
-
         let mut server = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &ar,
-            Rc::new(RefCell::new(cid_mgr)),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
             QuicVersion::default(),
-            local_initial_source_cid,
         )
         .unwrap();
 
@@ -3501,16 +3477,12 @@ mod tests {
     fn test_crypto_frame_split() {
         let mut client = default_client();
 
-        let mut cid_mgr = FixedConnectionIdManager::new(6);
-        let local_initial_source_cid = cid_mgr.generate_cid();
-
         let mut server = Connection::new_server(
             test_fixture::LONG_CERT_KEYS,
             test_fixture::DEFAULT_ALPN,
             &test_fixture::anti_replay(),
-            Rc::new(RefCell::new(cid_mgr)),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
             QuicVersion::default(),
-            local_initial_source_cid,
         )
         .expect("create a server");
 
