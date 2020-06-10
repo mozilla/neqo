@@ -17,4 +17,6 @@ pub struct Stats {
     pub dups_rx: usize,
     /// Dropped datagrams, or parts thereof
     pub dropped_rx: usize,
+    /// resumsion used
+    pub resumed: bool,
 }
