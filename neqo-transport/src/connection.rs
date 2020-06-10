@@ -526,7 +526,6 @@ impl Connection {
         tps.set_empty(tparams::DISABLE_MIGRATION);
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn new(
         role: Role,
         agent: Agent,
