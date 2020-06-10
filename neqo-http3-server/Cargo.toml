@@ -15,7 +15,7 @@ structopt = "0.3.7"
 mio = "0.6.17"
 mio-extras = "2.0.5"
 log = {version = "0.4.0", default-features = false}
-qlog = "0.2.0"
+qlog = "0.3.0"
 
 [features]
 default = ["deny-warnings"]
