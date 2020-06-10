@@ -11,7 +11,9 @@ use neqo_common::matches;
 use neqo_crypto::{init_db, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Server};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, State};
+use neqo_transport::{
+    Connection, ConnectionEvent, ConnectionIdManager, FixedConnectionIdManager, QuicVersion, State,
+};
 
 use std::cell::RefCell;
 use std::mem;
@@ -82,6 +84,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
+        QuicVersion::default(),
     )
     .expect("create a default client")
 }
@@ -90,10 +93,16 @@ pub fn default_client() -> Connection {
 #[must_use]
 pub fn default_server() -> Connection {
     fixture_init();
+
+    let mut cid_mgr = FixedConnectionIdManager::new(5);
+    let local_initial_source_cid = cid_mgr.generate_cid();
+
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+        Rc::new(RefCell::new(cid_mgr)),
+        QuicVersion::default(),
+        local_initial_source_cid,
     )
     .expect("create a default server");
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
@@ -151,6 +160,7 @@ pub fn default_http3_client() -> Http3Client {
             max_table_size_decoder: 100,
             max_blocked_streams: 100,
         },
+        QuicVersion::default(),
     )
     .expect("create a default client")
 }
