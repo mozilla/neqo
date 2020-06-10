@@ -557,7 +557,7 @@ fn test_h3_rz(
     // get resumption ticket
     let res_token = hc.h3.resumption_token();
     if res_token.is_none() {
-        return Err(format!("ERROR: no resumption token"));
+        return Err("ERROR: no resumption token".into());
     }
     let res_token = res_token.unwrap();
 
@@ -575,7 +575,7 @@ fn test_h3_rz(
         QuicVersion::default(),
     );
     if handler.is_err() {
-        return Err(format!("ERROR: creating a client failed"));
+        return Err("ERROR: creating a client failed".into());
     }
 
     let mut hc = H3Handler {
@@ -592,7 +592,7 @@ fn test_h3_rz(
     if *test == Test::Z {
         println!("Test 0RTT");
         if Http3State::ZeroRtt != hc.h3.state() {
-            return Err(format!("ERROR: zerortt not negotiated"));
+            return Err("ERROR: zerortt not negotiated".into());
         }
 
         // SendH3 data during 0rtt
@@ -608,7 +608,7 @@ fn test_h3_rz(
 
         let recvd_0rtt_reject = |e| e == Http3ClientEvent::ZeroRttRejected;
         if hc.h3.events().any(recvd_0rtt_reject) {
-            return Err(format!("ERROR: 0RTT rejected"));
+            return Err("ERROR: 0RTT rejected".into());
         }
     } else {
         println!("Test resumption");
@@ -618,7 +618,7 @@ fn test_h3_rz(
     }
 
     if !hc.h3.conn().stats().resumed {
-        return Err(format!("ERROR: resumption failed"));
+        return Err("ERROR: resumption failed".into());
     }
     Ok(())
 }
