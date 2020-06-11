@@ -9,6 +9,7 @@
 
 mod codec;
 mod datagram;
+pub mod display;
 mod incrdecoder;
 pub mod log;
 pub mod qlog;
