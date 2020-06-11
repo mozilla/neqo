@@ -481,7 +481,7 @@ impl Connection {
             None,
             quic_version,
         )?;
-        c.crypto.states.init(Role::Client, &dcid);
+        c.crypto.states.init(quic_version, Role::Client, &dcid);
         c.remote_original_destination_cid = Some(dcid);
         c.initialize_path(local_addr, remote_addr);
         Ok(c)
@@ -1002,9 +1002,7 @@ impl Connection {
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
-        // Switching crypto state here might not happen eventually.
-        // https://github.com/quicwg/base-drafts/issues/2823
-        self.crypto.states.init(self.role, packet.scid());
+        self.crypto.states.init(self.quic_version, self.role, packet.scid());
         Ok(())
     }
 
@@ -1088,7 +1086,7 @@ impl Connection {
                     );
                     self.set_state(State::WaitInitial);
                     self.loss_recovery.start_pacer(now);
-                    self.crypto.states.init(self.role, &packet.dcid());
+                    self.crypto.states.init(self.quic_version, self.role, &packet.dcid());
 
                     // We need to make sure that we set this transport parameter.
                     // This has to happen prior to processing the packet so that
