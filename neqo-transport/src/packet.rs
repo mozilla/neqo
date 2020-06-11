@@ -136,7 +136,8 @@ where
         QuicVersion::Draft27 | QuicVersion::Draft28 => &RETRY_AEAD_27,
         QuicVersion::Draft29 => &RETRY_AEAD_29,
     }
-    .try_with(|aead| f(&aead.borrow())).map_err(|e| {
+    .try_with(|aead| f(&aead.borrow()))
+    .map_err(|e| {
         qerror!("Unable to access Retry AEAD: {:?}", e);
         Error::InternalError
     })?
