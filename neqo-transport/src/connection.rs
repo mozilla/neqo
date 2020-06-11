@@ -545,7 +545,7 @@ impl Connection {
 
         let crypto = Crypto::new(agent, protocols, tphandler.clone(), anti_replay)?;
 
-        Ok(Self {
+        let mut c = Self {
             role,
             state: State::Init,
             cid_manager,
@@ -572,7 +572,9 @@ impl Connection {
             stats: Stats::default(),
             qlog: None,
             quic_version,
-        })
+        };
+        c.stats.init(format!("{}", c));
+        Ok(c)
     }
 
     /// Get the local path.
@@ -965,18 +967,15 @@ impl Connection {
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
         qinfo!([self], "received Retry");
         if self.retry_info.is_some() {
-            qinfo!([self], "Dropping extra Retry");
-            self.stats.dropped_rx += 1;
+            self.stats.pkt_dropped("Extra Retry");
             return Ok(());
         }
         if packet.token().is_empty() {
-            qinfo!([self], "Dropping Retry without a token");
-            self.stats.dropped_rx += 1;
+            self.stats.pkt_dropped("Retry without a token");
             return Ok(());
         }
         if !packet.is_valid_retry(&self.remote_original_destination_cid.as_ref().unwrap()) {
-            qinfo!([self], "Dropping Retry with bad integrity tag");
-            self.stats.dropped_rx += 1;
+            self.stats.pkt_dropped("Retry with bad integrity tag");
             return Ok(());
         }
         if let Some(p) = &mut self.path {
@@ -1067,9 +1066,9 @@ impl Connection {
                 match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
-                        qdebug!([self], "Garbage packet: {}", e);
+                        qinfo!([self], "Garbage packet: {}", e);
                         qtrace!([self], "Garbage packet contents: {}", hex(slc));
-                        self.stats.dropped_rx += 1;
+                        self.stats.pkt_dropped("Garbage packet");
                         break;
                     }
                 };
@@ -1077,7 +1076,7 @@ impl Connection {
             match (packet.packet_type(), &self.state, &self.role) {
                 (PacketType::Initial, State::Init, Role::Server) => {
                     if !packet.is_valid_initial() {
-                        self.stats.dropped_rx += 1;
+                        self.stats.pkt_dropped("Invalid Initial");
                         break;
                     }
                     qinfo!(
@@ -1115,8 +1114,8 @@ impl Connection {
                 (PacketType::VersionNegotiation, ..)
                 | (PacketType::Retry, ..)
                 | (PacketType::OtherVersion, ..) => {
-                    qwarn!("dropping {:?}", packet.packet_type());
-                    self.stats.dropped_rx += 1;
+                    self.stats
+                        .pkt_dropped(format!("{:?}", packet.packet_type()));
                     break;
                 }
                 _ => {}
@@ -1124,15 +1123,14 @@ impl Connection {
 
             match self.state {
                 State::Init => {
-                    qinfo!([self], "Received message while in Init state");
-                    self.stats.dropped_rx += 1;
+                    self.stats.pkt_dropped("Received while in Init state");
                     break;
                 }
                 State::WaitInitial => {}
                 State::Handshaking | State::Connected | State::Confirmed => {
                     if !self.is_valid_cid(packet.dcid()) {
-                        qinfo!([self], "Ignoring packet with CID {:?}", packet.dcid());
-                        self.stats.dropped_rx += 1;
+                        self.stats
+                            .pkt_dropped(format!("Ignoring packet with CID {:?}", packet.dcid()));
                         break;
                     }
                     if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
@@ -1148,7 +1146,7 @@ impl Connection {
                 }
                 State::Draining { .. } | State::Closed(..) => {
                     // Do nothing.
-                    self.stats.dropped_rx += 1;
+                    self.stats.pkt_dropped(format!("State {:?}", self.state));
                     break;
                 }
             }
@@ -1187,7 +1185,7 @@ impl Connection {
                 // Decryption failure, or not having keys is not fatal.
                 // If the state isn't available, or we can't decrypt the packet, drop
                 // the rest of the datagram on the floor, but don't generate an error.
-                self.stats.dropped_rx += 1;
+                self.stats.pkt_dropped("Decryption failure");
                 if slc.len() == d.len() {
                     self.check_stateless_reset(&d, now)?
                 }
