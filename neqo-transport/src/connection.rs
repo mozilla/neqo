@@ -1002,7 +1002,9 @@ impl Connection {
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
-        self.crypto.states.init(self.quic_version, self.role, packet.scid());
+        self.crypto
+            .states
+            .init(self.quic_version, self.role, packet.scid());
         Ok(())
     }
 
@@ -1086,7 +1088,9 @@ impl Connection {
                     );
                     self.set_state(State::WaitInitial);
                     self.loss_recovery.start_pacer(now);
-                    self.crypto.states.init(self.quic_version, self.role, &packet.dcid());
+                    self.crypto
+                        .states
+                        .init(self.quic_version, self.role, &packet.dcid());
 
                     // We need to make sure that we set this transport parameter.
                     // This has to happen prior to processing the packet so that
