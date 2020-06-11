@@ -102,33 +102,47 @@ impl TryFrom<Version> for QuicVersion {
     }
 }
 
+const RETRY_SECRET_27: &[u8] = &[
+    0x65, 0x6e, 0x61, 0xe3, 0x36, 0xae, 0x94, 0x17, 0xf7, 0xf0, 0xed, 0xd8, 0xd7, 0x8d, 0x46, 0x1e,
+    0x2a, 0xa7, 0x08, 0x4a, 0xba, 0x7a, 0x14, 0xc1, 0xe9, 0xf7, 0x26, 0xd5, 0x57, 0x09, 0x16, 0x9a,
+];
+const RETRY_SECRET_29: &[u8] = &[
+    0x8b, 0x0d, 0x37, 0xeb, 0x85, 0x35, 0x02, 0x2e, 0xbc, 0x8d, 0x76, 0xa2, 0x07, 0xd8, 0x0d, 0xf2,
+    0x26, 0x46, 0xec, 0x06, 0xdc, 0x80, 0x96, 0x42, 0xc3, 0x0a, 0x8b, 0xaa, 0x2b, 0xaa, 0xff, 0x4c,
+];
+
 /// The AEAD used for Retry is fixed, so use this.
-fn make_retry_aead() -> Aead {
+fn make_retry_aead(secret: &[u8]) -> Aead {
     #[cfg(debug_assertions)]
     ::neqo_crypto::assert_initialized();
 
-    let secret = hkdf::import_key(
-        TLS_VERSION_1_3,
-        TLS_AES_128_GCM_SHA256,
-        &[
-            0x65, 0x6e, 0x61, 0xe3, 0x36, 0xae, 0x94, 0x17, 0xf7, 0xf0, 0xed, 0xd8, 0xd7, 0x8d,
-            0x46, 0x1e, 0x2a, 0xa7, 0x08, 0x4a, 0xba, 0x7a, 0x14, 0xc1, 0xe9, 0xf7, 0x26, 0xd5,
-            0x57, 0x09, 0x16, 0x9a,
-        ],
-    )
-    .unwrap();
+    let secret = hkdf::import_key(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, secret).unwrap();
     Aead::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic ").unwrap()
 }
-thread_local!(static RETRY_AEAD: RefCell<Aead> = RefCell::new(make_retry_aead()));
+thread_local!(static RETRY_AEAD_27: RefCell<Aead> = RefCell::new(make_retry_aead(RETRY_SECRET_27)));
+thread_local!(static RETRY_AEAD_29: RefCell<Aead> = RefCell::new(make_retry_aead(RETRY_SECRET_29)));
 fn retry_expansion() -> usize {
-    if let Ok(ex) = RETRY_AEAD.try_with(|aead| aead.borrow().expansion()) {
+    if let Ok(ex) = RETRY_AEAD_29.try_with(|aead| aead.borrow().expansion()) {
         ex
     } else {
         panic!("Unable to access Retry AEAD")
     }
 }
+fn retry_try_with<F, T>(quic_version: QuicVersion, f: F) -> Res<T>
+where
+    F: FnOnce(&Aead) -> Res<T>,
+{
+    match quic_version {
+        QuicVersion::Draft27 | QuicVersion::Draft28 => &RETRY_AEAD_27,
+        QuicVersion::Draft29 => &RETRY_AEAD_29,
+    }
+    .try_with(|aead| f(&aead.borrow())).map_err(|e| {
+        qerror!("Unable to access Retry AEAD: {:?}", e);
+        Error::InternalError
+    })?
+}
 
-struct PacketBuilderoffsets {
+struct PacketBuilderOffsets {
     /// The bits of the first octet that need masking.
     first_byte_mask: u8,
     /// The offset of the length field.
@@ -143,7 +157,7 @@ pub struct PacketBuilder {
     encoder: Encoder,
     pn: PacketNumber,
     header: Range<usize>,
-    offsets: PacketBuilderoffsets,
+    offsets: PacketBuilderOffsets,
 }
 
 impl PacketBuilder {
@@ -157,7 +171,7 @@ impl PacketBuilder {
             encoder,
             pn: u64::max_value(),
             header: header_start..header_start,
-            offsets: PacketBuilderoffsets {
+            offsets: PacketBuilderOffsets {
                 first_byte_mask: PACKET_HP_MASK_SHORT,
                 pn: 0..0,
                 len: 0,
@@ -184,7 +198,7 @@ impl PacketBuilder {
             encoder,
             pn: u64::max_value(),
             header: header_start..header_start,
-            offsets: PacketBuilderoffsets {
+            offsets: PacketBuilderOffsets {
                 first_byte_mask: PACKET_HP_MASK_LONG,
                 pn: 0..0,
                 len: 0,
@@ -301,15 +315,10 @@ impl PacketBuilder {
         encoder.encode_vec(1, scid);
         debug_assert_ne!(token.len(), 0);
         encoder.encode(token);
-        let tag = RETRY_AEAD
-            .try_with(|aead| -> Res<Vec<u8>> {
-                let mut buf = vec![0; aead.borrow().expansion()];
-                Ok(aead.borrow().encrypt(0, &encoder, &[], &mut buf)?.to_vec())
-            })
-            .map_err(|e| {
-                qerror!("Unable to access Retry AEAD: {:?}", e);
-                Error::InternalError
-            })??;
+        let tag = retry_try_with(quic_version, |aead| {
+            let mut buf = vec![0; aead.expansion()];
+            Ok(aead.encrypt(0, &encoder, &[], &mut buf)?.to_vec())
+        })?;
         encoder.encode(&tag);
         let mut complete: Vec<u8> = encoder.into();
         Ok(complete.split_off(start))
@@ -527,19 +536,11 @@ impl<'a> PublicPacket<'a> {
         let mut encoder = Encoder::with_capacity(self.data.len());
         encoder.encode_vec(1, odcid);
         encoder.encode(header);
-        RETRY_AEAD
-            .try_with(|aead| -> bool {
-                let mut buf = vec![0; expansion];
-                if let Ok(v) = aead.borrow().decrypt(0, &encoder, tag, &mut buf) {
-                    v.is_empty()
-                } else {
-                    false
-                }
-            })
-            .unwrap_or_else(|e| {
-                qerror!("Unable to access Retry AEAD: {:?}", e);
-                false
-            })
+        retry_try_with(self.quic_version.unwrap(), |aead| {
+            let mut buf = vec![0; expansion];
+            Ok(aead.decrypt(0, &encoder, tag, &mut buf)?.is_empty())
+        })
+        .unwrap_or(false)
     }
 
     pub fn is_valid_initial(&self) -> bool {
@@ -932,6 +933,12 @@ mod tests {
         0x92, 0x0e, 0x6f, 0xdf, 0x1d, 0x63,
     ];
 
+    const SAMPLE_RETRY_29: &[u8] = &[
+        0xff, 0xff, 0x00, 0x00, 0x1d, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
+        0x74, 0x6f, 0x6b, 0x65, 0x6e, 0xd1, 0x69, 0x26, 0xd8, 0x1f, 0x6f, 0x9c, 0xa2, 0x95, 0x3a,
+        0x8a, 0xa4, 0x57, 0x5e, 0x1e, 0x49,
+    ];
+
     const RETRY_TOKEN: &[u8] = b"token";
 
     fn build_retry_single(quic_version: QuicVersion, sample_retry: &[u8]) {
@@ -966,12 +973,18 @@ mod tests {
     }
 
     #[test]
+    fn build_retry_29() {
+        build_retry_single(QuicVersion::Draft29, SAMPLE_RETRY_29);
+    }
+
+    #[test]
     fn build_retry_multiple() {
         // Run the build_retry test a few times.
         // This increases the chance that the full comparison happens.
         for _ in 0..32 {
             build_retry_27();
             build_retry_28();
+            build_retry_29();
         }
     }
 
@@ -995,6 +1008,11 @@ mod tests {
     #[test]
     fn decode_retry_28() {
         decode_retry(QuicVersion::Draft28, SAMPLE_RETRY_28);
+    }
+
+    #[test]
+    fn decode_retry_29() {
+        decode_retry(QuicVersion::Draft29, SAMPLE_RETRY_29);
     }
 
     /// Check some packets that are clearly not valid Retry packets.

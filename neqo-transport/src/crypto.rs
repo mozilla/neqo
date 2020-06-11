@@ -464,7 +464,12 @@ impl CryptoDxState {
     pub(crate) fn test_default() -> Self {
         // This matches the value in packet.rs
         const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
-        Self::new_initial(QuicVersion::default(), CryptoDxDirection::Write, "server in", CLIENT_CID)
+        Self::new_initial(
+            QuicVersion::default(),
+            CryptoDxDirection::Write,
+            "server in",
+            CLIENT_CID,
+        )
     }
 }
 
