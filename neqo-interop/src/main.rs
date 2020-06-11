@@ -828,6 +828,11 @@ const PEERS: &[Peer] = &[
         host: "www.cloudflare.com",
         port: 443,
     },
+    Peer {
+        label: "litespeed",
+        host: "http3-test.litespeedtech.com",
+        port: 4433,
+    },
 ];
 
 const TESTS: [Test; 6] = [
