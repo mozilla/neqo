@@ -11,7 +11,7 @@ use crate::qpack_send_buf::QPData;
 use crate::reader::ReceiverConnWrapper;
 use crate::table::HeaderTable;
 use crate::{Error, Header, QpackSettings, Res};
-use neqo_common::qdebug;
+use neqo_common::{display, qdebug};
 use neqo_transport::Connection;
 use std::convert::TryInto;
 
@@ -231,11 +231,7 @@ impl QPackDecoder {
     }
 }
 
-impl ::std::fmt::Display for QPackDecoder {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "QPackDecoder {}", self.capacity())
-    }
-}
+display!(QPackDecoder, v, "QPackDecoder {}", v.capacity());
 
 fn map_error(err: &Error) -> Error {
     if *err == Error::ClosedCriticalStream {

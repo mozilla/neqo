@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 use std::convert::TryInto;
 use std::time::{Duration, Instant};
 
-use neqo_common::{qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{display, qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::frame::{AckRange, Frame};
@@ -38,6 +38,14 @@ impl PNSpace {
             PNSpace::ApplicationData,
         ];
         SPACES.iter()
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Initial => "in",
+            Self::Handshake => "hs",
+            Self::ApplicationData => "ap",
+        }
     }
 }
 
@@ -151,15 +159,7 @@ impl SentPacket {
     }
 }
 
-impl std::fmt::Display for PNSpace {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Initial => "in",
-            Self::Handshake => "hs",
-            Self::ApplicationData => "ap",
-        })
-    }
-}
+display!(PNSpace, v, "{}", v.as_str());
 
 #[derive(Clone, Debug, Default)]
 pub struct PacketRange {
@@ -233,11 +233,7 @@ impl PacketRange {
     }
 }
 
-impl ::std::fmt::Display for PacketRange {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{}->{}", self.largest, self.smallest)
-    }
-}
+display!(PacketRange, "{}->{}", largest, smallest);
 
 /// The ACK delay we use.
 pub const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
@@ -465,11 +461,7 @@ impl RecvdPackets {
     }
 }
 
-impl ::std::fmt::Display for RecvdPackets {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Recvd-{}", self.space)
-    }
-}
+display!(RecvdPackets, "Recvd-{}", space);
 
 #[derive(Debug)]
 pub struct AckTracker {

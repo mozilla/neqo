@@ -13,7 +13,7 @@ use crate::reader::ReceiverConnWrapper;
 use crate::table::{HeaderTable, LookupResult, ADDITIONAL_TABLE_ENTRY_SIZE};
 use crate::Header;
 use crate::{Error, QpackSettings, Res};
-use neqo_common::{qdebug, qlog::NeqoQlog, qtrace};
+use neqo_common::{display, qdebug, qlog::NeqoQlog, qtrace};
 use neqo_transport::Connection;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
@@ -428,11 +428,7 @@ impl QPackEncoder {
     }
 }
 
-impl ::std::fmt::Display for QPackEncoder {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "QPackEncoder")
-    }
-}
+display!(QPackEncoder);
 
 fn map_error(err: &Error) -> Error {
     if *err == Error::ClosedCriticalStream {

@@ -7,7 +7,7 @@
 // This file implements a server that can handle multiple connections.
 
 use neqo_common::{
-    self as common, hex, matches, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn,
+    self as common, display, hex, matches, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn,
     timer::Timer, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
@@ -67,6 +67,8 @@ impl DerefMut for ServerConnectionState {
         &mut self.c
     }
 }
+
+display!(ServerConnectionState, "{}", c);
 
 enum RetryTokenResult {
     Pass,
@@ -645,6 +647,8 @@ impl PartialEq for ActiveConnectionRef {
 
 impl Eq for ActiveConnectionRef {}
 
+display!(ActiveConnectionRef, "{:?}", c);
+
 struct ServerConnectionIdManager {
     c: Option<StateRef>,
     connections: ConnectionTableRef,
@@ -697,8 +701,4 @@ impl ConnectionIdManager for ServerConnectionIdManager {
     }
 }
 
-impl ::std::fmt::Display for Server {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Server")
-    }
-}
+display!(Server);

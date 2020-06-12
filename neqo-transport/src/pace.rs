@@ -7,11 +7,11 @@
 // Pacer
 #![deny(clippy::pedantic)]
 
-use neqo_common::qtrace;
+use neqo_common::{display, qtrace};
 
 use std::cmp::min;
 use std::convert::TryFrom;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 use std::time::{Duration, Instant};
 
 /// This value determines how much faster the pacer operates than the
@@ -103,11 +103,7 @@ impl Pacer {
     }
 }
 
-impl Display for Pacer {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Pacer {}/{}", self.c, self.p)
-    }
-}
+display!(Pacer, "Pacer {}/{}", c, p);
 
 impl Debug for Pacer {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {

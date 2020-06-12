@@ -7,7 +7,7 @@
 use crate::hframe::{HFrame, HFrameReader};
 use crate::push_controller::PushController;
 use crate::{Error, Header, Res};
-use neqo_common::{matches, qdebug, qinfo, qtrace};
+use neqo_common::{display, matches, qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::Connection;
 use std::cell::RefCell;
@@ -57,11 +57,7 @@ pub(crate) struct RecvMessage {
     stream_id: u64,
 }
 
-impl ::std::fmt::Display for RecvMessage {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "RecvMessage stream_id:{}", self.stream_id)
-    }
-}
+display!(RecvMessage, "RecvMessage stream_id:{}", stream_id);
 
 impl RecvMessage {
     pub fn new(

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use smallvec::{smallvec, SmallVec};
 
-use neqo_common::{qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{display, qdebug, qinfo, qtrace, qwarn};
 
 use crate::cc::CongestionControl;
 use crate::crypto::CryptoRecoveryToken;
@@ -774,11 +774,7 @@ impl LossRecovery {
     }
 }
 
-impl ::std::fmt::Display for LossRecovery {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "LossRecovery")
-    }
-}
+display!(LossRecovery);
 
 #[cfg(test)]
 mod tests {

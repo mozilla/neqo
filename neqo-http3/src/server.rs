@@ -11,7 +11,7 @@ use crate::connection_server::Http3ServerHandler;
 use crate::server_connection_events::Http3ServerConnEvent;
 use crate::server_events::{ClientRequestStream, Http3ServerEvent, Http3ServerEvents};
 use crate::Res;
-use neqo_common::{qtrace, Datagram};
+use neqo_common::{display, qtrace, Datagram};
 use neqo_crypto::AntiReplay;
 use neqo_qpack::QpackSettings;
 use neqo_transport::server::{ActiveConnectionRef, Server};
@@ -34,11 +34,7 @@ pub struct Http3Server {
     events: Http3ServerEvents,
 }
 
-impl ::std::fmt::Display for Http3Server {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Http3 server ")
-    }
-}
+display!(Http3Server);
 
 impl Http3Server {
     /// # Errors

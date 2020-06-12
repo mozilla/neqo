@@ -97,8 +97,4 @@ impl Role {
     }
 }
 
-impl ::std::fmt::Display for Role {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
+display_debug!(Role);

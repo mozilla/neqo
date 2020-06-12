@@ -15,7 +15,7 @@ use crate::reader::{to_string, ReceiverBufferWrapper};
 use crate::table::HeaderTable;
 use crate::Header;
 use crate::{Error, Res};
-use neqo_common::qtrace;
+use neqo_common::{display, qtrace};
 use std::ops::{Deref, Div};
 
 #[derive(Default, Debug, PartialEq)]
@@ -27,11 +27,7 @@ pub struct HeaderEncoder {
     max_dynamic_index_ref: Option<u64>,
 }
 
-impl ::std::fmt::Display for HeaderEncoder {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "HeaderEncoder")
-    }
-}
+display!(HeaderEncoder);
 
 impl HeaderEncoder {
     pub fn new(base: u64, use_huffman: bool, max_entries: u64) -> Self {
@@ -198,11 +194,7 @@ pub(crate) struct HeaderDecoder<'a> {
     req_insert_cnt: u64,
 }
 
-impl<'a> ::std::fmt::Display for HeaderDecoder<'a> {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "HeaderDecoder")
-    }
-}
+display!(HeaderDecoder<'a>);
 
 #[derive(Debug, PartialEq)]
 pub enum HeaderDecoderResult {

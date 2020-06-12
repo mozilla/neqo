@@ -11,7 +11,7 @@ use std::ops::{Index, IndexMut, Range};
 use std::rc::Rc;
 use std::time::Instant;
 
-use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, Role};
+use neqo_common::{display, hex, matches, qdebug, qerror, qinfo, qtrace, Role};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hp::HpKey;
 use neqo_crypto::{
@@ -229,11 +229,7 @@ impl Crypto {
     }
 }
 
-impl ::std::fmt::Display for Crypto {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Crypto")
-    }
-}
+display!(Crypto);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CryptoDxDirection {
@@ -473,11 +469,7 @@ impl CryptoDxState {
     }
 }
 
-impl std::fmt::Display for CryptoDxState {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "epoch {} {:?}", self.epoch, self.direction)
-    }
-}
+display!(CryptoDxState, "epoch {} {:?}", epoch, direction);
 
 #[derive(Debug)]
 pub struct CryptoState {
@@ -859,11 +851,7 @@ impl CryptoStates {
     }
 }
 
-impl std::fmt::Display for CryptoStates {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "CryptoStates")
-    }
-}
+display!(CryptoStates);
 
 #[derive(Debug, Default)]
 pub struct CryptoStream {

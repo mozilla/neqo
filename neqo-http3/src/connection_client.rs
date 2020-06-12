@@ -13,8 +13,8 @@ use crate::recv_message::RecvMessage;
 use crate::send_message::{SendMessage, SendMessageEvents};
 use crate::Header;
 use neqo_common::{
-    hex, hex_with_len, matches, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Decoder, Encoder,
-    Role,
+    display, hex, hex_with_len, matches, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Decoder,
+    Encoder, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_qpack::QpackSettings;
@@ -52,11 +52,7 @@ pub struct Http3Client {
     push_handler: Rc<RefCell<PushController>>,
 }
 
-impl Display for Http3Client {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Http3 client")
-    }
-}
+display!(Http3Client);
 
 impl Http3Client {
     /// # Errors

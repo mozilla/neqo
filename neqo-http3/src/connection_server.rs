@@ -10,7 +10,7 @@ use crate::recv_message::RecvMessage;
 use crate::send_message::SendMessage;
 use crate::server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents};
 use crate::{Error, Header, Res};
-use neqo_common::{matches, qdebug, qinfo, qtrace};
+use neqo_common::{display, matches, qdebug, qinfo, qtrace};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamType};
 use std::time::Instant;
@@ -22,11 +22,7 @@ pub struct Http3ServerHandler {
     needs_processing: bool,
 }
 
-impl ::std::fmt::Display for Http3ServerHandler {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Http3 server connection")
-    }
-}
+display!(Http3ServerHandler);
 
 impl Http3ServerHandler {
     pub(crate) fn new(qpack_settings: QpackSettings) -> Self {

@@ -6,7 +6,7 @@
 
 // Encoding and decoding packets off the wire.
 
-use neqo_common::{hex, hex_with_len, matches, Decoder};
+use neqo_common::{display, hex, hex_with_len, matches, Decoder};
 use neqo_crypto::random;
 
 use std::borrow::Borrow;
@@ -75,15 +75,11 @@ impl std::ops::Deref for ConnectionId {
     }
 }
 
+display!(ConnectionId, v, "{}", hex(&v.cid));
+
 impl ::std::fmt::Debug for ConnectionId {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "CID {}", hex_with_len(&self.cid))
-    }
-}
-
-impl ::std::fmt::Display for ConnectionId {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{}", hex(&self.cid))
     }
 }
 
@@ -104,11 +100,7 @@ impl<'a> ::std::fmt::Debug for ConnectionIdRef<'a> {
     }
 }
 
-impl<'a> ::std::fmt::Display for ConnectionIdRef<'a> {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{}", hex_with_len(&self.cid))
-    }
-}
+display!(ConnectionIdRef<'a>, v, "{}", hex(&v.cid));
 
 impl<'a> From<&'a [u8]> for ConnectionIdRef<'a> {
     fn from(cid: &'a [u8]) -> Self {

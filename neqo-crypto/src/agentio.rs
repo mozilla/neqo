@@ -9,7 +9,7 @@ use crate::err::{nspr, Error, PR_SetError, Res};
 use crate::prio;
 use crate::ssl;
 
-use neqo_common::{hex, hex_with_len, qtrace};
+use neqo_common::{display, hex, hex_with_len, qtrace};
 use std::cmp::min;
 use std::convert::{TryFrom, TryInto};
 use std::fmt;
@@ -203,11 +203,7 @@ impl AgentIoInput {
     }
 }
 
-impl ::std::fmt::Display for AgentIoInput {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "AgentIoInput {:p}", self.input)
-    }
-}
+display!(AgentIoInput, "AgentIoInput {:p}", input);
 
 #[derive(Debug)]
 pub struct AgentIo {
@@ -253,11 +249,7 @@ impl AgentIo {
     }
 }
 
-impl ::std::fmt::Display for AgentIo {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "AgentIo")
-    }
-}
+display!(AgentIo);
 
 unsafe extern "C" fn agent_close(fd: PrFd) -> PrStatus {
     (*fd).secret = null_mut();

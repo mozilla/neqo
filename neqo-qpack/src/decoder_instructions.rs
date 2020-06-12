@@ -10,7 +10,7 @@ use crate::prefix::{
 use crate::qpack_send_buf::QPData;
 use crate::reader::{IntReader, ReadByte};
 use crate::Res;
-use neqo_common::{qdebug, qtrace};
+use neqo_common::{display, qdebug, qtrace};
 use std::mem;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -62,11 +62,7 @@ pub struct DecoderInstructionReader {
     instruction: DecoderInstruction,
 }
 
-impl ::std::fmt::Display for DecoderInstructionReader {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "InstructionReader")
-    }
-}
+display!(DecoderInstructionReader);
 
 impl DecoderInstructionReader {
     pub fn new() -> Self {

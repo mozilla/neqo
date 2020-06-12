@@ -6,9 +6,11 @@
 
 #![allow(dead_code)]
 
-use std::os::raw::c_char;
-
 use crate::ssl::{SECStatus, SECSuccess};
+
+use neqo_common::display_debug;
+
+use std::os::raw::c_char;
 
 include!(concat!(env!("OUT_DIR"), "/nspr_error.rs"));
 mod codes {
@@ -62,11 +64,7 @@ impl std::error::Error for Error {
     }
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Error: {:?}", self)
-    }
-}
+display_debug!(Error, "Error");
 
 impl From<std::num::TryFromIntError> for Error {
     #[must_use]

@@ -5,26 +5,18 @@
 // except according to those terms.
 
 use crate::{Error, Res};
-use neqo_common::qtrace;
+use neqo_common::{display, qtrace};
 use std::fmt::Debug;
-use std::fmt::Display;
 
 #[derive(Debug)]
 pub(crate) struct PushController {}
 
+display!(PushController);
 impl PushController {
     pub fn new() -> Self {
         PushController {}
     }
-}
 
-impl Display for PushController {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Push controler")
-    }
-}
-
-impl PushController {
     #[allow(clippy::needless_pass_by_value)]
     pub fn new_push_promise(&self, push_id: u64, header_block: Vec<u8>) -> Res<()> {
         qtrace!(

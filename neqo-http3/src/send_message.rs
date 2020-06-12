@@ -7,7 +7,7 @@
 use crate::hframe::HFrame;
 use crate::Header;
 use crate::{Error, Res};
-use neqo_common::{matches, qdebug, qinfo, qtrace, Encoder};
+use neqo_common::{display, matches, qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
 use std::cmp::min;
@@ -273,8 +273,4 @@ impl SendMessage {
     }
 }
 
-impl ::std::fmt::Display for SendMessage {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "SendMesage {}", self.stream_id)
-    }
-}
+display!(SendMessage, "SendMesage {}", stream_id);

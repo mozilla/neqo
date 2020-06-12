@@ -38,6 +38,8 @@ pub use self::frame::StreamType;
 pub use self::packet::QuicVersion;
 pub use self::stream_id::StreamId;
 
+use neqo_common::display_debug;
+
 const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30); // 30 second
 
 type TransportError = u64;
@@ -146,11 +148,7 @@ impl ::std::error::Error for Error {
     }
 }
 
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Transport error: {:?}", self)
-    }
-}
+display_debug!(Error, "Transport error");
 
 pub type AppError = u64;
 

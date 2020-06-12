@@ -11,7 +11,7 @@ use crate::prefix::{
 use crate::qpack_send_buf::QPData;
 use crate::reader::{IntReader, LiteralReader, ReadByte, Reader};
 use crate::Res;
-use neqo_common::{matches, qdebug, qtrace};
+use neqo_common::{display, matches, qdebug, qtrace};
 use std::mem;
 
 // The encoder only uses InsertWithNameLiteral, therefore clippy is complaining about dead_code.
@@ -107,15 +107,12 @@ pub struct EncoderInstructionReader {
     instruction: DecodedEncoderInstruction,
 }
 
-impl ::std::fmt::Display for EncoderInstructionReader {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(
-            f,
-            "EncoderInstructionReader state={:?} instruction:{:?}",
-            self.state, self.instruction
-        )
-    }
-}
+display!(
+    EncoderInstructionReader,
+    "EncoderInstructionReader {:?} {:?}",
+    state,
+    instruction
+);
 
 impl EncoderInstructionReader {
     pub fn new() -> Self {

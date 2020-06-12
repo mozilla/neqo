@@ -26,6 +26,8 @@ pub mod reader;
 mod static_table;
 mod table;
 
+use neqo_common::display_debug;
+
 pub type Header = (String, String);
 type Res<T> = Result<T, Error>;
 
@@ -84,11 +86,7 @@ impl ::std::error::Error for Error {
     }
 }
 
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "QPACK error: {:?}", self)
-    }
-}
+display_debug!(Error, "QPACK error");
 
 impl From<neqo_transport::Error> for Error {
     fn from(err: neqo_transport::Error) -> Self {

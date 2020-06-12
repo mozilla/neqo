@@ -24,6 +24,7 @@ mod server_connection_events;
 mod server_events;
 mod stream_type_reader;
 
+use neqo_common::display_debug;
 use neqo_qpack::Error as QpackError;
 pub use neqo_transport::Output;
 use neqo_transport::{AppError, Error as TransportError};
@@ -148,8 +149,4 @@ impl ::std::error::Error for Error {
     }
 }
 
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "HTTP/3 error: {:?}", self)
-    }
-}
+display_debug!(Error, "HTTP/3 error");

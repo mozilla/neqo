@@ -21,7 +21,7 @@ use crate::secrets::SecretHolder;
 use crate::ssl::{self, PRBool};
 use crate::time::TimeHolder;
 
-use neqo_common::{hex_snip_middle, matches, qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{display, hex_snip_middle, matches, qdebug, qinfo, qtrace, qwarn};
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::ffi::CString;
@@ -677,11 +677,7 @@ impl Drop for SecretAgent {
     }
 }
 
-impl ::std::fmt::Display for SecretAgent {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Agent {:p}", self.fd)
-    }
-}
+display!(SecretAgent, "Agent {:p}", fd);
 
 /// A TLS Client.
 #[derive(Debug)]

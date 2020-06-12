@@ -6,7 +6,7 @@
 
 use crate::static_table::{StaticTableEntry, HEADER_STATIC_TABLE};
 use crate::{Error, Res};
-use neqo_common::qtrace;
+use neqo_common::{display, qtrace};
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 
@@ -74,15 +74,13 @@ pub(crate) struct HeaderTable {
     acked_inserts_cnt: u64,
 }
 
-impl ::std::fmt::Display for HeaderTable {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(
-            f,
-            "HeaderTable for (base={} acked_inserts_cnt={} capacity={})",
-            self.base, self.acked_inserts_cnt, self.capacity
-        )
-    }
-}
+display!(
+    HeaderTable,
+    "HeaderTable base={} acked_inserts_cnt={} capacity={}",
+    base,
+    acked_inserts_cnt,
+    capacity
+);
 
 impl HeaderTable {
     pub fn new(encoder: bool) -> Self {

@@ -6,7 +6,7 @@
 
 use crate::hframe::HFrame;
 use crate::Res;
-use neqo_common::{qtrace, Encoder};
+use neqo_common::{display, qtrace, Encoder};
 use neqo_transport::{Connection, StreamType};
 
 pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
@@ -18,11 +18,7 @@ pub(crate) struct ControlStreamLocal {
     buf: Vec<u8>,
 }
 
-impl ::std::fmt::Display for ControlStreamLocal {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Local control stream {:?}", self.stream_id)
-    }
-}
+display!(ControlStreamLocal, "Local control {:?}", stream_id);
 
 impl ControlStreamLocal {
     /// Add a new frame that needs to be send.

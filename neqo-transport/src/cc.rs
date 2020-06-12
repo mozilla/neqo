@@ -7,13 +7,12 @@
 // Congestion control
 
 use std::cmp::max;
-use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
 use crate::pace::Pacer;
 use crate::path::PATH_MTU_V6;
 use crate::tracking::SentPacket;
-use neqo_common::{const_max, const_min, qdebug, qinfo, qtrace};
+use neqo_common::{const_max, const_min, display, qdebug, qinfo, qtrace};
 
 pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
 pub const INITIAL_CWND_PKTS: usize = 10;
@@ -47,19 +46,18 @@ impl Default for CongestionControl {
     }
 }
 
-impl Display for CongestionControl {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "CongCtrl {}/{} ssthresh {}",
-            self.bytes_in_flight, self.congestion_window, self.ssthresh,
-        )?;
-        if let Some(p) = &self.pacer {
-            write!(f, " {}", p)?;
-        }
-        Ok(())
-    }
-}
+display!(
+    CongestionControl,
+    v,
+    "CongCtrl {}/{} ssthresh {}{}",
+    v.bytes_in_flight,
+    v.congestion_window,
+    v.ssthresh,
+    v.pacer
+        .as_ref()
+        .map(|p| format!(" {}", p))
+        .unwrap_or_else(|| String::from("")),
+);
 
 impl CongestionControl {
     #[cfg(test)]
