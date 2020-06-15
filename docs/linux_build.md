@@ -106,7 +106,7 @@ sudo apt-get autoremove -y && sudo apt-get clean -y
 ```shell
 export NSS_DIR=$HOME/nss
 export NSPR_DIR=$HOME/nspr
-export LD_LIBRARY_PATH=$HOME/dist/Debug/lib
+export LD_LIBRARY_PATH=$NSS_DIR/../dist/Debug/lib
 ```
 
 5. Clone **NSS** and **NSPR**
