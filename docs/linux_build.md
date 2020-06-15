@@ -1,6 +1,6 @@
 # Build process for linux
 
-## Table of contents
+## Table of Contents
 
 1. [System Details](#system-details)
 2. [Installation Steps](#installation-steps)
