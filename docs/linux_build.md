@@ -1,4 +1,4 @@
-# Build process for linux
+# Build Process for Linux
 
 ## Table of Contents
 
