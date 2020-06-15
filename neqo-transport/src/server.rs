@@ -29,7 +29,7 @@ use std::mem;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 pub enum InitialResult {
@@ -468,7 +468,7 @@ impl Server {
         // Instead, wrap it so that we can save connection IDs.
 
         let cid_mgr = Rc::new(RefCell::new(ServerConnectionIdManager {
-            c: None,
+            c: Weak::new(),
             cid_manager: self.cid_manager.clone(),
             connections: self.connections.clone(),
             saved_cids: Vec::new(),
@@ -646,7 +646,7 @@ impl PartialEq for ActiveConnectionRef {
 impl Eq for ActiveConnectionRef {}
 
 struct ServerConnectionIdManager {
-    c: Option<StateRef>,
+    c: Weak<RefCell<ServerConnectionState>>,
     connections: ConnectionTableRef,
     cid_manager: CidMgr,
     saved_cids: Vec<ConnectionId>,
@@ -654,22 +654,16 @@ struct ServerConnectionIdManager {
 
 impl ServerConnectionIdManager {
     pub fn set_connection(&mut self, c: StateRef) {
-        self.c = Some(c);
         let saved = std::mem::replace(&mut self.saved_cids, Vec::with_capacity(0));
         for cid in saved {
-            self.insert_cid(cid);
+            self.insert_cid(cid, c.clone());
         }
+        self.c = Rc::downgrade(&c);
     }
 
-    fn insert_cid(&mut self, cid: ConnectionId) {
+    fn insert_cid(&mut self, cid: ConnectionId, rc: StateRef) {
         debug_assert!(!cid.is_empty());
-        let v = self
-            .connections
-            .borrow_mut()
-            .insert(cid, self.c.as_ref().unwrap().clone());
-        if let Some(v) = v {
-            debug_assert!(Rc::ptr_eq(&v, self.c.as_ref().unwrap()));
-        }
+        self.connections.borrow_mut().insert(cid, rc);
     }
 }
 
@@ -682,8 +676,8 @@ impl ConnectionIdDecoder for ServerConnectionIdManager {
 impl ConnectionIdManager for ServerConnectionIdManager {
     fn generate_cid(&mut self) -> ConnectionId {
         let cid = self.cid_manager.borrow_mut().generate_cid();
-        if self.c.is_some() {
-            self.insert_cid(cid.clone());
+        if let Some(rc) = self.c.upgrade() {
+            self.insert_cid(cid.clone(), rc);
         } else {
             // This function can be called before the connection is set.
             // So save any connection IDs until that hookup happens.
