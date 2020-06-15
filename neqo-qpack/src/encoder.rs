@@ -14,7 +14,7 @@ use crate::stats::Stats;
 use crate::table::{HeaderTable, LookupResult, ADDITIONAL_TABLE_ENTRY_SIZE};
 use crate::Header;
 use crate::{Error, QpackSettings, Res};
-use neqo_common::{qdebug, qlog::NeqoQlog, qtrace};
+use neqo_common::{qdebug, qerror, qlog::NeqoQlog, qtrace};
 use neqo_transport::Connection;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
@@ -100,7 +100,7 @@ impl QPackEncoder {
         let new_cap = std::cmp::min(self.max_table_size, cap);
         self.max_entries = new_cap / 32;
         // we also set our table to the max allowed.
-        self.change_capacity(new_cap);
+        self.need_change_capacity(new_cap);
         Ok(())
     }
 
@@ -278,20 +278,19 @@ impl QPackEncoder {
         }
     }
 
-    fn change_capacity(&mut self, value: u64) {
+    fn need_change_capacity(&mut self, value: u64) {
         qdebug!([self], "change capacity: {}", value);
         self.change_capacity = Some(value);
     }
 
     fn maybe_send_change_capacity(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
-        if let Some(cap) = self.change_capacity {
+        if let Some(cap) = self.change_capacity.take() {
             let mut buf = QPData::default();
             EncoderInstruction::Capacity { value: cap }.marshal(&mut buf, self.use_huffman);
             if !conn.stream_send_atomic(stream_id, &buf)? {
                 return Err(Error::EncoderStreamBlocked);
             }
             self.table.set_capacity(cap)?;
-            self.change_capacity = None;
         }
         Ok(())
     }
@@ -301,7 +300,10 @@ impl QPackEncoder {
     ///   returns `EncoderStream` in case of an error.
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         match self.local_stream {
-            LocalStreamState::NoStream => Ok(()),
+            LocalStreamState::NoStream => {
+                qerror!("Send call but there is no stream yet.");
+                Ok(())
+            }
             LocalStreamState::Uninitialized(stream_id) => {
                 let mut buf = QPData::default();
                 buf.encode_varint(QPACK_UNI_STREAM_TYPE_ENCODER);
@@ -499,6 +501,14 @@ mod tests {
         peer_conn: Connection,
     }
 
+    impl TestEncoder {
+        pub fn change_capacity(&mut self, capacity: u64) -> Res<()> {
+            self.encoder.set_max_capacity(capacity).unwrap();
+            // We will try to really change the table only when we send the change capacity instruction.
+            self.encoder.send(&mut self.conn)
+        }
+    }
+
     fn connect_generic<F>(huffman: bool, f: F) -> TestEncoder
     where
         F: FnOnce(&mut Connection, &mut Connection),
@@ -548,12 +558,6 @@ mod tests {
 
             handshake(client, server);
         })
-    }
-
-    fn change_capacity(encoder: &mut TestEncoder, capacity: u64) -> Res<()> {
-        encoder.encoder.set_max_capacity(capacity).unwrap();
-        // We will try to really change the table only when we send the change capacity instruction.
-        encoder.encoder.send(&mut encoder.conn)
     }
 
     fn send_instructions(encoder: &mut TestEncoder, encoder_instruction: &[u8]) {
@@ -1383,19 +1387,19 @@ mod tests {
         assert_is_index_to_dynamic(&buf);
 
         // trying to evict the entry will failed.
-        assert!(change_capacity(&mut encoder, 10).is_err());
+        assert!(encoder.change_capacity(10).is_err());
 
         // receive an Insert Count Increment for the entry.
         recv_instruction(&mut encoder, &[0x01]);
 
         // trying to evict the entry will failed. The stream is still referring to it.
-        assert!(change_capacity(&mut encoder, 10).is_err());
+        assert!(encoder.change_capacity(10).is_err());
 
         // receive a header_ack for the header block.
         recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1);
 
         // now entry can be evicted.
-        assert!(change_capacity(&mut encoder, 10).is_ok());
+        assert!(encoder.change_capacity(10).is_ok());
     }
 
     #[test]
@@ -1430,19 +1434,19 @@ mod tests {
         assert_is_index_to_dynamic(&buf);
 
         // trying to evict the entry will failed.
-        assert!(change_capacity(&mut encoder, 10).is_err());
+        assert!(encoder.change_capacity(10).is_err());
 
         // receive an Insert Count Increment for the entry.
         recv_instruction(&mut encoder, &[0x01]);
 
         // trying to evict the entry will failed. The stream is still referring to it.
-        assert!(change_capacity(&mut encoder, 10).is_err());
+        assert!(encoder.change_capacity(10).is_err());
 
         // receive a stream cancelled.
         recv_instruction(&mut encoder, STREAM_CANCELED_ID_1);
 
         // now entry can be evicted.
-        assert!(change_capacity(&mut encoder, 10).is_ok());
+        assert!(encoder.change_capacity(10).is_ok());
     }
 
     #[test]
@@ -1466,13 +1470,13 @@ mod tests {
         send_instructions(&mut encoder, HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // trying to evict the entry will failed, because the entry is not acked.
-        assert!(change_capacity(&mut encoder, 10).is_err());
+        assert!(encoder.change_capacity(10).is_err());
 
         // receive an Insert Count Increment for the entry.
         recv_instruction(&mut encoder, &[0x01]);
 
         // now entry can be evicted.
-        assert!(change_capacity(&mut encoder, 10).is_ok());
+        assert!(encoder.change_capacity(10).is_ok());
     }
 
     #[test]
@@ -1508,13 +1512,13 @@ mod tests {
 
         // trying to evict the entry will failed. The stream is still referring to it and
         // entry is not acked.
-        assert!(change_capacity(&mut encoder, 10).is_err());
+        assert!(encoder.change_capacity(10).is_err());
 
         // receive a header_ack for the header block. This will also ack the instruction.
         recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1);
 
         // now entry can be evicted.
-        assert!(change_capacity(&mut encoder, 10).is_ok());
+        assert!(encoder.change_capacity(10).is_ok());
     }
 
     #[test]
@@ -1616,7 +1620,7 @@ mod tests {
         let mut encoder = connect(false);
 
         encoder.encoder.set_max_blocked_streams(20).unwrap();
-        assert!(change_capacity(&mut encoder, 50).is_ok());
+        assert!(encoder.change_capacity(50).is_ok());
 
         encoder
             .encoder
