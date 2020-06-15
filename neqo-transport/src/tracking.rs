@@ -10,8 +10,8 @@
 
 use std::collections::VecDeque;
 use std::convert::TryInto;
-use std::time::{Duration, Instant};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
