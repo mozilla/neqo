@@ -76,6 +76,7 @@ cargo clippy --version
 ```output
 clippy 0.0.212 (69f99e7 2019-12-14)
 ```
+</details>
 
 ## Installation Steps
 
