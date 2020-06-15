@@ -120,7 +120,7 @@ hg clone -u NSPR_4_25_RTM https://hg.mozilla.org/projects/nspr "$NSPR_DIR"
 
 ```shell
 cd $NSS_DIR
-./build.sh -j 3 --static -Ddisable_tests=1
+./build.sh --static -Ddisable_tests=1
 ```
 
 7. Navigate to your workspace and checkout **Neqo**
