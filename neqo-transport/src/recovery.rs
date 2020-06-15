@@ -1128,7 +1128,7 @@ mod tests {
 
         // There are cases where we send a packet that is not subsequently tracked.
         // So check that this works.
-        lr.on_packet_sent( 
+        lr.on_packet_sent(
             PNSpace::Initial,
             0,
             SentPacket::new(pn_time(3), true, Rc::default(), ON_SENT_SIZE, true),
