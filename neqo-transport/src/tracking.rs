@@ -531,8 +531,7 @@ impl AckTracker {
         pn_space: PNSpace,
     ) -> Option<(Frame, Option<RecoveryToken>)> {
         self.get_mut(pn_space)
-            .map(|space| space.get_frame(now))
-            .flatten()
+            .and_then(|space| space.get_frame(now))
     }
 }
 

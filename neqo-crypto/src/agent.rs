@@ -968,8 +968,8 @@ impl Deref for Agent {
 impl DerefMut for Agent {
     fn deref_mut(&mut self) -> &mut SecretAgent {
         match self {
-            Self::Client(c) => c.deref_mut(),
-            Self::Server(s) => s.deref_mut(),
+            Self::Client(c) => &mut *c,
+            Self::Server(s) => &mut *s,
         }
     }
 }

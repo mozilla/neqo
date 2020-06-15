@@ -496,10 +496,7 @@ impl LossRecovery {
     }
 
     pub fn largest_acknowledged_pn(&self, pn_space: PNSpace) -> Option<u64> {
-        self.spaces
-            .get(pn_space)
-            .map(|sp| sp.largest_acked)
-            .flatten()
+        self.spaces.get(pn_space).and_then(|sp| sp.largest_acked)
     }
 
     pub fn pto(&self) -> Duration {
