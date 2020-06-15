@@ -7,9 +7,8 @@
 
 ## System Details
 
-**Linux Kernel:** 4.15.0-101-generic  
-**Ubuntu:** 18.04
-
+<details>
+  <summary>**Ubuntu:** 18.04 (expand for details)</summary>
 ```shell
 rustup show
 ```
