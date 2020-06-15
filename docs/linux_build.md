@@ -141,7 +141,7 @@ cargo test -v
 
 ```shell
 #Start server
-./target/debug/neqo-http3-server [::]:12345 --db ./test-fixture/db
+cargo run --bin neqo-http3-server -- [::]:12345 --db ./test-fixture/db
 #Run Client (In seperate shell. Will require LD_LIBRARY_PATH to be exported)
 ./target/debug/neqo-client http://127.0.0.1:12345/
 ```
