@@ -8,7 +8,8 @@
 ## System Details
 
 <details>
-  <summary>**Ubuntu:** 18.04 (expand for details)</summary>
+  <summary><b>Ubuntu:</b> 18.04 (expand for details)</summary>
+
 ```shell
 rustup show
 ```
