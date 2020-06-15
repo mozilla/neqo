@@ -784,6 +784,7 @@ impl ::std::fmt::Display for LossRecovery {
 mod tests {
     use super::{LossRecovery, LossRecoverySpace, PNSpace, SentPacket};
     use std::convert::TryInto;
+    use std::rc::Rc;
     use std::time::{Duration, Instant};
     use test_fixture::now;
 
@@ -862,7 +863,7 @@ mod tests {
             lr.on_packet_sent(
                 PNSpace::ApplicationData,
                 pn,
-                SentPacket::new(pn_time(pn), true, Vec::new(), ON_SENT_SIZE, true),
+                SentPacket::new(pn_time(pn), true, Rc::default(), ON_SENT_SIZE, true),
             );
         }
     }
@@ -983,7 +984,7 @@ mod tests {
         lr.on_packet_sent(
             PNSpace::ApplicationData,
             0,
-            SentPacket::new(pn_time(0), true, Vec::new(), ON_SENT_SIZE, true),
+            SentPacket::new(pn_time(0), true, Rc::default(), ON_SENT_SIZE, true),
         );
         lr.on_packet_sent(
             PNSpace::ApplicationData,
@@ -991,7 +992,7 @@ mod tests {
             SentPacket::new(
                 pn_time(0) + INITIAL_RTT / 4,
                 true,
-                Vec::new(),
+                Rc::default(),
                 ON_SENT_SIZE,
                 true,
             ),
@@ -1093,21 +1094,21 @@ mod tests {
         lr.on_packet_sent(
             PNSpace::Initial,
             0,
-            SentPacket::new(pn_time(0), true, Vec::new(), ON_SENT_SIZE, true),
+            SentPacket::new(pn_time(0), true, Rc::default(), ON_SENT_SIZE, true),
         );
         lr.on_packet_sent(
             PNSpace::Handshake,
             0,
-            SentPacket::new(pn_time(1), true, Vec::new(), ON_SENT_SIZE, true),
+            SentPacket::new(pn_time(1), true, Rc::default(), ON_SENT_SIZE, true),
         );
         lr.on_packet_sent(
             PNSpace::ApplicationData,
             0,
-            SentPacket::new(pn_time(2), true, Vec::new(), ON_SENT_SIZE, true),
+            SentPacket::new(pn_time(2), true, Rc::default(), ON_SENT_SIZE, true),
         );
 
         // Now put all spaces on the LR timer so we can see them.
-        let pkt = SentPacket::new(pn_time(3), true, vec![], ON_SENT_SIZE, true);
+        let pkt = SentPacket::new(pn_time(3), true, Rc::default(), ON_SENT_SIZE, true);
         for sp in PNSpace::iter() {
             lr.on_packet_sent(*sp, 1, pkt.clone());
             lr.on_ack_received(*sp, 1, vec![(1, 1)], Duration::from_secs(0), pn_time(3));
@@ -1127,10 +1128,10 @@ mod tests {
 
         // There are cases where we send a packet that is not subsequently tracked.
         // So check that this works.
-        lr.on_packet_sent(
+        lr.on_packet_sent( 
             PNSpace::Initial,
             0,
-            SentPacket::new(pn_time(3), true, Vec::new(), ON_SENT_SIZE, true),
+            SentPacket::new(pn_time(3), true, Rc::default(), ON_SENT_SIZE, true),
         );
         assert_sent_times(&lr, None, None, Some(pn_time(2)));
     }

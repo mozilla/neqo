@@ -11,6 +11,7 @@
 use std::collections::VecDeque;
 use std::convert::TryInto;
 use std::time::{Duration, Instant};
+use std::rc::Rc;
 
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
@@ -66,7 +67,7 @@ impl From<PacketType> for PNSpace {
 pub struct SentPacket {
     ack_eliciting: bool,
     pub time_sent: Instant,
-    pub tokens: Vec<RecoveryToken>,
+    pub tokens: Rc<Vec<RecoveryToken>>,
 
     time_declared_lost: Option<Instant>,
     /// After a PTO, the packet has been released.
@@ -80,7 +81,7 @@ impl SentPacket {
     pub fn new(
         time_sent: Instant,
         ack_eliciting: bool,
-        tokens: Vec<RecoveryToken>,
+        tokens: Rc<Vec<RecoveryToken>>,
         size: usize,
         in_flight: bool,
     ) -> Self {

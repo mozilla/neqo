@@ -1535,7 +1535,7 @@ impl Connection {
             let sent = SentPacket::new(
                 now,
                 ack_eliciting,
-                tokens,
+                Rc::new(tokens),
                 encoder.len() - header_start,
                 in_flight,
             );
@@ -1990,7 +1990,7 @@ impl Connection {
     /// to retransmit the frame as needed.
     fn handle_lost_packets(&mut self, lost_packets: &[SentPacket]) {
         for lost in lost_packets {
-            for token in &lost.tokens {
+            for token in lost.tokens.as_ref() {
                 qdebug!([self], "Lost: {:?}", token);
                 match token {
                     RecoveryToken::Ack(_) => {}
@@ -2036,10 +2036,10 @@ impl Connection {
             now,
         );
         for acked in acked_packets {
-            for token in acked.tokens {
+            for token in acked.tokens.as_ref() {
                 match token {
-                    RecoveryToken::Ack(at) => self.acks.acked(&at),
-                    RecoveryToken::Stream(st) => self.send_streams.acked(&st),
+                    RecoveryToken::Ack(at) => self.acks.acked(at),
+                    RecoveryToken::Stream(st) => self.send_streams.acked(st),
                     RecoveryToken::Crypto(ct) => self.crypto.acked(ct),
                     RecoveryToken::Flow(ft) => {
                         self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
