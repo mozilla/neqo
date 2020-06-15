@@ -201,7 +201,7 @@ impl Crypto {
         Ok(())
     }
 
-    pub fn acked(&mut self, token: CryptoRecoveryToken) {
+    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
         qinfo!(
             "Acked crypto frame space={} offset={} length={}",
             token.space,
@@ -933,7 +933,7 @@ impl CryptoStreams {
         self.get_mut(space).unwrap().rx.read_to_end(buf)
     }
 
-    pub fn acked(&mut self, token: CryptoRecoveryToken) {
+    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
         self.get_mut(token.space)
             .unwrap()
             .tx
