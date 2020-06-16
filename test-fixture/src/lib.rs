@@ -7,7 +7,6 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
-use neqo_common::matches;
 use neqo_crypto::{init_db, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Server};
 use neqo_qpack::QpackSettings;

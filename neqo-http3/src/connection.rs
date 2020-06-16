@@ -13,7 +13,7 @@ use crate::hsettings_frame::{HSetting, HSettingType, HSettings};
 use crate::recv_message::RecvMessage;
 use crate::send_message::SendMessage;
 use crate::stream_type_reader::NewStreamTypeReader;
-use neqo_common::{matches, qdebug, qerror, qinfo, qtrace, qwarn};
+use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn};
 use neqo_qpack::decoder::{QPackDecoder, QPACK_UNI_STREAM_TYPE_DECODER};
 use neqo_qpack::encoder::{QPackEncoder, QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_qpack::QpackSettings;
