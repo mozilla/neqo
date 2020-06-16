@@ -474,12 +474,11 @@ impl Server {
             saved_cids: Vec::new(),
         }));
 
-        let cid_mgr_dyn = Rc::clone(&cid_mgr); // Temporary for tricking type coercion.
         let sconn = Connection::new_server(
             &self.certs,
             &self.protocols,
             &self.anti_replay,
-            cid_mgr_dyn,
+            Rc::clone(&cid_mgr) as _,
             initial.quic_version,
         );
 
