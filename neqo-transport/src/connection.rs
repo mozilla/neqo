@@ -647,12 +647,12 @@ impl Connection {
     }
 
     /// Enable a set of ciphers.
-    pub fn enable_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
+    pub fn set_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
         if self.state != State::Init {
             qerror!([self], "Cannot enable ciphers in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
-        self.crypto.tls.enable_ciphers(ciphers)?;
+        self.crypto.tls.set_ciphers(ciphers)?;
         Ok(())
     }
 
