@@ -293,7 +293,7 @@ impl Server {
         match out {
             Output::Datagram(_) => {
                 qtrace!([self], "Sending packet, added to waiting connections");
-                self.waiting.push_back(c.clone());
+                self.waiting.push_back(Rc::clone(&c));
             }
             Output::Callback(delay) => {
                 let next = now + delay;
@@ -301,7 +301,7 @@ impl Server {
                     qtrace!([self], "Change timer to {:?}", next);
                     self.remove_timer(&c);
                     c.borrow_mut().last_timer = next;
-                    self.timers.add(next, c.clone());
+                    self.timers.add(next, Rc::clone(&c));
                 }
             }
             _ => {
@@ -310,7 +310,7 @@ impl Server {
         }
         if c.borrow().has_events() {
             qtrace!([self], "Connection active: {:?}", c);
-            self.active.insert(ActiveConnectionRef { c: c.clone() });
+            self.active.insert(ActiveConnectionRef { c: Rc::clone(&c) });
         }
 
         if *c.borrow().state() > State::Handshaking {
@@ -469,16 +469,17 @@ impl Server {
 
         let cid_mgr = Rc::new(RefCell::new(ServerConnectionIdManager {
             c: Weak::new(),
-            cid_manager: self.cid_manager.clone(),
-            connections: self.connections.clone(),
+            cid_manager: Rc::clone(&self.cid_manager),
+            connections: Rc::clone(&self.connections),
             saved_cids: Vec::new(),
         }));
 
+        let cid_mgr_dyn = Rc::clone(&cid_mgr); // Temporary for tricking type coercion.
         let sconn = Connection::new_server(
             &self.certs,
             &self.protocols,
             &self.anti_replay,
-            cid_mgr.clone(),
+            cid_mgr_dyn,
             initial.quic_version,
         );
 
@@ -493,8 +494,8 @@ impl Server {
                 last_timer: now,
                 active_attempt: Some(attempt_key.clone()),
             }));
-            cid_mgr.borrow_mut().set_connection(c.clone());
-            let previous_attempt = self.active_attempts.insert(attempt_key, c.clone());
+            cid_mgr.borrow_mut().set_connection(Rc::clone(&c));
+            let previous_attempt = self.active_attempts.insert(attempt_key, Rc::clone(&c));
             debug_assert!(previous_attempt.is_none());
             self.process_connection(c, Some(dgram), now)
         } else {
@@ -656,7 +657,7 @@ impl ServerConnectionIdManager {
     pub fn set_connection(&mut self, c: StateRef) {
         let saved = std::mem::replace(&mut self.saved_cids, Vec::with_capacity(0));
         for cid in saved {
-            self.insert_cid(cid, c.clone());
+            self.insert_cid(cid, Rc::clone(&c));
         }
         self.c = Rc::downgrade(&c);
     }
