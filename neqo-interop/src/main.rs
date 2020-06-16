@@ -262,6 +262,7 @@ fn process_loop_h3(
     nctx: &NetworkCtx,
     handler: &mut H3Handler,
     connect: bool,
+    close: bool,
 ) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
     let timer = Timer::new();
@@ -291,7 +292,7 @@ fn process_loop_h3(
                 }
             }
         }
-        if !handler.handle() {
+        if !handler.handle(close) {
             return Ok(handler.h3.conn().state().clone());
         }
 
@@ -318,7 +319,7 @@ fn process_loop_h3(
 
 // This is a bit fancier than actually needed.
 impl H3Handler {
-    fn handle(&mut self) -> bool {
+    fn handle(&mut self, close: bool) -> bool {
         let mut data = vec![0; 4000];
         while let Some(event) = self.h3.next_event() {
             match event {
@@ -351,7 +352,9 @@ impl H3Handler {
                     }
                     if fin {
                         eprintln!("<FIN[{}]>", stream_id);
-                        self.h3.close(Instant::now(), 0, "kthxbye!");
+                        if close {
+                            self.h3.close(Instant::now(), 0, "kthxbye!");
+                        }
                         return false;
                     }
                 }
@@ -406,12 +409,13 @@ enum Test {
     VN,
     R,
     Z,
+    D,
 }
 
 impl Test {
     fn alpn(&self) -> Vec<String> {
         match self {
-            Self::H3 | Self::R | Self::Z => vec![String::from("h3-28")],
+            Self::H3 | Self::R | Self::Z | Self::D => vec![String::from("h3-28")],
             _ => vec![String::from("hq-28")],
         }
     }
@@ -424,6 +428,7 @@ impl Test {
             Self::VN => "vn",
             Self::R => "r",
             Self::Z => "z",
+            Self::D => "d",
         })
     }
 
@@ -435,6 +440,7 @@ impl Test {
             Self::VN => vec!['V'],
             Self::R => vec!['R'],
             Self::Z => vec!['Z'],
+            Self::D => vec!['d'],
         }
     }
 }
@@ -510,13 +516,13 @@ fn connect_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<H3Ha
         path: String::from("/"),
     };
 
-    if let Err(e) = process_loop_h3(nctx, &mut hc, true) {
+    if let Err(e) = process_loop_h3(nctx, &mut hc, true, false) {
         return Err(format!("ERROR: {}", e));
     }
     Ok(hc)
 }
 
-fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), String> {
+fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> Result<(), String> {
     let mut hc = connect_h3(nctx, peer, client)?;
 
     let client_stream_id = hc
@@ -526,8 +532,34 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
     let _ = hc.h3.stream_close_send(client_stream_id);
 
     hc.streams.insert(client_stream_id);
-    if let Err(e) = process_loop_h3(nctx, &mut hc, false) {
+    if let Err(e) = process_loop_h3(nctx, &mut hc, false, *test != Test::D) {
         return Err(format!("ERROR: {}", e));
+    }
+
+    if *test == Test::D {
+        // Send another request, when the first one was send we probably did not have the peer's qpack parameter.
+        let client_stream_id = hc
+            .h3
+            .fetch(
+                "GET",
+                "https",
+                &hc.host,
+                &hc.path,
+                &[(String::from("something1"), String::from("something2"))],
+            )
+            .unwrap();
+        let _ = hc.h3.stream_close_send(client_stream_id);
+        hc.streams.insert(client_stream_id);
+        if let Err(e) = process_loop_h3(nctx, &mut hc, false, true) {
+            return Err(format!("ERROR: {}", e));
+        }
+
+        if hc.h3.qpack_decoder_stats().dynamic_table_references == 0 {
+            return Err("ERROR: qpack decoder does not use the dynamic table.".into());
+        }
+        if hc.h3.qpack_encoder_stats().dynamic_table_references == 0 {
+            return Err("ERROR: qpack encoder does not use the dynamic table.".into());
+        }
     }
 
     Ok(())
@@ -550,7 +582,7 @@ fn test_h3_rz(
     let _ = hc.h3.stream_close_send(client_stream_id);
 
     hc.streams.insert(client_stream_id);
-    if let Err(e) = process_loop_h3(nctx, &mut hc, false) {
+    if let Err(e) = process_loop_h3(nctx, &mut hc, false, true) {
         return Err(format!("ERROR: {}", e));
     }
 
@@ -602,7 +634,7 @@ fn test_h3_rz(
             .unwrap();
         let _ = hc.h3.stream_close_send(client_stream_id);
         hc.streams.insert(client_stream_id);
-        if let Err(e) = process_loop_h3(nctx, &mut hc, false) {
+        if let Err(e) = process_loop_h3(nctx, &mut hc, false, true) {
             return Err(format!("ERROR: {}", e));
         }
 
@@ -612,7 +644,7 @@ fn test_h3_rz(
         }
     } else {
         println!("Test resumption");
-        if let Err(e) = process_loop_h3(nctx, &mut hc, true) {
+        if let Err(e) = process_loop_h3(nctx, &mut hc, true, true) {
             return Err(format!("ERROR: {}", e));
         }
     }
@@ -694,10 +726,11 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
             return (test, String::from("OK"));
         }
         Test::H9 => test_h9(&nctx, &mut client),
-        Test::H3 => test_h3(&nctx, peer, client),
+        Test::H3 => test_h3(&nctx, peer, client, test),
         Test::VN => unimplemented!(),
         Test::R => test_h3_rz(&nctx, peer, client, test),
         Test::Z => test_h3_rz(&nctx, peer, client, test),
+        Test::D => test_h3(&nctx, peer, client, test),
     };
 
     if let Err(e) = res {
@@ -835,13 +868,14 @@ const PEERS: &[Peer] = &[
     },
 ];
 
-const TESTS: [Test; 6] = [
+const TESTS: [Test; 7] = [
     Test::Connect,
     Test::H9,
     Test::H3,
     Test::VN,
     Test::R,
     Test::Z,
+    Test::D,
 ];
 
 fn main() {
