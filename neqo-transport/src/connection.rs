@@ -480,7 +480,7 @@ impl Connection {
             None,
             quic_version,
         )?;
-        c.crypto.states.init(Role::Client, &dcid);
+        c.crypto.states.init(quic_version, Role::Client, &dcid);
         c.remote_original_destination_cid = Some(dcid);
         c.initialize_path(local_addr, remote_addr);
         Ok(c)
@@ -532,7 +532,6 @@ impl Connection {
         tps.set_empty(tparams::DISABLE_MIGRATION);
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn new(
         role: Role,
         agent: Agent,
@@ -551,7 +550,7 @@ impl Connection {
 
         let crypto = Crypto::new(agent, protocols, tphandler.clone())?;
 
-        Ok(Self {
+        let mut c = Self {
             role,
             state: State::Init,
             cid_manager,
@@ -578,7 +577,9 @@ impl Connection {
             stats: Stats::default(),
             qlog: None,
             quic_version,
-        })
+        };
+        c.stats.init(format!("{}", c));
+        Ok(c)
     }
 
     /// Get the local path.
@@ -971,18 +972,15 @@ impl Connection {
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
         qinfo!([self], "received Retry");
         if self.retry_info.is_some() {
-            qinfo!([self], "Dropping extra Retry");
-            self.stats.dropped_rx += 1;
+            self.stats.pkt_dropped("Extra Retry");
             return Ok(());
         }
         if packet.token().is_empty() {
-            qinfo!([self], "Dropping Retry without a token");
-            self.stats.dropped_rx += 1;
+            self.stats.pkt_dropped("Retry without a token");
             return Ok(());
         }
         if !packet.is_valid_retry(&self.remote_original_destination_cid.as_ref().unwrap()) {
-            qinfo!([self], "Dropping Retry with bad integrity tag");
-            self.stats.dropped_rx += 1;
+            self.stats.pkt_dropped("Retry with bad integrity tag");
             return Ok(());
         }
         if let Some(p) = &mut self.path {
@@ -1008,9 +1006,9 @@ impl Connection {
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
-        // Switching crypto state here might not happen eventually.
-        // https://github.com/quicwg/base-drafts/issues/2823
-        self.crypto.states.init(self.role, packet.scid());
+        self.crypto
+            .states
+            .init(self.quic_version, self.role, packet.scid());
         Ok(())
     }
 
@@ -1073,9 +1071,9 @@ impl Connection {
                 match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
-                        qdebug!([self], "Garbage packet: {}", e);
+                        qinfo!([self], "Garbage packet: {}", e);
                         qtrace!([self], "Garbage packet contents: {}", hex(slc));
-                        self.stats.dropped_rx += 1;
+                        self.stats.pkt_dropped("Garbage packet");
                         break;
                     }
                 };
@@ -1083,7 +1081,7 @@ impl Connection {
             match (packet.packet_type(), &self.state, &self.role) {
                 (PacketType::Initial, State::Init, Role::Server) => {
                     if !packet.is_valid_initial() {
-                        self.stats.dropped_rx += 1;
+                        self.stats.pkt_dropped("Invalid Initial");
                         break;
                     }
                     qinfo!(
@@ -1094,7 +1092,9 @@ impl Connection {
                     );
                     self.set_state(State::WaitInitial);
                     self.loss_recovery.start_pacer(now);
-                    self.crypto.states.init(self.role, &packet.dcid());
+                    self.crypto
+                        .states
+                        .init(self.quic_version, self.role, &packet.dcid());
 
                     // We need to make sure that we set this transport parameter.
                     // This has to happen prior to processing the packet so that
@@ -1119,8 +1119,8 @@ impl Connection {
                 (PacketType::VersionNegotiation, ..)
                 | (PacketType::Retry, ..)
                 | (PacketType::OtherVersion, ..) => {
-                    qwarn!("dropping {:?}", packet.packet_type());
-                    self.stats.dropped_rx += 1;
+                    self.stats
+                        .pkt_dropped(format!("{:?}", packet.packet_type()));
                     break;
                 }
                 _ => {}
@@ -1128,15 +1128,14 @@ impl Connection {
 
             match self.state {
                 State::Init => {
-                    qinfo!([self], "Received message while in Init state");
-                    self.stats.dropped_rx += 1;
+                    self.stats.pkt_dropped("Received while in Init state");
                     break;
                 }
                 State::WaitInitial => {}
                 State::Handshaking | State::Connected | State::Confirmed => {
                     if !self.is_valid_cid(packet.dcid()) {
-                        qinfo!([self], "Ignoring packet with CID {:?}", packet.dcid());
-                        self.stats.dropped_rx += 1;
+                        self.stats
+                            .pkt_dropped(format!("Ignoring packet with CID {:?}", packet.dcid()));
                         break;
                     }
                     if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
@@ -1152,7 +1151,7 @@ impl Connection {
                 }
                 State::Draining { .. } | State::Closed(..) => {
                     // Do nothing.
-                    self.stats.dropped_rx += 1;
+                    self.stats.pkt_dropped(format!("State {:?}", self.state));
                     break;
                 }
             }
@@ -1177,7 +1176,8 @@ impl Connection {
                 qlog::packet_received(&mut self.qlog, &payload)?;
                 let res = self.process_packet(&payload, now);
                 if res.is_err() && self.path.is_none() {
-                    // Save the packet, but we're on our way out.
+                    // We need to make a path for sending an error message.
+                    // But this connection is going to be closed.
                     self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
                     self.initialize_path(d.destination(), d.source());
                 }
@@ -1190,7 +1190,7 @@ impl Connection {
                 // Decryption failure, or not having keys is not fatal.
                 // If the state isn't available, or we can't decrypt the packet, drop
                 // the rest of the datagram on the floor, but don't generate an error.
-                self.stats.dropped_rx += 1;
+                self.stats.pkt_dropped("Decryption failure");
                 if slc.len() == d.len() {
                     self.check_stateless_reset(&d, now)?
                 }
@@ -1540,7 +1540,7 @@ impl Connection {
             let sent = SentPacket::new(
                 now,
                 ack_eliciting,
-                tokens,
+                Rc::new(tokens),
                 encoder.len() - header_start,
                 in_flight,
             );
@@ -1995,7 +1995,7 @@ impl Connection {
     /// to retransmit the frame as needed.
     fn handle_lost_packets(&mut self, lost_packets: &[SentPacket]) {
         for lost in lost_packets {
-            for token in &lost.tokens {
+            for token in lost.tokens.as_ref() {
                 qdebug!([self], "Lost: {:?}", token);
                 match token {
                     RecoveryToken::Ack(_) => {}
@@ -2032,7 +2032,7 @@ impl Connection {
         );
 
         let acked_ranges =
-            Frame::decode_ack_frame(largest_acknowledged, first_ack_range, ack_ranges)?;
+            Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             space,
             largest_acknowledged,
@@ -2041,10 +2041,10 @@ impl Connection {
             now,
         );
         for acked in acked_packets {
-            for token in acked.tokens {
+            for token in acked.tokens.as_ref() {
                 match token {
-                    RecoveryToken::Ack(at) => self.acks.acked(&at),
-                    RecoveryToken::Stream(st) => self.send_streams.acked(&st),
+                    RecoveryToken::Ack(at) => self.acks.acked(at),
+                    RecoveryToken::Stream(st) => self.send_streams.acked(st),
                     RecoveryToken::Crypto(ct) => self.crypto.acked(ct),
                     RecoveryToken::Flow(ft) => {
                         self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
@@ -2102,6 +2102,7 @@ impl Connection {
         self.crypto.install_application_keys(now + pto)?;
         self.process_tps()?;
         self.set_state(State::Connected);
+        self.stats.resumed = self.crypto.tls.info().unwrap().resumed();
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
             self.set_state(State::Confirmed);

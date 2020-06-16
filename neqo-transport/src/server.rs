@@ -690,7 +690,7 @@ impl ServerConnectionIdManager {
         self.c = Some(c);
         let saved = std::mem::replace(&mut self.saved_cids, Vec::with_capacity(0));
         for cid in saved {
-            qtrace!("inserting saved cid {}", cid);
+            qtrace!("ServerConnectionIdManager inserting saved cid {}", cid);
             self.insert_cid(cid);
         }
     }
@@ -719,7 +719,7 @@ impl ConnectionIdManager for ServerConnectionIdManager {
         if self.c.is_some() {
             self.insert_cid(cid.clone());
         } else {
-            qtrace!("saving cid {}", cid);
+            qtrace!("ServerConnectionIdManager saving cid {}", cid);
             self.saved_cids.push(cid.clone());
         }
         cid

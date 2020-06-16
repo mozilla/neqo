@@ -9,7 +9,7 @@
 
 use neqo_common::{hex, matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3Client, Http3ClientEvent};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output,
@@ -258,13 +258,23 @@ struct H3Handler {
 }
 
 // TODO(ekr@rtfm.com): Figure out how to merge this.
-fn process_loop_h3(nctx: &NetworkCtx, handler: &mut H3Handler) -> Result<State, String> {
+fn process_loop_h3(
+    nctx: &NetworkCtx,
+    handler: &mut H3Handler,
+    connect: bool,
+) -> Result<State, String> {
     let buf = &mut [0u8; 2048];
     let timer = Timer::new();
 
     loop {
         if let State::Closed(..) = handler.h3.conn().state() {
             return Ok(handler.h3.conn().state().clone());
+        }
+
+        if connect {
+            if let Http3State::Connected = handler.h3.state() {
+                return Ok(handler.h3.conn().state().clone());
+            }
         }
 
         loop {
@@ -388,18 +398,20 @@ impl ToSocketAddrs for Peer {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Test {
     Connect,
     H9,
     H3,
     VN,
+    R,
+    Z,
 }
 
 impl Test {
     fn alpn(&self) -> Vec<String> {
         match self {
-            Self::H3 => vec![String::from("h3-28")],
+            Self::H3 | Self::R | Self::Z => vec![String::from("h3-28")],
             _ => vec![String::from("hq-28")],
         }
     }
@@ -410,6 +422,8 @@ impl Test {
             Self::H9 => "h9",
             Self::H3 => "h3",
             Self::VN => "vn",
+            Self::R => "r",
+            Self::Z => "z",
         })
     }
 
@@ -419,6 +433,8 @@ impl Test {
             Self::H9 => vec!['D', 'C'],
             Self::H3 => vec!['3', 'C', 'D'],
             Self::VN => vec!['V'],
+            Self::R => vec!['R'],
+            Self::Z => vec!['Z'],
         }
     }
 }
@@ -479,7 +495,7 @@ fn test_h9(nctx: &NetworkCtx, client: &mut Connection) -> Result<(), String> {
     Ok(())
 }
 
-fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), String> {
+fn connect_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<H3Handler, String> {
     let mut hc = H3Handler {
         streams: HashSet::new(),
         h3: Http3Client::new_with_conn(
@@ -493,6 +509,16 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
         host: String::from(peer.host),
         path: String::from("/"),
     };
+
+    if let Err(e) = process_loop_h3(nctx, &mut hc, true) {
+        return Err(format!("ERROR: {}", e));
+    }
+    Ok(hc)
+}
+
+fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), String> {
+    let mut hc = connect_h3(nctx, peer, client)?;
+
     let client_stream_id = hc
         .h3
         .fetch("GET", "https", &hc.host, &hc.path, &[])
@@ -500,10 +526,100 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<(), Str
     let _ = hc.h3.stream_close_send(client_stream_id);
 
     hc.streams.insert(client_stream_id);
-    if let Err(e) = process_loop_h3(nctx, &mut hc) {
+    if let Err(e) = process_loop_h3(nctx, &mut hc, false) {
         return Err(format!("ERROR: {}", e));
     }
 
+    Ok(())
+}
+
+// Return true if 0RTT was negotiated.
+fn test_h3_rz(
+    nctx: &NetworkCtx,
+    peer: &Peer,
+    client: Connection,
+    test: &Test,
+) -> Result<(), String> {
+    let mut hc = connect_h3(nctx, peer, client)?;
+
+    // exhange some data ot get http3 cotrols streams and a resumption token.
+    let client_stream_id = hc
+        .h3
+        .fetch("GET", "https", &hc.host, &hc.path, &[])
+        .unwrap();
+    let _ = hc.h3.stream_close_send(client_stream_id);
+
+    hc.streams.insert(client_stream_id);
+    if let Err(e) = process_loop_h3(nctx, &mut hc, false) {
+        return Err(format!("ERROR: {}", e));
+    }
+
+    // get resumption ticket
+    let res_token = hc.h3.resumption_token();
+    if res_token.is_none() {
+        return Err("ERROR: no resumption token".into());
+    }
+    let res_token = res_token.unwrap();
+
+    let handler = Http3Client::new(
+        peer.host,
+        &test.alpn(),
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+        nctx.local_addr,
+        nctx.remote_addr,
+        QpackSettings {
+            max_table_size_encoder: 16384,
+            max_table_size_decoder: 16384,
+            max_blocked_streams: 10,
+        },
+        QuicVersion::default(),
+    );
+    if handler.is_err() {
+        return Err("ERROR: creating a client failed".into());
+    }
+
+    let mut hc = H3Handler {
+        streams: HashSet::new(),
+        h3: handler.unwrap(),
+        host: String::from(peer.host),
+        path: String::from("/"),
+    };
+
+    hc.h3
+        .set_resumption_token(Instant::now(), &res_token)
+        .unwrap();
+
+    if *test == Test::Z {
+        println!("Test 0RTT");
+        if Http3State::ZeroRtt != hc.h3.state() {
+            return Err("ERROR: zerortt not negotiated".into());
+        }
+
+        // SendH3 data during 0rtt
+        let client_stream_id = hc
+            .h3
+            .fetch("GET", "https", &hc.host, &hc.path, &[])
+            .unwrap();
+        let _ = hc.h3.stream_close_send(client_stream_id);
+        hc.streams.insert(client_stream_id);
+        if let Err(e) = process_loop_h3(nctx, &mut hc, false) {
+            return Err(format!("ERROR: {}", e));
+        }
+
+        let recvd_0rtt_reject = |e| e == Http3ClientEvent::ZeroRttRejected;
+        if hc.h3.events().any(recvd_0rtt_reject) {
+            return Err("ERROR: 0RTT rejected".into());
+        }
+    } else {
+        println!("Test resumption");
+        if let Err(e) = process_loop_h3(nctx, &mut hc, true) {
+            return Err(format!("ERROR: {}", e));
+        }
+    }
+
+    if !hc.h3.conn().stats().resumed {
+        return Err("ERROR: resumption failed".into());
+    }
     Ok(())
 }
 
@@ -580,6 +696,8 @@ fn run_test<'t>(peer: &Peer, test: &'t Test) -> (&'t Test, String) {
         Test::H9 => test_h9(&nctx, &mut client),
         Test::H3 => test_h3(&nctx, peer, client),
         Test::VN => unimplemented!(),
+        Test::R => test_h3_rz(&nctx, peer, client, test),
+        Test::Z => test_h3_rz(&nctx, peer, client, test),
     };
 
     if let Err(e) = res {
@@ -631,6 +749,21 @@ fn run_peer(args: &Args, peer: &'static Peer) -> Vec<(&'static Test, String)> {
 
 const PEERS: &[Peer] = &[
     Peer {
+        label: "quiche",
+        host: "quic.tech",
+        port: 4433,
+    },
+    Peer {
+        label: "quiche2",
+        host: "quic.tech",
+        port: 8443,
+    },
+    Peer {
+        label: "quiche3",
+        host: "quic.tech",
+        port: 8444,
+    },
+    Peer {
         label: "quant",
         host: "quant.eggert.org",
         port: 4433,
@@ -639,6 +772,11 @@ const PEERS: &[Peer] = &[
         label: "quicly",
         host: "quic.examp1e.net",
         port: 443,
+    },
+    Peer {
+        label: "quicly2",
+        host: "quic.examp1e.net",
+        port: 4433,
     },
     Peer {
         label: "local",
@@ -690,9 +828,21 @@ const PEERS: &[Peer] = &[
         host: "www.cloudflare.com",
         port: 443,
     },
+    Peer {
+        label: "litespeed",
+        host: "http3-test.litespeedtech.com",
+        port: 4433,
+    },
 ];
 
-const TESTS: [Test; 4] = [Test::Connect, Test::H9, Test::H3, Test::VN];
+const TESTS: [Test; 6] = [
+    Test::Connect,
+    Test::H9,
+    Test::H3,
+    Test::VN,
+    Test::R,
+    Test::Z,
+];
 
 fn main() {
     let _tests = vec![Test::Connect];
