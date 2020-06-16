@@ -43,6 +43,11 @@ impl ControlStreamRemote {
         Ok(())
     }
 
+    /// Check if `stream_id` is the remote control stream.
+    pub fn is_recv_stream(&self, stream_id: u64) -> bool {
+        matches!(self.stream_id, Some(id) if id == stream_id)
+    }
+
     /// Check if a stream is the control stream and read received data.
     pub fn receive_if_this_stream(&mut self, conn: &mut Connection, stream_id: u64) -> Res<bool> {
         if let Some(id) = self.stream_id {
