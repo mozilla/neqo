@@ -21,7 +21,7 @@ use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
 use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
-use neqo_common::{matches, qtrace};
+use neqo_common::qtrace;
 
 pub const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
@@ -553,7 +553,6 @@ impl RecvStream {
 mod tests {
     use super::*;
     use crate::frame::Frame;
-    use neqo_common::matches;
 
     #[test]
     fn test_stream_rx() {

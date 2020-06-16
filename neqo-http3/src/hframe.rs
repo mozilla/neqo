@@ -338,7 +338,6 @@ impl HFrameReader {
 mod tests {
     use super::{Encoder, Error, HFrame, HFrameReader, HSettings};
     use crate::settings::{HSetting, HSettingType};
-    use neqo_common::matches;
     use neqo_crypto::AuthenticationStatus;
     use neqo_transport::{Connection, StreamType};
     use num_traits::Num;

@@ -11,7 +11,7 @@ use crate::RecvMessageEvents;
 use crate::RecvStream;
 use crate::{Error, Header, Res};
 
-use neqo_common::{matches, qdebug, qinfo, qtrace};
+use neqo_common::{qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{AppError, Connection};
 use std::cell::RefCell;

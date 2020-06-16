@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use neqo_common::{
-    hex, hex_snip_middle, matches, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram,
-    Decoder, Encoder, Role,
+    hex, hex_snip_middle, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder,
+    Encoder, Role,
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
@@ -2637,7 +2637,6 @@ mod tests {
     use crate::tracking::{ACK_DELAY, MAX_UNACKED_PKTS};
     use std::convert::TryInto;
 
-    use neqo_common::matches;
     use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AllowZeroRtt};
     use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
