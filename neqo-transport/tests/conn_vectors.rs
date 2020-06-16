@@ -178,11 +178,10 @@ fn make_server(quic_version: QuicVersion) -> Connection {
     .expect("create a default server")
 }
 
-#[test]
-fn process_client_initial_27() {
-    let mut server = make_server(QuicVersion::Draft27);
+fn process_client_initial(quic_version: QuicVersion, packet: &str) {
+    let mut server = make_server(quic_version);
 
-    let pkt: Vec<u8> = Encoder::from_hex(INITIAL_PACKET_27).into();
+    let pkt: Vec<u8> = Encoder::from_hex(packet).into();
     let dgram = Datagram::new(loopback(), loopback(), pkt);
     assert_eq!(*server.state(), State::Init);
     let out = server.process(Some(dgram), now());
@@ -191,13 +190,11 @@ fn process_client_initial_27() {
 }
 
 #[test]
-fn process_client_initial_29() {
-    let mut server = make_server(QuicVersion::Draft29);
+fn process_client_initial_27() {
+    process_client_initial(QuicVersion::Draft27, &INITIAL_PACKET_27);
+}
 
-    let pkt: Vec<u8> = Encoder::from_hex(INITIAL_PACKET_29).into();
-    let dgram = Datagram::new(loopback(), loopback(), pkt);
-    assert_eq!(*server.state(), State::Init);
-    let out = server.process(Some(dgram), now());
-    assert_eq!(*server.state(), State::Handshaking);
-    assert!(out.dgram().is_some());
+#[test]
+fn process_client_initial_29() {
+    process_client_initial(QuicVersion::Draft29, &INITIAL_PACKET_29);
 }
