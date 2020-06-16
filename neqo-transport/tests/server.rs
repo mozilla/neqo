@@ -717,14 +717,10 @@ fn version_negotiation() {
     }
     assert!(found, "valid version not found");
 
+    // Client ignores VN packet that contain negotiated version.
     let res = client.process(Some(vn), now());
-    assert_eq!(res, Output::None);
-    match client.state() {
-        State::Closed(err) => {
-            assert_eq!(*err, ConnectionError::Transport(Error::VersionNegotiation))
-        }
-        _ => panic!("Invalid client state"),
-    }
+    assert!(res.callback() > Duration::new(0, 120));
+    assert_eq!(client.state(), &State::WaitInitial);
 }
 
 #[test]

@@ -24,7 +24,7 @@ const PACKET_TYPE_0RTT: u8 = 0x01;
 const PACKET_TYPE_HANDSHAKE: u8 = 0x2;
 const PACKET_TYPE_RETRY: u8 = 0x03;
 
-const PACKET_BIT_LONG: u8 = 0x80;
+pub const PACKET_BIT_LONG: u8 = 0x80;
 const PACKET_BIT_SHORT: u8 = 0x00;
 const PACKET_BIT_KEY_PHASE: u8 = 0x04;
 const PACKET_BIT_FIXED_QUIC: u8 = 0x40;
@@ -639,6 +639,17 @@ impl<'a> PublicPacket<'a> {
         } else {
             Err(Error::DecryptError)
         }
+    }
+
+    pub fn supported_versions(&self) -> Res<Vec<Version>> {
+        assert_eq!(self.packet_type, PacketType::VersionNegotiation);
+        let mut decoder = Decoder::new(&self.data[self.header_len..]);
+        let mut res = Vec::new();
+        while decoder.remaining() > 0 {
+            let version = Version::try_from(Self::opt(decoder.decode_uint(4))?)?;
+            res.push(version);
+        }
+        Ok(res)
     }
 }
 
