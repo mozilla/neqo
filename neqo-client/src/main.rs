@@ -838,7 +838,7 @@ mod old {
         }
 
         if let Some(cip) = ciphers {
-            client.set_ciphers(cip).expect("Cannot enable ciphers");
+            client.set_ciphers(cip).expect("Cannot set ciphers");
         }
 
         client.set_qlog(qlog_new(args, origin)?);
