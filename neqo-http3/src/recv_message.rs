@@ -7,7 +7,7 @@
 use crate::hframe::{HFrame, HFrameReader};
 use crate::push_controller::PushController;
 use crate::{Error, Header, Res};
-use neqo_common::{qdebug, qinfo, qtrace};
+use neqo_common::{matches, qdebug, qinfo, qtrace};
 use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::Connection;
 use std::cell::RefCell;

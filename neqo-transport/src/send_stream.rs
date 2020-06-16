@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
-use neqo_common::{qdebug, qerror, qinfo, qtrace};
+use neqo_common::{matches, qdebug, qerror, qinfo, qtrace};
 
 use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
@@ -836,6 +836,8 @@ pub struct StreamRecoveryToken {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use neqo_common::matches;
 
     use crate::events::ConnectionEvent;
 
