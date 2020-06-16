@@ -15,8 +15,7 @@ use crate::settings::HSettings;
 use crate::Header;
 use crate::RecvMessageEvents;
 use neqo_common::{
-    hex, hex_with_len, matches, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Decoder, Encoder,
-    Role,
+    hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_qpack::{stats::Stats, QpackSettings};
@@ -691,7 +690,7 @@ mod tests {
     };
     use crate::hframe::HFrame;
     use crate::settings::{HSetting, HSettingType};
-    use neqo_common::{matches, Datagram, Encoder};
+    use neqo_common::{Datagram, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
