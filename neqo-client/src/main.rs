@@ -9,7 +9,7 @@
 
 use qlog::QlogStreamer;
 
-use neqo_common::{self as common, hex, qlog::NeqoQlog, Datagram, Role};
+use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{init, AuthenticationStatus, Cipher, TLS_CHACHA20_POLY1305_SHA256};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_qpack::QpackSettings;
@@ -603,7 +603,7 @@ mod old {
 
     use super::{qlog_new, Res};
 
-    use neqo_common::Datagram;
+    use neqo_common::{matches, Datagram};
     use neqo_crypto::{AuthenticationStatus, Cipher};
     use neqo_transport::{
         Connection, ConnectionEvent, Error, FixedConnectionIdManager, Output, QuicVersion, State,
