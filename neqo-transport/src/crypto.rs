@@ -11,7 +11,7 @@ use std::ops::{Index, IndexMut, Range};
 use std::rc::Rc;
 use std::time::Instant;
 
-use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, Role};
+use neqo_common::{hex, qdebug, qerror, qinfo, qtrace, Role};
 use neqo_crypto::aead::Aead;
 use neqo_crypto::hp::HpKey;
 use neqo_crypto::{

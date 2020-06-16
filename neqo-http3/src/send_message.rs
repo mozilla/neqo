@@ -7,7 +7,7 @@
 use crate::hframe::HFrame;
 use crate::Header;
 use crate::{Error, Res};
-use neqo_common::{matches, qdebug, qinfo, qtrace, Encoder};
+use neqo_common::{qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::encoder::QPackEncoder;
 use neqo_transport::Connection;
 use std::cmp::min;
