@@ -607,6 +607,7 @@ impl LossRecovery {
     /// When receiving a retry, get all the sent packets so that they can be flushed.
     /// We also need to pretend that they never happened for the purposes of congestion control.
     pub fn retry(&mut self) -> Vec<SentPacket> {
+        self.pto_state = None;
         let cc = &mut self.cc;
         self.spaces
             .iter_mut()
