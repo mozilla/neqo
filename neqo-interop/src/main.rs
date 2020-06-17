@@ -604,6 +604,7 @@ fn test_h3_rz(
             max_table_size_decoder: 16384,
             max_blocked_streams: 10,
         },
+        0,
         QuicVersion::default(),
     );
     if handler.is_err() {
