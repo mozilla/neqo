@@ -3970,7 +3970,7 @@ mod tests {
         let _out = client.process(qpack_pkt1.dgram(), now());
 
         assert!(client.events().any(header_ready_event));
-}
+    }
 
     // Client: receive a push stream
     #[test]
