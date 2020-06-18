@@ -1245,7 +1245,7 @@ impl Connection {
                         payload.pn(),
                         &payload[..],
                     );
-                    qlog::packet_received(&mut self.qlog.borrow_mut(), &payload)?;
+                    qlog::packet_received(&mut self.qlog.borrow_mut(), &payload);
                     let res = self.process_packet(&payload, now);
                     if res.is_err() && self.path.is_none() {
                         // We need to make a path for sending an error message.
@@ -1269,7 +1269,7 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(&d, slc, now)?;
                     self.stats.pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&mut self.qlog.borrow_mut(), &packet)?;
+                    qlog::packet_dropped(&mut self.qlog.borrow_mut(), &packet);
                 }
             }
             slc = remainder;
@@ -1605,7 +1605,7 @@ impl Connection {
                 pt,
                 pn,
                 &builder[payload_start..],
-            )?;
+            );
 
             self.stats.packets_tx += 1;
             encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
@@ -1685,7 +1685,7 @@ impl Connection {
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self], "client_start");
         debug_assert_eq!(self.role, Role::Client);
-        qlog::client_connection_started(&mut self.qlog.borrow_mut(), self.path.as_ref().unwrap())?;
+        qlog::client_connection_started(&mut self.qlog.borrow_mut(), self.path.as_ref().unwrap());
         self.loss_recovery.start_pacer(now);
 
         self.handshake(now, PNSpace::Initial, None)?;
@@ -2187,7 +2187,7 @@ impl Connection {
             qlog::server_connection_started(
                 &mut self.qlog.borrow_mut(),
                 self.path.as_ref().unwrap(),
-            )?;
+            );
         } else {
             self.zero_rtt_state = if self.crypto.tls.info().unwrap().early_data_accepted() {
                 ZeroRttState::AcceptedClient
@@ -2208,7 +2208,7 @@ impl Connection {
             self.set_state(State::Confirmed);
         }
         qinfo!([self], "Connection established");
-        qlog::connection_tparams_set(&mut self.qlog.borrow_mut(), &*self.tps.borrow())?;
+        qlog::connection_tparams_set(&mut self.qlog.borrow_mut(), &*self.tps.borrow());
         Ok(())
     }
 
