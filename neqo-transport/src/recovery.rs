@@ -248,14 +248,14 @@ impl LossRecoverySpace {
         }
     }
 
-    pub fn on_packet_sent(&mut self, packet_number: u64, sent_packet: SentPacket) {
+    pub fn on_packet_sent(&mut self, sent_packet: SentPacket) {
         if sent_packet.ack_eliciting() {
             self.pto_base_time = Some(sent_packet.time_sent);
             if sent_packet.cc_in_flight() {
                 self.in_flight_outstanding += 1;
             }
         }
-        self.sent_packets.insert(packet_number, sent_packet);
+        self.sent_packets.insert(sent_packet.pn, sent_packet);
     }
 
     pub fn remove_packet(&mut self, pn: u64) -> Option<SentPacket> {
@@ -548,14 +548,20 @@ impl LossRecovery {
             .collect()
     }
 
-    pub fn on_packet_sent(&mut self, pn_space: PNSpace, pn: u64, sent_packet: SentPacket) {
-        qdebug!([self], "packet {}-{} sent", pn_space, pn);
+    pub fn on_packet_sent(&mut self, sent_packet: SentPacket) {
+        let pn_space = PNSpace::from(sent_packet.pt);
+        qdebug!([self], "packet {}-{} sent", pn_space, sent_packet.pn);
         let rtt = self.rtt();
         if let Some(space) = self.spaces.get_mut(pn_space) {
             self.cc.on_packet_sent(&sent_packet, rtt);
-            space.on_packet_sent(pn, sent_packet);
+            space.on_packet_sent(sent_packet);
         } else {
-            qinfo!([self], "ignoring {}-{} from dropped space", pn_space, pn);
+            qinfo!(
+                [self],
+                "ignoring {}-{} from dropped space",
+                pn_space,
+                sent_packet.pn
+            );
         }
     }
 
@@ -815,6 +821,7 @@ impl ::std::fmt::Display for LossRecovery {
 #[cfg(test)]
 mod tests {
     use super::{LossRecovery, LossRecoverySpace, PNSpace, SentPacket};
+    use crate::packet::PacketType;
     use std::convert::TryInto;
     use std::rc::Rc;
     use std::time::{Duration, Instant};
@@ -891,11 +898,15 @@ mod tests {
 
     fn pace(lr: &mut LossRecovery, count: u64) {
         for pn in 0..count {
-            lr.on_packet_sent(
-                PNSpace::ApplicationData,
+            lr.on_packet_sent(SentPacket::new(
+                PacketType::Short,
                 pn,
-                SentPacket::new(pn_time(pn), true, Rc::default(), ON_SENT_SIZE, true),
-            );
+                pn_time(pn),
+                true,
+                Rc::default(),
+                ON_SENT_SIZE,
+                true,
+            ));
         }
     }
 
@@ -1012,22 +1023,24 @@ mod tests {
         // So send two packets with 1/4 RTT between them.  Acknowledge pn 1 after 1 RTT.
         // pn 0 should then be marked lost because it is then outstanding for 5RTT/4
         // the loss time for packets is 9RTT/8.
-        lr.on_packet_sent(
-            PNSpace::ApplicationData,
+        lr.on_packet_sent(SentPacket::new(
+            PacketType::Short,
             0,
-            SentPacket::new(pn_time(0), true, Rc::default(), ON_SENT_SIZE, true),
-        );
-        lr.on_packet_sent(
-            PNSpace::ApplicationData,
+            pn_time(0),
+            true,
+            Rc::default(),
+            ON_SENT_SIZE,
+            true,
+        ));
+        lr.on_packet_sent(SentPacket::new(
+            PacketType::Short,
             1,
-            SentPacket::new(
-                pn_time(0) + INITIAL_RTT / 4,
-                true,
-                Rc::default(),
-                ON_SENT_SIZE,
-                true,
-            ),
-        );
+            pn_time(0) + INITIAL_RTT / 4,
+            true,
+            Rc::default(),
+            ON_SENT_SIZE,
+            true,
+        ));
         let (_, lost) = lr.on_ack_received(
             PNSpace::ApplicationData,
             1,
@@ -1122,32 +1135,57 @@ mod tests {
     fn drop_spaces() {
         let mut lr = LossRecovery::new();
         lr.start_pacer(now());
-        lr.on_packet_sent(
-            PNSpace::Initial,
+        lr.on_packet_sent(SentPacket::new(
+            PacketType::Initial,
             0,
-            SentPacket::new(pn_time(0), true, Rc::default(), ON_SENT_SIZE, true),
-        );
-        lr.on_packet_sent(
-            PNSpace::Handshake,
+            pn_time(0),
+            true,
+            Rc::default(),
+            ON_SENT_SIZE,
+            true,
+        ));
+        lr.on_packet_sent(SentPacket::new(
+            PacketType::Handshake,
             0,
-            SentPacket::new(pn_time(1), true, Rc::default(), ON_SENT_SIZE, true),
-        );
-        lr.on_packet_sent(
-            PNSpace::ApplicationData,
+            pn_time(1),
+            true,
+            Rc::default(),
+            ON_SENT_SIZE,
+            true,
+        ));
+        lr.on_packet_sent(SentPacket::new(
+            PacketType::Short,
             0,
-            SentPacket::new(pn_time(2), true, Rc::default(), ON_SENT_SIZE, true),
-        );
+            pn_time(2),
+            true,
+            Rc::default(),
+            ON_SENT_SIZE,
+            true,
+        ));
 
         // Now put all spaces on the LR timer so we can see them.
-        let pkt = SentPacket::new(pn_time(3), true, Rc::default(), ON_SENT_SIZE, true);
-        for sp in PNSpace::iter() {
-            lr.on_packet_sent(*sp, 1, pkt.clone());
-            lr.on_ack_received(*sp, 1, vec![(1, 1)], Duration::from_secs(0), pn_time(3));
+        for sp in &[
+            PacketType::Initial,
+            PacketType::Handshake,
+            PacketType::Short,
+        ] {
+            let sent_pkt =
+                SentPacket::new(*sp, 1, pn_time(3), true, Rc::default(), ON_SENT_SIZE, true);
+            let pn_space = PNSpace::from(sent_pkt.pt);
+            lr.on_packet_sent(sent_pkt);
+            lr.on_ack_received(
+                pn_space,
+                1,
+                vec![(1, 1)],
+                Duration::from_secs(0),
+                pn_time(3),
+            );
             let mut lost = Vec::new();
-            lr.spaces
-                .get_mut(*sp)
-                .unwrap()
-                .detect_lost_packets(pn_time(3), INITIAL_RTT, &mut lost);
+            lr.spaces.get_mut(pn_space).unwrap().detect_lost_packets(
+                pn_time(3),
+                INITIAL_RTT,
+                &mut lost,
+            );
             assert!(lost.is_empty());
         }
 
@@ -1159,11 +1197,15 @@ mod tests {
 
         // There are cases where we send a packet that is not subsequently tracked.
         // So check that this works.
-        lr.on_packet_sent(
-            PNSpace::Initial,
+        lr.on_packet_sent(SentPacket::new(
+            PacketType::Initial,
             0,
-            SentPacket::new(pn_time(3), true, Rc::default(), ON_SENT_SIZE, true),
-        );
+            pn_time(3),
+            true,
+            Rc::default(),
+            ON_SENT_SIZE,
+            true,
+        ));
         assert_sent_times(&lr, None, None, Some(pn_time(2)));
     }
 }

@@ -872,6 +872,7 @@ impl Connection {
 
         let lost = self.loss_recovery.timeout(now);
         self.handle_lost_packets(&lost);
+        qlog::packets_lost(&mut self.qlog.borrow_mut(), &lost);
     }
 
     /// Call in to process activity on the connection. Either new packets have
@@ -1618,6 +1619,8 @@ impl Connection {
                 self.idle_timeout.on_packet_sent(now);
             }
             let sent = SentPacket::new(
+                pt,
+                pn,
                 now,
                 ack_eliciting,
                 Rc::new(tokens),
@@ -1627,13 +1630,13 @@ impl Connection {
             if pt == PacketType::Initial && self.role == Role::Client {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
-                initial_sent = Some((pn, sent));
+                initial_sent = Some(sent);
                 needs_padding = true;
             } else {
                 if pt != PacketType::ZeroRtt {
                     needs_padding = false;
                 }
-                self.loss_recovery.on_packet_sent(*space, pn, sent);
+                self.loss_recovery.on_packet_sent(sent);
             }
 
             if *space == PNSpace::Handshake {
@@ -1652,14 +1655,13 @@ impl Connection {
         } else {
             // Pad Initial packets sent by the client to mtu bytes.
             let mut packets: Vec<u8> = encoder.into();
-            if let Some((initial_pn, mut initial)) = initial_sent.take() {
+            if let Some(mut initial) = initial_sent.take() {
                 if needs_padding {
                     qdebug!([self], "pad Initial to path MTU {}", path.mtu());
                     initial.size += path.mtu() - packets.len();
                     packets.resize(path.mtu(), 0);
                 }
-                self.loss_recovery
-                    .on_packet_sent(PNSpace::Initial, initial_pn, initial);
+                self.loss_recovery.on_packet_sent(initial);
             }
             Ok(SendOption::Yes(path.datagram(packets)))
         }
@@ -2151,6 +2153,7 @@ impl Connection {
             }
         }
         self.handle_lost_packets(&lost_packets);
+        qlog::packets_lost(&mut self.qlog.borrow_mut(), &lost_packets);
         Ok(())
     }
 
