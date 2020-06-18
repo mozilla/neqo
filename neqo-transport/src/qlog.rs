@@ -22,6 +22,7 @@ use crate::frame::{self, Frame};
 use crate::packet::{DecryptedPacket, PacketNumber, PacketType, PublicPacket};
 use crate::path::Path;
 use crate::tparams::{self, TransportParametersHandler};
+use crate::tracking::SentPacket;
 use crate::QuicVersion;
 
 pub fn connection_tparams_set(maybe_qlog: &mut Option<NeqoQlog>, tph: &TransportParametersHandler) {
@@ -157,6 +158,27 @@ pub fn packet_dropped(maybe_qlog: &mut Option<NeqoQlog>, payload: &PublicPacket)
             Some(u64::try_from(payload.packet_len()).unwrap()),
             None,
         ));
+        handle_qlog_result(maybe_qlog, res)
+    }
+}
+
+pub fn packets_lost(maybe_qlog: &mut Option<NeqoQlog>, pkts: &[SentPacket]) {
+    if let Some(qlog) = maybe_qlog {
+        let mut res = Ok(());
+        for pkt in pkts {
+            res = (|| {
+                qlog.stream().add_event(Event::packet_lost_min(
+                    to_qlog_pkt_type(pkt.pt),
+                    pkt.pn.to_string(),
+                    Vec::new(),
+                ))?;
+
+                qlog.stream().finish_frames()
+            })();
+            if res.is_err() {
+                break;
+            }
+        }
         handle_qlog_result(maybe_qlog, res)
     }
 }
