@@ -9,6 +9,7 @@
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::string::String;
+use std::time::Duration;
 
 use qlog::{self, event::Event, PacketHeader, QuicFrame};
 
@@ -210,6 +211,78 @@ pub fn congestion_state_updated(maybe_qlog: &mut Option<NeqoQlog>, new_state: &s
             }
         });
         handle_qlog_result(maybe_qlog, res);
+    }
+}
+
+#[allow(dead_code)]
+pub enum QlogMetric {
+    MinRtt(Duration),
+    SmoothedRtt(Duration),
+    LatestRtt(Duration),
+    RttVariance(u64),
+    MaxAckDelay(u64),
+    PtoCount(usize),
+    CongestionWindow(usize),
+    BytesInFlight(usize),
+    SsThresh(usize),
+    PacketsInFlight(u64),
+    InRecovery(bool),
+    PacingRate(u64),
+}
+
+pub fn metrics_updated(maybe_qlog: &mut Option<NeqoQlog>, updated_metrics: &[QlogMetric]) {
+    if let Some(qlog) = maybe_qlog {
+        let mut min_rtt: Option<u64> = None;
+        let mut smoothed_rtt: Option<u64> = None;
+        let mut latest_rtt: Option<u64> = None;
+        let mut rtt_variance: Option<u64> = None;
+        let mut max_ack_delay: Option<u64> = None;
+        let mut pto_count: Option<u64> = None;
+        let mut congestion_window: Option<u64> = None;
+        let mut bytes_in_flight: Option<u64> = None;
+        let mut ssthresh: Option<u64> = None;
+        let mut packets_in_flight: Option<u64> = None;
+        let mut in_recovery: Option<bool> = None;
+        let mut pacing_rate: Option<u64> = None;
+
+        for metric in updated_metrics {
+            match metric {
+                QlogMetric::MinRtt(v) => min_rtt = Some(u64::try_from(v.as_millis()).unwrap()),
+                QlogMetric::SmoothedRtt(v) => {
+                    smoothed_rtt = Some(u64::try_from(v.as_millis()).unwrap())
+                }
+                QlogMetric::LatestRtt(v) => {
+                    latest_rtt = Some(u64::try_from(v.as_millis()).unwrap())
+                }
+                QlogMetric::RttVariance(v) => rtt_variance = Some(*v),
+                QlogMetric::MaxAckDelay(v) => max_ack_delay = Some(*v),
+                QlogMetric::PtoCount(v) => pto_count = Some(u64::try_from(*v).unwrap()),
+                QlogMetric::CongestionWindow(v) => {
+                    congestion_window = Some(u64::try_from(*v).unwrap())
+                }
+                QlogMetric::BytesInFlight(v) => bytes_in_flight = Some(u64::try_from(*v).unwrap()),
+                QlogMetric::SsThresh(v) => ssthresh = Some(u64::try_from(*v).unwrap()),
+                QlogMetric::PacketsInFlight(v) => packets_in_flight = Some(*v),
+                QlogMetric::InRecovery(v) => in_recovery = Some(*v),
+                QlogMetric::PacingRate(v) => pacing_rate = Some(*v),
+            }
+        }
+
+        let res = qlog.stream().add_event(Event::metrics_updated(
+            min_rtt,
+            smoothed_rtt,
+            latest_rtt,
+            rtt_variance,
+            max_ack_delay,
+            pto_count,
+            congestion_window,
+            bytes_in_flight,
+            ssthresh,
+            packets_in_flight,
+            in_recovery,
+            pacing_rate,
+        ));
+        handle_qlog_result(maybe_qlog, res)
     }
 }
 

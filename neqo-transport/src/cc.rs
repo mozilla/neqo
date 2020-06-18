@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use crate::pace::Pacer;
 use crate::path::PATH_MTU_V6;
-use crate::qlog;
+use crate::qlog::{self, QlogMetric};
 use crate::tracking::SentPacket;
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
@@ -116,6 +116,13 @@ impl CongestionControl {
                 qinfo!([self], "congestion avoidance");
                 qlog::congestion_state_updated(&mut self.qlog.borrow_mut(), "congestion_avoidance");
             }
+            qlog::metrics_updated(
+                &mut self.qlog.borrow_mut(),
+                &[
+                    QlogMetric::CongestionWindow(self.congestion_window),
+                    QlogMetric::BytesInFlight(self.bytes_in_flight),
+                ],
+            );
         }
     }
 
@@ -134,6 +141,10 @@ impl CongestionControl {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
         }
+        qlog::metrics_updated(
+            &mut self.qlog.borrow_mut(),
+            &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+        );
 
         qdebug!([self], "Pkts lost {}", lost_packets.len());
 
@@ -158,6 +169,10 @@ impl CongestionControl {
         if pkt.cc_outstanding() {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
+            qlog::metrics_updated(
+                &mut self.qlog.borrow_mut(),
+                &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+            );
             qtrace!([self], "Ignore pkt with size {}", pkt.size);
         }
     }
@@ -180,14 +195,30 @@ impl CongestionControl {
             self.bytes_in_flight,
             self.congestion_window
         );
+        qlog::metrics_updated(
+            &mut self.qlog.borrow_mut(),
+            &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
+        );
+
         debug_assert!(self.bytes_in_flight <= self.congestion_window);
     }
 
     #[must_use]
-    pub fn in_congestion_recovery(&self, sent_time: Instant) -> bool {
-        self.congestion_recovery_start_time
-            .map(|start| sent_time <= start)
-            .unwrap_or(false)
+    pub fn in_congestion_recovery(&mut self, sent_time: Instant) -> bool {
+        match self.congestion_recovery_start_time {
+            Some(crst) => {
+                if sent_time <= crst {
+                    true
+                } else {
+                    qlog::metrics_updated(
+                        &mut self.qlog.borrow_mut(),
+                        &[QlogMetric::InRecovery(false)],
+                    );
+                    false
+                }
+            }
+            None => false,
+        }
     }
 
     fn on_congestion_event(&mut self, now: Instant, sent_time: Instant) {
@@ -203,6 +234,13 @@ impl CongestionControl {
                 "Cong event -> recovery; cwnd {}, ssthresh {}",
                 self.congestion_window,
                 self.ssthresh
+            );
+            qlog::metrics_updated(
+                &mut self.qlog.borrow_mut(),
+                &[
+                    QlogMetric::SsThresh(self.ssthresh),
+                    QlogMetric::InRecovery(true),
+                ],
             );
             qlog::congestion_state_updated(&mut self.qlog.borrow_mut(), "recovery");
         } else {

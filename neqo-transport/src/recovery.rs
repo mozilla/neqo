@@ -21,6 +21,7 @@ use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
 use crate::cc::CongestionControl;
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
+use crate::qlog::{self, QlogMetric};
 use crate::send_stream::StreamRecoveryToken;
 use crate::tracking::{AckToken, PNSpace, SentPacket};
 use crate::LOCAL_IDLE_TIMEOUT;
@@ -58,7 +59,12 @@ struct RttVals {
 }
 
 impl RttVals {
-    fn update_rtt(&mut self, latest_rtt: Duration, ack_delay: Duration) {
+    fn update_rtt(
+        &mut self,
+        qlog: &Rc<RefCell<Option<NeqoQlog>>>,
+        latest_rtt: Duration,
+        ack_delay: Duration,
+    ) {
         self.latest_rtt = latest_rtt;
         // min_rtt ignores ack delay.
         self.min_rtt = min(self.min_rtt, self.latest_rtt);
@@ -85,6 +91,14 @@ impl RttVals {
                 self.smoothed_rtt = Some((smoothed_rtt * 7 + self.latest_rtt) / 8);
             }
         }
+        qlog::metrics_updated(
+            &mut qlog.borrow_mut(),
+            &[
+                QlogMetric::LatestRtt(self.latest_rtt),
+                QlogMetric::MinRtt(self.min_rtt),
+                QlogMetric::SmoothedRtt(self.smoothed_rtt.unwrap()),
+            ],
+        );
     }
 
     pub fn rtt(&self) -> Duration {
@@ -438,6 +452,10 @@ impl PtoState {
         self.packets = PTO_PACKET_COUNT;
     }
 
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
     /// Generate a sending profile, indicating what space it should be from.
     /// This takes a packet from the supply or returns an ack-only profile if it can't.
     pub fn send_profile(&mut self, mtu: usize) -> SendProfile {
@@ -457,6 +475,8 @@ pub(crate) struct LossRecovery {
     cc: CongestionControl,
 
     spaces: LossRecoverySpaces,
+
+    qlog: Rc<RefCell<Option<NeqoQlog>>>,
 }
 
 impl LossRecovery {
@@ -471,6 +491,7 @@ impl LossRecovery {
             pto_state: None,
             cc: CongestionControl::default(),
             spaces: LossRecoverySpaces::new(),
+            qlog: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -506,6 +527,7 @@ impl LossRecovery {
     }
 
     pub fn set_qlog(&mut self, qlog: Rc<RefCell<Option<NeqoQlog>>>) {
+        self.qlog = qlog.clone();
         self.cc.set_qlog(qlog)
     }
 
@@ -574,7 +596,7 @@ impl LossRecovery {
             space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
             if any_ack_eliciting {
                 let latest_rtt = now - largest_acked_pkt.time_sent;
-                self.rtt_vals.update_rtt(latest_rtt, ack_delay);
+                self.rtt_vals.update_rtt(&self.qlog, latest_rtt, ack_delay);
             }
         }
         self.cc.on_packets_acked(&acked_packets);
@@ -723,6 +745,12 @@ impl LossRecovery {
             } else {
                 self.pto_state = Some(PtoState::new(pn_space));
             }
+            qlog::metrics_updated(
+                &mut self.qlog.borrow_mut(),
+                &[QlogMetric::PtoCount(
+                    self.pto_state.as_ref().unwrap().count(),
+                )],
+            );
         }
     }
 
