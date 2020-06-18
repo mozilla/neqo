@@ -6,6 +6,7 @@
 
 // Functions that handle capturing QLOG traces.
 
+use std::convert::TryFrom;
 use std::string::String;
 
 use qlog::{self, event::Event, PacketHeader, QuicFrame};
@@ -13,7 +14,7 @@ use qlog::{self, event::Event, PacketHeader, QuicFrame};
 use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
 
 use crate::frame::{self, Frame};
-use crate::packet::{DecryptedPacket, PacketNumber, PacketType};
+use crate::packet::{DecryptedPacket, PacketNumber, PacketType, PublicPacket};
 use crate::path::Path;
 use crate::tparams::{self, TransportParametersHandler};
 use crate::{QuicVersion, Res};
@@ -120,6 +121,17 @@ pub fn packet_sent(
         qlog.stream().finish_frames()?;
     }
     Ok(())
+}
+
+pub fn packet_dropped(maybe_qlog: &mut Option<NeqoQlog>, payload: &PublicPacket) {
+    if let Some(qlog) = maybe_qlog {
+        let res = qlog.stream().add_event(Event::packet_dropped(
+            Some(to_qlog_pkt_type(payload.packet_type())),
+            Some(u64::try_from(payload.packet_len()).unwrap()),
+            None,
+        ));
+        handle_qlog_result(maybe_qlog, res)
+    }
 }
 
 pub fn packet_received(qlog: &mut Option<NeqoQlog>, payload: &DecryptedPacket) -> Res<()> {
