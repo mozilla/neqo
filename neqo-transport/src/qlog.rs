@@ -6,6 +6,7 @@
 
 // Functions that handle capturing QLOG traces.
 
+use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::string::String;
 
@@ -181,6 +182,28 @@ fn connection_started(qlog: &mut Option<NeqoQlog>, path: &Path) -> Res<()> {
         ))?;
     }
     Ok(())
+}
+
+thread_local!(static CURR_CONG_STATE: RefCell<Option<String>> = RefCell::new(None));
+
+pub fn congestion_state_updated(maybe_qlog: &mut Option<NeqoQlog>, new_state: &str) {
+    if let Some(qlog) = maybe_qlog {
+        let res = CURR_CONG_STATE.with(|ccs| {
+            let mut b_ccs = ccs.borrow_mut();
+
+            if b_ccs.as_ref().map(|s| &**s) != Some(new_state) {
+                let res = qlog.stream().add_event(Event::congestion_state_updated(
+                    b_ccs.clone(),
+                    new_state.to_string(),
+                ));
+                *b_ccs = Some(new_state.to_string());
+                res
+            } else {
+                Ok(false)
+            }
+        });
+        handle_qlog_result(maybe_qlog, res);
+    }
 }
 
 // Helper functions

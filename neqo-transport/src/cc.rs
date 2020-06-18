@@ -6,14 +6,17 @@
 
 // Congestion control
 
+use std::cell::RefCell;
 use std::cmp::max;
 use std::fmt::{self, Display};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use crate::pace::Pacer;
 use crate::path::PATH_MTU_V6;
+use crate::qlog;
 use crate::tracking::SentPacket;
-use neqo_common::{const_max, const_min, qdebug, qinfo, qtrace};
+use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
 pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
 pub const INITIAL_CWND_PKTS: usize = 10;
@@ -33,6 +36,8 @@ pub struct CongestionControl {
     congestion_recovery_start_time: Option<Instant>,
     ssthresh: usize,
     pacer: Option<Pacer>,
+
+    qlog: Rc<RefCell<Option<NeqoQlog>>>,
 }
 
 impl Default for CongestionControl {
@@ -43,6 +48,7 @@ impl Default for CongestionControl {
             congestion_recovery_start_time: None,
             ssthresh: std::usize::MAX,
             pacer: None,
+            qlog: Rc::new(RefCell::new(None)),
         }
     }
 }
@@ -62,6 +68,10 @@ impl Display for CongestionControl {
 }
 
 impl CongestionControl {
+    pub fn set_qlog(&mut self, qlog: Rc<RefCell<Option<NeqoQlog>>>) {
+        self.qlog = qlog;
+    }
+
     #[cfg(test)]
     #[must_use]
     pub fn cwnd(&self) -> usize {
@@ -93,15 +103,24 @@ impl CongestionControl {
             }
             if self.app_limited() {
                 // Do not increase congestion_window if application limited.
+                let _ = qlog::congestion_state_updated(
+                    &mut self.qlog.borrow_mut(),
+                    "application_limited",
+                );
                 continue;
             }
 
             if self.congestion_window < self.ssthresh {
                 self.congestion_window += pkt.size;
                 qinfo!([self], "slow start");
+                let _ = qlog::congestion_state_updated(&mut self.qlog.borrow_mut(), "slow_start");
             } else {
                 self.congestion_window += (MAX_DATAGRAM_SIZE * pkt.size) / self.congestion_window;
                 qinfo!([self], "congestion avoidance");
+                let _ = qlog::congestion_state_updated(
+                    &mut self.qlog.borrow_mut(),
+                    "congestion_avoidance",
+                );
             }
         }
     }
@@ -191,6 +210,7 @@ impl CongestionControl {
                 self.congestion_window,
                 self.ssthresh
             );
+            let _ = qlog::congestion_state_updated(&mut self.qlog.borrow_mut(), "recovery");
         } else {
             qdebug!([self], "Cong event but already in recovery");
         }
