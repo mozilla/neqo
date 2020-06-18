@@ -12,19 +12,20 @@ use std::string::String;
 
 use qlog::{self, event::Event, PacketHeader, QuicFrame};
 
-use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
+use neqo_common::{
+    hex, qinfo,
+    qlog::{handle_qlog_result, NeqoQlog},
+    Decoder,
+};
 
 use crate::frame::{self, Frame};
 use crate::packet::{DecryptedPacket, PacketNumber, PacketType, PublicPacket};
 use crate::path::Path;
 use crate::tparams::{self, TransportParametersHandler};
-use crate::{QuicVersion, Res};
+use crate::QuicVersion;
 
-pub fn connection_tparams_set(
-    qlog: &mut Option<NeqoQlog>,
-    tph: &TransportParametersHandler,
-) -> Res<()> {
-    if let Some(qlog) = qlog {
+pub fn connection_tparams_set(maybe_qlog: &mut Option<NeqoQlog>, tph: &TransportParametersHandler) {
+    if let Some(qlog) = maybe_qlog {
         let remote = tph.remote();
         let event = Event::transport_parameters_set(
             None,
@@ -81,47 +82,51 @@ pub fn connection_tparams_set(
             None,
         );
 
-        qlog.stream().add_event(event)?;
+        let res = qlog.stream().add_event(event);
+        handle_qlog_result(maybe_qlog, res)
     }
-    Ok(())
 }
 
-pub fn server_connection_started(qlog: &mut Option<NeqoQlog>, path: &Path) -> Res<()> {
-    connection_started(qlog, path)
+pub fn server_connection_started(maybe_qlog: &mut Option<NeqoQlog>, path: &Path) {
+    connection_started(maybe_qlog, path)
 }
 
-pub fn client_connection_started(qlog: &mut Option<NeqoQlog>, path: &Path) -> Res<()> {
-    connection_started(qlog, path)
+pub fn client_connection_started(maybe_qlog: &mut Option<NeqoQlog>, path: &Path) {
+    connection_started(maybe_qlog, path)
 }
 
 pub fn packet_sent(
-    qlog: &mut Option<NeqoQlog>,
+    maybe_qlog: &mut Option<NeqoQlog>,
     pt: PacketType,
     pn: PacketNumber,
     body: &[u8],
-) -> Res<()> {
-    if let Some(qlog) = qlog {
+) {
+    if let Some(qlog) = maybe_qlog {
         let mut d = Decoder::from(body);
 
-        qlog.stream().add_event(Event::packet_sent_min(
-            to_qlog_pkt_type(pt),
-            PacketHeader::new(pn, None, None, None, None, None),
-            Some(Vec::new()),
-        ))?;
+        let res: Result<_, qlog::Error> = (|| {
+            qlog.stream().add_event(Event::packet_sent_min(
+                to_qlog_pkt_type(pt),
+                PacketHeader::new(pn, None, None, None, None, None),
+                Some(Vec::new()),
+            ))?;
 
-        while d.remaining() > 0 {
-            match Frame::decode(&mut d) {
-                Ok(f) => qlog.stream().add_frame(frame_to_qlogframe(&f), false)?,
-                Err(_) => {
-                    qinfo!("qlog: invalid frame");
-                    break;
+            while d.remaining() > 0 {
+                match Frame::decode(&mut d) {
+                    Ok(f) => {
+                        qlog.stream().add_frame(frame_to_qlogframe(&f), false)?;
+                    }
+                    Err(_) => {
+                        qinfo!("qlog: invalid frame");
+                        break;
+                    }
                 }
             }
-        }
 
-        qlog.stream().finish_frames()?;
+            qlog.stream().finish_frames()
+        })();
+        handle_qlog_result(maybe_qlog, res)
     }
-    Ok(())
 }
 
 pub fn packet_dropped(maybe_qlog: &mut Option<NeqoQlog>, payload: &PublicPacket) {
@@ -135,37 +140,39 @@ pub fn packet_dropped(maybe_qlog: &mut Option<NeqoQlog>, payload: &PublicPacket)
     }
 }
 
-pub fn packet_received(qlog: &mut Option<NeqoQlog>, payload: &DecryptedPacket) -> Res<()> {
-    if let Some(qlog) = qlog {
+pub fn packet_received(maybe_qlog: &mut Option<NeqoQlog>, payload: &DecryptedPacket) {
+    if let Some(qlog) = maybe_qlog {
         let mut d = Decoder::from(&payload[..]);
 
-        qlog.stream().add_event(Event::packet_received(
-            to_qlog_pkt_type(payload.packet_type()),
-            PacketHeader::new(payload.pn(), None, None, None, None, None),
-            Some(Vec::new()),
-            None,
-            None,
-            None,
-        ))?;
+        let res: Result<_, qlog::Error> = (|| {
+            qlog.stream().add_event(Event::packet_received(
+                to_qlog_pkt_type(payload.packet_type()),
+                PacketHeader::new(payload.pn(), None, None, None, None, None),
+                Some(Vec::new()),
+                None,
+                None,
+                None,
+            ))?;
 
-        while d.remaining() > 0 {
-            match Frame::decode(&mut d) {
-                Ok(f) => qlog.stream().add_frame(frame_to_qlogframe(&f), false)?,
-                Err(_) => {
-                    qinfo!("qlog: invalid frame");
-                    break;
+            while d.remaining() > 0 {
+                match Frame::decode(&mut d) {
+                    Ok(f) => qlog.stream().add_frame(frame_to_qlogframe(&f), false)?,
+                    Err(_) => {
+                        qinfo!("qlog: invalid frame");
+                        break;
+                    }
                 }
             }
-        }
 
-        qlog.stream().finish_frames()?;
+            qlog.stream().finish_frames()
+        })();
+        handle_qlog_result(maybe_qlog, res)
     }
-    Ok(())
 }
 
-fn connection_started(qlog: &mut Option<NeqoQlog>, path: &Path) -> Res<()> {
-    if let Some(qlog) = qlog {
-        qlog.stream().add_event(Event::connection_started(
+fn connection_started(maybe_qlog: &mut Option<NeqoQlog>, path: &Path) {
+    if let Some(qlog) = maybe_qlog {
+        let res = qlog.stream().add_event(Event::connection_started(
             if path.local_address().ip().is_ipv4() {
                 "ipv4".into()
             } else {
@@ -179,9 +186,9 @@ fn connection_started(qlog: &mut Option<NeqoQlog>, path: &Path) -> Res<()> {
             Some(format!("{:x}", QuicVersion::default().as_u32())),
             Some(format!("{}", path.local_cid())),
             Some(format!("{}", path.remote_cid())),
-        ))?;
+        ));
+        handle_qlog_result(maybe_qlog, res)
     }
-    Ok(())
 }
 
 thread_local!(static CURR_CONG_STATE: RefCell<Option<String>> = RefCell::new(None));

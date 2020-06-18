@@ -53,6 +53,17 @@ impl Drop for NeqoQlog {
     }
 }
 
+pub fn handle_qlog_result<T>(qlog: &mut Option<NeqoQlog>, result: Result<T, qlog::Error>) {
+    if let Err(e) = result {
+        crate::do_log!(
+            ::log::Level::Error,
+            "Qlog streaming failed with error {}; closing qlog.",
+            e
+        );
+        *qlog = None;
+    }
+}
+
 #[must_use]
 pub fn new_trace(role: Role) -> qlog::Trace {
     Trace {
