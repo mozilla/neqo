@@ -524,7 +524,7 @@ mod tests {
         encoder.encoder.send(&mut encoder.conn).unwrap();
         let out = encoder.conn.process(None, now());
         let out2 = encoder.peer_conn.process(out.dgram(), now());
-        encoder.conn.process(out2.dgram(), now());
+        let _ = encoder.conn.process(out2.dgram(), now());
         let mut buf = [0_u8; 100];
         let (amount, fin) = encoder
             .peer_conn
@@ -540,7 +540,7 @@ mod tests {
             .stream_send(encoder.recv_stream_id, decoder_instruction)
             .unwrap();
         let out = encoder.peer_conn.process(None, now());
-        encoder.conn.process(out.dgram(), now());
+        let _ = encoder.conn.process(out.dgram(), now());
         assert!(encoder
             .encoder
             .read_instructions(&mut encoder.conn, encoder.recv_stream_id)
@@ -1589,7 +1589,7 @@ mod tests {
 
         encoder.encoder.send(&mut encoder.conn).unwrap();
         let out = encoder.conn.process(None, now());
-        encoder.peer_conn.process(out.dgram(), now());
+        let _ = encoder.peer_conn.process(out.dgram(), now());
         // receive an insert count increment.
         recv_instruction(&mut encoder, &[0x01]);
 

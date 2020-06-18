@@ -953,6 +953,7 @@ impl Connection {
     }
 
     /// Process input and generate output.
+    #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         if let Some(d) = dgram {
             self.process_input(d, now);
@@ -2839,7 +2840,7 @@ mod tests {
             now += rtt / 2;
             mem::swap(&mut a, &mut b);
         }
-        a.process(datagram, now);
+        let _ = a.process(datagram, now);
         now
     }
 
@@ -3205,11 +3206,11 @@ mod tests {
         let stream_id = client.stream_create(StreamType::BiDi).unwrap();
         client.stream_send(stream_id, &[0x00]).unwrap();
         let out = client.process(None, now());
-        server.process(out.dgram(), now());
+        let _ = server.process(out.dgram(), now());
 
         assert_eq!(Ok(()), server.stream_close_send(stream_id));
         let out = server.process(None, now());
-        client.process(out.dgram(), now());
+        let _ = client.process(out.dgram(), now());
         let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
         assert!(client.events().any(stream_readable));
     }
@@ -3259,10 +3260,10 @@ mod tests {
         assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
         // Still connected after 29 seconds. Idle timer not reset
-        client.process(None, now + LOCAL_IDLE_TIMEOUT - Duration::from_secs(1));
+        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT - Duration::from_secs(1));
         assert!(matches!(client.state(), State::Confirmed));
 
-        client.process(None, now + LOCAL_IDLE_TIMEOUT);
+        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT);
 
         // Not connected after LOCAL_IDLE_TIMEOUT seconds.
         assert!(matches!(client.state(), State::Closed(_)));
@@ -3362,14 +3363,14 @@ mod tests {
 
         // Still connected after 39 seconds because idle timer reset by outgoing
         // packet
-        client.process(
+        let _ = client.process(
             out.dgram(),
             now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(9),
         );
         assert!(matches!(client.state(), State::Confirmed));
 
         // Not connected after 40 seconds.
-        client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
+        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
 
         assert!(matches!(client.state(), State::Closed(_)));
     }
@@ -3394,12 +3395,12 @@ mod tests {
         let _out = client.process(None, now + Duration::from_secs(20));
 
         // Still connected after 39 seconds.
-        client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(9));
+        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(9));
         assert!(matches!(client.state(), State::Confirmed));
 
         // Not connected after 40 seconds because timer not reset by second
         // outgoing packet
-        client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
+        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
         assert!(matches!(client.state(), State::Closed(_)));
     }
 
@@ -3424,16 +3425,16 @@ mod tests {
         let out = server.process_output(now + Duration::from_secs(10));
         assert_ne!(out.as_dgram_ref(), None);
 
-        client.process(out.dgram(), now + Duration::from_secs(20));
+        let _ = client.process(out.dgram(), now + Duration::from_secs(20));
         assert!(matches!(client.state(), State::Confirmed));
 
         // Still connected after 49 seconds because idle timer reset by received
         // packet
-        client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(19));
+        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(19));
         assert!(matches!(client.state(), State::Confirmed));
 
         // Not connected after 50 seconds.
-        client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(20));
+        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(20));
 
         assert!(matches!(client.state(), State::Closed(_)));
     }
@@ -3565,7 +3566,7 @@ mod tests {
         let stream_id = client.stream_create(StreamType::BiDi).unwrap();
         client.stream_send(stream_id, &[0x00]).unwrap();
         let out = client.process(None, now());
-        server.process(out.dgram(), now());
+        let _ = server.process(out.dgram(), now());
 
         let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
         assert!(server.events().any(stream_readable));
@@ -3585,7 +3586,7 @@ mod tests {
         let out = server.process(out_second_data_frame.dgram(), now());
         assert!(!server.events().any(stream_readable));
 
-        client.process(out.dgram(), now());
+        let _ = client.process(out.dgram(), now());
         assert_eq!(
             Err(Error::FinalSizeError),
             client.stream_send(stream_id, &[0x00])
@@ -3605,7 +3606,7 @@ mod tests {
         let stream_id = client.stream_create(StreamType::BiDi).unwrap();
         client.stream_send(stream_id, &[0x00]).unwrap();
         let out = client.process(None, now());
-        server.process(out.dgram(), now());
+        let _ = server.process(out.dgram(), now());
 
         let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
         assert!(server.events().any(stream_readable));
@@ -3628,7 +3629,7 @@ mod tests {
         assert!(!server.events().any(stream_readable));
 
         // The client gets the STOP_SENDING frame.
-        client.process(out.dgram(), now());
+        let _ = client.process(out.dgram(), now());
         assert_eq!(
             Err(Error::InvalidStreamId),
             client.stream_send(stream_id, &[0x00])
@@ -4698,7 +4699,7 @@ mod tests {
         let dgram = client.process(None, now).dgram();
         assert!(dgram.is_some()); // Drop this packet.
         assert_eq!(client.get_epochs(), (Some(4), Some(3)));
-        server.process(None, now);
+        let _ = server.process(None, now);
         assert_eq!(server.get_epochs(), (Some(4), Some(4)));
 
         // Even though the server has updated, it hasn't received an ACK yet.
@@ -4723,7 +4724,7 @@ mod tests {
         assert!(server.initiate_key_update().is_err());
 
         now += AT_LEAST_PTO;
-        client.process(None, now);
+        let _ = client.process(None, now);
         assert_eq!(client.get_epochs(), (Some(4), Some(4)));
     }
 
@@ -4751,7 +4752,7 @@ mod tests {
             assert_eq!(server.get_epochs(), (Some(4), Some(3)));
             // Now move the server temporarily into the future so that it
             // rotates the keys.  The client stays in the present.
-            server.process(None, now + AT_LEAST_PTO);
+            let _ = server.process(None, now + AT_LEAST_PTO);
             assert_eq!(server.get_epochs(), (Some(4), Some(4)));
         } else {
             panic!("server should have a timer set");
@@ -5330,7 +5331,7 @@ mod tests {
 
         let mut unknown_version_packet = vec![0x80, 0x1a, 0x1a, 0x1a, 0x1a];
         unknown_version_packet.resize(1200, 0x0);
-        client.process(
+        let _ = client.process(
             Some(Datagram::new(
                 loopback(),
                 loopback(),

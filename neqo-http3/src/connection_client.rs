@@ -907,7 +907,7 @@ mod tests {
     fn send_and_receive_client_settings(client: &mut Http3Client, server: &mut TestServer) {
         // send and receive client settings
         let out = client.process(None, now());
-        server.conn.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
         server.check_client_control_qpack_streams_no_resumption();
     }
 
@@ -1015,7 +1015,7 @@ mod tests {
         assert_eq!(request_stream_id, 0);
 
         let out = client.process(None, now());
-        server.conn.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
 
         // find the new request/response stream and send frame v on it.
         while let Some(e) = server.conn.next_event() {
@@ -1226,7 +1226,7 @@ mod tests {
             .stream_send(new_stream_id, &[0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
         let out = server.conn.process(None, now());
         let out = client.process(out.dgram(), now());
-        server.conn.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::HttpStreamCreation.
         let mut stop_sending_event_found = false;
@@ -1255,7 +1255,7 @@ mod tests {
         let _ = server.conn.stream_send(push_stream_id, PUSH_STREAM_DATA);
         let out = server.conn.process(None, now());
         let out = client.process(out.dgram(), now());
-        server.conn.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
 
         assert_closed(&client, &Error::HttpId);
     }
@@ -1492,7 +1492,7 @@ mod tests {
         let _ = client.stream_close_send(request_stream_id);
 
         let out = client.process(None, now());
-        server.conn.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
 
         // find the new request/response stream and send response on it.
         while let Some(e) = server.conn.next_event() {
@@ -2167,7 +2167,7 @@ mod tests {
         assert_eq!(request_stream_id_3, 8);
 
         let out = client.process(None, now());
-        server.conn.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
 
         let _ = server
             .conn
@@ -2241,7 +2241,7 @@ mod tests {
         assert_eq!(request_stream_id_3, 8);
 
         let out = client.process(None, now());
-        server.conn.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
 
         // First send a Goaway frame with an higher number
         let _ = server
@@ -3647,7 +3647,7 @@ mod tests {
 
         let request_stream_id = make_request(&mut client, true);
         let out = client.process(None, now());
-        server.conn.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
 
         server.encoder.set_max_capacity(100).unwrap();
         server.encoder.set_max_blocked_streams(100).unwrap();
