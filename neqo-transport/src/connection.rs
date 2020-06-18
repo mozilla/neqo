@@ -1267,6 +1267,7 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(&d, slc, now)?;
                     self.stats.pkt_dropped("Decryption failure");
+                    qlog::packet_dropped(&mut self.qlog, &packet)?;
                 }
             }
             slc = remainder;
