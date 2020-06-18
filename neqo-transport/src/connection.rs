@@ -457,7 +457,7 @@ pub struct Connection {
     events: ConnectionEvents,
     token: Option<Vec<u8>>,
     stats: Stats,
-    qlog: Option<NeqoQlog>,
+    qlog: Rc<RefCell<Option<NeqoQlog>>>,
 
     quic_version: QuicVersion,
 }
@@ -582,7 +582,7 @@ impl Connection {
             events: ConnectionEvents::default(),
             token: None,
             stats: Stats::default(),
-            qlog: None,
+            qlog: Rc::new(RefCell::new(None)),
             quic_version,
         };
         c.stats.init(format!("{}", c));
@@ -596,12 +596,14 @@ impl Connection {
 
     /// Set or clear the qlog for this connection.
     pub fn set_qlog(&mut self, qlog: Option<NeqoQlog>) {
-        self.qlog = qlog;
+        let conn_ql = Rc::new(RefCell::new(qlog));
+        self.loss_recovery.set_qlog(conn_ql.clone());
+        self.qlog = conn_ql;
     }
 
     /// Get the qlog (if any) for this connection.
-    pub fn qlog_mut(&mut self) -> &mut Option<NeqoQlog> {
-        &mut self.qlog
+    pub fn qlog_mut(&mut self) -> Rc<RefCell<Option<NeqoQlog>>> {
+        self.qlog.clone()
     }
 
     /// Set a local transport parameter, possibly overriding a default value.
@@ -1243,7 +1245,7 @@ impl Connection {
                         payload.pn(),
                         &payload[..],
                     );
-                    qlog::packet_received(&mut self.qlog, &payload)?;
+                    qlog::packet_received(&mut self.qlog.borrow_mut(), &payload)?;
                     let res = self.process_packet(&payload, now);
                     if res.is_err() && self.path.is_none() {
                         // We need to make a path for sending an error message.
@@ -1267,7 +1269,7 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(&d, slc, now)?;
                     self.stats.pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&mut self.qlog, &packet)?;
+                    qlog::packet_dropped(&mut self.qlog.borrow_mut(), &packet)?;
                 }
             }
             slc = remainder;
@@ -1598,7 +1600,12 @@ impl Connection {
             }
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
-            qlog::packet_sent(&mut self.qlog, pt, pn, &builder[payload_start..])?;
+            qlog::packet_sent(
+                &mut self.qlog.borrow_mut(),
+                pt,
+                pn,
+                &builder[payload_start..],
+            )?;
 
             self.stats.packets_tx += 1;
             encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
@@ -1678,7 +1685,7 @@ impl Connection {
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self], "client_start");
         debug_assert_eq!(self.role, Role::Client);
-        qlog::client_connection_started(&mut self.qlog, self.path.as_ref().unwrap())?;
+        qlog::client_connection_started(&mut self.qlog.borrow_mut(), self.path.as_ref().unwrap())?;
         self.loss_recovery.start_pacer(now);
 
         self.handshake(now, PNSpace::Initial, None)?;
@@ -2177,7 +2184,10 @@ impl Connection {
             debug_assert_eq!(1, self.valid_cids.len());
             self.valid_cids.clear();
             // Generate a qlog event that the server connection started.
-            qlog::server_connection_started(&mut self.qlog, self.path.as_ref().unwrap())?;
+            qlog::server_connection_started(
+                &mut self.qlog.borrow_mut(),
+                self.path.as_ref().unwrap(),
+            )?;
         } else {
             self.zero_rtt_state = if self.crypto.tls.info().unwrap().early_data_accepted() {
                 ZeroRttState::AcceptedClient
@@ -2198,7 +2208,7 @@ impl Connection {
             self.set_state(State::Confirmed);
         }
         qinfo!([self], "Connection established");
-        qlog::connection_tparams_set(&mut self.qlog, &*self.tps.borrow())?;
+        qlog::connection_tparams_set(&mut self.qlog.borrow_mut(), &*self.tps.borrow())?;
         Ok(())
     }
 

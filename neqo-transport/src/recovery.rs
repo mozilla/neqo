@@ -8,13 +8,15 @@
 
 #![deny(clippy::pedantic)]
 
+use std::cell::RefCell;
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use smallvec::{smallvec, SmallVec};
 
-use neqo_common::{qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace, qwarn};
 
 use crate::cc::CongestionControl;
 use crate::crypto::CryptoRecoveryToken;
@@ -501,6 +503,10 @@ impl LossRecovery {
 
     pub fn pto(&self) -> Duration {
         self.rtt_vals.pto(PNSpace::ApplicationData)
+    }
+
+    pub fn set_qlog(&mut self, qlog: Rc<RefCell<Option<NeqoQlog>>>) {
+        self.cc.set_qlog(qlog)
     }
 
     pub fn drop_0rtt(&mut self) -> Vec<SentPacket> {
