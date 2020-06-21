@@ -5,7 +5,6 @@
 // except according to those terms.
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
-#![warn(clippy::pedantic)]
 
 use neqo_common::{hex_with_len, matches, qdebug, qtrace, Datagram, Decoder, Encoder};
 use neqo_crypto::{

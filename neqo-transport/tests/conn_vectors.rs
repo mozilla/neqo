@@ -5,7 +5,6 @@
 // except according to those terms.
 
 // Tests with the test vectors from the spec.
-#![deny(clippy::pedantic)]
 
 use neqo_common::{Datagram, Encoder};
 use neqo_transport::{Connection, FixedConnectionIdManager, QuicVersion, State};
