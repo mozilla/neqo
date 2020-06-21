@@ -6,7 +6,6 @@
 
 // Tracking of sent packets and detecting their loss.
 
-
 use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};

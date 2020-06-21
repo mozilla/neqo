@@ -6,7 +6,6 @@
 
 // Tracking of received packets and generating acks thereof.
 
-
 use std::collections::VecDeque;
 use std::convert::TryInto;
 use std::rc::Rc;
