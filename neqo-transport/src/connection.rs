@@ -2801,17 +2801,17 @@ mod tests {
             _ => None,
         });
         let stream_id = stream_ids.next().expect("should have a new stream event");
-        let (received, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
+        let (received, fin) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
         assert_eq!(received, 4000);
         assert_eq!(fin, false);
-        let (received, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
+        let (received, fin) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
         assert_eq!(received, 140);
         assert_eq!(fin, false);
 
         let stream_id = stream_ids
             .next()
             .expect("should have a second new stream event");
-        let (received, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
+        let (received, fin) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
         assert_eq!(received, 60);
         assert_eq!(fin, true);
     }
@@ -3074,7 +3074,7 @@ mod tests {
                 _ => None,
             })
             .expect("should have received a new stream event");
-        assert_eq!(client_stream_id, server_stream_id);
+        assert_eq!(client_stream_id, server_stream_id.as_u64());
     }
 
     #[test]
@@ -3105,11 +3105,11 @@ mod tests {
         let server_stream_id = server
             .events()
             .find_map(|evt| match evt {
-                ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
+                ConnectionEvent::NewStream { stream_id } => Some(stream_id),
                 _ => None,
             })
             .expect("should have received a new stream event");
-        assert_eq!(client_stream_id, server_stream_id);
+        assert_eq!(client_stream_id, server_stream_id.as_u64());
     }
 
     #[test]

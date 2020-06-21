@@ -22,10 +22,7 @@ pub enum ConnectionEvent {
     /// Cert authentication needed
     AuthenticationNeeded,
     /// A new uni (read) or bidi stream has been opened by the peer.
-    NewStream {
-        stream_id: u64,
-        stream_type: StreamType,
-    },
+    NewStream { stream_id: StreamId },
     /// Space available in the buffer for an application write to succeed.
     SendStreamWritable { stream_id: u64 },
     /// New bytes available for reading.
@@ -58,10 +55,7 @@ impl ConnectionEvents {
     }
 
     pub fn new_stream(&self, stream_id: StreamId) {
-        self.insert(ConnectionEvent::NewStream {
-            stream_id: stream_id.as_u64(),
-            stream_type: stream_id.stream_type(),
-        });
+        self.insert(ConnectionEvent::NewStream { stream_id });
     }
 
     pub fn recv_stream_readable(&self, stream_id: StreamId) {
