@@ -271,7 +271,7 @@ fn retry_0rtt() {
     server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
     client
-        .set_resumption_token(now(), &token)
+        .enable_resumption(now(), &token)
         .expect("should set token");
 
     let client_stream = client.stream_create(StreamType::UniDi).unwrap();

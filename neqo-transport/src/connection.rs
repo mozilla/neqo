@@ -657,12 +657,12 @@ impl Connection {
     }
 
     /// Access the latest resumption token on the connection.
-    pub fn resumption_token(&self) -> Option<Vec<u8>> {
+    pub fn resumption_token(&mut self) -> Option<Vec<u8>> {
         if self.state < State::Connected {
             return None;
         }
         match self.crypto.tls {
-            Agent::Client(ref c) => match c.resumption_token() {
+            Agent::Client(ref mut c) => match c.resumption_token() {
                 Some(ref t) => {
                     qtrace!("TLS token {}", hex(&t));
                     let mut enc = Encoder::default();
@@ -691,7 +691,7 @@ impl Connection {
     /// This can only be called once and only on the client.
     /// After calling the function, it should be possible to attempt 0-RTT
     /// if the token supports that.
-    pub fn set_resumption_token(&mut self, now: Instant, token: &[u8]) -> Res<()> {
+    pub fn enable_resumption(&mut self, now: Instant, token: &[u8]) -> Res<()> {
         if self.state != State::Init {
             qerror!([self], "set token in state {:?}", self.state);
             return Err(Error::ConnectionState);
@@ -715,7 +715,7 @@ impl Connection {
         let tok = dec.decode_remainder();
         qtrace!([self], "  TLS token {}", hex(&tok));
         match self.crypto.tls {
-            Agent::Client(ref mut c) => c.set_resumption_token(&tok)?,
+            Agent::Client(ref mut c) => c.enable_resumption(&tok)?,
             Agent::Server(_) => return Err(Error::WrongRole),
         }
 
@@ -2982,7 +2982,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -3002,7 +3002,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now);
         let mut client = default_client();
         let mut server = default_server();
-        client.set_resumption_token(now, &token[..]).unwrap();
+        client.enable_resumption(now, &token[..]).unwrap();
         assert_eq!(
             client.loss_recovery.rtt(),
             RTT1,
@@ -3029,7 +3029,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -3046,7 +3046,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
 
@@ -3086,7 +3086,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
 
@@ -3127,7 +3127,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         // Using a freshly initialized anti-replay context
         // should result in the server rejecting 0-RTT.

@@ -833,7 +833,7 @@ mod old {
 
         if let Some(tok) = token {
             client
-                .set_resumption_token(Instant::now(), &tok)
+                .enable_resumption(Instant::now(), &tok)
                 .expect("should set token");
         }
 
