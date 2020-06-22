@@ -61,6 +61,10 @@ pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
+/// The maximum number of tokens we'll save from NEW_TOKEN.
+/// This should be the same as the value of MAX_TICKETS in neqo-crypto.
+const MAX_NEW_TOKEN: usize = 4;
+
 #[derive(Clone, Debug, PartialEq, Ord, Eq)]
 /// The state of the Connection.
 pub enum State {
@@ -209,16 +213,27 @@ impl ConnectionIdManager for FixedConnectionIdManager {
     }
 }
 
-struct RetryInfo {
-    token: Vec<u8>,
-    retry_source_cid: ConnectionId,
+enum AddressValidationInfo {
+    None,
+    NewToken(Vec<u8>),
+    Retry {
+        token: Vec<u8>,
+        retry_source_cid: ConnectionId,
+    },
 }
 
-impl RetryInfo {
-    fn new(retry_source_cid: ConnectionId, token: Vec<u8>) -> Self {
-        Self {
+impl AddressValidationInfo {
+    pub fn new(retry_source_cid: ConnectionId, token: Vec<u8>) -> Self {
+        Self::Retry {
             token,
             retry_source_cid,
+        }
+    }
+
+    pub fn token(&self) -> &[u8] {
+        match self {
+            Self::None => &[],
+            Self::NewToken(token) | Self::Retry { token, .. } => &token,
         }
     }
 }
@@ -423,7 +438,7 @@ pub struct Connection {
     /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     valid_cids: Vec<ConnectionId>,
-    retry_info: Option<RetryInfo>,
+    address_validation: AddressValidationInfo,
 
     /// Since we need to communicate this to our peer in tparams, setting this
     /// value is part of constructing the struct.
@@ -444,7 +459,7 @@ pub struct Connection {
     state_signaling: StateSignaling,
     loss_recovery: LossRecovery,
     events: ConnectionEvents,
-    token: Option<Vec<u8>>,
+    new_token: Vec<Vec<u8>>,
     stats: Stats,
     qlog: Option<NeqoQlog>,
 
@@ -553,7 +568,7 @@ impl Connection {
             valid_cids: Vec::new(),
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
-            retry_info: None,
+            address_validation: AddressValidationInfo::None,
             local_initial_source_cid,
             remote_initial_source_cid: None,
             remote_original_destination_cid: None,
@@ -568,7 +583,7 @@ impl Connection {
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(),
             events: ConnectionEvents::default(),
-            token: None,
+            new_token: Vec::new(),
             stats: Stats::default(),
             qlog: None,
             quic_version,
@@ -677,6 +692,8 @@ impl Connection {
                             .expect("should have transport parameters")
                             .encode(enc_inner);
                     });
+                    let token = self.new_token.pop();
+                    enc.encode_vvec(token.as_ref().map_or(&[], |t| &t[..]));
                     enc.encode(&t[..]);
                     qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
                     Some(enc.into())
@@ -696,31 +713,36 @@ impl Connection {
             qerror!([self], "set token in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
+        if self.role == Role::Server {
+            return Err(Error::ConnectionState);
+        }
+
         qinfo!([self], "resumption token {}", hex_snip_middle(token));
         let mut dec = Decoder::from(token);
 
-        let smoothed_rtt = match dec.decode_varint() {
-            Some(v) => Duration::from_millis(v),
-            _ => return Err(Error::InvalidResumptionToken),
-        };
+        let smoothed_rtt =
+            Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);
+        qtrace!([self], "  RTT {:?}", smoothed_rtt);
 
-        let tp_slice = match dec.decode_vvec() {
-            Some(v) => v,
-            _ => return Err(Error::InvalidResumptionToken),
-        };
+        let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!([self], "  transport parameters {}", hex(&tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
         let tp = TransportParameters::decode(&mut dec_tp)?;
+
+        let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
+        qtrace!([self], "  Initial token {}", hex(&init_token));
 
         let tok = dec.decode_remainder();
         qtrace!([self], "  TLS token {}", hex(&tok));
         match self.crypto.tls {
             Agent::Client(ref mut c) => c.enable_resumption(&tok)?,
-            Agent::Server(_) => return Err(Error::WrongRole),
+            Agent::Server(_) => unreachable!(),
         }
 
         self.tps.borrow_mut().remote_0rtt = Some(tp);
-
+        if !init_token.is_empty() {
+            self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
+        }
         if smoothed_rtt > GRANULARITY {
             self.loss_recovery.set_initial_rtt(smoothed_rtt);
         }
@@ -967,7 +989,7 @@ impl Connection {
 
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
         qinfo!([self], "received Retry");
-        if self.retry_info.is_some() {
+        if matches!(self.address_validation, AddressValidationInfo::Retry { .. }) {
             self.stats.pkt_dropped("Extra Retry");
             return Ok(());
         }
@@ -987,24 +1009,21 @@ impl Connection {
             return Err(Error::InternalError);
         };
 
+        let retry_scid = ConnectionId::from(packet.scid());
         qinfo!(
             [self],
             "Valid Retry received, token={} scid={}",
             hex(packet.token()),
-            packet.scid()
+            retry_scid
         );
-
-        self.retry_info = Some(RetryInfo::new(
-            ConnectionId::from(packet.scid()),
-            packet.token().to_vec(),
-        ));
 
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
         self.crypto
             .states
-            .init(self.quic_version, self.role, packet.scid());
+            .init(self.quic_version, self.role, &retry_scid);
+        self.address_validation = AddressValidationInfo::new(retry_scid, packet.token().to_vec());
         Ok(())
     }
 
@@ -1354,7 +1373,7 @@ impl Connection {
         space: PNSpace,
         encoder: Encoder,
         tx: &CryptoDxState,
-        retry_info: &Option<RetryInfo>,
+        address_validation: &AddressValidationInfo,
         quic_version: QuicVersion,
     ) -> (PacketType, PacketNumber, PacketBuilder) {
         let pt = match space {
@@ -1388,11 +1407,7 @@ impl Connection {
             )
         };
         if pt == PacketType::Initial {
-            builder.initial_token(if let Some(info) = retry_info {
-                &info.token
-            } else {
-                &[]
-            });
+            builder.initial_token(address_validation.token());
         }
         // TODO(mt) work out packet number length based on `4*path CWND/path MTU`.
         let pn = tx.next_pn();
@@ -1414,8 +1429,14 @@ impl Connection {
                 continue;
             }
 
-            let (_, _, mut builder) =
-                Self::build_packet_header(path, *space, encoder, tx, &None, self.quic_version);
+            let (_, _, mut builder) = Self::build_packet_header(
+                path,
+                *space,
+                encoder,
+                tx,
+                &AddressValidationInfo::None,
+                self.quic_version,
+            );
             // ConnectionError::Application is only allowed at 1RTT.
             if *space == PNSpace::ApplicationData {
                 frame.marshal(&mut builder);
@@ -1512,7 +1533,7 @@ impl Connection {
                 *space,
                 encoder,
                 tx,
-                &self.retry_info,
+                &self.address_validation,
                 self.quic_version,
             );
             let payload_start = builder.len();
@@ -1686,8 +1707,8 @@ impl Connection {
     }
 
     fn validate_cids_draft_27(&mut self) -> Res<()> {
-        if let Some(info) = &self.retry_info {
-            debug_assert!(!info.token.is_empty());
+        if let AddressValidationInfo::Retry { token, .. } = &self.address_validation {
+            debug_assert!(!token.is_empty());
             let tph = self.tps.borrow();
             let tp = tph
                 .remote()
@@ -1742,10 +1763,14 @@ impl Connection {
             }
 
             let tp = remote_tps.get_bytes(tparams::RETRY_SOURCE_CONNECTION_ID);
-            let expected = self
-                .retry_info
-                .as_ref()
-                .map(|ri| ri.retry_source_cid.as_cid_ref());
+            let expected = if let AddressValidationInfo::Retry {
+                retry_source_cid, ..
+            } = &self.address_validation
+            {
+                Some(retry_source_cid.as_cid_ref())
+            } else {
+                None
+            };
             if expected != tp.map(ConnectionIdRef::from) {
                 qwarn!(
                     "{} RSCID test failed. self cid {:?} != tp cid {:?}",
@@ -1868,7 +1893,12 @@ impl Connection {
                     self.handshake(now, space, Some(&buf))?;
                 }
             }
-            Frame::NewToken { token } => self.token = Some(token),
+            Frame::NewToken { token } => {
+                if self.new_token.len() >= MAX_NEW_TOKEN {
+                    self.new_token.remove(0);
+                }
+                self.new_token.push(token);
+            }
             Frame::Stream {
                 fin,
                 stream_id,
