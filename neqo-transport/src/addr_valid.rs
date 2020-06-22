@@ -175,6 +175,9 @@ impl AddressValidation {
     /// Calculate the Hamming difference between our identifier and the target.
     /// Less than one difference per byte indicates that it is likely not a Retry.
     /// This generous interpretation allows for a lot of damage in transit.
+    /// Note that if this check fails, then the token will be treated like it came
+    /// from NEW_TOKEN instead.  If there truly is corruption of packets that causes
+    /// validation failure, it will be a failure that we try to recover from.
     fn is_likely_retry(token: &[u8]) -> bool {
         let mut difference = 0;
         for i in 0..TOKEN_IDENTIFIER_RETRY.len() {
