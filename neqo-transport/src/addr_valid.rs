@@ -213,9 +213,7 @@ impl AddressValidation {
                 if cid.len() >= 8 {
                     AddressValidationResult::ValidRetry(cid)
                 } else {
-                    // This should be impossible.
-                    qwarn!("AddressValidation: Retry token with small CID {}", cid);
-                    AddressValidationResult::Invalid
+                    panic!("AddressValidation: Retry token with small CID {}", cid);
                 }
             } else if cid.is_empty() {
                 // An empty connection ID means NEW_TOKEN.
@@ -225,21 +223,20 @@ impl AddressValidation {
                     AddressValidationResult::Pass
                 }
             } else {
-                // This should be impossible.
-                qwarn!("AddressValidation: NEW_TOKEN token with CID {}", cid);
-                AddressValidationResult::Invalid
+                panic!("AddressValidation: NEW_TOKEN token with CID {}", cid);
             }
         } else {
             // From here on, we have a token that we couldn't decrypt.
             // We've either lost the keys or we've received junk.
             if retry {
-                // If this looked like a Retry, that is probably just bad.
+                // If this looked like a Retry, so treat it as being bad.
                 AddressValidationResult::Invalid
             } else if self.require_retry == ValidateAddress::Never {
-                // If we don't require validation, that's fine.
+                // We don't require validation, so OK.
                 AddressValidationResult::Pass
             } else {
-                // Otherwise, pretend that we didn't have a token and validate.
+                // This might be an invalid NEW_TOKEN token, or a valid one
+                // for which we have since lost the keys.  Check again.
                 AddressValidationResult::Validate
             }
         }

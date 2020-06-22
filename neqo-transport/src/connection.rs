@@ -5590,4 +5590,10 @@ mod tests {
             _ => panic!("Invalid client state"),
         }
     }
+
+    /// Check that a resumed connection uses a token on Initial packets.
+    #[test]
+    fn address_validation_token_resume() {
+        //TTODO(mt)
+    }
 }
