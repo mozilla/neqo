@@ -481,6 +481,10 @@ fn main() -> Res<()> {
             Ok(_) => exit(127),
             Err(_) => exit(1),
         }
+
+        if let Ok(qlogdir) = env::var("QLOGDIR") {
+            args.qlog_dir = Some(PathBuf::from(qlogdir));
+        }
     }
 
     let mut urls_by_origin: HashMap<Origin, Vec<Url>> = HashMap::new();
