@@ -67,6 +67,12 @@ impl Display for CongestionControl {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum PacketState {
+    Acked,
+    Lost,
+}
+
 impl CongestionControl {
     pub fn set_qlog(&mut self, qlog: Rc<RefCell<Option<NeqoQlog>>>) {
         self.qlog = qlog;
@@ -97,7 +103,7 @@ impl CongestionControl {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
 
-            if self.in_congestion_recovery(pkt.time_sent) {
+            if self.in_congestion_recovery(pkt.time_sent, PacketState::Acked) {
                 // Do not increase congestion window in recovery period.
                 continue;
             }
@@ -204,16 +210,19 @@ impl CongestionControl {
     }
 
     #[must_use]
-    pub fn in_congestion_recovery(&mut self, sent_time: Instant) -> bool {
+    fn in_congestion_recovery(&mut self, sent_time: Instant, packet_state: PacketState) -> bool {
         match self.congestion_recovery_start_time {
             Some(crst) => {
                 if sent_time <= crst {
                     true
                 } else {
-                    qlog::metrics_updated(
-                        &mut self.qlog.borrow_mut(),
-                        &[QlogMetric::InRecovery(false)],
-                    );
+                    if let PacketState::Acked = packet_state {
+                        qlog::metrics_updated(
+                            &mut self.qlog.borrow_mut(),
+                            &[QlogMetric::InRecovery(false)],
+                        );
+                        self.congestion_recovery_start_time = None;
+                    }
                     false
                 }
             }
@@ -224,7 +233,7 @@ impl CongestionControl {
     fn on_congestion_event(&mut self, now: Instant, sent_time: Instant) {
         // Start a new congestion event if packet was sent after the
         // start of the previous congestion recovery period.
-        if !self.in_congestion_recovery(sent_time) {
+        if !self.in_congestion_recovery(sent_time, PacketState::Lost) {
             self.congestion_recovery_start_time = Some(now);
             self.congestion_window /= 2; // kLossReductionFactor = 0.5
             self.congestion_window = max(self.congestion_window, MIN_CONG_WINDOW);
