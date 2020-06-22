@@ -43,6 +43,8 @@ pub enum InitialResult {
 const MIN_INITIAL_PACKET_SIZE: usize = 1200;
 const TIMER_GRANULARITY: Duration = Duration::from_millis(10);
 const TIMER_CAPACITY: usize = 16384;
+const TOKEN_IDENTIFIER_RETRY: &[u8] = &[0x52, 0x65, 0x74, 0x72, 0x79];
+const TOKEN_IDENTIFIER_NEW_TOKEN: &[u8] = &[0xad, 0x9a, 0x8b, 0x8d, 0x86];
 
 type StateRef = Rc<RefCell<ServerConnectionState>>;
 type CidMgr = Rc<RefCell<dyn ConnectionIdManager>>;
@@ -68,82 +70,133 @@ impl DerefMut for ServerConnectionState {
     }
 }
 
-enum RetryTokenResult {
+#[derive(Debug, PartialEq, Eq)]
+pub enum ValidateAddress {
+    /// Require address validation never.
+    Never,
+    /// Require address validation unless a NEW_TOKEN token is provided.
+    NoToken,
+    /// Require address validation even if a NEW_TOKEN token is provided.
+    Always,
+}
+
+enum AddressValidationResult {
     Pass,
-    Valid(ConnectionId),
+    ValidRetry(ConnectionId),
     Validate,
     Invalid,
 }
 
-struct RetryToken {
-    /// Whether to send a Retry.
-    require_retry: bool,
+struct AddressValidation {
+    /// When a Retry is sent.
+    require_retry: ValidateAddress,
     /// A self-encryption object used for protecting Retry tokens.
     self_encrypt: SelfEncrypt,
     /// When this object was created.
     start_time: Instant,
 }
 
-impl RetryToken {
+impl AddressValidation {
     fn new(now: Instant) -> Res<Self> {
         Ok(Self {
-            require_retry: false,
+            require_retry: ValidateAddress::Never,
             self_encrypt: SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256)?,
             start_time: now,
         })
     }
 
-    fn encode_peer_address(peer_address: SocketAddr) -> Vec<u8> {
+    fn encode_aad(peer_address: SocketAddr, retry: bool) -> Encoder {
         // Let's be "clever" by putting the peer's address in the AAD.
         // We don't need to encode these into the token as they should be
         // available when we need to check the token.
-        let mut encoded_address = Encoder::default();
+        let mut aad = Encoder::default();
+        if retry {
+            aad.encode(TOKEN_IDENTIFIER_RETRY);
+        } else {
+            aad.encode(TOKEN_IDENTIFIER_NEW_TOKEN);
+        }
         match peer_address.ip() {
             IpAddr::V4(a) => {
-                encoded_address.encode_byte(4);
-                encoded_address.encode(&a.octets());
+                aad.encode_byte(4);
+                aad.encode(&a.octets());
             }
             IpAddr::V6(a) => {
-                encoded_address.encode_byte(6);
-                encoded_address.encode(&a.octets());
+                aad.encode_byte(6);
+                aad.encode(&a.octets());
             }
         }
-        encoded_address.encode_uint(2, peer_address.port());
-        encoded_address.into()
+        if retry {
+            aad.encode_uint(2, peer_address.port());
+        }
+        aad
+    }
+
+    pub fn generate_token(
+        &mut self,
+        dcid: Option<&ConnectionId>,
+        peer_address: SocketAddr,
+        now: Instant,
+    ) -> Res<Vec<u8>> {
+        const EXPIRATION_RETRY: Duration = Duration::from_secs(5);
+        const EXPIRATION_NEW_TOKEN: Duration = Duration::from_secs(60 * 60 * 24);
+
+        // TODO(mt) rotate keys on a fixed schedule.
+        let retry = dcid.is_some();
+        let mut data = Encoder::default();
+        let end = now
+            + if retry {
+                EXPIRATION_RETRY
+            } else {
+                EXPIRATION_NEW_TOKEN
+            };
+        let end_millis = u32::try_from(end.duration_since(self.start_time).as_millis())?;
+        data.encode_uint(4, end_millis);
+        if let Some(dcid) = dcid {
+            data.encode(dcid);
+        }
+
+        // Include the token identifier ("Retry"/~) in the AAD, then keep it for plaintext.
+        let mut buf = Self::encode_aad(peer_address, retry);
+        let encrypted = self.self_encrypt.seal(&buf, &data)?;
+        buf.truncate(TOKEN_IDENTIFIER_RETRY.len());
+        buf.encode(&encrypted);
+        Ok(buf.into())
     }
 
     /// This generates a token for use with Retry.
-    pub fn generate_token(
+    pub fn generate_retry_token(
         &mut self,
         dcid: &ConnectionId,
         peer_address: SocketAddr,
         now: Instant,
     ) -> Res<Vec<u8>> {
-        const EXPIRATION: Duration = Duration::from_secs(5);
-
-        // TODO(mt) rotate keys on a fixed schedule.
-        let mut token = Encoder::default();
-        let end = now + EXPIRATION;
-        let end_millis = u32::try_from(end.duration_since(self.start_time).as_millis())?;
-        token.encode_uint(4, end_millis);
-        token.encode(dcid);
-        let peer_addr = Self::encode_peer_address(peer_address);
-        Ok(self.self_encrypt.seal(&peer_addr, &token)?)
+        self.generate_token(Some(dcid), peer_address, now)
     }
 
-    pub fn set_retry_required(&mut self, retry: bool) {
+    // pub fn generate_new_token(
+    //     &mut self,
+    //     peer_address: SocketAddr,
+    //     now: Instant,
+    // ) -> Res<Vec<u8>> {
+    //     self.generate_token(None, peer_address, now)
+    // }
+
+    pub fn set_validation(&mut self, retry: ValidateAddress) {
         self.require_retry = retry;
     }
 
-    /// Decrypts `token` and returns the connection Id it contains.
-    /// Returns `None` if the date is invalid in any way (such as it being expired or garbled).
+    /// Decrypts `token` and returns the connection ID it contains.
+    /// Returns a tuple with a boolean indicating whether this thinks
+    /// that the token was a Retry token, and a connection ID, that is
+    /// None if the token wasn't successfully decrypted.
     fn decrypt_token(
         &self,
         token: &[u8],
         peer_address: SocketAddr,
+        retry: bool,
         now: Instant,
     ) -> Option<ConnectionId> {
-        let peer_addr = Self::encode_peer_address(peer_address);
+        let peer_addr = Self::encode_aad(peer_address, retry);
         let data = if let Ok(d) = self.self_encrypt.open(&peer_addr, token) {
             d
         } else {
@@ -162,22 +215,79 @@ impl RetryToken {
         Some(ConnectionId::from(dec.decode_remainder()))
     }
 
+    /// Calculate the Hamming difference between our identifier and the target.
+    /// Less than one difference per byte indicates that it is likely not a Retry.
+    /// This generous interpretation allows for a lot of damage in transit.
+    fn is_likely_retry(token: &[u8]) -> bool {
+        let mut difference = 0;
+        for i in 0..TOKEN_IDENTIFIER_RETRY.len() {
+            difference += (token[i] ^ TOKEN_IDENTIFIER_RETRY[i]).count_ones();
+        }
+        usize::try_from(difference).unwrap() < TOKEN_IDENTIFIER_RETRY.len()
+    }
+
     pub fn validate(
         &self,
         token: &[u8],
         peer_address: SocketAddr,
         now: Instant,
-    ) -> RetryTokenResult {
+    ) -> AddressValidationResult {
         if token.is_empty() {
-            if self.require_retry {
-                RetryTokenResult::Validate
+            if self.require_retry == ValidateAddress::Never {
+                return AddressValidationResult::Pass;
             } else {
-                RetryTokenResult::Pass
+                return AddressValidationResult::Validate;
             }
-        } else if let Some(cid) = self.decrypt_token(token, peer_address, now) {
-            RetryTokenResult::Valid(cid)
+        }
+        if token.len() <= TOKEN_IDENTIFIER_RETRY.len() {
+            // Treat bad tokens strictly.
+            return AddressValidationResult::Invalid;
+        }
+        let retry = Self::is_likely_retry(token);
+        let enc = &token[TOKEN_IDENTIFIER_RETRY.len()..];
+        // Note that this allows the token identifier part to be corrupted.
+        // That's OK here as we don't depend on that being authenticated.
+        if let Some(cid) = self.decrypt_token(enc, peer_address, retry, now) {
+            if retry {
+                // This is from Retry, so we should have an ODCID >= 8.
+                if cid.len() >= 8 {
+                    AddressValidationResult::ValidRetry(cid)
+                } else {
+                    // This should be impossible.
+                    qwarn!(
+                        "AddressValidation: received Retry token with small CID {}",
+                        cid
+                    );
+                    AddressValidationResult::Invalid
+                }
+            } else
+            // An empty connection ID means NEW_TOKEN.
+            if cid.is_empty() {
+                if self.require_retry == ValidateAddress::Always {
+                    AddressValidationResult::Validate
+                } else {
+                    AddressValidationResult::Pass
+                }
+            } else {
+                // This should also be impossible.
+                qwarn!(
+                    "AddressValidation: received NEW_TOKEN token with CID {}",
+                    cid
+                );
+                AddressValidationResult::Invalid
+            }
+        } else
+        // From here, we have a token that we couldn't decrypt.
+        // We've either lost the keys or we've received junk.
+        if retry {
+            // If this looked like a Retry, that is probably just bad.
+            AddressValidationResult::Invalid
+        } else if self.require_retry == ValidateAddress::Never {
+            // If we don't require validation, that's fine.
+            AddressValidationResult::Pass
         } else {
-            RetryTokenResult::Invalid
+            // Otherwise, pretend that we didn't have a token and validate.
+            AddressValidationResult::Validate
         }
     }
 }
@@ -231,9 +341,8 @@ pub struct Server {
     waiting: VecDeque<StateRef>,
     /// Outstanding timers for connections.
     timers: Timer<StateRef>,
-    /// Whether a Retry packet will be sent in response to new
-    /// Initial packets.
-    retry: RetryToken,
+    /// Address validation logic, which determines whether we send a Retry.
+    address_validation: AddressValidation,
     /// Directory to create qlog traces in
     qlog_dir: Option<PathBuf>,
 }
@@ -263,7 +372,7 @@ impl Server {
             active: HashSet::default(),
             waiting: VecDeque::default(),
             timers: Timer::new(now, TIMER_GRANULARITY, TIMER_CAPACITY),
-            retry: RetryToken::new(now)?,
+            address_validation: AddressValidation::new(now)?,
             qlog_dir: None,
         })
     }
@@ -273,8 +382,8 @@ impl Server {
         self.qlog_dir = dir;
     }
 
-    pub fn set_retry_required(&mut self, require_retry: bool) {
-        self.retry.set_retry_required(require_retry);
+    pub fn set_validation(&mut self, validate: ValidateAddress) {
+        self.address_validation.set_validation(validate);
     }
 
     fn remove_timer(&mut self, c: &StateRef) {
@@ -344,18 +453,23 @@ impl Server {
         now: Instant,
     ) -> Option<Datagram> {
         qdebug!([self], "Handle initial");
-        match self.retry.validate(&initial.token, dgram.source(), now) {
-            RetryTokenResult::Invalid => None,
-            RetryTokenResult::Pass => self.connection_attempt(initial, dgram, None, now),
-            RetryTokenResult::Valid(orig_dcid) => {
+        match self
+            .address_validation
+            .validate(&initial.token, dgram.source(), now)
+        {
+            AddressValidationResult::Invalid => None,
+            AddressValidationResult::Pass => self.connection_attempt(initial, dgram, None, now),
+            AddressValidationResult::ValidRetry(orig_dcid) => {
                 self.connection_attempt(initial, dgram, Some(orig_dcid), now)
             }
-            RetryTokenResult::Validate => {
+            AddressValidationResult::Validate => {
                 qinfo!([self], "Send retry for {:?}", initial.dst_cid);
 
-                let res = self
-                    .retry
-                    .generate_token(&initial.dst_cid, dgram.source(), now);
+                let res = self.address_validation.generate_retry_token(
+                    &initial.dst_cid,
+                    dgram.source(),
+                    now,
+                );
                 let token = if let Ok(t) = res {
                     t
                 } else {

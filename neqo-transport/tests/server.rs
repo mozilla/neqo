@@ -16,7 +16,7 @@ use neqo_crypto::{
     AuthenticationStatus,
 };
 use neqo_transport::{
-    server::{ActiveConnectionRef, Server},
+    server::{ActiveConnectionRef, Server, ValidateAddress},
     Connection, ConnectionError, Error, FixedConnectionIdManager, Output, QuicVersion, State,
     StreamType,
 };
@@ -55,7 +55,7 @@ fn connected_server(server: &mut Server) -> ActiveConnectionRef {
 
 /// Connect.  This returns a reference to the server connection.
 fn connect(client: &mut Connection, server: &mut Server) -> ActiveConnectionRef {
-    server.set_retry_required(false);
+    server.set_validation(ValidateAddress::Never);
 
     assert_eq!(*client.state(), State::Init);
     let dgram = client.process(None, now()).dgram(); // ClientHello
@@ -227,7 +227,7 @@ fn drop_non_initial() {
 #[test]
 fn retry_basic() {
     let mut server = default_server();
-    server.set_retry_required(true);
+    server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
 
     let dgram = client.process(None, now()).dgram(); // Initial
@@ -268,7 +268,7 @@ fn retry_0rtt() {
     // Calling active_connections clears the set of active connections.
     assert_eq!(server.active_connections().len(), 1);
 
-    server.set_retry_required(true);
+    server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
     client
         .set_resumption_token(now(), &token)
@@ -305,7 +305,7 @@ fn retry_0rtt() {
 #[test]
 fn retry_different_ip() {
     let mut server = default_server();
-    server.set_retry_required(true);
+    server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
 
     let dgram = client.process(None, now()).dgram(); // Initial
@@ -331,7 +331,7 @@ fn retry_different_ip() {
 fn retry_after_initial() {
     let mut server = default_server();
     let mut retry_server = default_server();
-    retry_server.set_retry_required(true);
+    retry_server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
 
     let cinit = client.process(None, now()).dgram(); // Initial
@@ -372,7 +372,7 @@ fn retry_after_initial() {
 #[test]
 fn retry_bad_integrity() {
     let mut server = default_server();
-    server.set_retry_required(true);
+    server.set_validation(ValidateAddress::Always);
     let mut client = default_client();
 
     let dgram = client.process(None, now()).dgram(); // Initial
@@ -396,7 +396,7 @@ fn retry_bad_integrity() {
 fn retry_bad_token() {
     let mut client = default_client();
     let mut retry_server = default_server();
-    retry_server.set_retry_required(true);
+    retry_server.set_validation(ValidateAddress::Always);
     let mut server = default_server();
 
     // Send a retry to one server, then replay it to the other.
@@ -420,7 +420,7 @@ fn retry_bad_token() {
 fn retry_after_pto() {
     let mut client = default_client();
     let mut server = default_server();
-    server.set_retry_required(true);
+    server.set_validation(ValidateAddress::Always);
     let mut now = now();
 
     let ci = client.process(None, now).dgram();
@@ -556,7 +556,7 @@ fn apply_header_protection(hp: &HpKey, packet: &mut [u8], pn_bytes: Range<usize>
 fn mitm_retry() {
     let mut client = default_client();
     let mut retry_server = default_server();
-    retry_server.set_retry_required(true);
+    retry_server.set_validation(ValidateAddress::Always);
     let mut server = default_server();
 
     // Trigger initial and a second client Initial.
