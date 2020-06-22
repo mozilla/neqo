@@ -13,7 +13,7 @@ use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
@@ -28,6 +28,7 @@ use neqo_crypto::{
     Server,
 };
 
+use crate::addr_valid::{AddressValidation, NewTokenState};
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
 use crate::crypto::{Crypto, CryptoDxState};
 use crate::dump::*;
@@ -60,10 +61,6 @@ pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
-
-/// The maximum number of tokens we'll save from NEW_TOKEN.
-/// This should be the same as the value of MAX_TICKETS in neqo-crypto.
-const MAX_NEW_TOKEN: usize = 4;
 
 #[derive(Clone, Debug, PartialEq, Ord, Eq)]
 /// The state of the Connection.
@@ -213,13 +210,20 @@ impl ConnectionIdManager for FixedConnectionIdManager {
     }
 }
 
+/// `AddressValidationInfo` holds information relevant to either
+/// responding to address validation (`NewToken`, `Retry`) or generating
+/// tokens for address validation (`Server`).
 enum AddressValidationInfo {
     None,
+    // We are a client and have information from `NEW_TOKEN`.
     NewToken(Vec<u8>),
+    // We are a client and have received a `Retry` packet.
     Retry {
         token: Vec<u8>,
         retry_source_cid: ConnectionId,
     },
+    // We are a server and can generate tokens.
+    Server(Weak<RefCell<AddressValidation>>),
 }
 
 impl AddressValidationInfo {
@@ -232,8 +236,29 @@ impl AddressValidationInfo {
 
     pub fn token(&self) -> &[u8] {
         match self {
-            Self::None => &[],
             Self::NewToken(token) | Self::Retry { token, .. } => &token,
+            _ => &[],
+        }
+    }
+
+    pub fn generate_new_token(
+        &mut self,
+        peer_address: SocketAddr,
+        now: Instant,
+    ) -> Option<Vec<u8>> {
+        match self {
+            Self::Server(ref w) => {
+                if let Some(validation) = w.upgrade() {
+                    validation
+                        .borrow()
+                        .generate_new_token(peer_address, now)
+                        .ok()
+                } else {
+                    None
+                }
+            }
+            Self::None => None,
+            _ => unreachable!("called a server function on a client"),
         }
     }
 }
@@ -459,7 +484,7 @@ pub struct Connection {
     state_signaling: StateSignaling,
     loss_recovery: LossRecovery,
     events: ConnectionEvents,
-    new_token: Vec<Vec<u8>>,
+    new_token: NewTokenState,
     stats: Stats,
     qlog: Option<NeqoQlog>,
 
@@ -583,7 +608,7 @@ impl Connection {
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(),
             events: ConnectionEvents::default(),
-            new_token: Vec::new(),
+            new_token: NewTokenState::new(role),
             stats: Stats::default(),
             qlog: None,
             quic_version,
@@ -692,7 +717,7 @@ impl Connection {
                             .expect("should have transport parameters")
                             .encode(enc_inner);
                     });
-                    let token = self.new_token.pop();
+                    let token = self.new_token.take_token();
                     enc.encode_vvec(token.as_ref().map_or(&[], |t| &t[..]));
                     enc.encode(&t[..]);
                     qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
@@ -752,23 +777,45 @@ impl Connection {
         self.client_start(now)
     }
 
-    /// Send a TLS session ticket.
+    pub(crate) fn set_validation(&mut self, validation: Rc<RefCell<AddressValidation>>) {
+        qtrace!([self], "Enabling NEW_TOKEN");
+        assert_eq!(self.role, Role::Server);
+        self.address_validation = AddressValidationInfo::Server(Rc::downgrade(&validation));
+    }
+
+    /// Send a TLS session ticket AND a NEW_TOKEN frame (if possible).
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
-        let tps = &self.tps;
-        match self.crypto.tls {
-            Agent::Server(ref mut s) => {
-                let mut enc = Encoder::default();
-                enc.encode_vvec_with(|mut enc_inner| {
-                    tps.borrow().local.encode(&mut enc_inner);
-                });
-                enc.encode(extra);
-                let records = s.send_ticket(now, &enc)?;
-                qinfo!([self], "send session ticket {}", hex(&enc));
-                self.crypto.buffer_records(records)?;
-                Ok(())
-            }
-            Agent::Client(_) => Err(Error::WrongRole),
+        if self.role == Role::Client {
+            return Err(Error::WrongRole);
         }
+
+        let tps = &self.tps;
+        if let Agent::Server(ref mut s) = self.crypto.tls {
+            let mut enc = Encoder::default();
+            enc.encode_vvec_with(|mut enc_inner| {
+                tps.borrow().local.encode(&mut enc_inner);
+            });
+            enc.encode(extra);
+            let records = s.send_ticket(now, &enc)?;
+            qinfo!([self], "send session ticket {}", hex(&enc));
+            self.crypto.buffer_records(records)?;
+        } else {
+            unreachable!();
+        }
+
+        // If we are able, also send a NEW_TOKEN frame.
+        // This should be recording all remote addresses that are valid,
+        // but there are just 0 or 1 in the current implementation.
+        if let Some(p) = self.path.as_ref() {
+            if let Some(token) = self
+                .address_validation
+                .generate_new_token(p.remote_address(), now)
+            {
+                self.new_token.send_new_token(token);
+            }
+        }
+
+        Ok(())
     }
 
     pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
@@ -1490,6 +1537,9 @@ impl Connection {
                 if frame.is_none() {
                     frame = self.send_streams.get_frame(space, remaining);
                 }
+                if frame.is_none() && space == PNSpace::ApplicationData {
+                    frame = self.new_token.get_frame(remaining);
+                }
             }
 
             if let Some((frame, token)) = frame {
@@ -1894,10 +1944,7 @@ impl Connection {
                 }
             }
             Frame::NewToken { token } => {
-                if self.new_token.len() >= MAX_NEW_TOKEN {
-                    self.new_token.remove(0);
-                }
-                self.new_token.push(token);
+                self.new_token.save_token(token);
             }
             Frame::Stream {
                 fin,
@@ -2048,6 +2095,7 @@ impl Connection {
                         &mut self.indexes,
                     ),
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
+                    RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
                 }
             }
         }
@@ -2090,6 +2138,7 @@ impl Connection {
                         self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
                     }
                     RecoveryToken::HandshakeDone => (),
+                    RecoveryToken::NewToken(seqno) => self.new_token.acked(*seqno),
                 }
             }
         }

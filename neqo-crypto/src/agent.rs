@@ -688,6 +688,7 @@ impl ::std::fmt::Display for SecretAgent {
 
 /// A TLS Client.
 #[derive(Debug)]
+#[allow(clippy::box_vec)] // We need the Box.
 pub struct Client {
     agent: SecretAgent,
 

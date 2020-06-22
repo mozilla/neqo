@@ -44,6 +44,7 @@ pub enum RecoveryToken {
     Crypto(CryptoRecoveryToken),
     Flow(FlowControlRecoveryToken),
     HandshakeDone,
+    NewToken(usize),
 }
 
 #[derive(Debug, Default)]
