@@ -1913,10 +1913,10 @@ impl Connection {
                 // But if it does, open it up all the way
                 self.flow_mgr.borrow_mut().max_data(LOCAL_MAX_DATA);
             }
-            Frame::StreamDataBlocked { stream_id, .. } => {
-                // TODO(agrover@mozilla.com): how should we be using
-                // currently-unused stream_data_limit?
-
+            Frame::StreamDataBlocked {
+                stream_id,
+                stream_data_limit,
+            } => {
                 // Terminate connection with STREAM_STATE_ERROR if send-only
                 // stream (-transport 19.13)
                 if stream_id.is_send_only(self.role()) {
@@ -1924,7 +1924,18 @@ impl Connection {
                 }
 
                 if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
-                    rs.maybe_send_flowc_update();
+                    if let Some(msd) = rs.max_stream_data() {
+                        qinfo!(
+                            [self],
+                            "Got StreamDataBlocked(id {} MSD {}); curr MSD {}",
+                            stream_id.as_u64(),
+                            stream_data_limit,
+                            msd
+                        );
+                        if stream_data_limit != msd {
+                            self.flow_mgr.borrow_mut().max_stream_data(stream_id, msd)
+                        }
+                    }
                 }
             }
             Frame::StreamsBlocked { stream_type, .. } => {
@@ -5510,5 +5521,39 @@ mod tests {
             }
             _ => panic!("Invalid client state"),
         }
+    }
+
+    #[test]
+    fn stream_data_blocked_generates_max_stream_data() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        let now = now();
+
+        // Try to say we're blocked beyond the initial data window
+        server
+            .flow_mgr
+            .borrow_mut()
+            .stream_data_blocked(3.into(), RX_STREAM_DATA_WINDOW * 4);
+
+        let out = server.process(None, now);
+        assert!(out.as_dgram_ref().is_some());
+
+        let frames = client.test_process_input(out.dgram().unwrap(), now);
+        assert!(frames
+            .iter()
+            .any(|(f, _)| matches!(f, Frame::StreamDataBlocked { .. })));
+
+        let out = client.process_output(now);
+        assert!(out.as_dgram_ref().is_some());
+
+        let frames = server.test_process_input(out.dgram().unwrap(), now);
+        // Client should have sent a MaxStreamData frame with just the initial
+        // window value.
+        assert!(frames.iter().any(
+            |(f, _)| matches!(f, Frame::MaxStreamData { maximum_stream_data, .. }
+				   if *maximum_stream_data == RX_STREAM_DATA_WINDOW)
+        ));
     }
 }
