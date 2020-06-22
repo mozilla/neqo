@@ -220,7 +220,7 @@ impl FlowMgr {
                     application_error_code,
                     final_size
                 );
-                if send_streams.get(stream_id).is_ok() {
+                if send_streams.get(&stream_id).is_ok() {
                     self.stream_reset(stream_id, application_error_code, final_size);
                 }
             }
@@ -240,7 +240,7 @@ impl FlowMgr {
                 }
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
-                if let Ok(ss) = send_streams.get(stream_id) {
+                if let Ok(ss) = send_streams.get(&stream_id) {
                     if ss.credit_avail() == 0 {
                         self.stream_data_blocked(stream_id, ss.max_stream_data())
                     }

@@ -732,11 +732,11 @@ impl SendStream {
 pub(crate) struct SendStreams(HashMap<StreamId, SendStream>);
 
 impl SendStreams {
-    pub fn get(&self, id: StreamId) -> Res<&SendStream> {
+    pub fn get(&self, id: &StreamId) -> Res<&SendStream> {
         self.0.get(&id).ok_or_else(|| Error::InvalidStreamId)
     }
 
-    pub fn get_mut(&mut self, id: StreamId) -> Res<&mut SendStream> {
+    pub fn get_mut(&mut self, id: &StreamId) -> Res<&mut SendStream> {
         self.0.get_mut(&id).ok_or_else(|| Error::InvalidStreamId)
     }
 
@@ -1226,7 +1226,7 @@ mod tests {
         let f2 = ss.get_frame(PNSpace::ApplicationData, 100);
         assert!(matches!(f2, None));
 
-        ss.get_mut(0.into()).unwrap().close();
+        ss.get_mut(&0.into()).unwrap().close();
 
         let (_f2, f2_token) = ss.get_frame(PNSpace::ApplicationData, 100).unwrap();
         assert!(matches!(&f2_token, Some(RecoveryToken::Stream(x)) if x.offset == 10));

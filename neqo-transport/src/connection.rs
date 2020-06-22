@@ -2284,7 +2284,7 @@ impl Connection {
         }
 
         Ok((
-            self.send_streams.get_mut(stream_id).ok(),
+            self.send_streams.get_mut(&stream_id).ok(),
             self.recv_streams.get_mut(&stream_id),
         ))
     }
@@ -2411,7 +2411,7 @@ impl Connection {
     /// `InvalidInput` if length of `data` is zero,
     /// `FinalSizeError` if the stream has already been closed.
     pub fn stream_send(&mut self, stream_id: u64, data: &[u8]) -> Res<usize> {
-        self.send_streams.get_mut(stream_id.into())?.send(data)
+        self.send_streams.get_mut(&stream_id.into())?.send(data)
     }
 
     /// Send all data or nothing on a stream. May cause DATA_BLOCKED or
@@ -2424,7 +2424,7 @@ impl Connection {
     pub fn stream_send_atomic(&mut self, stream_id: u64, data: &[u8]) -> Res<bool> {
         let val = self
             .send_streams
-            .get_mut(stream_id.into())?
+            .get_mut(&stream_id.into())?
             .send_atomic(data);
         if let Ok(val) = val {
             debug_assert!(
@@ -2441,18 +2441,18 @@ impl Connection {
     /// i.e. that will not be blocked by flow credits or send buffer max
     /// capacity.
     pub fn stream_avail_send_space(&self, stream_id: u64) -> Res<usize> {
-        Ok(self.send_streams.get(stream_id.into())?.avail())
+        Ok(self.send_streams.get(&stream_id.into())?.avail())
     }
 
     /// Close the stream. Enqueued data will be sent.
     pub fn stream_close_send(&mut self, stream_id: u64) -> Res<()> {
-        self.send_streams.get_mut(stream_id.into())?.close();
+        self.send_streams.get_mut(&stream_id.into())?.close();
         Ok(())
     }
 
     /// Abandon transmission of in-flight and future stream data.
     pub fn stream_reset_send(&mut self, stream_id: u64, err: AppError) -> Res<()> {
-        self.send_streams.get_mut(stream_id.into())?.reset(err);
+        self.send_streams.get_mut(&stream_id.into())?.reset(err);
         Ok(())
     }
 
@@ -3470,7 +3470,7 @@ mod tests {
         let evts = client.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 2); // SendStreamWritable, StateChange(connected)
         assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 0);
-        let ss = client.send_streams.get_mut(stream_id.into()).unwrap();
+        let ss = client.send_streams.get_mut(&stream_id.into()).unwrap();
         ss.mark_as_sent(0, 4096, false);
         ss.mark_as_acked(0, 4096, false);
 
