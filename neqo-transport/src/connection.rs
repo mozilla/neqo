@@ -1431,7 +1431,6 @@ impl Connection {
 
     /// Add frames to the provided builder and
     /// return whether any of them were ACK eliciting.
-    #[allow(clippy::useless_let_if_seq)]
     fn add_frames(
         &mut self,
         builder: &mut PacketBuilder,
@@ -1441,13 +1440,14 @@ impl Connection {
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool) {
         let mut tokens = Vec::new();
-        let mut ack_eliciting = false;
 
-        if profile.pto() {
+        let mut ack_eliciting = if profile.pto() {
             // Add a PING on a PTO.  This might get a more expedient ACK.
             builder.encode_varint(Frame::Ping.get_type());
-            ack_eliciting = true;
-        }
+            true
+        } else {
+            false
+        };
 
         // All useful frames are at least 2 bytes.
         while builder.len() + 2 < limit {
