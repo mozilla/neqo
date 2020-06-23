@@ -634,10 +634,10 @@ impl<'a> PublicPacket<'a> {
                     data: d,
                 })
             } else {
-                Err(Error::DecryptError)
+                Err(Error::KeysNotFound)
             }
         } else {
-            Err(Error::DecryptError)
+            Err(Error::KeysNotFound)
         }
     }
 

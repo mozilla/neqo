@@ -24,7 +24,7 @@ pub enum ConnectionEvent {
     /// A new uni (read) or bidi stream has been opened by the peer.
     NewStream { stream_id: StreamId },
     /// Space available in the buffer for an application write to succeed.
-    SendStreamWritable { stream_id: u64 },
+    SendStreamWritable { stream_id: StreamId },
     /// New bytes available for reading.
     RecvStreamReadable { stream_id: u64 },
     /// Peer reset the stream.
@@ -75,9 +75,7 @@ impl ConnectionEvents {
     }
 
     pub fn send_stream_writable(&self, stream_id: StreamId) {
-        self.insert(ConnectionEvent::SendStreamWritable {
-            stream_id: stream_id.as_u64(),
-        });
+        self.insert(ConnectionEvent::SendStreamWritable { stream_id });
     }
 
     pub fn send_stream_stop_sending(&self, stream_id: StreamId, app_error: AppError) {
@@ -91,7 +89,7 @@ impl ConnectionEvents {
     }
 
     pub fn send_stream_complete(&self, stream_id: StreamId) {
-        self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamWritable { stream_id: x } if *x == stream_id.as_u64()));
+        self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamWritable { stream_id: x } if *x == stream_id));
 
         self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamStopSending { stream_id: x, .. } if *x == stream_id.as_u64()));
 
