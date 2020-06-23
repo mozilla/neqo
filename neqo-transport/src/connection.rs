@@ -5367,9 +5367,7 @@ mod tests {
             QuicVersion::default(),
         )
         .expect("create a default client");
-        client
-            .enable_ciphers(&[TLS_CHACHA20_POLY1305_SHA256])
-            .unwrap();
+        client.set_ciphers(&[TLS_CHACHA20_POLY1305_SHA256]).unwrap();
         connect_force_idle(&mut client, &mut server);
     }
 

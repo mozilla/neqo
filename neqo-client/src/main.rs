@@ -401,7 +401,7 @@ fn client(
     )?;
     let ciphers = args.get_ciphers();
     if !ciphers.is_empty() {
-        transport.enable_ciphers(&ciphers)?;
+        transport.set_ciphers(&ciphers)?;
     }
     let mut client = Http3Client::new_with_conn(
         transport,
