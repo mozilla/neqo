@@ -42,7 +42,7 @@ type TpHandler = Rc<RefCell<TransportParametersHandler>>;
 impl Crypto {
     pub fn new(mut agent: Agent, protocols: &[impl AsRef<str>], tphandler: TpHandler) -> Res<Self> {
         agent.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
-        agent.enable_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])?;
+        agent.set_ciphers(&[TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384])?;
         agent.set_alpn(protocols)?;
         agent.disable_end_of_early_data()?;
         // Always enable 0-RTT on the client, but the server needs

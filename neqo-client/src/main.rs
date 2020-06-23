@@ -62,7 +62,7 @@ type Res<T> = Result<T, ClientError>;
     about = "A basic QUIC HTTP/0.9 and HTTP3 client."
 )]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3-28")]
+    #[structopt(short = "a", long, default_value = "h3-29")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP/3 no matter what the ALPN says.
@@ -838,7 +838,7 @@ mod old {
         }
 
         if let Some(cip) = ciphers {
-            client.enable_ciphers(cip).expect("Cannot enable ciphers");
+            client.set_ciphers(cip).expect("Cannot set ciphers");
         }
 
         client.set_qlog(qlog_new(args, origin)?);

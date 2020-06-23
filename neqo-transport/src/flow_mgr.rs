@@ -263,11 +263,11 @@ impl FlowMgr {
                 stream_id,
                 application_error_code,
             } => self.stop_sending(stream_id, application_error_code),
-            // Resend MaxStreamData if not SizeKnown
-            // (maybe_send_flowc_update() checks this.)
             Frame::MaxStreamData { stream_id, .. } => {
                 if let Some(rs) = recv_streams.get_mut(&stream_id) {
-                    rs.maybe_send_flowc_update()
+                    if let Some(msd) = rs.max_stream_data() {
+                        self.max_stream_data(stream_id, msd)
+                    }
                 }
             }
             Frame::PathResponse { .. } => qinfo!("Path Response lost, not re-sent"),

@@ -29,7 +29,7 @@ use std::mem;
 use std::net::{IpAddr, SocketAddr};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 pub enum InitialResult {
@@ -323,7 +323,7 @@ impl Server {
         match out {
             Output::Datagram(_) => {
                 qtrace!([self], "Sending packet, added to waiting connections");
-                self.waiting.push_back(c.clone());
+                self.waiting.push_back(Rc::clone(&c));
             }
             Output::Callback(delay) => {
                 let next = now + delay;
@@ -331,7 +331,7 @@ impl Server {
                     qtrace!([self], "Change timer to {:?}", next);
                     self.remove_timer(&c);
                     c.borrow_mut().last_timer = next;
-                    self.timers.add(next, c.clone());
+                    self.timers.add(next, Rc::clone(&c));
                 }
             }
             _ => {
@@ -340,7 +340,7 @@ impl Server {
         }
         if c.borrow().has_events() {
             qtrace!([self], "Connection active: {:?}", c);
-            self.active.insert(ActiveConnectionRef { c: c.clone() });
+            self.active.insert(ActiveConnectionRef { c: Rc::clone(&c) });
         }
 
         if *c.borrow().state() > State::Handshaking {
@@ -498,16 +498,16 @@ impl Server {
         // Instead, wrap it so that we can save connection IDs.
 
         let cid_mgr = Rc::new(RefCell::new(ServerConnectionIdManager {
-            c: None,
-            cid_manager: self.cid_manager.clone(),
-            connections: self.connections.clone(),
+            c: Weak::new(),
+            cid_manager: Rc::clone(&self.cid_manager),
+            connections: Rc::clone(&self.connections),
             saved_cids: Vec::new(),
         }));
 
         let sconn = Connection::new_server(
             &self.certs,
             &self.protocols,
-            cid_mgr.clone(),
+            Rc::clone(&cid_mgr) as _,
             initial.quic_version,
         );
 
@@ -526,8 +526,8 @@ impl Server {
                 last_timer: now,
                 active_attempt: Some(attempt_key.clone()),
             }));
-            cid_mgr.borrow_mut().set_connection(c.clone());
-            let previous_attempt = self.active_attempts.insert(attempt_key, c.clone());
+            cid_mgr.borrow_mut().set_connection(Rc::clone(&c));
+            let previous_attempt = self.active_attempts.insert(attempt_key, Rc::clone(&c));
             debug_assert!(previous_attempt.is_none());
             self.process_connection(c, Some(dgram), now)
         } else {
@@ -679,7 +679,7 @@ impl PartialEq for ActiveConnectionRef {
 impl Eq for ActiveConnectionRef {}
 
 struct ServerConnectionIdManager {
-    c: Option<StateRef>,
+    c: Weak<RefCell<ServerConnectionState>>,
     connections: ConnectionTableRef,
     cid_manager: CidMgr,
     saved_cids: Vec<ConnectionId>,
@@ -687,23 +687,17 @@ struct ServerConnectionIdManager {
 
 impl ServerConnectionIdManager {
     pub fn set_connection(&mut self, c: StateRef) {
-        self.c = Some(c);
         let saved = std::mem::replace(&mut self.saved_cids, Vec::with_capacity(0));
         for cid in saved {
             qtrace!("ServerConnectionIdManager inserting saved cid {}", cid);
-            self.insert_cid(cid);
+            self.insert_cid(cid, Rc::clone(&c));
         }
+        self.c = Rc::downgrade(&c);
     }
 
-    fn insert_cid(&mut self, cid: ConnectionId) {
+    fn insert_cid(&mut self, cid: ConnectionId, rc: StateRef) {
         debug_assert!(!cid.is_empty());
-        let v = self
-            .connections
-            .borrow_mut()
-            .insert(cid, self.c.as_ref().unwrap().clone());
-        if let Some(v) = v {
-            debug_assert!(Rc::ptr_eq(&v, self.c.as_ref().unwrap()));
-        }
+        self.connections.borrow_mut().insert(cid, rc);
     }
 }
 
@@ -716,9 +710,11 @@ impl ConnectionIdDecoder for ServerConnectionIdManager {
 impl ConnectionIdManager for ServerConnectionIdManager {
     fn generate_cid(&mut self) -> ConnectionId {
         let cid = self.cid_manager.borrow_mut().generate_cid();
-        if self.c.is_some() {
-            self.insert_cid(cid.clone());
+        if let Some(rc) = self.c.upgrade() {
+            self.insert_cid(cid.clone(), rc);
         } else {
+            // This function can be called before the connection is set.
+            // So save any connection IDs until that hookup happens.
             qtrace!("ServerConnectionIdManager saving cid {}", cid);
             self.saved_cids.push(cid.clone());
         }

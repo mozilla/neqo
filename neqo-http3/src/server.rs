@@ -444,7 +444,7 @@ mod tests {
         assert_eq!(sent, Ok(1));
         let out1 = neqo_trans_conn.process(None, now());
         let out2 = hconn.process(out1.dgram(), now());
-        neqo_trans_conn.process(out2.dgram(), now());
+        let _ = neqo_trans_conn.process(out2.dgram(), now());
 
         // assert no error occured.
         assert_not_closed(&mut hconn);
@@ -542,9 +542,9 @@ mod tests {
         let _ = peer_conn.stream_send(new_stream_id, &[0x41, 0x19, 0x4, 0x4, 0x6, 0x0, 0x8, 0x0]);
         let out = peer_conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
-        peer_conn.process(out.dgram(), now());
+        let _ = peer_conn.process(out.dgram(), now());
         let out = hconn.process(None, now());
-        peer_conn.process(out.dgram(), now());
+        let _ = peer_conn.process(out.dgram(), now());
 
         // check for stop-sending with Error::HttpStreamCreation.
         let mut stop_sending_event_found = false;
@@ -573,7 +573,7 @@ mod tests {
         let _ = peer_conn.stream_send(push_stream_id, &[0x1]);
         let out = peer_conn.process(None, now());
         let out = hconn.process(out.dgram(), now());
-        peer_conn.process(out.dgram(), now());
+        let _ = peer_conn.conn.process(out.dgram(), now());
         assert_closed(&mut hconn, &Error::HttpStreamCreation);
     }
 
