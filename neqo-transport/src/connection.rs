@@ -2529,6 +2529,7 @@ mod tests {
     use std::convert::TryInto;
 
     use neqo_common::matches;
+    use neqo_crypto::constants::TLS_CHACHA20_POLY1305_SHA256;
     use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
 
@@ -5351,6 +5352,23 @@ mod tests {
             now(),
         );
         assert_eq!(1, client.stats().dropped_rx);
+    }
+
+    /// Run a single ChaCha20-Poly1305 test and get a PTO.
+    #[test]
+    fn chacha20poly1305() {
+        let mut server = default_server();
+        let mut client = Connection::new_client(
+            test_fixture::DEFAULT_SERVER_NAME,
+            test_fixture::DEFAULT_ALPN,
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+            loopback(),
+            loopback(),
+            QuicVersion::default(),
+        )
+        .expect("create a default client");
+        client.set_ciphers(&[TLS_CHACHA20_POLY1305_SHA256]).unwrap();
+        connect_force_idle(&mut client, &mut server);
     }
 
     /// Test that a client can handle a stateless reset correctly.
