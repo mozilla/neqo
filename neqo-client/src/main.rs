@@ -10,10 +10,13 @@
 use qlog::QlogStreamer;
 
 use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
-use neqo_crypto::{init, AuthenticationStatus, Cipher, TLS_CHACHA20_POLY1305_SHA256};
+use neqo_crypto::{
+    constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
+    init, AuthenticationStatus, Cipher,
+};
 use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{FixedConnectionIdManager, QuicVersion};
+use neqo_transport::{Connection, FixedConnectionIdManager, QuicVersion};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -34,6 +37,7 @@ pub enum ClientError {
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
     QlogError,
+    TransportError(neqo_transport::Error),
 }
 
 impl From<io::Error> for ClientError {
@@ -54,20 +58,27 @@ impl From<qlog::Error> for ClientError {
     }
 }
 
+impl From<neqo_transport::Error> for ClientError {
+    fn from(err: neqo_transport::Error) -> Self {
+        Self::TransportError(err)
+    }
+}
+
 type Res<T> = Result<T, ClientError>;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "neqo-client",
-    about = "A basic QUIC HTTP/0.9 and HTTP3 client."
+    about = "A basic QUIC HTTP/0.9 and HTTP/3 client."
 )]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3-29")]
+    #[structopt(short = "a", long, default_value = "h3-29", number_of_values = 1)]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP/3 no matter what the ALPN says.
     alpn: String,
 
+    #[structopt(required = true, min_values = 1)]
     urls: Vec<Url>,
 
     #[structopt(short = "m", default_value = "GET")]
@@ -123,6 +134,25 @@ pub struct Args {
     /// Client attemps to resume connections when there are multiple connections made.
     /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
     resume: bool,
+
+    #[structopt(short = "c", long, number_of_values = 1)]
+    /// The set of TLS cipher suites to enable.
+    /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
+    ciphers: Vec<String>,
+}
+
+impl Args {
+    fn get_ciphers(&self) -> Vec<Cipher> {
+        self.ciphers
+            .iter()
+            .filter_map(|c| match c.as_str() {
+                "TLS_AES_128_GCM_SHA256" => Some(TLS_AES_128_GCM_SHA256),
+                "TLS_AES_256_GCM_SHA384" => Some(TLS_AES_256_GCM_SHA384),
+                "TLS_CHACHA20_POLY1305_SHA256" => Some(TLS_CHACHA20_POLY1305_SHA256),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 trait Handler {
@@ -351,7 +381,7 @@ fn client(
     socket: UdpSocket,
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
-    origin: &str,
+    hostname: &str,
     urls: &[Url],
 ) -> Res<()> {
     let quic_protocol = match args.alpn.as_str() {
@@ -361,21 +391,27 @@ fn client(
         _ => QuicVersion::default(),
     };
 
-    let mut client = Http3Client::new(
-        origin,
+    let mut transport = Connection::new_client(
+        hostname,
         &[&args.alpn],
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
         remote_addr,
+        quic_protocol,
+    )?;
+    let ciphers = args.get_ciphers();
+    if !ciphers.is_empty() {
+        transport.enable_ciphers(&ciphers)?;
+    }
+    let mut client = Http3Client::new_with_conn(
+        transport,
         QpackSettings {
             max_table_size_encoder: args.max_table_size_encoder,
             max_table_size_decoder: args.max_table_size_decoder,
             max_blocked_streams: args.max_blocked_streams,
         },
-        quic_protocol,
-    )
-    .expect("must succeed");
-    client.set_qlog(qlog_new(args, origin)?);
+    );
+    client.set_qlog(qlog_new(args, hostname)?);
     // Temporary here to help out the type inference engine
     let mut h = PreConnectHandler {};
     process_loop(
@@ -451,10 +487,6 @@ fn main() -> Res<()> {
 
     let mut args = Args::from_args();
 
-    let mut resumption_test = false;
-
-    let mut ciphers: Option<&[Cipher]> = None;
-
     if args.qns_mode {
         match env::var("TESTCASE") {
             Ok(s) if s == "http3" => {}
@@ -468,7 +500,6 @@ fn main() -> Res<()> {
                 }
                 args.use_old_http = true;
                 args.resume = true;
-                resumption_test = true;
             }
             Ok(s) if s == "multiconnect" => {
                 args.use_old_http = true;
@@ -476,7 +507,9 @@ fn main() -> Res<()> {
             }
             Ok(s) if s == "chacha20" => {
                 args.use_old_http = true;
-                ciphers = Some(&[TLS_CHACHA20_POLY1305_SHA256]);
+                args.ciphers.clear();
+                args.ciphers
+                    .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
             }
             Ok(_) => exit(127),
             Err(_) => exit(1),
@@ -537,7 +570,7 @@ fn main() -> Res<()> {
                 &urls,
             )?;
         } else if !args.download_in_series {
-            let token = if resumption_test {
+            let token = if args.resume {
                 // Download first URL using a separate connection, save the token and use it for
                 // the remaining URLs
                 if urls.len() < 2 {
@@ -555,7 +588,6 @@ fn main() -> Res<()> {
                     &format!("{}", host),
                     &[first_url],
                     None,
-                    ciphers,
                 )?
             } else {
                 None
@@ -569,7 +601,6 @@ fn main() -> Res<()> {
                 &format!("{}", host),
                 &urls,
                 token,
-                ciphers,
             )?;
         } else {
             let mut token: Option<Vec<u8>> = None;
@@ -583,7 +614,6 @@ fn main() -> Res<()> {
                     &format!("{}", host),
                     &[url],
                     token,
-                    ciphers,
                 )?;
             }
         }
@@ -608,7 +638,7 @@ mod old {
     use super::{qlog_new, Res};
 
     use neqo_common::{matches, Datagram};
-    use neqo_crypto::{AuthenticationStatus, Cipher};
+    use neqo_crypto::AuthenticationStatus;
     use neqo_transport::{
         Connection, ConnectionEvent, Error, FixedConnectionIdManager, Output, QuicVersion, State,
         StreamType,
@@ -808,7 +838,6 @@ mod old {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn old_client(
         args: &Args,
         socket: &UdpSocket,
@@ -817,7 +846,6 @@ mod old {
         origin: &str,
         urls: &[Url],
         token: Option<Vec<u8>>,
-        ciphers: Option<&[Cipher]>,
     ) -> Res<Option<Vec<u8>>> {
         let (quic_protocol, alpn) = match args.alpn.as_str() {
             "hq-27" => (QuicVersion::Draft27, "hq-27"),
@@ -832,17 +860,15 @@ mod old {
             local_addr,
             remote_addr,
             quic_protocol,
-        )
-        .expect("must succeed");
+        )?;
 
         if let Some(tok) = token {
-            client
-                .set_resumption_token(Instant::now(), &tok)
-                .expect("should set token");
+            client.set_resumption_token(Instant::now(), &tok)?;
         }
 
-        if let Some(cip) = ciphers {
-            client.set_ciphers(cip).expect("Cannot set ciphers");
+        let ciphers = args.get_ciphers();
+        if !ciphers.is_empty() {
+            client.set_ciphers(&ciphers)?;
         }
 
         client.set_qlog(qlog_new(args, origin)?);
