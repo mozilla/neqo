@@ -135,6 +135,7 @@ impl Server {
         anti_replay: AntiReplay,
         cid_manager: CidMgr,
     ) -> Res<Self> {
+        let validation = AddressValidation::new(now, ValidateAddress::Never)?;
         Ok(Self {
             certs: certs.iter().map(|x| String::from(x.as_ref())).collect(),
             protocols: protocols.iter().map(|x| String::from(x.as_ref())).collect(),
@@ -145,7 +146,7 @@ impl Server {
             active: HashSet::default(),
             waiting: VecDeque::default(),
             timers: Timer::new(now, TIMER_GRANULARITY, TIMER_CAPACITY),
-            address_validation: Rc::new(RefCell::new(AddressValidation::new(now)?)),
+            address_validation: Rc::new(RefCell::new(validation)),
             qlog_dir: None,
         })
     }
@@ -155,10 +156,9 @@ impl Server {
         self.qlog_dir = dir;
     }
 
-    pub fn set_validation(&mut self, validate: ValidateAddress) {
-        self.address_validation
-            .borrow_mut()
-            .set_validation(validate);
+    /// Set the policy for address validation.
+    pub fn set_validation(&mut self, v: ValidateAddress) {
+        self.address_validation.borrow_mut().set_validation(v);
     }
 
     fn remove_timer(&mut self, c: &StateRef) {

@@ -6,7 +6,7 @@
 
 // This file implements functions necessary for address validation.
 
-use neqo_common::{qwarn, Decoder, Encoder, Role};
+use neqo_common::{qinfo, qtrace, Decoder, Encoder, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     selfencrypt::SelfEncrypt,
@@ -30,6 +30,8 @@ const TOKEN_IDENTIFIER_NEW_TOKEN: &[u8] = &[0xad, 0x9a, 0x8b, 0x8d, 0x86];
 /// This should be the same as the value of MAX_TICKETS in neqo-crypto.
 const MAX_NEW_TOKEN: usize = 4;
 
+/// `ValidateAddress` determines what sort of address validation is performed.
+/// In short, this determines when a Retry packet is sent.
 #[derive(Debug, PartialEq, Eq)]
 pub enum ValidateAddress {
     /// Require address validation never.
@@ -48,8 +50,8 @@ pub enum AddressValidationResult {
 }
 
 pub struct AddressValidation {
-    /// When a Retry is sent.
-    require_retry: ValidateAddress,
+    /// What sort of validation is performed.
+    validation: ValidateAddress,
     /// A self-encryption object used for protecting Retry tokens.
     self_encrypt: SelfEncrypt,
     /// When this object was created.
@@ -57,9 +59,9 @@ pub struct AddressValidation {
 }
 
 impl AddressValidation {
-    pub fn new(now: Instant) -> Res<Self> {
+    pub fn new(now: Instant, validation: ValidateAddress) -> Res<Self> {
         Ok(Self {
-            require_retry: ValidateAddress::Never,
+            validation,
             self_encrypt: SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256)?,
             start_time: now,
         })
@@ -138,8 +140,9 @@ impl AddressValidation {
         self.generate_token(None, peer_address, now)
     }
 
-    pub fn set_validation(&mut self, retry: ValidateAddress) {
-        self.require_retry = retry;
+    pub fn set_validation(&mut self, validation: ValidateAddress) {
+        qtrace!("AddressValidation {:p}: set to {:?}", self, validation);
+        self.validation = validation;
     }
 
     /// Decrypts `token` and returns the connection ID it contains.
@@ -164,6 +167,7 @@ impl AddressValidation {
             Some(d) => {
                 let end = self.start_time + Duration::from_millis(d);
                 if end < now {
+                    qtrace!("Expired token: {:?} vs. {:?}", end, now);
                     return None;
                 }
             }
@@ -192,15 +196,24 @@ impl AddressValidation {
         peer_address: SocketAddr,
         now: Instant,
     ) -> AddressValidationResult {
+        qtrace!(
+            "AddressValidation {:p}: validate {:?}",
+            self,
+            self.validation
+        );
+
         if token.is_empty() {
-            if self.require_retry == ValidateAddress::Never {
+            if self.validation == ValidateAddress::Never {
+                qinfo!("AddressValidation: no token; accepting");
                 return AddressValidationResult::Pass;
             } else {
+                qinfo!("AddressValidation: no token; validating");
                 return AddressValidationResult::Validate;
             }
         }
         if token.len() <= TOKEN_IDENTIFIER_RETRY.len() {
             // Treat bad tokens strictly.
+            qinfo!("AddressValidation: too short token");
             return AddressValidationResult::Invalid;
         }
         let retry = Self::is_likely_retry(token);
@@ -211,15 +224,18 @@ impl AddressValidation {
             if retry {
                 // This is from Retry, so we should have an ODCID >= 8.
                 if cid.len() >= 8 {
+                    qinfo!("AddressValidation: valid Retry token for {}", cid);
                     AddressValidationResult::ValidRetry(cid)
                 } else {
                     panic!("AddressValidation: Retry token with small CID {}", cid);
                 }
             } else if cid.is_empty() {
                 // An empty connection ID means NEW_TOKEN.
-                if self.require_retry == ValidateAddress::Always {
+                if self.validation == ValidateAddress::Always {
+                    qinfo!("AddressValidation: valid NEW_TOKEN token; validating again");
                     AddressValidationResult::Validate
                 } else {
+                    qinfo!("AddressValidation: valid NEW_TOKEN token; accepting");
                     AddressValidationResult::Pass
                 }
             } else {
@@ -229,14 +245,17 @@ impl AddressValidation {
             // From here on, we have a token that we couldn't decrypt.
             // We've either lost the keys or we've received junk.
             if retry {
-                // If this looked like a Retry, so treat it as being bad.
+                // If this looked like a Retry, treat it as being bad.
+                qinfo!("AddressValidation: invalid Retry token; rejecting");
                 AddressValidationResult::Invalid
-            } else if self.require_retry == ValidateAddress::Never {
+            } else if self.validation == ValidateAddress::Never {
                 // We don't require validation, so OK.
+                qinfo!("AddressValidation: invalid NEW_TOKEN token; accepting");
                 AddressValidationResult::Pass
             } else {
                 // This might be an invalid NEW_TOKEN token, or a valid one
                 // for which we have since lost the keys.  Check again.
+                qinfo!("AddressValidation: invalid NEW_TOKEN token; validating again");
                 AddressValidationResult::Validate
             }
         }
@@ -270,6 +289,13 @@ impl NewTokenState {
     /// If this is a server, panic.
     pub fn save_token(&mut self, token: Vec<u8>) {
         if let Self::Client(ref mut tokens) = self {
+            for t in tokens.iter().rev() {
+                if t == &token {
+                    qinfo!("NewTokenState discarding duplicate NEW_TOKEN");
+                    return;
+                }
+            }
+
             if tokens.len() >= MAX_NEW_TOKEN {
                 tokens.remove(0);
             }
@@ -355,7 +381,7 @@ impl NewTokenSender {
 
     pub fn get_frame(&mut self, space: usize) -> Option<(Frame, Option<RecoveryToken>)> {
         for t in self.tokens.iter_mut() {
-            if t.fits(space) {
+            if t.needs_sending && t.fits(space) {
                 t.needs_sending = false;
                 return Some((
                     Frame::NewToken {

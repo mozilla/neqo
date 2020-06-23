@@ -33,3 +33,15 @@ pub fn assert_coalesced_0rtt(payload: &[u8]) {
 pub fn assert_retry(payload: &[u8]) {
     assert_eq!(payload[0] & 0b1111_0000, 0b1111_0000);
 }
+
+pub fn assert_initial(payload: &[u8], expect_token: bool) {
+    assert_eq!(payload[0] & 0b1111_0000, 0b1100_0000);
+
+    // Check that it has a token.
+    let mut dec = Decoder::from(payload);
+    dec.skip(5); // Skip type and version.
+    dec.skip_vec(1); // Destination Connection ID.
+    dec.skip_vec(1); // Source Connection ID.
+    let token = dec.decode_vvec().unwrap();
+    assert_eq!(expect_token, !token.is_empty());
+}
