@@ -636,7 +636,7 @@ mod old {
 
     use super::{qlog_new, Res};
 
-    use neqo_common::{matches, Datagram};
+    use neqo_common::Datagram;
     use neqo_crypto::AuthenticationStatus;
     use neqo_transport::{
         Connection, ConnectionEvent, Error, FixedConnectionIdManager, Output, QuicVersion, State,
@@ -645,29 +645,25 @@ mod old {
 
     use super::{emit_datagram, get_output_file, Args};
 
-    trait HandlerOld {
-        fn handle(&mut self, client: &mut Connection) -> Res<bool>;
-    }
-
-    struct PreConnectHandlerOld {}
-    impl HandlerOld for PreConnectHandlerOld {
-        fn handle(&mut self, client: &mut Connection) -> Res<bool> {
-            let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
-            if client.events().any(authentication_needed) {
-                client.authenticated(AuthenticationStatus::Ok, Instant::now());
-            }
-            Ok(State::Connected != *dbg!(client.state()))
-        }
-    }
-
-    struct PostConnectHandlerOld<'a> {
+    struct HandlerOld<'a> {
         streams: HashMap<u64, Option<File>>,
         url_queue: VecDeque<Url>,
         all_paths: Vec<PathBuf>,
         args: &'a Args,
     }
 
-    impl<'a> PostConnectHandlerOld<'a> {
+    impl<'a> HandlerOld<'a> {
+        fn download_urls(&mut self, client: &mut Connection) {
+            loop {
+                if self.url_queue.is_empty() {
+                    break;
+                }
+                if !self.download_next(client) {
+                    break;
+                }
+            }
+        }
+
         fn download_next(&mut self, client: &mut Connection) -> bool {
             let url = self
                 .url_queue
@@ -686,8 +682,8 @@ mod old {
                     self.streams.insert(client_stream_id, out_file);
                     true
                 }
-                Err(Error::StreamLimitError) => {
-                    println!("Cannot create stream (StreamLimitError)");
+                e @ Err(Error::StreamLimitError) | e @ Err(Error::ConnectionState) => {
+                    println!("Cannot create stream {:?}", e);
                     self.url_queue.push_front(url);
                     false
                 }
@@ -696,14 +692,14 @@ mod old {
                 }
             }
         }
-    }
 
-    // This is a bit fancier than actually needed.
-    impl HandlerOld for PostConnectHandlerOld<'_> {
         fn handle(&mut self, client: &mut Connection) -> Res<bool> {
             let mut data = vec![0; 4000];
             while let Some(event) = client.next_event() {
                 match event {
+                    ConnectionEvent::AuthenticationNeeded => {
+                        client.authenticated(AuthenticationStatus::Ok, Instant::now());
+                    }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         let out_file = self.streams.get_mut(&stream_id);
                         if out_file.is_none() {
@@ -750,15 +746,14 @@ mod old {
                     ConnectionEvent::SendStreamCreatable { stream_type } => {
                         println!("stream {:?} creatable", stream_type);
                         if stream_type == StreamType::BiDi {
-                            loop {
-                                if self.url_queue.is_empty() {
-                                    break;
-                                }
-                                if !self.download_next(client) {
-                                    break;
-                                }
-                            }
+                            self.download_urls(client);
                         }
+                    }
+                    ConnectionEvent::StateChange(State::WaitInitial)
+                    | ConnectionEvent::StateChange(State::Handshaking)
+                    | ConnectionEvent::StateChange(State::Connected) => {
+                        println!("{:?}", event);
+                        self.download_urls(client);
                     }
                     _ => {
                         println!("Unexpected event {:?}", event);
@@ -775,7 +770,7 @@ mod old {
         remote_addr: &SocketAddr,
         socket: &UdpSocket,
         client: &mut Connection,
-        handler: &mut dyn HandlerOld,
+        handler: &mut HandlerOld,
     ) -> Res<State> {
         let buf = &mut [0u8; 2048];
         loop {
@@ -871,27 +866,15 @@ mod old {
         }
 
         client.set_qlog(qlog_new(args, origin)?);
-        // Temporary here to help out the type inference engine
-        let mut h = PreConnectHandlerOld {};
-        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
-        let mut h2 = PostConnectHandlerOld {
+        let mut h = HandlerOld {
             streams: HashMap::new(),
             url_queue: VecDeque::from(urls.to_vec()),
             all_paths: Vec::new(),
             args: &args,
         };
 
-        loop {
-            if h2.url_queue.is_empty() {
-                break;
-            }
-            if !h2.download_next(&mut client) {
-                break;
-            }
-        }
-
-        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h2)?;
+        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
         Ok(if args.resume {
             client.resumption_token()
