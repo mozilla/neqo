@@ -537,7 +537,7 @@ impl CryptoDxAppData {
     pub fn next(&self) -> Res<Self> {
         if self.dx.epoch == usize::max_value() {
             // Guard against too many key updates.
-            return Err(Error::KeysNotFound);
+            return Err(Error::KeysExhausted);
         }
         let next_secret = Self::update_secret(self.cipher, &self.next_secret)?;
         Ok(Self {

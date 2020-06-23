@@ -420,9 +420,9 @@ impl Http3Client {
                     }
                 },
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id) {
+                    if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id.as_u64()) {
                         if s.is_state_sending_data() {
-                            self.events.data_writable(stream_id);
+                            self.events.data_writable(stream_id.as_u64());
                         }
                     }
                 }
@@ -801,7 +801,8 @@ mod tests {
             let mut request = false;
             while let Some(e) = self.conn.next_event() {
                 match e {
-                    ConnectionEvent::NewStream { stream_id, .. } => {
+                    ConnectionEvent::NewStream { stream_id }
+                    | ConnectionEvent::SendStreamWritable { stream_id } => {
                         if expect_request {
                             assert!(matches!(stream_id.as_u64(), 2 | 6 | 10 | 0));
                         } else {
@@ -836,9 +837,6 @@ mod tests {
                         } else {
                             panic!("unexpected event");
                         }
-                    }
-                    ConnectionEvent::SendStreamWritable { stream_id } => {
-                        assert!(matches!(stream_id, 2 | 6 | 10));
                     }
                     ConnectionEvent::StateChange(State::Connected) => connected = true,
                     ConnectionEvent::StateChange(_) => {}
