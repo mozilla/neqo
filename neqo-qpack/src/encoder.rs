@@ -375,7 +375,7 @@ impl QPackEncoder {
             }
         }
 
-        encoded_h.fix_header_block_prefix();
+        encoded_h.encode_header_block_prefix();
 
         if !stream_is_blocker {
             // The streams was not a blocker, check if the stream is a blocker now.
