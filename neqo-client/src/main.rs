@@ -9,17 +9,17 @@
 
 use qlog::QlogStreamer;
 
-use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
+use neqo_common::{self as common, hex, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, AuthenticationStatus, Cipher,
 };
-use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_http3::{self, Error, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{Connection, FixedConnectionIdManager, QuicVersion};
+use neqo_transport::{Connection, Error as TransportError, FixedConnectionIdManager, QuicVersion};
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
@@ -154,10 +154,6 @@ impl Args {
     }
 }
 
-trait Handler {
-    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> Res<bool>;
-}
-
 fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) -> io::Result<()> {
     if let Some(d) = d {
         let sent = socket.send(&d[..])?;
@@ -214,8 +210,7 @@ fn process_loop(
     remote_addr: &SocketAddr,
     socket: &UdpSocket,
     client: &mut Http3Client,
-    handler: &mut dyn Handler,
-    args: &Args,
+    handler: &mut Handler,
 ) -> Res<neqo_http3::Http3State> {
     let buf = &mut [0u8; 2048];
     loop {
@@ -223,7 +218,7 @@ fn process_loop(
             return Ok(client.state());
         }
 
-        let mut exiting = !handler.handle(args, client)?;
+        let mut exiting = !handler.handle(client)?;
 
         loop {
             let output = client.process_output(Instant::now());
@@ -274,28 +269,68 @@ fn process_loop(
     }
 }
 
-struct PreConnectHandler {}
-impl Handler for PreConnectHandler {
-    fn handle(&mut self, _args: &Args, client: &mut Http3Client) -> Res<bool> {
-        let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
-        if client.events().any(authentication_needed) {
-            client.authenticated(AuthenticationStatus::Ok, Instant::now());
-        }
-        Ok(Http3State::Connected != client.state())
-    }
-}
-
-#[derive(Default)]
-struct PostConnectHandler {
+struct Handler<'a> {
     streams: HashMap<u64, Option<File>>,
+    url_queue: VecDeque<Url>,
+    all_paths: Vec<PathBuf>,
+    args: &'a Args,
 }
 
-// This is a bit fancier than actually needed.
-impl Handler for PostConnectHandler {
-    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> Res<bool> {
+impl<'a> Handler<'a> {
+    fn download_urls(&mut self, client: &mut Http3Client) {
+        loop {
+            if self.url_queue.is_empty() {
+                break;
+            }
+            if !self.download_next(client) {
+                break;
+            }
+        }
+    }
+
+    fn download_next(&mut self, client: &mut Http3Client) -> bool {
+        let url = self
+            .url_queue
+            .pop_front()
+            .expect("download_next called with empty queue");
+        match client.fetch(
+            &self.args.method,
+            &url.scheme(),
+            &url.host_str().unwrap(),
+            &url.path(),
+            &to_headers(&self.args.header),
+        ) {
+            Ok(client_stream_id) => {
+                println!(
+                    "Successfully created stream id {} for {}",
+                    client_stream_id, url
+                );
+                let _ = client.stream_close_send(client_stream_id);
+
+                let out_file = get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
+
+                self.streams.insert(client_stream_id, out_file);
+                true
+            }
+            e @ Err(Error::TransportError(TransportError::StreamLimitError))
+            | e @ Err(Error::Unavailable) => {
+                println!("Cannot create stream {:?}", e);
+                self.url_queue.push_front(url);
+                false
+            }
+            Err(e) => {
+                panic!("Can't create stream {}", e);
+            }
+        }
+    }
+
+    fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {
         let mut data = vec![0; 4000];
         while let Some(event) = client.next_event() {
             match event {
+                Http3ClientEvent::AuthenticationNeeded => {
+                    client.authenticated(AuthenticationStatus::Ok, Instant::now());
+                }
                 Http3ClientEvent::HeaderReady {
                     stream_id,
                     headers,
@@ -327,7 +362,7 @@ impl Handler for PostConnectHandler {
                                 if sz > 0 {
                                     out_file.write_all(&data[..sz])?;
                                 }
-                            } else if !args.output_read_data {
+                            } else if !self.args.output_read_data {
                                 println!("READ[{}]: {} bytes", stream_id, sz);
                             } else if let Ok(txt) = String::from_utf8(data.clone()) {
                                 println!("READ[{}]: {}", stream_id, txt);
@@ -346,13 +381,20 @@ impl Handler for PostConnectHandler {
 
                     if stream_done {
                         self.streams.remove(&stream_id);
-                        if self.streams.is_empty() {
+                        if self.streams.is_empty() && self.url_queue.is_empty() {
                             client.close(Instant::now(), 0, "kthxbye!");
                             return Ok(false);
                         }
                     }
                 }
-                _ => {}
+                Http3ClientEvent::StateChange(Http3State::Connected)
+                | Http3ClientEvent::RequestsCreatable => {
+                    println!("{:?}", event);
+                    self.download_urls(client);
+                }
+                _ => {
+                    println!("Unhandled event {:?}", event);
+                }
             }
         }
 
@@ -411,45 +453,15 @@ fn client(
         },
     );
     client.set_qlog(qlog_new(args, hostname)?);
-    // Temporary here to help out the type inference engine
-    let mut h = PreConnectHandler {};
-    process_loop(
-        &local_addr,
-        &remote_addr,
-        &socket,
-        &mut client,
-        &mut h,
-        &args,
-    )?;
 
-    let mut h2 = PostConnectHandler::default();
+    let mut h = Handler {
+        streams: HashMap::new(),
+        url_queue: VecDeque::from(urls.to_vec()),
+        all_paths: Vec::new(),
+        args: &args,
+    };
 
-    let mut open_paths = Vec::new();
-
-    for url in urls {
-        let client_stream_id = client.fetch(
-            &args.method,
-            &url.scheme(),
-            &url.host_str().unwrap(),
-            &url.path(),
-            &to_headers(&args.header),
-        )?;
-
-        let _ = client.stream_close_send(client_stream_id);
-
-        let out_file = get_output_file(url, &args.output_dir, &mut open_paths);
-
-        h2.streams.insert(client_stream_id, out_file);
-    }
-
-    process_loop(
-        &local_addr,
-        &remote_addr,
-        &socket,
-        &mut client,
-        &mut h2,
-        &args,
-    )?;
+    process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
     Ok(())
 }
@@ -645,14 +657,14 @@ mod old {
 
     use super::{emit_datagram, get_output_file, Args};
 
-    struct HandlerOld<'a> {
+    struct HandlerOld<'b> {
         streams: HashMap<u64, Option<File>>,
         url_queue: VecDeque<Url>,
         all_paths: Vec<PathBuf>,
-        args: &'a Args,
+        args: &'b Args,
     }
 
-    impl<'a> HandlerOld<'a> {
+    impl<'b> HandlerOld<'b> {
         fn download_urls(&mut self, client: &mut Connection) {
             loop {
                 if self.url_queue.is_empty() {
@@ -756,7 +768,7 @@ mod old {
                         self.download_urls(client);
                     }
                     _ => {
-                        println!("Unexpected event {:?}", event);
+                        println!("Unhandled event {:?}", event);
                     }
                 }
             }
