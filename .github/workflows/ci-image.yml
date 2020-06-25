@@ -1,0 +1,26 @@
+name: "Update CI Docker Image"
+
+on:
+  push:
+    branches:
+    - "master"
+    paths:
+    - "ci/**"
+
+jobs:
+  build:
+    name: "Update CI Docker Image"
+    runs-on: ubuntu-latest
+    steps:
+    - name: "Checkout"
+      uses: actions/checkout@v2
+
+    - name: "Build Image"
+      run: "docker build -t neqo-ci ci"
+
+    - name: "Publish Image"
+      # TODO(mt) if this is a tag (i.e., refs/tags/foo), then use that label
+      # rather than "latest".
+      run: |
+        docker login --username ${{ secrets.DOCKERHUB_USERNAME }} --password ${{ secrets.DOCKERHUB_TOKEN }}
+        docker push neqoquic/ci:latest
