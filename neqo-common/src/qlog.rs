@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
@@ -25,12 +25,15 @@ impl NeqoQlog {
     /// # Errors
     ///
     /// Will return `qlog::Error` if cannot write to the new log.
-    pub fn new(mut streamer: QlogStreamer, qlog_path: PathBuf) -> Result<Self, qlog::Error> {
+    pub fn new(
+        mut streamer: QlogStreamer,
+        qlog_path: impl AsRef<Path>,
+    ) -> Result<Self, qlog::Error> {
         streamer.start_log()?;
 
         Ok(Self {
             streamer,
-            qlog_path,
+            qlog_path: qlog_path.as_ref().to_owned(),
         })
     }
 
