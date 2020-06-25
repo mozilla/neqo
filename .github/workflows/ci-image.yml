@@ -13,18 +13,24 @@ jobs:
     - name: "Checkout"
       uses: actions/checkout@v2
 
-    - name: "Build Image"
-      run: "docker build -t neqo-ci ci"
+    - name: "Get Tag"
+      id: tag
+      run: |
+        ref="${{ github.ref }}"
+        if [ "$ref" = "refs/heads/master" ]; then
+          echo "::set-output name=tag::latest"
+        elif [ "${ref#refs/tags/}" != "$ref" ]; then
+          echo "::set-output name=tag::${ref#refs/tags/}"
+        else
+          echo "::set-output name=tag::"
+        fi
 
     - name: "Publish Latest"
-      if: ${{ github.ref == 'refs/heads/master' }}
-      run: |
-        docker login --username ${{ secrets.DOCKERHUB_USERNAME }} --password ${{ secrets.DOCKERHUB_TOKEN }}
-        docker push neqoquic/ci:latest
-
-    - name: "Publish Tag"
-      if: ${{ startsWith(github.ref, 'refs/tags/') }}
-      run: |
-        docker login --username ${{ secrets.DOCKERHUB_USERNAME }} --password ${{ secrets.DOCKERHUB_TOKEN }}
-        ref=${{ github.ref }}
-        docker push "neqoquic/ci:${ref#refs/tags/}"
+      uses: docker/build-push-action@v1
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        repository: neqoquic/ci
+        path: ci
+        tags: ${{ steps.tag.outputs.tag }}
+        push: ${{ steps.tag.outputs.tag != '' }}
