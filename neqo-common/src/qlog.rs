@@ -15,6 +15,7 @@ use qlog::{
 };
 
 use crate::Role;
+
 #[allow(clippy::module_name_repetitions)]
 pub struct NeqoQlog {
     qlog_path: PathBuf,

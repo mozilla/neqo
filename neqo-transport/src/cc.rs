@@ -109,18 +109,27 @@ impl CongestionControl {
             }
             if self.app_limited() {
                 // Do not increase congestion_window if application limited.
-                qlog::congestion_state_updated(&mut self.qlog.borrow_mut(), "application_limited");
+                qlog::congestion_state_updated(
+                    &mut self.qlog.borrow_mut(),
+                    qlog::CongestionState::ApplicationLimited,
+                );
                 continue;
             }
 
             if self.congestion_window < self.ssthresh {
                 self.congestion_window += pkt.size;
                 qinfo!([self], "slow start");
-                qlog::congestion_state_updated(&mut self.qlog.borrow_mut(), "slow_start");
+                qlog::congestion_state_updated(
+                    &mut self.qlog.borrow_mut(),
+                    qlog::CongestionState::SlowStart,
+                );
             } else {
                 self.congestion_window += (MAX_DATAGRAM_SIZE * pkt.size) / self.congestion_window;
                 qinfo!([self], "congestion avoidance");
-                qlog::congestion_state_updated(&mut self.qlog.borrow_mut(), "congestion_avoidance");
+                qlog::congestion_state_updated(
+                    &mut self.qlog.borrow_mut(),
+                    qlog::CongestionState::CongestionAvoidance,
+                );
             }
             qlog::metrics_updated(
                 &mut self.qlog.borrow_mut(),
@@ -251,7 +260,10 @@ impl CongestionControl {
                     QlogMetric::InRecovery(true),
                 ],
             );
-            qlog::congestion_state_updated(&mut self.qlog.borrow_mut(), "recovery");
+            qlog::congestion_state_updated(
+                &mut self.qlog.borrow_mut(),
+                qlog::CongestionState::Recovery,
+            );
         } else {
             qdebug!([self], "Cong event but already in recovery");
         }

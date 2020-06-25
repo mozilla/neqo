@@ -96,6 +96,27 @@ pub fn client_connection_started(maybe_qlog: &mut Option<NeqoQlog>, path: &Path)
     connection_started(maybe_qlog, path)
 }
 
+fn connection_started(maybe_qlog: &mut Option<NeqoQlog>, path: &Path) {
+    if let Some(qlog) = maybe_qlog {
+        let res = qlog.stream().add_event(Event::connection_started(
+            if path.local_address().ip().is_ipv4() {
+                "ipv4".into()
+            } else {
+                "ipv6".into()
+            },
+            format!("{}", path.local_address().ip()),
+            format!("{}", path.remote_address().ip()),
+            Some("QUIC".into()),
+            path.local_address().port().into(),
+            path.remote_address().port().into(),
+            Some(format!("{:x}", QuicVersion::default().as_u32())),
+            Some(format!("{}", path.local_cid())),
+            Some(format!("{}", path.remote_cid())),
+        ));
+        handle_qlog_result(maybe_qlog, res)
+    }
+}
+
 pub fn packet_sent(
     maybe_qlog: &mut Option<NeqoQlog>,
     pt: PacketType,
@@ -171,40 +192,38 @@ pub fn packet_received(maybe_qlog: &mut Option<NeqoQlog>, payload: &DecryptedPac
     }
 }
 
-fn connection_started(maybe_qlog: &mut Option<NeqoQlog>, path: &Path) {
-    if let Some(qlog) = maybe_qlog {
-        let res = qlog.stream().add_event(Event::connection_started(
-            if path.local_address().ip().is_ipv4() {
-                "ipv4".into()
-            } else {
-                "ipv6".into()
-            },
-            format!("{}", path.local_address().ip()),
-            format!("{}", path.remote_address().ip()),
-            Some("QUIC".into()),
-            path.local_address().port().into(),
-            path.remote_address().port().into(),
-            Some(format!("{:x}", QuicVersion::default().as_u32())),
-            Some(format!("{}", path.local_cid())),
-            Some(format!("{}", path.remote_cid())),
-        ));
-        handle_qlog_result(maybe_qlog, res)
+thread_local!(static CURR_CONG_STATE: RefCell<Option<CongestionState>> = RefCell::new(None));
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CongestionState {
+    ApplicationLimited,
+    SlowStart,
+    CongestionAvoidance,
+    Recovery,
+}
+
+impl CongestionState {
+    fn to_str(&self) -> &str {
+        match self {
+            Self::ApplicationLimited => "application_limited",
+            Self::SlowStart => "slow_start",
+            Self::CongestionAvoidance => "congestion_avoidance",
+            Self::Recovery => "recovery",
+        }
     }
 }
 
-thread_local!(static CURR_CONG_STATE: RefCell<Option<String>> = RefCell::new(None));
-
-pub fn congestion_state_updated(maybe_qlog: &mut Option<NeqoQlog>, new_state: &str) {
+pub fn congestion_state_updated(maybe_qlog: &mut Option<NeqoQlog>, new_state: CongestionState) {
     if let Some(qlog) = maybe_qlog {
         let res = CURR_CONG_STATE.with(|ccs| {
             let mut b_ccs = ccs.borrow_mut();
 
-            if b_ccs.as_ref().map(|s| &**s) != Some(new_state) {
+            if *b_ccs != Some(new_state) {
                 let res = qlog.stream().add_event(Event::congestion_state_updated(
-                    b_ccs.clone(),
-                    new_state.to_string(),
+                    b_ccs.map(|ccs| ccs.to_str().to_owned()),
+                    new_state.to_str().to_owned(),
                 ));
-                *b_ccs = Some(new_state.to_string());
+                *b_ccs = Some(new_state);
                 res
             } else {
                 Ok(false)
