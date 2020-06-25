@@ -4,6 +4,7 @@ on:
   push:
     paths:
     - "ci/**"
+    - ".github/workflows/ci-image.yml"
 
 jobs:
   build:
@@ -25,7 +26,7 @@ jobs:
           echo "::set-output name=tag::"
         fi
 
-    - name: "Publish Latest"
+    - name: "Publish to Dockerhub"
       uses: docker/build-push-action@v1
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
