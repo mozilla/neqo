@@ -6,7 +6,6 @@
 
 // Functions that handle capturing QLOG traces.
 
-use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::string::String;
 use std::time::Duration;
@@ -192,44 +191,39 @@ pub fn packet_received(maybe_qlog: &mut Option<NeqoQlog>, payload: &DecryptedPac
     }
 }
 
-thread_local!(static CURR_CONG_STATE: RefCell<Option<CongestionState>> = RefCell::new(None));
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CongestionState {
-    ApplicationLimited,
     SlowStart,
     CongestionAvoidance,
+    ApplicationLimited,
     Recovery,
 }
 
 impl CongestionState {
     fn to_str(&self) -> &str {
         match self {
-            Self::ApplicationLimited => "application_limited",
             Self::SlowStart => "slow_start",
             Self::CongestionAvoidance => "congestion_avoidance",
+            Self::ApplicationLimited => "application_limited",
             Self::Recovery => "recovery",
         }
     }
 }
 
-pub fn congestion_state_updated(maybe_qlog: &mut Option<NeqoQlog>, new_state: CongestionState) {
+pub fn congestion_state_updated(
+    maybe_qlog: &mut Option<NeqoQlog>,
+    curr_state: &mut CongestionState,
+    new_state: CongestionState,
+) {
     if let Some(qlog) = maybe_qlog {
-        let res = CURR_CONG_STATE.with(|ccs| {
-            let mut b_ccs = ccs.borrow_mut();
-
-            if *b_ccs != Some(new_state) {
-                let res = qlog.stream().add_event(Event::congestion_state_updated(
-                    b_ccs.map(|ccs| ccs.to_str().to_owned()),
-                    new_state.to_str().to_owned(),
-                ));
-                *b_ccs = Some(new_state);
-                res
-            } else {
-                Ok(false)
-            }
-        });
-        handle_qlog_result(maybe_qlog, res);
+        if *curr_state != new_state {
+            let res = qlog.stream().add_event(Event::congestion_state_updated(
+                Some(curr_state.to_str().to_owned()),
+                new_state.to_str().to_owned(),
+            ));
+            handle_qlog_result(maybe_qlog, res);
+            *curr_state = new_state;
+        }
     }
 }
 
