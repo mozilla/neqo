@@ -78,7 +78,6 @@ pub struct Args {
     /// This client still only does HTTP/3 no matter what the ALPN says.
     alpn: String,
 
-    #[structopt(required = true, min_values = 1)]
     urls: Vec<Url>,
 
     #[structopt(short = "m", default_value = "GET")]
