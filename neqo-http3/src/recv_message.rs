@@ -157,17 +157,6 @@ impl RecvMessage {
         }
     }
 
-    fn recv_frame(&mut self, conn: &mut Connection) -> Res<(Option<HFrame>, bool)> {
-        qtrace!([self], "receiving frame header");
-        let fin = self.frame_reader.receive(conn, self.stream_id)?;
-        if self.frame_reader.done() {
-            qdebug!([self], "A new frame has been received.");
-            Ok((Some(self.frame_reader.get_frame()?), fin))
-        } else {
-            Ok((None, fin))
-        }
-    }
-
     pub fn read_data(
         &mut self,
         conn: &mut Connection,
@@ -229,7 +218,7 @@ impl RecvMessage {
                 RecvMessageState::WaitingForResponseHeaders
                 | RecvMessageState::WaitingForData
                 | RecvMessageState::WaitingForFinAfterTrailers => {
-                    match self.recv_frame(conn)? {
+                    match self.frame_reader.receive(conn, self.stream_id)? {
                         (None, true) => {
                             self.set_state_to_close_pending();
                             break Ok(());
