@@ -238,35 +238,24 @@ impl Http3Connection {
     }
 
     fn recv_control(&mut self, conn: &mut Connection, stream_id: u64) -> Res<HandleReadableOutput> {
-        if self
-            .control_stream_remote
-            .receive_if_this_stream(conn, stream_id)?
-        {
-            qdebug!(
-                [self],
-                "The remote control stream ({}) is readable.",
-                stream_id
-            );
+        assert!(self.control_stream_remote.is_recv_stream(stream_id));
+        let mut control_frames = Vec::new();
 
-            let mut control_frames = Vec::new();
-
-            while self.control_stream_remote.frame_reader_done()
-                || self.control_stream_remote.recvd_fin()
-            {
-                if let Some(f) = self.handle_control_frame()? {
-                    control_frames.push(f);
+        loop {
+            match self.control_stream_remote.receive(conn)? {
+                Some(f) => {
+                    if let Some(f) = self.handle_control_frame(f)? {
+                        control_frames.push(f);
+                    }
                 }
-                self.control_stream_remote
-                    .receive_if_this_stream(conn, stream_id)?;
+                None => {
+                    if control_frames.is_empty() {
+                        break Ok(HandleReadableOutput::NoOutput);
+                    } else {
+                        break Ok(HandleReadableOutput::ControlFrames(control_frames));
+                    }
+                }
             }
-            if control_frames.is_empty() {
-                Ok(HandleReadableOutput::NoOutput)
-            } else {
-                Ok(HandleReadableOutput::ControlFrames(control_frames))
-            }
-        } else {
-            debug_assert!(false, "Must be a control stream");
-            Ok(HandleReadableOutput::NoOutput)
         }
     }
 
@@ -288,6 +277,11 @@ impl Http3Connection {
             qdebug!([label], "Request/response stream {} read.", stream_id);
             Ok(HandleReadableOutput::NoOutput)
         } else if self.control_stream_remote.is_recv_stream(stream_id) {
+            qdebug!(
+                [self],
+                "The remote control stream ({}) is readable.",
+                stream_id
+            );
             self.recv_control(conn, stream_id)
         } else if self.qpack_encoder.recv_if_encoder_stream(conn, stream_id)? {
             qdebug!(
@@ -458,7 +452,7 @@ impl Http3Connection {
         Ok(true)
     }
 
-    // Returns true if it is a push stream.
+    /// Returns true if it is a push stream.
     fn decode_new_stream(
         &mut self,
         conn: &mut Connection,
@@ -550,28 +544,21 @@ impl Http3Connection {
 
     // If the control stream has received frames MaxPushId or Goaway which handling is specific to
     // the client and server, we must give them to the specific client/server handler..
-    fn handle_control_frame(&mut self) -> Res<Option<HFrame>> {
-        if self.control_stream_remote.recvd_fin() {
-            return Err(Error::HttpClosedCriticalStream);
+    fn handle_control_frame(&mut self, f: HFrame) -> Res<Option<HFrame>> {
+        qinfo!([self], "Handle a control frame {:?}", f);
+        if !matches!(f, HFrame::Settings { .. })
+            && !matches!(self.settings_state, Http3RemoteSettingsState::Received{..})
+        {
+            return Err(Error::HttpMissingSettings);
         }
-        if self.control_stream_remote.frame_reader_done() {
-            let f = self.control_stream_remote.get_frame()?;
-            qinfo!([self], "Handle a control frame {:?}", f);
-            if !matches!(f, HFrame::Settings { .. })
-                && !matches!(self.settings_state, Http3RemoteSettingsState::Received{..})
-            {
-                return Err(Error::HttpMissingSettings);
+        match f {
+            HFrame::Settings { settings } => {
+                self.handle_settings(settings)?;
+                Ok(None)
             }
-            return match f {
-                HFrame::Settings { settings } => {
-                    self.handle_settings(settings)?;
-                    Ok(None)
-                }
-                HFrame::Goaway { .. } | HFrame::MaxPushId { .. } => Ok(Some(f)),
-                _ => Err(Error::HttpFrameUnexpected),
-            };
+            HFrame::Goaway { .. } | HFrame::MaxPushId { .. } => Ok(Some(f)),
+            _ => Err(Error::HttpFrameUnexpected),
         }
-        Ok(None)
     }
 
     fn set_qpack_settings(&mut self, settings: &[HSetting]) -> Res<()> {
