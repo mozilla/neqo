@@ -125,9 +125,9 @@ impl SendMessage {
     }
 
     pub fn send_body(&mut self, conn: &mut Connection, buf: &[u8]) -> Res<usize> {
-        qinfo!(
+        qtrace!(
             [self],
-            "send_request_body: state={:?} len={}",
+            "send_body: state={:?} len={}",
             self.state,
             buf.len()
         );
