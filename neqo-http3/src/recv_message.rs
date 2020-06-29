@@ -39,13 +39,13 @@ pub(crate) trait RecvMessageEvents: Debug {
  * the TransactionClient.
  *    Closed
  */
-#[derive(PartialEq, Debug)]
+#[derive(Debug)]
 enum RecvMessageState {
-    WaitingForResponseHeaders,
+    WaitingForResponseHeaders { frame_reader: HFrameReader },
     DecodingHeaders { header_block: Vec<u8>, fin: bool },
-    WaitingForData,
+    WaitingForData { frame_reader: HFrameReader },
     ReadingData { remaining_data_len: usize },
-    WaitingForFinAfterTrailers,
+    WaitingForFinAfterTrailers { frame_reader: HFrameReader },
     ClosePending, // Close must first be read by application
     Closed,
 }
@@ -53,7 +53,6 @@ enum RecvMessageState {
 #[derive(Debug)]
 pub(crate) struct RecvMessage {
     state: RecvMessageState,
-    frame_reader: HFrameReader,
     conn_events: Box<dyn RecvMessageEvents>,
     push_handler: Option<Rc<RefCell<PushController>>>,
     stream_id: u64,
@@ -72,8 +71,9 @@ impl RecvMessage {
         push_handler: Option<Rc<RefCell<PushController>>>,
     ) -> Self {
         Self {
-            state: RecvMessageState::WaitingForResponseHeaders,
-            frame_reader: HFrameReader::new(),
+            state: RecvMessageState::WaitingForResponseHeaders {
+                frame_reader: HFrameReader::new(),
+            },
             conn_events,
             push_handler,
             stream_id,
@@ -82,18 +82,18 @@ impl RecvMessage {
 
     fn handle_headers_frame(&mut self, header_block: Vec<u8>, fin: bool) -> Res<()> {
         match self.state {
-            RecvMessageState::WaitingForResponseHeaders => {
+            RecvMessageState::WaitingForResponseHeaders {..} => {
                 if header_block.is_empty() {
                     self.add_headers(None, fin);
                 } else {
                     self.state = RecvMessageState::DecodingHeaders { header_block, fin };
                 }
              }
-            RecvMessageState::WaitingForData => {
+            RecvMessageState::WaitingForData { ..} => {
                 // TODO implement trailers, for now just ignore them.
-                self.state = RecvMessageState::WaitingForFinAfterTrailers;
+                self.state = RecvMessageState::WaitingForFinAfterTrailers{frame_reader: HFrameReader::new()};
             }
-            RecvMessageState::WaitingForFinAfterTrailers => {
+            RecvMessageState::WaitingForFinAfterTrailers {..} => {
                 return Err(Error::HttpFrameUnexpected);
             }
             _ => unreachable!("This functions is only called in WaitingForResponseHeaders | WaitingForData | WaitingForFinAfterTrailers state.")
@@ -103,10 +103,10 @@ impl RecvMessage {
 
     fn handle_data_frame(&mut self, len: u64, fin: bool) -> Res<()> {
         match self.state {
-            RecvMessageState::WaitingForResponseHeaders | RecvMessageState::WaitingForFinAfterTrailers => {
+            RecvMessageState::WaitingForResponseHeaders {..} | RecvMessageState::WaitingForFinAfterTrailers {..} => {
                 return Err(Error::HttpFrameUnexpected);
             }
-            RecvMessageState::WaitingForData => {
+            RecvMessageState::WaitingForData {..} => {
                 if len > 0 {
                     if fin {
                         return Err(Error::HttpFrame);
@@ -128,7 +128,9 @@ impl RecvMessage {
         } else {
             self.conn_events
                 .header_ready(self.stream_id, headers, false);
-            self.state = RecvMessageState::WaitingForData;
+            self.state = RecvMessageState::WaitingForData {
+                frame_reader: HFrameReader::new(),
+            };
         }
     }
 
@@ -142,12 +144,13 @@ impl RecvMessage {
         );
 
         match self.state {
-            RecvMessageState::WaitingForResponseHeaders => {
+            RecvMessageState::WaitingForResponseHeaders { .. } => {
                 self.conn_events.header_ready(self.stream_id, None, true);
                 self.state = RecvMessageState::Closed;
             }
             RecvMessageState::ReadingData { .. } => {}
-            RecvMessageState::WaitingForData | RecvMessageState::WaitingForFinAfterTrailers => {
+            RecvMessageState::WaitingForData { .. }
+            | RecvMessageState::WaitingForFinAfterTrailers { .. } => {
                 self.conn_events.data_readable(self.stream_id)
             }
             _ => unreachable!("Closing an already closed transaction."),
@@ -189,7 +192,9 @@ impl RecvMessage {
                         self.state = RecvMessageState::Closed;
                         break Ok((written, fin));
                     } else if *remaining_data_len == 0 {
-                        self.state = RecvMessageState::WaitingForData;
+                        self.state = RecvMessageState::WaitingForData {
+                            frame_reader: HFrameReader::new(),
+                        };
                         self.receive_internal(conn, decoder, false)?;
                     } else {
                         break Ok((written, false));
@@ -213,12 +218,12 @@ impl RecvMessage {
         let label = ::neqo_common::log_subject!(::log::Level::Debug, self);
         loop {
             qdebug!([label], "state={:?}.", self.state);
-            match self.state {
+            match &mut self.state {
                 // In the following 3 states we need to read frames.
-                RecvMessageState::WaitingForResponseHeaders
-                | RecvMessageState::WaitingForData
-                | RecvMessageState::WaitingForFinAfterTrailers => {
-                    match self.frame_reader.receive(conn, self.stream_id)? {
+                RecvMessageState::WaitingForResponseHeaders { frame_reader }
+                | RecvMessageState::WaitingForData { frame_reader }
+                | RecvMessageState::WaitingForFinAfterTrailers { frame_reader } => {
+                    match frame_reader.receive(conn, self.stream_id)? {
                         (None, true) => {
                             self.set_state_to_close_pending();
                             break Ok(());
@@ -261,11 +266,12 @@ impl RecvMessage {
                     ref header_block,
                     fin,
                 } => {
+                    let done = *fin;
                     if let Some(headers) =
                         decoder.decode_header_block(header_block, self.stream_id)?
                     {
-                        self.add_headers(Some(headers), fin);
-                        if fin {
+                        self.add_headers(Some(headers), done);
+                        if done {
                             break Ok(());
                         }
                     } else {
@@ -291,6 +297,6 @@ impl RecvMessage {
     }
 
     pub fn done(&self) -> bool {
-        self.state == RecvMessageState::Closed
+        matches!(self.state, RecvMessageState::Closed)
     }
 }
