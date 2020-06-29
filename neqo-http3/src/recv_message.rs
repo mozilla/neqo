@@ -130,6 +130,15 @@ impl RecvMessage {
         }
     }
 
+    fn check_headers(headers: &[Header]) -> bool {
+        for header_tuple in headers {
+            if header_tuple.0.find(char::is_uppercase) != None {
+                return false;
+            }
+        }
+        true
+    }
+
     fn set_state_to_close_pending(&mut self) {
         // Stream has received fin. Depending on headers state set header_ready
         // or data_readable event so that app can pick up the fin.
@@ -267,9 +276,13 @@ impl RecvMessage {
                     if let Some(headers) =
                         decoder.decode_header_block(header_block, self.stream_id)?
                     {
-                        self.add_headers(Some(headers), fin);
-                        if fin {
-                            break Ok(());
+                        if RecvMessage::check_headers(&headers) {
+                            self.add_headers(Some(headers), fin);
+                            if fin {
+                                break Ok(());
+                            }
+                        } else {
+                            break Err(Error::HttpGeneralProtocol);
                         }
                     } else {
                         qinfo!([self], "decoding header is blocked.");
