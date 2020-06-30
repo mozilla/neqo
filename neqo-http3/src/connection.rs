@@ -242,18 +242,15 @@ impl Http3Connection {
         let mut control_frames = Vec::new();
 
         loop {
-            match self.control_stream_remote.receive(conn)? {
-                Some(f) => {
-                    if let Some(f) = self.handle_control_frame(f)? {
-                        control_frames.push(f);
-                    }
+            if let Some(f) = self.control_stream_remote.receive(conn)? {
+                if let Some(f) = self.handle_control_frame(f)? {
+                    control_frames.push(f);
                 }
-                None => {
-                    if control_frames.is_empty() {
-                        break Ok(HandleReadableOutput::NoOutput);
-                    } else {
-                        break Ok(HandleReadableOutput::ControlFrames(control_frames));
-                    }
+            } else {
+                if control_frames.is_empty() {
+                    return Ok(HandleReadableOutput::NoOutput);
+                } else {
+                    return Ok(HandleReadableOutput::ControlFrames(control_frames));
                 }
             }
         }
@@ -543,7 +540,7 @@ impl Http3Connection {
     }
 
     // If the control stream has received frames MaxPushId or Goaway which handling is specific to
-    // the client and server, we must give them to the specific client/server handler..
+    // the client and server, we must give them to the specific client/server handler.
     fn handle_control_frame(&mut self, f: HFrame) -> Res<Option<HFrame>> {
         qinfo!([self], "Handle a control frame {:?}", f);
         if !matches!(f, HFrame::Settings { .. })
