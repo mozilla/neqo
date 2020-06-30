@@ -713,39 +713,50 @@ mod old {
                         client.authenticated(AuthenticationStatus::Ok, Instant::now());
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
-                        let out_file = self.streams.get_mut(&stream_id);
-                        if out_file.is_none() {
-                            println!("Data on unexpected stream: {}", stream_id);
-                            return Ok(false);
-                        }
-
-                        let (sz, fin) = client
-                            .stream_recv(stream_id, &mut data)
-                            .expect("Read should succeed");
-
-                        let mut have_out_file = false;
-                        if let Some(Some(out_file)) = out_file {
-                            have_out_file = true;
-                            if sz > 0 {
-                                out_file.write_all(&data[..sz])?;
-                            }
-                        } else if !self.args.output_read_data {
-                            println!("READ[{}]: {} bytes", stream_id, sz);
-                        } else {
-                            println!(
-                                "READ[{}]: {}",
-                                stream_id,
-                                String::from_utf8(data.clone()).unwrap()
-                            )
-                        }
-                        if fin {
-                            if !have_out_file {
-                                println!("<FIN[{}]>", stream_id);
-                            }
-                            self.streams.remove(&stream_id);
-                            if self.streams.is_empty() && self.url_queue.is_empty() {
-                                client.close(Instant::now(), 0, "kthxbye!");
+                        let mut maybe_maybe_out_file = self.streams.get_mut(&stream_id);
+                        match &mut maybe_maybe_out_file {
+                            None => {
+                                println!("Data on unexpected stream: {}", stream_id);
                                 return Ok(false);
+                            }
+                            Some(maybe_out_file) => {
+                                let fin_recvd;
+                                loop {
+                                    let (sz, fin) = client
+                                        .stream_recv(stream_id, &mut data)
+                                        .expect("Read should succeed");
+                                    if sz == 0 {
+                                        fin_recvd = fin;
+                                        break;
+                                    }
+
+                                    if let Some(out_file) = maybe_out_file {
+                                        out_file.write_all(&data[..sz])?;
+                                    } else if !self.args.output_read_data {
+                                        println!("READ[{}]: {} bytes", stream_id, sz);
+                                    } else {
+                                        println!(
+                                            "READ[{}]: {}",
+                                            stream_id,
+                                            String::from_utf8(data.clone()).unwrap()
+                                        )
+                                    }
+                                    if fin {
+                                        fin_recvd = true;
+                                        break;
+                                    }
+                                }
+
+                                if fin_recvd {
+                                    if maybe_out_file.is_none() {
+                                        println!("<FIN[{}]>", stream_id);
+                                    }
+                                    self.streams.remove(&stream_id);
+                                    if self.streams.is_empty() && self.url_queue.is_empty() {
+                                        client.close(Instant::now(), 0, "kthxbye!");
+                                        return Ok(false);
+                                    }
+                                }
                             }
                         }
                     }
