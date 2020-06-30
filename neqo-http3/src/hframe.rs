@@ -6,7 +6,8 @@
 
 use crate::settings::HSettings;
 use neqo_common::{
-    hex_with_len, qdebug, qtrace, Decoder, Encoder, IncrementalDecoder, IncrementalDecoderResult,
+    hex_with_len, qdebug, qtrace, Decoder, Encoder, IncrementalDecoderBuffer,
+    IncrementalDecoderIgnore, IncrementalDecoderUint,
 };
 use neqo_transport::Connection;
 use std::convert::TryFrom;
@@ -108,11 +109,11 @@ impl HFrame {
 
 #[derive(Clone, Debug)]
 enum HFrameReaderState {
-    BeforeFrame { decoder: IncrementalDecoder },
-    GetType { decoder: IncrementalDecoder },
-    GetLength { decoder: IncrementalDecoder },
-    GetData { decoder: IncrementalDecoder },
-    UnknownFrameDischargeData { decoder: IncrementalDecoder },
+    BeforeFrame { decoder: IncrementalDecoderUint },
+    GetType { decoder: IncrementalDecoderUint },
+    GetLength { decoder: IncrementalDecoderUint },
+    GetData { decoder: IncrementalDecoderBuffer },
+    UnknownFrameDischargeData { decoder: IncrementalDecoderIgnore },
 }
 
 #[derive(Debug)]
@@ -134,7 +135,7 @@ impl HFrameReader {
     pub fn new() -> Self {
         Self {
             state: HFrameReaderState::BeforeFrame {
-                decoder: IncrementalDecoder::decode_varint(),
+                decoder: IncrementalDecoderUint::new(),
             },
             hframe_type: 0,
             hframe_len: 0,
@@ -144,7 +145,7 @@ impl HFrameReader {
 
     fn reset(&mut self) {
         self.state = HFrameReaderState::BeforeFrame {
-            decoder: IncrementalDecoder::decode_varint(),
+            decoder: IncrementalDecoderUint::new(),
         };
     }
 
@@ -152,9 +153,9 @@ impl HFrameReader {
         match &self.state {
             HFrameReaderState::BeforeFrame { decoder }
             | HFrameReaderState::GetType { decoder }
-            | HFrameReaderState::GetLength { decoder }
-            | HFrameReaderState::GetData { decoder }
-            | HFrameReaderState::UnknownFrameDischargeData { decoder } => decoder.min_remaining(),
+            | HFrameReaderState::GetLength { decoder } => decoder.min_remaining(),
+            HFrameReaderState::GetData { decoder } => decoder.min_remaining(),
+            HFrameReaderState::UnknownFrameDischargeData { decoder } => decoder.min_remaining(),
         }
     }
 
@@ -204,23 +205,22 @@ impl HFrameReader {
             match &mut self.state {
                 HFrameReaderState::BeforeFrame { decoder }
                 | HFrameReaderState::GetType { decoder } => match decoder.consume(&mut input) {
-                    IncrementalDecoderResult::Uint(v) => {
+                    Some(v) => {
                         qtrace!([conn], "HFrameReader::receive: read frame type {}", v);
                         self.hframe_type = v;
                         self.state = HFrameReaderState::GetLength {
-                            decoder: IncrementalDecoder::decode_varint(),
+                            decoder: IncrementalDecoderUint::new(),
                         };
                     }
-                    IncrementalDecoderResult::InProgress => {
+                    None => {
                         self.state = HFrameReaderState::GetType {
-                            decoder: mem::replace(decoder, IncrementalDecoder::decode_varint()),
+                            decoder: mem::replace(decoder, IncrementalDecoderUint::new()),
                         };
                     }
-                    _ => panic!("We must be in one of the states above"),
                 },
 
                 HFrameReaderState::GetLength { decoder } => match decoder.consume(&mut input) {
-                    IncrementalDecoderResult::Uint(len) => {
+                    Some(len) => {
                         qtrace!(
                             [conn],
                             "HFrameReader::receive: frame type {} length {}",
@@ -245,7 +245,7 @@ impl HFrameReader {
                                     break Ok((Some(self.get_frame()?), fin));
                                 } else {
                                     HFrameReaderState::GetData {
-                                        decoder: IncrementalDecoder::decode(
+                                        decoder: IncrementalDecoderBuffer::new(
                                             usize::try_from(len).or(Err(Error::HttpFrame))?,
                                         ),
                                     }
@@ -254,11 +254,11 @@ impl HFrameReader {
                             _ => {
                                 if len == 0 {
                                     HFrameReaderState::BeforeFrame {
-                                        decoder: IncrementalDecoder::decode_varint(),
+                                        decoder: IncrementalDecoderUint::new(),
                                     }
                                 } else {
                                     HFrameReaderState::UnknownFrameDischargeData {
-                                        decoder: IncrementalDecoder::ignore(
+                                        decoder: IncrementalDecoderIgnore::new(
                                             usize::try_from(len).or(Err(Error::HttpFrame))?,
                                         ),
                                     }
@@ -266,11 +266,10 @@ impl HFrameReader {
                             }
                         };
                     }
-                    IncrementalDecoderResult::InProgress => {}
-                    _ => panic!("We must be in one of the states above"),
+                    None => {}
                 },
                 HFrameReaderState::GetData { decoder } => match decoder.consume(&mut input) {
-                    IncrementalDecoderResult::Buffer(data) => {
+                    Some(data) => {
                         qtrace!(
                             [conn],
                             "received frame {}: {}",
@@ -280,16 +279,11 @@ impl HFrameReader {
                         self.payload = data;
                         break Ok((Some(self.get_frame()?), fin));
                     }
-                    IncrementalDecoderResult::InProgress => {}
-                    _ => panic!("We must be in one of the states above"),
+                    None => {}
                 },
                 HFrameReaderState::UnknownFrameDischargeData { decoder } => {
-                    match decoder.consume(&mut input) {
-                        IncrementalDecoderResult::Ignored => {
-                            self.reset();
-                        }
-                        IncrementalDecoderResult::InProgress => {}
-                        _ => panic!("We must be in one of the states above"),
+                    if decoder.consume(&mut input) {
+                        self.reset();
                     }
                 }
             };
