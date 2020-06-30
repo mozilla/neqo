@@ -36,8 +36,10 @@ impl NewStreamTypeReader {
                     return None;
                 }
                 Ok((amount, false)) => {
-                    let mut dec = Decoder::from(&buf[..amount]);
-                    return self.reader.consume(&mut dec);
+                    let res = self.reader.consume(&mut Decoder::from(&buf[..amount]));
+                    if res.is_some() {
+                        return res;
+                    }
                 }
                 Err(e) => {
                     qdebug!(
