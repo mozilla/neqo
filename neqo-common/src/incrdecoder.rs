@@ -21,12 +21,6 @@ pub struct IncrementalDecoderUint {
 }
 
 impl IncrementalDecoderUint {
-    pub fn new() -> Self {
-        Self {
-            state: IncrementalDecoderUintState::BeforeVarint,
-        }
-    }
-
     #[must_use]
     pub fn min_remaining(&self) -> usize {
         match self.state {
@@ -75,6 +69,14 @@ impl IncrementalDecoderUint {
     }
 }
 
+impl Default for IncrementalDecoderUint {
+    fn default() -> Self {
+        Self {
+            state: IncrementalDecoderUintState::BeforeVarint,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct IncrementalDecoderBuffer {
     v: Vec<u8>,
@@ -82,6 +84,7 @@ pub struct IncrementalDecoderBuffer {
 }
 
 impl IncrementalDecoderBuffer {
+    #[must_use]
     pub fn new(n: usize) -> Self {
         Self {
             v: Vec::new(),
@@ -113,6 +116,7 @@ pub struct IncrementalDecoderIgnore {
 }
 
 impl IncrementalDecoderIgnore {
+    #[must_use]
     pub fn new(n: usize) -> Self {
         Self { remaining: n }
     }
@@ -171,7 +175,7 @@ mod tests {
                 self.b, self.v
             );
 
-            let decoder = IncrementalDecoderUint::new();
+            let decoder = IncrementalDecoderUint::default();
             let mut db = Encoder::from_hex(&self.b);
             // Add padding so that we can verify that the reader doesn't over-consume.
             db.encode_byte(0xff);
