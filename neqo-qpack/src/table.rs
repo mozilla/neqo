@@ -246,7 +246,7 @@ impl HeaderTable {
         self.evict_to_internal(reduce, false)
     }
 
-    fn test_evict_to(&mut self, reduce: u64) -> bool {
+    pub fn test_evict_to(&mut self, reduce: u64) -> bool {
         self.evict_to_internal(reduce, true)
     }
 

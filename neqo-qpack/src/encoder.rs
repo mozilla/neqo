@@ -97,8 +97,8 @@ impl QPackEncoder {
             self.table.capacity(),
             self.max_table_size,
         );
+
         let new_cap = std::cmp::min(self.max_table_size, cap);
-        self.max_entries = new_cap / 32;
         // we also set our table to the max allowed.
         self.need_change_capacity(new_cap);
         Ok(())
@@ -284,13 +284,25 @@ impl QPackEncoder {
     }
 
     fn maybe_send_change_capacity(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
-        if let Some(cap) = self.change_capacity.take() {
+        if let Some(cap) = self.change_capacity {
+            // Check if itt is possible to reduce the capacity, e.g. if enough space can be make free for the reduction.
+            if cap < self.table.capacity() && !self.table.test_evict_to(cap) {
+                return Err(Error::DynamicTableFull);
+            }
             let mut buf = QPData::default();
             EncoderInstruction::Capacity { value: cap }.marshal(&mut buf, self.use_huffman);
             if !conn.stream_send_atomic(stream_id, &buf)? {
                 return Err(Error::EncoderStreamBlocked);
             }
-            self.table.set_capacity(cap)?;
+            if self.table.set_capacity(cap).is_err() {
+                debug_assert!(
+                    false,
+                    "test_evict_to should have checked and make sure this operation is possible"
+                );
+                return Err(Error::InternalError);
+            }
+            self.max_entries = cap / 32;
+            self.change_capacity = None;
         }
         Ok(())
     }
