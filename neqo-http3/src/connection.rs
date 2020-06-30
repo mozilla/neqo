@@ -246,12 +246,10 @@ impl Http3Connection {
                 if let Some(f) = self.handle_control_frame(f)? {
                     control_frames.push(f);
                 }
+            } else if control_frames.is_empty() {
+                return Ok(HandleReadableOutput::NoOutput);
             } else {
-                if control_frames.is_empty() {
-                    return Ok(HandleReadableOutput::NoOutput);
-                } else {
-                    return Ok(HandleReadableOutput::ControlFrames(control_frames));
-                }
+                return Ok(HandleReadableOutput::ControlFrames(control_frames));
             }
         }
     }

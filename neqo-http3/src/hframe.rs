@@ -135,7 +135,7 @@ impl HFrameReader {
     pub fn new() -> Self {
         Self {
             state: HFrameReaderState::BeforeFrame {
-                decoder: IncrementalDecoderUint::new(),
+                decoder: IncrementalDecoderUint::default(),
             },
             hframe_type: 0,
             hframe_len: 0,
@@ -145,7 +145,7 @@ impl HFrameReader {
 
     fn reset(&mut self) {
         self.state = HFrameReaderState::BeforeFrame {
-            decoder: IncrementalDecoderUint::new(),
+            decoder: IncrementalDecoderUint::default(),
         };
     }
 
@@ -210,11 +210,11 @@ impl HFrameReader {
                     qtrace!("HFrameReader::receive: read frame type {}", v);
                     self.hframe_type = v;
                     self.state = HFrameReaderState::GetLength {
-                        decoder: IncrementalDecoderUint::new(),
+                        decoder: IncrementalDecoderUint::default(),
                     };
                 } else {
                     self.state = HFrameReaderState::GetType {
-                        decoder: mem::replace(decoder, IncrementalDecoderUint::new()),
+                        decoder: mem::replace(decoder, IncrementalDecoderUint::default()),
                     };
                 }
             }
@@ -253,7 +253,7 @@ impl HFrameReader {
                         _ => {
                             if len == 0 {
                                 HFrameReaderState::BeforeFrame {
-                                    decoder: IncrementalDecoderUint::new(),
+                                    decoder: IncrementalDecoderUint::default(),
                                 }
                             } else {
                                 HFrameReaderState::UnknownFrameDischargeData {

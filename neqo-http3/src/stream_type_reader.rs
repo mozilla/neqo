@@ -18,7 +18,7 @@ pub(crate) struct NewStreamTypeReader {
 impl NewStreamTypeReader {
     pub fn new() -> Self {
         Self {
-            reader: IncrementalDecoderUint::new(),
+            reader: IncrementalDecoderUint::default(),
             fin: false,
         }
     }
