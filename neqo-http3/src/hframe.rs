@@ -6,8 +6,8 @@
 
 use crate::settings::HSettings;
 use neqo_common::{
-    hex_with_len, qdebug, qtrace, Decoder, Encoder, IncrementalDecoderBuffer,
-    IncrementalDecoderIgnore, IncrementalDecoderUint,
+    hex_with_len, qtrace, Decoder, Encoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore,
+    IncrementalDecoderUint,
 };
 use neqo_transport::Connection;
 use std::convert::TryFrom;
@@ -171,122 +171,22 @@ impl HFrameReader {
         loop {
             let to_read = std::cmp::min(self.min_remaining(), MAX_READ_SIZE);
             let mut buf = vec![0; to_read];
-            let fin;
-            let mut input = match conn.stream_recv(stream_id, &mut buf) {
-                Ok((0, true)) => {
-                    qtrace!([conn], "HFrameReader::receive: stream has been closed");
-                    break match self.state {
-                        HFrameReaderState::BeforeFrame { .. } => Ok((None, true)),
-                        _ => Err(Error::HttpFrame),
-                    };
-                }
-                Ok((0, false)) => break Ok((None, false)),
-                Ok((amount, f)) => {
+            let (output, read, fin) = match conn.stream_recv(stream_id, &mut buf)? {
+                (0, f) => (None, false, f),
+                (amount, f) => {
                     qtrace!(
                         [conn],
                         "HFrameReader::receive: reading {} byte, fin={}",
                         amount,
                         f
                     );
-                    fin = f;
-                    Decoder::from(&buf[..amount])
-                }
-                Err(e) => {
-                    qdebug!(
-                        [conn],
-                        "HFrameReader::receive: error reading data from stream {}: {:?}",
-                        stream_id,
-                        e
-                    );
-                    break Err(e.into());
+                    (self.consume(Decoder::from(&buf[..amount]))?, true, f)
                 }
             };
 
-            match &mut self.state {
-                HFrameReaderState::BeforeFrame { decoder }
-                | HFrameReaderState::GetType { decoder } => match decoder.consume(&mut input) {
-                    Some(v) => {
-                        qtrace!([conn], "HFrameReader::receive: read frame type {}", v);
-                        self.hframe_type = v;
-                        self.state = HFrameReaderState::GetLength {
-                            decoder: IncrementalDecoderUint::new(),
-                        };
-                    }
-                    None => {
-                        self.state = HFrameReaderState::GetType {
-                            decoder: mem::replace(decoder, IncrementalDecoderUint::new()),
-                        };
-                    }
-                },
-
-                HFrameReaderState::GetLength { decoder } => match decoder.consume(&mut input) {
-                    Some(len) => {
-                        qtrace!(
-                            [conn],
-                            "HFrameReader::receive: frame type {} length {}",
-                            self.hframe_type,
-                            len
-                        );
-                        self.hframe_len = len;
-                        self.state = match self.hframe_type {
-                            // DATA payload are left on the quic stream and picked up separately
-                            H3_FRAME_TYPE_DATA => {
-                                break Ok((Some(self.get_frame()?), fin));
-                            }
-
-                            // for other frames get all data before decoding.
-                            H3_FRAME_TYPE_CANCEL_PUSH
-                            | H3_FRAME_TYPE_SETTINGS
-                            | H3_FRAME_TYPE_GOAWAY
-                            | H3_FRAME_TYPE_MAX_PUSH_ID
-                            | H3_FRAME_TYPE_PUSH_PROMISE
-                            | H3_FRAME_TYPE_HEADERS => {
-                                if len == 0 {
-                                    break Ok((Some(self.get_frame()?), fin));
-                                } else {
-                                    HFrameReaderState::GetData {
-                                        decoder: IncrementalDecoderBuffer::new(
-                                            usize::try_from(len).or(Err(Error::HttpFrame))?,
-                                        ),
-                                    }
-                                }
-                            }
-                            _ => {
-                                if len == 0 {
-                                    HFrameReaderState::BeforeFrame {
-                                        decoder: IncrementalDecoderUint::new(),
-                                    }
-                                } else {
-                                    HFrameReaderState::UnknownFrameDischargeData {
-                                        decoder: IncrementalDecoderIgnore::new(
-                                            usize::try_from(len).or(Err(Error::HttpFrame))?,
-                                        ),
-                                    }
-                                }
-                            }
-                        };
-                    }
-                    None => {}
-                },
-                HFrameReaderState::GetData { decoder } => match decoder.consume(&mut input) {
-                    Some(data) => {
-                        qtrace!(
-                            [conn],
-                            "received frame {}: {}",
-                            self.hframe_type,
-                            hex_with_len(&data[..])
-                        );
-                        self.payload = data;
-                        break Ok((Some(self.get_frame()?), fin));
-                    }
-                    None => {}
-                },
-                HFrameReaderState::UnknownFrameDischargeData { decoder } => {
-                    if decoder.consume(&mut input) {
-                        self.reset();
-                    }
-                }
-            };
+            if output.is_some() {
+                break Ok((output, fin));
+            }
 
             if fin {
                 if let HFrameReaderState::BeforeFrame { .. } = self.state {
@@ -295,7 +195,95 @@ impl HFrameReader {
                     break Err(Error::HttpFrame);
                 }
             }
+
+            if !read {
+                // There was no new data, exit the loop.
+                break Ok((None, false));
+            }
         }
+    }
+
+    fn consume(&mut self, mut input: Decoder) -> Res<Option<HFrame>> {
+        match &mut self.state {
+            HFrameReaderState::BeforeFrame { decoder } | HFrameReaderState::GetType { decoder } => {
+                if let Some(v) = decoder.consume(&mut input) {
+                    qtrace!("HFrameReader::receive: read frame type {}", v);
+                    self.hframe_type = v;
+                    self.state = HFrameReaderState::GetLength {
+                        decoder: IncrementalDecoderUint::new(),
+                    };
+                } else {
+                    self.state = HFrameReaderState::GetType {
+                        decoder: mem::replace(decoder, IncrementalDecoderUint::new()),
+                    };
+                }
+            }
+
+            HFrameReaderState::GetLength { decoder } => {
+                if let Some(len) = decoder.consume(&mut input) {
+                    qtrace!(
+                        "HFrameReader::receive: frame type {} length {}",
+                        self.hframe_type,
+                        len
+                    );
+                    self.hframe_len = len;
+                    self.state = match self.hframe_type {
+                        // DATA payload are left on the quic stream and picked up separately
+                        H3_FRAME_TYPE_DATA => {
+                            return Ok(Some(self.get_frame()?));
+                        }
+
+                        // for other frames get all data before decoding.
+                        H3_FRAME_TYPE_CANCEL_PUSH
+                        | H3_FRAME_TYPE_SETTINGS
+                        | H3_FRAME_TYPE_GOAWAY
+                        | H3_FRAME_TYPE_MAX_PUSH_ID
+                        | H3_FRAME_TYPE_PUSH_PROMISE
+                        | H3_FRAME_TYPE_HEADERS => {
+                            if len == 0 {
+                                return Ok(Some(self.get_frame()?));
+                            } else {
+                                HFrameReaderState::GetData {
+                                    decoder: IncrementalDecoderBuffer::new(
+                                        usize::try_from(len).or(Err(Error::HttpFrame))?,
+                                    ),
+                                }
+                            }
+                        }
+                        _ => {
+                            if len == 0 {
+                                HFrameReaderState::BeforeFrame {
+                                    decoder: IncrementalDecoderUint::new(),
+                                }
+                            } else {
+                                HFrameReaderState::UnknownFrameDischargeData {
+                                    decoder: IncrementalDecoderIgnore::new(
+                                        usize::try_from(len).or(Err(Error::HttpFrame))?,
+                                    ),
+                                }
+                            }
+                        }
+                    };
+                }
+            }
+            HFrameReaderState::GetData { decoder } => {
+                if let Some(data) = decoder.consume(&mut input) {
+                    qtrace!(
+                        "received frame {}: {}",
+                        self.hframe_type,
+                        hex_with_len(&data[..])
+                    );
+                    self.payload = data;
+                    return Ok(Some(self.get_frame()?));
+                }
+            }
+            HFrameReaderState::UnknownFrameDischargeData { decoder } => {
+                if decoder.consume(&mut input) {
+                    self.reset();
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// # Errors
@@ -341,6 +329,7 @@ impl HFrameReader {
 mod tests {
     use super::{Encoder, Error, HFrame, HFrameReader, HSettings};
     use crate::settings::{HSetting, HSettingType};
+    use neqo_common::matches;
     use neqo_crypto::AuthenticationStatus;
     use neqo_transport::{Connection, StreamType};
     use num_traits::Num;
@@ -502,14 +491,9 @@ mod tests {
         let mut fr = HFrameReaderTest::new();
 
         // Read settings frame 400406064004084100
-        assert!(fr.process(&[0x40]).is_none());
-        assert!(fr.process(&[0x4]).is_none());
-        assert!(fr.process(&[0x6]).is_none());
-        assert!(fr.process(&[0x6]).is_none());
-        assert!(fr.process(&[0x40]).is_none());
-        assert!(fr.process(&[0x4]).is_none());
-        assert!(fr.process(&[0x8]).is_none());
-        assert!(fr.process(&[0x41]).is_none());
+        for i in &[0x40, 0x04, 0x06, 0x06, 0x40, 0x04, 0x08, 0x41] {
+            assert!(fr.process(&[*i]).is_none());
+        }
         let frame = fr.process(&[0x0]);
 
         assert!(frame.is_some());
@@ -521,18 +505,15 @@ mod tests {
         }
     }
 
-    // Test receiving bytte by byte for a PUSH_PROMISE frame.
+    // Test receiving byte by byte for a PUSH_PROMISE frame.
     #[test]
     fn test_frame_reading_with_stream_push_promise() {
         let mut fr = HFrameReaderTest::new();
 
-        // Read pushpromise frame 05054101010203
-        assert!(fr.process(&[0x5]).is_none());
-        assert!(fr.process(&[0x5]).is_none());
-        assert!(fr.process(&[0x41]).is_none());
-        assert!(fr.process(&[0x1]).is_none());
-        assert!(fr.process(&[0x1]).is_none());
-        assert!(fr.process(&[0x2]).is_none());
+        // Read push-promise frame 05054101010203
+        for i in &[0x05, 0x05, 0x41, 0x01, 0x01, 0x02] {
+            assert!(fr.process(&[*i]).is_none());
+        }
         let frame = fr.process(&[0x3]);
 
         assert!(frame.is_some());
@@ -555,11 +536,7 @@ mod tests {
 
         // Read data frame 0003010203
         let frame = fr.process(&[0x0, 0x3, 0x1, 0x2, 0x3]).unwrap();
-        if let HFrame::Data { len } = frame {
-            assert!(len == 3);
-        } else {
-            panic!("wrong frame type");
-        }
+        assert!(matches!(frame, HFrame::Data { len } if len == 3));
 
         // payloead is still on the stream.
         // assert that we have 3 bytes in the stream
