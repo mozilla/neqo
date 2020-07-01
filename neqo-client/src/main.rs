@@ -72,7 +72,7 @@ type Res<T> = Result<T, ClientError>;
     about = "A basic QUIC HTTP/0.9 and HTTP/3 client."
 )]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3-29", number_of_values = 1)]
+    #[structopt(short = "a", long, default_value = "h3-29")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP/3 no matter what the ALPN says.

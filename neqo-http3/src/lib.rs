@@ -15,7 +15,6 @@ mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod hframe;
-mod hsettings_frame;
 mod push_controller;
 mod qlog;
 mod recv_message;
@@ -23,6 +22,7 @@ mod send_message;
 pub mod server;
 mod server_connection_events;
 mod server_events;
+mod settings;
 mod stream_type_reader;
 
 use neqo_qpack::Error as QpackError;
