@@ -227,13 +227,6 @@ enum AddressValidationInfo {
 }
 
 impl AddressValidationInfo {
-    pub fn new(retry_source_cid: ConnectionId, token: Vec<u8>) -> Self {
-        Self::Retry {
-            token,
-            retry_source_cid,
-        }
-    }
-
     pub fn token(&self) -> &[u8] {
         match self {
             Self::NewToken(token) | Self::Retry { token, .. } => &token,
@@ -1090,7 +1083,10 @@ impl Connection {
         self.crypto
             .states
             .init(self.quic_version, self.role, &retry_scid);
-        self.address_validation = AddressValidationInfo::new(retry_scid, packet.token().to_vec());
+        self.address_validation = AddressValidationInfo::Retry {
+            token: packet.token().to_vec(),
+            retry_source_cid: retry_scid,
+        };
         Ok(())
     }
 
