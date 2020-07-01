@@ -705,8 +705,39 @@ mod old {
             }
         }
 
+        /// Read and maybe print received data from a stream.
+        // Returns bool: was fin received?
+        fn read_from_stream(
+            client: &mut Connection,
+            stream_id: u64,
+            output_read_data: bool,
+            maybe_out_file: &mut Option<File>,
+        ) -> Res<bool> {
+            let mut data = vec![0; 4096];
+            loop {
+                let (sz, fin) = client.stream_recv(stream_id, &mut data)?;
+                if sz == 0 {
+                    return Ok(fin);
+                }
+
+                if let Some(out_file) = maybe_out_file {
+                    out_file.write_all(&data[..sz])?;
+                } else if !output_read_data {
+                    println!("READ[{}]: {} bytes", stream_id, sz);
+                } else {
+                    println!(
+                        "READ[{}]: {}",
+                        stream_id,
+                        String::from_utf8(data.clone()).unwrap()
+                    )
+                }
+                if fin {
+                    return Ok(true);
+                }
+            }
+        }
+
         fn handle(&mut self, client: &mut Connection) -> Res<bool> {
-            let mut data = vec![0; 4000];
             while let Some(event) = client.next_event() {
                 match event {
                     ConnectionEvent::AuthenticationNeeded => {
@@ -720,32 +751,12 @@ mod old {
                                 return Ok(false);
                             }
                             Some(maybe_out_file) => {
-                                let fin_recvd;
-                                loop {
-                                    let (sz, fin) = client
-                                        .stream_recv(stream_id, &mut data)
-                                        .expect("Read should succeed");
-                                    if sz == 0 {
-                                        fin_recvd = fin;
-                                        break;
-                                    }
-
-                                    if let Some(out_file) = maybe_out_file {
-                                        out_file.write_all(&data[..sz])?;
-                                    } else if !self.args.output_read_data {
-                                        println!("READ[{}]: {} bytes", stream_id, sz);
-                                    } else {
-                                        println!(
-                                            "READ[{}]: {}",
-                                            stream_id,
-                                            String::from_utf8(data.clone()).unwrap()
-                                        )
-                                    }
-                                    if fin {
-                                        fin_recvd = true;
-                                        break;
-                                    }
-                                }
+                                let fin_recvd = Self::read_from_stream(
+                                    client,
+                                    stream_id,
+                                    self.args.output_read_data,
+                                    maybe_out_file,
+                                )?;
 
                                 if fin_recvd {
                                     if maybe_out_file.is_none() {
