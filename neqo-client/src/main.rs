@@ -72,7 +72,7 @@ type Res<T> = Result<T, ClientError>;
     about = "A basic QUIC HTTP/0.9 and HTTP/3 client."
 )]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3-29", number_of_values = 1)]
+    #[structopt(short = "a", long, default_value = "h3-29")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP/3 no matter what the ALPN says.
@@ -705,47 +705,69 @@ mod old {
             }
         }
 
+        /// Read and maybe print received data from a stream.
+        // Returns bool: was fin received?
+        fn read_from_stream(
+            client: &mut Connection,
+            stream_id: u64,
+            output_read_data: bool,
+            maybe_out_file: &mut Option<File>,
+        ) -> Res<bool> {
+            let mut data = vec![0; 4096];
+            loop {
+                let (sz, fin) = client.stream_recv(stream_id, &mut data)?;
+                if sz == 0 {
+                    return Ok(fin);
+                }
+
+                if let Some(out_file) = maybe_out_file {
+                    out_file.write_all(&data[..sz])?;
+                } else if !output_read_data {
+                    println!("READ[{}]: {} bytes", stream_id, sz);
+                } else {
+                    println!(
+                        "READ[{}]: {}",
+                        stream_id,
+                        String::from_utf8(data.clone()).unwrap()
+                    )
+                }
+                if fin {
+                    return Ok(true);
+                }
+            }
+        }
+
         fn handle(&mut self, client: &mut Connection) -> Res<bool> {
-            let mut data = vec![0; 4000];
             while let Some(event) = client.next_event() {
                 match event {
                     ConnectionEvent::AuthenticationNeeded => {
                         client.authenticated(AuthenticationStatus::Ok, Instant::now());
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
-                        let out_file = self.streams.get_mut(&stream_id);
-                        if out_file.is_none() {
-                            println!("Data on unexpected stream: {}", stream_id);
-                            return Ok(false);
-                        }
-
-                        let (sz, fin) = client
-                            .stream_recv(stream_id, &mut data)
-                            .expect("Read should succeed");
-
-                        let mut have_out_file = false;
-                        if let Some(Some(out_file)) = out_file {
-                            have_out_file = true;
-                            if sz > 0 {
-                                out_file.write_all(&data[..sz])?;
-                            }
-                        } else if !self.args.output_read_data {
-                            println!("READ[{}]: {} bytes", stream_id, sz);
-                        } else {
-                            println!(
-                                "READ[{}]: {}",
-                                stream_id,
-                                String::from_utf8(data.clone()).unwrap()
-                            )
-                        }
-                        if fin {
-                            if !have_out_file {
-                                println!("<FIN[{}]>", stream_id);
-                            }
-                            self.streams.remove(&stream_id);
-                            if self.streams.is_empty() && self.url_queue.is_empty() {
-                                client.close(Instant::now(), 0, "kthxbye!");
+                        let mut maybe_maybe_out_file = self.streams.get_mut(&stream_id);
+                        match &mut maybe_maybe_out_file {
+                            None => {
+                                println!("Data on unexpected stream: {}", stream_id);
                                 return Ok(false);
+                            }
+                            Some(maybe_out_file) => {
+                                let fin_recvd = Self::read_from_stream(
+                                    client,
+                                    stream_id,
+                                    self.args.output_read_data,
+                                    maybe_out_file,
+                                )?;
+
+                                if fin_recvd {
+                                    if maybe_out_file.is_none() {
+                                        println!("<FIN[{}]>", stream_id);
+                                    }
+                                    self.streams.remove(&stream_id);
+                                    if self.streams.is_empty() && self.url_queue.is_empty() {
+                                        client.close(Instant::now(), 0, "kthxbye!");
+                                        return Ok(false);
+                                    }
+                                }
                             }
                         }
                     }

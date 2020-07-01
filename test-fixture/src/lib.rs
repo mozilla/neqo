@@ -8,7 +8,7 @@
 #![warn(clippy::pedantic)]
 
 use neqo_common::matches;
-use neqo_crypto::{init_db, AntiReplay, AuthenticationStatus};
+use neqo_crypto::{init_db, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Server};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State};
@@ -92,14 +92,16 @@ pub fn default_client() -> Connection {
 pub fn default_server() -> Connection {
     fixture_init();
 
-    Connection::new_server(
+    let mut c = Connection::new_server(
         DEFAULT_KEYS,
         DEFAULT_ALPN,
-        &anti_replay(),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         QuicVersion::default(),
     )
-    .expect("create a default server")
+    .expect("create a default server");
+    c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
+        .expect("enable 0-RTT");
+    c
 }
 
 /// If state is `AuthenticationNeeded` call `authenticated()`.

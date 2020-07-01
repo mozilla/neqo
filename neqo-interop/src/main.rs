@@ -574,7 +574,7 @@ fn test_h3_rz(
 ) -> Result<(), String> {
     let mut hc = connect_h3(nctx, peer, client)?;
 
-    // exhange some data ot get http3 cotrols streams and a resumption token.
+    // Exchange some data to get http3 control streams and a resumption token.
     let client_stream_id = hc
         .h3
         .fetch("GET", "https", &hc.host, &hc.path, &[])
@@ -587,11 +587,10 @@ fn test_h3_rz(
     }
 
     // get resumption ticket
-    let res_token = hc.h3.resumption_token();
-    if res_token.is_none() {
-        return Err("ERROR: no resumption token".into());
-    }
-    let res_token = res_token.unwrap();
+    let res_token = hc
+        .h3
+        .resumption_token()
+        .ok_or("ERROR: no resumption token")?;
 
     let handler = Http3Client::new(
         peer.host,
@@ -607,7 +606,7 @@ fn test_h3_rz(
         QuicVersion::default(),
     );
     if handler.is_err() {
-        return Err("ERROR: creating a client failed".into());
+        return Err(String::from("ERROR: creating a client failed"));
     }
 
     let mut hc = H3Handler {

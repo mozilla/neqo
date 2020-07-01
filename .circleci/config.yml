@@ -8,6 +8,7 @@ jobs:
     environment:
       NSS_JOBS: 3
       LD_LIBRARY_PATH: /home/neqo/dist/Debug/lib
+      RUST_BACKTRACE: 1
 
     steps:
       - checkout

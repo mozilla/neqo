@@ -74,7 +74,7 @@ impl Http3ServerHandler {
             return;
         }
 
-        let res = self.check_connection_events(conn);
+        let res = self.check_connection_events(conn, now);
         if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
             let res = self.base_handler.process_sending(conn);
             self.check_result(conn, now, &res);
@@ -116,7 +116,7 @@ impl Http3ServerHandler {
     }
 
     // If this return an error the connection must be closed.
-    fn check_connection_events(&mut self, conn: &mut Connection) -> Res<()> {
+    fn check_connection_events(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
         qtrace!([self], "Check connection events.");
         while let Some(e) = conn.next_event() {
             qdebug!([self], "check_connection_events - event {:?}.", e);
@@ -153,6 +153,10 @@ impl Http3ServerHandler {
                 } => self.handle_stream_stop_sending(conn, stream_id, app_error)?,
                 ConnectionEvent::StateChange(state) => {
                     if self.base_handler.handle_state_change(conn, &state)? {
+                        if self.base_handler.state() == Http3State::Connected {
+                            let settings = self.base_handler.save_settings();
+                            conn.send_ticket(now, &settings)?;
+                        }
                         self.events
                             .connection_state_change(self.base_handler.state());
                     }

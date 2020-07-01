@@ -7,10 +7,10 @@
 use crate::client_events::{Http3ClientEvent, Http3ClientEvents};
 use crate::connection::{HandleReadableOutput, Http3Connection, Http3State};
 use crate::hframe::HFrame;
-use crate::hsettings_frame::HSettings;
 use crate::push_controller::PushController;
 use crate::recv_message::RecvMessage;
 use crate::send_message::{SendMessage, SendMessageEvents};
+use crate::settings::HSettings;
 use crate::Header;
 use neqo_common::{
     hex, hex_with_len, matches, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Decoder, Encoder,
@@ -608,9 +608,9 @@ mod tests {
         Http3State, QpackSettings, Rc, RefCell, StreamType,
     };
     use crate::hframe::HFrame;
-    use crate::hsettings_frame::{HSetting, HSettingType};
+    use crate::settings::{HSetting, HSettingType};
     use neqo_common::{matches, Encoder};
-    use neqo_crypto::AntiReplay;
+    use neqo_crypto::{AllowZeroRtt, AntiReplay};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
         CloseError, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State,
@@ -2976,20 +2976,20 @@ mod tests {
         let token = exchange_token(&mut client, &mut server.conn);
 
         let mut client = default_http3_client();
-
-        // Using a freshly initialized anti-replay context
-        // should result in the server rejecting 0-RTT.
-        let ar = AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3)
-            .expect("setup anti-replay");
-
         let mut server = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
-            &ar,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
             QuicVersion::default(),
         )
         .unwrap();
+        // Using a freshly initialized anti-replay context
+        // should result in the server rejecting 0-RTT.
+        let ar = AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3)
+            .expect("setup anti-replay");
+        server
+            .server_enable_0rtt(&ar, AllowZeroRtt {})
+            .expect("enable 0-RTT");
 
         assert_eq!(client.state(), Http3State::Initializing);
         client

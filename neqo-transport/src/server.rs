@@ -10,7 +10,7 @@ use neqo_common::{
     self as common, hex, matches, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn,
     timer::Timer, Datagram, Decoder, Role,
 };
-use neqo_crypto::AntiReplay;
+use neqo_crypto::{AntiReplay, ZeroRttCheckResult, ZeroRttChecker};
 
 pub use crate::addr_valid::ValidateAddress;
 use crate::addr_valid::{AddressValidation, AddressValidationResult};
@@ -75,6 +75,28 @@ struct AttemptKey {
     odcid: ConnectionId,
 }
 
+/// A `ServerZeroRttChecker` is a simple wrapper around a single checker.
+/// It uses `RefCell` so that the wrapped checker can be shared between
+/// multiple connections created by the server.
+#[derive(Clone, Debug)]
+struct ServerZeroRttChecker {
+    checker: Rc<RefCell<Box<dyn ZeroRttChecker>>>,
+}
+
+impl ServerZeroRttChecker {
+    pub fn new(checker: Box<dyn ZeroRttChecker>) -> Self {
+        Self {
+            checker: Rc::new(RefCell::new(checker)),
+        }
+    }
+}
+
+impl ZeroRttChecker for ServerZeroRttChecker {
+    fn check(&self, token: &[u8]) -> ZeroRttCheckResult {
+        self.checker.borrow().check(token)
+    }
+}
+
 /// `InitialDetails` holds important information for processing `Initial` packets.
 struct InitialDetails {
     src_cid: ConnectionId,
@@ -99,7 +121,10 @@ pub struct Server {
     certs: Vec<String>,
     /// The ALPN values that the server supports.
     protocols: Vec<String>,
+    /// Anti-replay configuration for 0-RTT.
     anti_replay: AntiReplay,
+    /// A function for determining if 0-RTT can be accepted.
+    zero_rtt_checker: ServerZeroRttChecker,
     /// A connection ID manager.
     cid_manager: CidMgr,
     /// Active connection attempts, keyed by `AttemptKey`.  Initial packets with
@@ -122,17 +147,21 @@ pub struct Server {
 
 impl Server {
     /// Construct a new server.
-    /// `now` is the time that the server is instantiated.
-    /// `cid_manager` is responsible for generating connection IDs and parsing them;
-    /// connection IDs produced by the manager cannot be zero-length.
-    /// `certs` is a list of the certificates that should be configured.
-    /// `protocols` is the preference list of ALPN values.
-    /// `anti_replay` is an anti-replay context.
+    /// * `now` is the time that the server is instantiated.
+    /// * `certs` is a list of the certificates that should be configured.
+    /// * `protocols` is the preference list of ALPN values.
+    /// * `anti_replay` is an anti-replay context.
+    /// * `zero_rtt_checker` determines whether 0-RTT should be accepted. This
+    ///   will be passed the value of the `extra` argument that was passed to
+    ///   `Connection::send_ticket` to see if it is OK.
+    /// * `cid_manager` is responsible for generating connection IDs and parsing them;
+    ///   connection IDs produced by the manager cannot be zero-length.
     pub fn new(
         now: Instant,
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
+        zero_rtt_checker: Box<dyn ZeroRttChecker>,
         cid_manager: CidMgr,
     ) -> Res<Self> {
         let validation = AddressValidation::new(now, ValidateAddress::Never)?;
@@ -140,6 +169,7 @@ impl Server {
             certs: certs.iter().map(|x| String::from(x.as_ref())).collect(),
             protocols: protocols.iter().map(|x| String::from(x.as_ref())).collect(),
             anti_replay,
+            zero_rtt_checker: ServerZeroRttChecker::new(zero_rtt_checker),
             cid_manager,
             active_attempts: HashMap::default(),
             connections: Rc::default(),
@@ -367,12 +397,15 @@ impl Server {
         let sconn = Connection::new_server(
             &self.certs,
             &self.protocols,
-            &self.anti_replay,
             Rc::clone(&cid_mgr) as _,
             initial.quic_version,
         );
 
         if let Ok(mut c) = sconn {
+            let zcheck = self.zero_rtt_checker.clone();
+            if c.server_enable_0rtt(&self.anti_replay, zcheck).is_err() {
+                qwarn!([self], "Unable to enable 0-RTT");
+            }
             if let Some(odcid) = orig_dcid {
                 // There was a retry, so set the connection IDs for.
                 c.set_retry_cids(odcid, initial.src_cid, initial.dst_cid);
@@ -547,6 +580,7 @@ impl ServerConnectionIdManager {
     pub fn set_connection(&mut self, c: StateRef) {
         let saved = std::mem::replace(&mut self.saved_cids, Vec::with_capacity(0));
         for cid in saved {
+            qtrace!("ServerConnectionIdManager inserting saved cid {}", cid);
             self.insert_cid(cid, Rc::clone(&c));
         }
         self.c = Rc::downgrade(&c);
@@ -572,6 +606,7 @@ impl ConnectionIdManager for ServerConnectionIdManager {
         } else {
             // This function can be called before the connection is set.
             // So save any connection IDs until that hookup happens.
+            qtrace!("ServerConnectionIdManager saving cid {}", cid);
             self.saved_cids.push(cid.clone());
         }
         cid
