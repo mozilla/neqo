@@ -109,7 +109,6 @@ impl HFrame {
 
 #[derive(Clone, Debug)]
 enum HFrameReaderState {
-    BeforeFrame { decoder: IncrementalDecoderUint },
     GetType { decoder: IncrementalDecoderUint },
     GetLength { decoder: IncrementalDecoderUint },
     GetData { decoder: IncrementalDecoderBuffer },
@@ -134,7 +133,7 @@ impl HFrameReader {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            state: HFrameReaderState::BeforeFrame {
+            state: HFrameReaderState::GetType {
                 decoder: IncrementalDecoderUint::default(),
             },
             hframe_type: 0,
@@ -144,18 +143,26 @@ impl HFrameReader {
     }
 
     fn reset(&mut self) {
-        self.state = HFrameReaderState::BeforeFrame {
+        self.state = HFrameReaderState::GetType {
             decoder: IncrementalDecoderUint::default(),
         };
     }
 
     fn min_remaining(&self) -> usize {
         match &self.state {
-            HFrameReaderState::BeforeFrame { decoder }
-            | HFrameReaderState::GetType { decoder }
-            | HFrameReaderState::GetLength { decoder } => decoder.min_remaining(),
+            HFrameReaderState::GetType { decoder } | HFrameReaderState::GetLength { decoder } => {
+                decoder.min_remaining()
+            }
             HFrameReaderState::GetData { decoder } => decoder.min_remaining(),
             HFrameReaderState::UnknownFrameDischargeData { decoder } => decoder.min_remaining(),
+        }
+    }
+
+    fn decoding_in_progress(&self) -> bool {
+        if let HFrameReaderState::GetType { decoder } = &self.state {
+            decoder.decoding_in_progress()
+        } else {
+            true
         }
     }
 
@@ -189,10 +196,10 @@ impl HFrameReader {
             }
 
             if fin {
-                if let HFrameReaderState::BeforeFrame { .. } = self.state {
-                    break Ok((None, fin));
-                } else {
+                if self.decoding_in_progress() {
                     break Err(Error::HttpFrame);
+                } else {
+                    break Ok((None, fin));
                 }
             }
 
@@ -205,16 +212,12 @@ impl HFrameReader {
 
     fn consume(&mut self, mut input: Decoder) -> Res<Option<HFrame>> {
         match &mut self.state {
-            HFrameReaderState::BeforeFrame { decoder } | HFrameReaderState::GetType { decoder } => {
+            HFrameReaderState::GetType { decoder } => {
                 if let Some(v) = decoder.consume(&mut input) {
                     qtrace!("HFrameReader::receive: read frame type {}", v);
                     self.hframe_type = v;
                     self.state = HFrameReaderState::GetLength {
                         decoder: IncrementalDecoderUint::default(),
-                    };
-                } else {
-                    self.state = HFrameReaderState::GetType {
-                        decoder: mem::replace(decoder, IncrementalDecoderUint::default()),
                     };
                 }
             }
@@ -252,7 +255,7 @@ impl HFrameReader {
                         }
                         _ => {
                             if len == 0 {
-                                HFrameReaderState::BeforeFrame {
+                                HFrameReaderState::GetType {
                                     decoder: IncrementalDecoderUint::default(),
                                 }
                             } else {
