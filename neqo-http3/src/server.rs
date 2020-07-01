@@ -330,16 +330,13 @@ mod tests {
         let mut connected = false;
         while let Some(e) = client.next_event() {
             match e {
-                ConnectionEvent::NewStream {
-                    stream_id,
-                    stream_type,
-                } => {
+                ConnectionEvent::NewStream { stream_id } => {
                     assert!(
-                        (stream_id == SERVER_SIDE_CONTROL_STREAM_ID)
-                            || (stream_id == SERVER_SIDE_ENCODER_STREAM_ID)
-                            || (stream_id == SERVER_SIDE_DECODER_STREAM_ID)
+                        (stream_id.as_u64() == SERVER_SIDE_CONTROL_STREAM_ID)
+                            || (stream_id.as_u64() == SERVER_SIDE_ENCODER_STREAM_ID)
+                            || (stream_id.as_u64() == SERVER_SIDE_DECODER_STREAM_ID)
                     );
-                    assert_eq!(stream_type, StreamType::UniDi);
+                    assert_eq!(stream_id.stream_type(), StreamType::UniDi);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     if stream_id == CLIENT_SIDE_CONTROL_STREAM_ID

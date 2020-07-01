@@ -157,7 +157,9 @@ impl Http3Client {
         qtrace!([self], "  settings {}", hex_with_len(&settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
         let mut settings = HSettings::default();
-        settings.decode_frame_contents(&mut dec_settings)?;
+        settings
+            .decode_frame_contents(&mut dec_settings)
+            .map_err(|_| Error::InvalidResumptionToken)?;
         let tok = dec.decode_remainder();
         qtrace!([self], "  Transport token {}", hex(&tok));
         self.conn.set_resumption_token(now, tok)?;
@@ -408,24 +410,21 @@ impl Http3Client {
         while let Some(e) = self.conn.next_event() {
             qdebug!([self], "check_connection_events - event {:?}.", e);
             match e {
-                ConnectionEvent::NewStream {
-                    stream_id,
-                    stream_type,
-                } => match stream_type {
+                ConnectionEvent::NewStream { stream_id } => match stream_id.stream_type() {
                     StreamType::BiDi => return Err(Error::HttpStreamCreation),
                     StreamType::UniDi => {
                         if self
                             .base_handler
-                            .handle_new_unidi_stream(&mut self.conn, stream_id)?
+                            .handle_new_unidi_stream(&mut self.conn, stream_id.as_u64())?
                         {
                             return Err(Error::HttpId);
                         }
                     }
                 },
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id) {
+                    if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id.as_u64()) {
                         if s.is_state_sending_data() {
-                            self.events.data_writable(stream_id);
+                            self.events.data_writable(stream_id.as_u64());
                         }
                     }
                 }
@@ -804,11 +803,12 @@ mod tests {
             let mut request = false;
             while let Some(e) = self.conn.next_event() {
                 match e {
-                    ConnectionEvent::NewStream { stream_id, .. } => {
+                    ConnectionEvent::NewStream { stream_id }
+                    | ConnectionEvent::SendStreamWritable { stream_id } => {
                         if expect_request {
-                            assert!(matches!(stream_id, 2 | 6 | 10 | 0));
+                            assert!(matches!(stream_id.as_u64(), 2 | 6 | 10 | 0));
                         } else {
-                            assert!(matches!(stream_id, 2 | 6 | 10));
+                            assert!(matches!(stream_id.as_u64(), 2 | 6 | 10));
                         }
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
@@ -839,9 +839,6 @@ mod tests {
                         } else {
                             panic!("unexpected event");
                         }
-                    }
-                    ConnectionEvent::SendStreamWritable { stream_id } => {
-                        assert!(matches!(stream_id, 2 | 6 | 10));
                     }
                     ConnectionEvent::StateChange(State::Connected) => connected = true,
                     ConnectionEvent::StateChange(_) => {}
@@ -1020,12 +1017,9 @@ mod tests {
         // find the new request/response stream and send frame v on it.
         while let Some(e) = server.conn.next_event() {
             match e {
-                ConnectionEvent::NewStream {
-                    stream_id,
-                    stream_type,
-                } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(stream_type, StreamType::BiDi);
+                ConnectionEvent::NewStream { stream_id } => {
+                    assert_eq!(stream_id.as_u64(), request_stream_id);
+                    assert_eq!(stream_id.stream_type(), StreamType::BiDi);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
@@ -1497,12 +1491,9 @@ mod tests {
         // find the new request/response stream and send response on it.
         while let Some(e) = server.conn.next_event() {
             match e {
-                ConnectionEvent::NewStream {
-                    stream_id,
-                    stream_type,
-                } => {
-                    assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(stream_type, StreamType::BiDi);
+                ConnectionEvent::NewStream { stream_id } => {
+                    assert_eq!(stream_id.as_u64(), request_stream_id);
+                    assert_eq!(stream_id.stream_type(), StreamType::BiDi);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     assert_eq!(stream_id, request_stream_id);
