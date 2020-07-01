@@ -61,6 +61,11 @@ impl IncrementalDecoderUint {
             }
         }
     }
+
+    #[must_use]
+    pub fn decoding_in_progress(&self) -> bool {
+        self.remaining.is_some()
+    }
 }
 
 #[derive(Clone, Debug)]
