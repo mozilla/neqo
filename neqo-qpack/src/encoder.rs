@@ -53,7 +53,7 @@ pub struct QPackEncoder {
     unacked_header_blocks: HashMap<u64, VecDeque<HashSet<u64>>>,
     blocked_stream_cnt: u16,
     use_huffman: bool,
-    change_capacity: Option<u64>,
+    next_capacity: Option<u64>,
     stats: Stats,
 }
 
@@ -71,7 +71,7 @@ impl QPackEncoder {
             unacked_header_blocks: HashMap::new(),
             blocked_stream_cnt: 0,
             use_huffman,
-            change_capacity: None,
+            next_capacity: None,
             stats: Stats::default(),
         }
     }
@@ -100,7 +100,7 @@ impl QPackEncoder {
 
         let new_cap = std::cmp::min(self.max_table_size, cap);
         // we also set our table to the max allowed.
-        self.need_change_capacity(new_cap);
+        self.change_capacity(new_cap);
         Ok(())
     }
 
@@ -278,13 +278,13 @@ impl QPackEncoder {
         }
     }
 
-    fn need_change_capacity(&mut self, value: u64) {
+    fn change_capacity(&mut self, value: u64) {
         qdebug!([self], "change capacity: {}", value);
-        self.change_capacity = Some(value);
+        self.next_capacity = Some(value);
     }
 
     fn maybe_send_change_capacity(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
-        if let Some(cap) = self.change_capacity {
+        if let Some(cap) = self.next_capacity {
             // Check if itt is possible to reduce the capacity, e.g. if enough space can be make free for the reduction.
             if cap < self.table.capacity() && !self.table.test_evict_to(cap) {
                 return Err(Error::DynamicTableFull);
@@ -302,7 +302,7 @@ impl QPackEncoder {
                 return Err(Error::InternalError);
             }
             self.max_entries = cap / 32;
-            self.change_capacity = None;
+            self.next_capacity = None;
         }
         Ok(())
     }
