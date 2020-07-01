@@ -8,7 +8,8 @@ LABEL maintainer="Martin Thomson <mt@lowentropy.net>"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates coreutils curl git make mercurial ssh \
-    build-essential clang llvm libclang-dev gyp ninja-build pkg-config zlib1g-dev sudo \
+    build-essential clang llvm libclang-dev lld \
+    gyp ninja-build pkg-config zlib1g-dev sudo \
  && apt-get autoremove -y && apt-get clean -y \
  && rm -rf /var/lib/apt/lists/*
 
@@ -38,7 +39,8 @@ USER $USER
 
 ENV NSS_DIR=$HOME/nss \
     NSPR_DIR=$HOME/nspr \
-    LD_LIBRARY_PATH=$HOME/dist/Debug/lib
+    LD_LIBRARY_PATH=$HOME/dist/Debug/lib \
+    RUSTFLAGS="-C link-arg=-fuse-ld=lld"
 
 RUN set -eux; \
     hg clone -u c7a1c91cd9be https://hg.mozilla.org/projects/nss "$NSS_DIR"; \
