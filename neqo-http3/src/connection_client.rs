@@ -120,7 +120,7 @@ impl Http3Client {
         self.conn.authenticated(status, now);
     }
 
-    pub fn set_qlog(&mut self, qlog: Option<NeqoQlog>) {
+    pub fn set_qlog(&mut self, qlog: &NeqoQlog) {
         self.conn.set_qlog(qlog);
     }
 

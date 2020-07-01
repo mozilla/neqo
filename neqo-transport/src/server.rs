@@ -351,7 +351,7 @@ impl Server {
         }
 
         if matches!(c.borrow().state(), State::Closed(_)) {
-            c.borrow_mut().set_qlog(None);
+            c.borrow_mut().set_qlog(&NeqoQlog::disabled());
             self.connections
                 .borrow_mut()
                 .retain(|_, v| !Rc::ptr_eq(v, &c));
@@ -435,7 +435,7 @@ impl Server {
         }
     }
 
-    fn create_qlog_trace(&self, attempt_key: &AttemptKey) -> Option<NeqoQlog> {
+    fn create_qlog_trace(&self, attempt_key: &AttemptKey) -> NeqoQlog {
         if let Some(qlog_dir) = &self.qlog_dir {
             let mut qlog_path = qlog_dir.to_path_buf();
 
@@ -460,13 +460,13 @@ impl Server {
                         common::qlog::new_trace(Role::Server),
                         Box::new(f),
                     );
-                    let n_qlog = NeqoQlog::new(streamer, qlog_path);
+                    let n_qlog = NeqoQlog::enabled(streamer, qlog_path);
                     match n_qlog {
-                        Ok(nql) => Some(nql),
+                        Ok(nql) => nql,
                         Err(e) => {
                             // Keep going but w/o qlogging
                             qerror!("NeqoQlog error: {}", e);
-                            None
+                            NeqoQlog::disabled()
                         }
                     }
                 }
@@ -476,11 +476,11 @@ impl Server {
                         qlog_path.display(),
                         e
                     );
-                    None
+                    NeqoQlog::disabled()
                 }
             }
         } else {
-            None
+            NeqoQlog::disabled()
         }
     }
 
@@ -519,7 +519,7 @@ impl Server {
                 // There was a retry, so set the connection IDs for.
                 c.set_retry_cids(odcid, initial.src_cid, initial.dst_cid);
             }
-            c.set_qlog(self.create_qlog_trace(&attempt_key));
+            c.set_qlog(&self.create_qlog_trace(&attempt_key));
             let c = Rc::new(RefCell::new(ServerConnectionState {
                 c,
                 last_timer: now,
