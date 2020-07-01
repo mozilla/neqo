@@ -535,6 +535,10 @@ impl<'a> PublicPacket<'a> {
         self.quic_version
     }
 
+    pub fn packet_len(&self) -> usize {
+        self.data.len()
+    }
+
     fn decode_pn(expected: PacketNumber, pn: u64, w: usize) -> PacketNumber {
         let window = 1_u64 << (w * 8);
         let candidate = (expected & !(window - 1)) | pn;
@@ -634,10 +638,10 @@ impl<'a> PublicPacket<'a> {
                     data: d,
                 })
             } else {
-                Err(Error::DecryptError)
+                Err(Error::KeysNotFound)
             }
         } else {
-            Err(Error::DecryptError)
+            Err(Error::KeysNotFound)
         }
     }
 
@@ -1091,5 +1095,23 @@ mod tests {
             PublicPacket::decode_pn(0x3fff_ffff_ffff_ffff, 2, 4),
             0x4000_0000_0000_0002
         );
+    }
+
+    #[test]
+    fn chacha20_sample() {
+        const PACKET: &[u8] = &[
+            0x4c, 0xfe, 0x41, 0x89, 0x65, 0x5e, 0x5c, 0xd5, 0x5c, 0x41, 0xf6, 0x90, 0x80, 0x57,
+            0x5d, 0x79, 0x99, 0xc2, 0x5a, 0x5b, 0xfb,
+        ];
+        fixture_init();
+        let (packet, slice) =
+            PublicPacket::decode(PACKET, &FixedConnectionIdManager::new(0)).unwrap();
+        assert!(slice.is_empty());
+        let decrypted = packet
+            .decrypt(&mut CryptoStates::test_chacha(), now())
+            .unwrap();
+        assert_eq!(decrypted.packet_type(), PacketType::Short);
+        assert_eq!(decrypted.pn(), 654_360_564);
+        assert_eq!(&decrypted[..], &[0x01]);
     }
 }

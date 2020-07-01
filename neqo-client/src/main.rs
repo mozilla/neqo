@@ -9,14 +9,17 @@
 
 use qlog::QlogStreamer;
 
-use neqo_common::{self as common, hex, matches, qlog::NeqoQlog, Datagram, Role};
-use neqo_crypto::{init, AuthenticationStatus, Cipher, TLS_CHACHA20_POLY1305_SHA256};
-use neqo_http3::{self, Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_common::{self as common, hex, qlog::NeqoQlog, Datagram, Role};
+use neqo_crypto::{
+    constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
+    init, AuthenticationStatus, Cipher,
+};
+use neqo_http3::{self, Error, Header, Http3Client, Http3ClientEvent, Http3State, Output};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{FixedConnectionIdManager, QuicVersion};
+use neqo_transport::{Connection, Error as TransportError, FixedConnectionIdManager, QuicVersion};
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
@@ -34,6 +37,7 @@ pub enum ClientError {
     Http3Error(neqo_http3::Error),
     IoError(io::Error),
     QlogError,
+    TransportError(neqo_transport::Error),
 }
 
 impl From<io::Error> for ClientError {
@@ -54,15 +58,21 @@ impl From<qlog::Error> for ClientError {
     }
 }
 
+impl From<neqo_transport::Error> for ClientError {
+    fn from(err: neqo_transport::Error) -> Self {
+        Self::TransportError(err)
+    }
+}
+
 type Res<T> = Result<T, ClientError>;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "neqo-client",
-    about = "A basic QUIC HTTP/0.9 and HTTP3 client."
+    about = "A basic QUIC HTTP/0.9 and HTTP/3 client."
 )]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3-29")]
+    #[structopt(short = "a", long, default_value = "h3-29", number_of_values = 1)]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP/3 no matter what the ALPN says.
@@ -123,10 +133,25 @@ pub struct Args {
     /// Client attemps to resume connections when there are multiple connections made.
     /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
     resume: bool,
+
+    #[structopt(short = "c", long, number_of_values = 1)]
+    /// The set of TLS cipher suites to enable.
+    /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
+    ciphers: Vec<String>,
 }
 
-trait Handler {
-    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> Res<bool>;
+impl Args {
+    fn get_ciphers(&self) -> Vec<Cipher> {
+        self.ciphers
+            .iter()
+            .filter_map(|c| match c.as_str() {
+                "TLS_AES_128_GCM_SHA256" => Some(TLS_AES_128_GCM_SHA256),
+                "TLS_AES_256_GCM_SHA384" => Some(TLS_AES_256_GCM_SHA384),
+                "TLS_CHACHA20_POLY1305_SHA256" => Some(TLS_CHACHA20_POLY1305_SHA256),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    }
 }
 
 fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) -> io::Result<()> {
@@ -185,8 +210,7 @@ fn process_loop(
     remote_addr: &SocketAddr,
     socket: &UdpSocket,
     client: &mut Http3Client,
-    handler: &mut dyn Handler,
-    args: &Args,
+    handler: &mut Handler,
 ) -> Res<neqo_http3::Http3State> {
     let buf = &mut [0u8; 2048];
     loop {
@@ -194,7 +218,7 @@ fn process_loop(
             return Ok(client.state());
         }
 
-        let mut exiting = !handler.handle(args, client)?;
+        let mut exiting = !handler.handle(client)?;
 
         loop {
             let output = client.process_output(Instant::now());
@@ -245,28 +269,68 @@ fn process_loop(
     }
 }
 
-struct PreConnectHandler {}
-impl Handler for PreConnectHandler {
-    fn handle(&mut self, _args: &Args, client: &mut Http3Client) -> Res<bool> {
-        let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
-        if client.events().any(authentication_needed) {
-            client.authenticated(AuthenticationStatus::Ok, Instant::now());
-        }
-        Ok(Http3State::Connected != client.state())
-    }
-}
-
-#[derive(Default)]
-struct PostConnectHandler {
+struct Handler<'a> {
     streams: HashMap<u64, Option<File>>,
+    url_queue: VecDeque<Url>,
+    all_paths: Vec<PathBuf>,
+    args: &'a Args,
 }
 
-// This is a bit fancier than actually needed.
-impl Handler for PostConnectHandler {
-    fn handle(&mut self, args: &Args, client: &mut Http3Client) -> Res<bool> {
+impl<'a> Handler<'a> {
+    fn download_urls(&mut self, client: &mut Http3Client) {
+        loop {
+            if self.url_queue.is_empty() {
+                break;
+            }
+            if !self.download_next(client) {
+                break;
+            }
+        }
+    }
+
+    fn download_next(&mut self, client: &mut Http3Client) -> bool {
+        let url = self
+            .url_queue
+            .pop_front()
+            .expect("download_next called with empty queue");
+        match client.fetch(
+            &self.args.method,
+            &url.scheme(),
+            &url.host_str().unwrap(),
+            &url.path(),
+            &to_headers(&self.args.header),
+        ) {
+            Ok(client_stream_id) => {
+                println!(
+                    "Successfully created stream id {} for {}",
+                    client_stream_id, url
+                );
+                let _ = client.stream_close_send(client_stream_id);
+
+                let out_file = get_output_file(&url, &self.args.output_dir, &mut self.all_paths);
+
+                self.streams.insert(client_stream_id, out_file);
+                true
+            }
+            e @ Err(Error::TransportError(TransportError::StreamLimitError))
+            | e @ Err(Error::Unavailable) => {
+                println!("Cannot create stream {:?}", e);
+                self.url_queue.push_front(url);
+                false
+            }
+            Err(e) => {
+                panic!("Can't create stream {}", e);
+            }
+        }
+    }
+
+    fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {
         let mut data = vec![0; 4000];
         while let Some(event) = client.next_event() {
             match event {
+                Http3ClientEvent::AuthenticationNeeded => {
+                    client.authenticated(AuthenticationStatus::Ok, Instant::now());
+                }
                 Http3ClientEvent::HeaderReady {
                     stream_id,
                     headers,
@@ -298,7 +362,7 @@ impl Handler for PostConnectHandler {
                                 if sz > 0 {
                                     out_file.write_all(&data[..sz])?;
                                 }
-                            } else if !args.output_read_data {
+                            } else if !self.args.output_read_data {
                                 println!("READ[{}]: {} bytes", stream_id, sz);
                             } else if let Ok(txt) = String::from_utf8(data.clone()) {
                                 println!("READ[{}]: {}", stream_id, txt);
@@ -317,13 +381,20 @@ impl Handler for PostConnectHandler {
 
                     if stream_done {
                         self.streams.remove(&stream_id);
-                        if self.streams.is_empty() {
+                        if self.streams.is_empty() && self.url_queue.is_empty() {
                             client.close(Instant::now(), 0, "kthxbye!");
                             return Ok(false);
                         }
                     }
                 }
-                _ => {}
+                Http3ClientEvent::StateChange(Http3State::Connected)
+                | Http3ClientEvent::RequestsCreatable => {
+                    println!("{:?}", event);
+                    self.download_urls(client);
+                }
+                _ => {
+                    println!("Unhandled event {:?}", event);
+                }
             }
         }
 
@@ -351,7 +422,7 @@ fn client(
     socket: UdpSocket,
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
-    origin: &str,
+    hostname: &str,
     urls: &[Url],
 ) -> Res<()> {
     let quic_protocol = match args.alpn.as_str() {
@@ -361,60 +432,36 @@ fn client(
         _ => QuicVersion::default(),
     };
 
-    let mut client = Http3Client::new(
-        origin,
+    let mut transport = Connection::new_client(
+        hostname,
         &[&args.alpn],
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
         remote_addr,
+        quic_protocol,
+    )?;
+    let ciphers = args.get_ciphers();
+    if !ciphers.is_empty() {
+        transport.set_ciphers(&ciphers)?;
+    }
+    let mut client = Http3Client::new_with_conn(
+        transport,
         QpackSettings {
             max_table_size_encoder: args.max_table_size_encoder,
             max_table_size_decoder: args.max_table_size_decoder,
             max_blocked_streams: args.max_blocked_streams,
         },
-        quic_protocol,
-    )
-    .expect("must succeed");
-    client.set_qlog(qlog_new(args, origin)?);
-    // Temporary here to help out the type inference engine
-    let mut h = PreConnectHandler {};
-    process_loop(
-        &local_addr,
-        &remote_addr,
-        &socket,
-        &mut client,
-        &mut h,
-        &args,
-    )?;
+    );
+    client.set_qlog(qlog_new(args, hostname)?);
 
-    let mut h2 = PostConnectHandler::default();
+    let mut h = Handler {
+        streams: HashMap::new(),
+        url_queue: VecDeque::from(urls.to_vec()),
+        all_paths: Vec::new(),
+        args: &args,
+    };
 
-    let mut open_paths = Vec::new();
-
-    for url in urls {
-        let client_stream_id = client.fetch(
-            &args.method,
-            &url.scheme(),
-            &url.host_str().unwrap(),
-            &url.path(),
-            &to_headers(&args.header),
-        )?;
-
-        let _ = client.stream_close_send(client_stream_id);
-
-        let out_file = get_output_file(url, &args.output_dir, &mut open_paths);
-
-        h2.streams.insert(client_stream_id, out_file);
-    }
-
-    process_loop(
-        &local_addr,
-        &remote_addr,
-        &socket,
-        &mut client,
-        &mut h2,
-        &args,
-    )?;
+    process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
     Ok(())
 }
@@ -451,10 +498,6 @@ fn main() -> Res<()> {
 
     let mut args = Args::from_args();
 
-    let mut resumption_test = false;
-
-    let mut ciphers: Option<&[Cipher]> = None;
-
     if args.qns_mode {
         match env::var("TESTCASE") {
             Ok(s) if s == "http3" => {}
@@ -468,7 +511,6 @@ fn main() -> Res<()> {
                 }
                 args.use_old_http = true;
                 args.resume = true;
-                resumption_test = true;
             }
             Ok(s) if s == "multiconnect" => {
                 args.use_old_http = true;
@@ -476,10 +518,16 @@ fn main() -> Res<()> {
             }
             Ok(s) if s == "chacha20" => {
                 args.use_old_http = true;
-                ciphers = Some(&[TLS_CHACHA20_POLY1305_SHA256]);
+                args.ciphers.clear();
+                args.ciphers
+                    .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
             }
             Ok(_) => exit(127),
             Err(_) => exit(1),
+        }
+
+        if let Ok(qlogdir) = env::var("QLOGDIR") {
+            args.qlog_dir = Some(PathBuf::from(qlogdir));
         }
     }
 
@@ -533,7 +581,7 @@ fn main() -> Res<()> {
                 &urls,
             )?;
         } else if !args.download_in_series {
-            let token = if resumption_test {
+            let token = if args.resume {
                 // Download first URL using a separate connection, save the token and use it for
                 // the remaining URLs
                 if urls.len() < 2 {
@@ -551,7 +599,6 @@ fn main() -> Res<()> {
                     &format!("{}", host),
                     &[first_url],
                     None,
-                    ciphers,
                 )?
             } else {
                 None
@@ -565,7 +612,6 @@ fn main() -> Res<()> {
                 &format!("{}", host),
                 &urls,
                 token,
-                ciphers,
             )?;
         } else {
             let mut token: Option<Vec<u8>> = None;
@@ -579,7 +625,6 @@ fn main() -> Res<()> {
                     &format!("{}", host),
                     &[url],
                     token,
-                    ciphers,
                 )?;
             }
         }
@@ -603,8 +648,8 @@ mod old {
 
     use super::{qlog_new, Res};
 
-    use neqo_common::{matches, Datagram};
-    use neqo_crypto::{AuthenticationStatus, Cipher};
+    use neqo_common::Datagram;
+    use neqo_crypto::AuthenticationStatus;
     use neqo_transport::{
         Connection, ConnectionEvent, Error, FixedConnectionIdManager, Output, QuicVersion, State,
         StreamType,
@@ -612,29 +657,25 @@ mod old {
 
     use super::{emit_datagram, get_output_file, Args};
 
-    trait HandlerOld {
-        fn handle(&mut self, client: &mut Connection) -> Res<bool>;
-    }
-
-    struct PreConnectHandlerOld {}
-    impl HandlerOld for PreConnectHandlerOld {
-        fn handle(&mut self, client: &mut Connection) -> Res<bool> {
-            let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
-            if client.events().any(authentication_needed) {
-                client.authenticated(AuthenticationStatus::Ok, Instant::now());
-            }
-            Ok(State::Connected != *dbg!(client.state()))
-        }
-    }
-
-    struct PostConnectHandlerOld<'a> {
+    struct HandlerOld<'b> {
         streams: HashMap<u64, Option<File>>,
         url_queue: VecDeque<Url>,
         all_paths: Vec<PathBuf>,
-        args: &'a Args,
+        args: &'b Args,
     }
 
-    impl<'a> PostConnectHandlerOld<'a> {
+    impl<'b> HandlerOld<'b> {
+        fn download_urls(&mut self, client: &mut Connection) {
+            loop {
+                if self.url_queue.is_empty() {
+                    break;
+                }
+                if !self.download_next(client) {
+                    break;
+                }
+            }
+        }
+
         fn download_next(&mut self, client: &mut Connection) -> bool {
             let url = self
                 .url_queue
@@ -653,8 +694,8 @@ mod old {
                     self.streams.insert(client_stream_id, out_file);
                     true
                 }
-                Err(Error::StreamLimitError) => {
-                    println!("Cannot create stream (StreamLimitError)");
+                e @ Err(Error::StreamLimitError) | e @ Err(Error::ConnectionState) => {
+                    println!("Cannot create stream {:?}", e);
                     self.url_queue.push_front(url);
                     false
                 }
@@ -663,14 +704,14 @@ mod old {
                 }
             }
         }
-    }
 
-    // This is a bit fancier than actually needed.
-    impl HandlerOld for PostConnectHandlerOld<'_> {
         fn handle(&mut self, client: &mut Connection) -> Res<bool> {
             let mut data = vec![0; 4000];
             while let Some(event) = client.next_event() {
                 match event {
+                    ConnectionEvent::AuthenticationNeeded => {
+                        client.authenticated(AuthenticationStatus::Ok, Instant::now());
+                    }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         let out_file = self.streams.get_mut(&stream_id);
                         if out_file.is_none() {
@@ -717,18 +758,17 @@ mod old {
                     ConnectionEvent::SendStreamCreatable { stream_type } => {
                         println!("stream {:?} creatable", stream_type);
                         if stream_type == StreamType::BiDi {
-                            loop {
-                                if self.url_queue.is_empty() {
-                                    break;
-                                }
-                                if !self.download_next(client) {
-                                    break;
-                                }
-                            }
+                            self.download_urls(client);
                         }
                     }
+                    ConnectionEvent::StateChange(State::WaitInitial)
+                    | ConnectionEvent::StateChange(State::Handshaking)
+                    | ConnectionEvent::StateChange(State::Connected) => {
+                        println!("{:?}", event);
+                        self.download_urls(client);
+                    }
                     _ => {
-                        println!("Unexpected event {:?}", event);
+                        println!("Unhandled event {:?}", event);
                     }
                 }
             }
@@ -742,7 +782,7 @@ mod old {
         remote_addr: &SocketAddr,
         socket: &UdpSocket,
         client: &mut Connection,
-        handler: &mut dyn HandlerOld,
+        handler: &mut HandlerOld,
     ) -> Res<State> {
         let buf = &mut [0u8; 2048];
         loop {
@@ -804,7 +844,6 @@ mod old {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn old_client(
         args: &Args,
         socket: &UdpSocket,
@@ -813,7 +852,6 @@ mod old {
         origin: &str,
         urls: &[Url],
         token: Option<Vec<u8>>,
-        ciphers: Option<&[Cipher]>,
     ) -> Res<Option<Vec<u8>>> {
         let (quic_protocol, alpn) = match args.alpn.as_str() {
             "hq-27" => (QuicVersion::Draft27, "hq-27"),
@@ -828,41 +866,27 @@ mod old {
             local_addr,
             remote_addr,
             quic_protocol,
-        )
-        .expect("must succeed");
+        )?;
 
         if let Some(tok) = token {
-            client
-                .enable_resumption(Instant::now(), &tok)
-                .expect("should set token");
+            client.enable_resumption(Instant::now(), &tok)?;
         }
 
-        if let Some(cip) = ciphers {
-            client.set_ciphers(cip).expect("Cannot set ciphers");
+        let ciphers = args.get_ciphers();
+        if !ciphers.is_empty() {
+            client.set_ciphers(&ciphers)?;
         }
 
         client.set_qlog(qlog_new(args, origin)?);
-        // Temporary here to help out the type inference engine
-        let mut h = PreConnectHandlerOld {};
-        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
-        let mut h2 = PostConnectHandlerOld {
+        let mut h = HandlerOld {
             streams: HashMap::new(),
             url_queue: VecDeque::from(urls.to_vec()),
             all_paths: Vec::new(),
             args: &args,
         };
 
-        loop {
-            if h2.url_queue.is_empty() {
-                break;
-            }
-            if !h2.download_next(&mut client) {
-                break;
-            }
-        }
-
-        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h2)?;
+        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
         Ok(if args.resume {
             client.resumption_token()
