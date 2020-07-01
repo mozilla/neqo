@@ -177,11 +177,7 @@ impl SendMessage {
                 }
                 match conn.stream_send(self.stream_id, &buf[..to_send]) {
                     Ok(sent) => {
-                        qlog::h3_data_moved_down(
-                            &mut conn.qlog_mut().borrow_mut(),
-                            self.stream_id,
-                            buf.len(),
-                        );
+                        qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id, buf.len());
                         Ok(sent)
                     }
                     Err(e) => Err(Error::TransportError(e)),
@@ -240,7 +236,7 @@ impl SendMessage {
 
         if let SendMessageState::SendingInitialMessage { ref mut buf, fin } = self.state {
             let sent = conn.stream_send(self.stream_id, &buf)?;
-            qlog::h3_data_moved_down(&mut conn.qlog_mut().borrow_mut(), self.stream_id, buf.len());
+            qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id, buf.len());
 
             qtrace!([label], "{} bytes sent", sent);
 

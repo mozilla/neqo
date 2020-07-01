@@ -120,9 +120,7 @@ impl QPackEncoder {
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv) {
-                Ok(instruction) => {
-                    self.call_instruction(instruction, &mut conn.qlog_mut().borrow_mut())?
-                }
+                Ok(instruction) => self.call_instruction(instruction, &mut conn.qlog_mut())?,
                 Err(Error::NeedMoreData) => break Ok(()),
                 Err(e) => break Err(e),
             }
@@ -193,7 +191,7 @@ impl QPackEncoder {
     fn call_instruction(
         &mut self,
         instruction: DecoderInstruction,
-        qlog: &mut Option<NeqoQlog>,
+        qlog: &mut NeqoQlog,
     ) -> Res<()> {
         qdebug!([self], "call intruction {:?}", instruction);
         match instruction {
@@ -202,7 +200,7 @@ impl QPackEncoder {
                     qlog,
                     increment,
                     &increment.to_be_bytes(),
-                )?;
+                );
 
                 self.insert_count_instruction(increment)
             }
