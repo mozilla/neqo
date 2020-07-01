@@ -9,70 +9,56 @@ use std::mem;
 
 use crate::codec::Decoder;
 
-#[derive(Clone, Debug)]
-enum IncrementalDecoderUintState {
-    BeforeVarint,
-    InUint { v: u64, remaining: usize },
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct IncrementalDecoderUint {
-    state: IncrementalDecoderUintState,
+    v: u64,
+    remaining: Option<usize>,
 }
 
 impl IncrementalDecoderUint {
     #[must_use]
     pub fn min_remaining(&self) -> usize {
-        match self.state {
-            IncrementalDecoderUintState::BeforeVarint => 1,
-            IncrementalDecoderUintState::InUint { remaining, .. } => remaining,
+        if let Some(r) = self.remaining {
+            r
+        } else {
+            1
         }
     }
 
     pub fn consume(&mut self, dv: &mut Decoder) -> Option<u64> {
-        match &mut self.state {
-            IncrementalDecoderUintState::BeforeVarint => {
-                let (v, remaining) = match dv.decode_byte() {
-                    Some(b) => (
-                        u64::from(b & 0x3f),
-                        match b >> 6 {
-                            0 => 0,
-                            1 => 1,
-                            2 => 3,
-                            3 => 7,
-                            _ => unreachable!(),
-                        },
-                    ),
-                    None => unreachable!(),
-                };
-                self.state = IncrementalDecoderUintState::InUint { v, remaining };
-                if remaining == 0 {
-                    Some(v)
-                } else {
-                    None
-                }
+        if let Some(r) = &mut self.remaining {
+            let amount = min(*r, dv.remaining());
+            if amount < 8 {
+                self.v <<= amount * 8;
             }
-            IncrementalDecoderUintState::InUint { v, remaining } => {
-                let amount = min(*remaining, dv.remaining());
-                if amount < 8 {
-                    *v <<= amount * 8;
-                }
-                *v |= dv.decode_uint(amount).unwrap();
-                *remaining -= amount;
-                if *remaining == 0 {
-                    Some(*v)
-                } else {
-                    None
-                }
+            self.v |= dv.decode_uint(amount).unwrap();
+            *r -= amount;
+            if *r == 0 {
+                Some(self.v)
+            } else {
+                None
             }
-        }
-    }
-}
-
-impl Default for IncrementalDecoderUint {
-    fn default() -> Self {
-        Self {
-            state: IncrementalDecoderUintState::BeforeVarint,
+        } else {
+            let (v, remaining) = match dv.decode_byte() {
+                Some(b) => (
+                    u64::from(b & 0x3f),
+                    match b >> 6 {
+                        0 => 0,
+                        1 => 1,
+                        2 => 3,
+                        3 => 7,
+                        _ => unreachable!(),
+                    },
+                ),
+                None => unreachable!(),
+            };
+            self.remaining = Some(remaining);
+            self.v = v;
+            if remaining == 0 {
+                Some(v)
+            } else {
+                None
+            }
         }
     }
 }
