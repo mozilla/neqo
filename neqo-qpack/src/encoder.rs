@@ -289,8 +289,8 @@ impl QPackEncoder {
         stream_id: &StreamId,
     ) -> Res<()> {
         if let Some(cap) = self.next_capacity {
-            // Check if itt is possible to reduce the capacity, e.g. if enough space can be make free for the reduction.
-            if cap < self.table.capacity() && !self.table.test_evict_to(cap) {
+            // Check if it is possible to reduce the capacity, e.g. if enough space can be make free for the reduction.
+            if cap < self.table.capacity() && !self.table.can_evict_to(cap) {
                 return Err(Error::DynamicTableFull);
             }
             let mut buf = QPData::default();
@@ -301,7 +301,7 @@ impl QPackEncoder {
             if self.table.set_capacity(cap).is_err() {
                 debug_assert!(
                     false,
-                    "test_evict_to should have checked and make sure this operation is possible"
+                    "can_evict_to should have checked and make sure this operation is possible"
                 );
                 return Err(Error::InternalError);
             }
