@@ -452,7 +452,13 @@ fn client(
             max_blocked_streams: args.max_blocked_streams,
         },
     );
-    client.set_qlog(qlog_new(args, hostname)?);
+
+    let qlog_filename = format!(
+        "{}-{}",
+        hostname,
+        client.conn().path().unwrap().remote_cid()
+    );
+    client.set_qlog(qlog_new(args, &qlog_filename)?);
 
     let mut h = Handler {
         streams: HashMap::new(),
@@ -466,10 +472,10 @@ fn client(
     Ok(())
 }
 
-fn qlog_new(args: &Args, origin: &str) -> Res<Option<NeqoQlog>> {
+fn qlog_new(args: &Args, filename: &str) -> Res<Option<NeqoQlog>> {
     if let Some(qlog_dir) = &args.qlog_dir {
         let mut qlog_path = qlog_dir.to_path_buf();
-        qlog_path.push(format!("{}.qlog", origin));
+        qlog_path.push(format!("{}.qlog", filename));
 
         let f = OpenOptions::new()
             .write(true)
@@ -899,7 +905,10 @@ mod old {
             client.set_ciphers(&ciphers)?;
         }
 
-        client.set_qlog(qlog_new(args, origin)?);
+        client.set_qlog(qlog_new(
+            args,
+            &format!("{}-{}", origin, client.path().unwrap().remote_cid()),
+        )?);
 
         let mut h = HandlerOld {
             streams: HashMap::new(),
