@@ -15,7 +15,7 @@ use crate::table::{HeaderTable, LookupResult, ADDITIONAL_TABLE_ENTRY_SIZE};
 use crate::Header;
 use crate::{Error, QpackSettings, Res};
 use neqo_common::{qdebug, qerror, qlog::NeqoQlog, qtrace};
-use neqo_transport::Connection;
+use neqo_transport::{Connection, StreamId};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
 
@@ -24,12 +24,12 @@ pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
 #[derive(Debug, PartialEq)]
 enum LocalStreamState {
     NoStream,
-    Uninitialized(u64),
-    Initialized(u64),
+    Uninitialized(StreamId),
+    Initialized(StreamId),
 }
 
 impl LocalStreamState {
-    pub fn stream_id(&self) -> Option<u64> {
+    pub fn stream_id(&self) -> Option<StreamId> {
         match self {
             Self::NoStream => None,
             Self::Uninitialized(stream_id) | Self::Initialized(stream_id) => Some(*stream_id),
@@ -262,7 +262,7 @@ impl QPackEncoder {
 
         let stream_id = self.local_stream.stream_id().ok_or(Error::Internal)?;
 
-        let sent = conn.stream_send_atomic(stream_id, &buf)?;
+        let sent = conn.stream_send_atomic(stream_id.as_u64(), &buf)?;
         if !sent {
             return Err(Error::EncoderStreamBlocked);
         }
@@ -283,7 +283,11 @@ impl QPackEncoder {
         self.next_capacity = Some(value);
     }
 
-    fn maybe_send_change_capacity(&mut self, conn: &mut Connection, stream_id: u64) -> Res<()> {
+    fn maybe_send_change_capacity(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: &StreamId,
+    ) -> Res<()> {
         if let Some(cap) = self.next_capacity {
             // Check if itt is possible to reduce the capacity, e.g. if enough space can be make free for the reduction.
             if cap < self.table.capacity() && !self.table.test_evict_to(cap) {
@@ -291,7 +295,7 @@ impl QPackEncoder {
             }
             let mut buf = QPData::default();
             EncoderInstruction::Capacity { value: cap }.marshal(&mut buf, self.use_huffman);
-            if !conn.stream_send_atomic(stream_id, &buf)? {
+            if !conn.stream_send_atomic(stream_id.as_u64(), &buf)? {
                 return Err(Error::EncoderStreamBlocked);
             }
             if self.table.set_capacity(cap).is_err() {
@@ -319,14 +323,14 @@ impl QPackEncoder {
             LocalStreamState::Uninitialized(stream_id) => {
                 let mut buf = QPData::default();
                 buf.encode_varint(QPACK_UNI_STREAM_TYPE_ENCODER);
-                if !conn.stream_send_atomic(stream_id, &buf[..])? {
+                if !conn.stream_send_atomic(stream_id.as_u64(), &buf[..])? {
                     return Err(Error::EncoderStreamBlocked);
                 }
                 self.local_stream = LocalStreamState::Initialized(stream_id);
-                self.maybe_send_change_capacity(conn, stream_id)
+                self.maybe_send_change_capacity(conn, &stream_id)
             }
             LocalStreamState::Initialized(stream_id) => {
-                self.maybe_send_change_capacity(conn, stream_id)
+                self.maybe_send_change_capacity(conn, &stream_id)
             }
         }
     }
@@ -444,7 +448,7 @@ impl QPackEncoder {
     /// Encoder stream has been created. Add the stream id.
     pub fn add_send_stream(&mut self, stream_id: u64) {
         if self.local_stream == LocalStreamState::NoStream {
-            self.local_stream = LocalStreamState::Uninitialized(stream_id);
+            self.local_stream = LocalStreamState::Uninitialized(StreamId::new(stream_id));
         } else {
             panic!("Adding multiple local streams");
         }
@@ -469,7 +473,7 @@ impl QPackEncoder {
 
     #[must_use]
     pub fn local_stream_id(&self) -> Option<u64> {
-        self.local_stream.stream_id()
+        self.local_stream.stream_id().map(|s| s.as_u64())
     }
 
     #[must_use]
