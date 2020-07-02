@@ -74,8 +74,8 @@ enum PacketState {
 }
 
 impl CongestionControl {
-    pub fn set_qlog(&mut self, qlog: &NeqoQlog) {
-        self.qlog = qlog.clone();
+    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+        self.qlog = qlog;
     }
 
     #[cfg(test)]

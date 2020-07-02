@@ -454,7 +454,7 @@ fn client(
     );
 
     let qlog = qlog_new(args, hostname, client.conn())?;
-    client.set_qlog(&qlog);
+    client.set_qlog(qlog);
 
     let mut h = Handler {
         streams: HashMap::new(),
@@ -902,7 +902,7 @@ mod old {
             client.set_ciphers(&ciphers)?;
         }
 
-        client.set_qlog(&qlog_new(args, origin, &client)?);
+        client.set_qlog(qlog_new(args, origin, &client)?);
 
         let mut h = HandlerOld {
             streams: HashMap::new(),
