@@ -600,9 +600,9 @@ impl Connection {
     }
 
     /// Set or clear the qlog for this connection.
-    pub fn set_qlog(&mut self, qlog: &NeqoQlog) {
-        self.loss_recovery.set_qlog(qlog);
-        self.qlog = qlog.clone();
+    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+        self.loss_recovery.set_qlog(qlog.clone());
+        self.qlog = qlog;
     }
 
     /// Get the qlog (if any) for this connection.

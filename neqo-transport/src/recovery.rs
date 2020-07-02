@@ -519,9 +519,9 @@ impl LossRecovery {
         self.rtt_vals.pto(PNSpace::ApplicationData)
     }
 
-    pub fn set_qlog(&mut self, qlog: &NeqoQlog) {
-        self.qlog = qlog.clone();
-        self.cc.set_qlog(qlog)
+    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+        self.cc.set_qlog(qlog.clone());
+        self.qlog = qlog;
     }
 
     pub fn drop_0rtt(&mut self) -> Vec<SentPacket> {

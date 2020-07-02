@@ -351,7 +351,7 @@ impl Server {
         }
 
         if matches!(c.borrow().state(), State::Closed(_)) {
-            c.borrow_mut().set_qlog(&NeqoQlog::disabled());
+            c.borrow_mut().set_qlog(NeqoQlog::disabled());
             self.connections
                 .borrow_mut()
                 .retain(|_, v| !Rc::ptr_eq(v, &c));
@@ -519,7 +519,7 @@ impl Server {
                 // There was a retry, so set the connection IDs for.
                 c.set_retry_cids(odcid, initial.src_cid, initial.dst_cid);
             }
-            c.set_qlog(&self.create_qlog_trace(&attempt_key));
+            c.set_qlog(self.create_qlog_trace(&attempt_key));
             let c = Rc::new(RefCell::new(ServerConnectionState {
                 c,
                 last_timer: now,
