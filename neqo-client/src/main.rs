@@ -14,7 +14,9 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, AuthenticationStatus, Cipher,
 };
-use neqo_http3::{self, Error, Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_http3::{
+    self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
+};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{Connection, Error as TransportError, FixedConnectionIdManager, QuicVersion};
 
@@ -449,12 +451,14 @@ fn client(
     }
     let mut client = Http3Client::new_with_conn(
         transport,
-        QpackSettings {
-            max_table_size_encoder: args.max_table_size_encoder,
-            max_table_size_decoder: args.max_table_size_decoder,
-            max_blocked_streams: args.max_blocked_streams,
+        &Http3Parameters {
+            qpack_settings: QpackSettings {
+                max_table_size_encoder: args.max_table_size_encoder,
+                max_table_size_decoder: args.max_table_size_decoder,
+                max_blocked_streams: args.max_blocked_streams,
+            },
+            max_concurrent_push_streams: args.max_concurrent_push_streams,
         },
-        args.max_concurrent_push_streams,
     );
 
     let qlog = qlog_new(args, hostname, client.conn())?;

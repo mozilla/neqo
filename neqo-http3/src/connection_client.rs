@@ -57,6 +57,11 @@ where
     move |id, v| f((id, v)).is_none()
 }
 
+pub struct Http3Parameters {
+    pub qpack_settings: QpackSettings,
+    pub max_concurrent_push_streams: u64,
+}
+
 pub struct Http3Client {
     conn: Connection,
     base_handler: Http3Connection,
@@ -80,9 +85,8 @@ impl Http3Client {
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        qpack_settings: QpackSettings,
-        max_concurent_push_streams: u64,
         quic_version: QuicVersion,
+        http3_parameters: &Http3Parameters,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
             Connection::new_client(
@@ -93,24 +97,19 @@ impl Http3Client {
                 remote_addr,
                 quic_version,
             )?,
-            qpack_settings,
-            max_concurent_push_streams,
+            http3_parameters,
         ))
     }
 
     #[must_use]
-    pub fn new_with_conn(
-        c: Connection,
-        qpack_settings: QpackSettings,
-        max_concurent_push_streams: u64,
-    ) -> Self {
+    pub fn new_with_conn(c: Connection, http3_parameters: &Http3Parameters) -> Self {
         let events = Http3ClientEvents::default();
         Self {
             conn: c,
-            base_handler: Http3Connection::new(qpack_settings),
+            base_handler: Http3Connection::new(http3_parameters.qpack_settings),
             events: events.clone(),
             push_handler: Rc::new(RefCell::new(PushController::new(
-                max_concurent_push_streams,
+                http3_parameters.max_concurrent_push_streams,
                 events,
             ))),
         }
@@ -653,7 +652,7 @@ impl Http3Client {
 mod tests {
     use super::{
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
-        Http3State, QpackSettings, Rc, RefCell, StreamType,
+        Http3Parameters, Http3State, QpackSettings, Rc, RefCell, StreamType,
     };
     use crate::hframe::HFrame;
     use crate::settings::{HSetting, HSettingType};
@@ -685,13 +684,15 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
-            QpackSettings {
-                max_table_size_encoder: 100,
-                max_table_size_decoder: 100,
-                max_blocked_streams: 100,
-            },
-            5,
             QuicVersion::default(),
+            &Http3Parameters {
+                qpack_settings: QpackSettings {
+                    max_table_size_encoder: 100,
+                    max_table_size_decoder: 100,
+                    max_blocked_streams: 100,
+                },
+                max_concurrent_push_streams: 5,
+            },
         )
         .expect("create a default client")
     }
