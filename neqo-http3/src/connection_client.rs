@@ -48,12 +48,13 @@ where
 }
 
 // This is used for filtering send_streams and recv_Streams with a stream_ids less than a given id.
-// Only the same type (bidirectional or unidirectionsl) streams are filtered.
+// Only the same type (bidirectional or unidirectional) streams are filtered.
 fn id_lt<U>(base: StreamId) -> impl FnMut(&u64, &mut U) -> bool
 where
     U: ?Sized,
 {
-    move |id, _| *id < base.as_u64() || (StreamId::from(*id).is_bidi() ^ base.is_bidi())
+    let mut f = id_gte(base);
+    move |id, v| f((id, v)).is_none()
 }
 
 pub struct Http3Client {
@@ -3001,7 +3002,6 @@ mod tests {
 
         let out = server.conn.process(None, now());
         client.process(out.dgram(), now());
-        //        client.process(None, now());
 
         // Read first frame
         match client.events().nth(1).unwrap() {

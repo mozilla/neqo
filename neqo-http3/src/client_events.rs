@@ -214,10 +214,10 @@ impl Http3ClientEvents {
     pub fn remove_events_for_push_id(&self, push_id: u64) {
         self.remove(|evt| {
             matches!(evt,
-                Http3ClientEvent::PushPromise{push_id:x, ..}
-                | Http3ClientEvent::PushHeaderReady{push_id:x, ..}
-                | Http3ClientEvent::PushDataReadable{push_id:x, ..}
-                | Http3ClientEvent::PushCanceled{push_id:x, ..} if *x == push_id)
+                Http3ClientEvent::PushPromise{ push_id: x, .. }
+                | Http3ClientEvent::PushHeaderReady{ push_id: x, .. }
+                | Http3ClientEvent::PushDataReadable{ push_id: x, .. }
+                | Http3ClientEvent::PushCanceled{ push_id: x, .. } if *x == push_id)
         });
     }
 }
