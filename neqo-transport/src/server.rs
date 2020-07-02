@@ -439,14 +439,13 @@ impl Server {
         if let Some(qlog_dir) = &self.qlog_dir {
             let mut qlog_path = qlog_dir.to_path_buf();
 
-            // TODO(mt) - the original DCID is not really unique, which means that attackers
-            // can cause us to overwrite our own logs.  That's not ideal.
             qlog_path.push(format!("{}.qlog", attempt_key.odcid));
 
+            // The original DCID is chosen by the client. Using create_new()
+            // prevents attackers from overwriting existing logs.
             match OpenOptions::new()
                 .write(true)
-                .create(true)
-                .truncate(true)
+                .create_new(true)
                 .open(&qlog_path)
             {
                 Ok(f) => {
