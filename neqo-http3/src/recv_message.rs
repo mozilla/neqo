@@ -130,9 +130,58 @@ impl RecvMessage {
         }
     }
 
+    #[allow(unreachable_code)]
     fn check_headers(headers: &[Header]) -> bool {
+        let mut regular_header_field_encountered = false;
+
+        let prohibited_header_list = vec![
+            "accept-charset",
+            "accept-encoding",
+            "access-control-request-headers",
+            "access-control-request-method",
+            "connection",
+            "content-length",
+            "date",
+            "dnt",
+            "expect",
+            "feature-policy",
+            "host",
+            "keep-alive",
+            "origin",
+            "proxy-",
+            "sec-",
+            "referer",
+            "te",
+            "trailer",
+            "transfer-encoding",
+            "upgrade",
+            "via",
+        ];
+
         for header_tuple in headers {
+            // Check for UpperCase in field_names
             if header_tuple.0.find(char::is_uppercase) != None {
+                return false;
+            }
+
+            // Check for pseudo header fields after fields
+            if header_tuple.0.starts_with(':') {
+                if regular_header_field_encountered {
+                    return false;
+                }
+            } else {
+                regular_header_field_encountered = true;
+            }
+
+            // Presence of prohibited header fields
+            if header_tuple.0.starts_with("Proxy-") || header_tuple.0.starts_with("Sec-") {
+                return false;
+            }
+
+            if prohibited_header_list
+                .iter()
+                .any(|&prohibited_name| prohibited_name == header_tuple.0)
+            {
                 return false;
             }
         }
