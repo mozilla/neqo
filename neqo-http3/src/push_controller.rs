@@ -47,7 +47,7 @@ enum PushState {
 
 /// `ActivePushStreams` holds information about push streams.
 ///
-/// `first_push_id` holds a push_id of the first element in `push_streams` if it is present.
+/// `first_push_id` holds a `push_id` of the first element in `push_streams` if it is present.
 /// `push_id` smaller than `first_push_id` have been already closed. `push_id` => `first_push_id`
 /// are in `push_streams` or they are not yet opened.
 #[derive(Debug)]
