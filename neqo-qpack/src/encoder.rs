@@ -286,7 +286,7 @@ impl QPackEncoder {
     fn maybe_send_change_capacity(
         &mut self,
         conn: &mut Connection,
-        stream_id: &StreamId,
+        stream_id: StreamId,
     ) -> Res<()> {
         if let Some(cap) = self.next_capacity {
             // Check if it is possible to reduce the capacity, e.g. if enough space can be make free for the reduction.
@@ -327,10 +327,10 @@ impl QPackEncoder {
                     return Err(Error::EncoderStreamBlocked);
                 }
                 self.local_stream = LocalStreamState::Initialized(stream_id);
-                self.maybe_send_change_capacity(conn, &stream_id)
+                self.maybe_send_change_capacity(conn, stream_id)
             }
             LocalStreamState::Initialized(stream_id) => {
-                self.maybe_send_change_capacity(conn, &stream_id)
+                self.maybe_send_change_capacity(conn, stream_id)
             }
         }
     }
@@ -473,7 +473,7 @@ impl QPackEncoder {
 
     #[must_use]
     pub fn local_stream_id(&self) -> Option<u64> {
-        self.local_stream.stream_id().map(|s| s.as_u64())
+        self.local_stream.stream_id().map(StreamId::as_u64)
     }
 
     #[must_use]
