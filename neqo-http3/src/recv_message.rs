@@ -254,7 +254,7 @@ impl RecvStream for RecvMessage {
         self.conn_events.reset(self.stream_id, app_error);
     }
 
-    pub fn read_data(
+    fn read_data(
         &mut self,
         conn: &mut Connection,
         decoder: &mut QPackDecoder,
@@ -279,7 +279,7 @@ impl RecvStream for RecvMessage {
                         if *remaining_data_len > 0 {
                             return Err(Error::HttpFrame);
                         }
-                       self.state = RecvMessageState::Closed;
+                        self.state = RecvMessageState::Closed;
                         break Ok((written, fin));
                     } else if *remaining_data_len == 0 {
                         self.state = RecvMessageState::WaitingForData {

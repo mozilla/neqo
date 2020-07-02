@@ -9,7 +9,7 @@
 
 use neqo_common::{hex, matches, Datagram};
 use neqo_crypto::{init, AuthenticationStatus};
-use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3State};
+use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output,
@@ -506,12 +506,14 @@ fn connect_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<H3Ha
         streams: HashSet::new(),
         h3: Http3Client::new_with_conn(
             client,
-            QpackSettings {
-                max_table_size_encoder: 16384,
-                max_table_size_decoder: 16384,
-                max_blocked_streams: 10,
+            &Http3Parameters {
+                qpack_settings: QpackSettings {
+                    max_table_size_encoder: 16384,
+                    max_table_size_decoder: 16384,
+                    max_blocked_streams: 10,
+                },
+                max_concurrent_push_streams: 10,
             },
-            10,
         ),
         host: String::from(peer.host),
         path: String::from("/"),
@@ -599,13 +601,15 @@ fn test_h3_rz(
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
-        QpackSettings {
-            max_table_size_encoder: 16384,
-            max_table_size_decoder: 16384,
-            max_blocked_streams: 10,
-        },
-        0,
         QuicVersion::default(),
+        &Http3Parameters {
+            qpack_settings: QpackSettings {
+                max_table_size_encoder: 16384,
+                max_table_size_decoder: 16384,
+                max_blocked_streams: 10,
+            },
+            max_concurrent_push_streams: 0,
+        },
     );
     if handler.is_err() {
         return Err(String::from("ERROR: creating a client failed"));
