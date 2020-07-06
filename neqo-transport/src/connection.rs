@@ -547,6 +547,7 @@ impl Connection {
             u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
         );
         tps.set_empty(tparams::DISABLE_MIGRATION);
+        tps.set_empty(tparams::GREASE_QUIC_BIT);
     }
 
     fn new(
@@ -1460,6 +1461,7 @@ impl Connection {
         tx: &CryptoDxState,
         retry_info: &Option<RetryInfo>,
         quic_version: QuicVersion,
+        grease_quic_bit: bool,
     ) -> (PacketType, PacketNumber, PacketBuilder) {
         let pt = match space {
             PNSpace::Initial => PacketType::Initial,
@@ -1491,6 +1493,7 @@ impl Connection {
                 path.local_cid(),
             )
         };
+        builder.scramble(grease_quic_bit);
         if pt == PacketType::Initial {
             builder.initial_token(if let Some(info) = retry_info {
                 &info.token
@@ -1504,8 +1507,20 @@ impl Connection {
         (pt, pn, builder)
     }
 
+    fn can_grease_quic_bit(&self) -> bool {
+        let tph = self.tps.borrow();
+        if let Some(r) = &tph.remote {
+            r.get_empty(tparams::GREASE_QUIC_BIT)
+        } else if let Some(r) = &tph.remote_0rtt {
+            r.get_empty(tparams::GREASE_QUIC_BIT)
+        } else {
+            false
+        }
+    }
+
     fn output_close(&mut self, path: &Path, frame: &Frame) -> Res<SendOption> {
         let mut encoder = Encoder::with_capacity(path.mtu());
+        let grease_quic_bit = self.can_grease_quic_bit();
         for space in PNSpace::iter() {
             let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
                 tx_state
@@ -1518,8 +1533,15 @@ impl Connection {
                 continue;
             }
 
-            let (_, _, mut builder) =
-                Self::build_packet_header(path, *space, encoder, tx, &None, self.quic_version);
+            let (_, _, mut builder) = Self::build_packet_header(
+                path,
+                *space,
+                encoder,
+                tx,
+                &None,
+                self.quic_version,
+                grease_quic_bit,
+            );
             // ConnectionError::Application is only allowed at 1RTT.
             if *space == PNSpace::ApplicationData {
                 frame.marshal(&mut builder);
@@ -1595,6 +1617,7 @@ impl Connection {
     fn output_path(&mut self, path: &mut Path, now: Instant) -> Res<SendOption> {
         let mut initial_sent = None;
         let mut needs_padding = false;
+        let grease_quic_bit = self.can_grease_quic_bit();
 
         // Determine how we are sending packets (PTO, etc..).
         let profile = self.loss_recovery.send_profile(now, path.mtu());
@@ -1619,6 +1642,7 @@ impl Connection {
                 tx,
                 &self.retry_info,
                 self.quic_version,
+                grease_quic_bit,
             );
             let payload_start = builder.len();
 
