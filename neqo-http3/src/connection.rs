@@ -396,7 +396,7 @@ impl Http3Connection {
                 self.state = Http3State::Connected;
                 Ok(true)
             }
-            State::Closing { error, .. } => {
+            State::Closing { error, .. } | State::Draining { error, .. } => {
                 if matches!(self.state, Http3State::Closing(_)| Http3State::Closed(_)) {
                     Ok(false)
                 } else {
