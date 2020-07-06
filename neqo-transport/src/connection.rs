@@ -3957,11 +3957,11 @@ mod tests {
         assert!(pkt1.is_some());
         assert_eq!(pkt1.clone().unwrap().len(), PATH_MTU_V6);
 
-        let out = client.process(None, now);
-        assert_eq!(out, Output::Callback(Duration::from_millis(120)));
+        let delay = client.process(None, now).callback();
+        assert_eq!(delay, Duration::from_millis(300));
 
         // Resend initial after PTO.
-        now += Duration::from_millis(120);
+        now += delay;
         let pkt2 = client.process(None, now).dgram();
         assert!(pkt2.is_some());
         assert_eq!(pkt2.unwrap().len(), PATH_MTU_V6);
@@ -3970,9 +3970,9 @@ mod tests {
         assert!(pkt3.is_some());
         assert_eq!(pkt3.unwrap().len(), PATH_MTU_V6);
 
-        let out = client.process(None, now);
+        let delay = client.process(None, now).callback();
         // PTO has doubled.
-        assert_eq!(out, Output::Callback(Duration::from_millis(240)));
+        assert_eq!(delay, Duration::from_millis(600));
 
         // Server process the first initial pkt.
         let mut server = default_server();
@@ -4002,7 +4002,7 @@ mod tests {
 
         let pkt = client.process(None, now).dgram();
         let cb = client.process(None, now).callback();
-        assert_eq!(cb, Duration::from_millis(120));
+        assert_eq!(cb, Duration::from_millis(300));
 
         now += Duration::from_millis(10);
         let pkt = server.process(pkt, now).dgram();
@@ -5631,10 +5631,9 @@ mod tests {
             &[0x1a1_a1a1a, QuicVersion::default().as_u32()],
         );
 
-        assert_eq!(
-            client.process(Some(Datagram::new(loopback(), loopback(), vn,)), now(),),
-            Output::Callback(Duration::from_millis(120))
-        );
+        let dgram = Datagram::new(loopback(), loopback(), vn);
+        let delay = client.process(Some(dgram), now()).callback();
+        assert_eq!(delay, Duration::from_millis(300));
         assert_eq!(*client.state(), State::WaitInitial);
         assert_eq!(1, client.stats().dropped_rx);
     }
@@ -5651,10 +5650,8 @@ mod tests {
 
         let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
 
-        assert_eq!(
-            client.process(Some(Datagram::new(loopback(), loopback(), vn,)), now(),),
-            Output::None
-        );
+        let dgram = Datagram::new(loopback(), loopback(), vn);
+        assert_eq!(client.process(Some(dgram), now()), Output::None);
         match client.state() {
             State::Closed(err) => {
                 assert_eq!(*err, ConnectionError::Transport(Error::VersionNegotiation))
@@ -5675,13 +5672,9 @@ mod tests {
 
         let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
 
-        assert_eq!(
-            client.process(
-                Some(Datagram::new(loopback(), loopback(), &vn[..vn.len() - 1])),
-                now(),
-            ),
-            Output::Callback(Duration::from_millis(120))
-        );
+        let dgram = Datagram::new(loopback(), loopback(), &vn[..vn.len() - 1]);
+        let delay = client.process(Some(dgram), now()).callback();
+        assert_eq!(delay, Duration::from_millis(300));
         assert_eq!(*client.state(), State::WaitInitial);
         assert_eq!(1, client.stats().dropped_rx);
     }
@@ -5698,10 +5691,9 @@ mod tests {
 
         let vn = create_vn(&initial_pkt, &[]);
 
-        assert_eq!(
-            client.process(Some(Datagram::new(loopback(), loopback(), vn)), now(),),
-            Output::Callback(Duration::from_millis(120))
-        );
+        let dgram = Datagram::new(loopback(), loopback(), vn);
+        let delay = client.process(Some(dgram), now()).callback();
+        assert_eq!(delay, Duration::from_millis(300));
         assert_eq!(*client.state(), State::WaitInitial);
         assert_eq!(1, client.stats().dropped_rx);
     }
