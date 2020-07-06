@@ -171,7 +171,12 @@ impl Http3Connection {
             }
         }
         self.qpack_decoder.send(conn)?;
-        self.qpack_encoder.send(conn)?;
+        match self.qpack_encoder.send(conn) {
+            Ok(())
+            | Err(neqo_qpack::Error::EncoderStreamBlocked)
+            | Err(neqo_qpack::Error::DynamicTableFull) => {}
+            Err(e) => return Err(Error::QpackError(e)),
+        }
         Ok(())
     }
 
