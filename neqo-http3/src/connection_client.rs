@@ -1855,7 +1855,7 @@ mod tests {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read the DATA frame.
-                    let mut buf = [1_u8; 0xffff];
+                    let mut buf = vec![1_u8; Connection::stream_recv_buffer_size()];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert_eq!(fin, true);
                     assert_eq!(
@@ -1927,15 +1927,19 @@ mod tests {
         assert_eq!(sent, Ok(first_frame.len()));
 
         // The second frame cannot fit.
-        let sent = client.send_request_body(request_stream_id, &[0_u8; 0xffff]);
+        let sent = client.send_request_body(
+            request_stream_id,
+            &vec![0_u8; Connection::stream_recv_buffer_size()],
+        );
         assert_eq!(sent, Ok(expected_second_data_frame.len()));
 
         // Close stream.
         let _ = client.stream_close_send(request_stream_id);
 
         let mut out = client.process(None, now());
-        // We need to loop a bit until all data has been sent.
-        for _i in 0..55 {
+        // We need to loop a bit until all data has been sent. Once for every 1K
+        // of data.
+        for _i in 0..Connection::stream_send_buffer_size() / 1000 {
             out = server.conn.process(out.dgram(), now());
             out = client.process(out.dgram(), now());
         }
@@ -1945,7 +1949,7 @@ mod tests {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
                 if stream_id == request_stream_id {
                     // Read DATA frames.
-                    let mut buf = [1_u8; 0xffff];
+                    let mut buf = vec![1_u8; Connection::stream_recv_buffer_size()];
                     let (amount, fin) = server.conn.stream_recv(stream_id, &mut buf).unwrap();
                     assert_eq!(fin, true);
                     assert_eq!(
@@ -1986,16 +1990,20 @@ mod tests {
         read_response(&mut client, &mut server.conn, request_stream_id);
     }
 
+    fn alloc_buffer(size: usize) -> (Vec<u8>, Vec<u8>) {
+        let data_frame = HFrame::Data { len: size as u64 };
+        let mut enc = Encoder::default();
+        data_frame.encode(&mut enc);
+
+        (vec![0_u8; size], enc.to_vec())
+    }
+
     // Send 2 frames. For the second one we can only send 63 bytes.
     // After the first frame there is exactly 63+2 bytes left in the send buffer.
     #[test]
     fn fetch_two_data_frame_second_63bytes() {
-        fetch_with_two_data_frames(
-            &[0_u8; 65447],
-            &[0x0, 0x80, 0x0, 0xff, 0x0a7],
-            &[0x0, 0x3f],
-            &[0_u8; 63],
-        );
+        let (buf, hdr) = alloc_buffer(Connection::stream_send_buffer_size() - 88);
+        fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x3f], &[0_u8; 63]);
     }
 
     // Send 2 frames. For the second one we can only send 63 bytes.
@@ -2003,12 +2011,8 @@ mod tests {
     // but we can only send 63 bytes.
     #[test]
     fn fetch_two_data_frame_second_63bytes_place_for_66() {
-        fetch_with_two_data_frames(
-            &[0_u8; 65446],
-            &[0x0, 0x80, 0x0, 0xff, 0x0a6],
-            &[0x0, 0x3f],
-            &[0_u8; 63],
-        );
+        let (buf, hdr) = alloc_buffer(Connection::stream_send_buffer_size() - 89);
+        fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x3f], &[0_u8; 63]);
     }
 
     // Send 2 frames. For the second one we can only send 64 bytes.
@@ -2016,60 +2020,40 @@ mod tests {
     // but we can only send 64 bytes.
     #[test]
     fn fetch_two_data_frame_second_64bytes_place_for_67() {
-        fetch_with_two_data_frames(
-            &[0_u8; 65445],
-            &[0x0, 0x80, 0x0, 0xff, 0x0a5],
-            &[0x0, 0x40, 0x40],
-            &[0_u8; 64],
-        );
+        let (buf, hdr) = alloc_buffer(Connection::stream_send_buffer_size() - 90);
+        fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x40, 0x40], &[0_u8; 64]);
     }
 
     // Send 2 frames. For the second one we can only send 16383 bytes.
     // After the first frame there is exactly 16383+3 bytes left in the send buffer.
     #[test]
     fn fetch_two_data_frame_second_16383bytes() {
-        fetch_with_two_data_frames(
-            &[0_u8; 49126],
-            &[0x0, 0x80, 0x0, 0xbf, 0x0e6],
-            &[0x0, 0x7f, 0xff],
-            &[0_u8; 16383],
-        );
+        let (buf, hdr) = alloc_buffer(Connection::stream_send_buffer_size() - 16409);
+        fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x7f, 0xff], &[0_u8; 16383]);
     }
 
     // Send 2 frames. For the second one we can only send 16383 bytes.
     // After the first frame there is exactly 16383+4 bytes left in the send buffer, but we can only send 16383 bytes.
     #[test]
     fn fetch_two_data_frame_second_16383bytes_place_for_16387() {
-        fetch_with_two_data_frames(
-            &[0_u8; 49125],
-            &[0x0, 0x80, 0x0, 0xbf, 0x0e5],
-            &[0x0, 0x7f, 0xff],
-            &[0_u8; 16383],
-        );
+        let (buf, hdr) = alloc_buffer(Connection::stream_send_buffer_size() - 16410);
+        fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x7f, 0xff], &[0_u8; 16383]);
     }
 
     // Send 2 frames. For the second one we can only send 16383 bytes.
     // After the first frame there is exactly 16383+5 bytes left in the send buffer, but we can only send 16383 bytes.
     #[test]
     fn fetch_two_data_frame_second_16383bytes_place_for_16388() {
-        fetch_with_two_data_frames(
-            &[0_u8; 49124],
-            &[0x0, 0x80, 0x0, 0xbf, 0x0e4],
-            &[0x0, 0x7f, 0xff],
-            &[0_u8; 16383],
-        );
+        let (buf, hdr) = alloc_buffer(Connection::stream_send_buffer_size() - 16411);
+        fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x7f, 0xff], &[0_u8; 16383]);
     }
 
     // Send 2 frames. For the second one we can send 16384 bytes.
     // After the first frame there is exactly 16384+5 bytes left in the send buffer, but we can send 16384 bytes.
     #[test]
     fn fetch_two_data_frame_second_16384bytes_place_for_16389() {
-        fetch_with_two_data_frames(
-            &[0_u8; 49123],
-            &[0x0, 0x80, 0x0, 0xbf, 0x0e3],
-            &[0x0, 0x80, 0x0, 0x40, 0x0],
-            &[0_u8; 16384],
-        );
+        let (buf, hdr) = alloc_buffer(Connection::stream_send_buffer_size() - 16412);
+        fetch_with_two_data_frames(&buf, &hdr, &[0x0, 0x80, 0x0, 0x40, 0x0], &[0_u8; 16384]);
     }
 
     // Test receiving STOP_SENDING with the HttpNoError error code.
