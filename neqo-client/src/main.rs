@@ -299,6 +299,7 @@ impl<'a> Handler<'a> {
             .pop_front()
             .expect("download_next called with empty queue");
         match client.fetch(
+            Instant::now(),
             &self.args.method,
             &url.scheme(),
             &url.host_str().unwrap(),

@@ -113,7 +113,7 @@ fn test_fetch() {
 
     eprintln!("-----client");
     let req = hconn_c
-        .fetch("GET", "https", "something.com", "/", &[])
+        .fetch(now(), "GET", "https", "something.com", "/", &[])
         .unwrap();
     assert_eq!(req, 0);
     hconn_c.stream_close_send(req).unwrap();

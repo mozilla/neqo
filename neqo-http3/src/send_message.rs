@@ -199,6 +199,9 @@ impl SendMessage {
         }
     }
 
+    /// # Errors
+    /// `ClosedCriticalStream` if the encoder stream is closed.
+    /// `InternalError` if an unexpected error occurred.
     fn ensure_encoded(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
         if let SendMessageState::Initialized { headers, data, fin } = &self.state {
             qdebug!([self], "Encoding headers");
@@ -225,6 +228,13 @@ impl SendMessage {
         Ok(())
     }
 
+    /// # Errors
+    /// `ClosedCriticalStream` if the encoder stream is closed.
+    /// `InternalError` if an unexpected error occurred.
+    /// `InvalidStreamId` if the stream does not exist,
+    /// `AlreadyClosed` if the stream has already been closed.
+    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
+    /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
     pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
         self.ensure_encoded(conn, encoder)?;
 
@@ -235,14 +245,17 @@ impl SendMessage {
         };
 
         if let SendMessageState::SendingInitialMessage { ref mut buf, fin } = self.state {
-            let sent = conn.stream_send(self.stream_id, &buf)?;
+            let sent = conn
+                .stream_send(self.stream_id, &buf)
+                .map_err(|_| Error::map_send_errors())?;
             qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id, sent);
 
             qtrace!([label], "{} bytes sent", sent);
 
             if sent == buf.len() {
                 if fin {
-                    conn.stream_close_send(self.stream_id)?;
+                    conn.stream_close_send(self.stream_id)
+                        .map_err(|_| Error::map_send_errors())?;
                     self.state = SendMessageState::Closed;
                     qtrace!([label], "done sending request");
                 } else {
