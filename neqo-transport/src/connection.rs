@@ -2393,7 +2393,10 @@ impl Connection {
     }
 
     /// Create a stream.
-    // Returns new stream id
+    /// Returns new stream id
+    /// # Errors
+    /// `ConnectionState` if the connecton stat does not allow to create streams.
+    /// `StreamLimitError` if we are limiied by server's stream concurence.
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         // Can't make streams while closing, otherwise rely on the stream limits.
         match self.state {

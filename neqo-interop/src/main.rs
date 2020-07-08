@@ -530,7 +530,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
 
     let client_stream_id = hc
         .h3
-        .fetch("GET", "https", &hc.host, &hc.path, &[])
+        .fetch(Instant::now(), "GET", "https", &hc.host, &hc.path, &[])
         .unwrap();
     let _ = hc.h3.stream_close_send(client_stream_id);
 
@@ -544,6 +544,7 @@ fn test_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection, test: &Test) -> R
         let client_stream_id = hc
             .h3
             .fetch(
+                Instant::now(),
                 "GET",
                 "https",
                 &hc.host,
@@ -580,7 +581,7 @@ fn test_h3_rz(
     // Exchange some data to get http3 control streams and a resumption token.
     let client_stream_id = hc
         .h3
-        .fetch("GET", "https", &hc.host, &hc.path, &[])
+        .fetch(Instant::now(), "GET", "https", &hc.host, &hc.path, &[])
         .unwrap();
     let _ = hc.h3.stream_close_send(client_stream_id);
 
@@ -635,7 +636,7 @@ fn test_h3_rz(
         // SendH3 data during 0rtt
         let client_stream_id = hc
             .h3
-            .fetch("GET", "https", &hc.host, &hc.path, &[])
+            .fetch(Instant::now(), "GET", "https", &hc.host, &hc.path, &[])
             .unwrap();
         let _ = hc.h3.stream_close_send(client_stream_id);
         hc.streams.insert(client_stream_id);

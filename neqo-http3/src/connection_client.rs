@@ -229,6 +229,7 @@ impl Http3Client {
     /// If a new stream cannot be created an error will be return.
     pub fn fetch(
         &mut self,
+        now: Instant,
         method: &str,
         scheme: &str,
         host: &str,
@@ -252,7 +253,10 @@ impl Http3Client {
             _ => {}
         }
 
-        let id = self.conn.stream_create(StreamType::BiDi)?;
+        let id = self
+            .conn
+            .stream_create(StreamType::BiDi)
+            .map_err(|e| Error::map_stream_create_errors(&e))?;
 
         // Transform pseudo-header fields
         let mut final_headers = Vec::new();
@@ -271,6 +275,22 @@ impl Http3Client {
                 Some(self.push_handler.clone()),
             )),
         );
+
+        // Call immediately send so that at least headers get sent. This will make Firefox faster, since
+        // it can send request body immediatly in most cases and does not need to do a complete process loop.
+        if let Err(e) = self
+            .base_handler
+            .send_streams
+            .get_mut(&id)
+            .ok_or(Error::InvalidStreamId)?
+            .send(&mut self.conn, &mut self.base_handler.qpack_encoder)
+        {
+            if e.connection_error() {
+                self.close(now, e.code(), "");
+            }
+            return Err(e);
+        }
+
         Ok(id)
     }
 
@@ -1003,7 +1023,7 @@ mod tests {
     // Fetch request fetch("GET", "https", "something.com", "/", &[]).
     fn make_request(client: &mut Http3Client, close_sending_side: bool) -> u64 {
         let request_stream_id = client
-            .fetch("GET", "https", "something.com", "/", &[])
+            .fetch(now(), "GET", "https", "something.com", "/", &[])
             .unwrap();
         if close_sending_side {
             let _ = client.stream_close_send(request_stream_id);
@@ -2537,7 +2557,7 @@ mod tests {
 
         // Check that a new request cannot be made.
         assert_eq!(
-            client.fetch("GET", "https", "something.com", "/", &[]),
+            client.fetch(now(), "GET", "https", "something.com", "/", &[]),
             Err(Error::AlreadyClosed)
         );
 
@@ -3300,7 +3320,7 @@ mod tests {
     fn zero_rtt_before_resumption_token() {
         let mut client = default_http3_client();
         assert!(client
-            .fetch("GET", "https", "something.com", "/", &[])
+            .fetch(now(), "GET", "https", "something.com", "/", &[])
             .is_err());
     }
 
