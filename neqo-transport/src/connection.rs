@@ -44,7 +44,7 @@ use crate::path::Path;
 use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile, GRANULARITY};
 use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
-use crate::send_stream::{SendStream, SendStreams};
+use crate::send_stream::{SendStream, SendStreams, TxBuffer};
 use crate::stats::Stats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::{
@@ -2571,6 +2571,16 @@ impl Connection {
         Ok(())
     }
 
+    /// The per-stream send buffer size.
+    pub const fn stream_send_buffer_size() -> usize {
+        TxBuffer::BUFFER_SIZE
+    }
+
+    /// The per-stream receive max data size.
+    pub const fn stream_recv_buffer_size() -> usize {
+        RX_STREAM_DATA_WINDOW as usize
+    }
+
     /// Get all current events. Best used just in debug/testing code, use
     /// next_event() instead.
     pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
@@ -3589,13 +3599,24 @@ mod tests {
         // no event because still limited by conn max data
         assert_eq!(client.events().count(), 0);
 
-        // increase max data
+        // Increase max data. Avail space now limited by stream credit
         client.handle_max_data(100_000_000);
-        // Avail space now limited by tx buffer
+        assert_eq!(
+            client.stream_avail_send_space(stream_id).unwrap(),
+            TxBuffer::BUFFER_SIZE - SMALL_MAX_DATA
+        );
+
+        // Increase max stream data. Avail space now limited by tx buffer
+        client
+            .send_streams
+            .get_mut(stream_id.into())
+            .unwrap()
+            .set_max_stream_data(100_000_000);
         assert_eq!(
             client.stream_avail_send_space(stream_id).unwrap(),
             TxBuffer::BUFFER_SIZE - SMALL_MAX_DATA + 4096
         );
+
         let evts = client.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 1);
         assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
