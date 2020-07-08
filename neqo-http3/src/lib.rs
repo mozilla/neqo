@@ -76,6 +76,8 @@ pub enum Error {
     TransportError(TransportError),
     Unavailable,
     Unexpected,
+    TransportStreamDoesNotExist,
+    InvalidInput,
 }
 
 impl Error {
@@ -119,6 +121,20 @@ impl Error {
             | Self::HttpSettings
             | Self::HttpMissingSettings => true,
             _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn map_stream_send_errors(err: &TransportError) -> Self {
+        match err {
+            TransportError::InvalidStreamId | TransportError::FinalSizeError => {
+                Error::TransportStreamDoesNotExist
+            }
+            TransportError::InvalidInput => Error::InvalidInput,
+            _ => {
+                debug_assert!(false, "Unexpected error");
+                Error::TransportStreamDoesNotExist
+            }
         }
     }
 }
