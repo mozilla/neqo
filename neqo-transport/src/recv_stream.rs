@@ -23,7 +23,7 @@ use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
 use neqo_common::{matches, qtrace};
 
-pub const RX_STREAM_DATA_WINDOW: u64 = 0xFFFF; // 64 KiB
+pub const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
 
 pub(crate) type RecvStreams = BTreeMap<StreamId, RecvStream>;
 
