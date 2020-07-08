@@ -514,6 +514,8 @@ impl RecvStream {
             .map_or(false, RxStreamOrderer::data_ready)
     }
 
+    /// # Errors
+    /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn read(&mut self, buf: &mut [u8]) -> Res<(usize, bool)> {
         let res = match &mut self.state {
             RecvStreamState::Recv { recv_buf, .. }
@@ -522,7 +524,7 @@ impl RecvStream {
                 let bytes_read = recv_buf.read(buf);
                 let fin_read = recv_buf.buffered() == 0;
                 if fin_read {
-                    self.set_state(RecvStreamState::DataRead)
+                    self.set_state(RecvStreamState::DataRead);
                 }
                 Ok((bytes_read, fin_read))
             }
