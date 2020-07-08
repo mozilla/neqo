@@ -728,12 +728,19 @@ impl Connection {
         };
         qtrace!([self], "  transport parameters {}", hex(&tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
-        let tp = TransportParameters::decode(&mut dec_tp)?;
+        let tp =
+            TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
 
         let tok = dec.decode_remainder();
         qtrace!([self], "  TLS token {}", hex(&tok));
         match self.crypto.tls {
-            Agent::Client(ref mut c) => c.set_resumption_token(&tok)?,
+            Agent::Client(ref mut c) => {
+                let res = c.set_resumption_token(&tok);
+                if let Err(e) = res {
+                    self.absorb_error::<Error>(now, Err(Error::CryptoError(e)));
+                    return Ok(());
+                }
+            }
             Agent::Server(_) => return Err(Error::WrongRole),
         }
 
@@ -745,7 +752,9 @@ impl Connection {
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
-        self.client_start(now)
+        let res = self.client_start(now);
+        self.absorb_error(now, res);
+        Ok(())
     }
 
     /// Send a TLS session ticket.
@@ -820,6 +829,11 @@ impl Connection {
                 | State::Draining { error: err, .. }
                 | State::Closed(err) => {
                     qwarn!([self], "Closing again after error {:?}", err);
+                }
+                State::Init => {
+                    // We have not even sent anything just close the connection without sending any error.
+                    // This may happen when clieeent_start fails.
+                    self.set_state(State::Closed(error));
                 }
                 State::WaitInitial => {
                     // We don't have any state yet, so don't bother with

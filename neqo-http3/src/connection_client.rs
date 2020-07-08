@@ -183,7 +183,19 @@ impl Http3Client {
             .map_err(|_| Error::InvalidResumptionToken)?;
         let tok = dec.decode_remainder();
         qtrace!([self], "  Transport token {}", hex(&tok));
-        self.conn.set_resumption_token(now, tok)?;
+        self.conn
+            .set_resumption_token(now, tok)
+            .map_err(|e| Error::map_set_resumption_errors(&e))?;
+        if self.conn.state().closed() {
+            let state = self.conn.state().clone();
+            debug_assert!(
+                Ok(true)
+                    == self
+                        .base_handler
+                        .handle_state_change(&mut self.conn, &state)
+            );
+            return Err(Error::FatalError);
+        }
         if *self.conn.zero_rtt_state() == ZeroRttState::Sending {
             self.base_handler
                 .set_0rtt_settings(&mut self.conn, settings)?;

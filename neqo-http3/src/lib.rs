@@ -78,6 +78,7 @@ pub enum Error {
     Unexpected,
     TransportStreamDoesNotExist,
     InvalidInput,
+    FatalError,
 }
 
 impl Error {
@@ -153,6 +154,14 @@ impl Error {
             }
         };
         Error::TransportStreamDoesNotExist
+    }
+
+    #[must_use]
+    pub fn map_set_resumption_errors(err: &TransportError) -> Self {
+        match err {
+            TransportError::ConnectionState => Error::InvalidState,
+            _ => Error::InvalidResumptionToken,
+        }
     }
 }
 
