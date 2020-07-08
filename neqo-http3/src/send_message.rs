@@ -140,8 +140,11 @@ impl SendMessage {
             | SendMessageState::Initialized { .. }
             | SendMessageState::SendingInitialMessage { .. } => Ok(0),
             SendMessageState::SendingData => {
-                let available = usize::try_from(conn.stream_avail_send_space(self.stream_id)?)
-                    .unwrap_or(usize::max_value());
+                let available = usize::try_from(
+                    conn.stream_avail_send_space(self.stream_id)
+                        .map_err(|e| Error::map_stream_send_errors(&e))?,
+                )
+                .unwrap_or(usize::max_value());
                 if available <= 2 {
                     return Ok(0);
                 }
@@ -171,19 +174,16 @@ impl SendMessage {
                 };
                 let mut enc = Encoder::default();
                 data_frame.encode(&mut enc);
-                match conn.stream_send(self.stream_id, &enc) {
-                    Ok(sent) => {
-                        debug_assert_eq!(sent, enc.len());
-                    }
-                    Err(e) => return Err(Error::TransportError(e)),
-                }
-                match conn.stream_send(self.stream_id, &buf[..to_send]) {
-                    Ok(sent) => {
-                        qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id, buf.len());
-                        Ok(sent)
-                    }
-                    Err(e) => Err(Error::TransportError(e)),
-                }
+                let sent_fh = conn
+                    .stream_send(self.stream_id, &enc)
+                    .map_err(|e| Error::map_stream_send_errors(&e))?;
+                debug_assert_eq!(sent_fh, enc.len());
+
+                let sent = conn
+                    .stream_send(self.stream_id, &buf[..to_send])
+                    .map_err(|e| Error::map_stream_send_errors(&e))?;
+                qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id, to_send);
+                Ok(sent)
             }
             SendMessageState::Closed => Err(Error::AlreadyClosed),
         }

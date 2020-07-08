@@ -285,8 +285,11 @@ impl Http3Client {
 
     /// To supply a request body this function is called (headers are supplied through the `fetch` function.)
     /// # Errors
-    /// It will be return an error if a stream does not exist or new data cannot be sent because stream
-    /// is already closed.
+    /// `InvalidStreamId` if thee stream does not exist,
+    /// `AlreadyClosed` if the stream has already been closed.
+    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
+    /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
+    /// `InvalidInput` if an empty buffer has been supplied.
     pub fn send_request_body(&mut self, stream_id: u64, buf: &[u8]) -> Res<usize> {
         qinfo!(
             [self],
