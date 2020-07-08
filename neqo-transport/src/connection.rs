@@ -2606,6 +2606,7 @@ mod tests {
     use crate::path::PATH_MTU_V6;
     use crate::recovery::ACK_ONLY_SIZE_LIMIT;
     use crate::recovery::PTO_PACKET_COUNT;
+    use crate::send_stream::TxBuffer;
     use crate::tracking::{ACK_DELAY, MAX_UNACKED_PKTS};
     use std::convert::TryInto;
 
@@ -3556,6 +3557,7 @@ mod tests {
         connect(&mut client, &mut server);
 
         let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(client.events().count(), 2); // SendStreamWritable, StateChange(connected)
         assert_eq!(stream_id, 2);
         assert_eq!(
             client.stream_avail_send_space(stream_id).unwrap(),
@@ -3567,20 +3569,33 @@ mod tests {
                 .unwrap(),
             SMALL_MAX_DATA
         );
-        let evts = client.events().collect::<Vec<_>>();
-        assert_eq!(evts.len(), 2); // SendStreamWritable, StateChange(connected)
-        assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 0);
-        let ss = client.send_streams.get_mut(stream_id.into()).unwrap();
-        ss.mark_as_sent(0, 4096, false);
-        ss.mark_as_acked(0, 4096, false);
+        assert_eq!(client.events().count(), 0);
 
+        assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 0);
+        client
+            .send_streams
+            .get_mut(stream_id.into())
+            .unwrap()
+            .mark_as_sent(0, 4096, false);
+        assert_eq!(client.events().count(), 0);
+        client
+            .send_streams
+            .get_mut(stream_id.into())
+            .unwrap()
+            .mark_as_acked(0, 4096, false);
+        assert_eq!(client.events().count(), 0);
+
+        assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 0);
         // no event because still limited by conn max data
-        let evts = client.events().collect::<Vec<_>>();
-        assert_eq!(evts.len(), 0);
+        assert_eq!(client.events().count(), 0);
 
         // increase max data
-        client.handle_max_data(100_000);
-        assert_eq!(client.stream_avail_send_space(stream_id).unwrap(), 49152);
+        client.handle_max_data(100_000_000);
+        // Avail space now limited by tx buffer
+        assert_eq!(
+            client.stream_avail_send_space(stream_id).unwrap(),
+            TxBuffer::BUFFER_SIZE - SMALL_MAX_DATA + 4096
+        );
         let evts = client.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 1);
         assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));

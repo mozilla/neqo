@@ -280,7 +280,7 @@ pub struct TxBuffer {
 }
 
 impl TxBuffer {
-    const BUFFER_SIZE: usize = 0xFFFF; // 64 KiB
+    pub const BUFFER_SIZE: usize = 0xFFFF; // 64 KiB
 
     pub fn new() -> Self {
         Self {
