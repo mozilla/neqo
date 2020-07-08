@@ -137,6 +137,23 @@ impl Error {
             }
         }
     }
+
+    #[must_use]
+    pub fn map_stream_recv_errors(err: &TransportError) -> Self {
+        match err {
+            TransportError::NoMoreData => {
+                debug_assert!(
+                    false,
+                    "Do not call stream_recv if FIN has been previously read"
+                );
+            }
+            TransportError::InvalidStreamId => {}
+            _ => {
+                debug_assert!(false, "Unexpected error");
+            }
+        };
+        Error::TransportStreamDoesNotExist
+    }
 }
 
 impl From<TransportError> for Error {
