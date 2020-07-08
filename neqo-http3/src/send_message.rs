@@ -236,7 +236,7 @@ impl SendMessage {
 
         if let SendMessageState::SendingInitialMessage { ref mut buf, fin } = self.state {
             let sent = conn.stream_send(self.stream_id, &buf)?;
-            qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id, buf.len());
+            qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id, sent);
 
             qtrace!([label], "{} bytes sent", sent);
 
