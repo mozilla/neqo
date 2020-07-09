@@ -45,6 +45,7 @@ RUN cd neqo && cargo build && cp target/debug/neqo-client target && cp target/de
 FROM martenseemann/quic-network-simulator-endpoint:latest
 ENV LD_LIBRARY_PATH=$HOME/dist/Debug/lib
 COPY --from=buildimage /neqo/target /neqo/target
+COPY --from=buildimage /neqo/test-fixture/db /neqo/test-fixture/db
 COPY --from=buildimage $HOME/dist/Debug/lib/*.so $HOME/dist/Debug/lib/
 COPY run_endpoint.sh .
 RUN chmod +x run_endpoint.sh
