@@ -9,7 +9,10 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::env;
+use std::fs::OpenOptions;
 use std::io;
+use std::io::Read;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
@@ -68,7 +71,7 @@ struct Args {
     /// Name of key from NSS database.
     key: String,
 
-    #[structopt(short = "a", long, default_value = "h3-28")]
+    #[structopt(short = "a", long, default_value = "h3-29")]
     /// ALPN labels to negotiate.
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.
@@ -77,6 +80,9 @@ struct Args {
     #[structopt(name = "qlog-dir", long)]
     /// Enable QLOG logging and QLOG traces to this directory
     qlog_dir: Option<PathBuf>,
+
+    #[structopt(name = "qns-mode", long)]
+    qns_mode: bool,
 }
 
 impl Args {
@@ -89,7 +95,7 @@ impl Args {
     }
 }
 
-fn process_events(server: &mut Http3Server) {
+fn process_events(server: &mut Http3Server, args: &Args) {
     while let Some(event) = server.next_event() {
         eprintln!("Event: {:?}", event);
         match event {
@@ -104,9 +110,37 @@ fn process_events(server: &mut Http3Server) {
 
                 let response = headers.and_then(|h| {
                     h.iter().find(|&(k, _)| k == ":path").and_then(|(_, path)| {
-                        match path.trim_matches(|p| p == '/').parse::<usize>() {
-                            Ok(v) => Some(vec![b'a'; v]),
-                            Err(_) => Some(default_ret),
+                        if args.qns_mode {
+                            let mut file_path = PathBuf::from("/www");
+                            file_path.push(path.trim_matches(|p| p == '/'));
+
+                            OpenOptions::new()
+                                .read(true)
+                                .open(&file_path)
+                                .map_err(|_e| eprintln!("Could not open {}", file_path.display()))
+                                .ok()
+                                .and_then(|mut f| {
+                                    let mut data = Vec::new();
+                                    match f.read_to_end(&mut data) {
+                                        Ok(sz) => {
+                                            println!(
+                                                "{} bytes read from {}",
+                                                sz,
+                                                file_path.display()
+                                            );
+                                            Some(data)
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Error reading data: {:?}", e);
+                                            None
+                                        }
+                                    }
+                                })
+                        } else {
+                            match path.trim_matches(|p| p == '/').parse::<usize>() {
+                                Ok(v) => Some(vec![b'a'; v]),
+                                Err(_) => Some(default_ret),
+                            }
                         }
                     })
                 });
@@ -181,10 +215,22 @@ fn process(
 }
 
 fn main() -> Result<(), io::Error> {
-    let args = Args::from_args();
+    let mut args = Args::from_args();
     assert!(!args.key.is_empty(), "Need at least one key");
 
     init_db(args.db.clone());
+
+    if args.qns_mode {
+        match env::var("TESTCASE") {
+            Ok(s) if s == "http3" => {}
+            Ok(_) => exit(127),
+            Err(_) => exit(1),
+        }
+
+        if let Ok(qlogdir) = env::var("QLOGDIR") {
+            args.qlog_dir = Some(PathBuf::from(qlogdir));
+        }
+    }
 
     let poll = Poll::new()?;
 
@@ -326,7 +372,7 @@ fn main() -> Result<(), io::Error> {
                             out,
                             &mut timer,
                         );
-                        process_events(server);
+                        process_events(server, &args);
                         process(server, svr_timeout, event.token().0, None, out, &mut timer);
                     }
                 }

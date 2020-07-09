@@ -6,7 +6,7 @@
 cd neqo
 
 CLIENT_PARAMS="--qns-mode --output-dir /downloads"
-SERVER_PARAMS=""
+SERVER_PARAMS="--qns-mode 0.0.0.0:443"
 
 if [ "$ROLE" == "client" ]; then
     echo "Starting Neqo client ..."
@@ -15,5 +15,5 @@ if [ "$ROLE" == "client" ]; then
     sleep 5
     RUST_LOG=debug RUST_BACKTRACE=1 ./target/neqo-client $CLIENT_PARAMS $REQUESTS
 elif [ "$ROLE" == "server" ]; then
-    exit 127
+    RUST_LOG=info RUST_BACKTRACE=1 ./target/neqo-http3-server $SERVER_PARAMS
 fi
