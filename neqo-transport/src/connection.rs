@@ -43,8 +43,8 @@ use crate::packet::{
 use crate::path::Path;
 use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile, GRANULARITY};
-use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
-use crate::send_stream::{SendStream, SendStreams, TxBuffer};
+use crate::recv_stream::{RecvStream, RecvStreams, RECV_BUFFER_SIZE};
+use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::Stats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::{
@@ -526,13 +526,16 @@ impl Connection {
     fn set_tp_defaults(tps: &mut TransportParameters) {
         tps.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
-            RX_STREAM_DATA_WINDOW,
+            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
         );
         tps.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
-            RX_STREAM_DATA_WINDOW,
+            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
         );
-        tps.set_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI, RX_STREAM_DATA_WINDOW);
+        tps.set_integer(
+            tparams::INITIAL_MAX_STREAM_DATA_UNI,
+            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
+        );
         tps.set_integer(tparams::INITIAL_MAX_STREAMS_BIDI, LOCAL_STREAM_LIMIT_BIDI);
         tps.set_integer(tparams::INITIAL_MAX_STREAMS_UNI, LOCAL_STREAM_LIMIT_UNI);
         tps.set_integer(tparams::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
@@ -2588,16 +2591,6 @@ impl Connection {
         Ok(())
     }
 
-    /// The per-stream send buffer size.
-    pub const fn stream_send_buffer_size() -> usize {
-        TxBuffer::BUFFER_SIZE
-    }
-
-    /// The per-stream receive max data size.
-    pub const fn stream_recv_buffer_size() -> usize {
-        RX_STREAM_DATA_WINDOW as usize
-    }
-
     /// Get all current events. Best used just in debug/testing code, use
     /// next_event() instead.
     pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
@@ -2633,7 +2626,7 @@ mod tests {
     use crate::path::PATH_MTU_V6;
     use crate::recovery::ACK_ONLY_SIZE_LIMIT;
     use crate::recovery::PTO_PACKET_COUNT;
-    use crate::send_stream::TxBuffer;
+    use crate::send_stream::SEND_BUFFER_SIZE;
     use crate::tracking::{ACK_DELAY, MAX_UNACKED_PKTS};
     use std::convert::TryInto;
 
@@ -3591,7 +3584,7 @@ mod tests {
         );
         assert_eq!(
             client
-                .stream_send(stream_id, &[b'a'; RX_STREAM_DATA_WINDOW as usize])
+                .stream_send(stream_id, &[b'a'; RECV_BUFFER_SIZE])
                 .unwrap(),
             SMALL_MAX_DATA
         );
@@ -3619,7 +3612,7 @@ mod tests {
         client.handle_max_data(100_000_000);
         assert_eq!(
             client.stream_avail_send_space(stream_id).unwrap(),
-            TxBuffer::BUFFER_SIZE - SMALL_MAX_DATA
+            SEND_BUFFER_SIZE - SMALL_MAX_DATA
         );
 
         // Increase max stream data. Avail space now limited by tx buffer
@@ -3630,7 +3623,7 @@ mod tests {
             .set_max_stream_data(100_000_000);
         assert_eq!(
             client.stream_avail_send_space(stream_id).unwrap(),
-            TxBuffer::BUFFER_SIZE - SMALL_MAX_DATA + 4096
+            SEND_BUFFER_SIZE - SMALL_MAX_DATA + 4096
         );
 
         let evts = client.events().collect::<Vec<_>>();
@@ -5786,7 +5779,7 @@ mod tests {
         server
             .flow_mgr
             .borrow_mut()
-            .stream_data_blocked(3.into(), RX_STREAM_DATA_WINDOW * 4);
+            .stream_data_blocked(3.into(), RECV_BUFFER_SIZE as u64 * 4);
 
         let out = server.process(None, now);
         assert!(out.as_dgram_ref().is_some());
@@ -5804,7 +5797,7 @@ mod tests {
         // window value.
         assert!(frames.iter().any(
             |(f, _)| matches!(f, Frame::MaxStreamData { maximum_stream_data, .. }
-				   if *maximum_stream_data == RX_STREAM_DATA_WINDOW)
+				   if *maximum_stream_data == RECV_BUFFER_SIZE as u64)
         ));
     }
 }

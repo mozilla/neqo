@@ -23,7 +23,10 @@ use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
 use neqo_common::qtrace;
 
-pub const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
+const RX_STREAM_DATA_WINDOW: u64 = 0x10_0000; // 1MiB
+
+// Export as usize for consistency with SEND_BUFFER_SIZE
+pub const RECV_BUFFER_SIZE: usize = RX_STREAM_DATA_WINDOW as usize;
 
 pub(crate) type RecvStreams = BTreeMap<StreamId, RecvStream>;
 
