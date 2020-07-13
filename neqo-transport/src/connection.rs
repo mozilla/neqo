@@ -2346,6 +2346,8 @@ impl Connection {
                 loop {
                     let next_stream_id =
                         next_stream_idx.to_stream_id(stream_id.stream_type(), stream_id.role());
+                    self.events.new_stream(next_stream_id);
+
                     self.recv_streams.insert(
                         next_stream_id,
                         RecvStream::new(
@@ -2356,9 +2358,7 @@ impl Connection {
                         ),
                     );
 
-                    if next_stream_id.is_uni() {
-                        self.events.new_stream(next_stream_id);
-                    } else {
+                    if next_stream_id.is_bidi() {
                         // From the local perspective, this is a remote- originated BiDi stream.
                         // From the remote perspective, this is a local-originated BiDi stream.
                         // Therefore, look at the remote's transport parameters for the
@@ -2378,7 +2378,6 @@ impl Connection {
                                 self.events.clone(),
                             ),
                         );
-                        self.events.new_stream(next_stream_id);
                     }
 
                     *next_stream_idx += 1;
