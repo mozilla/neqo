@@ -238,6 +238,7 @@ fn process(
     }
 }
 
+#[allow(clippy::cognitive_complexity)]
 fn main() -> Result<(), io::Error> {
     let mut args = Args::from_args();
     assert!(!args.key.is_empty(), "Need at least one key");
