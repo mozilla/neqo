@@ -25,11 +25,11 @@ use neqo_transport::{ConnectionEvent, ConnectionIdManager, Output};
 use super::{qns_read_response, Args, HttpServer};
 
 #[derive(Clone, Debug)]
-struct DenyZeroRttChecker {}
+struct AcceptZeroRttChecker {}
 
-impl ZeroRttChecker for DenyZeroRttChecker {
+impl ZeroRttChecker for AcceptZeroRttChecker {
     fn check(&self, _token: &[u8]) -> ZeroRttCheckResult {
-        ZeroRttCheckResult::Reject
+        ZeroRttCheckResult::Accept
     }
 }
 
@@ -58,7 +58,7 @@ impl Http09Server {
                 certs,
                 protocols,
                 anti_replay,
-                Box::new(DenyZeroRttChecker {}),
+                Box::new(AcceptZeroRttChecker {}),
                 cid_manager,
             )?,
             conn_state: HashMap::new(),
