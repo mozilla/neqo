@@ -250,7 +250,7 @@ fn main() -> Result<(), io::Error> {
             Ok(s) if s == "http3" => {}
             Ok(s) if s == "handshake" || s == "transfer" || s == "retry" => {
                 args.use_old_http = true;
-                args.alpn = "hq-29".to_string();
+                args.alpn = "hq-29".into();
             }
 
             Ok(_) => exit(127),
@@ -315,15 +315,19 @@ fn main() -> Result<(), io::Error> {
             local_addr,
             (
                 {
+                    let anti_replay =
+                        AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+                            .expect("unable to setup anti-replay");
+                    let cid_mgr = Rc::new(RefCell::new(FixedConnectionIdManager::new(10)));
+
                     let mut svr: Box<dyn HttpServer> = if args.use_old_http {
                         Box::new(
                             Http09Server::new(
                                 Instant::now(),
                                 &[args.key.clone()],
                                 &[args.alpn.clone()],
-                                AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
-                                    .expect("unable to setup anti-replay"),
-                                Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+                                anti_replay,
+                                cid_mgr,
                             )
                             .expect("We cannot make a server!"),
                         )
@@ -333,9 +337,8 @@ fn main() -> Result<(), io::Error> {
                                 Instant::now(),
                                 &[args.key.clone()],
                                 &[args.alpn.clone()],
-                                AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
-                                    .expect("unable to setup anti-replay"),
-                                Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+                                anti_replay,
+                                cid_mgr,
                                 QpackSettings {
                                     max_table_size_encoder: args.max_table_size_encoder,
                                     max_table_size_decoder: args.max_table_size_decoder,

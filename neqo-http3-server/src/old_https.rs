@@ -17,21 +17,12 @@ use std::time::Instant;
 use regex::Regex;
 
 use neqo_common::Datagram;
-use neqo_crypto::{AntiReplay, ZeroRttCheckResult, ZeroRttChecker};
+use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::server::{ActiveConnectionRef, Server};
 use neqo_transport::{ConnectionEvent, ConnectionIdManager, Output};
 
 use super::{qns_read_response, Args, HttpServer};
-
-#[derive(Clone, Debug)]
-struct AcceptZeroRttChecker {}
-
-impl ZeroRttChecker for AcceptZeroRttChecker {
-    fn check(&self, _token: &[u8]) -> ZeroRttCheckResult {
-        ZeroRttCheckResult::Accept
-    }
-}
 
 #[derive(Default)]
 struct Http09ConnState {
@@ -58,7 +49,7 @@ impl Http09Server {
                 certs,
                 protocols,
                 anti_replay,
-                Box::new(AcceptZeroRttChecker {}),
+                Box::new(AllowZeroRtt {}),
                 cid_manager,
             )?,
             conn_state: HashMap::new(),
