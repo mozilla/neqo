@@ -23,17 +23,19 @@ use std::time::{Duration, Instant};
 use mio::net::UdpSocket;
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio_extras::timer::{Builder, Timeout, Timer};
-use regex::Regex;
 use structopt::StructOpt;
 
 use neqo_common::{qdebug, qinfo, Datagram};
-use neqo_crypto::{init_db, AntiReplay, ZeroRttCheckResult, ZeroRttChecker};
+use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
-use neqo_transport::server::{ActiveConnectionRef, Server};
-use neqo_transport::{ConnectionEvent, ConnectionIdManager, FixedConnectionIdManager, Output};
+use neqo_transport::{FixedConnectionIdManager, Output};
+
+use crate::old_https::Http09Server;
 
 const TIMER_TOKEN: Token = Token(0xffff_ffff);
+
+mod old_https;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-http3-server", about = "A basic HTTP3 server.")]
@@ -203,167 +205,12 @@ impl HttpServer for Http3Server {
     }
 
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
-        Http3Server::set_qlog_dir(self, dir)
-    }
-}
-
-#[derive(Clone, Debug)]
-struct DenyZeroRttChecker {}
-
-impl ZeroRttChecker for DenyZeroRttChecker {
-    fn check(&self, _token: &[u8]) -> ZeroRttCheckResult {
-        ZeroRttCheckResult::Reject
-    }
-}
-
-#[derive(Default)]
-struct Http09ConnState {
-    writable: bool,
-    data_to_send: Option<(Vec<u8>, usize)>,
-}
-
-struct Http09Server {
-    server: Server,
-    conn_state: HashMap<(ActiveConnectionRef, u64), Http09ConnState>,
-}
-
-impl Http09Server {
-    fn new(
-        now: Instant,
-        certs: &[impl AsRef<str>],
-        protocols: &[impl AsRef<str>],
-        anti_replay: AntiReplay,
-        cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            server: Server::new(
-                now,
-                certs,
-                protocols,
-                anti_replay,
-                Box::new(DenyZeroRttChecker {}),
-                cid_manager,
-            )?,
-            conn_state: HashMap::new(),
-        })
-    }
-
-    fn stream_readable(&mut self, stream_id: u64, mut conn: &mut ActiveConnectionRef, args: &Args) {
-        if stream_id % 4 != 0 {
-            eprintln!("Stream {} not client-initiated bidi, ignoring", stream_id);
-            return;
-        }
-        let mut data = vec![0; 4000];
-        conn.borrow_mut()
-            .stream_recv(stream_id, &mut data)
-            .expect("Read should succeed");
-        let msg = match String::from_utf8(data) {
-            Ok(s) => s,
-            Err(_e) => {
-                eprintln!("invalid string. Is this HTTP 0.9?");
-                conn.borrow_mut().stream_close_send(stream_id).unwrap();
-                return;
-            }
-        };
-        let re = if args.qns_mode {
-            Regex::new(r"GET +/(\S+)(\r)?\n").unwrap()
-        } else {
-            Regex::new(r"GET +/(\d+)(\r)?\n").unwrap()
-        };
-        let m = re.captures(&msg);
-        let resp = match m.and_then(|m| m.get(1)) {
-            None => Some(b"Hello World".to_vec()),
-            Some(path) => {
-                let path = path.as_str();
-                eprintln!("Path = '{}'", path);
-                if args.qns_mode {
-                    qns_read_response(path)
-                } else {
-                    let count = usize::from_str_radix(path, 10).unwrap();
-                    Some(vec![b'a'; count])
-                }
-            }
-        };
-        let conn_state = self.conn_state.get_mut(&(conn.clone(), stream_id)).unwrap();
-        conn_state.data_to_send = resp.map(|r| (r, 0));
-        if conn_state.writable {
-            self.stream_writable(stream_id, &mut conn);
-        }
-    }
-
-    fn stream_writable(&mut self, stream_id: u64, conn: &mut ActiveConnectionRef) {
-        match self.conn_state.get_mut(&(conn.clone(), stream_id)) {
-            None => {
-                eprintln!("Unknown stream {}, ignoring event", stream_id);
-            }
-            Some(conn_state) => {
-                conn_state.writable = true;
-                if let Some((data, mut offset)) = &mut conn_state.data_to_send {
-                    let sent = conn
-                        .borrow_mut()
-                        .stream_send(stream_id, &data[offset..])
-                        .unwrap();
-                    eprintln!("Wrote {}", sent);
-                    offset += sent;
-                    if offset == data.len() {
-                        eprintln!("Sent {} on {}, closing", sent, stream_id);
-                        conn.borrow_mut().stream_close_send(stream_id).unwrap();
-                        self.conn_state.remove(&(conn.clone(), stream_id));
-                    } else {
-                        conn_state.writable = false;
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl HttpServer for Http09Server {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
-        self.server.process(dgram, now)
-    }
-
-    fn process_events(&mut self, args: &Args) {
-        let active_conns = self.server.active_connections();
-        for mut acr in active_conns {
-            loop {
-                let event = match acr.borrow_mut().next_event() {
-                    None => break,
-                    Some(e) => e,
-                };
-                match event {
-                    ConnectionEvent::NewStream { stream_id } => {
-                        self.conn_state.insert(
-                            (acr.clone(), stream_id.as_u64()),
-                            Http09ConnState::default(),
-                        );
-                    }
-                    ConnectionEvent::RecvStreamReadable { stream_id } => {
-                        self.stream_readable(stream_id, &mut acr, args);
-                    }
-                    ConnectionEvent::SendStreamWritable { stream_id } => {
-                        self.stream_writable(stream_id.as_u64(), &mut acr);
-                    }
-                    ConnectionEvent::StateChange { .. } => {}
-                    e => eprintln!("unhandled event {:?}", e),
-                }
-            }
-        }
-    }
-
-    fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
-        self.server.set_qlog_dir(dir)
-    }
-}
-
-impl Display for Http09Server {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "Http 0.9 server ")
+        Self::set_qlog_dir(self, dir)
     }
 }
 
 fn process(
-    server: &mut Box<dyn HttpServer>,
+    server: &mut dyn HttpServer,
     svr_timeout: &mut Option<Timeout>,
     inx: usize,
     mut dgram: Option<Datagram>,
@@ -517,11 +364,11 @@ fn main() -> Result<(), io::Error> {
                 while let Some(inx) = timer.poll() {
                     if let Some(socket) = sockets.get(inx) {
                         qinfo!("Timer expired for {:?}", socket);
-                        if let Some((server, svr_timeout)) =
+                        if let Some((ref mut server, svr_timeout)) =
                             servers.get_mut(&socket.local_addr().unwrap())
                         {
                             process(
-                                server,
+                                &mut **server,
                                 svr_timeout,
                                 inx,
                                 None,
@@ -556,14 +403,14 @@ fn main() -> Result<(), io::Error> {
 
                     if sz == 0 {
                         eprintln!("zero length datagram received?");
-                    } else if let Some((server, svr_timeout)) =
+                    } else if let Some((ref mut server, svr_timeout)) =
                         servers.get_mut(&socket.local_addr().unwrap())
                     {
                         let out = out_dgrams
                             .entry(socket.local_addr().unwrap())
                             .or_insert_with(Vec::new);
                         process(
-                            server,
+                            &mut **server,
                             svr_timeout,
                             event.token().0,
                             Some(Datagram::new(remote_addr, local_addr, &buf[..sz])),
@@ -571,7 +418,14 @@ fn main() -> Result<(), io::Error> {
                             &mut timer,
                         );
                         server.process_events(&args);
-                        process(server, svr_timeout, event.token().0, None, out, &mut timer);
+                        process(
+                            &mut **server,
+                            svr_timeout,
+                            event.token().0,
+                            None,
+                            out,
+                            &mut timer,
+                        );
                     }
                 }
             }
