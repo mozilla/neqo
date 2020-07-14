@@ -238,42 +238,24 @@ fn process(
     }
 }
 
-#[allow(clippy::cognitive_complexity)]
-fn main() -> Result<(), io::Error> {
-    let mut args = Args::from_args();
-    assert!(!args.key.is_empty(), "Need at least one key");
-
-    init_db(args.db.clone());
-
-    if args.qns_mode {
-        match env::var("TESTCASE") {
-            Ok(s) if s == "http3" => {}
-            Ok(s) if s == "handshake" || s == "transfer" || s == "retry" => {
-                args.use_old_http = true;
-                args.alpn = "hq-29".into();
-            }
-
-            Ok(_) => exit(127),
-            Err(_) => exit(1),
-        }
-
-        if let Ok(qlogdir) = env::var("QLOGDIR") {
-            args.qlog_dir = Some(PathBuf::from(qlogdir));
-        }
-    }
-
+/// Init Poll for all hosts. Returns the Poll, sockets, and a map of the
+/// socketaddrs to instances of the HttpServer handling that addr.
+#[allow(clippy::type_complexity)]
+fn init_poll(
+    hosts: &[SocketAddr],
+    args: &Args,
+) -> Result<
+    (
+        Poll,
+        Vec<UdpSocket>,
+        HashMap<SocketAddr, (Box<dyn HttpServer>, Option<Timeout>)>,
+    ),
+    io::Error,
+> {
     let poll = Poll::new()?;
-
-    let hosts = args.host_socket_addrs();
-    if hosts.is_empty() {
-        eprintln!("No valid hosts defined");
-        exit(1);
-    }
 
     let mut sockets = Vec::new();
     let mut servers = HashMap::new();
-    let mut timer = Builder::default().build::<usize>();
-    poll.register(&timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
 
     for (i, host) in hosts.iter().enumerate() {
         let socket = match UdpSocket::bind(&host) {
@@ -355,6 +337,43 @@ fn main() -> Result<(), io::Error> {
             ),
         );
     }
+
+    Ok((poll, sockets, servers))
+}
+
+fn main() -> Result<(), io::Error> {
+    let mut args = Args::from_args();
+    assert!(!args.key.is_empty(), "Need at least one key");
+
+    init_db(args.db.clone());
+
+    if args.qns_mode {
+        match env::var("TESTCASE") {
+            Ok(s) if s == "http3" => {}
+            Ok(s) if s == "handshake" || s == "transfer" || s == "retry" => {
+                args.use_old_http = true;
+                args.alpn = "hq-29".into();
+            }
+
+            Ok(_) => exit(127),
+            Err(_) => exit(1),
+        }
+
+        if let Ok(qlogdir) = env::var("QLOGDIR") {
+            args.qlog_dir = Some(PathBuf::from(qlogdir));
+        }
+    }
+
+    let hosts = args.host_socket_addrs();
+    if hosts.is_empty() {
+        eprintln!("No valid hosts defined");
+        exit(1);
+    }
+
+    let (poll, mut sockets, mut servers) = init_poll(&hosts, &args)?;
+
+    let mut timer = Builder::default().build::<usize>();
+    poll.register(&timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
 
     let buf = &mut [0u8; 2048];
 
