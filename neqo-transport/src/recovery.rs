@@ -290,7 +290,7 @@ impl LossRecoverySpace {
             if sent_packet.cc_in_flight() {
                 self.in_flight_outstanding += 1;
             }
-        } else if self.space != PNSpace::ApplicationData {
+        } else if self.space != PNSpace::ApplicationData && self.pto_base_time.is_none() {
             // For Initial and Handshake spaces, make sure that we have a PTO baseline
             // always. See `LossRecoverySpace::pto_base_time()` for details.
             self.pto_base_time = Some(sent_packet.time_sent);
