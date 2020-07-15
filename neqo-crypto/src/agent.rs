@@ -780,7 +780,7 @@ impl DerefMut for Client {
 /// `ZeroRttCheckResult` encapsulates the options for handling a `ClientHello`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ZeroRttCheckResult {
-    /// Accept 0-RTT; the default.
+    /// Accept 0-RTT.
     Accept,
     /// Reject 0-RTT, but continue the handshake normally.
     Reject,

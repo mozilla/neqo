@@ -1903,12 +1903,15 @@ impl Connection {
             qerror!("frame not allowed: {:?} {:?}", frame, ptype);
             return Err(Error::ProtocolViolation);
         }
+        let space = PNSpace::from(ptype);
         match frame {
             Frame::Padding => {
                 // Ignore
             }
             Frame::Ping => {
-                // Ack elicited with no further handling needed
+                // If we get a PING and there are outstanding CRYPTO frames,
+                // prepare to resend them.
+                self.crypto.resend_frames(space);
             }
             Frame::Ack {
                 largest_acknowledged,
@@ -1917,7 +1920,7 @@ impl Connection {
                 ack_ranges,
             } => {
                 self.handle_ack(
-                    PNSpace::from(ptype),
+                    space,
                     largest_acknowledged,
                     ack_delay,
                     first_ack_range,
@@ -1946,7 +1949,6 @@ impl Connection {
                 }
             }
             Frame::Crypto { offset, data } => {
-                let space = PNSpace::from(ptype);
                 qtrace!(
                     [self],
                     "Crypto frame on space={} offset={}, data={:0x?}",
@@ -1960,6 +1962,9 @@ impl Connection {
                     let read = self.crypto.streams.read_to_end(space, &mut buf);
                     qdebug!("Read {} bytes", read);
                     self.handshake(now, space, Some(&buf))?;
+                } else {
+                    // If we get a useless CRYPTO frame send outstanding CRYPTO frames again.
+                    self.crypto.resend_frames(space);
                 }
             }
             Frame::NewToken { token } => self.token = Some(token),
@@ -3993,6 +3998,7 @@ mod tests {
 
     #[test]
     fn pto_initial() {
+        const INITIAL_PTO: Duration = Duration::from_millis(300);
         let mut now = now();
 
         qdebug!("---- client: generate CH");
@@ -4002,7 +4008,7 @@ mod tests {
         assert_eq!(pkt1.clone().unwrap().len(), PATH_MTU_V6);
 
         let delay = client.process(None, now).callback();
-        assert_eq!(delay, Duration::from_millis(300));
+        assert_eq!(delay, INITIAL_PTO);
 
         // Resend initial after PTO.
         now += delay;
@@ -4016,7 +4022,7 @@ mod tests {
 
         let delay = client.process(None, now).callback();
         // PTO has doubled.
-        assert_eq!(delay, Duration::from_millis(600));
+        assert_eq!(delay, INITIAL_PTO * 2);
 
         // Server process the first initial pkt.
         let mut server = default_server();
@@ -4027,14 +4033,15 @@ mod tests {
         // After the handshake packet the initial keys and the crypto stream for the initial
         // packet number space will be discarded.
         // Here only an ack for the Handshake packet will be sent.
-        now += Duration::from_millis(10);
         let out = client.process(out, now).dgram();
         assert!(out.is_some());
 
-        // We do not have PTO for the resent initial packet any more, because keys are discarded.
-        // The timeout will be an idle time out of LOCAL_IDLE_TIMEOUT seconds.
-        let out = client.process(None, now);
-        assert_eq!(out, Output::Callback(LOCAL_IDLE_TIMEOUT));
+        // We do not have PTO for the resent initial packet any more, but
+        // the Handshake PTO timer should be armed.  As the RTT is apparently
+        // the same as the initial PTO value, and there is only one sample,
+        // the PTO will be 3x the INITIAL PTO.
+        let delay = client.process(None, now).callback();
+        assert_eq!(delay, INITIAL_PTO * 3);
     }
 
     #[test]
@@ -4055,7 +4062,9 @@ mod tests {
         let pkt = client.process(pkt, now).dgram();
 
         let cb = client.process(None, now).callback();
-        assert_eq!(cb, LOCAL_IDLE_TIMEOUT);
+        // The client now has a single RTT estimate (20ms), so
+        // the handshake PTO is set based on that.
+        assert_eq!(cb, Duration::from_millis(60));
 
         now += Duration::from_millis(10);
         let pkt = server.process(pkt, now).dgram();
@@ -4122,7 +4131,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pto_handshake_and_app_data() {
+    fn pto_handshake_and_app_data() {
         let mut now = now();
         qdebug!("---- client: generate CH");
         let mut client = default_client();
@@ -4251,6 +4260,59 @@ mod tests {
         now += Duration::from_millis(10);
         let frames = server.test_process_input(pkt5.unwrap(), now);
         assert_hs_and_app_pto(&frames);
+    }
+
+    /// In the case that the Handshake takes too many packets, the server might
+    /// be stalled on the anti-amplification limit.  If a Handshake ACK from the
+    /// client is lost, the client has to keep the PTO timer armed or the server
+    /// might be unable to send anything, causing a deadlock.
+    #[test]
+    fn handshake_ack_pto() {
+        const RTT: Duration = Duration::from_millis(10);
+        let mut now = now();
+        let mut client = default_client();
+        let mut server = default_server();
+        // This is a greasing transport parameter, and large enough that the
+        // server needs to send two Handshake packets.
+        let big = TransportParameter::Bytes(vec![0; PATH_MTU_V6]);
+        server.set_local_tparam(0xce16, big).unwrap();
+
+        let c1 = client.process(None, now).dgram();
+
+        now += RTT / 2;
+        let s1 = server.process(c1, now).dgram();
+        assert!(s1.is_some());
+        let s2 = server.process(None, now).dgram();
+        assert!(s1.is_some());
+
+        // Now let the client have the Initial, but drop the first coalesced Handshake packet.
+        now += RTT / 2;
+        let (initial, _) = split_datagram(s1.unwrap());
+        client.process_input(initial, now);
+        let c2 = client.process(s2, now).dgram();
+        assert!(c2.is_some()); // This is an ACK.  Drop it.
+        let delay = client.process(None, now).callback();
+        assert_eq!(delay, RTT * 3);
+
+        // Wait for the PTO and ensure that the client generates a packet.
+        now += delay;
+        let c3 = client.process(None, now).dgram();
+        assert!(c3.is_some());
+
+        now += RTT / 2;
+        let frames = server.test_process_input(c3.unwrap(), now);
+        assert_eq!(frames, vec![(Frame::Ping, PNSpace::Handshake)]);
+
+        // Now complete the handshake as cheaply as possible.
+        let dgram = server.process(None, now).dgram();
+        client.process_input(dgram.unwrap(), now);
+        maybe_authenticate(&mut client);
+        let dgram = client.process(None, now).dgram();
+        assert_eq!(*client.state(), State::Connected);
+        let dgram = server.process(dgram, now).dgram();
+        assert_eq!(*server.state(), State::Confirmed);
+        client.process_input(dgram.unwrap(), now);
+        assert_eq!(*client.state(), State::Confirmed);
     }
 
     #[test]
