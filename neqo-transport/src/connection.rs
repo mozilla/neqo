@@ -5500,18 +5500,17 @@ mod tests {
         let c_hs4 = client.process(s_hs3, now + (INCR * 3)).dgram();
         assert!(c_hs4.is_some()); // This will be acknowledged.
 
-        // Get an ACK for the client.
+        // Process c_hs2 and c_hs4, but skip c_hs3.
+        // Then get an ACK for the client.
         now += RTT / 2;
-        // Deliver the last one first, so that gets acknowledged.
-        // This won't generate an ACK, because it only contains an ACK.
-        let s_ack1 = server.process(c_hs4, now).dgram();
-        assert!(s_ack1.is_none());
+        // Deliver c_hs4 first, but don't generate a packet.
+        server.process_input(c_hs4.unwrap(), now);
+        let s_ack = server.process(c_hs2, now).dgram();
+        assert!(s_ack.is_some());
         // This includes an ACK, but it also includes HANDSHAKE_DONE,
-        // which we need to remove because that will cause the Handshake loss recovery
-        // state to be dropped.
-        let s_ack2 = server.process(c_hs2, now).dgram();
-        assert!(s_ack2.is_some());
-        let (s_hs_ack, _s_ap_ack) = split_datagram(s_ack2.unwrap());
+        // which we need to remove because that will cause the Handshake loss
+        // recovery state to be dropped.
+        let (s_hs_ack, _s_ap_ack) = split_datagram(s_ack.unwrap());
 
         // Now the client should start its loss recovery timer based on the ACK.
         now += RTT / 2;
