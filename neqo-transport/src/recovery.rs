@@ -96,6 +96,12 @@ impl RttVals {
             self.smoothed_rtt = (self.smoothed_rtt * 7 + rtt_sample) / 8;
         }
         self.samples += 1;
+        qtrace!(
+            "RTT latest={:?} -> estimate={:?}~{:?}",
+            self.latest_rtt,
+            self.smoothed_rtt,
+            self.rttvar
+        );
         qlog::metrics_updated(
             &mut qlog,
             &[
@@ -261,8 +267,20 @@ impl LossRecoverySpace {
         if self.in_flight_outstanding() {
             debug_assert!(self.pto_base_time.is_some());
             self.pto_base_time
-        } else {
+        } else if self.space == PNSpace::ApplicationData {
             None
+        } else {
+            // Nasty special case to prevent handshake deadlocks.
+            // A client needs to keep the PTO timer armed to prevent a stall
+            // of the handshake.  Technically, this has to stop once we receive
+            // an ACK of Handshake or 1-RTT, or when we receive HANDSHAKE_DONE,
+            // but a few extra probes won't hurt.
+            // A server shouldn't arm its PTO timer this way. The server sends
+            // ack-eliciting, in-flight packets immediately so this only
+            // happens when the server has nothing outstanding.  If we had
+            // client authentication, this might cause some extra probes,
+            // but they would be harmless anyway.
+            self.pto_base_time
         }
     }
 
@@ -272,6 +290,10 @@ impl LossRecoverySpace {
             if sent_packet.cc_in_flight() {
                 self.in_flight_outstanding += 1;
             }
+        } else if self.space != PNSpace::ApplicationData {
+            // For Initial and Handshake spaces, make sure that we have a PTO baseline
+            // always. See `LossRecoverySpace::pto_base_time()` for details.
+            self.pto_base_time = Some(sent_packet.time_sent);
         }
         self.sent_packets.insert(sent_packet.pn, sent_packet);
     }
@@ -297,7 +319,7 @@ impl LossRecoverySpace {
             // ^^ Notabug: see Frame::decode_ack_frame()
             for pn in start..=end {
                 if let Some(sent) = self.remove_packet(pn) {
-                    qdebug!("acked={}", pn);
+                    qtrace!([self.space], "acked={}", pn);
                     eliciting |= sent.ack_eliciting();
                     acked_packets.insert(pn, sent);
                 }
@@ -351,14 +373,14 @@ impl LossRecoverySpace {
             .take_while(|(&k, _)| Some(k) < largest_acked)
         {
             if packet.time_sent <= lost_deadline {
-                qdebug!(
+                qtrace!(
                     "lost={}, time sent {:?} is before lost_deadline {:?}",
                     pn,
                     packet.time_sent,
                     lost_deadline
                 );
             } else if largest_acked >= Some(*pn + PACKET_THRESHOLD) {
-                qdebug!(
+                qtrace!(
                     "lost={}, is >= {} from largest acked {:?}",
                     pn,
                     PACKET_THRESHOLD,
@@ -664,6 +686,8 @@ impl LossRecovery {
     pub fn discard(&mut self, space: PNSpace) {
         qdebug!([self], "Reset loss recovery state for {}", space);
         // We just made progress, so discard PTO count.
+        // The spec says that clients should not do this until confirming that
+        // the server has completed address validation, but ignore that.
         self.pto_state = None;
         for p in self.spaces.drop_space(space) {
             self.cc.discard(&p);

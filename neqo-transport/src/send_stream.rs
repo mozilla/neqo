@@ -271,6 +271,19 @@ impl RangeTracker {
             self.used.insert(new_cur_off, (new_cur_len, cur_state));
         }
     }
+
+    /// Unmark all sent ranges.
+    pub fn unmark_sent(&mut self) {
+        let mut to_remove = SmallVec::<[_; 8]>::new();
+        for (off, (_, state)) in self.used.iter() {
+            if *state != RangeState::Acked {
+                to_remove.push(*off);
+            }
+        }
+        for r in to_remove {
+            self.used.remove(&r);
+        }
+    }
 }
 
 /// Buffer to contain queued bytes and track their state.
@@ -353,6 +366,11 @@ impl TxBuffer {
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize) {
         self.ranges.unmark_range(offset, len)
+    }
+
+    /// Forget about anything that was marked as sent.
+    pub fn unmark_sent(&mut self) {
+        self.ranges.unmark_sent();
     }
 
     fn data_limit(&self) -> u64 {
@@ -872,6 +890,59 @@ mod tests {
         rt.mark_range(0, 200, RangeState::Sent);
         assert_eq!(rt.highest_offset(), 400);
         assert_eq!(rt.acked_from_zero(), 400);
+    }
+
+    #[test]
+    fn unmark_sent_start() {
+        let mut rt = RangeTracker::default();
+
+        rt.mark_range(0, 5, RangeState::Sent);
+        assert_eq!(rt.highest_offset(), 5);
+        assert_eq!(rt.acked_from_zero(), 0);
+
+        rt.unmark_sent();
+        assert_eq!(rt.highest_offset(), 0);
+        assert_eq!(rt.acked_from_zero(), 0);
+        assert_eq!(rt.first_unmarked_range(), (0, None));
+    }
+
+    #[test]
+    fn unmark_sent_middle() {
+        let mut rt = RangeTracker::default();
+
+        rt.mark_range(0, 5, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 5);
+        assert_eq!(rt.acked_from_zero(), 5);
+        rt.mark_range(5, 5, RangeState::Sent);
+        assert_eq!(rt.highest_offset(), 10);
+        assert_eq!(rt.acked_from_zero(), 5);
+        rt.mark_range(10, 5, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 15);
+        assert_eq!(rt.acked_from_zero(), 5);
+        assert_eq!(rt.first_unmarked_range(), (15, None));
+
+        rt.unmark_sent();
+        assert_eq!(rt.highest_offset(), 15);
+        assert_eq!(rt.acked_from_zero(), 5);
+        assert_eq!(rt.first_unmarked_range(), (5, Some(5)));
+    }
+
+    #[test]
+    fn unmark_sent_end() {
+        let mut rt = RangeTracker::default();
+
+        rt.mark_range(0, 5, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 5);
+        assert_eq!(rt.acked_from_zero(), 5);
+        rt.mark_range(5, 5, RangeState::Sent);
+        assert_eq!(rt.highest_offset(), 10);
+        assert_eq!(rt.acked_from_zero(), 5);
+        assert_eq!(rt.first_unmarked_range(), (10, None));
+
+        rt.unmark_sent();
+        assert_eq!(rt.highest_offset(), 5);
+        assert_eq!(rt.acked_from_zero(), 5);
+        assert_eq!(rt.first_unmarked_range(), (5, None));
     }
 
     #[test]
