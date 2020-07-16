@@ -1911,7 +1911,7 @@ impl Connection {
             Frame::Ping => {
                 // If we get a PING and there are outstanding CRYPTO frames,
                 // prepare to resend them.
-                self.crypto.resend_frames(space);
+                self.crypto.resend_unacked(space);
             }
             Frame::Ack {
                 largest_acknowledged,
@@ -1964,7 +1964,7 @@ impl Connection {
                     self.handshake(now, space, Some(&buf))?;
                 } else {
                     // If we get a useless CRYPTO frame send outstanding CRYPTO frames again.
-                    self.crypto.resend_frames(space);
+                    self.crypto.resend_unacked(space);
                 }
             }
             Frame::NewToken { token } => self.token = Some(token),

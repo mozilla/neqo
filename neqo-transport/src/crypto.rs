@@ -237,8 +237,8 @@ impl Crypto {
 
     /// Mark any outstanding frames in the indicated space as "lost" so
     /// that they can be sent again.
-    pub fn resend_frames(&mut self, space: PNSpace) {
-        self.streams.resend(space);
+    pub fn resend_unacked(&mut self, space: PNSpace) {
+        self.streams.resend_unacked(space);
     }
 
     /// Discard state for a packet number space and return true
@@ -1014,7 +1014,7 @@ impl CryptoStreams {
 
     /// Resend any Initial or Handshake CRYPTO frames that might be outstanding.
     /// This can help speed up handshake times.
-    pub fn resend(&mut self, space: PNSpace) {
+    pub fn resend_unacked(&mut self, space: PNSpace) {
         if space != PNSpace::ApplicationData {
             if let Some(cs) = self.get_mut(space) {
                 cs.tx.unmark_sent();

@@ -208,11 +208,11 @@ impl RangeTracker {
 
     fn unmark_range(&mut self, off: u64, len: usize) {
         if len == 0 {
-            qinfo!("unmark 0-length range at {}", off);
+            qdebug!("unmark 0-length range at {}", off);
             return;
         }
 
-        let len = len as u64;
+        let len = u64::try_from(len).unwrap();
         let end_off = off + len;
 
         let mut to_remove = SmallVec::<[_; 8]>::new();
@@ -225,7 +225,7 @@ impl RangeTracker {
                 // Check for overlap
                 if *cur_off + *cur_len > off {
                     if *cur_state == RangeState::Acked {
-                        qinfo!(
+                        qdebug!(
                             "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
                             cur_off,
                             cur_len,
@@ -240,7 +240,7 @@ impl RangeTracker {
             }
 
             if *cur_state == RangeState::Acked {
-                qinfo!(
+                qdebug!(
                     "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
                     cur_off,
                     cur_len,
@@ -274,15 +274,7 @@ impl RangeTracker {
 
     /// Unmark all sent ranges.
     pub fn unmark_sent(&mut self) {
-        let mut to_remove = SmallVec::<[_; 8]>::new();
-        for (off, (_, state)) in self.used.iter() {
-            if *state != RangeState::Acked {
-                to_remove.push(*off);
-            }
-        }
-        for r in to_remove {
-            self.used.remove(&r);
-        }
+        self.unmark_range(0, usize::try_from(self.highest_offset()).unwrap());
     }
 }
 
