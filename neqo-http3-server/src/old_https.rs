@@ -106,7 +106,7 @@ impl Http09Server {
             }
             Some(conn_state) => {
                 conn_state.writable = true;
-                if let Some((data, mut offset)) = &mut conn_state.data_to_send {
+                if let Some((data, mut offset)) = &conn_state.data_to_send {
                     let sent = conn
                         .borrow_mut()
                         .stream_send(stream_id, &data[offset..])
@@ -119,6 +119,7 @@ impl Http09Server {
                         self.conn_state.remove(&(conn.clone(), stream_id));
                     } else {
                         conn_state.writable = false;
+                        conn_state.data_to_send = Some((data.to_vec(), offset));
                     }
                 }
             }
