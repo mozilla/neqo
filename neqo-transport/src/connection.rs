@@ -1673,9 +1673,10 @@ impl Connection {
             let mut packets: Vec<u8> = encoder.into();
             if let Some(mut initial) = initial_sent.take() {
                 if needs_padding {
-                    qdebug!([self], "pad Initial to path MTU {}", path.mtu());
-                    initial.size += path.mtu() - packets.len();
-                    packets.resize(path.mtu(), 0);
+                    let limit = profile.limit();
+                    qdebug!([self], "pad Initial to {}", limit);
+                    initial.size += limit - packets.len();
+                    packets.resize(limit, 0);
                 }
                 self.loss_recovery.on_packet_sent(initial);
             }
