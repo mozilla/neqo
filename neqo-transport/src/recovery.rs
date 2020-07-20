@@ -25,6 +25,8 @@ use crate::tracking::{AckToken, PNSpace, SentPacket};
 use crate::LOCAL_IDLE_TIMEOUT;
 
 pub const GRANULARITY: Duration = Duration::from_millis(20);
+/// The default value for the maximum time a peer can delay acknowledgment
+/// of an ack-eliciting packet.
 pub const MAX_ACK_DELAY: Duration = Duration::from_millis(25);
 // Defined in -recovery 6.2 as 333ms but using lower value.
 const INITIAL_RTT: Duration = Duration::from_millis(100);
@@ -510,6 +512,8 @@ impl PtoState {
 
 #[derive(Debug)]
 pub(crate) struct LossRecovery {
+    /// When the handshake was confirmed, if it has been.
+    confirmed_time: Option<Instant>,
     pto_state: Option<PtoState>,
     rtt_vals: RttVals,
     cc: CongestionControl,
@@ -522,6 +526,7 @@ pub(crate) struct LossRecovery {
 impl LossRecovery {
     pub fn new() -> Self {
         Self {
+            confirmed_time: None,
             rtt_vals: RttVals::default(),
             pto_state: None,
             cc: CongestionControl::default(),
@@ -682,15 +687,31 @@ impl LossRecovery {
             .collect()
     }
 
+    fn confirmed(&mut self, now: Instant) {
+        debug_assert!(self.confirmed_time.is_none());
+        self.confirmed_time = Some(now);
+        // Up until now, the ApplicationData space has been ignored for PTO.
+        // So maybe fire a PTO.
+        if let Some(pto) = self.pto_time(PNSpace::ApplicationData) {
+            if pto < now {
+                self.fire_pto(PNSpace::ApplicationData);
+            }
+        }
+    }
+
     /// Discard state for a given packet number space.
-    pub fn discard(&mut self, space: PNSpace) {
+    pub fn discard(&mut self, space: PNSpace, now: Instant) {
         qdebug!([self], "Reset loss recovery state for {}", space);
+        for p in self.spaces.drop_space(space) {
+            self.cc.discard(&p);
+        }
+
         // We just made progress, so discard PTO count.
         // The spec says that clients should not do this until confirming that
         // the server has completed address validation, but ignore that.
         self.pto_state = None;
-        for p in self.spaces.drop_space(space) {
-            self.cc.discard(&p);
+        if space == PNSpace::Handshake {
+            self.confirmed(now);
         }
     }
 
@@ -731,7 +752,9 @@ impl LossRecovery {
 
     // Calculate PTO time for the given space.
     fn pto_time(&self, pn_space: PNSpace) -> Option<Instant> {
-        if let Some(space) = self.spaces.get(pn_space) {
+        if self.confirmed_time.is_none() && pn_space == PNSpace::ApplicationData {
+            None
+        } else if let Some(space) = self.spaces.get(pn_space) {
             space.pto_base_time().map(|t| {
                 t + self
                     .rtt_vals
@@ -747,12 +770,29 @@ impl LossRecovery {
     /// Find the earliest PTO time for all active packet number spaces.
     /// Ignore Application if either Initial or Handshake have an active PTO.
     fn earliest_pto(&self) -> Option<Instant> {
-        self.pto_time(PNSpace::Initial)
-            .iter()
-            .chain(self.pto_time(PNSpace::Handshake).iter())
-            .min()
-            .cloned()
-            .or_else(|| self.pto_time(PNSpace::ApplicationData))
+        if self.confirmed_time.is_some() {
+            self.pto_time(PNSpace::ApplicationData)
+        } else {
+            self.pto_time(PNSpace::Initial)
+                .iter()
+                .chain(self.pto_time(PNSpace::Handshake).iter())
+                .min()
+                .cloned()
+        }
+    }
+
+    fn fire_pto(&mut self, pn_space: PNSpace) {
+        if let Some(st) = &mut self.pto_state {
+            st.pto(pn_space);
+        } else {
+            self.pto_state = Some(PtoState::new(pn_space));
+        }
+        qlog::metrics_updated(
+            &mut self.qlog,
+            &[QlogMetric::PtoCount(
+                self.pto_state.as_ref().unwrap().count(),
+            )],
+        );
     }
 
     /// This checks whether the PTO timer has fired and fires it if needed.
@@ -780,17 +820,7 @@ impl LossRecovery {
         // This has to happen outside the loop. Increasing the PTO count here causes the
         // pto_time to increase which might cause PTO for later packet number spaces to not fire.
         if let Some(pn_space) = pto_space {
-            if let Some(st) = &mut self.pto_state {
-                st.pto(pn_space);
-            } else {
-                self.pto_state = Some(PtoState::new(pn_space));
-            }
-            qlog::metrics_updated(
-                &mut self.qlog,
-                &[QlogMetric::PtoCount(
-                    self.pto_state.as_ref().unwrap().count(),
-                )],
-            );
+            self.fire_pto(pn_space);
         }
     }
 
@@ -854,7 +884,7 @@ impl ::std::fmt::Display for LossRecovery {
 
 #[cfg(test)]
 mod tests {
-    use super::{LossRecovery, LossRecoverySpace, PNSpace, SentPacket};
+    use super::{LossRecovery, LossRecoverySpace, PNSpace, SentPacket, INITIAL_RTT, MAX_ACK_DELAY};
     use crate::packet::PacketType;
     use std::convert::TryInto;
     use std::rc::Rc;
@@ -968,16 +998,16 @@ mod tests {
     }
 
     /// An initial RTT for using with `setup_lr`.
-    const INITIAL_RTT: Duration = ms!(80);
-    const INITIAL_RTTVAR: Duration = ms!(40);
+    const TEST_RTT: Duration = ms!(80);
+    const TEST_RTTVAR: Duration = ms!(40);
 
     /// Send `n` packets (using PACING), then acknowledge the first.
     fn setup_lr(n: u64) -> LossRecovery {
         let mut lr = LossRecovery::new();
         lr.start_pacer(now());
         pace(&mut lr, n);
-        ack(&mut lr, 0, INITIAL_RTT);
-        assert_rtts(&lr, INITIAL_RTT, INITIAL_RTT, INITIAL_RTTVAR, INITIAL_RTT);
+        ack(&mut lr, 0, TEST_RTT);
+        assert_rtts(&lr, TEST_RTT, TEST_RTT, TEST_RTTVAR, TEST_RTT);
         assert_no_sent_times(&lr);
         lr
     }
@@ -986,15 +1016,9 @@ mod tests {
     #[test]
     fn ack_delay_adjusted() {
         let mut lr = setup_lr(2);
-        ack(&mut lr, 1, INITIAL_RTT + ACK_DELAY);
+        ack(&mut lr, 1, TEST_RTT + ACK_DELAY);
         // RTT stays the same, but the RTTVAR is adjusted downwards.
-        assert_rtts(
-            &lr,
-            INITIAL_RTT,
-            INITIAL_RTT,
-            INITIAL_RTTVAR * 3 / 4,
-            INITIAL_RTT,
-        );
+        assert_rtts(&lr, TEST_RTT, TEST_RTT, TEST_RTTVAR * 3 / 4, TEST_RTT);
         assert_no_sent_times(&lr);
     }
 
@@ -1004,15 +1028,15 @@ mod tests {
         let mut lr = setup_lr(2);
         let extra = ms!(8);
         assert!(extra < ACK_DELAY);
-        ack(&mut lr, 1, INITIAL_RTT + extra);
-        let expected_rtt = INITIAL_RTT + (extra / 8);
-        let expected_rttvar = (INITIAL_RTTVAR * 3 + extra) / 4;
+        ack(&mut lr, 1, TEST_RTT + extra);
+        let expected_rtt = TEST_RTT + (extra / 8);
+        let expected_rttvar = (TEST_RTTVAR * 3 + extra) / 4;
         assert_rtts(
             &lr,
-            INITIAL_RTT + extra,
+            TEST_RTT + extra,
             expected_rtt,
             expected_rttvar,
-            INITIAL_RTT,
+            TEST_RTT,
         );
         assert_no_sent_times(&lr);
     }
@@ -1022,10 +1046,10 @@ mod tests {
     fn reduce_min_rtt() {
         let mut lr = setup_lr(2);
         let delta = ms!(4);
-        let reduced_rtt = INITIAL_RTT - delta;
+        let reduced_rtt = TEST_RTT - delta;
         ack(&mut lr, 1, reduced_rtt);
-        let expected_rtt = INITIAL_RTT - (delta / 8);
-        let expected_rttvar = (INITIAL_RTTVAR * 3 + delta) / 4;
+        let expected_rtt = TEST_RTT - (delta / 8);
+        let expected_rttvar = (TEST_RTTVAR * 3 + delta) / 4;
         assert_rtts(&lr, reduced_rtt, expected_rtt, expected_rttvar, reduced_rtt);
         assert_no_sent_times(&lr);
     }
@@ -1035,7 +1059,7 @@ mod tests {
     fn no_new_acks() {
         let mut lr = setup_lr(1);
         let check = |lr: &LossRecovery| {
-            assert_rtts(&lr, INITIAL_RTT, INITIAL_RTT, INITIAL_RTTVAR, INITIAL_RTT);
+            assert_rtts(&lr, TEST_RTT, TEST_RTT, TEST_RTTVAR, TEST_RTT);
             assert_no_sent_times(&lr);
         };
         check(&lr);
@@ -1069,7 +1093,7 @@ mod tests {
         lr.on_packet_sent(SentPacket::new(
             PacketType::Short,
             1,
-            pn_time(0) + INITIAL_RTT / 4,
+            pn_time(0) + TEST_RTT / 4,
             true,
             Rc::default(),
             ON_SENT_SIZE,
@@ -1080,7 +1104,7 @@ mod tests {
             1,
             vec![(1, 1)],
             ACK_DELAY,
-            pn_time(0) + (INITIAL_RTT * 5 / 4),
+            pn_time(0) + (TEST_RTT * 5 / 4),
         );
         assert_eq!(lost.len(), 1);
         assert_no_sent_times(&lr);
@@ -1094,8 +1118,8 @@ mod tests {
         // We want to declare PN 2 as acknowledged before we declare PN 1 as lost.
         // For this to work, we need PACING above to be less than 1/8 of an RTT.
         let pn1_sent_time = pn_time(1);
-        let pn1_loss_time = pn1_sent_time + (INITIAL_RTT * 9 / 8);
-        let pn2_ack_time = pn_time(2) + INITIAL_RTT;
+        let pn1_loss_time = pn1_sent_time + (TEST_RTT * 9 / 8);
+        let pn2_ack_time = pn_time(2) + TEST_RTT;
         assert!(pn1_loss_time > pn2_ack_time);
 
         let (_, lost) = lr.on_ack_received(
@@ -1140,14 +1164,14 @@ mod tests {
     #[should_panic(expected = "discarding application space")]
     fn drop_app() {
         let mut lr = LossRecovery::new();
-        lr.discard(PNSpace::ApplicationData);
+        lr.discard(PNSpace::ApplicationData, now());
     }
 
     #[test]
     #[should_panic(expected = "dropping spaces out of order")]
     fn drop_out_of_order() {
         let mut lr = LossRecovery::new();
-        lr.discard(PNSpace::Handshake);
+        lr.discard(PNSpace::Handshake, now());
     }
 
     #[test]
@@ -1155,7 +1179,7 @@ mod tests {
     fn ack_after_drop() {
         let mut lr = LossRecovery::new();
         lr.start_pacer(now());
-        lr.discard(PNSpace::Initial);
+        lr.discard(PNSpace::Initial, now());
         lr.on_ack_received(
             PNSpace::Initial,
             0,
@@ -1217,16 +1241,16 @@ mod tests {
             let mut lost = Vec::new();
             lr.spaces.get_mut(pn_space).unwrap().detect_lost_packets(
                 pn_time(3),
-                INITIAL_RTT,
+                TEST_RTT,
                 &mut lost,
             );
             assert!(lost.is_empty());
         }
 
-        lr.discard(PNSpace::Initial);
+        lr.discard(PNSpace::Initial, pn_time(3));
         assert_sent_times(&lr, None, Some(pn_time(1)), Some(pn_time(2)));
 
-        lr.discard(PNSpace::Handshake);
+        lr.discard(PNSpace::Handshake, pn_time(3));
         assert_sent_times(&lr, None, None, Some(pn_time(2)));
 
         // There are cases where we send a packet that is not subsequently tracked.
@@ -1241,5 +1265,40 @@ mod tests {
             true,
         ));
         assert_sent_times(&lr, None, None, Some(pn_time(2)));
+    }
+
+    #[test]
+    fn rearm_pto_after_confirmed() {
+        let mut lr = LossRecovery::new();
+        lr.start_pacer(now());
+        lr.on_packet_sent(SentPacket::new(
+            PacketType::Handshake,
+            0,
+            now(),
+            true,
+            Rc::default(),
+            ON_SENT_SIZE,
+            true,
+        ));
+        lr.on_packet_sent(SentPacket::new(
+            PacketType::Short,
+            0,
+            now(),
+            true,
+            Rc::default(),
+            ON_SENT_SIZE,
+            true,
+        ));
+
+        assert_eq!(lr.pto_time(PNSpace::ApplicationData), None);
+        lr.discard(PNSpace::Initial, pn_time(1));
+        assert_eq!(lr.pto_time(PNSpace::ApplicationData), None);
+
+        // Expiring state after the PTO on the ApplicationData space has
+        // expired should result in setting a PTO state.
+        let expected_pto = pn_time(2) + (INITIAL_RTT * 3) + MAX_ACK_DELAY;
+        lr.discard(PNSpace::Handshake, expected_pto);
+        let profile = lr.send_profile(expected_pto, 10000);
+        assert!(profile.pto());
     }
 }

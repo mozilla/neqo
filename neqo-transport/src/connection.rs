@@ -1049,10 +1049,10 @@ impl Connection {
         Ok(())
     }
 
-    fn discard_keys(&mut self, space: PNSpace) {
+    fn discard_keys(&mut self, space: PNSpace, now: Instant) {
         if self.crypto.discard(space) {
             qinfo!([self], "Drop packet number space {}", space);
-            self.loss_recovery.discard(space);
+            self.loss_recovery.discard(space, now);
             self.acks.drop_space(space);
         }
     }
@@ -1234,7 +1234,7 @@ impl Connection {
                     }
                     if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
                         // Server has received a Handshake packet -> discard Initial keys and states
-                        self.discard_keys(PNSpace::Initial);
+                        self.discard_keys(PNSpace::Initial, now);
                     }
                 }
                 State::Closing { .. } => {
@@ -1658,10 +1658,10 @@ impl Connection {
             if *space == PNSpace::Handshake {
                 if self.role == Role::Client {
                     // Client can send Handshake packets -> discard Initial keys and states
-                    self.discard_keys(PNSpace::Initial);
+                    self.discard_keys(PNSpace::Initial, now);
                 } else if self.state == State::Confirmed {
                     // We could discard handshake keys in set_state, but wait until after sending an ACK.
-                    self.discard_keys(PNSpace::Handshake);
+                    self.discard_keys(PNSpace::Handshake, now);
                 }
             }
         }
@@ -2103,7 +2103,7 @@ impl Connection {
                     return Err(Error::ProtocolViolation);
                 }
                 self.set_state(State::Confirmed);
-                self.discard_keys(PNSpace::Handshake);
+                self.discard_keys(PNSpace::Handshake, now);
             }
         };
 
