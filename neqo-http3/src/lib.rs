@@ -16,6 +16,7 @@ mod control_stream_local;
 mod control_stream_remote;
 pub mod hframe;
 mod push_controller;
+mod push_stream;
 mod qlog;
 mod recv_message;
 mod send_message;
@@ -25,13 +26,16 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
+use neqo_qpack::decoder::QPackDecoder;
 use neqo_qpack::Error as QpackError;
 pub use neqo_transport::Output;
-use neqo_transport::{AppError, Error as TransportError};
+use neqo_transport::{AppError, Connection, Error as TransportError};
+use std::fmt::Debug;
 
 pub use client_events::Http3ClientEvent;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
+pub use connection_client::Http3Parameters;
 pub use neqo_qpack::Header;
 pub use server::Http3Server;
 pub use server_events::Http3ServerEvent;
@@ -72,6 +76,10 @@ pub enum Error {
     TransportError(TransportError),
     Unavailable,
     Unexpected,
+    StreamLimitError,
+    TransportStreamDoesNotExist,
+    InvalidInput,
+    FatalError,
 }
 
 impl Error {
@@ -99,6 +107,82 @@ impl Error {
             _ => 3,
         }
     }
+
+    #[must_use]
+    pub fn connection_error(&self) -> bool {
+        match self {
+            Self::HttpGeneralProtocol
+            | Self::HttpInternal
+            | Self::HttpStreamCreation
+            | Self::HttpClosedCriticalStream
+            | Self::HttpFrameUnexpected
+            | Self::HttpFrame
+            | Self::HttpExcessiveLoad
+            | Self::HttpId
+            | Self::HttpSettings
+            | Self::HttpMissingSettings
+            | Self::QpackError(QpackError::EncoderStream)
+            | Self::QpackError(QpackError::DecoderStream) => true,
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn map_stream_send_errors(err: &TransportError) -> Self {
+        match err {
+            TransportError::InvalidStreamId | TransportError::FinalSizeError => {
+                Error::TransportStreamDoesNotExist
+            }
+            TransportError::InvalidInput => Error::InvalidInput,
+            _ => {
+                debug_assert!(false, "Unexpected error");
+                Error::TransportStreamDoesNotExist
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn map_stream_create_errors(err: &TransportError) -> Self {
+        match err {
+            TransportError::ConnectionState => Error::Unavailable,
+            TransportError::StreamLimitError => Error::StreamLimitError,
+            _ => {
+                debug_assert!(false, "Unexpected error");
+                Error::TransportStreamDoesNotExist
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn map_stream_recv_errors(err: &TransportError) -> Self {
+        match err {
+            TransportError::NoMoreData => {
+                debug_assert!(
+                    false,
+                    "Do not call stream_recv if FIN has been previously read"
+                );
+            }
+            TransportError::InvalidStreamId => {}
+            _ => {
+                debug_assert!(false, "Unexpected error");
+            }
+        };
+        Error::TransportStreamDoesNotExist
+    }
+
+    #[must_use]
+    pub fn map_set_resumption_errors(err: &TransportError) -> Self {
+        match err {
+            TransportError::ConnectionState => Error::InvalidState,
+            _ => Error::InvalidResumptionToken,
+        }
+    }
+
+    #[must_use]
+    pub fn map_send_errors() -> Self {
+        debug_assert!(false, "Unexpected error");
+        Error::HttpInternal
+    }
 }
 
 impl From<TransportError> for Error {
@@ -109,7 +193,11 @@ impl From<TransportError> for Error {
 
 impl From<QpackError> for Error {
     fn from(err: QpackError) -> Self {
-        Self::QpackError(err)
+        match err {
+            QpackError::ClosedCriticalStream => Error::HttpClosedCriticalStream,
+            QpackError::InternalError => Error::HttpInternal,
+            e => Self::QpackError(e),
+        }
     }
 }
 
@@ -153,4 +241,29 @@ impl ::std::fmt::Display for Error {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "HTTP/3 error: {:?}", self)
     }
+}
+
+pub trait RecvStream: Debug {
+    fn stream_reset(&self, app_error: AppError);
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
+    fn receive(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()>;
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
+    fn header_unblocked(&mut self, conn: &mut Connection, decoder: &mut QPackDecoder) -> Res<()>;
+    fn done(&self) -> bool;
+    /// # Errors
+    /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
+    fn read_data(
+        &mut self,
+        conn: &mut Connection,
+        decoder: &mut QPackDecoder,
+        buf: &mut [u8],
+    ) -> Res<(usize, bool)>;
+}
+
+pub(crate) trait RecvMessageEvents: Debug {
+    fn header_ready(&self, stream_id: u64, headers: Option<Vec<Header>>, fin: bool);
+    fn data_readable(&self, stream_id: u64);
+    fn reset(&self, stream_id: u64, error: AppError);
 }

@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use smallvec::SmallVec;
 
-use neqo_common::{matches, qdebug, qerror, qinfo, qtrace};
+use neqo_common::{qdebug, qerror, qinfo, qtrace};
 
 use crate::events::ConnectionEvents;
 use crate::flow_mgr::FlowMgr;
@@ -24,6 +24,8 @@ use crate::recovery::RecoveryToken;
 use crate::stream_id::StreamId;
 use crate::tracking::PNSpace;
 use crate::{AppError, Error, Res};
+
+pub const SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum RangeState {
@@ -206,11 +208,11 @@ impl RangeTracker {
 
     fn unmark_range(&mut self, off: u64, len: usize) {
         if len == 0 {
-            qinfo!("unmark 0-length range at {}", off);
+            qdebug!("unmark 0-length range at {}", off);
             return;
         }
 
-        let len = len as u64;
+        let len = u64::try_from(len).unwrap();
         let end_off = off + len;
 
         let mut to_remove = SmallVec::<[_; 8]>::new();
@@ -223,7 +225,7 @@ impl RangeTracker {
                 // Check for overlap
                 if *cur_off + *cur_len > off {
                     if *cur_state == RangeState::Acked {
-                        qinfo!(
+                        qdebug!(
                             "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
                             cur_off,
                             cur_len,
@@ -238,7 +240,7 @@ impl RangeTracker {
             }
 
             if *cur_state == RangeState::Acked {
-                qinfo!(
+                qdebug!(
                     "Attempted to unmark Acked range {}-{} with unmark_range {}-{}",
                     cur_off,
                     cur_len,
@@ -269,6 +271,11 @@ impl RangeTracker {
             self.used.insert(new_cur_off, (new_cur_len, cur_state));
         }
     }
+
+    /// Unmark all sent ranges.
+    pub fn unmark_sent(&mut self) {
+        self.unmark_range(0, usize::try_from(self.highest_offset()).unwrap());
+    }
 }
 
 /// Buffer to contain queued bytes and track their state.
@@ -280,21 +287,19 @@ pub struct TxBuffer {
 }
 
 impl TxBuffer {
-    const BUFFER_SIZE: usize = 0xFFFF; // 64 KiB
-
     pub fn new() -> Self {
         Self {
-            send_buf: VecDeque::with_capacity(Self::BUFFER_SIZE),
+            send_buf: VecDeque::with_capacity(SEND_BUFFER_SIZE),
             ..Self::default()
         }
     }
 
     /// Attempt to add some or all of the passed-in buffer to the TxBuffer.
     pub fn send(&mut self, buf: &[u8]) -> usize {
-        let can_buffer = min(Self::BUFFER_SIZE - self.buffered(), buf.len());
+        let can_buffer = min(SEND_BUFFER_SIZE - self.buffered(), buf.len());
         if can_buffer > 0 {
             self.send_buf.extend(&buf[..can_buffer]);
-            assert!(self.send_buf.len() <= Self::BUFFER_SIZE);
+            assert!(self.send_buf.len() <= SEND_BUFFER_SIZE);
         }
         can_buffer
     }
@@ -355,6 +360,11 @@ impl TxBuffer {
         self.ranges.unmark_range(offset, len)
     }
 
+    /// Forget about anything that was marked as sent.
+    pub fn unmark_sent(&mut self) {
+        self.ranges.unmark_sent();
+    }
+
     fn data_limit(&self) -> u64 {
         self.buffered() as u64 + self.retired
     }
@@ -364,7 +374,7 @@ impl TxBuffer {
     }
 
     fn avail(&self) -> usize {
-        Self::BUFFER_SIZE - self.buffered()
+        SEND_BUFFER_SIZE - self.buffered()
     }
 
     pub fn highest_sent(&self) -> u64 {
@@ -409,7 +419,7 @@ impl SendStreamState {
     fn tx_avail(&self) -> u64 {
         match self {
             // In Ready, TxBuffer not yet allocated but size is known
-            Self::Ready => TxBuffer::BUFFER_SIZE.try_into().unwrap(),
+            Self::Ready => SEND_BUFFER_SIZE.try_into().unwrap(),
             Self::Send { send_buf } | Self::DataSent { send_buf, .. } => {
                 send_buf.avail().try_into().unwrap()
             }
@@ -837,8 +847,6 @@ pub struct StreamRecoveryToken {
 mod tests {
     use super::*;
 
-    use neqo_common::matches;
-
     use crate::events::ConnectionEvent;
 
     #[test]
@@ -874,6 +882,59 @@ mod tests {
         rt.mark_range(0, 200, RangeState::Sent);
         assert_eq!(rt.highest_offset(), 400);
         assert_eq!(rt.acked_from_zero(), 400);
+    }
+
+    #[test]
+    fn unmark_sent_start() {
+        let mut rt = RangeTracker::default();
+
+        rt.mark_range(0, 5, RangeState::Sent);
+        assert_eq!(rt.highest_offset(), 5);
+        assert_eq!(rt.acked_from_zero(), 0);
+
+        rt.unmark_sent();
+        assert_eq!(rt.highest_offset(), 0);
+        assert_eq!(rt.acked_from_zero(), 0);
+        assert_eq!(rt.first_unmarked_range(), (0, None));
+    }
+
+    #[test]
+    fn unmark_sent_middle() {
+        let mut rt = RangeTracker::default();
+
+        rt.mark_range(0, 5, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 5);
+        assert_eq!(rt.acked_from_zero(), 5);
+        rt.mark_range(5, 5, RangeState::Sent);
+        assert_eq!(rt.highest_offset(), 10);
+        assert_eq!(rt.acked_from_zero(), 5);
+        rt.mark_range(10, 5, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 15);
+        assert_eq!(rt.acked_from_zero(), 5);
+        assert_eq!(rt.first_unmarked_range(), (15, None));
+
+        rt.unmark_sent();
+        assert_eq!(rt.highest_offset(), 15);
+        assert_eq!(rt.acked_from_zero(), 5);
+        assert_eq!(rt.first_unmarked_range(), (5, Some(5)));
+    }
+
+    #[test]
+    fn unmark_sent_end() {
+        let mut rt = RangeTracker::default();
+
+        rt.mark_range(0, 5, RangeState::Acked);
+        assert_eq!(rt.highest_offset(), 5);
+        assert_eq!(rt.acked_from_zero(), 5);
+        rt.mark_range(5, 5, RangeState::Sent);
+        assert_eq!(rt.highest_offset(), 10);
+        assert_eq!(rt.acked_from_zero(), 5);
+        assert_eq!(rt.first_unmarked_range(), (10, None));
+
+        rt.unmark_sent();
+        assert_eq!(rt.highest_offset(), 5);
+        assert_eq!(rt.acked_from_zero(), 5);
+        assert_eq!(rt.first_unmarked_range(), (5, None));
     }
 
     #[test]
@@ -926,54 +987,61 @@ mod tests {
     fn tx_buffer_next_bytes_1() {
         let mut txb = TxBuffer::new();
 
-        assert_eq!(txb.avail(), 65535);
+        assert_eq!(txb.avail(), SEND_BUFFER_SIZE);
 
         // Fill the buffer
-        assert_eq!(txb.send(&[1; 100_000]), TxBuffer::BUFFER_SIZE);
+        assert_eq!(txb.send(&[1; SEND_BUFFER_SIZE * 2]), SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(),
-			 Some((0, x)) if x.len()==65535
+			 Some((0, x)) if x.len()==SEND_BUFFER_SIZE
 			 && x.iter().all(|ch| *ch == 1)));
 
         // Mark almost all as sent. Get what's left
-        txb.mark_as_sent(0, 65534);
+        let one_byte_from_end = SEND_BUFFER_SIZE as u64 - 1;
+        txb.mark_as_sent(0, one_byte_from_end as usize);
         assert!(matches!(txb.next_bytes(),
-			 Some((65534, x)) if x.len() == 1
+			 Some((start, x)) if x.len() == 1
+			 && start == one_byte_from_end
 			 && x.iter().all(|ch| *ch == 1)));
 
         // Mark all as sent. Get nothing
-        txb.mark_as_sent(0, 65535);
+        txb.mark_as_sent(0, SEND_BUFFER_SIZE);
         assert!(matches!(txb.next_bytes(), None));
 
         // Mark as lost. Get it again
-        txb.mark_as_lost(65534, 1);
+        txb.mark_as_lost(one_byte_from_end, 1);
         assert!(matches!(txb.next_bytes(),
-			 Some((65534, x)) if x.len() == 1
+			 Some((start, x)) if x.len() == 1
+			 && start == one_byte_from_end
 			 && x.iter().all(|ch| *ch == 1)));
 
         // Mark a larger range lost, including beyond what's in the buffer even.
         // Get a little more
-        txb.mark_as_lost(65530, 100);
+        let five_bytes_from_end = SEND_BUFFER_SIZE as u64 - 5;
+        txb.mark_as_lost(five_bytes_from_end, 100);
         assert!(matches!(txb.next_bytes(),
-			 Some((65530, x)) if x.len() == 5
+			 Some((start, x)) if x.len() == 5
+			 && start == five_bytes_from_end
 			 && x.iter().all(|ch| *ch == 1)));
 
         // Contig acked range at start means it can be removed from buffer
         // Impl of vecdeque should now result in a split buffer when more data
         // is sent
-        txb.mark_as_acked(0, 65530);
+        txb.mark_as_acked(0, five_bytes_from_end as usize);
         assert_eq!(txb.send(&[2; 30]), 30);
         // Just get 5 even though there is more
         assert!(matches!(txb.next_bytes(),
-			 Some((65530, x)) if x.len() == 5
+			 Some((start, x)) if x.len() == 5
+			 && start == five_bytes_from_end
 			 && x.iter().all(|ch| *ch == 1)));
-        assert_eq!(txb.retired, 65530);
+        assert_eq!(txb.retired, five_bytes_from_end);
         assert_eq!(txb.buffered(), 35);
 
         // Marking that bit as sent should let the last contig bit be returned
         // when called again
-        txb.mark_as_sent(65530, 5);
+        txb.mark_as_sent(five_bytes_from_end, 5);
         assert!(matches!(txb.next_bytes(),
-			 Some((65535, x)) if x.len() == 30
+			 Some((start, x)) if x.len() == 30
+			 && start == SEND_BUFFER_SIZE as u64
 			 && x.iter().all(|ch| *ch == 2)));
     }
 
@@ -981,45 +1049,63 @@ mod tests {
     fn tx_buffer_next_bytes_2() {
         let mut txb = TxBuffer::new();
 
-        assert_eq!(txb.avail(), 65535);
+        assert_eq!(txb.avail(), SEND_BUFFER_SIZE);
 
-        assert_eq!(txb.send(&[1; 100_000]), TxBuffer::BUFFER_SIZE);
-        assert!(matches!(txb.next_bytes(), Some((0, x)) if x.len()==65535));
+        // Fill the buffer
+        assert_eq!(txb.send(&[1; SEND_BUFFER_SIZE * 2]), SEND_BUFFER_SIZE);
+        assert!(matches!(txb.next_bytes(),
+			 Some((0, x)) if x.len()==SEND_BUFFER_SIZE
+			 && x.iter().all(|ch| *ch == 1)));
 
         // As above
-        txb.mark_as_acked(0, 65500);
-        assert!(matches!(txb.next_bytes(), Some((65500, x)) if x.len() == 35));
+        let forty_bytes_from_end = SEND_BUFFER_SIZE as u64 - 40;
 
-        // Valid new data placed in discontig location
+        txb.mark_as_acked(0, forty_bytes_from_end as usize);
+        assert!(matches!(txb.next_bytes(),
+                 Some((start, x)) if x.len() == 40
+                 && start == forty_bytes_from_end
+        ));
+
+        // Valid new data placed in split locations
         assert_eq!(txb.send(&[2; 100]), 100);
 
         // Mark a little more as sent
-        txb.mark_as_sent(65500, 10);
+        txb.mark_as_sent(forty_bytes_from_end, 10);
+        let thirty_bytes_from_end = forty_bytes_from_end + 10;
         assert!(matches!(txb.next_bytes(),
-			 Some((65510, x)) if x.len() == 25
+			 Some((start, x)) if x.len() == 30
+			 && start == thirty_bytes_from_end
 			 && x.iter().all(|ch| *ch == 1)));
+
         // Mark a range 'A' in second slice as sent. Should still return the same
-        txb.mark_as_sent(65600, 10);
+        let range_a_start = SEND_BUFFER_SIZE as u64 + 30;
+        let range_a_end = range_a_start + 10;
+        txb.mark_as_sent(range_a_start, 10);
         assert!(matches!(txb.next_bytes(),
-			 Some((65510, x)) if x.len() == 25
+			 Some((start, x)) if x.len() == 30
+			 && start == thirty_bytes_from_end
 			 && x.iter().all(|ch| *ch == 1)));
+
         // Ack entire first slice and into second slice
-        txb.mark_as_acked(0, 65550);
+        let ten_bytes_past_end = SEND_BUFFER_SIZE as u64 + 10;
+        txb.mark_as_acked(0, ten_bytes_past_end as usize);
 
         // Get up to marked range A
         assert!(matches!(txb.next_bytes(),
-			 Some((65550, x)) if x.len() == 50
+			 Some((start, x)) if x.len() == 20
+			 && start == ten_bytes_past_end
 			 && x.iter().all(|ch| *ch == 2)));
 
-        txb.mark_as_sent(65550, 50);
+        txb.mark_as_sent(ten_bytes_past_end, 20);
 
         // Get bit after earlier marked range A
         assert!(matches!(txb.next_bytes(),
-			 Some((65610, x)) if x.len() == 25
+			 Some((start, x)) if x.len() == 60
+			 && start == range_a_end
 			 && x.iter().all(|ch| *ch == 2)));
 
         // No more bytes.
-        txb.mark_as_sent(65610, 25);
+        txb.mark_as_sent(range_a_end, 60);
         assert!(matches!(txb.next_bytes(), None));
     }
 
@@ -1037,25 +1123,25 @@ mod tests {
         assert_eq!(s.state.tx_buf().unwrap().data_limit(), 100);
 
         // Should hit stream flow control limit before filling up send buffer
-        let res = s.send(&[4; TxBuffer::BUFFER_SIZE]).unwrap();
+        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, 1024 - 100);
 
         // should do nothing, max stream data already 1024
         s.set_max_stream_data(1024);
-        let res = s.send(&[4; TxBuffer::BUFFER_SIZE]).unwrap();
+        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, 0);
 
         // should now hit the conn flow control (4096)
         s.set_max_stream_data(1_048_576);
-        let res = s.send(&[4; TxBuffer::BUFFER_SIZE]).unwrap();
+        let res = s.send(&[4; SEND_BUFFER_SIZE]).unwrap();
         assert_eq!(res, 3072);
 
         // should now hit the tx buffer size
         flow_mgr
             .borrow_mut()
-            .conn_increase_max_credit(TxBuffer::BUFFER_SIZE as u64);
-        let res = s.send(&[4; TxBuffer::BUFFER_SIZE + 100]).unwrap();
-        assert_eq!(res, TxBuffer::BUFFER_SIZE - 4096);
+            .conn_increase_max_credit(SEND_BUFFER_SIZE as u64);
+        let res = s.send(&[4; SEND_BUFFER_SIZE + 100]).unwrap();
+        assert_eq!(res, SEND_BUFFER_SIZE - 4096);
 
         // TODO(agrover@mozilla.com): test ooo acks somehow
         s.mark_as_acked(0, 40, false);
@@ -1127,11 +1213,11 @@ mod tests {
 
         // Unblocking both by a large amount will cause avail() to be limited by
         // tx buffer size.
-        assert_eq!(s.avail(), TxBuffer::BUFFER_SIZE - 4);
+        assert_eq!(s.avail(), SEND_BUFFER_SIZE - 4);
 
         assert_eq!(
-            s.send(&[b'a'; TxBuffer::BUFFER_SIZE]).unwrap(),
-            TxBuffer::BUFFER_SIZE - 4
+            s.send(&[b'a'; SEND_BUFFER_SIZE]).unwrap(),
+            SEND_BUFFER_SIZE - 4
         );
 
         // No event because still blocked by tx buffer full

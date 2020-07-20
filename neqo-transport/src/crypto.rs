@@ -11,7 +11,7 @@ use std::ops::{Index, IndexMut, Range};
 use std::rc::Rc;
 use std::time::Instant;
 
-use neqo_common::{hex, matches, qdebug, qerror, qinfo, qtrace, Role};
+use neqo_common::{hex, qdebug, qerror, qinfo, qtrace, Role};
 use neqo_crypto::{
     aead::Aead, hkdf, hp::HpKey, Agent, AntiReplay, Cipher, Epoch, HandshakeState, Record,
     RecordList, SymKey, ZeroRttChecker, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
@@ -233,6 +233,12 @@ impl Crypto {
             token.length
         );
         self.streams.lost(token);
+    }
+
+    /// Mark any outstanding frames in the indicated space as "lost" so
+    /// that they can be sent again.
+    pub fn resend_unacked(&mut self, space: PNSpace) {
+        self.streams.resend_unacked(space);
     }
 
     /// Discard state for a packet number space and return true
@@ -996,13 +1002,23 @@ impl CryptoStreams {
         self.get_mut(token.space)
             .unwrap()
             .tx
-            .mark_as_acked(token.offset, token.length)
+            .mark_as_acked(token.offset, token.length);
     }
 
     pub fn lost(&mut self, token: &CryptoRecoveryToken) {
         // See BZ 1624800, ignore lost packets in spaces we've dropped keys
         if let Some(cs) = self.get_mut(token.space) {
-            cs.tx.mark_as_lost(token.offset, token.length)
+            cs.tx.mark_as_lost(token.offset, token.length);
+        }
+    }
+
+    /// Resend any Initial or Handshake CRYPTO frames that might be outstanding.
+    /// This can help speed up handshake times.
+    pub fn resend_unacked(&mut self, space: PNSpace) {
+        if space != PNSpace::ApplicationData {
+            if let Some(cs) = self.get_mut(space) {
+                cs.tx.unmark_sent();
+            }
         }
     }
 

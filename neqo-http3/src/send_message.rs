@@ -9,9 +9,9 @@ use crate::qlog;
 use crate::Header;
 use crate::{Error, Res};
 
-use neqo_common::{matches, qdebug, qinfo, qtrace, Encoder};
+use neqo_common::{qdebug, qinfo, qtrace, Encoder};
 use neqo_qpack::encoder::QPackEncoder;
-use neqo_transport::Connection;
+use neqo_transport::{AppError, Connection};
 use std::cmp::min;
 use std::convert::TryFrom;
 use std::fmt::Debug;
@@ -25,6 +25,8 @@ const MAX_DATA_HEADER_SIZE_5_LIMIT: usize = MAX_DATA_HEADER_SIZE_5 + 9; // 10737
 
 pub(crate) trait SendMessageEvents: Debug {
     fn data_writable(&self, stream_id: u64);
+    fn remove_send_side_event(&self, stream_id: u64);
+    fn stop_sending(&self, stream_id: u64, app_err: AppError);
 }
 
 /*
@@ -138,8 +140,11 @@ impl SendMessage {
             | SendMessageState::Initialized { .. }
             | SendMessageState::SendingInitialMessage { .. } => Ok(0),
             SendMessageState::SendingData => {
-                let available = usize::try_from(conn.stream_avail_send_space(self.stream_id)?)
-                    .unwrap_or(usize::max_value());
+                let available = usize::try_from(
+                    conn.stream_avail_send_space(self.stream_id)
+                        .map_err(|e| Error::map_stream_send_errors(&e))?,
+                )
+                .unwrap_or(usize::max_value());
                 if available <= 2 {
                     return Ok(0);
                 }
@@ -169,40 +174,34 @@ impl SendMessage {
                 };
                 let mut enc = Encoder::default();
                 data_frame.encode(&mut enc);
-                match conn.stream_send(self.stream_id, &enc) {
-                    Ok(sent) => {
-                        debug_assert_eq!(sent, enc.len());
-                    }
-                    Err(e) => return Err(Error::TransportError(e)),
-                }
-                match conn.stream_send(self.stream_id, &buf[..to_send]) {
-                    Ok(sent) => {
-                        qlog::h3_data_moved_down(
-                            &mut conn.qlog_mut().borrow_mut(),
-                            self.stream_id,
-                            buf.len(),
-                        );
-                        Ok(sent)
-                    }
-                    Err(e) => Err(Error::TransportError(e)),
-                }
+                let sent_fh = conn
+                    .stream_send(self.stream_id, &enc)
+                    .map_err(|e| Error::map_stream_send_errors(&e))?;
+                debug_assert_eq!(sent_fh, enc.len());
+
+                let sent = conn
+                    .stream_send(self.stream_id, &buf[..to_send])
+                    .map_err(|e| Error::map_stream_send_errors(&e))?;
+                qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id, to_send);
+                Ok(sent)
             }
             SendMessageState::Closed => Err(Error::AlreadyClosed),
         }
-    }
-
-    pub fn is_sending_closed(&self) -> bool {
-        self.state.is_sending_closed()
     }
 
     pub fn done(&self) -> bool {
         self.state.done()
     }
 
-    pub fn is_state_sending_data(&self) -> bool {
-        self.state.is_state_sending_data()
+    pub fn stream_writable(&self) {
+        if self.state.is_state_sending_data() {
+            self.conn_events.data_writable(self.stream_id);
+        }
     }
 
+    /// # Errors
+    /// `ClosedCriticalStream` if the encoder stream is closed.
+    /// `InternalError` if an unexpected error occurred.
     fn ensure_encoded(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
         if let SendMessageState::Initialized { headers, data, fin } = &self.state {
             qdebug!([self], "Encoding headers");
@@ -229,6 +228,13 @@ impl SendMessage {
         Ok(())
     }
 
+    /// # Errors
+    /// `ClosedCriticalStream` if the encoder stream is closed.
+    /// `InternalError` if an unexpected error occurred.
+    /// `InvalidStreamId` if the stream does not exist,
+    /// `AlreadyClosed` if the stream has already been closed.
+    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if `process_output`
+    /// has not been called when needed, and HTTP3 layer has not picked up the info that the stream has been closed.)
     pub fn send(&mut self, conn: &mut Connection, encoder: &mut QPackEncoder) -> Res<()> {
         self.ensure_encoded(conn, encoder)?;
 
@@ -239,14 +245,17 @@ impl SendMessage {
         };
 
         if let SendMessageState::SendingInitialMessage { ref mut buf, fin } = self.state {
-            let sent = conn.stream_send(self.stream_id, &buf)?;
-            qlog::h3_data_moved_down(&mut conn.qlog_mut().borrow_mut(), self.stream_id, buf.len());
+            let sent = conn
+                .stream_send(self.stream_id, &buf)
+                .map_err(|_| Error::map_send_errors())?;
+            qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id, sent);
 
             qtrace!([label], "{} bytes sent", sent);
 
             if sent == buf.len() {
                 if fin {
-                    conn.stream_close_send(self.stream_id)?;
+                    conn.stream_close_send(self.stream_id)
+                        .map_err(|_| Error::map_send_errors())?;
                     self.state = SendMessageState::Closed;
                     qtrace!([label], "done sending request");
                 } else {
@@ -280,7 +289,16 @@ impl SendMessage {
                 conn.stream_close_send(self.stream_id)?;
             }
         }
+
+        self.conn_events.remove_send_side_event(self.stream_id);
         Ok(())
+    }
+
+    pub fn stop_sending(&mut self, app_err: AppError) {
+        if !self.state.is_sending_closed() {
+            self.conn_events.remove_send_side_event(self.stream_id);
+            self.conn_events.stop_sending(self.stream_id, app_err);
+        }
     }
 }
 

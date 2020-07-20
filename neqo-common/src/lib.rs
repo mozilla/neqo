@@ -16,21 +16,12 @@ pub mod timer;
 
 pub use self::codec::{Decoder, Encoder};
 pub use self::datagram::Datagram;
-pub use self::incrdecoder::{IncrementalDecoder, IncrementalDecoderResult};
+pub use self::incrdecoder::{
+    IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
+};
 
 #[macro_use]
 extern crate lazy_static;
-
-// Cribbed from the |matches| crate, for simplicity.
-#[macro_export]
-macro_rules! matches {
-    ($expression:expr, $($pattern:tt)+) => {
-        match $expression {
-            $($pattern)+ => true,
-            _ => false
-        }
-    }
-}
 
 #[must_use]
 pub fn hex(buf: &[u8]) -> String {

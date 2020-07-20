@@ -9,7 +9,11 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::env;
+use std::fmt::Display;
+use std::fs::OpenOptions;
 use std::io;
+use std::io::Read;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
@@ -27,7 +31,11 @@ use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{FixedConnectionIdManager, Output};
 
+use crate::old_https::Http09Server;
+
 const TIMER_TOKEN: Token = Token(0xffff_ffff);
+
+mod old_https;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "neqo-http3-server", about = "A basic HTTP3 server.")]
@@ -68,7 +76,7 @@ struct Args {
     /// Name of key from NSS database.
     key: String,
 
-    #[structopt(short = "a", long, default_value = "h3-28")]
+    #[structopt(short = "a", long, default_value = "h3-29")]
     /// ALPN labels to negotiate.
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.
@@ -77,6 +85,13 @@ struct Args {
     #[structopt(name = "qlog-dir", long)]
     /// Enable QLOG logging and QLOG traces to this directory
     qlog_dir: Option<PathBuf>,
+
+    #[structopt(name = "qns-mode", long)]
+    qns_mode: bool,
+
+    #[structopt(name = "use-old-http", short = "o", long)]
+    /// Use http 0.9 instead of HTTP/3
+    use_old_http: bool,
 }
 
 impl Args {
@@ -86,53 +101,6 @@ impl Args {
             .filter_map(|host| host.to_socket_addrs().ok())
             .flat_map(|x| x)
             .collect()
-    }
-}
-
-fn process_events(server: &mut Http3Server) {
-    while let Some(event) = server.next_event() {
-        eprintln!("Event: {:?}", event);
-        match event {
-            Http3ServerEvent::Headers {
-                mut request,
-                headers,
-                fin,
-            } => {
-                println!("Headers (request={} fin={}): {:?}", request, fin, headers);
-
-                let default_ret = b"Hello World".to_vec();
-
-                let response = headers.and_then(|h| {
-                    h.iter().find(|&(k, _)| k == ":path").and_then(|(_, path)| {
-                        match path.trim_matches(|p| p == '/').parse::<usize>() {
-                            Ok(v) => Some(vec![b'a'; v]),
-                            Err(_) => Some(default_ret),
-                        }
-                    })
-                });
-
-                if response.is_none() {
-                    let _ = request.stream_reset(Error::HttpRequestIncomplete.code());
-                    continue;
-                }
-
-                let response = response.unwrap();
-
-                request
-                    .set_response(
-                        &[
-                            (String::from(":status"), String::from("200")),
-                            (String::from("content-length"), response.len().to_string()),
-                        ],
-                        &response,
-                    )
-                    .unwrap();
-            }
-            Http3ServerEvent::Data { request, data, fin } => {
-                println!("Data (request={} fin={}): {:?}", request, fin, data);
-            }
-            _ => {}
-        }
     }
 }
 
@@ -151,8 +119,98 @@ fn emit_packets(sockets: &mut Vec<UdpSocket>, out_dgrams: &HashMap<SocketAddr, V
     }
 }
 
+fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
+    let mut file_path = PathBuf::from("/www");
+    file_path.push(filename.trim_matches(|p| p == '/'));
+
+    OpenOptions::new()
+        .read(true)
+        .open(&file_path)
+        .map_err(|_e| eprintln!("Could not open {}", file_path.display()))
+        .ok()
+        .and_then(|mut f| {
+            let mut data = Vec::new();
+            match f.read_to_end(&mut data) {
+                Ok(sz) => {
+                    println!("{} bytes read from {}", sz, file_path.display());
+                    Some(data)
+                }
+                Err(e) => {
+                    eprintln!("Error reading data: {:?}", e);
+                    None
+                }
+            }
+        })
+}
+
+trait HttpServer: Display {
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+    fn process_events(&mut self, args: &Args);
+    fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
+}
+
+impl HttpServer for Http3Server {
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        self.process(dgram, now)
+    }
+
+    fn process_events(&mut self, args: &Args) {
+        while let Some(event) = self.next_event() {
+            match event {
+                Http3ServerEvent::Headers {
+                    mut request,
+                    headers,
+                    fin,
+                } => {
+                    println!("Headers (request={} fin={}): {:?}", request, fin, headers);
+
+                    let default_ret = b"Hello World".to_vec();
+
+                    let response = headers.and_then(|h| {
+                        h.iter().find(|&(k, _)| k == ":path").and_then(|(_, path)| {
+                            if args.qns_mode {
+                                qns_read_response(path)
+                            } else {
+                                match path.trim_matches(|p| p == '/').parse::<usize>() {
+                                    Ok(v) => Some(vec![b'a'; v]),
+                                    Err(_) => Some(default_ret),
+                                }
+                            }
+                        })
+                    });
+
+                    if response.is_none() {
+                        let _ = request.stream_reset(Error::HttpRequestIncomplete.code());
+                        continue;
+                    }
+
+                    let response = response.unwrap();
+
+                    request
+                        .set_response(
+                            &[
+                                (String::from(":status"), String::from("200")),
+                                (String::from("content-length"), response.len().to_string()),
+                            ],
+                            &response,
+                        )
+                        .unwrap();
+                }
+                Http3ServerEvent::Data { request, data, fin } => {
+                    println!("Data (request={} fin={}): {:?}", request, fin, data);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
+        Self::set_qlog_dir(self, dir)
+    }
+}
+
 fn process(
-    server: &mut Http3Server,
+    server: &mut dyn HttpServer,
     svr_timeout: &mut Option<Timeout>,
     inx: usize,
     mut dgram: Option<Datagram>,
@@ -180,24 +238,24 @@ fn process(
     }
 }
 
-fn main() -> Result<(), io::Error> {
-    let args = Args::from_args();
-    assert!(!args.key.is_empty(), "Need at least one key");
-
-    init_db(args.db.clone());
-
+/// Init Poll for all hosts. Returns the Poll, sockets, and a map of the
+/// socketaddrs to instances of the HttpServer handling that addr.
+#[allow(clippy::type_complexity)]
+fn init_poll(
+    hosts: &[SocketAddr],
+    args: &Args,
+) -> Result<
+    (
+        Poll,
+        Vec<UdpSocket>,
+        HashMap<SocketAddr, (Box<dyn HttpServer>, Option<Timeout>)>,
+    ),
+    io::Error,
+> {
     let poll = Poll::new()?;
-
-    let hosts = args.host_socket_addrs();
-    if hosts.is_empty() {
-        eprintln!("No valid hosts defined");
-        exit(1);
-    }
 
     let mut sockets = Vec::new();
     let mut servers = HashMap::new();
-    let mut timer = Builder::default().build::<usize>();
-    poll.register(&timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
 
     for (i, host) in hosts.iter().enumerate() {
         let socket = match UdpSocket::bind(&host) {
@@ -239,20 +297,39 @@ fn main() -> Result<(), io::Error> {
             local_addr,
             (
                 {
-                    let mut svr = Http3Server::new(
-                        Instant::now(),
-                        &[args.key.clone()],
-                        &[args.alpn.clone()],
+                    let anti_replay =
                         AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
-                            .expect("unable to setup anti-replay"),
-                        Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-                        QpackSettings {
-                            max_table_size_encoder: args.max_table_size_encoder,
-                            max_table_size_decoder: args.max_table_size_decoder,
-                            max_blocked_streams: args.max_blocked_streams,
-                        },
-                    )
-                    .expect("We cannot make a server!");
+                            .expect("unable to setup anti-replay");
+                    let cid_mgr = Rc::new(RefCell::new(FixedConnectionIdManager::new(10)));
+
+                    let mut svr: Box<dyn HttpServer> = if args.use_old_http {
+                        Box::new(
+                            Http09Server::new(
+                                Instant::now(),
+                                &[args.key.clone()],
+                                &[args.alpn.clone()],
+                                anti_replay,
+                                cid_mgr,
+                            )
+                            .expect("We cannot make a server!"),
+                        )
+                    } else {
+                        Box::new(
+                            Http3Server::new(
+                                Instant::now(),
+                                &[args.key.clone()],
+                                &[args.alpn.clone()],
+                                anti_replay,
+                                cid_mgr,
+                                QpackSettings {
+                                    max_table_size_encoder: args.max_table_size_encoder,
+                                    max_table_size_decoder: args.max_table_size_decoder,
+                                    max_blocked_streams: args.max_blocked_streams,
+                                },
+                            )
+                            .expect("We cannot make a server!"),
+                        )
+                    };
                     svr.set_qlog_dir(args.qlog_dir.clone());
                     svr
                 },
@@ -260,6 +337,43 @@ fn main() -> Result<(), io::Error> {
             ),
         );
     }
+
+    Ok((poll, sockets, servers))
+}
+
+fn main() -> Result<(), io::Error> {
+    let mut args = Args::from_args();
+    assert!(!args.key.is_empty(), "Need at least one key");
+
+    init_db(args.db.clone());
+
+    if args.qns_mode {
+        match env::var("TESTCASE") {
+            Ok(s) if s == "http3" => {}
+            Ok(s) if s == "handshake" || s == "transfer" || s == "retry" => {
+                args.use_old_http = true;
+                args.alpn = "hq-29".into();
+            }
+
+            Ok(_) => exit(127),
+            Err(_) => exit(1),
+        }
+
+        if let Ok(qlogdir) = env::var("QLOGDIR") {
+            args.qlog_dir = Some(PathBuf::from(qlogdir));
+        }
+    }
+
+    let hosts = args.host_socket_addrs();
+    if hosts.is_empty() {
+        eprintln!("No valid hosts defined");
+        exit(1);
+    }
+
+    let (poll, mut sockets, mut servers) = init_poll(&hosts, &args)?;
+
+    let mut timer = Builder::default().build::<usize>();
+    poll.register(&timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
 
     let buf = &mut [0u8; 2048];
 
@@ -273,11 +387,11 @@ fn main() -> Result<(), io::Error> {
                 while let Some(inx) = timer.poll() {
                     if let Some(socket) = sockets.get(inx) {
                         qinfo!("Timer expired for {:?}", socket);
-                        if let Some((server, svr_timeout)) =
+                        if let Some((ref mut server, svr_timeout)) =
                             servers.get_mut(&socket.local_addr().unwrap())
                         {
                             process(
-                                server,
+                                &mut **server,
                                 svr_timeout,
                                 inx,
                                 None,
@@ -312,22 +426,29 @@ fn main() -> Result<(), io::Error> {
 
                     if sz == 0 {
                         eprintln!("zero length datagram received?");
-                    } else if let Some((server, svr_timeout)) =
+                    } else if let Some((ref mut server, svr_timeout)) =
                         servers.get_mut(&socket.local_addr().unwrap())
                     {
                         let out = out_dgrams
                             .entry(socket.local_addr().unwrap())
                             .or_insert_with(Vec::new);
                         process(
-                            server,
+                            &mut **server,
                             svr_timeout,
                             event.token().0,
                             Some(Datagram::new(remote_addr, local_addr, &buf[..sz])),
                             out,
                             &mut timer,
                         );
-                        process_events(server);
-                        process(server, svr_timeout, event.token().0, None, out, &mut timer);
+                        server.process_events(&args);
+                        process(
+                            &mut **server,
+                            svr_timeout,
+                            event.token().0,
+                            None,
+                            out,
+                            &mut timer,
+                        );
                     }
                 }
             }

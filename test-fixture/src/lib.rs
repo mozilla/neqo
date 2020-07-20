@@ -7,9 +7,8 @@
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
 
-use neqo_common::matches;
 use neqo_crypto::{init_db, AllowZeroRtt, AntiReplay, AuthenticationStatus};
-use neqo_http3::{Http3Client, Http3Server};
+use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State};
 
@@ -149,12 +148,15 @@ pub fn default_http3_client() -> Http3Client {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
-        QpackSettings {
-            max_table_size_encoder: 100,
-            max_table_size_decoder: 100,
-            max_blocked_streams: 100,
-        },
         QuicVersion::default(),
+        &Http3Parameters {
+            qpack_settings: QpackSettings {
+                max_table_size_encoder: 100,
+                max_table_size_decoder: 100,
+                max_blocked_streams: 100,
+            },
+            max_concurrent_push_streams: 10,
+        },
     )
     .expect("create a default client")
 }

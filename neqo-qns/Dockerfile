@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     PATH=/usr/local/cargo/bin:$PATH \
-    RUST_VERSION=1.41.1
+    RUST_VERSION=1.43.0
 
 RUN set -eux; \
     curl -sSLf "https://static.rust-lang.org/rustup/archive/1.20.2/x86_64-unknown-linux-gnu/rustup-init" -o rustup-init; \
@@ -45,6 +45,7 @@ RUN cd neqo && cargo build && cp target/debug/neqo-client target && cp target/de
 FROM martenseemann/quic-network-simulator-endpoint:latest
 ENV LD_LIBRARY_PATH=$HOME/dist/Debug/lib
 COPY --from=buildimage /neqo/target /neqo/target
+COPY --from=buildimage /neqo/test-fixture/db /neqo/test-fixture/db
 COPY --from=buildimage $HOME/dist/Debug/lib/*.so $HOME/dist/Debug/lib/
 COPY run_endpoint.sh .
 RUN chmod +x run_endpoint.sh

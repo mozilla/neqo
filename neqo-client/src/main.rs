@@ -14,7 +14,9 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, AuthenticationStatus, Cipher,
 };
-use neqo_http3::{self, Error, Header, Http3Client, Http3ClientEvent, Http3State, Output};
+use neqo_http3::{
+    self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
+};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{Connection, Error as TransportError, FixedConnectionIdManager, QuicVersion};
 
@@ -104,6 +106,9 @@ pub struct Args {
 
     #[structopt(name = "max-blocked-streams", short = "b", long, default_value = "10")]
     max_blocked_streams: u16,
+
+    #[structopt(name = "max-push", short = "p", long, default_value = "10")]
+    max_concurrent_push_streams: u64,
 
     #[structopt(name = "use-old-http", short = "o", long)]
     /// Use http 0.9 instead of HTTP/3
@@ -294,6 +299,7 @@ impl<'a> Handler<'a> {
             .pop_front()
             .expect("download_next called with empty queue");
         match client.fetch(
+            Instant::now(),
             &self.args.method,
             &url.scheme(),
             &url.host_str().unwrap(),
@@ -446,13 +452,18 @@ fn client(
     }
     let mut client = Http3Client::new_with_conn(
         transport,
-        QpackSettings {
-            max_table_size_encoder: args.max_table_size_encoder,
-            max_table_size_decoder: args.max_table_size_decoder,
-            max_blocked_streams: args.max_blocked_streams,
+        &Http3Parameters {
+            qpack_settings: QpackSettings {
+                max_table_size_encoder: args.max_table_size_encoder,
+                max_table_size_decoder: args.max_table_size_decoder,
+                max_blocked_streams: args.max_blocked_streams,
+            },
+            max_concurrent_push_streams: args.max_concurrent_push_streams,
         },
     );
-    client.set_qlog(qlog_new(args, hostname)?);
+
+    let qlog = qlog_new(args, hostname, client.conn())?;
+    client.set_qlog(qlog);
 
     let mut h = Handler {
         streams: HashMap::new(),
@@ -466,10 +477,11 @@ fn client(
     Ok(())
 }
 
-fn qlog_new(args: &Args, origin: &str) -> Res<Option<NeqoQlog>> {
+fn qlog_new(args: &Args, hostname: &str, conn: &Connection) -> Res<NeqoQlog> {
     if let Some(qlog_dir) = &args.qlog_dir {
         let mut qlog_path = qlog_dir.to_path_buf();
-        qlog_path.push(format!("{}.qlog", origin));
+        let filename = format!("{}-{}.qlog", hostname, conn.path().unwrap().remote_cid());
+        qlog_path.push(filename);
 
         let f = OpenOptions::new()
             .write(true)
@@ -487,9 +499,9 @@ fn qlog_new(args: &Args, origin: &str) -> Res<Option<NeqoQlog>> {
             Box::new(f),
         );
 
-        Ok(Some(NeqoQlog::new(streamer, qlog_path)?))
+        Ok(NeqoQlog::enabled(streamer, qlog_path)?)
     } else {
-        Ok(None)
+        Ok(NeqoQlog::disabled())
     }
 }
 
@@ -899,7 +911,7 @@ mod old {
             client.set_ciphers(&ciphers)?;
         }
 
-        client.set_qlog(qlog_new(args, origin)?);
+        client.set_qlog(qlog_new(args, origin, &client)?);
 
         let mut h = HandlerOld {
             streams: HashMap::new(),

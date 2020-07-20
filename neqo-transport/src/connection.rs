@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use neqo_common::{
-    hex, hex_snip_middle, matches, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram,
-    Decoder, Encoder, Role,
+    hex, hex_snip_middle, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder,
+    Encoder, Role,
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
@@ -44,7 +44,7 @@ use crate::packet::{
 use crate::path::Path;
 use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile, GRANULARITY};
-use crate::recv_stream::{RecvStream, RecvStreams, RX_STREAM_DATA_WINDOW};
+use crate::recv_stream::{RecvStream, RecvStreams, RECV_BUFFER_SIZE};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::Stats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
@@ -490,7 +490,7 @@ pub struct Connection {
     events: ConnectionEvents,
     new_token: NewTokenState,
     stats: Stats,
-    qlog: Rc<RefCell<Option<NeqoQlog>>>,
+    qlog: NeqoQlog,
 
     quic_version: QuicVersion,
 }
@@ -559,13 +559,16 @@ impl Connection {
     fn set_tp_defaults(tps: &mut TransportParameters) {
         tps.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
-            RX_STREAM_DATA_WINDOW,
+            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
         );
         tps.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
-            RX_STREAM_DATA_WINDOW,
+            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
         );
-        tps.set_integer(tparams::INITIAL_MAX_STREAM_DATA_UNI, RX_STREAM_DATA_WINDOW);
+        tps.set_integer(
+            tparams::INITIAL_MAX_STREAM_DATA_UNI,
+            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
+        );
         tps.set_integer(tparams::INITIAL_MAX_STREAMS_BIDI, LOCAL_STREAM_LIMIT_BIDI);
         tps.set_integer(tparams::INITIAL_MAX_STREAMS_UNI, LOCAL_STREAM_LIMIT_UNI);
         tps.set_integer(tparams::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
@@ -620,7 +623,7 @@ impl Connection {
             events: ConnectionEvents::default(),
             new_token: NewTokenState::new(role),
             stats: Stats::default(),
-            qlog: Rc::new(RefCell::new(None)),
+            qlog: NeqoQlog::disabled(),
             quic_version,
         };
         c.stats.init(format!("{}", c));
@@ -633,15 +636,14 @@ impl Connection {
     }
 
     /// Set or clear the qlog for this connection.
-    pub fn set_qlog(&mut self, qlog: Option<NeqoQlog>) {
-        let conn_ql = Rc::new(RefCell::new(qlog));
-        self.loss_recovery.set_qlog(conn_ql.clone());
-        self.qlog = conn_ql;
+    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+        self.loss_recovery.set_qlog(qlog.clone());
+        self.qlog = qlog;
     }
 
     /// Get the qlog (if any) for this connection.
-    pub fn qlog_mut(&mut self) -> Rc<RefCell<Option<NeqoQlog>>> {
-        self.qlog.clone()
+    pub fn qlog_mut(&mut self) -> &mut NeqoQlog {
+        &mut self.qlog
     }
 
     /// Set a local transport parameter, possibly overriding a default value.
@@ -764,7 +766,8 @@ impl Connection {
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!([self], "  transport parameters {}", hex(&tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
-        let tp = TransportParameters::decode(&mut dec_tp)?;
+        let tp =
+            TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
 
         let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!([self], "  Initial token {}", hex(&init_token));
@@ -772,8 +775,14 @@ impl Connection {
         let tok = dec.decode_remainder();
         qtrace!([self], "  TLS token {}", hex(&tok));
         match self.crypto.tls {
-            Agent::Client(ref mut c) => c.enable_resumption(&tok)?,
-            Agent::Server(_) => unreachable!(),
+            Agent::Client(ref mut c) => {
+                let res = c.enable_resumption(&tok);
+                if let Err(e) = res {
+                    self.absorb_error::<Error>(now, Err(Error::from(e)));
+                    return Ok(());
+                }
+            }
+            Agent::Server(_) => return Err(Error::WrongRole),
         }
 
         self.tps.borrow_mut().remote_0rtt = Some(tp);
@@ -786,7 +795,9 @@ impl Connection {
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
-        self.client_start(now)
+        let res = self.client_start(now);
+        self.absorb_error(now, res);
+        Ok(())
     }
 
     pub(crate) fn set_validation(&mut self, validation: Rc<RefCell<AddressValidation>>) {
@@ -884,6 +895,11 @@ impl Connection {
                 | State::Closed(err) => {
                     qwarn!([self], "Closing again after error {:?}", err);
                 }
+                State::Init => {
+                    // We have not even sent anything just close the connection without sending any error.
+                    // This may happen when clieeent_start fails.
+                    self.set_state(State::Closed(error));
+                }
                 State::WaitInitial => {
                     // We don't have any state yet, so don't bother with
                     // the closing state, just send one CONNECTION_CLOSE.
@@ -939,7 +955,7 @@ impl Connection {
 
         let lost = self.loss_recovery.timeout(now);
         self.handle_lost_packets(&lost);
-        qlog::packets_lost(&mut self.qlog.borrow_mut(), &lost);
+        qlog::packets_lost(&mut self.qlog, &lost);
     }
 
     /// Call in to process activity on the connection. Either new packets have
@@ -1313,7 +1329,7 @@ impl Connection {
                         payload.pn(),
                         &payload[..],
                     );
-                    qlog::packet_received(&mut self.qlog.borrow_mut(), &payload);
+                    qlog::packet_received(&mut self.qlog, &payload);
                     let res = self.process_packet(&payload, now);
                     if res.is_err() && self.path.is_none() {
                         // We need to make a path for sending an error message.
@@ -1337,7 +1353,7 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(&d, slc, now)?;
                     self.stats.pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&mut self.qlog.borrow_mut(), &packet);
+                    qlog::packet_dropped(&mut self.qlog, &packet);
                 }
             }
             slc = remainder;
@@ -1673,12 +1689,7 @@ impl Connection {
             }
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
-            qlog::packet_sent(
-                &mut self.qlog.borrow_mut(),
-                pt,
-                pn,
-                &builder[payload_start..],
-            );
+            qlog::packet_sent(&mut self.qlog, pt, pn, &builder[payload_start..]);
 
             self.stats.packets_tx += 1;
             encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
@@ -1759,7 +1770,7 @@ impl Connection {
     fn client_start(&mut self, now: Instant) -> Res<()> {
         qinfo!([self], "client_start");
         debug_assert_eq!(self.role, Role::Client);
-        qlog::client_connection_started(&mut self.qlog.borrow_mut(), self.path.as_ref().unwrap());
+        qlog::client_connection_started(&mut self.qlog, self.path.as_ref().unwrap());
         self.loss_recovery.start_pacer(now);
 
         self.handshake(now, PNSpace::Initial, None)?;
@@ -1963,12 +1974,15 @@ impl Connection {
             qerror!("frame not allowed: {:?} {:?}", frame, ptype);
             return Err(Error::ProtocolViolation);
         }
+        let space = PNSpace::from(ptype);
         match frame {
             Frame::Padding => {
                 // Ignore
             }
             Frame::Ping => {
-                // Ack elicited with no further handling needed
+                // If we get a PING and there are outstanding CRYPTO frames,
+                // prepare to resend them.
+                self.crypto.resend_unacked(space);
             }
             Frame::Ack {
                 largest_acknowledged,
@@ -1977,7 +1991,7 @@ impl Connection {
                 ack_ranges,
             } => {
                 self.handle_ack(
-                    PNSpace::from(ptype),
+                    space,
                     largest_acknowledged,
                     ack_delay,
                     first_ack_range,
@@ -2006,7 +2020,6 @@ impl Connection {
                 }
             }
             Frame::Crypto { offset, data } => {
-                let space = PNSpace::from(ptype);
                 qtrace!(
                     [self],
                     "Crypto frame on space={} offset={}, data={:0x?}",
@@ -2020,6 +2033,9 @@ impl Connection {
                     let read = self.crypto.streams.read_to_end(space, &mut buf);
                     qdebug!("Read {} bytes", read);
                     self.handshake(now, space, Some(&buf))?;
+                } else {
+                    // If we get a useless CRYPTO frame send outstanding CRYPTO frames again.
+                    self.crypto.resend_unacked(space);
                 }
             }
             Frame::NewToken { token } => {
@@ -2233,7 +2249,7 @@ impl Connection {
             }
         }
         self.handle_lost_packets(&lost_packets);
-        qlog::packets_lost(&mut self.qlog.borrow_mut(), &lost_packets);
+        qlog::packets_lost(&mut self.qlog, &lost_packets);
         Ok(())
     }
 
@@ -2267,10 +2283,7 @@ impl Connection {
             debug_assert_eq!(1, self.valid_cids.len());
             self.valid_cids.clear();
             // Generate a qlog event that the server connection started.
-            qlog::server_connection_started(
-                &mut self.qlog.borrow_mut(),
-                self.path.as_ref().unwrap(),
-            );
+            qlog::server_connection_started(&mut self.qlog, self.path.as_ref().unwrap());
         } else {
             self.zero_rtt_state = if self.crypto.tls.info().unwrap().early_data_accepted() {
                 ZeroRttState::AcceptedClient
@@ -2291,7 +2304,7 @@ impl Connection {
             self.set_state(State::Confirmed);
         }
         qinfo!([self], "Connection established");
-        qlog::connection_tparams_set(&mut self.qlog.borrow_mut(), &*self.tps.borrow());
+        qlog::connection_tparams_set(&mut self.qlog, &*self.tps.borrow());
         Ok(())
     }
 
@@ -2413,6 +2426,8 @@ impl Connection {
                 loop {
                     let next_stream_id =
                         next_stream_idx.to_stream_id(stream_id.stream_type(), stream_id.role());
+                    self.events.new_stream(next_stream_id);
+
                     self.recv_streams.insert(
                         next_stream_id,
                         RecvStream::new(
@@ -2423,9 +2438,7 @@ impl Connection {
                         ),
                     );
 
-                    if next_stream_id.is_uni() {
-                        self.events.new_stream(next_stream_id);
-                    } else {
+                    if next_stream_id.is_bidi() {
                         // From the local perspective, this is a remote- originated BiDi stream.
                         // From the remote perspective, this is a local-originated BiDi stream.
                         // Therefore, look at the remote's transport parameters for the
@@ -2445,7 +2458,6 @@ impl Connection {
                                 self.events.clone(),
                             ),
                         );
-                        self.events.new_stream(next_stream_id);
                     }
 
                     *next_stream_idx += 1;
@@ -2463,7 +2475,10 @@ impl Connection {
     }
 
     /// Create a stream.
-    // Returns new stream id
+    /// Returns new stream id
+    /// # Errors
+    /// `ConnectionState` if the connecton stat does not allow to create streams.
+    /// `StreamLimitError` if we are limiied by server's stream concurence.
     pub fn stream_create(&mut self, st: StreamType) -> Res<u64> {
         // Can't make streams while closing, otherwise rely on the stream limits.
         match self.state {
@@ -2631,6 +2646,9 @@ impl Connection {
 
     /// Read buffered data from stream. bool says whether read bytes includes
     /// the final data on stream.
+    /// # Errors
+    /// `InvalidStreamId` if the stream does not exist.
+    /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn stream_recv(&mut self, stream_id: u64, data: &mut [u8]) -> Res<(usize, bool)> {
         let stream = self
             .recv_streams
@@ -2687,10 +2705,10 @@ mod tests {
     use crate::path::PATH_MTU_V6;
     use crate::recovery::ACK_ONLY_SIZE_LIMIT;
     use crate::recovery::PTO_PACKET_COUNT;
+    use crate::send_stream::SEND_BUFFER_SIZE;
     use crate::tracking::{ACK_DELAY, MAX_UNACKED_PKTS};
     use std::convert::TryInto;
 
-    use neqo_common::matches;
     use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AllowZeroRtt};
     use std::mem;
     use test_fixture::{self, assertions, fixture_init, loopback, now};
@@ -3637,6 +3655,7 @@ mod tests {
         connect(&mut client, &mut server);
 
         let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(client.events().count(), 2); // SendStreamWritable, StateChange(connected)
         assert_eq!(stream_id, 2);
         assert_eq!(
             client.stream_avail_send_space(stream_id).unwrap(),
@@ -3644,24 +3663,48 @@ mod tests {
         );
         assert_eq!(
             client
-                .stream_send(stream_id, &[b'a'; RX_STREAM_DATA_WINDOW as usize])
+                .stream_send(stream_id, &[b'a'; RECV_BUFFER_SIZE])
                 .unwrap(),
             SMALL_MAX_DATA
         );
-        let evts = client.events().collect::<Vec<_>>();
-        assert_eq!(evts.len(), 2); // SendStreamWritable, StateChange(connected)
+        assert_eq!(client.events().count(), 0);
+
         assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 0);
-        let ss = client.send_streams.get_mut(stream_id.into()).unwrap();
-        ss.mark_as_sent(0, 4096, false);
-        ss.mark_as_acked(0, 4096, false);
+        client
+            .send_streams
+            .get_mut(stream_id.into())
+            .unwrap()
+            .mark_as_sent(0, 4096, false);
+        assert_eq!(client.events().count(), 0);
+        client
+            .send_streams
+            .get_mut(stream_id.into())
+            .unwrap()
+            .mark_as_acked(0, 4096, false);
+        assert_eq!(client.events().count(), 0);
 
+        assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 0);
         // no event because still limited by conn max data
-        let evts = client.events().collect::<Vec<_>>();
-        assert_eq!(evts.len(), 0);
+        assert_eq!(client.events().count(), 0);
 
-        // increase max data
-        client.handle_max_data(100_000);
-        assert_eq!(client.stream_avail_send_space(stream_id).unwrap(), 49152);
+        // Increase max data. Avail space now limited by stream credit
+        client.handle_max_data(100_000_000);
+        assert_eq!(
+            client.stream_avail_send_space(stream_id).unwrap(),
+            SEND_BUFFER_SIZE - SMALL_MAX_DATA
+        );
+
+        // Increase max stream data. Avail space now limited by tx buffer
+        client
+            .send_streams
+            .get_mut(stream_id.into())
+            .unwrap()
+            .set_max_stream_data(100_000_000);
+        assert_eq!(
+            client.stream_avail_send_space(stream_id).unwrap(),
+            SEND_BUFFER_SIZE - SMALL_MAX_DATA + 4096
+        );
+
         let evts = client.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 1);
         assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
@@ -4030,6 +4073,7 @@ mod tests {
 
     #[test]
     fn pto_initial() {
+        const INITIAL_PTO: Duration = Duration::from_millis(300);
         let mut now = now();
 
         qdebug!("---- client: generate CH");
@@ -4038,11 +4082,11 @@ mod tests {
         assert!(pkt1.is_some());
         assert_eq!(pkt1.clone().unwrap().len(), PATH_MTU_V6);
 
-        let out = client.process(None, now);
-        assert_eq!(out, Output::Callback(Duration::from_millis(120)));
+        let delay = client.process(None, now).callback();
+        assert_eq!(delay, INITIAL_PTO);
 
         // Resend initial after PTO.
-        now += Duration::from_millis(120);
+        now += delay;
         let pkt2 = client.process(None, now).dgram();
         assert!(pkt2.is_some());
         assert_eq!(pkt2.unwrap().len(), PATH_MTU_V6);
@@ -4051,9 +4095,9 @@ mod tests {
         assert!(pkt3.is_some());
         assert_eq!(pkt3.unwrap().len(), PATH_MTU_V6);
 
-        let out = client.process(None, now);
+        let delay = client.process(None, now).callback();
         // PTO has doubled.
-        assert_eq!(out, Output::Callback(Duration::from_millis(240)));
+        assert_eq!(delay, INITIAL_PTO * 2);
 
         // Server process the first initial pkt.
         let mut server = default_server();
@@ -4064,14 +4108,15 @@ mod tests {
         // After the handshake packet the initial keys and the crypto stream for the initial
         // packet number space will be discarded.
         // Here only an ack for the Handshake packet will be sent.
-        now += Duration::from_millis(10);
         let out = client.process(out, now).dgram();
         assert!(out.is_some());
 
-        // We do not have PTO for the resent initial packet any more, because keys are discarded.
-        // The timeout will be an idle time out of LOCAL_IDLE_TIMEOUT seconds.
-        let out = client.process(None, now);
-        assert_eq!(out, Output::Callback(LOCAL_IDLE_TIMEOUT));
+        // We do not have PTO for the resent initial packet any more, but
+        // the Handshake PTO timer should be armed.  As the RTT is apparently
+        // the same as the initial PTO value, and there is only one sample,
+        // the PTO will be 3x the INITIAL PTO.
+        let delay = client.process(None, now).callback();
+        assert_eq!(delay, INITIAL_PTO * 3);
     }
 
     #[test]
@@ -4083,7 +4128,7 @@ mod tests {
 
         let pkt = client.process(None, now).dgram();
         let cb = client.process(None, now).callback();
-        assert_eq!(cb, Duration::from_millis(120));
+        assert_eq!(cb, Duration::from_millis(300));
 
         now += Duration::from_millis(10);
         let pkt = server.process(pkt, now).dgram();
@@ -4092,7 +4137,9 @@ mod tests {
         let pkt = client.process(pkt, now).dgram();
 
         let cb = client.process(None, now).callback();
-        assert_eq!(cb, LOCAL_IDLE_TIMEOUT);
+        // The client now has a single RTT estimate (20ms), so
+        // the handshake PTO is set based on that.
+        assert_eq!(cb, Duration::from_millis(60));
 
         now += Duration::from_millis(10);
         let pkt = server.process(pkt, now).dgram();
@@ -4159,7 +4206,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pto_handshake_and_app_data() {
+    fn pto_handshake_and_app_data() {
         let mut now = now();
         qdebug!("---- client: generate CH");
         let mut client = default_client();
@@ -4288,6 +4335,59 @@ mod tests {
         now += Duration::from_millis(10);
         let frames = server.test_process_input(pkt5.unwrap(), now);
         assert_hs_and_app_pto(&frames);
+    }
+
+    /// In the case that the Handshake takes too many packets, the server might
+    /// be stalled on the anti-amplification limit.  If a Handshake ACK from the
+    /// client is lost, the client has to keep the PTO timer armed or the server
+    /// might be unable to send anything, causing a deadlock.
+    #[test]
+    fn handshake_ack_pto() {
+        const RTT: Duration = Duration::from_millis(10);
+        let mut now = now();
+        let mut client = default_client();
+        let mut server = default_server();
+        // This is a greasing transport parameter, and large enough that the
+        // server needs to send two Handshake packets.
+        let big = TransportParameter::Bytes(vec![0; PATH_MTU_V6]);
+        server.set_local_tparam(0xce16, big).unwrap();
+
+        let c1 = client.process(None, now).dgram();
+
+        now += RTT / 2;
+        let s1 = server.process(c1, now).dgram();
+        assert!(s1.is_some());
+        let s2 = server.process(None, now).dgram();
+        assert!(s1.is_some());
+
+        // Now let the client have the Initial, but drop the first coalesced Handshake packet.
+        now += RTT / 2;
+        let (initial, _) = split_datagram(s1.unwrap());
+        client.process_input(initial, now);
+        let c2 = client.process(s2, now).dgram();
+        assert!(c2.is_some()); // This is an ACK.  Drop it.
+        let delay = client.process(None, now).callback();
+        assert_eq!(delay, RTT * 3);
+
+        // Wait for the PTO and ensure that the client generates a packet.
+        now += delay;
+        let c3 = client.process(None, now).dgram();
+        assert!(c3.is_some());
+
+        now += RTT / 2;
+        let frames = server.test_process_input(c3.unwrap(), now);
+        assert_eq!(frames, vec![(Frame::Ping, PNSpace::Handshake)]);
+
+        // Now complete the handshake as cheaply as possible.
+        let dgram = server.process(None, now).dgram();
+        client.process_input(dgram.unwrap(), now);
+        maybe_authenticate(&mut client);
+        let dgram = client.process(None, now).dgram();
+        assert_eq!(*client.state(), State::Connected);
+        let dgram = server.process(dgram, now).dgram();
+        assert_eq!(*server.state(), State::Confirmed);
+        client.process_input(dgram.unwrap(), now);
+        assert_eq!(*client.state(), State::Confirmed);
     }
 
     #[test]
@@ -5475,18 +5575,17 @@ mod tests {
         let c_hs4 = client.process(s_hs3, now + (INCR * 3)).dgram();
         assert!(c_hs4.is_some()); // This will be acknowledged.
 
-        // Get an ACK for the client.
+        // Process c_hs2 and c_hs4, but skip c_hs3.
+        // Then get an ACK for the client.
         now += RTT / 2;
-        // Deliver the last one first, so that gets acknowledged.
-        // This won't generate an ACK, because it only contains an ACK.
-        let s_ack1 = server.process(c_hs4, now).dgram();
-        assert!(s_ack1.is_none());
+        // Deliver c_hs4 first, but don't generate a packet.
+        server.process_input(c_hs4.unwrap(), now);
+        let s_ack = server.process(c_hs2, now).dgram();
+        assert!(s_ack.is_some());
         // This includes an ACK, but it also includes HANDSHAKE_DONE,
-        // which we need to remove because that will cause the Handshake loss recovery
-        // state to be dropped.
-        let s_ack2 = server.process(c_hs2, now).dgram();
-        assert!(s_ack2.is_some());
-        let (s_hs_ack, _s_ap_ack) = split_datagram(s_ack2.unwrap());
+        // which we need to remove because that will cause the Handshake loss
+        // recovery state to be dropped.
+        let (s_hs_ack, _s_ap_ack) = split_datagram(s_ack.unwrap());
 
         // Now the client should start its loss recovery timer based on the ACK.
         now += RTT / 2;
@@ -5712,10 +5811,9 @@ mod tests {
             &[0x1a1_a1a1a, QuicVersion::default().as_u32()],
         );
 
-        assert_eq!(
-            client.process(Some(Datagram::new(loopback(), loopback(), vn,)), now(),),
-            Output::Callback(Duration::from_millis(120))
-        );
+        let dgram = Datagram::new(loopback(), loopback(), vn);
+        let delay = client.process(Some(dgram), now()).callback();
+        assert_eq!(delay, Duration::from_millis(300));
         assert_eq!(*client.state(), State::WaitInitial);
         assert_eq!(1, client.stats().dropped_rx);
     }
@@ -5732,10 +5830,8 @@ mod tests {
 
         let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
 
-        assert_eq!(
-            client.process(Some(Datagram::new(loopback(), loopback(), vn,)), now(),),
-            Output::None
-        );
+        let dgram = Datagram::new(loopback(), loopback(), vn);
+        assert_eq!(client.process(Some(dgram), now()), Output::None);
         match client.state() {
             State::Closed(err) => {
                 assert_eq!(*err, ConnectionError::Transport(Error::VersionNegotiation))
@@ -5756,13 +5852,9 @@ mod tests {
 
         let vn = create_vn(&initial_pkt, &[0x1a1a_1a1a, 0x2a2a_2a2a]);
 
-        assert_eq!(
-            client.process(
-                Some(Datagram::new(loopback(), loopback(), &vn[..vn.len() - 1])),
-                now(),
-            ),
-            Output::Callback(Duration::from_millis(120))
-        );
+        let dgram = Datagram::new(loopback(), loopback(), &vn[..vn.len() - 1]);
+        let delay = client.process(Some(dgram), now()).callback();
+        assert_eq!(delay, Duration::from_millis(300));
         assert_eq!(*client.state(), State::WaitInitial);
         assert_eq!(1, client.stats().dropped_rx);
     }
@@ -5779,10 +5871,9 @@ mod tests {
 
         let vn = create_vn(&initial_pkt, &[]);
 
-        assert_eq!(
-            client.process(Some(Datagram::new(loopback(), loopback(), vn)), now(),),
-            Output::Callback(Duration::from_millis(120))
-        );
+        let dgram = Datagram::new(loopback(), loopback(), vn);
+        let delay = client.process(Some(dgram), now()).callback();
+        assert_eq!(delay, Duration::from_millis(300));
         assert_eq!(*client.state(), State::WaitInitial);
         assert_eq!(1, client.stats().dropped_rx);
     }
@@ -5823,7 +5914,7 @@ mod tests {
         server
             .flow_mgr
             .borrow_mut()
-            .stream_data_blocked(3.into(), RX_STREAM_DATA_WINDOW * 4);
+            .stream_data_blocked(3.into(), RECV_BUFFER_SIZE as u64 * 4);
 
         let out = server.process(None, now);
         assert!(out.as_dgram_ref().is_some());
@@ -5841,7 +5932,7 @@ mod tests {
         // window value.
         assert!(frames.iter().any(
             |(f, _)| matches!(f, Frame::MaxStreamData { maximum_stream_data, .. }
-				   if *maximum_stream_data == RX_STREAM_DATA_WINDOW)
+				   if *maximum_stream_data == RECV_BUFFER_SIZE as u64)
         ));
     }
 

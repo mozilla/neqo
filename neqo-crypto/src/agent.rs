@@ -21,7 +21,7 @@ use crate::secrets::SecretHolder;
 use crate::ssl::{self, PRBool};
 use crate::time::TimeHolder;
 
-use neqo_common::{hex_snip_middle, matches, qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{hex_snip_middle, qdebug, qinfo, qtrace, qwarn};
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::ffi::CString;
@@ -787,7 +787,7 @@ impl DerefMut for Client {
 /// `ZeroRttCheckResult` encapsulates the options for handling a `ClientHello`.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ZeroRttCheckResult {
-    /// Accept 0-RTT; the default.
+    /// Accept 0-RTT.
     Accept,
     /// Reject 0-RTT, but continue the handshake normally.
     Reject,
