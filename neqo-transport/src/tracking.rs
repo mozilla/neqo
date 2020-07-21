@@ -10,6 +10,7 @@
 
 use std::collections::VecDeque;
 use std::convert::TryInto;
+use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -63,6 +64,62 @@ impl From<PacketType> for PNSpace {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct PNSpaceSet {
+    initial: bool,
+    handshake: bool,
+    application_data: bool,
+}
+
+impl Index<PNSpace> for PNSpaceSet {
+    type Output = bool;
+
+    fn index(&self, space: PNSpace) -> &Self::Output {
+        match space {
+            PNSpace::Initial => &self.initial,
+            PNSpace::Handshake => &self.handshake,
+            PNSpace::ApplicationData => &self.application_data,
+        }
+    }
+}
+
+impl IndexMut<PNSpace> for PNSpaceSet {
+    fn index_mut(&mut self, space: PNSpace) -> &mut Self::Output {
+        match space {
+            PNSpace::Initial => &mut self.initial,
+            PNSpace::Handshake => &mut self.handshake,
+            PNSpace::ApplicationData => &mut self.application_data,
+        }
+    }
+}
+
+impl<T: AsRef<[PNSpace]>> From<T> for PNSpaceSet {
+    fn from(spaces: T) -> Self {
+        let mut v = Self::default();
+        for sp in spaces.as_ref() {
+            v[*sp] = true;
+        }
+        v
+    }
+}
+
+impl std::fmt::Debug for PNSpaceSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let mut first = true;
+        f.write_str("(")?;
+        for sp in PNSpace::iter() {
+            if self[*sp] {
+                if !first {
+                    f.write_str("+")?;
+                    first = false;
+                }
+                std::fmt::Display::fmt(sp, f)?;
+            }
+        }
+        f.write_str(")")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SentPacket {
     pub pt: PacketType,
@@ -72,10 +129,9 @@ pub struct SentPacket {
     pub tokens: Rc<Vec<RecoveryToken>>,
 
     time_declared_lost: Option<Instant>,
-    /// After a PTO, the packet has been released.
+    /// After a PTO, this is true when the packet has been released.
     pto: bool,
 
-    in_flight: bool,
     pub size: usize,
 }
 
@@ -87,7 +143,6 @@ impl SentPacket {
         ack_eliciting: bool,
         tokens: Rc<Vec<RecoveryToken>>,
         size: usize,
-        in_flight: bool,
     ) -> Self {
         Self {
             pt,
@@ -98,19 +153,12 @@ impl SentPacket {
             time_declared_lost: None,
             pto: false,
             size,
-            in_flight,
         }
     }
 
     /// Returns `true` if the packet will elicit an ACK.
     pub fn ack_eliciting(&self) -> bool {
         self.ack_eliciting
-    }
-
-    /// Returns `true` if the packet counts requires congestion control accounting.
-    /// The specification uses the term "in flight" for this.
-    pub fn cc_in_flight(&self) -> bool {
-        self.in_flight
     }
 
     /// Whether the packet has been declared lost.
@@ -122,8 +170,10 @@ impl SentPacket {
     /// congestion controller is pending.
     /// Returns `true` if the packet counts as being "in flight",
     /// and has not previously been declared lost.
+    /// Note that this should count packets that contain only ACK and PADDING,
+    /// but we don't send PADDING, so we don't track that.
     pub fn cc_outstanding(&self) -> bool {
-        self.cc_in_flight() && !self.lost()
+        self.ack_eliciting() && !self.lost()
     }
 
     /// Declare the packet as lost.  Returns `true` if this is the first time.
@@ -556,7 +606,7 @@ impl Default for AckTracker {
 #[cfg(test)]
 mod tests {
     use super::{
-        AckTracker, Duration, Instant, PNSpace, RecoveryToken, RecvdPackets, ACK_DELAY,
+        AckTracker, Duration, Instant, PNSpace, PNSpaceSet, RecoveryToken, RecvdPackets, ACK_DELAY,
         MAX_TRACKED_RANGES, MAX_UNACKED_PKTS,
     };
     use lazy_static::lazy_static;
@@ -782,5 +832,40 @@ mod tests {
             tracker.ack_time(*NOW + Duration::from_millis(1)),
             Some(*NOW)
         );
+    }
+
+    #[test]
+    fn pnspaceset_default() {
+        let set = PNSpaceSet::default();
+        assert!(!set[PNSpace::Initial]);
+        assert!(!set[PNSpace::Handshake]);
+        assert!(!set[PNSpace::ApplicationData]);
+    }
+
+    #[test]
+    fn pnspaceset_from() {
+        let set = PNSpaceSet::from(&[PNSpace::Initial]);
+        assert!(set[PNSpace::Initial]);
+        assert!(!set[PNSpace::Handshake]);
+        assert!(!set[PNSpace::ApplicationData]);
+
+        let set = PNSpaceSet::from(&[PNSpace::Handshake, PNSpace::Initial]);
+        assert!(set[PNSpace::Initial]);
+        assert!(set[PNSpace::Handshake]);
+        assert!(!set[PNSpace::ApplicationData]);
+
+        let set = PNSpaceSet::from(&[PNSpace::ApplicationData, PNSpace::ApplicationData]);
+        assert!(!set[PNSpace::Initial]);
+        assert!(!set[PNSpace::Handshake]);
+        assert!(set[PNSpace::ApplicationData]);
+    }
+
+    #[test]
+    fn pnspaceset_copy() {
+        let set = PNSpaceSet::from(&[PNSpace::Handshake, PNSpace::ApplicationData]);
+        let copy = set;
+        assert!(!copy[PNSpace::Initial]);
+        assert!(copy[PNSpace::Handshake]);
+        assert!(copy[PNSpace::ApplicationData]);
     }
 }
