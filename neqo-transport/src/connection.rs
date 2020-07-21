@@ -228,6 +228,7 @@ impl RetryInfo {
 /// -transport 10.2 ("Idle Timeout").
 enum IdleTimeoutState {
     Init,
+    New(Instant),
     PacketReceived(Instant),
     AckElicitingPacketSent(Instant),
 }
@@ -254,13 +255,17 @@ impl IdleTimeout {
         self.timeout = min(self.timeout, peer_timeout);
     }
 
-    pub fn expiry(&self, pto: Duration) -> Option<Instant> {
-        match self.state {
-            IdleTimeoutState::Init => None,
-            IdleTimeoutState::PacketReceived(t) | IdleTimeoutState::AckElicitingPacketSent(t) => {
-                Some(t + max(self.timeout, pto * 3))
+    pub fn expiry(&mut self, now: Instant, pto: Duration) -> Instant {
+        let start = match self.state {
+            IdleTimeoutState::Init => {
+                self.state = IdleTimeoutState::New(now);
+                now
             }
-        }
+            IdleTimeoutState::New(t)
+            | IdleTimeoutState::PacketReceived(t)
+            | IdleTimeoutState::AckElicitingPacketSent(t) => t,
+        };
+        start + max(self.timeout, pto * 3)
     }
 
     fn on_packet_sent(&mut self, now: Instant) {
@@ -268,7 +273,9 @@ impl IdleTimeout {
         // time we reset the timeout here.
         match self.state {
             IdleTimeoutState::AckElicitingPacketSent(_) => {}
-            IdleTimeoutState::Init | IdleTimeoutState::PacketReceived(_) => {
+            IdleTimeoutState::Init
+            | IdleTimeoutState::New(_)
+            | IdleTimeoutState::PacketReceived(_) => {
                 self.state = IdleTimeoutState::AckElicitingPacketSent(now);
             }
         }
@@ -278,12 +285,8 @@ impl IdleTimeout {
         self.state = IdleTimeoutState::PacketReceived(now);
     }
 
-    pub fn expired(&self, now: Instant, pto: Duration) -> bool {
-        if let Some(expiry) = self.expiry(pto) {
-            now >= expiry
-        } else {
-            false
-        }
+    pub fn expired(&mut self, now: Instant, pto: Duration) -> bool {
+        now >= self.expiry(now, pto)
     }
 }
 
@@ -928,10 +931,9 @@ impl Connection {
             delays.push(ack_time);
         }
 
-        if let Some(idle_time) = self.idle_timeout.expiry(self.loss_recovery.raw_pto()) {
-            qtrace!([self], "Idle timer {:?}", idle_time);
-            delays.push(idle_time);
-        }
+        let idle_time = self.idle_timeout.expiry(now, self.loss_recovery.raw_pto());
+        qtrace!([self], "Idle timer {:?}", idle_time);
+        delays.push(idle_time);
 
         if let Some(lr_time) = self.loss_recovery.next_timeout() {
             qtrace!([self], "Loss recovery timer {:?}", lr_time);
@@ -950,10 +952,7 @@ impl Connection {
             }
         }
 
-        // Should always at least have idle timeout, once connected
-        assert!(!delays.is_empty());
         let earliest = delays.into_iter().min().unwrap();
-
         // TODO(agrover, mt) - need to analyze and fix #47
         // rather than just clamping to zero here.
         qdebug!(
@@ -1147,6 +1146,7 @@ impl Connection {
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
+            self.stats.packets_rx += 1;
             let (packet, remainder) =
                 match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
                     Ok((packet, remainder)) => (packet, remainder),
@@ -1157,7 +1157,6 @@ impl Connection {
                         break;
                     }
                 };
-            self.stats.packets_rx += 1;
             match (packet.packet_type(), &self.state, &self.role) {
                 (PacketType::Initial, State::Init, Role::Server) => {
                     if !packet.is_valid_initial() {
@@ -5859,5 +5858,26 @@ mod tests {
             |(f, _)| matches!(f, Frame::MaxStreamData { maximum_stream_data, .. }
 				   if *maximum_stream_data == RECV_BUFFER_SIZE as u64)
         ));
+    }
+
+    #[test]
+    fn corrupted_initial() {
+        let mut client = default_client();
+        let mut server = default_server();
+        let d = client.process(None, now()).dgram().unwrap();
+        let mut corrupted = Vec::from(&d[..]);
+        // Find the last non-zero value and corrupt that.
+        let (idx, _) = corrupted
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, &v)| v != 0)
+            .unwrap();
+        corrupted[idx] ^= 0x76;
+        let dgram = Datagram::new(d.source(), d.destination(), corrupted);
+        server.process_input(dgram, now());
+        // The server should have received some packets, but dropped all of them.
+        assert_ne!(server.stats().packets_rx, 0);
+        assert_eq!(server.stats().packets_rx, server.stats().dropped_rx);
     }
 }
