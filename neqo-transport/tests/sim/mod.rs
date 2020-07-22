@@ -14,7 +14,7 @@ pub mod server;
 use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_transport::Output;
 use std::cmp::min;
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Display};
 use std::time::{Duration, Instant};
 
 use test_fixture::{self, now};
@@ -46,10 +46,12 @@ enum NodeState {
     /// The node just produced a datagram.  It should be activated again as soon as possible.
     Active,
     /// The node is waiting.
-    Timeout(Instant),
+    Waiting(Instant),
     /// The node became idle.
     Idle,
 }
+
+use NodeState::{Active, Idle, Waiting};
 
 #[derive(Debug)]
 struct NodeHolder {
@@ -60,9 +62,9 @@ struct NodeHolder {
 impl NodeHolder {
     fn ready(&self, now: Instant) -> bool {
         match self.state {
-            NodeState::Active => true,
-            NodeState::Timeout(t) => t >= now,
-            NodeState::Idle => false,
+            Active => true,
+            Waiting(t) => t >= now,
+            Idle => false,
         }
     }
 }
@@ -73,18 +75,16 @@ pub struct Simulator {
 
 impl Simulator {
     pub fn new(nodes: impl IntoIterator<Item = Box<dyn Node>>) -> Self {
+        // The first node is marked as Active, the rest are idle.
         let mut it = nodes.into_iter();
         let nodes = it
             .next()
             .map(|node| NodeHolder {
                 node,
-                state: NodeState::Active,
+                state: Active,
             })
             .into_iter()
-            .chain(it.map(|node| NodeHolder {
-                node,
-                state: NodeState::Idle,
-            }))
+            .chain(it.map(|node| NodeHolder { node, state: Idle }))
             .collect::<Vec<_>>();
         Self { nodes }
     }
@@ -93,13 +93,13 @@ impl Simulator {
         let mut next = None;
         for n in &self.nodes {
             match n.state {
-                NodeState::Idle => continue,
-                NodeState::Active => return now,
-                NodeState::Timeout(a) => next = Some(next.map_or(a, |b| min(a, b))),
+                Idle => continue,
+                Active => return now,
+                Waiting(a) => next = Some(next.map_or(a, |b| min(a, b))),
             }
         }
         let next = next.expect("a node cannot be idle and not done");
-        qdebug!(["sim"], "advancing time by {:?}", next - now);
+        qdebug!([self], "advancing time by {:?}", next - now);
         next
     }
 
@@ -108,7 +108,7 @@ impl Simulator {
         let start = now();
         let mut now = start;
         let mut dgram = None;
-        let dbg = format!("sim {:p}", &self);
+        let dbg = format!("{}", &self);
 
         for n in &mut self.nodes {
             n.node.init(now);
@@ -123,25 +123,25 @@ impl Simulator {
 
                 qdebug!([dbg], "processing {:?}", n.node);
                 let res = n.node.process(dgram.take(), now);
-                match res {
+                n.state = match res {
                     Output::Datagram(d) => {
                         dgram = Some(d);
-                        n.state = NodeState::Active;
+                        Active
                     }
                     Output::Callback(delay) => {
                         assert_ne!(delay, Duration::new(0, 0));
-                        n.state = NodeState::Timeout(now + delay);
+                        Waiting(now + delay)
                     }
                     Output::None => {
                         assert!(n.node.done(), "nodes have to be done when they go idle");
-                        n.state = NodeState::Idle;
+                        Idle
                     }
-                }
+                };
             }
 
             if self.nodes.iter().all(|n| n.node.done()) {
                 let elapsed = now - start;
-                qinfo!([dbg], "elapsed time: {:?}", elapsed);
+                qinfo!([dbg], "simulated elapsed time: {:?}", elapsed);
                 return elapsed;
             }
 
@@ -149,5 +149,11 @@ impl Simulator {
                 now = self.next_time(now);
             }
         }
+    }
+}
+
+impl Display for Simulator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "sim {:p}", self)
     }
 }

@@ -10,16 +10,36 @@
 #[macro_use]
 mod sim;
 
+use neqo_transport::{ConnectionError, Error, State};
 use sim::{
-    connection::{Confirmed, ConnectionNode, ReceiveData, SendData},
+    connection::{ConnectionNode, ReachState, ReceiveData, SendData},
     Simulator,
 };
 
 #[test]
 fn direct_connect() {
     let sim = Simulator::new(boxed![
-        ConnectionNode::new_client(boxed![Confirmed::default()]),
-        ConnectionNode::new_server(boxed![Confirmed::default()]),
+        ConnectionNode::new_client(boxed![ReachState::new(State::Confirmed)]),
+        ConnectionNode::new_server(boxed![ReachState::new(State::Confirmed)]),
+    ]);
+    sim.run();
+}
+
+#[test]
+fn direct_idle_timeout() {
+    let sim = Simulator::new(boxed![
+        ConnectionNode::new_client(boxed![
+            ReachState::new(State::Confirmed),
+            ReachState::new(State::Closed(ConnectionError::Transport(
+                Error::IdleTimeout
+            )))
+        ]),
+        ConnectionNode::new_server(boxed![
+            ReachState::new(State::Confirmed),
+            ReachState::new(State::Closed(ConnectionError::Transport(
+                Error::IdleTimeout
+            )))
+        ]),
     ]);
     sim.run();
 }

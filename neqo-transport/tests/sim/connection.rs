@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use super::Node;
-use crate::boxed; // Macro export rules are completely messed up.
 use neqo_common::{qdebug, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{Connection, ConnectionEvent, Output, State, StreamId, StreamType};
@@ -109,29 +108,31 @@ impl Node for ConnectionNode {
     }
 }
 
-impl Default for ConnectionNode {
-    fn default() -> Self {
-        Self::new_client(boxed![Confirmed::default()])
-    }
-}
-
 impl Debug for ConnectionNode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(&self.c, f)
     }
 }
 
-#[derive(Debug, Default)]
-pub struct Confirmed {}
+#[derive(Debug, Clone)]
+pub struct ReachState {
+    target: State,
+}
 
-impl ConnectionGoal for Confirmed {
+impl ReachState {
+    pub fn new(target: State) -> Self {
+        Self { target }
+    }
+}
+
+impl ConnectionGoal for ReachState {
     fn handle_event(
         &mut self,
         _c: &mut Connection,
         e: &ConnectionEvent,
         _now: Instant,
     ) -> GoalStatus {
-        if matches!(e, ConnectionEvent::StateChange(State::Confirmed)) {
+        if matches!(e, ConnectionEvent::StateChange(state) if *state == self.target) {
             GoalStatus::Done
         } else {
             GoalStatus::Waiting
