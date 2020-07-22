@@ -11,7 +11,7 @@
 pub mod connection;
 pub mod server;
 
-use neqo_common::{qdebug, Datagram};
+use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_transport::Output;
 use std::cmp::min;
 use std::fmt::Debug;
@@ -28,6 +28,7 @@ macro_rules! boxed {
 }
 
 pub trait Node: Debug {
+    fn init(&mut self, _now: Instant) {}
     /// Perform processing.  This optionally takes a datagram and produces either
     /// another data, a time that the simulator needs to wait, or nothing.
     fn process(&mut self, d: Option<Datagram>, now: Instant) -> Output;
@@ -37,13 +38,16 @@ pub trait Node: Debug {
     }
 }
 
+/// The state of a single node.  Nodes will be activated if they are `Active`
+/// or if the previous node in the loop generated a datagram.  Nodes that return
+/// `true` from `Node::done` will be activated as normal.
 #[derive(Debug, PartialEq)]
 enum NodeState {
     /// The node just produced a datagram.  It should be activated again as soon as possible.
     Active,
     /// The node is waiting.
     Timeout(Instant),
-    /// The node became idle; it will only activate if the previous node passes it a datagram.
+    /// The node became idle.
     Idle,
 }
 
@@ -51,6 +55,16 @@ enum NodeState {
 struct NodeHolder {
     node: Box<dyn Node>,
     state: NodeState,
+}
+
+impl NodeHolder {
+    fn ready(&self, now: Instant) -> bool {
+        match self.state {
+            NodeState::Active => true,
+            NodeState::Timeout(t) => t >= now,
+            NodeState::Idle => false,
+        }
+    }
 }
 
 pub struct Simulator {
@@ -84,23 +98,30 @@ impl Simulator {
                 NodeState::Timeout(a) => next = Some(next.map_or(a, |b| min(a, b))),
             }
         }
-        next.expect("a node cannot be idle and not done")
+        let next = next.expect("a node cannot be idle and not done");
+        qdebug!(["sim"], "advancing time by {:?}", next - now);
+        next
     }
 
-    /// Runs all the nodes,
-    pub fn run(&mut self) -> Instant {
+    /// Runs the simulation.
+    pub fn run(mut self) -> Duration {
         let start = now();
         let mut now = start;
         let mut dgram = None;
+        let dbg = format!("sim {:p}", &self);
+
+        for n in &mut self.nodes {
+            n.node.init(now);
+        }
 
         loop {
-            for n in self.nodes.iter_mut() {
-                if dgram.is_none() && n.state != NodeState::Active {
-                    qdebug!(["sim"], "skipping {:?}", n);
+            for n in &mut self.nodes {
+                if dgram.is_none() && !n.ready(now) {
+                    qdebug!([dbg], "skipping {:?}", n);
                     continue;
                 }
 
-                qdebug!(["sim"], "processing {:?}", n.node);
+                qdebug!([dbg], "processing {:?}", n.node);
                 let res = n.node.process(dgram.take(), now);
                 match res {
                     Output::Datagram(d) => {
@@ -119,7 +140,9 @@ impl Simulator {
             }
 
             if self.nodes.iter().all(|n| n.node.done()) {
-                return now;
+                let elapsed = now - start;
+                qinfo!([dbg], "elapsed time: {:?}", elapsed);
+                return elapsed;
             }
 
             if dgram.is_none() {

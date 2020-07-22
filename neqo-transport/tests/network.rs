@@ -10,13 +10,26 @@
 #[macro_use]
 mod sim;
 
-use sim::{connection::Confirmed, connection::ConnectionNode, Simulator};
+use sim::{
+    connection::{Confirmed, ConnectionNode, ReceiveData, SendData},
+    Simulator,
+};
 
 #[test]
-fn simple() {
-    let mut sim = Simulator::new(boxed![
+fn direct_connect() {
+    let sim = Simulator::new(boxed![
         ConnectionNode::new_client(boxed![Confirmed::default()]),
         ConnectionNode::new_server(boxed![Confirmed::default()]),
+    ]);
+    sim.run();
+}
+
+#[test]
+fn direct_transfer() {
+    const AMOUNT: usize = 1 << 20;
+    let sim = Simulator::new(boxed![
+        ConnectionNode::new_client(boxed![SendData::new(AMOUNT)]),
+        ConnectionNode::new_server(boxed![ReceiveData::new(AMOUNT)]),
     ]);
     sim.run();
 }
