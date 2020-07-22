@@ -1,6 +1,6 @@
 # Neqo, an Implementation of QUIC written in Rust
 
-![neqo logo](https://github.com/mozilla/neqo/raw/master/neqo.png "neqo logo")
+![neqo logo](https://github.com/mozilla/neqo/raw/main/neqo.png "neqo logo")
 
 To run test HTTP/3 programs (neqo-client and neqo-http3-server):
 

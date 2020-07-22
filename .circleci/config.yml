@@ -28,7 +28,7 @@ jobs:
           keys:
             - v1-git-{{ .Branch }}-{{ .Revision }}
             - v1-git-{{ .Branch }}
-            - v1-git-master
+            - v1-git-main
             - v1-git-
 
       - restore_cache:

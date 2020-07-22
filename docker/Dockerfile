@@ -1,7 +1,7 @@
 # This image is used for running CI tests.
 # The image is not built unless the `docker` branch is updated.
 # Push to `docker` to trigger a build:
-#  $ git push origin master:docker
+#  $ git push origin main:docker
 
 FROM ubuntu:18.04
 LABEL maintainer="Martin Thomson <mt@lowentropy.net>"
