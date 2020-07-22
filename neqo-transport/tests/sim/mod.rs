@@ -9,15 +9,29 @@
 #![warn(clippy::pedantic)]
 
 pub mod connection;
-pub mod server;
+mod delay;
+mod drop;
+pub mod rng;
 
-use neqo_common::{qdebug, qinfo, Datagram};
+use neqo_common::{qdebug, qinfo, Datagram, Encoder};
 use neqo_transport::Output;
+use rng::Random;
+use std::cell::RefCell;
 use std::cmp::min;
+use std::convert::TryFrom;
 use std::fmt::{self, Debug, Display};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
-
 use test_fixture::{self, now};
+
+use NodeState::{Active, Idle, Waiting};
+
+pub mod network {
+    pub use super::delay::Delay;
+    pub use super::drop::Drop;
+}
+
+type Rng = Rc<RefCell<Random>>;
 
 /// A macro that turns a list of values into boxed versions of the same.
 #[macro_export]
@@ -28,7 +42,7 @@ macro_rules! boxed {
 }
 
 pub trait Node: Debug {
-    fn init(&mut self, _now: Instant) {}
+    fn init(&mut self, _rng: Rng, _now: Instant) {}
     /// Perform processing.  This optionally takes a datagram and produces either
     /// another data, a time that the simulator needs to wait, or nothing.
     fn process(&mut self, d: Option<Datagram>, now: Instant) -> Output;
@@ -51,8 +65,6 @@ enum NodeState {
     Idle,
 }
 
-use NodeState::{Active, Idle, Waiting};
-
 #[derive(Debug)]
 struct NodeHolder {
     node: Box<dyn Node>,
@@ -71,6 +83,7 @@ impl NodeHolder {
 
 pub struct Simulator {
     nodes: Vec<NodeHolder>,
+    rng: Rng,
 }
 
 impl Simulator {
@@ -86,7 +99,21 @@ impl Simulator {
             .into_iter()
             .chain(it.map(|node| NodeHolder { node, state: Idle }))
             .collect::<Vec<_>>();
-        Self { nodes }
+        Self {
+            nodes,
+            rng: Rc::default(),
+        }
+    }
+
+    pub fn seed(&mut self, seed: [u8; 32]) {
+        self.rng = Rc::new(RefCell::new(Random::new(seed)));
+    }
+
+    /// Seed from a hex string.
+    /// Though this is convenient, it panics if this isn't a 64 character hex string.
+    pub fn seed_str(&mut self, seed: impl AsRef<str>) {
+        let seed = Encoder::from_hex(seed);
+        self.seed(<[u8; 32]>::try_from(&seed[..]).unwrap());
     }
 
     fn next_time(&self, now: Instant) -> Instant {
@@ -111,7 +138,7 @@ impl Simulator {
         let dbg = format!("{}", &self);
 
         for n in &mut self.nodes {
-            n.node.init(now);
+            n.node.init(self.rng.clone(), now);
         }
 
         loop {

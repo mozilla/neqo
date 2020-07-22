@@ -4,7 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::Node;
+#![allow(clippy::module_name_repetitions)]
+
+use super::{Node, Rng};
 use neqo_common::{qdebug, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{Connection, ConnectionEvent, Output, State, StreamId, StreamType};
@@ -63,7 +65,7 @@ impl ConnectionNode {
 }
 
 impl Node for ConnectionNode {
-    fn init(&mut self, now: Instant) {
+    fn init(&mut self, _rng: Rng, now: Instant) {
         for g in &mut self.goals {
             g.init(&mut self.c, now);
         }

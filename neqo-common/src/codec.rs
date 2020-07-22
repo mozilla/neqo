@@ -176,6 +176,16 @@ impl<'a> From<&'a [u8]> for Decoder<'a> {
     }
 }
 
+impl<'a, T> From<&'a T> for Decoder<'a>
+where
+    T: AsRef<[u8]>,
+{
+    #[must_use]
+    fn from(buf: &'a T) -> Decoder<'a> {
+        Decoder::new(buf.as_ref())
+    }
+}
+
 impl<'a, 'b> PartialEq<Decoder<'b>> for Decoder<'a> {
     #[must_use]
     fn eq(&self, other: &Decoder<'b>) -> bool {
@@ -225,7 +235,8 @@ impl Encoder {
 
     /// Don't use this except in testing.
     #[must_use]
-    pub fn from_hex(s: &str) -> Self {
+    pub fn from_hex(s: impl AsRef<str>) -> Self {
+        let s = s.as_ref();
         if s.len() % 2 != 0 {
             panic!("Needs to be even length");
         }
