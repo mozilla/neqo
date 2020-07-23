@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{hex, Decoder};
+use neqo_common::Decoder;
 use std::convert::TryFrom;
 use std::ops::Range;
 
@@ -16,7 +16,6 @@ pub struct Random {
 impl Random {
     pub fn new(seed: [u8; 32]) -> Self {
         assert!(seed.iter().any(|&x| x != 0));
-        println!("Random seed: {}", hex(&seed));
         let mut dec = Decoder::from(&seed);
         Self {
             state: [
@@ -63,6 +62,14 @@ impl Random {
                 return range.start + r;
             }
         }
+    }
+
+    /// Get the seed necessary to continue from this point.
+    pub fn seed_str(&self) -> String {
+        format!(
+            "{:8x}{:8x}{:8x}{:8x}",
+            self.state[0], self.state[1], self.state[2], self.state[3],
+        )
     }
 }
 

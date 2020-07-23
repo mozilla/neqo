@@ -13,13 +13,13 @@ mod delay;
 mod drop;
 pub mod rng;
 
-use neqo_common::{qdebug, qinfo, Datagram, Encoder};
+use neqo_common::{qdebug, Datagram, Encoder};
 use neqo_transport::Output;
 use rng::Random;
 use std::cell::RefCell;
 use std::cmp::min;
 use std::convert::TryFrom;
-use std::fmt::{self, Debug, Display};
+use std::fmt::Debug;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 use test_fixture::{self, now};
@@ -38,6 +38,36 @@ type Rng = Rc<RefCell<Random>>;
 macro_rules! boxed {
     [$($v:expr),+ $(,)?] => {
         vec![ $( Box::new($v) as _ ),+ ]
+    };
+}
+
+/// Create a simulation test case.  This takes either two or three arguments.
+/// The two argument form takes a bare name (`ident`), a comma, and an array of
+/// items that implement `Node`.
+/// The three argument form adds a setup block that can be used to construct a
+/// complex value that is then shared between all nodes.  The values in the
+/// three-argument form have to be closures (or functions) that accept a reference
+/// to the value returned by the setup.
+#[macro_export]
+macro_rules! simulate {
+    ($n:ident, [ $($v:expr),+ $(,)? ] $(,)?) => {
+        simulate!($n, (), [ $(|_| $v),+ ]);
+    };
+    ($n:ident, $setup:expr, [ $( $v:expr ),+ $(,)? ] $(,)?) => {
+        #[test]
+        fn $n() {
+            let fixture = $setup;
+            let mut nodes: Vec<Box<dyn crate::sim::Node>> = Vec::new();
+            $(
+                let f: Box<dyn FnOnce(&_) -> _> = Box::new($v);
+                nodes.push(Box::new(f(&fixture)));
+            )*
+            let mut sim = Simulator::new(stringify!($n), nodes);
+            if let Ok(seed) = std::env::var("SIMULATOR_SEED") {
+                sim.seed_str(seed);
+            }
+            sim.run();
+        }
     };
 }
 
@@ -82,12 +112,14 @@ impl NodeHolder {
 }
 
 pub struct Simulator {
+    name: String,
     nodes: Vec<NodeHolder>,
     rng: Rng,
 }
 
 impl Simulator {
-    pub fn new(nodes: impl IntoIterator<Item = Box<dyn Node>>) -> Self {
+    pub fn new(name: impl AsRef<str>, nodes: impl IntoIterator<Item = Box<dyn Node>>) -> Self {
+        let name = String::from(name.as_ref());
         // The first node is marked as Active, the rest are idle.
         let mut it = nodes.into_iter();
         let nodes = it
@@ -100,6 +132,7 @@ impl Simulator {
             .chain(it.map(|node| NodeHolder { node, state: Idle }))
             .collect::<Vec<_>>();
         Self {
+            name,
             nodes,
             rng: Rc::default(),
         }
@@ -126,7 +159,7 @@ impl Simulator {
             }
         }
         let next = next.expect("a node cannot be idle and not done");
-        qdebug!([self], "advancing time by {:?}", next - now);
+        qdebug!([self.name], "advancing time by {:?}", next - now);
         next
     }
 
@@ -135,20 +168,21 @@ impl Simulator {
         let start = now();
         let mut now = start;
         let mut dgram = None;
-        let dbg = format!("{}", &self);
 
         for n in &mut self.nodes {
             n.node.init(self.rng.clone(), now);
         }
+        println!("{}: seed {}", self.name, self.rng.borrow().seed_str());
 
+        let real_start = Instant::now();
         loop {
             for n in &mut self.nodes {
                 if dgram.is_none() && !n.ready(now) {
-                    qdebug!([dbg], "skipping {:?}", n);
+                    qdebug!([self.name], "skipping {:?}", n);
                     continue;
                 }
 
-                qdebug!([dbg], "processing {:?}", n.node);
+                qdebug!([self.name], "processing {:?}", n.node);
                 let res = n.node.process(dgram.take(), now);
                 n.state = match res {
                     Output::Datagram(d) => {
@@ -167,8 +201,10 @@ impl Simulator {
             }
 
             if self.nodes.iter().all(|n| n.node.done()) {
+                let real_elapsed = Instant::now() - real_start;
+                println!("{}: real elapsed time: {:?}", self.name, real_elapsed);
                 let elapsed = now - start;
-                qinfo!([dbg], "simulated elapsed time: {:?}", elapsed);
+                println!("{}: simulated elapsed time: {:?}", self.name, elapsed);
                 return elapsed;
             }
 
@@ -176,11 +212,5 @@ impl Simulator {
                 now = self.next_time(now);
             }
         }
-    }
-}
-
-impl Display for Simulator {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "sim {:p}", self)
     }
 }

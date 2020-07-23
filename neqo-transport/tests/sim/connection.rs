@@ -25,6 +25,8 @@ pub enum GoalStatus {
     Done,
 }
 
+/// A goal for the connection.
+/// Goals can be accomplished in any order.
 pub trait ConnectionGoal {
     fn init(&mut self, _c: &mut Connection, _now: Instant) {}
     /// Handle an event from the provided connection, returning `true` when the
