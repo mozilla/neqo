@@ -155,7 +155,7 @@ impl CongestionControl {
             return;
         }
 
-        for pkt in lost_packets.iter().filter(|pkt| pkt.cc_in_flight()) {
+        for pkt in lost_packets.iter().filter(|pkt| pkt.ack_eliciting()) {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
         }
@@ -201,7 +201,7 @@ impl CongestionControl {
             .unwrap()
             .spend(pkt.time_sent, rtt, self.congestion_window, pkt.size);
 
-        if !pkt.cc_in_flight() {
+        if !pkt.ack_eliciting() {
             return;
         }
 
@@ -217,8 +217,6 @@ impl CongestionControl {
             &mut self.qlog,
             &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
         );
-
-        debug_assert!(self.bytes_in_flight <= self.congestion_window);
     }
 
     #[must_use]
