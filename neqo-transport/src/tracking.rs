@@ -284,7 +284,6 @@ impl PacketRange {
     /// Requires that other is equal to this, or a larger range.
     pub fn acknowledged(&mut self, other: &Self) {
         if (other.smallest <= self.smallest) && (other.largest >= self.largest) {
-            qinfo!([self], "Acknowledged");
             self.ack_needed = false;
         }
     }
