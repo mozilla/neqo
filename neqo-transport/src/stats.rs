@@ -13,15 +13,15 @@ use neqo_common::qwarn;
 pub struct Stats {
     conn_display_info: String,
 
-    /// Total packets received
+    /// Total packets received, including all the bad ones.
     pub packets_rx: usize,
-    /// Total packets sent
+    /// Total packets sent.
     pub packets_tx: usize,
-    /// Duplicate packets received
+    /// Duplicate packets received.
     pub dups_rx: usize,
-    /// Dropped datagrams, or parts thereof
+    /// Dropped packets or dropped garbage.
     pub dropped_rx: usize,
-    /// resumption used
+    /// Whether the connection was resumed successfully.
     pub resumed: bool,
 }
 
