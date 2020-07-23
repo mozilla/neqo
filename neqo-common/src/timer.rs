@@ -89,6 +89,7 @@ impl<T> Timer<T> {
     }
 
     /// Slide forward in time by `n * self.granularity`.
+    #[allow(clippy::unknown_clippy_lints)] // Until we require rust 1.45.
     #[allow(clippy::cast_possible_truncation, clippy::reversed_empty_ranges)]
     // cast_possible_truncation is ok because we have an assertion guard.
     // reversed_empty_ranges is to avoid different types on the if/else.
