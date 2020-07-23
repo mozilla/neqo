@@ -7,7 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::Node;
-use neqo_common::Datagram;
+use neqo_common::{qtrace, Datagram};
 use neqo_transport::Output;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
@@ -103,8 +103,9 @@ impl TailDrop {
         } else if self.used + self.size(&d) <= self.capacity {
             self.used += self.size(&d);
             self.queue.push_back(d);
+        } else {
+            qtrace!("taildrop dropping {} bytes", d.len());
         }
-        // else: oops, dropped a packet.
     }
 
     /// If the last packet that was sending has been sent, start sending

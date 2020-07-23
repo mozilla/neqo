@@ -14,7 +14,7 @@ mod drop;
 pub mod rng;
 mod taildrop;
 
-use neqo_common::{qdebug, Datagram, Encoder};
+use neqo_common::{qdebug, qtrace, Datagram, Encoder};
 use neqo_transport::Output;
 use rng::Random;
 use std::cell::RefCell;
@@ -189,14 +189,17 @@ impl Simulator {
                 let res = n.node.process(dgram.take(), now);
                 n.state = match res {
                     Output::Datagram(d) => {
+                        qtrace!([self.name], " => datagram {}", d.len());
                         dgram = Some(d);
                         Active
                     }
                     Output::Callback(delay) => {
+                        qtrace!([self.name], " => callback {:?}", delay);
                         assert_ne!(delay, Duration::new(0, 0));
                         Waiting(now + delay)
                     }
                     Output::None => {
+                        qtrace!([self.name], " => nothing");
                         assert!(n.node.done(), "nodes have to be done when they go idle");
                         Idle
                     }

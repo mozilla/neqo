@@ -7,7 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{Node, Rng};
-use neqo_common::{qdebug, Datagram};
+use neqo_common::{qdebug, qtrace, Datagram};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{Connection, ConnectionEvent, Output, State, StreamId, StreamType};
 use std::cmp::min;
@@ -29,6 +29,10 @@ pub enum GoalStatus {
 /// Goals can be accomplished in any order.
 pub trait ConnectionGoal {
     fn init(&mut self, _c: &mut Connection, _now: Instant) {}
+    /// Perform some processing.
+    fn process(&mut self, _c: &mut Connection, _now: Instant) -> GoalStatus {
+        GoalStatus::Waiting
+    }
     /// Handle an event from the provided connection, returning `true` when the
     /// goal is achieved.
     fn handle_event(&mut self, c: &mut Connection, e: &ConnectionEvent, now: Instant)
@@ -64,6 +68,27 @@ impl ConnectionNode {
     pub fn add_goal(&mut self, goal: Box<dyn ConnectionGoal>) {
         self.goals.push(goal);
     }
+
+    /// Process all goals using the given closure and return whether any were active.
+    fn process_goals<F>(&mut self, mut f: F) -> bool
+    where
+        F: FnMut(&mut Box<dyn ConnectionGoal>, &mut Connection) -> GoalStatus,
+    {
+        // Waiting on drain_filter...
+        // self.goals.drain_filter(|g| f(g,  &mut self.c, &e)).count();
+        let mut active = false;
+        let mut i = 0;
+        while i < self.goals.len() {
+            let status = f(&mut self.goals[i], &mut self.c);
+            if status == GoalStatus::Done {
+                self.goals.remove(i);
+            } else {
+                active |= status == GoalStatus::Active;
+                i += 1;
+            }
+        }
+        active
+    }
 }
 
 impl Node for ConnectionNode {
@@ -74,9 +99,9 @@ impl Node for ConnectionNode {
     }
 
     fn process(&mut self, mut d: Option<Datagram>, now: Instant) -> Output {
+        let mut active = self.process_goals(|goal, c| goal.process(c, now));
         loop {
             let res = self.c.process(d.take(), now);
-            let mut active = false;
             while let Some(e) = self.c.next_event() {
                 qdebug!([self.c], "received event {:?}", e);
 
@@ -85,18 +110,7 @@ impl Node for ConnectionNode {
                     self.c.authenticated(AuthenticationStatus::Ok, now);
                 }
 
-                // Waiting on drain_filter...
-                // let _ = self.goals.drain_filter(|g| g.handle_event(&mut self.c, &e)).count();
-                let mut i = 0;
-                while i < self.goals.len() {
-                    let status = self.goals[i].handle_event(&mut self.c, &e, now);
-                    if status == GoalStatus::Done {
-                        self.goals.remove(i);
-                    } else {
-                        active |= status == GoalStatus::Active;
-                        i += 1;
-                    }
-                }
+                active |= self.process_goals(|goal, c| goal.handle_event(c, &e, now))
             }
             // Exit at this point if the connection produced a datagram.
             // OR if one of the goals acted.
@@ -104,6 +118,7 @@ impl Node for ConnectionNode {
                 return res;
             }
             qdebug!([self.c], "no datagram and goal activity, looping");
+            active = false;
         }
     }
 
@@ -170,11 +185,39 @@ impl SendData {
             }
         }
     }
+
+    fn send(&mut self, c: &mut Connection, stream_id: StreamId) -> GoalStatus {
+        const DATA: &[u8] = &[0; 4096];
+        let stream_id = stream_id.as_u64();
+        let mut status = GoalStatus::Waiting;
+        loop {
+            let end = min(self.remaining, DATA.len());
+            let sent = c.stream_send(stream_id, &DATA[..end]).unwrap();
+            if sent == 0 {
+                return status;
+            }
+            self.remaining -= sent;
+            qtrace!("sent {} remaining {}", sent, self.remaining);
+            if self.remaining == 0 {
+                c.stream_close_send(stream_id).unwrap();
+                return GoalStatus::Done;
+            }
+            status = GoalStatus::Active;
+        }
+    }
 }
 
 impl ConnectionGoal for SendData {
     fn init(&mut self, c: &mut Connection, _now: Instant) {
         self.make_stream(c);
+    }
+
+    fn process(&mut self, c: &mut Connection, _now: Instant) -> GoalStatus {
+        if let Some(stream_id) = self.stream_id {
+            self.send(c, stream_id)
+        } else {
+            GoalStatus::Waiting
+        }
     }
 
     fn handle_event(
@@ -183,7 +226,6 @@ impl ConnectionGoal for SendData {
         e: &ConnectionEvent,
         _now: Instant,
     ) -> GoalStatus {
-        const DATA: &[u8] = &[0; 4096];
         match e {
             ConnectionEvent::SendStreamCreatable {
                 stream_type: StreamType::UniDi,
@@ -197,14 +239,7 @@ impl ConnectionGoal for SendData {
             ConnectionEvent::SendStreamWritable { stream_id }
                 if Some(*stream_id) == self.stream_id =>
             {
-                let end = min(self.remaining, DATA.len());
-                let sent = c.stream_send(stream_id.as_u64(), &DATA[..end]).unwrap();
-                if self.remaining == sent {
-                    GoalStatus::Done
-                } else {
-                    self.remaining -= sent;
-                    GoalStatus::Active
-                }
+                self.send(c, *stream_id)
             }
 
             // If we sent data in 0-RTT, then we didn't track how much we should
@@ -225,6 +260,24 @@ impl ReceiveData {
     pub fn new(amount: usize) -> Self {
         Self { remaining: amount }
     }
+
+    fn recv(&mut self, c: &mut Connection, stream_id: StreamId) -> GoalStatus {
+        let mut buf = vec![0; 4096];
+        let mut status = GoalStatus::Waiting;
+        loop {
+            let end = min(self.remaining, buf.len());
+            let (recvd, _) = c.stream_recv(stream_id.as_u64(), &mut buf[..end]).unwrap();
+            if recvd == 0 {
+                return status;
+            }
+            self.remaining -= recvd;
+            qtrace!("received {} remaining {}", recvd, self.remaining);
+            if self.remaining == 0 {
+                return GoalStatus::Done;
+            }
+            status = GoalStatus::Active;
+        }
+    }
 }
 
 impl ConnectionGoal for ReceiveData {
@@ -235,15 +288,7 @@ impl ConnectionGoal for ReceiveData {
         _now: Instant,
     ) -> GoalStatus {
         if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-            let mut buf = vec![0; 4096];
-            let end = min(self.remaining, buf.len());
-            let (recvd, _) = c.stream_recv(*stream_id, &mut buf[..end]).unwrap();
-            if recvd == self.remaining {
-                GoalStatus::Done
-            } else {
-                self.remaining -= recvd;
-                GoalStatus::Active
-            }
+            self.recv(c, StreamId::new(*stream_id))
         } else {
             GoalStatus::Waiting
         }

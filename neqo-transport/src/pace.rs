@@ -58,7 +58,7 @@ impl Pacer {
     /// the current time is).
     pub fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
         if self.c >= self.p {
-            qtrace!([self], "next {}/{:?} no wait: {:?}", cwnd, rtt, self.t);
+            qtrace!([self], "next {}/{:?} no wait:  {:?}", cwnd, rtt, self.t);
             self.t
         } else {
             // This is the inverse of the function in `spend`:
@@ -67,15 +67,9 @@ impl Pacer {
             let d = r.saturating_mul(u128::try_from(self.p - self.c).unwrap());
             let add = d / u128::try_from(cwnd * PACER_SPEEDUP).unwrap();
             let dt = u64::try_from(add).map(Duration::from_nanos).unwrap_or(rtt);
-            qtrace!(
-                [self],
-                "next {}/{:?} wait {:?}: {:?}",
-                cwnd,
-                rtt,
-                dt,
-                self.t + dt
-            );
-            self.t + dt
+            let next = self.t + dt;
+            qtrace!([self], "next {}/{:?} wait {:?} = {:?}", cwnd, rtt, dt, next);
+            next
         }
     }
 
