@@ -297,7 +297,7 @@ impl ::std::fmt::Display for PacketRange {
 
 /// The ACK delay we use.
 pub const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
-pub const MAX_UNACKED_PKTS: u64 = 7;
+pub const MAX_UNACKED_PKTS: u64 = 1;
 const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
