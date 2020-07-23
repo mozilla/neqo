@@ -63,7 +63,7 @@ macro_rules! simulate {
                 nodes.push(Box::new(f(&fixture)));
             )*
             let mut sim = Simulator::new(stringify!($n), nodes);
-            if let Ok(seed) = std::env::var("SIMULATOR_SEED") {
+            if let Ok(seed) = std::env::var("SIMULATION_SEED") {
                 sim.seed_str(seed);
             }
             sim.run();

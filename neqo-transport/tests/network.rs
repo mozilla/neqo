@@ -16,12 +16,14 @@ use sim::{
     network::{Delay, Drop},
     Simulator,
 };
+use std::ops::Range;
 use std::time::Duration;
 
 // Some constants that are useful common values.
 const TRANSFER_AMOUNT: usize = 1 << 20;
 const ZERO: Duration = Duration::from_millis(0);
 const DELAY: Duration = Duration::from_millis(50);
+const DELAY_RANGE: Range<Duration> = DELAY..Duration::from_millis(55);
 
 simulate!(
     connect_direct,
@@ -64,6 +66,18 @@ simulate!(
         Delay::new(DELAY..DELAY),
         ConnectionNode::new_server(boxed![ReachState::new(State::Confirmed)]),
         Delay::new(DELAY..DELAY),
+    ],
+);
+
+simulate!(
+    transfer_delay_drop,
+    [
+        ConnectionNode::new_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
+        Delay::new(DELAY_RANGE),
+        Drop::percentage(1),
+        ConnectionNode::new_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
+        Delay::new(DELAY_RANGE),
+        Drop::percentage(1),
     ],
 );
 
