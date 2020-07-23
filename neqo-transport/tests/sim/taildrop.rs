@@ -96,9 +96,11 @@ impl TailDrop {
         self.on_link.push_back((egress, d));
     }
 
-    /// Enqueue the packet for sending.  If
+    /// Enqueue for sending.  Maybe.  If this overflows the queue, drop it instead.
     fn maybe_enqueue(&mut self, d: Datagram, now: Instant) {
-        if self.queue.is_empty() && self.next_deque.is_none() {
+        if self.next_deque.is_none() {
+            // Nothing in the queue and nothing still sending.
+            debug_assert!(self.queue.is_empty());
             self.send(d, now);
         } else if self.used + self.size(&d) <= self.capacity {
             self.used += self.size(&d);
