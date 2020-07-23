@@ -6,12 +6,13 @@
 
 // Tracking of some useful statistics.
 
-use neqo_common::qwarn;
+use neqo_common::qinfo;
+use std::fmt::{self, Debug};
 
-#[derive(Default, Debug)]
+#[derive(Default)]
 /// Connection statistics
 pub struct Stats {
-    conn_display_info: String,
+    info: String,
 
     /// Total packets received
     pub packets_rx: usize,
@@ -26,17 +27,28 @@ pub struct Stats {
 }
 
 impl Stats {
-    pub fn init(&mut self, conn_info: String) {
-        self.conn_display_info = conn_info;
+    pub fn init(&mut self, info: String) {
+        self.info = info;
     }
 
     pub fn pkt_dropped(&mut self, reason: impl AsRef<str>) {
         self.dropped_rx += 1;
-        qwarn!(
-            [self.conn_display_info],
+        qinfo!(
+            [self.info],
             "Dropped received packet: {}; Total: {}",
             reason.as_ref(),
             self.dropped_rx
         )
+    }
+}
+
+impl Debug for Stats {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "stats for {}", self.info)?;
+        writeln!(f, "  packets: tx {} ", self.packets_tx)?;
+        writeln!(f, "           rx {}", self.packets_rx)?;
+        writeln!(f, "           dropped {}", self.dropped_rx)?;
+        writeln!(f, "           dups {}", self.dups_rx)?;
+        write!(f, "  resumed: {} ", self.resumed)
     }
 }

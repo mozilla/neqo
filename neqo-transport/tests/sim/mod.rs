@@ -12,6 +12,7 @@ pub mod connection;
 mod delay;
 mod drop;
 pub mod rng;
+mod taildrop;
 
 use neqo_common::{qdebug, Datagram, Encoder};
 use neqo_transport::Output;
@@ -29,6 +30,7 @@ use NodeState::{Active, Idle, Waiting};
 pub mod network {
     pub use super::delay::Delay;
     pub use super::drop::Drop;
+    pub use super::taildrop::TailDrop;
 }
 
 type Rng = Rc<RefCell<Random>>;
@@ -80,6 +82,7 @@ pub trait Node: Debug {
     fn done(&self) -> bool {
         true
     }
+    fn print_summary(&self, _test_name: &str) {}
 }
 
 /// The state of a single node.  Nodes will be activated if they are `Active`
@@ -205,6 +208,9 @@ impl Simulator {
                 println!("{}: real elapsed time: {:?}", self.name, real_elapsed);
                 let elapsed = now - start;
                 println!("{}: simulated elapsed time: {:?}", self.name, elapsed);
+                for n in &self.nodes {
+                    n.node.print_summary(&self.name);
+                }
                 return elapsed;
             }
 

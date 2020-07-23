@@ -110,6 +110,10 @@ impl Node for ConnectionNode {
     fn done(&self) -> bool {
         self.goals.is_empty()
     }
+
+    fn print_summary(&self, test_name: &str) {
+        println!("{}: {:?}", test_name, self.c.stats());
+    }
 }
 
 impl Debug for ConnectionNode {

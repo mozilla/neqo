@@ -13,7 +13,7 @@ mod sim;
 use neqo_transport::{ConnectionError, Error, State};
 use sim::{
     connection::{ConnectionNode, ReachState, ReceiveData, SendData},
-    network::{Delay, Drop},
+    network::{Delay, Drop, TailDrop},
     Simulator,
 };
 use std::ops::Range;
@@ -24,6 +24,7 @@ const TRANSFER_AMOUNT: usize = 1 << 20;
 const ZERO: Duration = Duration::from_millis(0);
 const DELAY: Duration = Duration::from_millis(50);
 const DELAY_RANGE: Range<Duration> = DELAY..Duration::from_millis(55);
+const JITTER: Duration = Duration::from_millis(10);
 
 simulate!(
     connect_direct,
@@ -70,6 +71,28 @@ simulate!(
 );
 
 simulate!(
+    connect_tail_drop_jitter,
+    [
+        ConnectionNode::new_client(boxed![ReachState::new(State::Confirmed)]),
+        TailDrop::dsl_uplink(),
+        Delay::new(ZERO..JITTER),
+        ConnectionNode::new_server(boxed![ReachState::new(State::Confirmed)]),
+        TailDrop::dsl_downlink(),
+        Delay::new(ZERO..JITTER),
+    ],
+);
+
+simulate!(
+    connect_tail_drop,
+    [
+        ConnectionNode::new_client(boxed![ReachState::new(State::Confirmed)]),
+        TailDrop::dsl_uplink(),
+        ConnectionNode::new_server(boxed![ReachState::new(State::Confirmed)]),
+        TailDrop::dsl_downlink(),
+    ],
+);
+
+simulate!(
     transfer_delay_drop,
     [
         ConnectionNode::new_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
@@ -81,6 +104,30 @@ simulate!(
     ],
 );
 
+simulate!(
+    transfer_tail_drop,
+    [
+        ConnectionNode::new_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
+        TailDrop::dsl_uplink(),
+        ConnectionNode::new_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
+        TailDrop::dsl_downlink(),
+    ],
+);
+
+simulate!(
+    transfer_tail_drop_jitter,
+    [
+        ConnectionNode::new_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
+        TailDrop::dsl_uplink(),
+        Delay::new(ZERO..JITTER),
+        ConnectionNode::new_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
+        TailDrop::dsl_downlink(),
+        Delay::new(ZERO..JITTER),
+    ],
+);
+
+/// This test is a nasty piece of work.  Delays are anything from 0 to 50ms and 1% of
+/// packets get dropped.
 #[test]
 fn transfer_fixed_seed() {
     let mut sim = Simulator::new(
