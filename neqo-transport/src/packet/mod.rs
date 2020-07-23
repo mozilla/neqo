@@ -123,6 +123,7 @@ pub struct PacketBuilder {
 
 impl PacketBuilder {
     /// Start building a short header packet.
+    #[allow(clippy::reversed_empty_ranges)]
     pub fn short(mut encoder: Encoder, key_phase: bool, dcid: &ConnectionId) -> Self {
         let header_start = encoder.len();
         // TODO(mt) randomize the spin bit
@@ -143,6 +144,7 @@ impl PacketBuilder {
     /// Start building a long header packet.
     /// For an Initial packet you will need to call initial_token(),
     /// even if the token is empty.
+    #[allow(clippy::reversed_empty_ranges)] // For initializing an empty range.
     pub fn long(
         mut encoder: Encoder,
         pt: PacketType,
