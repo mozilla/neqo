@@ -92,8 +92,10 @@ impl TailDrop {
 
         self.next_deque = Some(deque_time);
 
-        let egress = deque_time + self.delay;
-        self.on_link.push_back((egress, d));
+        // Now work out when the packet is fully received at the other end of
+        // the link. Setup to deliver the packet then.
+        let delivery_time = deque_time + self.delay;
+        self.on_link.push_back((delivery_time, d));
     }
 
     /// Enqueue for sending.  Maybe.  If this overflows the queue, drop it instead.
