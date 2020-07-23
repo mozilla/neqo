@@ -53,6 +53,28 @@ simulate!(
 );
 
 simulate!(
+    idle_timeout_crazy_rtt,
+    [
+        ConnectionNode::new_client(boxed![
+            ReachState::new(State::Confirmed),
+            ReachState::new(State::Closed(ConnectionError::Transport(
+                Error::IdleTimeout
+            )))
+        ]),
+        Delay::new(Duration::from_secs(15)..Duration::from_secs(15)),
+        Drop::percentage(10),
+        ConnectionNode::new_server(boxed![
+            ReachState::new(State::Confirmed),
+            ReachState::new(State::Closed(ConnectionError::Transport(
+                Error::IdleTimeout
+            )))
+        ]),
+        Delay::new(Duration::from_secs(10)..Duration::from_secs(10)),
+        Drop::percentage(10),
+    ],
+);
+
+simulate!(
     transfer,
     [
         ConnectionNode::new_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
