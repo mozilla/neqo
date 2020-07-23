@@ -378,7 +378,6 @@ where
     }
 }
 
-
 impl Into<Vec<u8>> for Encoder {
     #[must_use]
     fn into(self) -> Vec<u8> {
