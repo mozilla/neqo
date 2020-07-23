@@ -81,9 +81,9 @@ impl Node for Delay {
         if let Some(dgram) = d {
             self.insert(dgram, now);
         }
-        if let Some((&k, _)) = self.queue.range(..=now).nth(0) {
+        if let Some((&k, _)) = self.queue.range(..=now).next() {
             Output::Datagram(self.queue.remove(&k).unwrap())
-        } else if let Some(&t) = self.queue.keys().nth(0) {
+        } else if let Some(&t) = self.queue.keys().next() {
             Output::Callback(t - now)
         } else {
             Output::None
