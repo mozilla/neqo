@@ -280,6 +280,7 @@ pub struct CryptoDxState {
 }
 
 impl CryptoDxState {
+    #[allow(clippy::reversed_empty_ranges)] // To initialize an empty range.
     pub fn new(
         direction: CryptoDxDirection,
         epoch: Epoch,

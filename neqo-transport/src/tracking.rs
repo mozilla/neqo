@@ -345,7 +345,7 @@ impl RecvdPackets {
     fn ack_now(&self, now: Instant) -> bool {
         match self.ack_time {
             Some(t) => t <= now,
-            _ => false,
+            None => false,
         }
     }
 
@@ -441,7 +441,7 @@ impl RecvdPackets {
             while cur.smallest > ack.largest {
                 cur = match range_iter.next() {
                     Some(c) => c,
-                    _ => return,
+                    None => return,
                 };
             }
             cur.acknowledged(&ack);
@@ -477,7 +477,7 @@ impl RecvdPackets {
 
         let first = match iter.next() {
             Some(v) => v,
-            _ => return None, // Nothing to send.
+            None => return None, // Nothing to send.
         };
         let mut ack_ranges = Vec::new();
         let mut last = first.smallest;
@@ -544,7 +544,7 @@ impl AckTracker {
                 self.spaces.shrink_to_fit();
                 sp
             }
-            _ => panic!("discarding application space"),
+            PNSpace::ApplicationData => panic!("discarding application space"),
         };
         assert_eq!(sp.unwrap().space, space, "dropping spaces out of order");
     }
