@@ -20,7 +20,7 @@ use std::ops::Range;
 use std::time::Duration;
 
 // Some constants that are useful common values.
-const TRANSFER_AMOUNT: usize = 10 << 10;
+const TRANSFER_AMOUNT: usize = 1 << 20; // 1M
 const ZERO: Duration = Duration::from_millis(0);
 const DELAY: Duration = Duration::from_millis(50);
 const DELAY_RANGE: Range<Duration> = DELAY..Duration::from_millis(55);

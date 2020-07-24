@@ -25,19 +25,27 @@ pub struct TailDrop {
     rate: usize,
     /// The depth of the queue, in bytes.
     capacity: usize,
+
     /// A counter for how many bytes are enqueued.
     used: usize,
     /// A queue of unsent bytes.
     queue: VecDeque<Datagram>,
-    /// The time it takes a byte to exit the other end of the link.
-    delay: Duration,
     /// The time that the next datagram can enter the link.
     next_deque: Option<Instant>,
+
     /// Any sub-ns delay from the last enqueue.
-    /// TODO set this to zero if queue drains.
     sub_ns_delay: u32,
+    /// The time it takes a byte to exit the other end of the link.
+    delay: Duration,
     /// The packets that are on the link and when they can be delivered.
     on_link: VecDeque<(Instant, Datagram)>,
+
+    /// The number of packets received.
+    received: usize,
+    /// The number of packets dropped.
+    dropped: usize,
+    /// The number of packets delivered.
+    delivered: usize,
 }
 
 impl TailDrop {
@@ -48,10 +56,13 @@ impl TailDrop {
             capacity,
             used: 0,
             queue: VecDeque::new(),
-            delay,
             next_deque: None,
             sub_ns_delay: 0,
+            delay,
             on_link: VecDeque::new(),
+            received: 0,
+            dropped: 0,
+            delivered: 0,
         }
     }
 
@@ -100,6 +111,7 @@ impl TailDrop {
 
     /// Enqueue for sending.  Maybe.  If this overflows the queue, drop it instead.
     fn maybe_enqueue(&mut self, d: Datagram, now: Instant) {
+        self.received += 1;
         if self.next_deque.is_none() {
             // Nothing in the queue and nothing still sending.
             debug_assert!(self.queue.is_empty());
@@ -109,6 +121,7 @@ impl TailDrop {
             self.queue.push_back(d);
         } else {
             qtrace!("taildrop dropping {} bytes", d.len());
+            self.dropped += 1;
         }
     }
 
@@ -138,6 +151,7 @@ impl Node for TailDrop {
         if let Some((t, _)) = self.on_link.front() {
             if *t <= now {
                 let (_, d) = self.on_link.pop_front().unwrap();
+                self.delivered += 1;
                 Output::Datagram(d)
             } else {
                 Output::Callback(*t - now)
@@ -145,6 +159,13 @@ impl Node for TailDrop {
         } else {
             Output::None
         }
+    }
+
+    fn print_summary(&self, test_name: &str) {
+        println!(
+            "{}: taildrop: rx {} drop {} tx {}",
+            test_name, self.received, self.dropped, self.delivered
+        );
     }
 }
 
