@@ -45,7 +45,7 @@ use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile, GRANULARITY};
 use crate::recv_stream::{RecvStream, RecvStreams, RECV_BUFFER_SIZE};
 use crate::send_stream::{SendStream, SendStreams};
-use crate::stats::Stats;
+use crate::stats::{Stats, StatsCell};
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::{
     self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
@@ -459,7 +459,7 @@ pub struct Connection {
     loss_recovery: LossRecovery,
     events: ConnectionEvents,
     token: Option<Vec<u8>>,
-    stats: Stats,
+    stats: StatsCell,
     qlog: NeqoQlog,
 
     quic_version: QuicVersion,
@@ -567,7 +567,8 @@ impl Connection {
 
         let crypto = Crypto::new(agent, protocols, tphandler.clone())?;
 
-        let mut c = Self {
+        let stats = StatsCell::default();
+        let c = Self {
             role,
             state: State::Init,
             cid_manager,
@@ -589,14 +590,14 @@ impl Connection {
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new(),
+            loss_recovery: LossRecovery::new(stats.clone()),
             events: ConnectionEvents::default(),
             token: None,
-            stats: Stats::default(),
+            stats,
             qlog: NeqoQlog::disabled(),
             quic_version,
         };
-        c.stats.init(format!("{}", c));
+        c.stats.borrow_mut().init(format!("{}", c));
         Ok(c)
     }
 
@@ -816,9 +817,9 @@ impl Connection {
         &self.zero_rtt_state
     }
 
-    /// Get collected statistics.
-    pub fn stats(&self) -> &Stats {
-        &self.stats
+    /// Get a snapshot of collected statistics.
+    pub fn stats(&self) -> Stats {
+        self.stats.borrow().clone()
     }
 
     // This function wraps a call to another function and sets the connection state
@@ -1010,15 +1011,17 @@ impl Connection {
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
         qinfo!([self], "received Retry");
         if self.retry_info.is_some() {
-            self.stats.pkt_dropped("Extra Retry");
+            self.stats.borrow_mut().pkt_dropped("Extra Retry");
             return Ok(());
         }
         if packet.token().is_empty() {
-            self.stats.pkt_dropped("Retry without a token");
+            self.stats.borrow_mut().pkt_dropped("Retry without a token");
             return Ok(());
         }
         if !packet.is_valid_retry(&self.remote_original_destination_cid.as_ref().unwrap()) {
-            self.stats.pkt_dropped("Retry with bad integrity tag");
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Retry with bad integrity tag");
             return Ok(());
         }
         if let Some(p) = &mut self.path {
@@ -1148,21 +1151,21 @@ impl Connection {
 
         // Handle each packet in the datagram
         while !slc.is_empty() {
-            self.stats.packets_rx += 1;
+            self.stats.borrow_mut().packets_rx += 1;
             let (packet, remainder) =
                 match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
                         qinfo!([self], "Garbage packet: {}", e);
                         qtrace!([self], "Garbage packet contents: {}", hex(slc));
-                        self.stats.pkt_dropped("Garbage packet");
+                        self.stats.borrow_mut().pkt_dropped("Garbage packet");
                         break;
                     }
                 };
             match (packet.packet_type(), &self.state, &self.role) {
                 (PacketType::Initial, State::Init, Role::Server) => {
                     if !packet.is_valid_initial() {
-                        self.stats.pkt_dropped("Invalid Initial");
+                        self.stats.borrow_mut().pkt_dropped("Invalid Initial");
                         break;
                     }
                     qinfo!(
@@ -1193,7 +1196,7 @@ impl Connection {
                             if versions.is_empty() || versions.contains(&self.quic_version.as_u32())
                             {
                                 // Ignore VersionNegotiation packets that contain the current version.
-                                self.stats.dropped_rx += 1;
+                                self.stats.borrow_mut().dropped_rx += 1;
                                 return Ok(frames);
                             }
                             self.set_state(State::Closed(ConnectionError::Transport(
@@ -1202,7 +1205,7 @@ impl Connection {
                             return Err(Error::VersionNegotiation);
                         }
                         Err(_) => {
-                            self.stats.dropped_rx += 1;
+                            self.stats.borrow_mut().dropped_rx += 1;
                             return Ok(frames);
                         }
                     }
@@ -1215,6 +1218,7 @@ impl Connection {
                 | (PacketType::Retry, ..)
                 | (PacketType::OtherVersion, ..) => {
                     self.stats
+                        .borrow_mut()
                         .pkt_dropped(format!("{:?}", packet.packet_type()));
                     break;
                 }
@@ -1223,13 +1227,16 @@ impl Connection {
 
             match self.state {
                 State::Init => {
-                    self.stats.pkt_dropped("Received while in Init state");
+                    self.stats
+                        .borrow_mut()
+                        .pkt_dropped("Received while in Init state");
                     break;
                 }
                 State::WaitInitial => {}
                 State::Handshaking | State::Connected | State::Confirmed => {
                     if !self.is_valid_cid(packet.dcid()) {
                         self.stats
+                            .borrow_mut()
                             .pkt_dropped(format!("Ignoring packet with CID {:?}", packet.dcid()));
                         break;
                     }
@@ -1246,7 +1253,9 @@ impl Connection {
                 }
                 State::Draining { .. } | State::Closed(..) => {
                     // Do nothing.
-                    self.stats.pkt_dropped(format!("State {:?}", self.state));
+                    self.stats
+                        .borrow_mut()
+                        .pkt_dropped(format!("State {:?}", self.state));
                     break;
                 }
             }
@@ -1291,7 +1300,7 @@ impl Connection {
                     // If the state isn't available, or we can't decrypt the packet, drop
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(&d, slc, now)?;
-                    self.stats.pkt_dropped("Decryption failure");
+                    self.stats.borrow_mut().pkt_dropped("Decryption failure");
                     qlog::packet_dropped(&mut self.qlog, &packet);
                 }
             }
@@ -1314,7 +1323,7 @@ impl Connection {
         let space = PNSpace::from(packet.packet_type());
         if self.acks.get_mut(space).unwrap().is_duplicate(packet.pn()) {
             qdebug!([self], "Duplicate packet from {} pn={}", space, packet.pn());
-            self.stats.dups_rx += 1;
+            self.stats.borrow_mut().dups_rx += 1;
             return Ok(vec![]);
         }
 
@@ -1626,7 +1635,7 @@ impl Connection {
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
             qlog::packet_sent(&mut self.qlog, pt, pn, &builder[payload_start..]);
 
-            self.stats.packets_tx += 1;
+            self.stats.borrow_mut().packets_tx += 1;
             encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
             debug_assert!(encoder.len() <= path.mtu());
 
@@ -2221,7 +2230,7 @@ impl Connection {
         self.crypto.install_application_keys(now + pto)?;
         self.process_tps()?;
         self.set_state(State::Connected);
-        self.stats.resumed = self.crypto.tls.info().unwrap().resumed();
+        self.stats.borrow_mut().resumed = self.crypto.tls.info().unwrap().resumed();
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
             self.set_state(State::Confirmed);
@@ -4703,12 +4712,12 @@ mod tests {
         // Make sure to flush any saved datagrams before doing this.
         let _ = peer.process_output(now());
 
-        let dropped_before = peer.stats.dropped_rx;
-        let dups_before = peer.stats.dups_rx;
+        let before = peer.stats();
         let out = peer.process(Some(pkt), now());
         assert!(out.as_dgram_ref().is_none());
-        assert_eq!(dropped, peer.stats.dropped_rx - dropped_before);
-        assert_eq!(dups, peer.stats.dups_rx - dups_before);
+        let after = peer.stats();
+        assert_eq!(dropped, after.dropped_rx - before.dropped_rx);
+        assert_eq!(dups, after.dups_rx - before.dups_rx);
     }
 
     #[test]
@@ -5577,17 +5586,17 @@ mod tests {
         // The client should process the datagram.  It can't process the 1-RTT
         // packet until authentication completes though.  So it saves it.
         now += RTT / 2;
-        assert_eq!(client.stats.dropped_rx, 0);
+        assert_eq!(client.stats().dropped_rx, 0);
         let _ = client.process(s2, now).dgram();
         // This packet will contain an ACK, but we can ignore it.
-        assert_eq!(client.stats.dropped_rx, 0);
+        assert_eq!(client.stats().dropped_rx, 0);
         assert!(client.saved_datagram.is_some());
 
         // After (successful) authentication, the packet is processed.
         maybe_authenticate(&mut client);
         let c3 = client.process(None, now).dgram();
         assert!(c3.is_some());
-        assert_eq!(client.stats.dropped_rx, 0);
+        assert_eq!(client.stats().dropped_rx, 0);
         assert!(client.saved_datagram.is_none());
 
         // Allow the handshake to complete.
