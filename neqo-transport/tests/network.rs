@@ -19,7 +19,7 @@ use sim::{
 use std::ops::Range;
 use std::time::Duration;
 
-// Some constants that are useful common values.
+/// The amount of transfer.  Much more than this takes a surprising amount of time.
 const TRANSFER_AMOUNT: usize = 1 << 20; // 1M
 const ZERO: Duration = Duration::from_millis(0);
 const DELAY: Duration = Duration::from_millis(50);
@@ -93,7 +93,7 @@ simulate!(
 );
 
 simulate!(
-    connect_tail_drop_jitter,
+    connect_taildrop_jitter,
     [
         ConnectionNode::new_client(boxed![ReachState::new(State::Confirmed)]),
         TailDrop::dsl_uplink(),
@@ -105,7 +105,7 @@ simulate!(
 );
 
 simulate!(
-    connect_tail_drop,
+    connect_taildrop,
     [
         ConnectionNode::new_client(boxed![ReachState::new(State::Confirmed)]),
         TailDrop::dsl_uplink(),
@@ -127,7 +127,7 @@ simulate!(
 );
 
 simulate!(
-    transfer_tail_drop,
+    transfer_taildrop,
     [
         ConnectionNode::new_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
         TailDrop::dsl_uplink(),
@@ -137,7 +137,7 @@ simulate!(
 );
 
 simulate!(
-    transfer_tail_drop_jitter,
+    transfer_taildrop_jitter,
     [
         ConnectionNode::new_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
         TailDrop::dsl_uplink(),

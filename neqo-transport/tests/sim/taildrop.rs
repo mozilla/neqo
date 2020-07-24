@@ -9,11 +9,13 @@
 use super::Node;
 use neqo_common::{qtrace, Datagram};
 use neqo_transport::Output;
+use std::cmp::max;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::time::{Duration, Instant};
 
+/// One second in nanoseconds.
 const ONE_SECOND_NS: u128 = 1_000_000_000;
 
 /// This models a link with a tail drop router at the front of it.
@@ -46,9 +48,14 @@ pub struct TailDrop {
     dropped: usize,
     /// The number of packets delivered.
     delivered: usize,
+    /// The maximum amount of queue capacity ever used.
+    /// As packets leave the queue as soon as they start being used, this doesn't
+    /// count them.
+    maxq: usize,
 }
 
 impl TailDrop {
+    /// Make a new taildrop node with the given rate, queue capacity, and link delay.
     pub fn new(rate: usize, capacity: usize, delay: Duration) -> Self {
         Self {
             overhead: 64,
@@ -63,6 +70,7 @@ impl TailDrop {
             received: 0,
             dropped: 0,
             delivered: 0,
+            maxq: 0,
         }
     }
 
@@ -100,7 +108,6 @@ impl TailDrop {
         assert_ne!(send_ns, 0, "sending a packet takes <1ns");
         self.sub_ns_delay = u32::try_from(t & u128::from(u32::MAX)).unwrap();
         let deque_time = now + Duration::from_nanos(send_ns);
-
         self.next_deque = Some(deque_time);
 
         // Now work out when the packet is fully received at the other end of
@@ -118,6 +125,7 @@ impl TailDrop {
             self.send(d, now);
         } else if self.used + self.size(&d) <= self.capacity {
             self.used += self.size(&d);
+            self.maxq = max(self.maxq, self.used);
             self.queue.push_back(d);
         } else {
             qtrace!("taildrop dropping {} bytes", d.len());
@@ -128,7 +136,7 @@ impl TailDrop {
     /// If the last packet that was sending has been sent, start sending
     /// the next one.
     fn maybe_send(&mut self, now: Instant) {
-        if self.next_deque.as_ref().map_or(false, |t| *t >= now) {
+        if self.next_deque.as_ref().map_or(false, |t| *t <= now) {
             if let Some(d) = self.queue.pop_front() {
                 self.used -= self.size(&d);
                 self.send(d, now);
@@ -163,8 +171,8 @@ impl Node for TailDrop {
 
     fn print_summary(&self, test_name: &str) {
         println!(
-            "{}: taildrop: rx {} drop {} tx {}",
-            test_name, self.received, self.dropped, self.delivered
+            "{}: taildrop: rx {} drop {} tx {} maxq {}",
+            test_name, self.received, self.dropped, self.delivered, self.maxq,
         );
     }
 }
