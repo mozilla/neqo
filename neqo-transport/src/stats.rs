@@ -45,10 +45,11 @@ impl Stats {
 impl Debug for Stats {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "stats for {}", self.info)?;
-        writeln!(f, "  packets: tx {} ", self.packets_tx)?;
-        writeln!(f, "           rx {}", self.packets_rx)?;
-        writeln!(f, "           dropped {}", self.dropped_rx)?;
-        writeln!(f, "           dups {}", self.dups_rx)?;
+        writeln!(
+            f,
+            "  packets: rx {} drop {} dup {} tx {}",
+            self.packets_rx, self.dropped_rx, self.dups_rx, self.packets_tx
+        )?;
         write!(f, "  resumed: {} ", self.resumed)
     }
 }
