@@ -196,6 +196,11 @@ impl SentPacket {
         }
     }
 
+    /// Whether the packet contents were cleared out after a PTO.
+    pub fn pto_fired(&self) -> bool {
+        self.pto
+    }
+
     /// On PTO, we need to get the recovery tokens so that we can ensure that
     /// the frames we sent can be sent again in the PTO packet(s).  Do that just once.
     pub fn pto(&mut self) -> bool {
