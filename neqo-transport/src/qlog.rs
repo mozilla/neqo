@@ -14,6 +14,7 @@ use qlog::{self, event::Event, PacketHeader, QuicFrame};
 
 use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
 
+use crate::connection::State;
 use crate::frame::{self, Frame};
 use crate::packet::{DecryptedPacket, PacketNumber, PacketType, PublicPacket};
 use crate::path::Path;
@@ -106,6 +107,21 @@ fn connection_started(qlog: &mut NeqoQlog, path: &Path) {
             Some(format!("{}", path.local_cid())),
             Some(format!("{}", path.remote_cid())),
         ))
+    })
+}
+
+pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
+    qlog.add_event(|| {
+        Some(Event::connection_state_updated_min(match new {
+            State::Init => qlog::ConnectionState::Attempted,
+            State::WaitInitial => qlog::ConnectionState::Attempted,
+            State::Handshaking => qlog::ConnectionState::Handshake,
+            State::Connected => qlog::ConnectionState::Active,
+            State::Confirmed => qlog::ConnectionState::Active,
+            State::Closing { .. } => qlog::ConnectionState::Draining,
+            State::Draining { .. } => qlog::ConnectionState::Draining,
+            State::Closed { .. } => qlog::ConnectionState::Closed,
+        }))
     })
 }
 

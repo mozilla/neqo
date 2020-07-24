@@ -2249,6 +2249,7 @@ impl Connection {
                 self.recv_streams.clear();
             }
             self.events.connection_state_change(state);
+            qlog::connection_state_updated(&mut self.qlog, &self.state)
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
             // and the connection is already closed.
