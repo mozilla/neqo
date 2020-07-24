@@ -19,11 +19,11 @@ use std::rc::Rc;
 pub struct Stats {
     info: String,
 
-    /// Total packets received
+    /// Total packets received, including all the bad ones.
     pub packets_rx: usize,
-    /// Duplicate packets received
+    /// Duplicate packets received.
     pub dups_rx: usize,
-    /// Dropped datagrams, or parts thereof
+    /// Dropped packets or dropped garbage.
     pub dropped_rx: usize,
 
     /// Total packets sent.
@@ -36,7 +36,7 @@ pub struct Stats {
     /// for retransmission when the PTO timer popped.
     pub pto_ack: usize,
 
-    /// resumption used
+    /// Whether the connection was resumed successfully.
     pub resumed: bool,
 }
 

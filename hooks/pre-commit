@@ -26,5 +26,11 @@ fi
 # Check formatting.
 trap 'git stash pop -q' EXIT
 git stash push -k -u -q -m "pre-commit stash"
-cargo fmt -- --check -l
-exit $?
+if ! errors=($(cargo fmt -- --check -l)); then
+    echo "Formatting errors found."
+    echo "Run \`cargo fmt\` to fix the following files:"
+    for err in "${errors[@]}"; do
+        echo "  $err"
+    done
+    exit 1
+fi

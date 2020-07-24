@@ -477,7 +477,7 @@ impl LossRecoverySpaces {
                 self.spaces.shrink_to_fit();
                 sp
             }
-            _ => panic!("discarding application space"),
+            PNSpace::ApplicationData => panic!("discarding application space"),
         };
         let mut sp = sp.unwrap();
         assert_eq!(sp.space(), space, "dropping spaces out of order");
