@@ -379,16 +379,6 @@ impl From<&[u8]> for Encoder {
     }
 }
 
-impl<'a, T> From<&'a T> for Decoder<'a>
-where
-    T: AsRef<[u8]>,
-{
-    #[must_use]
-    fn from(buf: &'a T) -> Decoder<'a> {
-        Decoder::new(buf.as_ref())
-    }
-}
-
 impl Into<Vec<u8>> for Encoder {
     #[must_use]
     fn into(self) -> Vec<u8> {
