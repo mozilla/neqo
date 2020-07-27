@@ -22,6 +22,7 @@ use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
 use crate::qlog::{self, QlogMetric};
 use crate::send_stream::StreamRecoveryToken;
+use crate::stats::{Stats, StatsCell};
 use crate::tracking::{AckToken, PNSpace, PNSpaceSet, SentPacket};
 use crate::LOCAL_IDLE_TIMEOUT;
 
@@ -320,7 +321,11 @@ impl LossRecoverySpace {
 
     // Remove all the acked packets. Returns them in ascending order -- largest
     // (i.e. highest PN) acked packet is last.
-    fn remove_acked(&mut self, acked_ranges: Vec<(u64, u64)>) -> (Vec<SentPacket>, bool) {
+    fn remove_acked(
+        &mut self,
+        acked_ranges: Vec<(u64, u64)>,
+        stats: &mut Stats,
+    ) -> (Vec<SentPacket>, bool) {
         let mut acked_packets = BTreeMap::new();
         let mut eliciting = false;
         for (end, start) in acked_ranges {
@@ -329,6 +334,12 @@ impl LossRecoverySpace {
                 if let Some(sent) = self.sent_packets.remove(&pn) {
                     self.remove_packet(&sent);
                     eliciting |= sent.ack_eliciting();
+                    if sent.lost() {
+                        stats.late_ack += 1;
+                    }
+                    if sent.pto_fired() {
+                        stats.pto_ack += 1;
+                    }
                     acked_packets.insert(pn, sent);
                 }
             }
@@ -446,16 +457,6 @@ pub(crate) struct LossRecoverySpaces {
 }
 
 impl LossRecoverySpaces {
-    pub fn new() -> Self {
-        Self {
-            spaces: smallvec![
-                LossRecoverySpace::new(PNSpace::ApplicationData),
-                LossRecoverySpace::new(PNSpace::Handshake),
-                LossRecoverySpace::new(PNSpace::Initial),
-            ],
-        }
-    }
-
     fn idx(space: PNSpace) -> usize {
         match space {
             PNSpace::ApplicationData => 0,
@@ -476,7 +477,7 @@ impl LossRecoverySpaces {
                 self.spaces.shrink_to_fit();
                 sp
             }
-            _ => panic!("discarding application space"),
+            PNSpace::ApplicationData => panic!("discarding application space"),
         };
         let mut sp = sp.unwrap();
         assert_eq!(sp.space(), space, "dropping spaces out of order");
@@ -490,14 +491,25 @@ impl LossRecoverySpaces {
     pub fn get_mut(&mut self, space: PNSpace) -> Option<&mut LossRecoverySpace> {
         self.spaces.get_mut(Self::idx(space))
     }
-}
 
-impl LossRecoverySpaces {
     fn iter(&self) -> impl Iterator<Item = &LossRecoverySpace> {
         self.spaces.iter()
     }
+
     fn iter_mut(&mut self) -> impl Iterator<Item = &mut LossRecoverySpace> {
         self.spaces.iter_mut()
+    }
+}
+
+impl Default for LossRecoverySpaces {
+    fn default() -> Self {
+        Self {
+            spaces: smallvec![
+                LossRecoverySpace::new(PNSpace::ApplicationData),
+                LossRecoverySpace::new(PNSpace::Handshake),
+                LossRecoverySpace::new(PNSpace::Initial),
+            ],
+        }
     }
 }
 
@@ -547,7 +559,7 @@ impl PtoState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct LossRecovery {
     /// When the handshake was confirmed, if it has been.
     confirmed_time: Option<Instant>,
@@ -558,17 +570,14 @@ pub(crate) struct LossRecovery {
     spaces: LossRecoverySpaces,
 
     qlog: NeqoQlog,
+    stats: StatsCell,
 }
 
 impl LossRecovery {
-    pub fn new() -> Self {
+    pub fn new(stats: StatsCell) -> Self {
         Self {
-            confirmed_time: None,
-            rtt_vals: RttVals::default(),
-            pto_state: None,
-            cc: CongestionControl::default(),
-            spaces: LossRecoverySpaces::new(),
-            qlog: NeqoQlog::disabled(),
+            stats,
+            ..Self::default()
         }
     }
 
@@ -653,11 +662,12 @@ impl LossRecovery {
             largest_acked
         );
 
+        let stats = &mut *self.stats.borrow_mut();
         let space = self
             .spaces
             .get_mut(pn_space)
             .expect("ACK on discarded space");
-        let (acked_packets, any_ack_eliciting) = space.remove_acked(acked_ranges);
+        let (acked_packets, any_ack_eliciting) = space.remove_acked(acked_ranges, stats);
         if acked_packets.is_empty() {
             // No new information.
             return (Vec::new(), Vec::new());
@@ -692,6 +702,7 @@ impl LossRecovery {
             .get_mut(pn_space)
             .unwrap()
             .detect_lost_packets(now, loss_delay, cleanup, &mut lost);
+        stats.lost += lost.len();
 
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
@@ -899,6 +910,7 @@ impl LossRecovery {
                 &lost_packets[first..],
             )
         }
+        self.stats.borrow_mut().lost += lost_packets.len();
 
         self.maybe_fire_pto(now, &mut lost_packets);
         lost_packets
@@ -1047,7 +1059,7 @@ mod tests {
 
     #[test]
     fn initial_rtt() {
-        let mut lr = LossRecovery::new();
+        let mut lr = LossRecovery::default();
         lr.start_pacer(now());
         pace(&mut lr, 1);
         let rtt = ms!(100);
@@ -1062,7 +1074,7 @@ mod tests {
 
     /// Send `n` packets (using PACING), then acknowledge the first.
     fn setup_lr(n: u64) -> LossRecovery {
-        let mut lr = LossRecovery::new();
+        let mut lr = LossRecovery::default();
         lr.start_pacer(now());
         pace(&mut lr, n);
         ack(&mut lr, 0, TEST_RTT);
@@ -1133,7 +1145,7 @@ mod tests {
     // Test time loss detection as part of handling a regular ACK.
     #[test]
     fn time_loss_detection_gap() {
-        let mut lr = LossRecovery::new();
+        let mut lr = LossRecovery::default();
         lr.start_pacer(now());
         // Create a single packet gap, and have pn 0 time out.
         // This can't use the default pacing, which is too tight.
@@ -1220,21 +1232,21 @@ mod tests {
     #[test]
     #[should_panic(expected = "discarding application space")]
     fn drop_app() {
-        let mut lr = LossRecovery::new();
+        let mut lr = LossRecovery::default();
         lr.discard(PNSpace::ApplicationData, now());
     }
 
     #[test]
     #[should_panic(expected = "dropping spaces out of order")]
     fn drop_out_of_order() {
-        let mut lr = LossRecovery::new();
+        let mut lr = LossRecovery::default();
         lr.discard(PNSpace::Handshake, now());
     }
 
     #[test]
     #[should_panic(expected = "ACK on discarded space")]
     fn ack_after_drop() {
-        let mut lr = LossRecovery::new();
+        let mut lr = LossRecovery::default();
         lr.start_pacer(now());
         lr.discard(PNSpace::Initial, now());
         lr.on_ack_received(
@@ -1248,7 +1260,7 @@ mod tests {
 
     #[test]
     fn drop_spaces() {
-        let mut lr = LossRecovery::new();
+        let mut lr = LossRecovery::default();
         lr.start_pacer(now());
         lr.on_packet_sent(SentPacket::new(
             PacketType::Initial,
@@ -1322,7 +1334,7 @@ mod tests {
 
     #[test]
     fn rearm_pto_after_confirmed() {
-        let mut lr = LossRecovery::new();
+        let mut lr = LossRecovery::default();
         lr.start_pacer(now());
         lr.on_packet_sent(SentPacket::new(
             PacketType::Handshake,

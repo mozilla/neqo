@@ -588,7 +588,7 @@ impl Http3Connection {
                 HSettingType::BlockedStreams => {
                     self.qpack_encoder.set_max_blocked_streams(s.value)?
                 }
-                _ => {}
+                HSettingType::MaxHeaderListSize => (),
             }
         }
         Ok(())
