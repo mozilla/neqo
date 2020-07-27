@@ -369,7 +369,7 @@ impl TxBuffer {
         self.buffered() as u64 + self.retired
     }
 
-    fn buffered(&self) -> usize {
+    pub fn buffered(&self) -> usize {
         self.send_buf.len()
     }
 

@@ -1024,6 +1024,13 @@ impl CryptoStreams {
         }
     }
 
+    pub fn all_data_acked(&self, space: PNSpace) -> bool {
+        match self.get(space) {
+            Some(cs) => cs.tx.buffered() == 0,
+            None => true,
+        }
+    }
+
     fn get(&self, space: PNSpace) -> Option<&CryptoStream> {
         let (initial, hs, app) = match self {
             Self::Initial {

@@ -1666,8 +1666,9 @@ impl Connection {
                 if self.role == Role::Client {
                     // Client can send Handshake packets -> discard Initial keys and states
                     self.discard_keys(PNSpace::Initial, now);
-                } else if self.state == State::Confirmed {
-                    // We could discard handshake keys in set_state, but wait until after sending an ACK.
+                } else if self.crypto.streams.all_data_acked(PNSpace::Handshake) {
+                    // We could discard handshake keys in set_state, but wait
+                    // until after sending an ACK.
                     self.discard_keys(PNSpace::Handshake, now);
                 }
             }
