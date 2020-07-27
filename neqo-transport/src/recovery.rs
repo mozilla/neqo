@@ -313,8 +313,13 @@ impl LossRecoverySpace {
             debug_assert!(self.in_flight_outstanding > 0);
             self.in_flight_outstanding -= 1;
             if self.in_flight_outstanding == 0 {
-                qtrace!("remove_packet outstanding == 0");
-                self.pto_base_time = None;
+                qtrace!("remove_packet outstanding == 0 for space {}", self.space);
+
+                // See above comments; keep PTO armed for Initial/Handshake even
+                // if no outstanding packets.
+                if self.space == PNSpace::ApplicationData {
+                    self.pto_base_time = None;
+                }
             }
         }
     }
