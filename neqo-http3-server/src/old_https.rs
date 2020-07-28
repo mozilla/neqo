@@ -92,7 +92,11 @@ impl Http09Server {
                 }
             }
         };
-        let conn_state = self.conn_state.get_mut(&(conn.clone(), stream_id)).unwrap();
+
+        let conn_state = self
+            .conn_state
+            .entry((conn.clone(), stream_id))
+            .or_default();
         conn_state.data_to_send = resp.map(|r| (r, 0));
         if conn_state.writable {
             self.stream_writable(stream_id, &mut conn);
