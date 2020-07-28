@@ -659,8 +659,8 @@ impl SendStream {
         let buf = if buf.is_empty() || (self.avail() == 0) {
             return Ok(0);
         } else if self.avail() < buf.len() {
-            self.send_blocked(buf.len() as u64);
             if atomic {
+                self.send_blocked(buf.len() as u64);
                 return Ok(0);
             } else {
                 &buf[..self.avail()]
@@ -1371,7 +1371,12 @@ mod tests {
 
         // assert non-atomic write works
         assert_eq!(s.send(b"abc").unwrap(), 2);
-        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(s.next_bytes(), Some((0, &b"ab"[..])));
+        // STREAM_DATA_BLOCKED is not sent yet.
+        assert!(flow_mgr.borrow_mut().next().is_none());
+
+        // STREAM_DATA_BLOCKED is queued once bytes using all credit are sent.
+        s.mark_as_sent(0, 2, false);
         assert_eq!(
             flow_mgr.borrow_mut().next().unwrap(),
             Frame::StreamDataBlocked {
@@ -1393,7 +1398,12 @@ mod tests {
 
         // assert non-atomic write works
         assert_eq!(s.send(b"abcd").unwrap(), 3);
-        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(s.next_bytes(), Some((2, &b"abc"[..])));
+        // DATA_BLOCKED is not sent yet.
+        assert!(flow_mgr.borrow_mut().next().is_none());
+
+        // DATA_BLOCKED is queued once bytes using all credit are sent.
+        s.mark_as_sent(2, 3, false);
         assert_eq!(
             flow_mgr.borrow_mut().next().unwrap(),
             Frame::DataBlocked { data_limit: 0x5 }
