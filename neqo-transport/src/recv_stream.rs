@@ -680,6 +680,7 @@ mod tests {
         recv_ranges(&[10..20, 14..20, 0..10], 20);
         // Now with the first range split.
         recv_ranges(&[10..14, 14..20, 10..15, 0..10], 20);
+        recv_ranges(&[10..15, 16..20, 21..25, 10..25, 0..10], 25);
     }
 
     #[test]
