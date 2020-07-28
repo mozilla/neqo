@@ -2259,10 +2259,13 @@ impl Connection {
     }
 
     fn cleanup_streams(&mut self) {
+        self.send_streams.clear_terminal();
+
         let recv_to_remove = self
             .recv_streams
             .iter()
             .filter(|(_, stream)| stream.is_terminal())
+            .filter(|(id, _)| id.is_uni() || self.send_streams.get(**id).is_err())
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
 
@@ -2292,8 +2295,6 @@ impl Connection {
                 .borrow_mut()
                 .max_streams(self.indexes.local_max_stream_uni, StreamType::UniDi)
         }
-
-        self.send_streams.clear_terminal();
     }
 
     /// Get or make a stream, and implicitly open additional streams as
