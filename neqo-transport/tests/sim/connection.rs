@@ -122,7 +122,6 @@ impl Node for ConnectionNode {
                 return res;
             }
             qdebug!([self.c], "no datagram and goal activity, looping");
-            active = false;
         }
     }
 
