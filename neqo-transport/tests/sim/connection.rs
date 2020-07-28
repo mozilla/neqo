@@ -106,7 +106,7 @@ impl Node for ConnectionNode {
 
             let mut active = false;
             while let Some(e) = self.c.next_event() {
-                qdebug!([self.c], "received event {:?}", e);
+                qtrace!([self.c], "received event {:?}", e);
 
                 // Perform authentication automatically.
                 if matches!(e, ConnectionEvent::AuthenticationNeeded) {
