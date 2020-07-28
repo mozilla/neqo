@@ -82,6 +82,7 @@ impl ConnectionNode {
             let status = f(&mut self.goals[i], &mut self.c);
             if status == GoalStatus::Done {
                 self.goals.remove(i);
+                active = true;
             } else {
                 active |= status == GoalStatus::Active;
                 i += 1;
@@ -99,9 +100,11 @@ impl Node for ConnectionNode {
     }
 
     fn process(&mut self, mut d: Option<Datagram>, now: Instant) -> Output {
-        let mut active = self.process_goals(|goal, c| goal.process(c, now));
+        let _ = self.process_goals(|goal, c| goal.process(c, now));
         loop {
             let res = self.c.process(d.take(), now);
+
+            let mut active = false;
             while let Some(e) = self.c.next_event() {
                 qdebug!([self.c], "received event {:?}", e);
 
@@ -113,7 +116,8 @@ impl Node for ConnectionNode {
                 active |= self.process_goals(|goal, c| goal.handle_event(c, &e, now))
             }
             // Exit at this point if the connection produced a datagram.
-            // OR if one of the goals acted.
+            // We also exit if none of the goals were active, as there is
+            // no point trying again if they did nothing.
             if matches!(res, Output::Datagram(_)) || !active {
                 return res;
             }
@@ -267,11 +271,11 @@ impl ReceiveData {
         loop {
             let end = min(self.remaining, buf.len());
             let (recvd, _) = c.stream_recv(stream_id.as_u64(), &mut buf[..end]).unwrap();
+            qtrace!("received {} remaining {}", recvd, self.remaining);
             if recvd == 0 {
                 return status;
             }
             self.remaining -= recvd;
-            qtrace!("received {} remaining {}", recvd, self.remaining);
             if self.remaining == 0 {
                 return GoalStatus::Done;
             }

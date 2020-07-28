@@ -181,7 +181,7 @@ impl Simulator {
         loop {
             for n in &mut self.nodes {
                 if dgram.is_none() && !n.ready(now) {
-                    qdebug!([self.name], "skipping {:?}", n);
+                    qdebug!([self.name], "skipping {:?}", n.node);
                     continue;
                 }
 

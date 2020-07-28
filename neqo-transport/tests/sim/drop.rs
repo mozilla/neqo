@@ -7,7 +7,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{Node, Rng};
-use neqo_common::Datagram;
+use neqo_common::{qtrace, Datagram};
 use neqo_transport::Output;
 use std::fmt::{self, Debug};
 use std::time::Instant;
@@ -53,6 +53,7 @@ impl Node for Drop {
     fn process(&mut self, d: Option<Datagram>, _now: Instant) -> Output {
         if let Some(dgram) = d {
             if self.drop() {
+                qtrace!("drop {}", dgram.len());
                 Output::None
             } else {
                 Output::Datagram(dgram)
