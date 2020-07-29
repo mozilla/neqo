@@ -2967,6 +2967,7 @@ mod tests {
             let output = a.process(input, now).dgram();
             assert!(had_input || output.is_some());
             input = output;
+            qtrace!("t += {:?}", rtt / 2);
             now += rtt / 2;
             mem::swap(&mut a, &mut b);
         }
