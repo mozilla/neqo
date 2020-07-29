@@ -7,6 +7,7 @@
 // Functions that handle capturing QLOG traces.
 
 use std::convert::TryFrom;
+use std::ops::RangeInclusive;
 use std::string::String;
 use std::time::Duration;
 
@@ -326,10 +327,20 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             first_ack_range,
             ack_ranges,
         } => {
-            let ack_ranges =
+            let ranges =
                 Frame::decode_ack_frame(*largest_acknowledged, *first_ack_range, ack_ranges).ok();
 
-            QuicFrame::ack(Some(ack_delay.to_string()), ack_ranges, None, None, None)
+            QuicFrame::ack(
+                Some(ack_delay.to_string()),
+                ranges.map(|all| {
+                    all.into_iter()
+                        .map(RangeInclusive::into_inner)
+                        .collect::<Vec<_>>()
+                }),
+                None,
+                None,
+                None,
+            )
         }
         Frame::ResetStream {
             stream_id,
