@@ -512,14 +512,7 @@ impl SendStream {
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_sent(offset, len);
-            if offset + len as u64 == self.max_stream_data {
-                self.flow_mgr
-                    .borrow_mut()
-                    .stream_data_blocked(self.stream_id, self.max_stream_data);
-            }
-            if self.flow_mgr.borrow().conn_credit_avail() == 0 {
-                self.flow_mgr.borrow_mut().data_blocked();
-            }
+            self.send_blocked_if_space_needed(0);
         };
 
         if fin {
@@ -628,14 +621,14 @@ impl SendStream {
         self.send_internal(buf, true)
     }
 
-    fn send_blocked(&mut self, len: u64) {
-        if self.credit_avail() < len {
+    fn send_blocked_if_space_needed(&mut self, needed_space: u64) {
+        if self.credit_avail() <= needed_space {
             self.flow_mgr
                 .borrow_mut()
                 .stream_data_blocked(self.stream_id, self.max_stream_data);
         }
 
-        if self.flow_mgr.borrow().conn_credit_avail() < len {
+        if self.flow_mgr.borrow().conn_credit_avail() <= needed_space {
             self.flow_mgr.borrow_mut().data_blocked();
         }
     }
@@ -660,7 +653,7 @@ impl SendStream {
             return Ok(0);
         } else if self.avail() < buf.len() {
             if atomic {
-                self.send_blocked(buf.len() as u64);
+                self.send_blocked_if_space_needed(buf.len() as u64);
                 return Ok(0);
             } else {
                 &buf[..self.avail()]
