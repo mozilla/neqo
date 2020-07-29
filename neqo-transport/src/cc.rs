@@ -34,6 +34,7 @@ pub struct CongestionControl {
     congestion_recovery_start_time: Option<Instant>,
     ssthresh: usize,
     pacer: Option<Pacer>,
+    in_recovery: bool,
 
     qlog: NeqoQlog,
     qlog_curr_cong_state: CongestionState,
@@ -47,6 +48,7 @@ impl Default for CongestionControl {
             congestion_recovery_start_time: None,
             ssthresh: std::usize::MAX,
             pacer: None,
+            in_recovery: false,
             qlog: NeqoQlog::disabled(),
             qlog_curr_cong_state: CongestionState::SlowStart,
         }
@@ -65,12 +67,6 @@ impl Display for CongestionControl {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum PacketState {
-    Acked,
-    Lost,
 }
 
 impl CongestionControl {
@@ -109,10 +105,16 @@ impl CongestionControl {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
 
-            if self.in_congestion_recovery(pkt.time_sent, PacketState::Acked) {
+            if self.in_congestion_recovery(pkt.time_sent) {
                 // Do not increase congestion window in recovery period.
                 continue;
             }
+
+            if self.in_recovery {
+                self.in_recovery = false;
+                qlog::metrics_updated(&mut self.qlog, &[QlogMetric::InRecovery(false)]);
+            }
+
             if self.app_limited() {
                 // Do not increase congestion_window if application limited.
                 qlog::congestion_state_updated(
@@ -231,19 +233,9 @@ impl CongestionControl {
     }
 
     #[must_use]
-    fn in_congestion_recovery(&mut self, sent_time: Instant, packet_state: PacketState) -> bool {
+    fn in_congestion_recovery(&mut self, sent_time: Instant) -> bool {
         match self.congestion_recovery_start_time {
-            Some(crst) => {
-                if sent_time <= crst {
-                    true
-                } else {
-                    if let PacketState::Acked = packet_state {
-                        qlog::metrics_updated(&mut self.qlog, &[QlogMetric::InRecovery(false)]);
-                        self.congestion_recovery_start_time = None;
-                    }
-                    false
-                }
-            }
+            Some(crst) => sent_time <= crst,
             None => false,
         }
     }
@@ -251,7 +243,7 @@ impl CongestionControl {
     fn on_congestion_event(&mut self, now: Instant, sent_time: Instant) {
         // Start a new congestion event if packet was sent after the
         // start of the previous congestion recovery period.
-        if !self.in_congestion_recovery(sent_time, PacketState::Lost) {
+        if !self.in_congestion_recovery(sent_time) {
             self.congestion_recovery_start_time = Some(now);
             self.congestion_window /= 2; // kLossReductionFactor = 0.5
             self.congestion_window = max(self.congestion_window, MIN_CONG_WINDOW);
@@ -270,6 +262,7 @@ impl CongestionControl {
                     QlogMetric::InRecovery(true),
                 ],
             );
+            self.in_recovery = true;
             qlog::congestion_state_updated(
                 &mut self.qlog,
                 &mut self.qlog_curr_cong_state,
