@@ -6,7 +6,7 @@
 
 // Congestion control
 
-use std::cmp::max;
+use std::cmp::{max, min};
 use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
@@ -31,6 +31,7 @@ const PERSISTENT_CONG_THRESH: u32 = 3;
 pub struct CongestionControl {
     congestion_window: usize, // = kInitialWindow
     bytes_in_flight: usize,
+    acked_bytes: usize,
     congestion_recovery_start_time: Option<Instant>,
     ssthresh: usize,
     pacer: Option<Pacer>,
@@ -45,6 +46,7 @@ impl Default for CongestionControl {
         Self {
             congestion_window: INITIAL_WINDOW,
             bytes_in_flight: 0,
+            acked_bytes: 0,
             congestion_recovery_start_time: None,
             ssthresh: std::usize::MAX,
             pacer: None,
@@ -126,31 +128,40 @@ impl CongestionControl {
                 continue;
             }
 
-            if self.congestion_window < self.ssthresh {
-                self.congestion_window += pkt.size;
-                qinfo!([self], "slow start");
-                qlog::congestion_state_updated(
-                    &mut self.qlog,
-                    &mut self.qlog_curr_cong_state,
-                    CongestionState::SlowStart,
-                );
-            } else {
-                self.congestion_window += (MAX_DATAGRAM_SIZE * pkt.size) / self.congestion_window;
-                qinfo!([self], "congestion avoidance");
-                qlog::congestion_state_updated(
-                    &mut self.qlog,
-                    &mut self.qlog_curr_cong_state,
-                    CongestionState::CongestionAvoidance,
-                );
-            }
-            qlog::metrics_updated(
+            self.acked_bytes += pkt.size;
+        }
+        qtrace!([self], "ACK received, acked_bytes = {}", self.acked_bytes);
+
+        // Slow start, up to the slow start threshold.
+        if self.congestion_window < self.ssthresh {
+            let increase = min(self.ssthresh - self.congestion_window, self.acked_bytes);
+            self.congestion_window += increase;
+            self.acked_bytes -= increase;
+            qinfo!([self], "slow start += {}", increase);
+            qlog::congestion_state_updated(
                 &mut self.qlog,
-                &[
-                    QlogMetric::CongestionWindow(self.congestion_window),
-                    QlogMetric::BytesInFlight(self.bytes_in_flight),
-                ],
+                &mut self.qlog_curr_cong_state,
+                CongestionState::SlowStart,
             );
         }
+        // Congestion avoidance, above the slow start threshold.
+        if self.acked_bytes >= self.congestion_window {
+            self.congestion_window += MAX_DATAGRAM_SIZE;
+            self.acked_bytes -= MAX_DATAGRAM_SIZE;
+            qinfo!([self], "congestion avoidance += {}", MAX_DATAGRAM_SIZE);
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                &mut self.qlog_curr_cong_state,
+                CongestionState::CongestionAvoidance,
+            );
+        }
+        qlog::metrics_updated(
+            &mut self.qlog,
+            &[
+                QlogMetric::CongestionWindow(self.congestion_window),
+                QlogMetric::BytesInFlight(self.bytes_in_flight),
+            ],
+        );
     }
 
     pub fn on_packets_lost(
@@ -247,6 +258,7 @@ impl CongestionControl {
         if self.after_recovery_start(sent_time) {
             self.congestion_recovery_start_time = Some(now);
             self.congestion_window /= 2; // kLossReductionFactor = 0.5
+            self.acked_bytes /= 2;
             self.congestion_window = max(self.congestion_window, MIN_CONG_WINDOW);
             self.ssthresh = self.congestion_window;
             qinfo!(

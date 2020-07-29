@@ -2649,7 +2649,7 @@ impl ::std::fmt::Display for Connection {
 mod tests {
     use super::*;
     use crate::cc::PACING_BURST_SIZE;
-    use crate::cc::{INITIAL_CWND_PKTS, MIN_CONG_WINDOW};
+    use crate::cc::{INITIAL_CWND_PKTS, MAX_DATAGRAM_SIZE, MIN_CONG_WINDOW};
     use crate::frame::{CloseError, StreamType};
     use crate::packet::PACKET_BIT_LONG;
     use crate::path::PATH_MTU_V6;
@@ -4326,15 +4326,20 @@ mod tests {
     }
 
     // Receive multiple packets and generate an ack-only packet.
-    fn ack_bytes(
+    fn ack_bytes<D>(
         dest: &mut Connection,
         stream: u64,
-        in_dgrams: Vec<Datagram>,
+        in_dgrams: D,
         now: Instant,
-    ) -> (Vec<Datagram>, Vec<Frame>) {
+    ) -> (Vec<Datagram>, Vec<Frame>)
+    where
+        D: IntoIterator<Item = Datagram>,
+        D::IntoIter: ExactSizeIterator,
+    {
         let mut srv_buf = [0; 4_096];
         let mut recvd_frames = Vec::new();
 
+        let in_dgrams = in_dgrams.into_iter();
         qdebug!([dest], "ack_bytes {} datagrams", in_dgrams.len());
         for dgram in in_dgrams {
             recvd_frames.extend(dest.test_process_input(dgram, now));
@@ -4569,25 +4574,34 @@ mod tests {
         let (mut c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
         now = next_now;
 
-        // Only sent 2 packets, to generate an ack but also keep cwnd increase
-        // small
-        c_tx_dgrams.truncate(2);
+        let c_tx_size: usize = c_tx_dgrams.iter().map(|d| d.len()).sum();
+        println!(
+            "client sending {} bytes into cwnd of {}",
+            c_tx_size,
+            client.loss_recovery.cwnd()
+        );
 
-        // Generate ACK
-        let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
-
+        // If we process just a few packets, we won't get an increase in the CWND.
+        let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams.drain(..2), now);
         for dgram in s_tx_dgram {
-            client.test_process_input(dgram, now);
+            client.process_input(dgram, now);
+        }
+        assert_eq!(cwnd1, client.loss_recovery.cwnd());
+
+        // Chances are that the client didn't send a full congestion window, so we need
+        // to send another packet so that it gets enough credit.
+        if c_tx_size < cwnd1 {
+            let extra = send_something(&mut client, now);
+            assert!(c_tx_size + extra.len() > cwnd1);
+            c_tx_dgrams.push(extra);
         }
 
-        // ACK of pkts sent after start of recovery period should have caused
-        // exit from recovery period to just regular congestion avoidance. cwnd
-        // should now be a little higher but not as high as acked pkts during
-        // slow-start would cause it to be.
-        let cwnd2 = client.loss_recovery.cwnd();
-
-        assert!(cwnd2 > cwnd1);
-        assert!(cwnd2 < cwnd1 + 500);
+        // It takes the entire CWND to increase the congestion window.
+        let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
+        for dgram in s_tx_dgram {
+            client.process_input(dgram, now);
+        }
+        assert_eq!(cwnd1 + MAX_DATAGRAM_SIZE, client.loss_recovery.cwnd());
     }
 
     fn induce_persistent_congestion(
