@@ -8,11 +8,12 @@
 
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::{hash_map::IterMut, BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::mem;
 use std::rc::Rc;
 
+use indexmap::IndexMap;
 use smallvec::SmallVec;
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace};
@@ -739,7 +740,7 @@ impl SendStream {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct SendStreams(HashMap<StreamId, SendStream>);
+pub(crate) struct SendStreams(IndexMap<StreamId, SendStream>);
 
 impl SendStreams {
     pub fn get(&self, id: StreamId) -> Res<&SendStream> {
@@ -828,9 +829,9 @@ impl SendStreams {
 
 impl<'a> IntoIterator for &'a mut SendStreams {
     type Item = (&'a StreamId, &'a mut SendStream);
-    type IntoIter = IterMut<'a, StreamId, SendStream>;
+    type IntoIter = indexmap::map::IterMut<'a, StreamId, SendStream>;
 
-    fn into_iter(self) -> IterMut<'a, StreamId, SendStream> {
+    fn into_iter(self) -> indexmap::map::IterMut<'a, StreamId, SendStream> {
         self.0.iter_mut()
     }
 }
