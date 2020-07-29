@@ -178,6 +178,11 @@ impl CongestionControl {
         {
             if last_lost_pkt.time_sent.duration_since(first.time_sent) > congestion_period {
                 self.congestion_window = MIN_CONG_WINDOW;
+                qlog::metrics_updated(
+                    &mut self.qlog,
+                    &[QlogMetric::CongestionWindow(self.congestion_window)],
+                );
+
                 qinfo!([self], "persistent congestion");
             }
         }
@@ -254,6 +259,7 @@ impl CongestionControl {
             qlog::metrics_updated(
                 &mut self.qlog,
                 &[
+                    QlogMetric::CongestionWindow(self.congestion_window),
                     QlogMetric::SsThresh(self.ssthresh),
                     QlogMetric::InRecovery(true),
                 ],
