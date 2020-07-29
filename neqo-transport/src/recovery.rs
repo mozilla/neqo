@@ -706,7 +706,6 @@ impl LossRecovery {
                     .update_rtt(&mut self.qlog, latest_rtt, ack_delay);
             }
         }
-        self.cc.on_packets_acked(&acked_packets);
 
         // Perform loss detection.
         // PTO is used to remove lost packets from in-flight accounting.
@@ -728,6 +727,11 @@ impl LossRecovery {
         let pto_raw = self.pto_raw(pn_space);
         self.cc
             .on_packets_lost(now, prev_largest_acked, pto_raw, &lost);
+
+        // This must happen after on_packets_lost. If in recovery, this could
+        // take us out, and then lost packets will start a new recovery period
+        // when it shouldn't.
+        self.cc.on_packets_acked(&acked_packets);
 
         self.pto_state = None;
 
