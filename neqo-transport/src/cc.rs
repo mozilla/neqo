@@ -90,6 +90,12 @@ impl CongestionControl {
         self.ssthresh
     }
 
+    #[cfg(test)]
+    #[must_use]
+    pub fn bif(&self) -> usize {
+        self.bytes_in_flight
+    }
+
     #[must_use]
     pub fn cwnd_avail(&self) -> usize {
         // BIF can be higher than cwnd due to PTO packets, which are sent even
@@ -300,5 +306,90 @@ impl CongestionControl {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packet::PacketType;
+    use std::rc::Rc;
+    use test_fixture::now;
+
+    #[test]
+    fn issue_876() {
+        let mut cc = CongestionControl::default();
+        let time_now = now();
+        let time_before = time_now - Duration::from_millis(100);
+        let time_after1 = time_now + Duration::from_millis(100);
+        let time_after2 = time_now + Duration::from_millis(150);
+        let time_after3 = time_now + Duration::from_millis(175);
+        let pto = Duration::from_millis(100);
+        let rtt = Duration::from_millis(98);
+
+        cc.start_pacer(time_now);
+
+        let sent_packets = vec![
+            SentPacket::new(
+                PacketType::Short,
+                1,             // pn
+                time_before,   // time sent
+                true,          // ack eliciting
+                Rc::default(), // tokens
+                103,           // size
+            ),
+            SentPacket::new(
+                PacketType::Short,
+                2,             // pn
+                time_before,   // time sent
+                true,          // ack eliciting
+                Rc::default(), // tokens
+                105,           // size
+            ),
+            SentPacket::new(
+                PacketType::Short,
+                3,             // pn
+                time_after2,   // time sent
+                true,          // ack eliciting
+                Rc::default(), // tokens
+                107,           // size
+            ),
+        ];
+
+        cc.on_packet_sent(&sent_packets[0], rtt);
+        assert_eq!(cc.cwnd(), INITIAL_WINDOW);
+        assert_eq!(cc.ssthresh(), std::usize::MAX);
+        assert_eq!(cc.bif(), 103);
+
+        cc.on_packet_sent(&sent_packets[1], rtt);
+        assert_eq!(cc.cwnd(), INITIAL_WINDOW);
+        assert_eq!(cc.ssthresh(), std::usize::MAX);
+        assert_eq!(cc.bif(), 208);
+
+        cc.on_packets_lost(time_after1, None, pto, &sent_packets[0..1]);
+
+        // We are now in recovery
+        assert_eq!(cc.cwnd(), INITIAL_WINDOW / 2);
+        assert_eq!(cc.ssthresh(), INITIAL_WINDOW / 2);
+        assert_eq!(cc.bif(), 105);
+
+        // Send a packet after recovery starts
+        cc.on_packet_sent(&sent_packets[2], rtt);
+        assert_eq!(cc.cwnd(), INITIAL_WINDOW / 2);
+        assert_eq!(cc.ssthresh(), INITIAL_WINDOW / 2);
+        assert_eq!(cc.bif(), 212);
+
+        // and ack it. cwnd increases slightly
+        let cwnd_increase = (MAX_DATAGRAM_SIZE * sent_packets[2].size) / cc.cwnd();
+        cc.on_packets_acked(&sent_packets[2..3]);
+        assert_eq!(cc.cwnd(), (INITIAL_WINDOW / 2) + cwnd_increase);
+        assert_eq!(cc.ssthresh(), INITIAL_WINDOW / 2);
+        assert_eq!(cc.bif(), 105);
+
+        // Packet from before is lost. Should not hurt cwnd.
+        cc.on_packets_lost(time_after3, None, pto, &sent_packets[1..2]);
+        assert_eq!(cc.cwnd(), (INITIAL_WINDOW / 2) + cwnd_increase);
+        assert_eq!(cc.ssthresh(), INITIAL_WINDOW / 2);
+        assert_eq!(cc.bif(), 0);
     }
 }
