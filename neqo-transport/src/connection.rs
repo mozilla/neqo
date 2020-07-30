@@ -5813,4 +5813,65 @@ mod tests {
         assert_ne!(server.stats().packets_rx, 0);
         assert_eq!(server.stats().packets_rx, server.stats().dropped_rx);
     }
+
+    #[test]
+    fn cleanup_bidi_streams_not_too_early() {
+        let mut conn = default_server();
+
+        let stream0 = StreamId::new(0);
+
+        // Make a bidi stream
+        conn.recv_streams.insert(
+            stream0,
+            RecvStream::new(stream0, 10_000, conn.flow_mgr.clone(), conn.events.clone()),
+        );
+
+        conn.send_streams.insert(
+            stream0,
+            SendStream::new(stream0, 10_000, conn.flow_mgr.clone(), conn.events.clone()),
+        );
+
+        assert_eq!(
+            false,
+            conn.recv_streams.get(&stream0).unwrap().is_terminal()
+        );
+        assert_eq!(false, conn.send_streams.get(stream0).unwrap().is_terminal());
+
+        // Write some data and FIN into the recv stream
+        conn.recv_streams
+            .get_mut(&stream0)
+            .unwrap()
+            .inbound_stream_frame(true, 0, b"abcde".to_vec())
+            .unwrap();
+
+        let mut buf = vec![0; 100];
+        let (sz, fin) = conn.stream_recv(stream0.as_u64(), &mut buf).unwrap();
+        assert_eq!(sz, 5);
+        assert_eq!(fin, true);
+
+        assert_eq!(true, conn.recv_streams.get(&stream0).unwrap().is_terminal());
+        assert_eq!(false, conn.send_streams.get(stream0).unwrap().is_terminal());
+
+        conn.cleanup_streams();
+
+        // This should not result in a max streams update because send stream is
+        // not yet terminal.
+        assert!(conn.flow_mgr.borrow_mut().next().is_none());
+
+        // send_stream -> DataSent
+        conn.send_streams.get_mut(stream0).unwrap().close();
+        // send_stream -> DataRecvd (terminal)
+        conn.send_streams
+            .get_mut(stream0)
+            .unwrap()
+            .mark_as_acked(0, 0, true);
+
+        assert_eq!(true, conn.recv_streams.get(&stream0).unwrap().is_terminal());
+        assert_eq!(true, conn.send_streams.get(stream0).unwrap().is_terminal());
+
+        conn.cleanup_streams();
+
+        // NOW we should see a MaxStreams frame
+        assert!(matches!(conn.flow_mgr.borrow_mut().next().unwrap(), Frame::MaxStreams{..}))
+    }
 }
