@@ -6,7 +6,6 @@ members = [
   "neqo-http3",
   "neqo-http3-server",
   "neqo-qpack",
-  "neqo-server",
   "neqo-transport",
   "neqo-interop",
   "test-fixture",

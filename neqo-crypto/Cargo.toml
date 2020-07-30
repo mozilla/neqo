@@ -11,7 +11,7 @@ neqo-common = { path = "../neqo-common" }
 log = {version = "0.4.0", default-features = false}
 
 [build-dependencies]
-bindgen = {version = "0.53.2", default-features = false}
+bindgen = {version = "0.53.2", features= ["runtime"]}
 serde = "1.0"
 serde_derive = "1.0"
 toml = "0.4"
