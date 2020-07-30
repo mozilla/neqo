@@ -744,6 +744,10 @@ impl SendStreams {
         self.0.get_mut(&id).ok_or_else(|| Error::InvalidStreamId)
     }
 
+    pub fn exists(&self, id: StreamId) -> bool {
+        self.0.contains_key(&id)
+    }
+
     pub fn insert(&mut self, id: StreamId, stream: SendStream) {
         self.0.insert(id, stream);
     }

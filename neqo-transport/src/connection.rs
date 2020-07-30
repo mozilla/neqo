@@ -2264,9 +2264,15 @@ impl Connection {
         let recv_to_remove = self
             .recv_streams
             .iter()
-            .filter(|(_, stream)| stream.is_terminal())
-            .filter(|(id, _)| id.is_uni() || self.send_streams.get(**id).is_err())
-            .map(|(id, _)| *id)
+            .filter_map(|(id, stream)| {
+                // Remove all streams for which the receiving is done (or aborted).
+                // But only if they are unidirectional, or we have finished sending.
+                if stream.is_terminal() && (id.is_uni() || !self.send_streams.exists(*id)) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
 
         let mut removed_bidi = 0;
