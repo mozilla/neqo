@@ -29,7 +29,7 @@ use neqo_crypto::{
 };
 
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
-use crate::crypto::{Crypto, CryptoDxState};
+use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
@@ -59,6 +59,9 @@ struct Packet(Vec<u8>);
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
+/// The number of datagrams that are saved during the handshake when
+/// keys to decrypt them are not yet available.
+const MAX_SAVED_DATAGRAMS: usize = 32;
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
 #[derive(Clone, Debug, PartialEq, Ord, Eq)]
@@ -394,6 +397,44 @@ impl StateSignaling {
     }
 }
 
+struct SavedDatagram {
+    /// The datagram.
+    d: Datagram,
+    /// The time that the datagram was received.
+    t: Instant,
+}
+
+#[derive(Default)]
+struct SavedDatagrams {
+    handshake: Vec<SavedDatagram>,
+    application_data: Vec<SavedDatagram>,
+}
+
+impl SavedDatagrams {
+    fn store(&mut self, cspace: CryptoSpace) -> &mut Vec<SavedDatagram> {
+        match cspace {
+            CryptoSpace::Handshake => &mut self.handshake,
+            CryptoSpace::ApplicationData => &mut self.application_data,
+            _ => panic!("unexpected space"),
+        }
+    }
+
+    pub fn save(&mut self, cspace: CryptoSpace, d: Datagram, t: Instant) {
+        let store = self.store(cspace);
+
+        if store.len() < MAX_SAVED_DATAGRAMS {
+            qdebug!("saving datagram@{:?}", t);
+            store.push(SavedDatagram { d, t });
+        } else {
+            qinfo!("too many saved datagrams");
+        }
+    }
+
+    pub fn take_saved(&mut self, cspace: CryptoSpace) -> Vec<SavedDatagram> {
+        mem::take(self.store(cspace))
+    }
+}
+
 /// A QUIC Connection
 ///
 /// First, create a new connection using `new_client()` or `new_server()`.
@@ -433,16 +474,11 @@ pub struct Connection {
     /// Checked against tparam value from peer
     remote_original_destination_cid: Option<ConnectionId>,
 
-    /// We sometimes save a datagram (just one) against the possibility that keys
-    /// will later become available.
-    /// One example of this is the case where a Handshake packet containing a
-    /// certificate is received coalesced with a 1-RTT packet.  The certificate
-    /// might need to authenticated by the application before the 1-RTT packet can
-    /// be processed.
-    /// The boolean indicates whether processing should be deferred: after saving,
-    /// we usually immediately try to process this, but that won't work until after
-    /// returning to the application.
-    saved_datagram: Option<(Datagram, bool)>,
+    /// We sometimes save a datagram against the possibility that keys will later
+    /// become available.  This avoids reporting packets as dropped during the handshake
+    /// when they are either just reordered or we haven't been able to install keys yet.
+    /// In particular, this occurs when asynchronous certificate validation happens.
+    saved_datagrams: SavedDatagrams,
 
     pub(crate) crypto: Crypto,
     pub(crate) acks: AckTracker,
@@ -576,7 +612,7 @@ impl Connection {
             local_initial_source_cid,
             remote_initial_source_cid: None,
             remote_original_destination_cid: None,
-            saved_datagram: None,
+            saved_datagrams: SavedDatagrams::default(),
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::default(),
@@ -794,8 +830,6 @@ impl Connection {
         self.crypto.tls.authenticated(status);
         let res = self.handshake(now, PNSpace::Handshake, None);
         self.absorb_error(now, res);
-        // Try to handle packets that couldn't be processed before.
-        self.process_saved(now, true);
     }
 
     /// Get the role of the connection.
@@ -862,7 +896,7 @@ impl Connection {
         self.capture_error(now, 0, res).ok()
     }
 
-    pub fn process_timer(&mut self, now: Instant) {
+    fn process_timer(&mut self, now: Instant) {
         if let State::Closing { error, timeout } | State::Draining { error, timeout } = &self.state
         {
             if *timeout <= now {
@@ -885,8 +919,6 @@ impl Connection {
             )));
             return;
         }
-
-        self.process_saved(now, false);
 
         let res = self.crypto.states.check_key_update(now);
         self.absorb_error(now, res);
@@ -1103,49 +1135,37 @@ impl Connection {
         }
     }
 
-    /// Process any saved packet.
-    /// When `always` is false, the packet is only processed if time has
-    /// passed since it was saved.  Otherwise saved packets are saved and then
-    /// dropped instantly.
-    fn process_saved(&mut self, now: Instant, always: bool) {
-        if let Some((_, ref mut defer)) = self.saved_datagram {
-            if always || !*defer {
-                let d = self.saved_datagram.take().unwrap().0;
-                qdebug!([self], "process saved datagram: {:?}", d);
-                self.process_input(d, now);
-            } else {
-                *defer = false;
+    /// Process any saved packets if the appropriate keys are available.
+    fn process_saved(&mut self, cspace: CryptoSpace) {
+        if self.crypto.states.rx_hp(cspace).is_some() {
+            for saved in self.saved_datagrams.take_saved(cspace) {
+                self.process_input(saved.d, saved.t);
             }
         }
     }
 
     /// In case a datagram arrives that we can only partially process, save any
     /// part that we don't have keys for.
-    fn maybe_save_datagram<'a, 'b>(
-        &'a mut self,
-        d: &'b Datagram,
-        slice: &'b [u8],
-        now: Instant,
-    ) -> bool {
-        // Only save partial datagrams to avoid looping.
-        // It also means that we don't have to worry about it being a stateless reset.
-        if slice.len() < d.len() {
-            let save = Datagram::new(d.source(), d.destination(), slice);
-            qdebug!([self], "saving datagram@{:?} {:?}", now, save);
-            self.saved_datagram = Some((save, true));
-            true
+    fn save_datagram(&mut self, cspace: CryptoSpace, d: Datagram, remaining: usize, now: Instant) {
+        let d = if remaining < d.len() {
+            Datagram::new(d.source(), d.destination(), &d[d.len() - remaining..])
         } else {
-            false
-        }
+            d
+        };
+        self.saved_datagrams.save(cspace, d, now);
+        self.stats.saved_datagrams += 1;
     }
 
+    /// Take a datagram as input.  This reports an error if the packet was bad.
+    /// `save_future` indicates whether failing to decrypt a packet due to lack of keys
+    /// should result in saving the packet for later.
     fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, PNSpace)>> {
         let mut slc = &d[..];
         let mut frames = Vec::new();
 
         qtrace!([self], "input {}", hex(&**d));
 
-        // Handle each packet in the datagram
+        // Handle each packet in the datagram.
         while !slc.is_empty() {
             let (packet, remainder) =
                 match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
@@ -1282,9 +1302,12 @@ impl Connection {
                     self.process_migrations(&d)?;
                 }
                 Err(e) => {
-                    // While connecting we might want to save the remainder of a packet.
-                    if matches!(e, Error::KeysNotFound) && self.maybe_save_datagram(&d, slc, now) {
-                        break;
+                    if let Error::KeysPending(cspace) = e {
+                        // This packet can't be decrypted because we don't have the keys yet.
+                        // Don't check this packet for a stateless reset, just return.
+                        let remaining = slc.len();
+                        self.save_datagram(cspace, d, remaining, now);
+                        return Ok(frames);
                     }
                     // Decryption failure, or not having keys is not fatal.
                     // If the state isn't available, or we can't decrypt the packet, drop
@@ -1438,23 +1461,13 @@ impl Connection {
 
     fn build_packet_header(
         path: &Path,
-        space: PNSpace,
+        cspace: CryptoSpace,
         encoder: Encoder,
         tx: &CryptoDxState,
         retry_info: &Option<RetryInfo>,
         quic_version: QuicVersion,
     ) -> (PacketType, PacketNumber, PacketBuilder) {
-        let pt = match space {
-            PNSpace::Initial => PacketType::Initial,
-            PNSpace::Handshake => PacketType::Handshake,
-            PNSpace::ApplicationData => {
-                if tx.is_0rtt() {
-                    PacketType::ZeroRtt
-                } else {
-                    PacketType::Short
-                }
-            }
-        };
+        let pt = PacketType::from(cspace);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {}", path.remote_cid());
             PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid())
@@ -1490,19 +1503,14 @@ impl Connection {
     fn output_close(&mut self, path: &Path, frame: &Frame) -> Res<SendOption> {
         let mut encoder = Encoder::with_capacity(path.mtu());
         for space in PNSpace::iter() {
-            let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
-                tx_state
+            let (cspace, tx) = if let Some(crypto) = self.crypto.states.select_tx(*space) {
+                crypto
             } else {
                 continue;
             };
 
-            // ConnectionClose frame not allowed for 0RTT.
-            if tx.is_0rtt() {
-                continue;
-            }
-
             let (_, _, mut builder) =
-                Self::build_packet_header(path, *space, encoder, tx, &None, self.quic_version);
+                Self::build_packet_header(path, cspace, encoder, tx, &None, self.quic_version);
             // ConnectionError::Application is only allowed at 1RTT.
             if *space == PNSpace::ApplicationData {
                 frame.marshal(&mut builder);
@@ -1587,8 +1595,8 @@ impl Connection {
         let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PNSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
-                tx_state
+            let (cspace, tx) = if let Some(crypto) = self.crypto.states.select_tx(*space) {
+                crypto
             } else {
                 continue;
             };
@@ -1596,7 +1604,7 @@ impl Connection {
             let header_start = encoder.len();
             let (pt, pn, mut builder) = Self::build_packet_header(
                 path,
-                *space,
+                cspace,
                 encoder,
                 tx,
                 &self.retry_info,
@@ -1625,7 +1633,7 @@ impl Connection {
             qlog::packet_sent(&mut self.qlog, pt, pn, &builder[payload_start..]);
 
             self.stats.packets_tx += 1;
-            encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
+            encoder = builder.build(self.crypto.states.tx(cspace).unwrap())?;
             debug_assert!(encoder.len() <= path.mtu());
 
             // Normal packets are in flight if they include PADDING frames,
@@ -1763,6 +1771,7 @@ impl Connection {
             self.path.as_mut().unwrap().set_reset_token(reset_token);
         }
         self.set_initial_limits();
+        qlog::connection_tparams_set(&mut self.qlog, &*self.tps.borrow());
         Ok(())
     }
 
@@ -1874,7 +1883,9 @@ impl Connection {
             if self.tps.borrow().remote.is_some() {
                 self.set_initial_limits();
             }
-            self.crypto.install_keys(self.role);
+            if self.crypto.install_keys(self.role)? {
+                self.process_saved(CryptoSpace::Handshake);
+            }
         }
 
         Ok(())
@@ -2223,13 +2234,13 @@ impl Connection {
         self.crypto.install_application_keys(now + pto)?;
         self.process_tps()?;
         self.set_state(State::Connected);
+        self.process_saved(CryptoSpace::ApplicationData);
         self.stats.resumed = self.crypto.tls.info().unwrap().resumed();
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
             self.set_state(State::Confirmed);
         }
         qinfo!([self], "Connection established");
-        qlog::connection_tparams_set(&mut self.qlog, &*self.tps.borrow());
         Ok(())
     }
 
@@ -5660,14 +5671,14 @@ mod tests {
         let _ = client.process(s2, now).dgram();
         // This packet will contain an ACK, but we can ignore it.
         assert_eq!(client.stats.dropped_rx, 0);
-        assert!(client.saved_datagram.is_some());
+        assert!(!client.saved_datagrams.application_data.is_empty());
 
         // After (successful) authentication, the packet is processed.
         maybe_authenticate(&mut client);
         let c3 = client.process(None, now).dgram();
         assert!(c3.is_some());
         assert_eq!(client.stats.dropped_rx, 0);
-        assert!(client.saved_datagram.is_none());
+        assert!(client.saved_datagrams.application_data.is_empty());
 
         // Allow the handshake to complete.
         now += RTT / 2;
@@ -5675,11 +5686,71 @@ mod tests {
         assert!(s3.is_some());
         assert_eq!(*server.state(), State::Confirmed);
         now += RTT / 2;
-        let c5 = client.process(s3, now).dgram();
-        assert!(c5.is_none());
+        let _ = client.process(s3, now).dgram();
         assert_eq!(*client.state(), State::Confirmed);
 
         assert_eq!(client.stats().dropped_rx, 0);
+    }
+
+    #[test]
+    fn reorder_handshake() {
+        const RTT: Duration = Duration::from_millis(100);
+        let mut client = default_client();
+        let mut server = default_server();
+        let mut now = now();
+
+        let c1 = client.process(None, now).dgram();
+        assert!(c1.is_some());
+
+        now += RTT / 2;
+        let s1 = server.process(c1, now).dgram();
+        assert!(s1.is_some());
+
+        // Drop the Initial packet from this.
+        let (_, s_hs) = split_datagram(s1.unwrap());
+        assert!(s_hs.is_some());
+
+        // Pass just the handshake packet in and the client can't handle it.
+        now += RTT / 2;
+        let res = client.process(s_hs, now);
+        assert_ne!(res.callback(), Duration::new(0, 0));
+        assert_eq!(client.stats().saved_datagrams, 1);
+        assert_eq!(client.stats().packets_rx, 1);
+
+        // Get the server to try again.
+        // Though we currently allow the server to arm its PTO timer, use
+        // a second client Initial packet to cause it to send again.
+        now += AT_LEAST_PTO;
+        let c2 = client.process(None, now).dgram();
+        now += RTT / 2;
+        let s2 = server.process(c2, now).dgram();
+        assert!(s2.is_some());
+
+        let (s_init, s_hs) = split_datagram(s2.unwrap());
+        assert!(s_hs.is_some());
+
+        // Processing the Handshake packet first should save it.
+        now += RTT / 2;
+        client.process_input(s_hs.unwrap(), now);
+        assert_eq!(client.stats().saved_datagrams, 2);
+        assert_eq!(client.stats().packets_rx, 2);
+
+        client.process_input(s_init, now);
+        // Each saved packet should now be "received" again.
+        assert_eq!(client.stats().packets_rx, 5);
+        maybe_authenticate(&mut client);
+        let c3 = client.process(None, now).dgram();
+        assert!(c3.is_some());
+
+        now += RTT / 2;
+        let s3 = server.process(c3, now).dgram();
+        assert_eq!(*server.state(), State::Confirmed);
+        assert_eq!(server.loss_recovery.rtt(), RTT);
+
+        now += RTT / 2;
+        client.process_input(s3.unwrap(), now);
+        assert_eq!(*client.state(), State::Confirmed);
+        assert_eq!(client.loss_recovery.rtt(), RTT);
     }
 
     #[test]

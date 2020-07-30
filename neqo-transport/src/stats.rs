@@ -21,6 +21,8 @@ pub struct Stats {
     pub dups_rx: usize,
     /// Dropped datagrams, or parts thereof
     pub dropped_rx: usize,
+    /// The number of packet that were saved for later processing.
+    pub saved_datagrams: usize,
     /// resumption used
     pub resumed: bool,
 }
