@@ -105,8 +105,9 @@ impl CongestionControl {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
 
-            if self.in_congestion_recovery(pkt.time_sent) {
-                // Do not increase congestion window in recovery period.
+            if !self.after_recovery_start(pkt.time_sent) {
+                // Do not increase congestion window for packets sent before
+                // recovery start.
                 continue;
             }
 
@@ -233,17 +234,17 @@ impl CongestionControl {
     }
 
     #[must_use]
-    fn in_congestion_recovery(&mut self, sent_time: Instant) -> bool {
+    fn after_recovery_start(&mut self, sent_time: Instant) -> bool {
         match self.congestion_recovery_start_time {
-            Some(crst) => sent_time <= crst,
-            None => false,
+            Some(crst) => sent_time > crst,
+            None => true,
         }
     }
 
     fn on_congestion_event(&mut self, now: Instant, sent_time: Instant) {
-        // Start a new congestion event if packet was sent after the
-        // start of the previous congestion recovery period.
-        if !self.in_congestion_recovery(sent_time) {
+        // Start a new congestion event if lost packet was sent after the start
+        // of the previous congestion recovery period.
+        if self.after_recovery_start(sent_time) {
             self.congestion_recovery_start_time = Some(now);
             self.congestion_window /= 2; // kLossReductionFactor = 0.5
             self.congestion_window = max(self.congestion_window, MIN_CONG_WINDOW);
