@@ -1277,7 +1277,7 @@ impl Connection {
                         payload.pn(),
                         &payload[..],
                     );
-                    qlog::packet_received(&mut self.qlog, &payload);
+                    qlog::packet_received(&mut self.qlog, &packet, &payload);
                     let res = self.process_packet(&payload, now);
                     if res.is_err() && self.path.is_none() {
                         // We need to make a path for sending an error message.
@@ -1633,7 +1633,13 @@ impl Connection {
             }
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
-            qlog::packet_sent(&mut self.qlog, pt, pn, &builder[payload_start..]);
+            qlog::packet_sent(
+                &mut self.qlog,
+                pt,
+                pn,
+                builder.len(),
+                &builder[payload_start..],
+            );
 
             self.stats.borrow_mut().packets_tx += 1;
             encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
