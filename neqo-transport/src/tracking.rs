@@ -302,7 +302,7 @@ impl ::std::fmt::Display for PacketRange {
 
 /// The ACK delay we use.
 pub const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
-pub const MAX_UNACKED_PKTS: u64 = 1;
+pub const MAX_UNACKED_PKTS: usize = 1;
 const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
@@ -325,7 +325,7 @@ pub struct RecvdPackets {
     largest_pn_time: Option<Instant>,
     // The time that we should be sending an ACK.
     ack_time: Option<Instant>,
-    pkts_since_last_ack: u64,
+    pkts_since_last_ack: usize,
 }
 
 impl RecvdPackets {
@@ -615,6 +615,7 @@ mod tests {
     };
     use lazy_static::lazy_static;
     use std::collections::HashSet;
+    use std::convert::TryFrom;
 
     lazy_static! {
         static ref NOW: Instant = Instant::now();
@@ -700,7 +701,8 @@ mod tests {
         assert!(!rp.ack_now(*NOW));
 
         // Some packets won't cause an ACK to be needed.
-        for num in 0..MAX_UNACKED_PKTS {
+        let max_unacked = u64::try_from(MAX_UNACKED_PKTS).unwrap();
+        for num in 0..max_unacked {
             rp.set_received(*NOW, num, true);
             assert_eq!(Some(*NOW + ACK_DELAY), rp.ack_time());
             assert!(!rp.ack_now(*NOW));
@@ -708,7 +710,7 @@ mod tests {
         }
 
         // Exceeding MAX_UNACKED_PKTS will move the ACK time to now.
-        rp.set_received(*NOW, MAX_UNACKED_PKTS, true);
+        rp.set_received(*NOW, max_unacked, true);
         assert_eq!(Some(*NOW), rp.ack_time());
         assert!(rp.ack_now(*NOW));
     }
