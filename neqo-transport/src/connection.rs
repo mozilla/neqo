@@ -1165,8 +1165,6 @@ impl Connection {
     }
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
-    /// `save_future` indicates whether failing to decrypt a packet due to lack of keys
-    /// should result in saving the packet for later.
     fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, PNSpace)>> {
         let mut slc = &d[..];
         let mut frames = Vec::new();

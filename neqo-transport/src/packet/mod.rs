@@ -640,17 +640,17 @@ impl<'a> PublicPacket<'a> {
     }
 
     pub fn decrypt(&self, crypto: &mut CryptoStates, release_at: Instant) -> Res<DecryptedPacket> {
-        let space: CryptoSpace = self.packet_type.into();
+        let cspace: CryptoSpace = self.packet_type.into();
         // This has to work in two stages because we need to remove header protection
         // before picking the keys to use.
-        if let Some(rx) = crypto.rx_hp(space) {
+        if let Some(rx) = crypto.rx_hp(cspace) {
             // Note that this will dump early, which creates a side-channel.
             // This is OK in this case because we the only reason this can
             // fail is if the cryptographic module is bad or the packet is
             // too small (which is public information).
             let (key_phase, pn, header, body) = self.decrypt_header(rx)?;
             qtrace!([rx], "decoded header: {:?}", header);
-            let rx = crypto.rx(space, key_phase).unwrap();
+            let rx = crypto.rx(cspace, key_phase).unwrap();
             let d = rx.decrypt(pn, &header, body)?;
             // If this is the first packet ever successfully decrypted
             // using `rx`, make sure to initiate a key update.
@@ -663,10 +663,10 @@ impl<'a> PublicPacket<'a> {
                 pn,
                 data: d,
             })
-        } else if crypto.rx_pending(space) {
-            Err(Error::KeysPending(space))
+        } else if crypto.rx_pending(cspace) {
+            Err(Error::KeysPending(cspace))
         } else {
-            qtrace!("keys for {:?} already discarded", space);
+            qtrace!("keys for {:?} already discarded", cspace);
             Err(Error::KeysDiscarded)
         }
     }

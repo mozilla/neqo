@@ -564,16 +564,6 @@ pub enum CryptoSpace {
     ApplicationData,
 }
 
-impl From<PNSpace> for CryptoSpace {
-    fn from(pn_space: PNSpace) -> Self {
-        match pn_space {
-            PNSpace::Initial => Self::Initial,
-            PNSpace::Handshake => Self::Handshake,
-            PNSpace::ApplicationData => Self::ApplicationData,
-        }
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct CryptoStates {
     initial: Option<CryptoState>,
