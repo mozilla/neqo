@@ -146,8 +146,8 @@ impl CongestionControl {
         }
         // Congestion avoidance, above the slow start threshold.
         if self.acked_bytes >= self.congestion_window {
+            self.acked_bytes -= self.congestion_window;
             self.congestion_window += MAX_DATAGRAM_SIZE;
-            self.acked_bytes -= MAX_DATAGRAM_SIZE;
             qinfo!([self], "congestion avoidance += {}", MAX_DATAGRAM_SIZE);
             qlog::congestion_state_updated(
                 &mut self.qlog,
