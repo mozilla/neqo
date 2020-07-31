@@ -126,13 +126,26 @@ pub fn connection_state_updated(qlog: &mut NeqoQlog, new: &State) {
     })
 }
 
-pub fn packet_sent(qlog: &mut NeqoQlog, pt: PacketType, pn: PacketNumber, body: &[u8]) {
+pub fn packet_sent(
+    qlog: &mut NeqoQlog,
+    pt: PacketType,
+    pn: PacketNumber,
+    plen: usize,
+    body: &[u8],
+) {
     qlog.add_event_with_stream(|stream| {
         let mut d = Decoder::from(body);
 
         stream.add_event(Event::packet_sent_min(
             to_qlog_pkt_type(pt),
-            PacketHeader::new(pn, None, None, None, None, None),
+            PacketHeader::new(
+                pn,
+                Some(u64::try_from(plen).unwrap()),
+                None,
+                None,
+                None,
+                None,
+            ),
             Some(Vec::new()),
         ))?;
 
@@ -177,13 +190,24 @@ pub fn packets_lost(qlog: &mut NeqoQlog, pkts: &[SentPacket]) {
     })
 }
 
-pub fn packet_received(qlog: &mut NeqoQlog, payload: &DecryptedPacket) {
+pub fn packet_received(
+    qlog: &mut NeqoQlog,
+    public_packet: &PublicPacket,
+    payload: &DecryptedPacket,
+) {
     qlog.add_event_with_stream(|stream| {
         let mut d = Decoder::from(&payload[..]);
 
         stream.add_event(Event::packet_received(
             to_qlog_pkt_type(payload.packet_type()),
-            PacketHeader::new(payload.pn(), None, None, None, None, None),
+            PacketHeader::new(
+                payload.pn(),
+                Some(u64::try_from(public_packet.packet_len()).unwrap()),
+                None,
+                None,
+                None,
+                None,
+            ),
             Some(Vec::new()),
             None,
             None,
