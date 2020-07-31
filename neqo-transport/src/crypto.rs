@@ -695,6 +695,7 @@ impl CryptoStates {
     }
 
     pub fn set_0rtt_keys(&mut self, dir: CryptoDxDirection, secret: &SymKey, cipher: Cipher) {
+        qtrace!([self], "install 0-RTT keys");
         self.zero_rtt = Some(CryptoDxState::new(dir, TLS_EPOCH_ZERO_RTT, secret, cipher));
     }
 
@@ -708,6 +709,7 @@ impl CryptoStates {
     }
 
     pub fn discard_0rtt_keys(&mut self) {
+        qtrace!([self], "discard 0-RTT keys");
         assert!(
             self.app_read.is_none(),
             "Can't discard 0-RTT after setting application keys"

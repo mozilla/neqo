@@ -5371,12 +5371,12 @@ mod tests {
         }
         let mut dec = Decoder::from(buf);
         let first = dec.decode_byte().unwrap();
+        assert_ne!(first & 0b0011_0000, 0b0011_0000, "retry not supported");
         dec.skip(4); // Version.
         dec.skip_vec(1); // DCID
         dec.skip_vec(1); // SCID
-        if first & 0x30 == 0 {
-            // Initial
-            dec.skip_vvec();
+        if first & 0b0011_0000 == 0 {
+            dec.skip_vvec(); // Initial token
         }
         dec.skip_vvec(); // The rest of the packet.
         let p1 = &buf[..dec.offset()];
@@ -5610,6 +5610,69 @@ mod tests {
         let (l, ended) = client.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(&buf[..l], DEFAULT_STREAM_DATA);
         assert!(ended);
+    }
+
+    #[test]
+    fn reorder_05rtt_with_0rtt() {
+        const RTT: Duration = Duration::from_millis(100);
+
+        let mut client = default_client();
+        let mut server = default_server();
+        let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
+
+        // Include RTT in sending the ticket or the ticket age reported by the
+        // client is wrong, which causes the server to reject 0-RTT.
+        now += RTT / 2;
+        server.send_ticket(now, &[]).unwrap();
+        let ticket = server.process_output(now).dgram().unwrap();
+        now += RTT / 2;
+        client.process_input(ticket, now);
+        let token = client.resumption_token().unwrap();
+        let mut client = default_client();
+        client.set_resumption_token(now, &token[..]).unwrap();
+        let mut server = default_server();
+
+        // Send ClientHello and some 0-RTT.
+        let c1 = send_something(&mut client, now);
+        assertions::assert_coalesced_0rtt(&c1[..]);
+        // Drop the 0-RTT from the coalesced datagram, so that the server
+        // acknowledges the next 0-RTT packet.
+        let (c1, _) = split_datagram(c1);
+        let c2 = send_something(&mut client, now);
+
+        // Handle the first packet and send 0.5-RTT in response.  Drop the response.
+        now += RTT / 2;
+        let _ = server.process(Some(c1), now).dgram().unwrap();
+        // The gap in 0-RTT will result in this 0.5 RTT containing an ACK.
+        server.process_input(c2, now);
+        let s2 = send_something(&mut server, now);
+
+        // Save the 0.5 RTT.
+        now += RTT / 2;
+        client.process_input(s2, now);
+        assert_eq!(client.stats().saved_datagrams, 1);
+
+        // Now PTO at the client and cause the server to re-send handshake packets.
+        now += AT_LEAST_PTO;
+        let c3 = client.process(None, now).dgram();
+
+        now += RTT / 2;
+        let s3 = server.process(c3, now).dgram().unwrap();
+        assertions::assert_no_1rtt(&s3[..]);
+
+        // The client should be able to process the 0.5 RTT now.
+        // This should contain an ACK, so we are processing an ACK from the past.
+        now += RTT / 2;
+        client.process_input(s3, now);
+        maybe_authenticate(&mut client);
+        let c4 = client.process(None, now).dgram();
+        assert_eq!(*client.state(), State::Connected);
+        assert_eq!(client.loss_recovery.rtt(), RTT);
+
+        now += RTT / 2;
+        server.process_input(c4.unwrap(), now);
+        assert_eq!(*server.state(), State::Confirmed);
+        assert_eq!(server.loss_recovery.rtt(), RTT);
     }
 
     /// Test that a server that coalesces 0.5 RTT with handshake packets
