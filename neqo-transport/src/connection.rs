@@ -61,6 +61,10 @@ pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
 /// The number of datagrams that are saved during the handshake when
 /// keys to decrypt them are not yet available.
+///
+/// This value exceeds what should be possible to send during the handshake.
+/// Neither endpoint should have enough congestion window to send this
+/// much before the handshake completes.
 const MAX_SAVED_DATAGRAMS: usize = 32;
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
@@ -426,10 +430,10 @@ impl SavedDatagrams {
         let store = self.store(cspace);
 
         if store.len() < MAX_SAVED_DATAGRAMS {
-            qdebug!("saving datagram@{:?}", t);
+            qdebug!("saving datagram of {} bytes", d.len());
             store.push(SavedDatagram { d, t });
         } else {
-            qinfo!("too many saved datagrams");
+            qinfo!("not saving datagram of {} bytes", d.len());
         }
     }
 
@@ -5733,6 +5737,71 @@ mod tests {
         client.process_input(s3.unwrap(), now);
         assert_eq!(*client.state(), State::Confirmed);
         assert_eq!(client.loss_recovery.rtt(), RTT);
+    }
+
+    #[test]
+    fn reorder_1rtt() {
+        const RTT: Duration = Duration::from_millis(100);
+        const PACKETS: usize = 6; // Many, but not enough to overflow cwnd.
+        let mut client = default_client();
+        let mut server = default_server();
+        let mut now = now();
+
+        let c1 = client.process(None, now).dgram();
+        assert!(c1.is_some());
+
+        now += RTT / 2;
+        let s1 = server.process(c1, now).dgram();
+        assert!(s1.is_some());
+
+        now += RTT / 2;
+        client.process_input(s1.unwrap(), now);
+        maybe_authenticate(&mut client);
+        let c2 = client.process(None, now).dgram();
+        assert!(c2.is_some());
+
+        // Now get a bunch of packets from the client.
+        // Give them to the server before giving it `c2`.
+        for _ in 0..PACKETS {
+            let d = send_something(&mut client, now);
+            server.process_input(d, now + RTT / 2);
+        }
+        // The server has now received those packets, and saved them.
+        // The two extra received are Initial + the junk we use for padding.
+        assert_eq!(server.stats().packets_rx, PACKETS + 2);
+        assert_eq!(server.stats().saved_datagrams, PACKETS);
+        assert_eq!(server.stats().dropped_rx, 1);
+
+        now += RTT / 2;
+        let s2 = server.process(c2, now).dgram();
+        // The server has now received those packets, and saved them.
+        // The two additional are an Initial ACK and Handshake.
+        assert_eq!(server.stats().packets_rx, PACKETS * 2 + 4);
+        assert_eq!(server.stats().saved_datagrams, PACKETS);
+        assert_eq!(server.stats().dropped_rx, 1);
+        assert_eq!(*server.state(), State::Confirmed);
+        assert_eq!(server.loss_recovery.rtt(), RTT);
+
+        now += RTT / 2;
+        client.process_input(s2.unwrap(), now);
+        assert_eq!(client.loss_recovery.rtt(), RTT);
+
+        // All the stream data that was sent should now be available.
+        let packets = server
+            .events()
+            .filter_map(|e| {
+                if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                    let mut buf = vec![0; DEFAULT_STREAM_DATA.len() + 1];
+                    let (recvd, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(recvd, DEFAULT_STREAM_DATA.len());
+                    assert!(fin);
+                    Some(())
+                } else {
+                    None
+                }
+            })
+            .count();
+        assert_eq!(packets, PACKETS);
     }
 
     #[test]
