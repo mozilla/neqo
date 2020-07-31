@@ -2927,7 +2927,7 @@ mod tests {
             let out = server.process(Some(d), now());
             assert_eq!(
                 out.as_dgram_ref().is_some(),
-                (d_num as u64 + 1) % (MAX_UNACKED_PKTS + 1) == 0
+                (d_num + 1) % (MAX_UNACKED_PKTS + 1) == 0
             );
             qdebug!("Output={:0x?}", out.as_dgram_ref());
         }
@@ -4560,42 +4560,44 @@ mod tests {
         }
 
         // Should be in CARP now.
-        let cwnd1 = client.loss_recovery.cwnd();
 
         now += Duration::from_millis(10); // Time passes. CARP -> CA
 
-        // Client: Send more data
-        let (mut c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
-        now = next_now;
+        // Now make sure that we increase congestion window according to the
+        // accurate byte counting version of congestion avoidance.
+        // Check over several increases to be sure.
+        let mut expected_cwnd = client.loss_recovery.cwnd();
+        for i in 0..5 {
+            println!("{}", i);
+            // Client: Send more data
+            let (mut c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
+            now = next_now;
 
-        let c_tx_size: usize = c_tx_dgrams.iter().map(|d| d.len()).sum();
-        println!(
-            "client sending {} bytes into cwnd of {}",
-            c_tx_size,
-            client.loss_recovery.cwnd()
-        );
+            let c_tx_size: usize = c_tx_dgrams.iter().map(|d| d.len()).sum();
+            println!(
+                "client sending {} bytes into cwnd of {}",
+                c_tx_size,
+                client.loss_recovery.cwnd()
+            );
+            assert_eq!(c_tx_size, expected_cwnd);
 
-        // If we process just a few packets, we won't get an increase in the CWND.
-        let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams.drain(..2), now);
-        for dgram in s_tx_dgram {
-            client.process_input(dgram, now);
+            // Until we process all the packets, the congestion window remains the same.
+            // Note that we need the client to process ACK frames in stages, so split the
+            // datagrams into two, ensuring that we allow for an ACK for each batch.
+            let most = c_tx_dgrams.len() - usize::try_from(MAX_UNACKED_PKTS + 1).unwrap();
+            let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams.drain(..most), now);
+            for dgram in s_tx_dgram {
+                assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
+                client.process_input(dgram, now);
+            }
+            let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
+            for dgram in s_tx_dgram {
+                assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
+                client.process_input(dgram, now);
+            }
+            expected_cwnd += MAX_DATAGRAM_SIZE;
+            assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
         }
-        assert_eq!(cwnd1, client.loss_recovery.cwnd());
-
-        // Chances are that the client didn't send a full congestion window, so we need
-        // to send another packet so that it gets enough credit.
-        if c_tx_size < cwnd1 {
-            let extra = send_something(&mut client, now);
-            assert!(c_tx_size + extra.len() > cwnd1);
-            c_tx_dgrams.push(extra);
-        }
-
-        // It takes the entire CWND to increase the congestion window.
-        let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
-        for dgram in s_tx_dgram {
-            client.process_input(dgram, now);
-        }
-        assert_eq!(cwnd1 + MAX_DATAGRAM_SIZE, client.loss_recovery.cwnd());
     }
 
     fn induce_persistent_congestion(
