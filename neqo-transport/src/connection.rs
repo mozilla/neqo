@@ -2140,6 +2140,17 @@ impl Connection {
         }
     }
 
+    fn decode_ack_delay(&self, v: u64) -> Duration {
+        // If we have remote transport parameters, use them.
+        // Otherwise, ack delay should be zero (because it's the handshake).
+        if let Some(r) = self.tps.borrow().remote.as_ref() {
+            let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT)).unwrap();
+            Duration::from_micros(v.checked_shl(exponent).unwrap_or(u64::MAX))
+        } else {
+            Duration::new(0, 0)
+        }
+    }
+
     fn handle_ack(
         &mut self,
         space: PNSpace,
@@ -2164,7 +2175,7 @@ impl Connection {
             space,
             largest_acknowledged,
             acked_ranges,
-            Duration::from_millis(ack_delay),
+            self.decode_ack_delay(ack_delay),
             now,
         );
         for acked in acked_packets {
