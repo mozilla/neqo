@@ -372,7 +372,9 @@ fn main() -> Result<(), io::Error> {
 
     let (poll, mut sockets, mut servers) = init_poll(&hosts, &args)?;
 
-    let mut timer = Builder::default().build::<usize>();
+    let mut timer = Builder::default()
+        .tick_duration(Duration::from_millis(1))
+        .build::<usize>();
     poll.register(&timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
 
     let buf = &mut [0u8; 2048];
