@@ -331,7 +331,6 @@ impl<'a> Handler<'a> {
     }
 
     fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {
-        let mut data = vec![0; 4000];
         while let Some(event) = client.next_event() {
             match event {
                 Http3ClientEvent::AuthenticationNeeded => {
@@ -359,7 +358,8 @@ impl<'a> Handler<'a> {
                             println!("Data on unexpected stream: {}", stream_id);
                             return Ok(false);
                         }
-                        Some(out_file) => {
+                        Some(out_file) => loop {
+                            let mut data = vec![0; 4096];
                             let (sz, fin) = client
                                 .read_response_data(Instant::now(), stream_id, &mut data)
                                 .expect("Read should succeed");
@@ -381,8 +381,13 @@ impl<'a> Handler<'a> {
                                     println!("<FIN[{}]>", stream_id);
                                 }
                                 stream_done = true;
+                                break;
                             }
-                        }
+
+                            if sz == 0 {
+                                break;
+                            }
+                        },
                     }
 
                     if stream_done {
