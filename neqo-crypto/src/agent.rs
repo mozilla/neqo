@@ -79,7 +79,7 @@ fn get_alpn(fd: *mut ssl::PRFileDesc, pre: bool) -> Res<Option<String>> {
             chosen.truncate(usize::try_from(chosen_len)?);
             Some(match String::from_utf8(chosen) {
                 Ok(a) => a,
-                _ => return Err(Error::InternalError),
+                Err(_) => return Err(Error::InternalError),
             })
         }
         _ => None,

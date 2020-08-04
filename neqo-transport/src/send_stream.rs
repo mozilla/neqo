@@ -8,11 +8,12 @@
 
 use std::cell::RefCell;
 use std::cmp::{max, min};
-use std::collections::{hash_map::IterMut, BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::mem;
 use std::rc::Rc;
 
+use indexmap::IndexMap;
 use smallvec::SmallVec;
 
 use neqo_common::{qdebug, qerror, qinfo, qtrace};
@@ -511,14 +512,7 @@ impl SendStream {
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_sent(offset, len);
-            if offset + len as u64 == self.max_stream_data {
-                self.flow_mgr
-                    .borrow_mut()
-                    .stream_data_blocked(self.stream_id, self.max_stream_data);
-            }
-            if self.flow_mgr.borrow().conn_credit_avail() == 0 {
-                self.flow_mgr.borrow_mut().data_blocked();
-            }
+            self.send_blocked_if_space_needed(0);
         };
 
         if fin {
@@ -627,14 +621,14 @@ impl SendStream {
         self.send_internal(buf, true)
     }
 
-    fn send_blocked(&mut self, len: u64) {
-        if self.credit_avail() < len {
+    fn send_blocked_if_space_needed(&mut self, needed_space: u64) {
+        if self.credit_avail() <= needed_space {
             self.flow_mgr
                 .borrow_mut()
                 .stream_data_blocked(self.stream_id, self.max_stream_data);
         }
 
-        if self.flow_mgr.borrow().conn_credit_avail() < len {
+        if self.flow_mgr.borrow().conn_credit_avail() <= needed_space {
             self.flow_mgr.borrow_mut().data_blocked();
         }
     }
@@ -658,8 +652,8 @@ impl SendStream {
         let buf = if buf.is_empty() || (self.avail() == 0) {
             return Ok(0);
         } else if self.avail() < buf.len() {
-            self.send_blocked(buf.len() as u64);
             if atomic {
+                self.send_blocked_if_space_needed(buf.len() as u64);
                 return Ok(0);
             } else {
                 &buf[..self.avail()]
@@ -739,7 +733,7 @@ impl SendStream {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct SendStreams(HashMap<StreamId, SendStream>);
+pub(crate) struct SendStreams(IndexMap<StreamId, SendStream>);
 
 impl SendStreams {
     pub fn get(&self, id: StreamId) -> Res<&SendStream> {
@@ -828,9 +822,9 @@ impl SendStreams {
 
 impl<'a> IntoIterator for &'a mut SendStreams {
     type Item = (&'a StreamId, &'a mut SendStream);
-    type IntoIter = IterMut<'a, StreamId, SendStream>;
+    type IntoIter = indexmap::map::IterMut<'a, StreamId, SendStream>;
 
-    fn into_iter(self) -> IterMut<'a, StreamId, SendStream> {
+    fn into_iter(self) -> indexmap::map::IterMut<'a, StreamId, SendStream> {
         self.0.iter_mut()
     }
 }
@@ -1370,7 +1364,12 @@ mod tests {
 
         // assert non-atomic write works
         assert_eq!(s.send(b"abc").unwrap(), 2);
-        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(s.next_bytes(), Some((0, &b"ab"[..])));
+        // STREAM_DATA_BLOCKED is not sent yet.
+        assert!(flow_mgr.borrow_mut().next().is_none());
+
+        // STREAM_DATA_BLOCKED is queued once bytes using all credit are sent.
+        s.mark_as_sent(0, 2, false);
         assert_eq!(
             flow_mgr.borrow_mut().next().unwrap(),
             Frame::StreamDataBlocked {
@@ -1392,7 +1391,12 @@ mod tests {
 
         // assert non-atomic write works
         assert_eq!(s.send(b"abcd").unwrap(), 3);
-        // assert that STREAM_DATA_BLOCKED is sent.
+        assert_eq!(s.next_bytes(), Some((2, &b"abc"[..])));
+        // DATA_BLOCKED is not sent yet.
+        assert!(flow_mgr.borrow_mut().next().is_none());
+
+        // DATA_BLOCKED is queued once bytes using all credit are sent.
+        s.mark_as_sent(2, 3, false);
         assert_eq!(
             flow_mgr.borrow_mut().next().unwrap(),
             Frame::DataBlocked { data_limit: 0x5 }

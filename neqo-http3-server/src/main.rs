@@ -104,18 +104,12 @@ impl Args {
     }
 }
 
-fn emit_packets(sockets: &mut Vec<UdpSocket>, out_dgrams: &HashMap<SocketAddr, Vec<Datagram>>) {
-    for s in sockets {
-        if let Some(dgrams) = out_dgrams.get(&s.local_addr().unwrap()) {
-            for d in dgrams {
-                let sent = s
-                    .send_to(d, &d.destination())
-                    .expect("Error sending datagram");
-                if sent != d.len() {
-                    eprintln!("Unable to send all {} bytes of datagram", d.len());
-                }
-            }
-        }
+fn emit_packet(socket: &mut UdpSocket, out_dgram: Datagram) {
+    let sent = socket
+        .send_to(&out_dgram, &out_dgram.destination())
+        .expect("Error sending datagram");
+    if sent != out_dgram.len() {
+        eprintln!("Unable to send all {} bytes of datagram", out_dgram.len());
     }
 }
 
@@ -214,12 +208,12 @@ fn process(
     svr_timeout: &mut Option<Timeout>,
     inx: usize,
     mut dgram: Option<Datagram>,
-    out_dgrams: &mut Vec<Datagram>,
     timer: &mut Timer<usize>,
+    socket: &mut UdpSocket,
 ) {
     loop {
         match server.process(dgram, Instant::now()) {
-            Output::Datagram(dgram) => out_dgrams.push(dgram),
+            Output::Datagram(dgram) => emit_packet(socket, dgram),
             Output::Callback(new_timeout) => {
                 if let Some(svr_timeout) = svr_timeout {
                     timer.cancel_timeout(svr_timeout);
@@ -372,7 +366,9 @@ fn main() -> Result<(), io::Error> {
 
     let (poll, mut sockets, mut servers) = init_poll(&hosts, &args)?;
 
-    let mut timer = Builder::default().build::<usize>();
+    let mut timer = Builder::default()
+        .tick_duration(Duration::from_millis(1))
+        .build::<usize>();
     poll.register(&timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
 
     let buf = &mut [0u8; 2048];
@@ -381,29 +377,19 @@ fn main() -> Result<(), io::Error> {
 
     loop {
         poll.poll(&mut events, None)?;
-        let mut out_dgrams = HashMap::new();
         for event in &events {
             if event.token() == TIMER_TOKEN {
                 while let Some(inx) = timer.poll() {
-                    if let Some(socket) = sockets.get(inx) {
+                    if let Some(socket) = sockets.get_mut(inx) {
                         qinfo!("Timer expired for {:?}", socket);
                         if let Some((ref mut server, svr_timeout)) =
                             servers.get_mut(&socket.local_addr().unwrap())
                         {
-                            process(
-                                &mut **server,
-                                svr_timeout,
-                                inx,
-                                None,
-                                &mut out_dgrams
-                                    .entry(socket.local_addr().unwrap())
-                                    .or_insert_with(Vec::new),
-                                &mut timer,
-                            );
+                            process(&mut **server, svr_timeout, inx, None, &mut timer, socket);
                         }
                     }
                 }
-            } else if let Some(socket) = sockets.get(event.token().0) {
+            } else if let Some(socket) = sockets.get_mut(event.token().0) {
                 let local_addr = hosts[event.token().0];
 
                 if !event.readiness().is_readable() {
@@ -429,16 +415,13 @@ fn main() -> Result<(), io::Error> {
                     } else if let Some((ref mut server, svr_timeout)) =
                         servers.get_mut(&socket.local_addr().unwrap())
                     {
-                        let out = out_dgrams
-                            .entry(socket.local_addr().unwrap())
-                            .or_insert_with(Vec::new);
                         process(
                             &mut **server,
                             svr_timeout,
                             event.token().0,
                             Some(Datagram::new(remote_addr, local_addr, &buf[..sz])),
-                            out,
                             &mut timer,
+                            socket,
                         );
                         server.process_events(&args);
                         process(
@@ -446,14 +429,12 @@ fn main() -> Result<(), io::Error> {
                             svr_timeout,
                             event.token().0,
                             None,
-                            out,
                             &mut timer,
+                            socket,
                         );
                     }
                 }
             }
         }
-
-        emit_packets(&mut sockets, &out_dgrams);
     }
 }

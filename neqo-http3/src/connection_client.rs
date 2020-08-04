@@ -172,7 +172,7 @@ impl Http3Client {
         let mut dec = Decoder::from(token);
         let settings_slice = match dec.decode_vvec() {
             Some(v) => v,
-            _ => return Err(Error::InvalidResumptionToken),
+            None => return Err(Error::InvalidResumptionToken),
         };
         qtrace!([self], "  settings {}", hex_with_len(&settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
@@ -3125,11 +3125,11 @@ mod tests {
         assert!(!client.events().any(header_ready_event));
 
         // Let client receive the encoder instructions.
-        let _out = client.process(encoder_inst_pkt.dgram(), now());
+        let _ = client.process(encoder_inst_pkt.dgram(), now());
 
         let out = server.conn.process(None, now());
-        let _out = client.process(out.dgram(), now());
-        let _out = client.process(None, now());
+        let _ = client.process(out.dgram(), now());
+        let _ = client.process(None, now());
 
         let mut recv_header = false;
         let mut recv_data = false;
@@ -3264,7 +3264,7 @@ mod tests {
         let out = client.process(out.dgram(), now());
         assert_eq!(client.state(), Http3State::Connected);
 
-        let _out = server.conn.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
         assert!(server.conn.state().connected());
 
         assert!(client.tls_info().unwrap().resumed());
@@ -4034,13 +4034,13 @@ mod tests {
         server.conn.stream_close_send(request_stream_id).unwrap();
 
         let out = server.conn.process(None, now());
-        let _out = client.process(out.dgram(), now());
+        let _ = client.process(out.dgram(), now());
 
         let header_ready_event = |e| matches!(e, Http3ClientEvent::HeaderReady { .. });
         assert!(!client.events().any(header_ready_event));
 
         // Let client receive the encoder instructions.
-        let _out = client.process(qpack_pkt1.dgram(), now());
+        let _ = client.process(qpack_pkt1.dgram(), now());
 
         assert!(client.events().any(header_ready_event));
     }
@@ -5086,7 +5086,7 @@ mod tests {
             .unwrap();
 
         let out = client.process(None, now());
-        let _out = server.conn.process(out.dgram(), now());
+        let _ = server.conn.process(out.dgram(), now());
         // Check that encoder got stream_canceled instruction.
         let mut inst = [0_u8; 100];
         let (amount, fin) = server
