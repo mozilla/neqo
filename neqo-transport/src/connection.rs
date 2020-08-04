@@ -617,6 +617,13 @@ impl Connection {
         &mut self.qlog
     }
 
+    /// Get the original destination connection id for this connection. This
+    /// will always be present for Role::Client but not if Role::Server is in
+    /// State::Init.
+    pub fn odcid(&self) -> &Option<ConnectionId> {
+        &self.remote_original_destination_cid
+    }
+
     /// Set a local transport parameter, possibly overriding a default value.
     pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
         if *self.state() == State::Init {

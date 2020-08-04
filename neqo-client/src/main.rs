@@ -18,7 +18,9 @@ use neqo_http3::{
     self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
 };
 use neqo_qpack::QpackSettings;
-use neqo_transport::{Connection, Error as TransportError, FixedConnectionIdManager, QuicVersion};
+use neqo_transport::{
+    Connection, ConnectionId, Error as TransportError, FixedConnectionIdManager, QuicVersion,
+};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -467,7 +469,7 @@ fn client(
         },
     );
 
-    let qlog = qlog_new(args, hostname, client.conn())?;
+    let qlog = qlog_new(args, hostname, client.connection_id())?;
     client.set_qlog(qlog);
 
     let mut h = Handler {
@@ -482,10 +484,10 @@ fn client(
     Ok(())
 }
 
-fn qlog_new(args: &Args, hostname: &str, conn: &Connection) -> Res<NeqoQlog> {
+fn qlog_new(args: &Args, hostname: &str, cid: &ConnectionId) -> Res<NeqoQlog> {
     if let Some(qlog_dir) = &args.qlog_dir {
         let mut qlog_path = qlog_dir.to_path_buf();
-        let filename = format!("{}-{}.qlog", hostname, conn.path().unwrap().remote_cid());
+        let filename = format!("{}-{}.qlog", hostname, cid);
         qlog_path.push(filename);
 
         let f = OpenOptions::new()
@@ -916,7 +918,7 @@ mod old {
             client.set_ciphers(&ciphers)?;
         }
 
-        client.set_qlog(qlog_new(args, origin, &client)?);
+        client.set_qlog(qlog_new(args, origin, &client.odcid().as_ref().unwrap())?);
 
         let mut h = HandlerOld {
             streams: HashMap::new(),

@@ -20,8 +20,8 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
 use neqo_qpack::{stats::Stats, QpackSettings};
 use neqo_transport::{
-    AppError, Connection, ConnectionEvent, ConnectionIdManager, Output, QuicVersion, StreamId,
-    StreamType, ZeroRttState,
+    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdManager, Output, QuicVersion,
+    StreamId, StreamType, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -142,6 +142,13 @@ impl Http3Client {
 
     pub fn set_qlog(&mut self, qlog: NeqoQlog) {
         self.conn.set_qlog(qlog);
+    }
+
+    /// Get the connection id, which is useful for disambiguating connections to
+    /// the same origin.
+    #[must_use]
+    pub fn connection_id(&self) -> &ConnectionId {
+        &self.conn.odcid().as_ref().expect("Client always has odcid")
     }
 
     /// Returns a resumption token if present.
