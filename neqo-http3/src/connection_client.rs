@@ -5178,7 +5178,7 @@ mod tests {
         client: &mut Http3Client,
         server: &mut TestServer,
         request_stream_id: u64,
-        headers: Vec<(String, String)>,
+        headers: &[(String, String)],
         data: &[u8],
     ) -> Option<Datagram> {
         let encoded_headers = server
@@ -5233,7 +5233,7 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id,
-            vec![
+            &[
                 (String::from(":status"), String::from("200")),
                 (String::from("my-header"), String::from("my-header")),
                 (String::from("content-length"), String::from("3")),
@@ -5266,7 +5266,7 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id,
-            vec![
+            &[
                 (String::from(":status"), String::from("200")),
                 (String::from("my-header"), String::from("my-header")),
                 (String::from("content-length"), String::from("3")),
