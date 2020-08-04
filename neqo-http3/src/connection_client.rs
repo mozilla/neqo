@@ -148,7 +148,7 @@ impl Http3Client {
     /// the same origin.
     #[must_use]
     pub fn connection_id(&self) -> &ConnectionId {
-        &self.conn.odcid().as_ref().expect("Client always has odcid")
+        &self.conn.odcid().expect("Client always has odcid")
     }
 
     /// Returns a resumption token if present.

@@ -918,7 +918,7 @@ mod old {
             client.set_ciphers(&ciphers)?;
         }
 
-        client.set_qlog(qlog_new(args, origin, &client.odcid().as_ref().unwrap())?);
+        client.set_qlog(qlog_new(args, origin, &client.odcid().unwrap())?);
 
         let mut h = HandlerOld {
             streams: HashMap::new(),
