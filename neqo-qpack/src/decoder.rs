@@ -151,7 +151,9 @@ impl QPackDecoder {
     }
 
     pub fn cancel_stream(&mut self, stream_id: u64) {
-        DecoderInstruction::StreamCancellation { stream_id }.marshal(&mut self.send_buf);
+        if self.table.capacity() > 0 {
+            DecoderInstruction::StreamCancellation { stream_id }.marshal(&mut self.send_buf);
+        }
     }
 
     /// # Errors
