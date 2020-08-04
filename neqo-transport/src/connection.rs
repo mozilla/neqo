@@ -1147,6 +1147,7 @@ impl Connection {
     fn process_saved(&mut self, cspace: CryptoSpace) {
         if self.crypto.states.rx_hp(cspace).is_some() {
             for saved in self.saved_datagrams.take_saved(cspace) {
+                qtrace!([self], "process saved @{:?}: {:?}", saved.t, saved.d);
                 self.process_input(saved.d, saved.t);
             }
         }
