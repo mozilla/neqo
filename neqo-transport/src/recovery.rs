@@ -675,12 +675,12 @@ impl LossRecovery {
             largest_acked
         );
 
+        let stats = &mut *self.stats.borrow_mut();
         let space = self
             .spaces
             .get_mut(pn_space)
             .expect("ACK on discarded space");
-        let (acked_packets, any_ack_eliciting) =
-            space.remove_acked(acked_ranges, &mut *self.stats.borrow_mut());
+        let (acked_packets, any_ack_eliciting) = space.remove_acked(acked_ranges, stats);
         if acked_packets.is_empty() {
             // No new information.
             return (Vec::new(), Vec::new());
@@ -714,7 +714,7 @@ impl LossRecovery {
             .get_mut(pn_space)
             .unwrap()
             .detect_lost_packets(now, loss_delay, cleanup, &mut lost);
-        self.stats.borrow_mut().lost += lost.len();
+        stats.lost += lost.len();
 
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
