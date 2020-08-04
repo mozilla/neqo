@@ -5106,4 +5106,57 @@ mod tests {
         assert_eq!(amount, STREAM_CANCELED_ID_0.len());
         assert_eq!(&inst[..amount], STREAM_CANCELED_ID_0);
     }
+
+    #[test]
+    fn data_readable_in_decoder_blocked_state() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let headers = vec![
+            (String::from(":status"), String::from("200")),
+            (String::from("my-header"), String::from("my-header")),
+            (String::from("content-length"), String::from("0")),
+        ];
+        let encoded_headers = server
+            .encoder
+            .encode_header_block(&mut server.conn, &headers, request_stream_id)
+            .unwrap();
+        let hframe = HFrame::Headers {
+            header_block: encoded_headers.to_vec(),
+        };
+
+        // Delay encoder instruction so that the stream will be blocked.
+        let encoder_insts = server.conn.process(None, now());
+
+        // Send response headers.
+        let mut d = Encoder::default();
+        hframe.encode(&mut d);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        // Headers are blocked waiting fro the encoder instructions.
+        let header_ready_event = |e| matches!(e, Http3ClientEvent::HeaderReady { .. });
+        assert!(!client.events().any(header_ready_event));
+
+        // Now send data frame. This will trigger DataRead event.
+        let mut d = Encoder::default();
+        let d_frame = HFrame::Data { len: 0 };
+        d_frame.encode(&mut d);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            true,
+        );
+
+        // Now read headers.
+        let _ = client.process(encoder_insts.dgram(), now());
+    }
 }
