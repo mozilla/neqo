@@ -620,8 +620,8 @@ impl Connection {
     /// Get the original destination connection id for this connection. This
     /// will always be present for Role::Client but not if Role::Server is in
     /// State::Init.
-    pub fn odcid(&self) -> &Option<ConnectionId> {
-        &self.remote_original_destination_cid
+    pub fn odcid(&self) -> Option<&ConnectionId> {
+        self.remote_original_destination_cid.as_ref()
     }
 
     /// Set a local transport parameter, possibly overriding a default value.
