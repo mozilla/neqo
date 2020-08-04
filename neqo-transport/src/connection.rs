@@ -1623,14 +1623,15 @@ impl Connection {
             let payload_start = builder.len();
 
             // Work out if we have space left.
-            if builder.len() + tx.expansion() > profile.limit() {
+            let aead_expansion = tx.expansion();
+            if builder.len() + aead_expansion > profile.limit() {
                 // No space for a packet of this type.
                 encoder = builder.abort();
                 continue;
             }
 
             // Add frames to the packet.
-            let limit = profile.limit() - tx.expansion();
+            let limit = profile.limit() - aead_expansion;
             let (tokens, ack_eliciting) =
                 self.add_frames(&mut builder, *space, limit, &profile, now);
             if builder.is_empty() {
@@ -1644,7 +1645,7 @@ impl Connection {
                 &mut self.qlog,
                 pt,
                 pn,
-                builder.len(),
+                builder.len() - header_start + aead_expansion,
                 &builder[payload_start..],
             );
 
