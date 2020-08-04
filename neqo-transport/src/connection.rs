@@ -1299,7 +1299,7 @@ impl Connection {
                         payload.pn(),
                         &payload[..],
                     );
-                    qlog::packet_received(&mut self.qlog, &payload);
+                    qlog::packet_received(&mut self.qlog, &packet, &payload);
                     let res = self.process_packet(&payload, now);
                     if res.is_err() && self.path.is_none() {
                         // We need to make a path for sending an error message.
@@ -1643,7 +1643,13 @@ impl Connection {
             }
 
             dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
-            qlog::packet_sent(&mut self.qlog, pt, pn, &builder[payload_start..]);
+            qlog::packet_sent(
+                &mut self.qlog,
+                pt,
+                pn,
+                builder.len(),
+                &builder[payload_start..],
+            );
 
             self.stats.borrow_mut().packets_tx += 1;
             encoder = builder.build(self.crypto.states.tx(cspace).unwrap())?;
@@ -2161,6 +2167,17 @@ impl Connection {
         }
     }
 
+    fn decode_ack_delay(&self, v: u64) -> Duration {
+        // If we have remote transport parameters, use them.
+        // Otherwise, ack delay should be zero (because it's the handshake).
+        if let Some(r) = self.tps.borrow().remote.as_ref() {
+            let exponent = u32::try_from(r.get_integer(tparams::ACK_DELAY_EXPONENT)).unwrap();
+            Duration::from_micros(v.checked_shl(exponent).unwrap_or(u64::MAX))
+        } else {
+            Duration::new(0, 0)
+        }
+    }
+
     fn handle_ack(
         &mut self,
         space: PNSpace,
@@ -2185,7 +2202,7 @@ impl Connection {
             space,
             largest_acknowledged,
             acked_ranges,
-            Duration::from_millis(ack_delay),
+            self.decode_ack_delay(ack_delay),
             now,
         );
         for acked in acked_packets {
@@ -2988,6 +3005,7 @@ mod tests {
             let output = a.process(input, now).dgram();
             assert!(had_input || output.is_some());
             input = output;
+            qtrace!("t += {:?}", rtt / 2);
             now += rtt / 2;
             mem::swap(&mut a, &mut b);
         }
