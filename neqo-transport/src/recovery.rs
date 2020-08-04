@@ -80,10 +80,11 @@ impl RttVals {
         mut rtt_sample: Duration,
         ack_delay: Duration,
     ) {
-        // min_rtt ignores ack delay.
+        // `min_rtt` ignores `ack_delay`.
         self.min_rtt = min(self.min_rtt, rtt_sample);
-        // Note: the caller adjusts `ack_delay` based on `max_ack_delay`.
-        // Adjust for ack delay unless it goes below `min_rtt`.
+        // `ack_delay` cannot exceed `max_ack_delay`.
+        let ack_delay = min(ack_delay, self.max_ack_delay);
+        // Adjust for `ack_delay` unless it goes below `min_rtt`.
         if rtt_sample - self.min_rtt >= ack_delay {
             rtt_sample -= ack_delay;
         }
@@ -658,23 +659,6 @@ impl LossRecovery {
         }
     }
 
-    /// Record an RTT sample.
-    fn rtt_sample(&mut self, send_time: Instant, now: Instant, ack_delay: Duration) {
-        // Limit ack delay by max_ack_delay if confirmed.
-        let delay = if let Some(confirmed) = self.confirmed_time {
-            if confirmed < send_time {
-                ack_delay
-            } else {
-                min(ack_delay, self.rtt_vals.max_ack_delay)
-            }
-        } else {
-            ack_delay
-        };
-
-        let sample = now - send_time;
-        self.rtt_vals.update_rtt(&mut self.qlog, sample, delay);
-    }
-
     /// Returns (acked packets, lost packets)
     pub fn on_ack_received(
         &mut self,
@@ -712,7 +696,8 @@ impl LossRecovery {
             let largest_acked_pkt = acked_packets.last().expect("must be there");
             space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
             if any_ack_eliciting {
-                self.rtt_sample(largest_acked_pkt.time_sent, now, ack_delay);
+                let sample = now - largest_acked_pkt.time_sent;
+                self.rtt_vals.update_rtt(&mut self.qlog, sample, ack_delay);
             }
         }
         self.cc.on_packets_acked(&acked_packets);
