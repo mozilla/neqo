@@ -9,11 +9,13 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::env;
 use std::fmt::Display;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Read;
+use std::mem;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::exit;
@@ -207,28 +209,28 @@ fn process(
     server: &mut dyn HttpServer,
     svr_timeout: &mut Option<Timeout>,
     inx: usize,
-    mut dgram: Option<Datagram>,
+    dgram: Option<Datagram>,
     timer: &mut Timer<usize>,
     socket: &mut UdpSocket,
-) {
-    loop {
-        match server.process(dgram, Instant::now()) {
-            Output::Datagram(dgram) => emit_packet(socket, dgram),
-            Output::Callback(new_timeout) => {
-                if let Some(svr_timeout) = svr_timeout {
-                    timer.cancel_timeout(svr_timeout);
-                }
+) -> bool {
+    match server.process(dgram, Instant::now()) {
+        Output::Datagram(dgram) => {
+            emit_packet(socket, dgram);
+            true
+        }
+        Output::Callback(new_timeout) => {
+            if let Some(svr_timeout) = svr_timeout {
+                timer.cancel_timeout(svr_timeout);
+            }
 
-                qinfo!("Setting timeout of {:?} for {}", new_timeout, server);
-                *svr_timeout = Some(timer.set_timeout(new_timeout, inx));
-                break;
-            }
-            Output::None => {
-                qdebug!("Output::None");
-                break;
-            }
-        };
-        dgram = None;
+            qinfo!("Setting timeout of {:?} for {}", new_timeout, server);
+            *svr_timeout = Some(timer.set_timeout(new_timeout, inx));
+            false
+        }
+        Output::None => {
+            qdebug!("Output::None");
+            false
+        }
     }
 }
 
@@ -335,6 +337,7 @@ fn init_poll(
     Ok((poll, sockets, servers))
 }
 
+#[allow(clippy::cognitive_complexity)]
 fn main() -> Result<(), io::Error> {
     let mut args = Args::from_args();
     assert!(!args.key.is_empty(), "Need at least one key");
@@ -375,8 +378,17 @@ fn main() -> Result<(), io::Error> {
 
     let mut events = Events::with_capacity(1024);
 
+    let mut active_servers: HashSet<usize> = HashSet::new();
+
     loop {
-        poll.poll(&mut events, None)?;
+        poll.poll(
+            &mut events,
+            if active_servers.is_empty() {
+                None
+            } else {
+                Some(Duration::from_millis(0))
+            },
+        )?;
         for event in &events {
             if event.token() == TIMER_TOKEN {
                 while let Some(inx) = timer.poll() {
@@ -385,7 +397,9 @@ fn main() -> Result<(), io::Error> {
                         if let Some((ref mut server, svr_timeout)) =
                             servers.get_mut(&socket.local_addr().unwrap())
                         {
-                            process(&mut **server, svr_timeout, inx, None, &mut timer, socket);
+                            if process(&mut **server, svr_timeout, inx, None, &mut timer, socket) {
+                                active_servers.insert(inx);
+                            }
                         }
                     }
                 }
@@ -415,7 +429,7 @@ fn main() -> Result<(), io::Error> {
                     } else if let Some((ref mut server, svr_timeout)) =
                         servers.get_mut(&socket.local_addr().unwrap())
                     {
-                        process(
+                        let _ = process(
                             &mut **server,
                             svr_timeout,
                             event.token().0,
@@ -424,7 +438,26 @@ fn main() -> Result<(), io::Error> {
                             socket,
                         );
                         server.process_events(&args);
-                        process(
+                        if process(
+                            &mut **server,
+                            svr_timeout,
+                            event.token().0,
+                            None,
+                            &mut timer,
+                            socket,
+                        ) {
+                            active_servers.insert(event.token().0);
+                        }
+                    }
+                }
+            }
+            let curr_active = mem::replace(&mut active_servers, HashSet::new());
+            for inx in curr_active {
+                if let Some(socket) = sockets.get_mut(inx) {
+                    if let Some((ref mut server, svr_timeout)) =
+                        servers.get_mut(&socket.local_addr().unwrap())
+                    {
+                        let _ = process(
                             &mut **server,
                             svr_timeout,
                             event.token().0,
@@ -432,6 +465,17 @@ fn main() -> Result<(), io::Error> {
                             &mut timer,
                             socket,
                         );
+                        server.process_events(&args);
+                        if process(
+                            &mut **server,
+                            svr_timeout,
+                            event.token().0,
+                            None,
+                            &mut timer,
+                            socket,
+                        ) {
+                            active_servers.insert(inx);
+                        }
                     }
                 }
             }
