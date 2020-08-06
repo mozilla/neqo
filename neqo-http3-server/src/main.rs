@@ -234,110 +234,250 @@ fn process(
     }
 }
 
-/// Init Poll for all hosts. Returns the Poll, sockets, and a map of the
-/// socketaddrs to instances of the HttpServer handling that addr.
-#[allow(clippy::type_complexity)]
-fn init_poll(
-    hosts: &[SocketAddr],
-    args: &Args,
-) -> Result<
-    (
-        Poll,
-        Vec<UdpSocket>,
-        HashMap<SocketAddr, (Box<dyn HttpServer>, Option<Timeout>)>,
-    ),
-    io::Error,
-> {
-    let poll = Poll::new()?;
+fn create_server(args: &Args) -> Box<dyn HttpServer> {
+    let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+        .expect("unable to setup anti-replay");
+    let cid_mgr = Rc::new(RefCell::new(FixedConnectionIdManager::new(10)));
 
-    let mut sockets = Vec::new();
-    let mut servers = HashMap::new();
-
-    for (i, host) in hosts.iter().enumerate() {
-        let socket = match UdpSocket::bind(&host) {
-            Err(err) => {
-                eprintln!("Unable to bind UDP socket: {}", err);
-                exit(1)
-            }
-            Ok(s) => s,
-        };
-
-        let local_addr = match socket.local_addr() {
-            Err(err) => {
-                eprintln!("Socket local address not bound: {}", err);
-                exit(1)
-            }
-            Ok(s) => s,
-        };
-
-        let res = socket.only_v6();
-        let also_v4 = if res.is_ok() && !res.unwrap() {
-            " as well as V4"
-        } else {
-            ""
-        };
-        println!(
-            "Server waiting for connection on: {:?}{}",
-            local_addr, also_v4
-        );
-
-        poll.register(
-            &socket,
-            Token(i),
-            Ready::readable() | Ready::writable(),
-            PollOpt::edge(),
-        )?;
-
-        sockets.push(socket);
-        servers.insert(
-            local_addr,
-            (
-                {
-                    let anti_replay =
-                        AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
-                            .expect("unable to setup anti-replay");
-                    let cid_mgr = Rc::new(RefCell::new(FixedConnectionIdManager::new(10)));
-
-                    let mut svr: Box<dyn HttpServer> = if args.use_old_http {
-                        Box::new(
-                            Http09Server::new(
-                                Instant::now(),
-                                &[args.key.clone()],
-                                &[args.alpn.clone()],
-                                anti_replay,
-                                cid_mgr,
-                            )
-                            .expect("We cannot make a server!"),
-                        )
-                    } else {
-                        Box::new(
-                            Http3Server::new(
-                                Instant::now(),
-                                &[args.key.clone()],
-                                &[args.alpn.clone()],
-                                anti_replay,
-                                cid_mgr,
-                                QpackSettings {
-                                    max_table_size_encoder: args.max_table_size_encoder,
-                                    max_table_size_decoder: args.max_table_size_decoder,
-                                    max_blocked_streams: args.max_blocked_streams,
-                                },
-                            )
-                            .expect("We cannot make a server!"),
-                        )
-                    };
-                    svr.set_qlog_dir(args.qlog_dir.clone());
-                    svr
+    let mut svr: Box<dyn HttpServer> = if args.use_old_http {
+        Box::new(
+            Http09Server::new(
+                Instant::now(),
+                &[args.key.clone()],
+                &[args.alpn.clone()],
+                anti_replay,
+                cid_mgr,
+            )
+            .expect("We cannot make a server!"),
+        )
+    } else {
+        Box::new(
+            Http3Server::new(
+                Instant::now(),
+                &[args.key.clone()],
+                &[args.alpn.clone()],
+                anti_replay,
+                cid_mgr,
+                QpackSettings {
+                    max_table_size_encoder: args.max_table_size_encoder,
+                    max_table_size_decoder: args.max_table_size_decoder,
+                    max_blocked_streams: args.max_blocked_streams,
                 },
-                None,
-            ),
-        );
-    }
-
-    Ok((poll, sockets, servers))
+            )
+            .expect("We cannot make a server!"),
+        )
+    };
+    svr.set_qlog_dir(args.qlog_dir.clone());
+    svr
 }
 
-#[allow(clippy::cognitive_complexity)]
+fn read_dgram(
+    socket: &mut UdpSocket,
+    local_address: &SocketAddr,
+) -> Result<Option<Datagram>, io::Error> {
+    let buf = &mut [0u8; 2048];
+    let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
+        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+        Err(err) => {
+            eprintln!("UDP recv error: {:?}", err);
+            return Err(err);
+        }
+        Ok(res) => res,
+    };
+
+    if sz == buf.len() {
+        eprintln!("Might have received more than {} bytes", buf.len());
+    }
+
+    if sz == 0 {
+        eprintln!("zero length datagram received?");
+        Ok(None)
+    } else {
+        Ok(Some(Datagram::new(remote_addr, *local_address, &buf[..sz])))
+    }
+}
+
+struct ServersRunner {
+    args: Args,
+    poll: Poll,
+    hosts: Vec<SocketAddr>,
+    sockets: Vec<UdpSocket>,
+    servers: HashMap<SocketAddr, (Box<dyn HttpServer>, Option<Timeout>)>,
+    timer: Timer<usize>,
+    active_servers: HashSet<usize>,
+}
+
+impl ServersRunner {
+    pub fn new(args: Args) -> Result<Self, io::Error> {
+        Ok(Self {
+            args,
+            poll: Poll::new()?,
+            sockets: Vec::new(),
+            servers: HashMap::new(),
+            timer: Builder::default()
+                .tick_duration(Duration::from_millis(1))
+                .build::<usize>(),
+            hosts: Vec::new(),
+            active_servers: HashSet::new(),
+        })
+    }
+
+    /// Init Poll for all hosts. Create sockets, and a map of the
+    /// socketaddrs to instances of the HttpServer handling that addr.
+    pub fn init(&mut self) -> Result<(), io::Error> {
+        self.hosts = self.args.host_socket_addrs();
+        if self.hosts.is_empty() {
+            eprintln!("No valid hosts defined");
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"));
+        }
+
+        for (i, host) in self.hosts.iter().enumerate() {
+            let socket = match UdpSocket::bind(&host) {
+                Err(err) => {
+                    eprintln!("Unable to bind UDP socket: {}", err);
+                    return Err(err);
+                }
+                Ok(s) => s,
+            };
+
+            let local_addr = match socket.local_addr() {
+                Err(err) => {
+                    eprintln!("Socket local address not bound: {}", err);
+                    return Err(err);
+                }
+                Ok(s) => s,
+            };
+
+            let res = socket.only_v6();
+            let also_v4 = if res.is_ok() && !res.unwrap() {
+                " as well as V4"
+            } else {
+                ""
+            };
+            println!(
+                "Server waiting for connection on: {:?}{}",
+                local_addr, also_v4
+            );
+
+            self.poll.register(
+                &socket,
+                Token(i),
+                Ready::readable() | Ready::writable(),
+                PollOpt::edge(),
+            )?;
+
+            self.sockets.push(socket);
+            self.servers
+                .insert(local_addr, (create_server(&self.args), None));
+        }
+
+        self.poll
+            .register(&self.timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
+
+        Ok(())
+    }
+
+    fn process_and_events(&mut self, inx: usize, read_socket: bool) -> Result<(), io::Error> {
+        if let Some(socket) = self.sockets.get_mut(inx) {
+            if let Some((ref mut server, svr_timeout)) =
+                self.servers.get_mut(&socket.local_addr().unwrap())
+            {
+                if read_socket {
+                    loop {
+                        let dgram = read_dgram(socket, &self.hosts[inx])?;
+                        if dgram.is_none() {
+                            break;
+                        }
+                        let _ = process(
+                            &mut **server,
+                            svr_timeout,
+                            inx,
+                            dgram,
+                            &mut self.timer,
+                            socket,
+                        );
+                        server.process_events(&self.args);
+                        if process(
+                            &mut **server,
+                            svr_timeout,
+                            inx,
+                            None,
+                            &mut self.timer,
+                            socket,
+                        ) {
+                            self.active_servers.insert(inx);
+                        }
+                    }
+                } else {
+                    let _ = process(
+                        &mut **server,
+                        svr_timeout,
+                        inx,
+                        None,
+                        &mut self.timer,
+                        socket,
+                    );
+                    server.process_events(&self.args);
+                    if process(
+                        &mut **server,
+                        svr_timeout,
+                        inx,
+                        None,
+                        &mut self.timer,
+                        socket,
+                    ) {
+                        self.active_servers.insert(inx);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn process_active_conns(&mut self) -> Result<(), io::Error> {
+        let curr_active = mem::take(&mut self.active_servers);
+        for inx in curr_active {
+            self.process_and_events(inx, false)?;
+        }
+        Ok(())
+    }
+
+    fn process_timeout(&mut self) -> Result<(), io::Error> {
+        while let Some(inx) = self.timer.poll() {
+            qinfo!("Timer expired for {:?}", inx);
+            self.process_and_events(inx, false)?;
+        }
+        Ok(())
+    }
+
+    pub fn run(&mut self) -> Result<(), io::Error> {
+        let mut events = Events::with_capacity(1024);
+        loop {
+            // If there are active servers do not block in poll.
+            self.poll.poll(
+                &mut events,
+                if self.active_servers.is_empty() {
+                    None
+                } else {
+                    Some(Duration::from_millis(0))
+                },
+            )?;
+
+            for event in &events {
+                if event.token() == TIMER_TOKEN {
+                    self.process_timeout()?;
+                } else {
+                    if !event.readiness().is_readable() {
+                        continue;
+                    }
+                    self.process_and_events(event.token().0, true)?;
+                }
+                self.process_active_conns()?;
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), io::Error> {
     let mut args = Args::from_args();
     assert!(!args.key.is_empty(), "Need at least one key");
@@ -361,124 +501,7 @@ fn main() -> Result<(), io::Error> {
         }
     }
 
-    let hosts = args.host_socket_addrs();
-    if hosts.is_empty() {
-        eprintln!("No valid hosts defined");
-        exit(1);
-    }
-
-    let (poll, mut sockets, mut servers) = init_poll(&hosts, &args)?;
-
-    let mut timer = Builder::default()
-        .tick_duration(Duration::from_millis(1))
-        .build::<usize>();
-    poll.register(&timer, TIMER_TOKEN, Ready::readable(), PollOpt::edge())?;
-
-    let buf = &mut [0u8; 2048];
-
-    let mut events = Events::with_capacity(1024);
-
-    let mut active_servers: HashSet<usize> = HashSet::new();
-
-    loop {
-        poll.poll(
-            &mut events,
-            if active_servers.is_empty() {
-                None
-            } else {
-                Some(Duration::from_millis(0))
-            },
-        )?;
-        for event in &events {
-            if event.token() == TIMER_TOKEN {
-                while let Some(inx) = timer.poll() {
-                    if let Some(socket) = sockets.get_mut(inx) {
-                        qinfo!("Timer expired for {:?}", socket);
-                        if let Some((ref mut server, svr_timeout)) =
-                            servers.get_mut(&socket.local_addr().unwrap())
-                        {
-                            if process(&mut **server, svr_timeout, inx, None, &mut timer, socket) {
-                                active_servers.insert(inx);
-                            }
-                        }
-                    }
-                }
-            } else if let Some(socket) = sockets.get_mut(event.token().0) {
-                let local_addr = hosts[event.token().0];
-
-                if !event.readiness().is_readable() {
-                    continue;
-                }
-
-                loop {
-                    let (sz, remote_addr) = match socket.recv_from(&mut buf[..]) {
-                        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => break,
-                        Err(err) => {
-                            eprintln!("UDP recv error: {:?}", err);
-                            exit(1);
-                        }
-                        Ok(res) => res,
-                    };
-
-                    if sz == buf.len() {
-                        eprintln!("Might have received more than {} bytes", buf.len());
-                    }
-
-                    if sz == 0 {
-                        eprintln!("zero length datagram received?");
-                    } else if let Some((ref mut server, svr_timeout)) =
-                        servers.get_mut(&socket.local_addr().unwrap())
-                    {
-                        let _ = process(
-                            &mut **server,
-                            svr_timeout,
-                            event.token().0,
-                            Some(Datagram::new(remote_addr, local_addr, &buf[..sz])),
-                            &mut timer,
-                            socket,
-                        );
-                        server.process_events(&args);
-                        if process(
-                            &mut **server,
-                            svr_timeout,
-                            event.token().0,
-                            None,
-                            &mut timer,
-                            socket,
-                        ) {
-                            active_servers.insert(event.token().0);
-                        }
-                    }
-                }
-            }
-            let curr_active = mem::replace(&mut active_servers, HashSet::new());
-            for inx in curr_active {
-                if let Some(socket) = sockets.get_mut(inx) {
-                    if let Some((ref mut server, svr_timeout)) =
-                        servers.get_mut(&socket.local_addr().unwrap())
-                    {
-                        let _ = process(
-                            &mut **server,
-                            svr_timeout,
-                            event.token().0,
-                            None,
-                            &mut timer,
-                            socket,
-                        );
-                        server.process_events(&args);
-                        if process(
-                            &mut **server,
-                            svr_timeout,
-                            event.token().0,
-                            None,
-                            &mut timer,
-                            socket,
-                        ) {
-                            active_servers.insert(inx);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let mut servers_runner = ServersRunner::new(args)?;
+    servers_runner.init()?;
+    servers_runner.run()
 }
