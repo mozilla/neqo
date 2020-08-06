@@ -15,5 +15,5 @@ if [ "$ROLE" == "client" ]; then
     echo "REQUESTS: $REQUESTS"
     RUST_LOG=debug RUST_BACKTRACE=1 ./target/neqo-client "${CLIENT_PARAMS[@]}" $REQUESTS
 elif [ "$ROLE" == "server" ]; then
-    RUST_LOG=info RUST_BACKTRACE=1 ./target/neqo-http3-server "${SERVER_PARAMS@]}"
+    RUST_LOG=info RUST_BACKTRACE=1 ./target/neqo-http3-server "${SERVER_PARAMS[@]}"
 fi
