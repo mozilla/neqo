@@ -62,17 +62,27 @@ impl Http09Server {
             return;
         }
         let mut data = vec![0; 4000];
-        conn.borrow_mut()
+        let (sz, fin) = conn
+            .borrow_mut()
             .stream_recv(stream_id, &mut data)
             .expect("Read should succeed");
-        let msg = match String::from_utf8(data) {
+
+        if sz == 0 {
+            if !fin {
+                eprintln!("size 0 but !fin");
+            }
+            return;
+        }
+
+        let msg = match std::str::from_utf8(&data[..sz]) {
             Ok(s) => s,
-            Err(_e) => {
-                eprintln!("invalid string. Is this HTTP 0.9?");
+            Err(e) => {
+                eprintln!("invalid string. Is this HTTP 0.9? error: {}", e);
                 conn.borrow_mut().stream_close_send(stream_id).unwrap();
                 return;
             }
         };
+
         let re = if args.qns_mode {
             Regex::new(r"GET +/(\S+)(\r)?\n").unwrap()
         } else {
@@ -96,7 +106,12 @@ impl Http09Server {
             .stream_state
             .get_mut(&(conn.clone(), stream_id))
             .unwrap();
-        stream_state.data_to_send = resp.map(|r| (r, 0));
+        match stream_state.data_to_send {
+            None => stream_state.data_to_send = resp.map(|r| (r, 0)),
+            Some(_) => {
+                eprintln!("Data already set, doing nothing");
+            }
+        }
         if stream_state.writable {
             self.stream_writable(stream_id, &mut conn);
         }
