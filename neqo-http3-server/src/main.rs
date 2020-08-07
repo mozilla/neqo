@@ -234,43 +234,6 @@ fn process(
     }
 }
 
-fn create_server(args: &Args) -> Box<dyn HttpServer> {
-    let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
-        .expect("unable to setup anti-replay");
-    let cid_mgr = Rc::new(RefCell::new(FixedConnectionIdManager::new(10)));
-
-    let mut svr: Box<dyn HttpServer> = if args.use_old_http {
-        Box::new(
-            Http09Server::new(
-                Instant::now(),
-                &[args.key.clone()],
-                &[args.alpn.clone()],
-                anti_replay,
-                cid_mgr,
-            )
-            .expect("We cannot make a server!"),
-        )
-    } else {
-        Box::new(
-            Http3Server::new(
-                Instant::now(),
-                &[args.key.clone()],
-                &[args.alpn.clone()],
-                anti_replay,
-                cid_mgr,
-                QpackSettings {
-                    max_table_size_encoder: args.max_table_size_encoder,
-                    max_table_size_decoder: args.max_table_size_decoder,
-                    max_blocked_streams: args.max_blocked_streams,
-                },
-            )
-            .expect("We cannot make a server!"),
-        )
-    };
-    svr.set_qlog_dir(args.qlog_dir.clone());
-    svr
-}
-
 fn read_dgram(
     socket: &mut UdpSocket,
     local_address: &SocketAddr,
@@ -368,7 +331,7 @@ impl ServersRunner {
 
             self.sockets.push(socket);
             self.servers
-                .insert(local_addr, (create_server(&self.args), None));
+                .insert(local_addr, (self.create_server(), None));
         }
 
         self.poll
@@ -377,7 +340,48 @@ impl ServersRunner {
         Ok(())
     }
 
-    fn process_and_events(&mut self, inx: usize, read_socket: bool) -> Result<(), io::Error> {
+    fn create_server(&self) -> Box<dyn HttpServer> {
+        let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+            .expect("unable to setup anti-replay");
+        let cid_mgr = Rc::new(RefCell::new(FixedConnectionIdManager::new(10)));
+
+        let mut svr: Box<dyn HttpServer> = if self.args.use_old_http {
+            Box::new(
+                Http09Server::new(
+                    Instant::now(),
+                    &[self.args.key.clone()],
+                    &[self.args.alpn.clone()],
+                    anti_replay,
+                    cid_mgr,
+                )
+                .expect("We cannot make a server!"),
+            )
+        } else {
+            Box::new(
+                Http3Server::new(
+                    Instant::now(),
+                    &[self.args.key.clone()],
+                    &[self.args.alpn.clone()],
+                    anti_replay,
+                    cid_mgr,
+                    QpackSettings {
+                        max_table_size_encoder: self.args.max_table_size_encoder,
+                        max_table_size_decoder: self.args.max_table_size_decoder,
+                        max_blocked_streams: self.args.max_blocked_streams,
+                    },
+                )
+                .expect("We cannot make a server!"),
+            )
+        };
+        svr.set_qlog_dir(self.args.qlog_dir.clone());
+        svr
+    }
+
+    fn process_datagrams_and_events(
+        &mut self,
+        inx: usize,
+        read_socket: bool,
+    ) -> Result<(), io::Error> {
         if let Some(socket) = self.sockets.get_mut(inx) {
             if let Some((ref mut server, svr_timeout)) =
                 self.servers.get_mut(&socket.local_addr().unwrap())
@@ -396,17 +400,6 @@ impl ServersRunner {
                             &mut self.timer,
                             socket,
                         );
-                        server.process_events(&self.args);
-                        if process(
-                            &mut **server,
-                            svr_timeout,
-                            inx,
-                            None,
-                            &mut self.timer,
-                            socket,
-                        ) {
-                            self.active_servers.insert(inx);
-                        }
                     }
                 } else {
                     let _ = process(
@@ -417,17 +410,17 @@ impl ServersRunner {
                         &mut self.timer,
                         socket,
                     );
-                    server.process_events(&self.args);
-                    if process(
-                        &mut **server,
-                        svr_timeout,
-                        inx,
-                        None,
-                        &mut self.timer,
-                        socket,
-                    ) {
-                        self.active_servers.insert(inx);
-                    }
+                }
+                server.process_events(&self.args);
+                if process(
+                    &mut **server,
+                    svr_timeout,
+                    inx,
+                    None,
+                    &mut self.timer,
+                    socket,
+                ) {
+                    self.active_servers.insert(inx);
                 }
             }
         }
@@ -437,7 +430,7 @@ impl ServersRunner {
     fn process_active_conns(&mut self) -> Result<(), io::Error> {
         let curr_active = mem::take(&mut self.active_servers);
         for inx in curr_active {
-            self.process_and_events(inx, false)?;
+            self.process_datagrams_and_events(inx, false)?;
         }
         Ok(())
     }
@@ -445,7 +438,7 @@ impl ServersRunner {
     fn process_timeout(&mut self) -> Result<(), io::Error> {
         while let Some(inx) = self.timer.poll() {
             qinfo!("Timer expired for {:?}", inx);
-            self.process_and_events(inx, false)?;
+            self.process_datagrams_and_events(inx, false)?;
         }
         Ok(())
     }
@@ -470,7 +463,7 @@ impl ServersRunner {
                     if !event.readiness().is_readable() {
                         continue;
                     }
-                    self.process_and_events(event.token().0, true)?;
+                    self.process_datagrams_and_events(event.token().0, true)?;
                 }
                 self.process_active_conns()?;
             }
