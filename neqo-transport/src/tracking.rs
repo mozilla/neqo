@@ -9,7 +9,7 @@
 #![deny(clippy::pedantic)]
 
 use std::collections::VecDeque;
-use std::convert::TryInto;
+use std::convert::TryFrom;
 use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -232,7 +232,7 @@ pub struct PacketRange {
 
 impl PacketRange {
     /// Make a single packet range.
-    pub fn new(pn: u64) -> Self {
+    pub fn new(pn: PacketNumber) -> Self {
         Self {
             largest: pn,
             smallest: pn,
@@ -251,12 +251,12 @@ impl PacketRange {
     }
 
     /// Return whether the given number is in the range.
-    pub fn contains(&self, pn: u64) -> bool {
+    pub fn contains(&self, pn: PacketNumber) -> bool {
         (pn >= self.smallest) && (pn <= self.largest)
     }
 
     /// Maybe add a packet number to the range.  Returns true if it was added.
-    pub fn add(&mut self, pn: u64) -> bool {
+    pub fn add(&mut self, pn: PacketNumber) -> bool {
         assert!(!self.contains(pn));
         // Only insert if this is adjacent the current range.
         if (self.largest + 1) == pn {
@@ -302,6 +302,8 @@ impl ::std::fmt::Display for PacketRange {
 
 /// The ACK delay we use.
 pub const DEFAULT_ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
+/// The default number of packets we will receive before sending
+/// an immediate acknowledgment.
 pub const DEFAULT_ACK_PACKETS: usize = 2;
 const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;
@@ -333,6 +335,13 @@ pub struct RecvdPackets {
     max_ack_delay: Duration,
     /// The maximum number of packets received before sending an immediate acknowledgment.
     max_ack_packets: usize,
+    /// The next packet number after the largest acknowledged.
+    /// (This is the next, so that we don't need to use `Option<PacketNumber>`
+    /// and more complicated logic when looking for out-of-order packets.)
+    next_unacknowledged: PacketNumber,
+    /// The number of packets that can be unordered before sending
+    /// an immediate ACK.
+    loss_threshold: u64,
 }
 
 impl RecvdPackets {
@@ -348,6 +357,8 @@ impl RecvdPackets {
             ack_frequency_seqno: 0,
             max_ack_delay: DEFAULT_ACK_DELAY,
             max_ack_packets: DEFAULT_ACK_PACKETS,
+            next_unacknowledged: 0,
+            loss_threshold: 1,
         }
     }
 
@@ -357,13 +368,20 @@ impl RecvdPackets {
     }
 
     /// Update acknowledgment delay parameters.
-    pub fn update_ack_delay(&mut self, seqno: u64, count: usize, delay: Duration) {
+    pub fn update_ack_freq(
+        &mut self,
+        seqno: u64,
+        count: usize,
+        delay: Duration,
+        loss_threshold: u64,
+    ) {
         // Yes, this means that we will overwrite values if a sequence number is
         // reused, but that is better than using an `Option<u64>` that is always `Some`.
         if seqno >= self.ack_frequency_seqno {
             self.ack_frequency_seqno = seqno;
             self.max_ack_delay = delay;
             self.max_ack_packets = count;
+            self.loss_threshold = loss_threshold;
         }
     }
 
@@ -400,14 +418,31 @@ impl RecvdPackets {
 
     /// Add the packet to the tracked set.
     pub fn set_received(&mut self, now: Instant, pn: u64, ack_eliciting: bool) {
-        let next_in_order_pn = self.ranges.front().map_or(0, |pr| pr.largest + 1);
-        qdebug!([self], "next in order pn: {}", next_in_order_pn);
         let i = self.add(pn);
 
-        // The new addition was the largest, so update the time we use for calculating ACK delay.
-        if i == 0 && pn == self.ranges[0].largest {
+        // The new addition was the largest, so update the time we use
+        // for calculating ACK delay.
+        //
+        // Also calculate whether receiving this packet indicates that
+        // whether an immediate ACK is needed due to reordering.
+        let reordered = if i == 0 && pn == self.ranges[0].largest {
             self.largest_pn_time = Some(now);
-        }
+
+            // This has increased the largest received, so check for a gap.
+            // IF the first range doesn't include the next packet we need to
+            // acknowledge, then there is a gap.
+            // If there is a gap and `pn` is at least `loss_threshold` higher
+            // than the next, there is too much reordering.
+            if self.loss_threshold > 0 {
+                let gap = self.next_unacknowledged < self.ranges[0].smallest;
+                gap && pn >= self.next_unacknowledged + self.loss_threshold
+            } else {
+                false
+            }
+        } else {
+            // Signal if this fills a gap before the largest acknowledged.
+            pn < self.next_unacknowledged
+        };
 
         // Limit the number of ranges that are tracked to MAX_TRACKED_RANGES.
         if self.ranges.len() > MAX_TRACKED_RANGES {
@@ -425,11 +460,11 @@ impl RecvdPackets {
             self.unacknowledged_packets += 1;
 
             // Send an ACK right away in three cases:
-            //  1. The packet appears out of order.
+            //  1. There are too many packets out of order.
             //  2. The packet is not in the application data space.
             //  3. We've acknowledged too many packets already.
             self.ack_time = Some(
-                if pn != next_in_order_pn
+                if reordered
                     || self.space != PNSpace::ApplicationData
                     || self.unacknowledged_packets >= self.max_ack_packets
                 {
@@ -518,11 +553,12 @@ impl RecvdPackets {
         // We've sent an ACK, reset the timer.
         self.ack_time = None;
         self.unacknowledged_packets = 0;
+        self.next_unacknowledged = first.largest + 1;
 
         let ack_delay = now.duration_since(self.largest_pn_time.unwrap());
         // We use the default exponent so
         // ack_delay is in multiples of 8 microseconds.
-        if let Ok(delay) = (ack_delay.as_micros() / 8).try_into() {
+        if let Ok(delay) = u64::try_from(ack_delay.as_micros() / 8) {
             let ack = Frame::Ack {
                 largest_acknowledged: first.largest,
                 ack_delay: delay,
@@ -560,10 +596,16 @@ pub struct AckTracker {
 
 impl AckTracker {
     /// Update acknowledgment delay parameters.
-    pub fn update_ack_delay(&mut self, seqno: u64, count: usize, delay: Duration) {
+    pub fn update_ack_freq(
+        &mut self,
+        seqno: u64,
+        count: usize,
+        delay: Duration,
+        loss_tolerance: u64,
+    ) {
         self.get_mut(PNSpace::ApplicationData)
             .unwrap()
-            .update_ack_delay(seqno, count, delay);
+            .update_ack_freq(seqno, count, delay, loss_tolerance);
     }
 
     pub fn drop_space(&mut self, space: PNSpace) {
@@ -636,8 +678,9 @@ impl Default for AckTracker {
 mod tests {
     use super::{
         AckTracker, Duration, Instant, PNSpace, PNSpaceSet, RecoveryToken, RecvdPackets,
-        DEFAULT_ACK_DELAY, DEFAULT_ACK_PACKETS, MAX_TRACKED_RANGES,
+        MAX_TRACKED_RANGES,
     };
+    use crate::packet::PacketNumber;
     use lazy_static::lazy_static;
     use std::collections::HashSet;
     use std::convert::TryFrom;
@@ -720,22 +763,26 @@ mod tests {
 
     #[test]
     fn ack_delay() {
+        const COUNT: usize = 10;
+        const DELAY: Duration = Duration::from_millis(7);
         // Only application data packets are delayed.
         let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
         assert!(rp.ack_time().is_none());
         assert!(!rp.ack_now(*NOW));
 
+        rp.update_ack_freq(0, COUNT, DELAY, 1);
+
         // Some packets won't cause an ACK to be needed.
-        let max_unacked = u64::try_from(DEFAULT_ACK_PACKETS - 1).unwrap();
-        for num in 0..max_unacked {
-            rp.set_received(*NOW, num, true);
-            assert_eq!(Some(*NOW + DEFAULT_ACK_DELAY), rp.ack_time());
+        for num in 0..(COUNT - 1) {
+            println!("{}", num);
+            rp.set_received(*NOW, PacketNumber::try_from(num).unwrap(), true);
+            assert_eq!(Some(*NOW + DELAY), rp.ack_time());
             assert!(!rp.ack_now(*NOW));
-            assert!(rp.ack_now(*NOW + DEFAULT_ACK_DELAY));
+            assert!(rp.ack_now(*NOW + DELAY));
         }
 
-        // Exceeding MAX_UNACKED_PKTS will move the ACK time to now.
-        rp.set_received(*NOW, max_unacked, true);
+        // Exceeding COUNT will move the ACK time to now.
+        rp.set_received(*NOW, PacketNumber::try_from(COUNT - 1).unwrap(), true);
         assert_eq!(Some(*NOW), rp.ack_time());
         assert!(rp.ack_now(*NOW));
     }
@@ -755,26 +802,82 @@ mod tests {
     }
 
     #[test]
-    fn ooo_no_ack_delay() {
-        for space in &[
-            PNSpace::Initial,
-            PNSpace::Handshake,
-            PNSpace::ApplicationData,
-        ] {
-            let mut rp = RecvdPackets::new(*space);
-            assert!(rp.ack_time().is_none());
-            assert!(!rp.ack_now(*NOW));
+    fn ooo_no_ack_delay_new() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+        assert!(rp.ack_time().is_none());
+        assert!(!rp.ack_now(*NOW));
 
-            // Any OoO packet will be acknowledged straight away.
-            rp.set_received(*NOW, 3, true);
-            assert_eq!(Some(*NOW), rp.ack_time());
-            assert!(rp.ack_now(*NOW));
-        }
+        // Anything other than packet 0 is acknowledged immediately.
+        rp.set_received(*NOW, 1, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
+        assert!(rp.ack_now(*NOW));
+    }
+
+    #[test]
+    fn ooo_no_ack_delay_gap() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+        assert!(rp.ack_time().is_none());
+        assert!(!rp.ack_now(*NOW));
+
+        // Packet number 0 causes delayed acknowledgment.
+        rp.set_received(*NOW, 0, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+
+        // A gap causes immediate acknowledgment.
+        rp.set_received(*NOW, 2, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
+        assert!(rp.ack_now(*NOW));
+    }
+
+    #[test]
+    fn ooo_no_ack_delay_fill() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+        rp.set_received(*NOW, 1, true);
+        assert!(rp.get_frame(*NOW).is_some());
+
+        // Filling in behind the largest acknowledged causes immediate ACK.
+        rp.set_received(*NOW, 0, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
+        assert!(rp.ack_now(*NOW));
+    }
+
+    #[test]
+    fn ooo_no_ack_delay_threshold_new() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+
+        // Set loss threshold to 3 and then it takes three packets.
+        rp.update_ack_freq(0, 10, Duration::from_millis(10), 3);
+
+        rp.set_received(*NOW, 1, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        rp.set_received(*NOW, 2, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        rp.set_received(*NOW, 3, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
+    }
+
+    #[test]
+    fn ooo_no_ack_delay_threshold_gap() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+        rp.set_received(*NOW, 1, true);
+        assert!(rp.get_frame(*NOW).is_some());
+
+        // Set loss threshold to 3 and then it takes three packets.
+        rp.update_ack_freq(0, 10, Duration::from_millis(10), 3);
+
+        rp.set_received(*NOW, 3, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        rp.set_received(*NOW, 4, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        rp.set_received(*NOW, 5, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
     }
 
     #[test]
     fn aggregate_ack_time() {
+        const DELAY: Duration = Duration::from_millis(17);
         let mut tracker = AckTracker::default();
+        tracker.update_ack_freq(0, 2, DELAY, 1);
         // This packet won't trigger an ACK.
         tracker
             .get_mut(PNSpace::Handshake)
@@ -787,10 +890,10 @@ mod tests {
             .get_mut(PNSpace::ApplicationData)
             .unwrap()
             .set_received(*NOW, 0, true);
-        assert_eq!(Some(*NOW + DEFAULT_ACK_DELAY), tracker.ack_time(*NOW));
+        assert_eq!(Some(*NOW + DELAY), tracker.ack_time(*NOW));
 
         // This should move the time forward.
-        let later = *NOW + DEFAULT_ACK_DELAY / 2;
+        let later = *NOW + DELAY / 2;
         tracker
             .get_mut(PNSpace::Initial)
             .unwrap()

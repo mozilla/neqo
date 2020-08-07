@@ -44,7 +44,7 @@ tpids! {
     ACTIVE_CONNECTION_ID_LIMIT = 0x0e,
     INITIAL_SOURCE_CONNECTION_ID = 0x0f,
     RETRY_SOURCE_CONNECTION_ID = 0x10,
-    MIN_ACK_DELAY = 0xaf,
+    MIN_ACK_DELAY = 0xde1a,
 }
 
 #[derive(Clone, Debug, PartialEq)]

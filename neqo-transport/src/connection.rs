@@ -2138,13 +2138,14 @@ impl Connection {
                 seqno,
                 packet_tolerance,
                 max_ack_delay,
+                loss_threshold,
             } => {
                 let count = usize::try_from(packet_tolerance).unwrap_or(usize::MAX);
                 let delay = Duration::from_millis(max_ack_delay);
                 if delay < GRANULARITY {
                     return Err(Error::ProtocolViolation);
                 }
-                self.acks.update_ack_delay(seqno, count, delay);
+                self.acks.update_ack_freq(seqno, count, delay, loss_threshold);
             }
         };
 
@@ -4618,7 +4619,7 @@ mod tests {
             // Until we process all the packets, the congestion window remains the same.
             // Note that we need the client to process ACK frames in stages, so split the
             // datagrams into two, ensuring that we allow for an ACK for each batch.
-            let most = c_tx_dgrams.len() - usize::try_from(DEFAULT_ACK_PACKETS).unwrap();
+            let most = c_tx_dgrams.len() - DEFAULT_ACK_PACKETS;
             let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams.drain(..most), now);
             for dgram in s_tx_dgram {
                 assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);

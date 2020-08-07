@@ -207,6 +207,7 @@ pub enum Frame {
         seqno: u64,
         packet_tolerance: u64,
         max_ack_delay: u64,
+        loss_threshold: u64,
     },
 }
 
@@ -459,10 +460,16 @@ impl Frame {
                 enc.encode_vvec(reason_phrase);
             }
             Self::HandshakeDone => (),
-            Self::AckFrequency { seqno, packet_tolerance, max_ack_delay }=> {
+            Self::AckFrequency {
+                seqno,
+                packet_tolerance,
+                max_ack_delay,
+                loss_threshold,
+            } => {
                 enc.encode_varint(*seqno);
                 enc.encode_varint(*packet_tolerance);
                 enc.encode_varint(*max_ack_delay);
+                enc.encode_varint(*loss_threshold);
             }
         }
     }
@@ -742,11 +749,17 @@ impl Frame {
             FRAME_TYPE_ACK_FREQUENCY => {
                 let seqno = dv!(dec);
                 let packet_tolerance = dv!(dec);
-                if packet_tolerance == 0  {
+                if packet_tolerance == 0 {
                     return Err(Error::DecodingFrame);
                 }
                 let max_ack_delay = dv!(dec);
-                Ok(Self::AckFrequency { seqno, packet_tolerance, max_ack_delay })
+                let loss_threshold = dv!(dec);
+                Ok(Self::AckFrequency {
+                    seqno,
+                    packet_tolerance,
+                    max_ack_delay,
+                    loss_threshold,
+                })
             }
             _ => Err(Error::UnknownFrameType),
         }
@@ -1223,13 +1236,18 @@ mod tests {
 
     #[test]
     fn ack_frequency() {
-        let f = Frame::AckFrequency { seqno: 10, packet_tolerance: 5, max_ack_delay: 2000 };
-        enc_dec(&f, "40af0a0547d0");
+        let f = Frame::AckFrequency {
+            seqno: 10,
+            packet_tolerance: 5,
+            max_ack_delay: 2000,
+            loss_threshold: 1,
+        };
+        enc_dec(&f, "40af0a0547d001");
     }
 
     #[test]
     fn ack_frequency_bad() {
-        let enc = Encoder::from_hex("40af000000");
+        let enc = Encoder::from_hex("40af00000000");
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
             Error::DecodingFrame
