@@ -45,6 +45,7 @@ const FRAME_TYPE_PATH_RESPONSE: FrameType = 0x1b;
 pub const FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: FrameType = 0x1c;
 pub const FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: FrameType = 0x1d;
 const FRAME_TYPE_HANDSHAKE_DONE: FrameType = 0x1e;
+pub const FRAME_TYPE_ACK_FREQUENCY: FrameType = 0xaf;
 
 const STREAM_FRAME_BIT_FIN: u64 = 0x01;
 const STREAM_FRAME_BIT_LEN: u64 = 0x02;
@@ -202,6 +203,11 @@ pub enum Frame {
         reason_phrase: Vec<u8>,
     },
     HandshakeDone,
+    AckFrequency {
+        seqno: u64,
+        packet_tolerance: u64,
+        max_ack_delay: u64,
+    },
 }
 
 impl Frame {
@@ -247,6 +253,7 @@ impl Frame {
                 FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT + error_code.frame_type_bit()
             }
             Self::HandshakeDone => FRAME_TYPE_HANDSHAKE_DONE,
+            Self::AckFrequency { .. } => FRAME_TYPE_ACK_FREQUENCY,
         }
     }
 
@@ -452,6 +459,11 @@ impl Frame {
                 enc.encode_vvec(reason_phrase);
             }
             Self::HandshakeDone => (),
+            Self::AckFrequency { seqno, packet_tolerance, max_ack_delay }=> {
+                enc.encode_varint(*seqno);
+                enc.encode_varint(*packet_tolerance);
+                enc.encode_varint(*max_ack_delay);
+            }
         }
     }
 
@@ -727,6 +739,15 @@ impl Frame {
                 })
             }
             FRAME_TYPE_HANDSHAKE_DONE => Ok(Self::HandshakeDone),
+            FRAME_TYPE_ACK_FREQUENCY => {
+                let seqno = dv!(dec);
+                let packet_tolerance = dv!(dec);
+                if packet_tolerance == 0  {
+                    return Err(Error::DecodingFrame);
+                }
+                let max_ack_delay = dv!(dec);
+                Ok(Self::AckFrequency { seqno, packet_tolerance, max_ack_delay })
+            }
             _ => Err(Error::UnknownFrameType),
         }
     }
@@ -1198,5 +1219,20 @@ mod tests {
         } else {
             panic!("Wrong frame type");
         }
+    }
+
+    #[test]
+    fn ack_frequency() {
+        let f = Frame::AckFrequency { seqno: 10, packet_tolerance: 5, max_ack_delay: 2000 };
+        enc_dec(&f, "40af0a0547d0");
+    }
+
+    #[test]
+    fn ack_frequency_bad() {
+        let enc = Encoder::from_hex("40af000000");
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::DecodingFrame
+        );
     }
 }

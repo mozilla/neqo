@@ -50,7 +50,7 @@ use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::{
     self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
 };
-use crate::tracking::{AckTracker, PNSpace, SentPacket};
+use crate::tracking::{AckTracker, PNSpace, SentPacket, DEFAULT_ACK_DELAY};
 use crate::{AppError, ConnectionError, Error, Res, LOCAL_IDLE_TIMEOUT};
 
 #[derive(Debug, Default)]
@@ -547,6 +547,14 @@ impl Connection {
             u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
         );
         tps.set_empty(tparams::DISABLE_MIGRATION);
+        tps.set_integer(
+            tparams::MAX_ACK_DELAY,
+            u64::try_from(DEFAULT_ACK_DELAY.as_micros()).unwrap(),
+        );
+        tps.set_integer(
+            tparams::MIN_ACK_DELAY,
+            u64::try_from(GRANULARITY.as_micros()).unwrap(),
+        );
     }
 
     fn new(
@@ -2126,6 +2134,18 @@ impl Connection {
                 self.set_state(State::Confirmed);
                 self.discard_keys(PNSpace::Handshake, now);
             }
+            Frame::AckFrequency {
+                seqno,
+                packet_tolerance,
+                max_ack_delay,
+            } => {
+                let count = usize::try_from(packet_tolerance).unwrap_or(usize::MAX);
+                let delay = Duration::from_millis(max_ack_delay);
+                if delay < GRANULARITY {
+                    return Err(Error::ProtocolViolation);
+                }
+                self.acks.update_ack_delay(seqno, count, delay);
+            }
         };
 
         Ok(())
@@ -2664,7 +2684,7 @@ mod tests {
     use crate::recovery::ACK_ONLY_SIZE_LIMIT;
     use crate::recovery::PTO_PACKET_COUNT;
     use crate::send_stream::SEND_BUFFER_SIZE;
-    use crate::tracking::{ACK_DELAY, MAX_UNACKED_PKTS};
+    use crate::tracking::{DEFAULT_ACK_DELAY, DEFAULT_ACK_PACKETS};
     use std::convert::TryInto;
 
     use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AllowZeroRtt};
@@ -2941,7 +2961,7 @@ mod tests {
             let out = server.process(Some(d), now());
             assert_eq!(
                 out.as_dgram_ref().is_some(),
-                (d_num + 1) % (MAX_UNACKED_PKTS + 1) == 0
+                (d_num + 1) % DEFAULT_ACK_PACKETS == 0
             );
             qdebug!("Output={:0x?}", out.as_dgram_ref());
         }
@@ -4151,7 +4171,7 @@ mod tests {
         // Client receive ack for the first packet
         let cb = client.process(pkt, now).callback();
         // Ack delay timer for the packet carrying HANDSHAKE_DONE.
-        assert_eq!(cb, ACK_DELAY);
+        assert_eq!(cb, DEFAULT_ACK_DELAY);
 
         // Let the ack timer expire.
         now += cb;
@@ -4161,7 +4181,7 @@ mod tests {
         // The handshake keys are discarded, but now we're back to the idle timeout.
         // We don't send another PING because the handshake space is done and there
         // is nothing to probe for.
-        assert_eq!(cb, LOCAL_IDLE_TIMEOUT - ACK_DELAY);
+        assert_eq!(cb, LOCAL_IDLE_TIMEOUT - DEFAULT_ACK_DELAY);
     }
 
     /// Test that PTO in the Handshake space contains the right frames.
@@ -4598,7 +4618,7 @@ mod tests {
             // Until we process all the packets, the congestion window remains the same.
             // Note that we need the client to process ACK frames in stages, so split the
             // datagrams into two, ensuring that we allow for an ACK for each batch.
-            let most = c_tx_dgrams.len() - usize::try_from(MAX_UNACKED_PKTS + 1).unwrap();
+            let most = c_tx_dgrams.len() - usize::try_from(DEFAULT_ACK_PACKETS).unwrap();
             let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams.drain(..most), now);
             for dgram in s_tx_dgram {
                 assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);

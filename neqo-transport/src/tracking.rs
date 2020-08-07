@@ -301,8 +301,8 @@ impl ::std::fmt::Display for PacketRange {
 }
 
 /// The ACK delay we use.
-pub const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
-pub const MAX_UNACKED_PKTS: usize = 1;
+pub const DEFAULT_ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
+pub const DEFAULT_ACK_PACKETS: usize = 2;
 const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
@@ -323,9 +323,16 @@ pub struct RecvdPackets {
     min_tracked: PacketNumber,
     /// The time we got the largest acknowledged.
     largest_pn_time: Option<Instant>,
-    // The time that we should be sending an ACK.
+    /// The number of packets received that have not been acknowledged.
+    unacknowledged_packets: usize,
+    /// The time at which the next acknowledgment should be sent.
     ack_time: Option<Instant>,
-    pkts_since_last_ack: usize,
+    /// The current ACK
+    ack_frequency_seqno: u64,
+    /// The maximum acknowledgment delay.
+    max_ack_delay: Duration,
+    /// The maximum number of packets received before sending an immediate acknowledgment.
+    max_ack_packets: usize,
 }
 
 impl RecvdPackets {
@@ -336,14 +343,28 @@ impl RecvdPackets {
             ranges: VecDeque::new(),
             min_tracked: 0,
             largest_pn_time: None,
+            unacknowledged_packets: 0,
             ack_time: None,
-            pkts_since_last_ack: 0,
+            ack_frequency_seqno: 0,
+            max_ack_delay: DEFAULT_ACK_DELAY,
+            max_ack_packets: DEFAULT_ACK_PACKETS,
         }
     }
 
     /// Get the time at which the next ACK should be sent.
     pub fn ack_time(&self) -> Option<Instant> {
         self.ack_time
+    }
+
+    /// Update acknowledgment delay parameters.
+    pub fn update_ack_delay(&mut self, seqno: u64, count: usize, delay: Duration) {
+        // Yes, this means that we will overwrite values if a sequence number is
+        // reused, but that is better than using an `Option<u64>` that is always `Some`.
+        if seqno >= self.ack_frequency_seqno {
+            self.ack_frequency_seqno = seqno;
+            self.max_ack_delay = delay;
+            self.max_ack_packets = count;
+        }
     }
 
     /// Returns true if an ACK frame should be sent now.
@@ -401,25 +422,22 @@ impl RecvdPackets {
         }
 
         if ack_eliciting {
-            self.pkts_since_last_ack += 1;
+            self.unacknowledged_packets += 1;
 
-            // Send ACK right away if out-of-order
-            // On the first in-order ack-eliciting packet since sending an ACK,
-            // set a delay.
-            // Count packets until we exceed MAX_UNACKED_PKTS, then remove the
-            // delay.
-            if pn != next_in_order_pn {
-                self.ack_time = Some(now);
-            } else if self.space == PNSpace::ApplicationData {
-                match &mut self.pkts_since_last_ack {
-                    0 => unreachable!(),
-                    1 => self.ack_time = Some(now + ACK_DELAY),
-                    x if *x > MAX_UNACKED_PKTS => self.ack_time = Some(now),
-                    _ => debug_assert!(self.ack_time.is_some()),
-                }
-            } else {
-                self.ack_time = Some(now);
-            }
+            // Send an ACK right away in three cases:
+            //  1. The packet appears out of order.
+            //  2. The packet is not in the application data space.
+            //  3. We've acknowledged too many packets already.
+            self.ack_time = Some(
+                if pn != next_in_order_pn
+                    || self.space != PNSpace::ApplicationData
+                    || self.unacknowledged_packets >= self.max_ack_packets
+                {
+                    now
+                } else {
+                    self.ack_time.unwrap_or(now + self.max_ack_delay)
+                },
+            );
             qdebug!([self], "Set ACK timer to {:?}", self.ack_time);
         }
     }
@@ -499,7 +517,7 @@ impl RecvdPackets {
 
         // We've sent an ACK, reset the timer.
         self.ack_time = None;
-        self.pkts_since_last_ack = 0;
+        self.unacknowledged_packets = 0;
 
         let ack_delay = now.duration_since(self.largest_pn_time.unwrap());
         // We use the default exponent so
@@ -541,6 +559,13 @@ pub struct AckTracker {
 }
 
 impl AckTracker {
+    /// Update acknowledgment delay parameters.
+    pub fn update_ack_delay(&mut self, seqno: u64, count: usize, delay: Duration) {
+        self.get_mut(PNSpace::ApplicationData)
+            .unwrap()
+            .update_ack_delay(seqno, count, delay);
+    }
+
     pub fn drop_space(&mut self, space: PNSpace) {
         let sp = match space {
             PNSpace::Initial => self.spaces.pop(),
@@ -610,8 +635,8 @@ impl Default for AckTracker {
 #[cfg(test)]
 mod tests {
     use super::{
-        AckTracker, Duration, Instant, PNSpace, PNSpaceSet, RecoveryToken, RecvdPackets, ACK_DELAY,
-        MAX_TRACKED_RANGES, MAX_UNACKED_PKTS,
+        AckTracker, Duration, Instant, PNSpace, PNSpaceSet, RecoveryToken, RecvdPackets,
+        DEFAULT_ACK_DELAY, DEFAULT_ACK_PACKETS, MAX_TRACKED_RANGES,
     };
     use lazy_static::lazy_static;
     use std::collections::HashSet;
@@ -701,12 +726,12 @@ mod tests {
         assert!(!rp.ack_now(*NOW));
 
         // Some packets won't cause an ACK to be needed.
-        let max_unacked = u64::try_from(MAX_UNACKED_PKTS).unwrap();
+        let max_unacked = u64::try_from(DEFAULT_ACK_PACKETS - 1).unwrap();
         for num in 0..max_unacked {
             rp.set_received(*NOW, num, true);
-            assert_eq!(Some(*NOW + ACK_DELAY), rp.ack_time());
+            assert_eq!(Some(*NOW + DEFAULT_ACK_DELAY), rp.ack_time());
             assert!(!rp.ack_now(*NOW));
-            assert!(rp.ack_now(*NOW + ACK_DELAY));
+            assert!(rp.ack_now(*NOW + DEFAULT_ACK_DELAY));
         }
 
         // Exceeding MAX_UNACKED_PKTS will move the ACK time to now.
@@ -762,10 +787,10 @@ mod tests {
             .get_mut(PNSpace::ApplicationData)
             .unwrap()
             .set_received(*NOW, 0, true);
-        assert_eq!(Some(*NOW + ACK_DELAY), tracker.ack_time(*NOW));
+        assert_eq!(Some(*NOW + DEFAULT_ACK_DELAY), tracker.ack_time(*NOW));
 
         // This should move the time forward.
-        let later = *NOW + ACK_DELAY.checked_div(2).unwrap();
+        let later = *NOW + DEFAULT_ACK_DELAY / 2;
         tracker
             .get_mut(PNSpace::Initial)
             .unwrap()
