@@ -451,7 +451,7 @@ impl RecvdPackets {
 
     /// Add the packet to the tracked set.
     pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) {
-        let largest = self.ranges.front().map_or(0, |r| r.largest);
+        let prev_largest = self.ranges.front().map_or(0, |r| r.largest);
         qdebug!([self], "received {}, largest: {}", pn, largest);
 
         self.add(pn);
@@ -459,7 +459,7 @@ impl RecvdPackets {
 
         // The new addition is the new largest acknowledged, so an immediate ACK
         // might be needed.
-        let immediate_ack = if pn >= largest {
+        let immediate_ack = if pn > prev_largest {
             self.largest_pn_time = Some(now);
 
             if self.space != PNSpace::ApplicationData {
@@ -499,10 +499,12 @@ impl RecvdPackets {
                 }
                 false
             }
-        } else {
+        } else if pn < self.next_unacknowledged {
             // This is fills a gap before we last sent an acknowledgment,
             // so acknowledge immediately (if it is ack-eliciting).
             true
+        } else {
+            false
         };
 
         if ack_eliciting {
