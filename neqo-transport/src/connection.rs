@@ -2136,16 +2136,16 @@ impl Connection {
             }
             Frame::AckFrequency {
                 seqno,
-                packet_tolerance,
-                max_ack_delay,
+                delay,
+                packet_threshold,
                 loss_threshold,
             } => {
-                let count = usize::try_from(packet_tolerance).unwrap_or(usize::MAX);
-                let delay = Duration::from_millis(max_ack_delay);
+                let delay = Duration::from_millis(delay);
                 if delay < GRANULARITY {
                     return Err(Error::ProtocolViolation);
                 }
-                self.acks.update_ack_freq(seqno, count, delay, loss_threshold);
+                self.acks
+                    .update_ack_freq(seqno, delay, packet_threshold, loss_threshold);
             }
         };
 
@@ -2685,7 +2685,7 @@ mod tests {
     use crate::recovery::ACK_ONLY_SIZE_LIMIT;
     use crate::recovery::PTO_PACKET_COUNT;
     use crate::send_stream::SEND_BUFFER_SIZE;
-    use crate::tracking::{DEFAULT_ACK_DELAY, DEFAULT_ACK_PACKETS};
+    use crate::tracking::{DEFAULT_ACK_DELAY, DEFAULT_ACK_PACKET_THRESHOLD};
     use std::convert::TryInto;
 
     use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AllowZeroRtt};
@@ -2962,7 +2962,7 @@ mod tests {
             let out = server.process(Some(d), now());
             assert_eq!(
                 out.as_dgram_ref().is_some(),
-                (d_num + 1) % DEFAULT_ACK_PACKETS == 0
+                (d_num + 1) % usize::try_from(DEFAULT_ACK_PACKET_THRESHOLD + 1).unwrap() == 0
             );
             qdebug!("Output={:0x?}", out.as_dgram_ref());
         }
@@ -3527,31 +3527,28 @@ mod tests {
     fn idle_send_packet1() {
         let mut client = default_client();
         let mut server = default_server();
+        let mut now = now();
         connect_force_idle(&mut client, &mut server);
-
-        let now = now();
 
         let res = client.process(None, now);
         assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
-        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);
-
-        let out = client.process(None, now + Duration::from_secs(10));
-        let out = server.process(out.dgram(), now + Duration::from_secs(10));
+        now += Duration::from_secs(10);
+        let dgram = send_and_receive(&mut client, &mut server, now);
+        assert!(dgram.is_none());
 
         // Still connected after 39 seconds because idle timer reset by outgoing
         // packet
-        let _ = client.process(
-            out.dgram(),
-            now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(9),
-        );
-        assert!(matches!(client.state(), State::Confirmed));
+        now += LOCAL_IDLE_TIMEOUT - Duration::from_secs(1);
+        let dgram = client.process(None, now).dgram();
+        assert!(dgram.is_none());
+        assert!(client.state().connected());
 
         // Not connected after 40 seconds.
-        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
-
-        assert!(matches!(client.state(), State::Closed(_)));
+        now += Duration::from_secs(1);
+        let dgram = client.process(None, now).dgram();
+        assert!(dgram.is_none());
+        assert!(client.state().closed());
     }
 
     #[test]
@@ -4619,7 +4616,8 @@ mod tests {
             // Until we process all the packets, the congestion window remains the same.
             // Note that we need the client to process ACK frames in stages, so split the
             // datagrams into two, ensuring that we allow for an ACK for each batch.
-            let most = c_tx_dgrams.len() - DEFAULT_ACK_PACKETS;
+            let most =
+                c_tx_dgrams.len() - usize::try_from(DEFAULT_ACK_PACKET_THRESHOLD).unwrap() - 1;
             let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams.drain(..most), now);
             for dgram in s_tx_dgram {
                 assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
@@ -4864,8 +4862,6 @@ mod tests {
         assert_eq!(client.get_epochs(), (Some(3), Some(3))); // (write, read)
         assert_eq!(server.get_epochs(), (Some(3), Some(3)));
 
-        // TODO(mt) this needs to wait for handshake confirmation,
-        // but for now, we can do this immediately.
         assert!(client.initiate_key_update().is_ok());
         assert!(client.initiate_key_update().is_err());
 

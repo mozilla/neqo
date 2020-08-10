@@ -204,9 +204,16 @@ pub enum Frame {
     },
     HandshakeDone,
     AckFrequency {
+        /// The current ACK frequency sequence number.
         seqno: u64,
-        packet_tolerance: u64,
-        max_ack_delay: u64,
+        /// The time to delay after receiving the first packet that is
+        /// not immediately acknowledged.
+        delay: u64,
+        /// The number of contiguous packets that can be received without
+        /// acknowledging immediately.
+        packet_threshold: u64,
+        /// The number of non-contiguous packets that can be received without
+        /// acknowledging immediately.
         loss_threshold: u64,
     },
 }
@@ -462,13 +469,13 @@ impl Frame {
             Self::HandshakeDone => (),
             Self::AckFrequency {
                 seqno,
-                packet_tolerance,
-                max_ack_delay,
+                delay,
+                packet_threshold,
                 loss_threshold,
             } => {
                 enc.encode_varint(*seqno);
-                enc.encode_varint(*packet_tolerance);
-                enc.encode_varint(*max_ack_delay);
+                enc.encode_varint(*delay);
+                enc.encode_varint(*packet_threshold);
                 enc.encode_varint(*loss_threshold);
             }
         }
@@ -748,16 +755,13 @@ impl Frame {
             FRAME_TYPE_HANDSHAKE_DONE => Ok(Self::HandshakeDone),
             FRAME_TYPE_ACK_FREQUENCY => {
                 let seqno = dv!(dec);
-                let packet_tolerance = dv!(dec);
-                if packet_tolerance == 0 {
-                    return Err(Error::DecodingFrame);
-                }
-                let max_ack_delay = dv!(dec);
+                let delay = dv!(dec);
+                let packet_threshold = dv!(dec);
                 let loss_threshold = dv!(dec);
                 Ok(Self::AckFrequency {
                     seqno,
-                    packet_tolerance,
-                    max_ack_delay,
+                    delay,
+                    packet_threshold,
                     loss_threshold,
                 })
             }
@@ -1238,19 +1242,10 @@ mod tests {
     fn ack_frequency() {
         let f = Frame::AckFrequency {
             seqno: 10,
-            packet_tolerance: 5,
-            max_ack_delay: 2000,
+            delay: 2000,
+            packet_threshold: 5,
             loss_threshold: 1,
         };
-        enc_dec(&f, "40af0a0547d001");
-    }
-
-    #[test]
-    fn ack_frequency_bad() {
-        let enc = Encoder::from_hex("40af00000000");
-        assert_eq!(
-            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
-            Error::DecodingFrame
-        );
+        enc_dec(&f, "40af0a47d00501");
     }
 }
