@@ -451,12 +451,15 @@ impl RecvdPackets {
 
     /// Add the packet to the tracked set.
     pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) {
+        let largest = self.ranges.front().map_or(0, |r| r.largest);
+        qdebug!([self], "received {}, largest: {}", pn, largest);
+
         self.add(pn);
         self.trim_ranges();
 
         // The new addition is the new largest acknowledged, so an immediate ACK
         // might be needed.
-        let immediate_ack = if pn >= self.next_unacknowledged {
+        let immediate_ack = if pn >= largest {
             self.largest_pn_time = Some(now);
 
             if self.space != PNSpace::ApplicationData {
