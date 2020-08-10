@@ -451,23 +451,22 @@ impl RecvdPackets {
 
     /// Add the packet to the tracked set.
     pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) {
-        let prev_largest = self.ranges.front().map_or(0, |r| r.largest);
-        qdebug!([self], "received {}, largest: {}", pn, largest);
+        let next_largest = self.ranges.front().map_or(0, |r| r.largest + 1);
+        qdebug!([self], "received {}, largest: {}", pn, next_largest);
 
         self.add(pn);
         self.trim_ranges();
 
-        // The new addition is the new largest acknowledged, so an immediate ACK
-        // might be needed.
-        let immediate_ack = if pn > prev_largest {
+        let immediate_ack = if pn >= next_largest {
+            // The new addition is the new largest received, so record when it arrived
+            // and try to work out if this needs immediate acknowledgment.
             self.largest_pn_time = Some(now);
 
             if self.space != PNSpace::ApplicationData {
                 // Always acknowledge ack-eliciting Initial and Handshake packets
-                // immediately (if they are ack-eliciting).
+                // immediately.
                 true
             } else if ack_eliciting {
-                // This has increased the largest received, so check for a gap.
                 // IF the first range doesn't include the next unacknowledged, then
                 // there is a gap, so use loss_threshold.
                 // Otherwise, there are no gaps, so use packet_threshold.
@@ -485,23 +484,11 @@ impl RecvdPackets {
                 );
                 pn >= self.next_unacknowledged + threshold
             } else {
-                // No need to work out whether to immediately acknowledge, but...
-                // If the packet was not ack-eliciting, then it won't be acknowledged
-                // immediately, but - assuming that it arrives in order - we should
-                // disregard it for the purposes of whether to acknowledge immediately.
-                // As this the status of every packet isn't tracked, packets that are
-                // not ack-eliciting might be counted if they are reordered.  That is,
-                // even if no received packet is ack-eliciting, we will use the first
-                // reordered such packet in calculating whether to immediately
-                // acknowledge ack-eliciting packets that follow.
-                if pn == self.next_unacknowledged {
-                    self.next_unacknowledged += 1;
-                }
                 false
             }
         } else if pn < self.next_unacknowledged {
-            // This is fills a gap before we last sent an acknowledgment,
-            // so acknowledge immediately (if it is ack-eliciting).
+            // This packet fills a gap before the last sent acknowledgment,
+            // so acknowledge it immediately (if it is ack-eliciting).
             true
         } else {
             false
@@ -515,6 +502,19 @@ impl RecvdPackets {
                 self.ack_time.unwrap_or(now + self.ack_delay)
             });
             qdebug!([self], "Set ACK timer to {:?}", self.ack_time);
+        } else if pn == self.next_unacknowledged {
+            // If the packet was not ack-eliciting, then it won't be acknowledged
+            // immediately, but - assuming that it arrives in order - we should
+            // disregard it for the purposes of whether to acknowledge subsequent
+            // packets immediately.  Ideally, all packets that are not ack-eliciting
+            // are ignored when doing that calculation, but whether packets are
+            // ack-eliciting is not tracked.  Instead, this increments
+            // `next_unacknowledged` if that packet isn't ack-eliciting.  This
+            // isn't perfect, because even if no received packet is ack-eliciting,
+            // the immediate acknowledgment calculation will start at the first
+            // reordered packet non-ack-eliciting packet rather than the first
+            // ack-eliciting packet.  This is not expected to be a problem though.
+            self.next_unacknowledged += 1;
         }
     }
 

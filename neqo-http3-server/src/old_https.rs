@@ -25,14 +25,14 @@ use neqo_transport::{ConnectionEvent, ConnectionIdManager, Output};
 use super::{qns_read_response, Args, HttpServer};
 
 #[derive(Default)]
-struct Http09ConnState {
+struct Http09StreamState {
     writable: bool,
     data_to_send: Option<(Vec<u8>, usize)>,
 }
 
 pub struct Http09Server {
     server: Server,
-    conn_state: HashMap<(ActiveConnectionRef, u64), Http09ConnState>,
+    stream_state: HashMap<(ActiveConnectionRef, u64), Http09StreamState>,
 }
 
 impl Http09Server {
@@ -52,7 +52,7 @@ impl Http09Server {
                 Box::new(AllowZeroRtt {}),
                 cid_manager,
             )?,
-            conn_state: HashMap::new(),
+            stream_state: HashMap::new(),
         })
     }
 
@@ -62,17 +62,27 @@ impl Http09Server {
             return;
         }
         let mut data = vec![0; 4000];
-        conn.borrow_mut()
+        let (sz, fin) = conn
+            .borrow_mut()
             .stream_recv(stream_id, &mut data)
             .expect("Read should succeed");
-        let msg = match String::from_utf8(data) {
+
+        if sz == 0 {
+            if !fin {
+                eprintln!("size 0 but !fin");
+            }
+            return;
+        }
+
+        let msg = match std::str::from_utf8(&data[..sz]) {
             Ok(s) => s,
-            Err(_e) => {
-                eprintln!("invalid string. Is this HTTP 0.9?");
+            Err(e) => {
+                eprintln!("invalid string. Is this HTTP 0.9? error: {}", e);
                 conn.borrow_mut().stream_close_send(stream_id).unwrap();
                 return;
             }
         };
+
         let re = if args.qns_mode {
             Regex::new(r"GET +/(\S+)(\r)?\n").unwrap()
         } else {
@@ -92,21 +102,29 @@ impl Http09Server {
                 }
             }
         };
-        let conn_state = self.conn_state.get_mut(&(conn.clone(), stream_id)).unwrap();
-        conn_state.data_to_send = resp.map(|r| (r, 0));
-        if conn_state.writable {
+        let stream_state = self
+            .stream_state
+            .get_mut(&(conn.clone(), stream_id))
+            .unwrap();
+        match stream_state.data_to_send {
+            None => stream_state.data_to_send = resp.map(|r| (r, 0)),
+            Some(_) => {
+                eprintln!("Data already set, doing nothing");
+            }
+        }
+        if stream_state.writable {
             self.stream_writable(stream_id, &mut conn);
         }
     }
 
     fn stream_writable(&mut self, stream_id: u64, conn: &mut ActiveConnectionRef) {
-        match self.conn_state.get_mut(&(conn.clone(), stream_id)) {
+        match self.stream_state.get_mut(&(conn.clone(), stream_id)) {
             None => {
                 eprintln!("Unknown stream {}, ignoring event", stream_id);
             }
-            Some(conn_state) => {
-                conn_state.writable = true;
-                if let Some((data, ref mut offset)) = &mut conn_state.data_to_send {
+            Some(stream_state) => {
+                stream_state.writable = true;
+                if let Some((data, ref mut offset)) = &mut stream_state.data_to_send {
                     let sent = conn
                         .borrow_mut()
                         .stream_send(stream_id, &data[*offset..])
@@ -116,9 +134,9 @@ impl Http09Server {
                     if *offset == data.len() {
                         eprintln!("Sent {} on {}, closing", sent, stream_id);
                         conn.borrow_mut().stream_close_send(stream_id).unwrap();
-                        self.conn_state.remove(&(conn.clone(), stream_id));
+                        self.stream_state.remove(&(conn.clone(), stream_id));
                     } else {
-                        conn_state.writable = false;
+                        stream_state.writable = false;
                     }
                 }
             }
@@ -141,9 +159,9 @@ impl HttpServer for Http09Server {
                 };
                 match event {
                     ConnectionEvent::NewStream { stream_id } => {
-                        self.conn_state.insert(
+                        self.stream_state.insert(
                             (acr.clone(), stream_id.as_u64()),
-                            Http09ConnState::default(),
+                            Http09StreamState::default(),
                         );
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {

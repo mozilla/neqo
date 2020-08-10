@@ -3525,58 +3525,67 @@ mod tests {
 
     #[test]
     fn idle_send_packet1() {
+        const DELTA: Duration = Duration::from_millis(10);
+
         let mut client = default_client();
         let mut server = default_server();
         let mut now = now();
         connect_force_idle(&mut client, &mut server);
 
-        let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
+        let timeout = client.process(None, now).callback();
+        assert_eq!(timeout, LOCAL_IDLE_TIMEOUT);
 
         now += Duration::from_secs(10);
         let dgram = send_and_receive(&mut client, &mut server, now);
         assert!(dgram.is_none());
 
-        // Still connected after 39 seconds because idle timer reset by outgoing
-        // packet
-        now += LOCAL_IDLE_TIMEOUT - Duration::from_secs(1);
+        // Still connected after 39 seconds because idle timer reset by the
+        // outgoing packet.
+        now += LOCAL_IDLE_TIMEOUT - DELTA;
         let dgram = client.process(None, now).dgram();
-        assert!(dgram.is_none());
+        assert!(dgram.is_some()); // PTO
         assert!(client.state().connected());
 
         // Not connected after 40 seconds.
-        now += Duration::from_secs(1);
-        let dgram = client.process(None, now).dgram();
-        assert!(dgram.is_none());
+        now += DELTA;
+        let out = client.process(None, now);
+        assert!(matches!(out, Output::None));
         assert!(client.state().closed());
     }
 
     #[test]
     fn idle_send_packet2() {
+        const GAP: Duration = Duration::from_secs(10);
+        const DELTA: Duration = Duration::from_millis(10);
+
         let mut client = default_client();
         let mut server = default_server();
         connect_force_idle(&mut client, &mut server);
 
-        let now = now();
+        let mut now = now();
 
-        let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
+        let timeout = client.process(None, now).callback();
+        assert_eq!(timeout, LOCAL_IDLE_TIMEOUT);
 
-        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);
+        // First transmission at t=GAP.
+        now += GAP;
+        let _ = send_something(&mut client, now);
 
-        let _out = client.process(None, now + Duration::from_secs(10));
+        // Second transmission at t=2*GAP.
+        let _ = send_something(&mut client, now + GAP);
+        assert!((GAP * 2 + DELTA) < LOCAL_IDLE_TIMEOUT);
 
-        assert_eq!(client.stream_send(2, b"there").unwrap(), 5);
-        let _out = client.process(None, now + Duration::from_secs(20));
-
-        // Still connected after 39 seconds.
-        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(9));
+        // Still connected just before GAP + LOCAL_IDLE_TIMEOUT.
+        now += LOCAL_IDLE_TIMEOUT - DELTA;
+        let dgram = client.process(None, now).dgram();
+        assert!(dgram.is_some()); // PTO
         assert!(matches!(client.state(), State::Confirmed));
 
         // Not connected after 40 seconds because timer not reset by second
         // outgoing packet
-        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
+        now += DELTA;
+        let out = client.process(None, now);
+        assert!(matches!(out, Output::None));
         assert!(matches!(client.state(), State::Closed(_)));
     }
 
