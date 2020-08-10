@@ -131,6 +131,7 @@ impl Http09Server {
                         .unwrap();
                     eprintln!("Wrote {}", sent);
                     *offset += sent;
+                    self.server.add_to_waiting(conn.clone());
                     if *offset == data.len() {
                         eprintln!("Sent {} on {}, closing", sent, stream_id);
                         conn.borrow_mut().stream_close_send(stream_id).unwrap();
