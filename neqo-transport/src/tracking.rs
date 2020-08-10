@@ -407,7 +407,12 @@ impl RecvdPackets {
     /// Add the packet to the tracked set.
     pub fn set_received(&mut self, now: Instant, pn: u64, ack_eliciting: bool) {
         let next_in_order_pn = self.ranges.front().map_or(0, |pr| pr.largest + 1);
-        qdebug!([self], "received {}, next in order pn: {}", pn, next_in_order_pn);
+        qdebug!(
+            [self],
+            "received {}, next in order pn: {}",
+            pn,
+            next_in_order_pn
+        );
 
         self.add(pn);
         self.trim_ranges();
