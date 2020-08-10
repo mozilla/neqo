@@ -18,6 +18,42 @@ use std::time::{Duration, Instant};
 /// One second in nanoseconds.
 const ONE_SECOND_NS: u128 = 1_000_000_000;
 
+#[derive(Default)]
+struct TailDropStats {
+    /// The number of packets received.
+    pub received: usize,
+    /// The number of packets dropped.
+    pub dropped: usize,
+    /// The number of packets delivered.
+    pub delivered: usize,
+    /// The maximum amount of queue capacity ever used.
+    /// As packets leave the queue as soon as they start being used, this doesn't
+    /// count them.
+    pub maxq: usize,
+    pub start_time: Option<Instant>,
+    pub end_time: Option<Instant>,
+    pub sent_bytes: usize,
+}
+
+impl TailDropStats {
+    fn print_summary(&self, test_name: &str) {
+        let throughput = if self.start_time.is_some()
+            && self.end_time.is_some()
+            && self.start_time.unwrap() != self.end_time.unwrap()
+        {
+            u128::try_from(self.sent_bytes).unwrap()
+                / (self.end_time.unwrap() - self.start_time.unwrap()).as_millis()
+                * 1000
+        } else {
+            0
+        };
+        println!(
+            "{}: taildrop: rx {} drop {} tx {} maxq {} throughput {}",
+            test_name, self.received, self.dropped, self.delivered, self.maxq, throughput
+        );
+    }
+}
+
 /// This models a link with a tail drop router at the front of it.
 pub struct TailDrop {
     /// An overhead associated with each entry.  This accounts for
@@ -42,16 +78,7 @@ pub struct TailDrop {
     /// The packets that are on the link and when they can be delivered.
     on_link: VecDeque<(Instant, Datagram)>,
 
-    /// The number of packets received.
-    received: usize,
-    /// The number of packets dropped.
-    dropped: usize,
-    /// The number of packets delivered.
-    delivered: usize,
-    /// The maximum amount of queue capacity ever used.
-    /// As packets leave the queue as soon as they start being used, this doesn't
-    /// count them.
-    maxq: usize,
+    stats: TailDropStats,
 }
 
 impl TailDrop {
@@ -67,10 +94,7 @@ impl TailDrop {
             sub_ns_delay: 0,
             delay,
             on_link: VecDeque::new(),
-            received: 0,
-            dropped: 0,
-            delivered: 0,
-            maxq: 0,
+            stats: TailDropStats::default(),
         }
     }
 
@@ -118,18 +142,18 @@ impl TailDrop {
 
     /// Enqueue for sending.  Maybe.  If this overflows the queue, drop it instead.
     fn maybe_enqueue(&mut self, d: Datagram, now: Instant) {
-        self.received += 1;
+        self.stats.received += 1;
         if self.next_deque.is_none() {
             // Nothing in the queue and nothing still sending.
             debug_assert!(self.queue.is_empty());
             self.send(d, now);
         } else if self.used + self.size(&d) <= self.capacity {
             self.used += self.size(&d);
-            self.maxq = max(self.maxq, self.used);
+            self.stats.maxq = max(self.stats.maxq, self.used);
             self.queue.push_back(d);
         } else {
             qtrace!("taildrop dropping {} bytes", d.len());
-            self.dropped += 1;
+            self.stats.dropped += 1;
         }
     }
 
@@ -151,6 +175,9 @@ impl TailDrop {
 impl Node for TailDrop {
     fn process(&mut self, d: Option<Datagram>, now: Instant) -> Output {
         if let Some(dgram) = d {
+            if self.stats.start_time.is_none() {
+                self.stats.start_time = Some(now);
+            }
             self.maybe_enqueue(dgram, now);
         }
 
@@ -159,7 +186,9 @@ impl Node for TailDrop {
         if let Some((t, _)) = self.on_link.front() {
             if *t <= now {
                 let (_, d) = self.on_link.pop_front().unwrap();
-                self.delivered += 1;
+                self.stats.delivered += 1;
+                self.stats.end_time = Some(now);
+                self.stats.sent_bytes += d.len();
                 Output::Datagram(d)
             } else {
                 Output::Callback(*t - now)
@@ -170,10 +199,7 @@ impl Node for TailDrop {
     }
 
     fn print_summary(&self, test_name: &str) {
-        println!(
-            "{}: taildrop: rx {} drop {} tx {} maxq {}",
-            test_name, self.received, self.dropped, self.delivered, self.maxq,
-        );
+        self.stats.print_summary(test_name);
     }
 }
 

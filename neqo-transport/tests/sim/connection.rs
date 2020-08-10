@@ -7,11 +7,14 @@
 #![allow(clippy::module_name_repetitions)]
 
 use super::{Node, Rng};
-use neqo_common::{qdebug, qtrace, Datagram};
+use neqo_common::{qdebug, qlog::NeqoQlog, qtrace, Datagram, Role};
 use neqo_crypto::AuthenticationStatus;
 use neqo_transport::{Connection, ConnectionEvent, Output, State, StreamId, StreamType};
+use qlog::QlogStreamer;
 use std::cmp::min;
 use std::fmt::{self, Debug};
+use std::fs::OpenOptions;
+use std::path::PathBuf;
 use std::time::Instant;
 
 /// The status of the processing of an event.
@@ -57,6 +60,62 @@ impl ConnectionNode {
             c: test_fixture::default_server(),
             goals: goals.into_iter().collect(),
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn new_client_qlog(
+        qlog_path: PathBuf,
+        goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
+    ) -> Self {
+        let mut client = ConnectionNode::new_client(goals);
+        let f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&qlog_path)
+            .expect("File cannot be opened");
+        let streamer = QlogStreamer::new(
+            qlog::QLOG_VERSION.to_string(),
+            Some("Example qlog".to_string()),
+            Some("Example qlog description".to_string()),
+            None,
+            std::time::Instant::now(),
+            neqo_common::qlog::new_trace(Role::Client),
+            Box::new(f),
+        );
+
+        client
+            .c
+            .set_qlog(NeqoQlog::enabled(streamer, qlog_path).expect("Enable neqo qlog failed"));
+        client
+    }
+
+    #[allow(dead_code)]
+    pub fn new_server_qlog(
+        qlog_path: PathBuf,
+        goals: impl IntoIterator<Item = Box<dyn ConnectionGoal>>,
+    ) -> Self {
+        let mut server = ConnectionNode::new_server(goals);
+        let f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&qlog_path)
+            .expect("File cannot be opened");
+        let streamer = QlogStreamer::new(
+            qlog::QLOG_VERSION.to_string(),
+            Some("Example qlog".to_string()),
+            Some("Example qlog description".to_string()),
+            None,
+            std::time::Instant::now(),
+            neqo_common::qlog::new_trace(Role::Server),
+            Box::new(f),
+        );
+
+        server
+            .c
+            .set_qlog(NeqoQlog::enabled(streamer, qlog_path).expect("Enable neqo qlog failed"));
+        server
     }
 
     #[allow(dead_code)]
