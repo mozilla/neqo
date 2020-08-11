@@ -452,21 +452,20 @@ impl RecvdPackets {
     /// Add the packet to the tracked set.
     pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) {
         let next_largest = self.ranges.front().map_or(0, |r| r.largest + 1);
-        qdebug!([self], "received {}, largest: {}", pn, next_largest);
+        qdebug!([self], "received {}, next largest: {}", pn, next_largest);
 
         self.add(pn);
         self.trim_ranges();
 
-        let immediate_ack = if pn >= next_largest {
-            // The new addition is the new largest received, so record when it arrived
-            // and try to work out if this needs immediate acknowledgment.
+        if pn >= next_largest {
             self.largest_pn_time = Some(now);
+        }
 
-            if self.space != PNSpace::ApplicationData {
-                // Always acknowledge ack-eliciting Initial and Handshake packets
-                // immediately.
+        if ack_eliciting {
+            let immediate_ack = if self.space != PNSpace::ApplicationData {
+                // Acknowledge Initial and Handshake packets immediately.
                 true
-            } else if ack_eliciting {
+            } else if pn >= next_largest {
                 // IF the first range doesn't include the next unacknowledged, then
                 // there is a gap, so use loss_threshold.
                 // Otherwise, there are no gaps, so use packet_threshold.
@@ -484,17 +483,11 @@ impl RecvdPackets {
                 );
                 pn >= self.next_unacknowledged + threshold
             } else {
-                false
-            }
-        } else if pn < self.next_unacknowledged {
-            // This packet fills a gap before the last sent acknowledgment,
-            // so acknowledge it immediately (if it is ack-eliciting).
-            true
-        } else {
-            false
-        };
+                // If this packet fills a gap before the last sent acknowledgment,
+                // acknowledge it immediately (if it is ack-eliciting).
+                pn < self.next_unacknowledged
+            };
 
-        if ack_eliciting {
             // Set the time for sending an acknowledgement.
             self.ack_time = Some(if immediate_ack {
                 now
@@ -503,19 +496,23 @@ impl RecvdPackets {
             });
             qdebug!([self], "Set ACK timer to {:?}", self.ack_time);
         } else if pn == self.next_unacknowledged {
-            // If the packet was not ack-eliciting, then it won't be acknowledged
-            // immediately, but - assuming that it arrives in order - we should
-            // disregard it for the purposes of whether to acknowledge subsequent
-            // packets immediately.  Ideally, all packets that are not ack-eliciting
-            // are ignored when doing that calculation, but whether packets are
-            // ack-eliciting is not tracked.  Instead, this increments
-            // `next_unacknowledged` if that packet isn't ack-eliciting.  This
-            // isn't perfect, because even if no received packet is ack-eliciting,
-            // the immediate acknowledgment calculation will start at the first
-            // reordered packet non-ack-eliciting packet rather than the first
-            // ack-eliciting packet.  This is not expected to be a problem though.
+            // If the packet was not ack-eliciting, then it won't be acknowledged,
+            // but - assuming that it arrives in order - disregard it for the purpose
+            // of determining whether to acknowledge subsequent packets immediately.
+            // Ideally, all packets that are not ack-eliciting are ignored when doing
+            // that calculation, but whether packets are ack-eliciting is not tracked.
+            // Instead, this increments `next_unacknowledged`.  This isn't perfect,
+            // because even if no received packet is ack-eliciting, the immediate
+            // acknowledgment calculation will start at the first reordered packet
+            // non-ack-eliciting packet rather than the first ack-eliciting packet.
             self.next_unacknowledged += 1;
         }
+    }
+
+    /// If we just received a PING frame, we should immediately acknowledge.
+    pub fn immediate_ack(&mut self, now: Instant) {
+        self.ack_time = Some(now);
+        qdebug!([self], "immediate_ack at {:?}", now);
     }
 
     /// Check if the packet is a duplicate.
@@ -523,13 +520,10 @@ impl RecvdPackets {
         if pn < self.min_tracked {
             return true;
         }
-        // TODO(mt) consider a binary search or early exit.
-        for range in &self.ranges {
-            if range.contains(pn) {
-                return true;
-            }
-        }
-        false
+        self.ranges
+            .iter()
+            .take_while(|r| pn <= r.largest)
+            .any(|r| r.contains(pn))
     }
 
     /// Mark the given range as having been acknowledged.
@@ -649,6 +643,13 @@ impl AckTracker {
             .update_ack_freq(seqno, delay, packet_threshold, loss_threshold);
     }
 
+    // Force an ACK to be generated immediately (a PING was received).
+    pub fn immediate_ack(&mut self, now: Instant) {
+        self.get_mut(PNSpace::ApplicationData)
+            .unwrap()
+            .immediate_ack(now);
+    }
+
     pub fn drop_space(&mut self, space: PNSpace) {
         let sp = match space {
             PNSpace::Initial => self.spaces.pop(),
@@ -672,6 +673,10 @@ impl AckTracker {
 
     /// Determine the earliest time that an ACK might be needed.
     pub fn ack_time(&self, now: Instant) -> Option<Instant> {
+        for recvd in &self.spaces {
+            qtrace!("ack_time for {} = {:?}", recvd.space, recvd.ack_time());
+        }
+
         if self.spaces.len() == 1 {
             self.spaces[0].ack_time()
         } else {
