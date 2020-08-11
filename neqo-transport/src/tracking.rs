@@ -8,8 +8,9 @@
 
 #![deny(clippy::pedantic)]
 
+use std::cmp::min;
 use std::collections::VecDeque;
-use std::convert::TryInto;
+use std::convert::TryFrom;
 use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -310,8 +311,13 @@ impl ::std::fmt::Display for PacketRange {
 }
 
 /// The ACK delay we use.
-pub const ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
-pub const MAX_UNACKED_PKTS: usize = 1;
+pub const DEFAULT_ACK_DELAY: Duration = Duration::from_millis(20); // 20ms
+/// The default number of in-order packets we will receive after
+/// largest acknowledged without sending an immediate acknowledgment.
+pub const DEFAULT_ACK_PACKET_THRESHOLD: PacketNumber = 1;
+/// The default number of packets we will receive after largest
+/// acknowledged sending an immediate acknowledgment, in case of a gap.
+pub const DEFAULT_ACK_LOSS_THRESHOLD: PacketNumber = 1;
 const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
@@ -332,9 +338,24 @@ pub struct RecvdPackets {
     min_tracked: PacketNumber,
     /// The time we got the largest acknowledged.
     largest_pn_time: Option<Instant>,
-    // The time that we should be sending an ACK.
+    /// The time at which the next acknowledgment should be sent.
     ack_time: Option<Instant>,
-    pkts_since_last_ack: usize,
+
+    /// The current ACK frequency sequence number.
+    ack_frequency_seqno: u64,
+    /// The time to delay after receiving the first packet that is
+    /// not immediately acknowledged.
+    ack_delay: Duration,
+    /// The first unacknowledged packet number.  Rather than tracking the largest
+    /// acknowledged, which would require `Option<PacketNumber>`, this tracks the
+    /// next packet.  That way it starts at 0 when no packets have been acknowledged.
+    next_unacknowledged: PacketNumber,
+    /// The number of contiguous packets that can be received without
+    /// acknowledging immediately.
+    packet_threshold: PacketNumber,
+    /// The number of non-contiguous packets that can be received without
+    /// acknowledging immediately.
+    loss_threshold: PacketNumber,
 }
 
 impl RecvdPackets {
@@ -346,13 +367,37 @@ impl RecvdPackets {
             min_tracked: 0,
             largest_pn_time: None,
             ack_time: None,
-            pkts_since_last_ack: 0,
+
+            ack_frequency_seqno: 0,
+            ack_delay: DEFAULT_ACK_DELAY,
+            next_unacknowledged: 0,
+            packet_threshold: DEFAULT_ACK_PACKET_THRESHOLD,
+            loss_threshold: DEFAULT_ACK_LOSS_THRESHOLD,
         }
     }
 
     /// Get the time at which the next ACK should be sent.
     pub fn ack_time(&self) -> Option<Instant> {
         self.ack_time
+    }
+
+    /// Update acknowledgment delay parameters.
+    pub fn update_ack_freq(
+        &mut self,
+        seqno: u64,
+        delay: Duration,
+        packet_threshold: u64,
+        loss_threshold: u64,
+    ) {
+        // Yes, this means that we will overwrite values if a sequence number is
+        // reused, but that is better than using an `Option<PacketNumber>`
+        // when it will always be `Some`.
+        if seqno >= self.ack_frequency_seqno {
+            self.ack_frequency_seqno = seqno;
+            self.ack_delay = delay;
+            self.packet_threshold = packet_threshold;
+            self.loss_threshold = min(loss_threshold, packet_threshold);
+        }
     }
 
     /// Returns true if an ACK frame should be sent now.
@@ -405,45 +450,69 @@ impl RecvdPackets {
     }
 
     /// Add the packet to the tracked set.
-    pub fn set_received(&mut self, now: Instant, pn: u64, ack_eliciting: bool) {
-        let next_in_order_pn = self.ranges.front().map_or(0, |pr| pr.largest + 1);
-        qdebug!(
-            [self],
-            "received {}, next in order pn: {}",
-            pn,
-            next_in_order_pn
-        );
+    pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) {
+        let next_largest = self.ranges.front().map_or(0, |r| r.largest + 1);
+        qdebug!([self], "received {}, next largest: {}", pn, next_largest);
 
         self.add(pn);
         self.trim_ranges();
 
-        // The new addition was the largest, so update the time we use for calculating ACK delay.
-        if pn >= next_in_order_pn {
+        if pn >= next_largest {
             self.largest_pn_time = Some(now);
         }
 
         if ack_eliciting {
-            self.pkts_since_last_ack += 1;
-
-            // Send ACK right away if out-of-order
-            // On the first in-order ack-eliciting packet since sending an ACK,
-            // set a delay.
-            // Count packets until we exceed MAX_UNACKED_PKTS, then remove the
-            // delay.
-            if pn != next_in_order_pn {
-                self.ack_time = Some(now);
-            } else if self.space == PNSpace::ApplicationData {
-                match &mut self.pkts_since_last_ack {
-                    0 => unreachable!(),
-                    1 => self.ack_time = Some(now + ACK_DELAY),
-                    x if *x > MAX_UNACKED_PKTS => self.ack_time = Some(now),
-                    _ => debug_assert!(self.ack_time.is_some()),
-                }
+            let immediate_ack = if self.space != PNSpace::ApplicationData {
+                // Acknowledge Initial and Handshake packets immediately.
+                true
+            } else if pn >= next_largest {
+                // IF the first range doesn't include the next unacknowledged, then
+                // there is a gap, so use loss_threshold.
+                // Otherwise, there are no gaps, so use packet_threshold.
+                let threshold = if self.next_unacknowledged < self.ranges[0].smallest {
+                    self.loss_threshold
+                } else {
+                    self.packet_threshold
+                };
+                qtrace!(
+                    [self],
+                    "Determine immediate ACK for {} >= {}+{}",
+                    pn,
+                    self.next_unacknowledged,
+                    threshold
+                );
+                pn >= self.next_unacknowledged + threshold
             } else {
-                self.ack_time = Some(now);
-            }
+                // If this packet fills a gap before the last sent acknowledgment,
+                // acknowledge it immediately (if it is ack-eliciting).
+                pn < self.next_unacknowledged
+            };
+
+            // Set the time for sending an acknowledgement.
+            self.ack_time = Some(if immediate_ack {
+                now
+            } else {
+                self.ack_time.unwrap_or(now + self.ack_delay)
+            });
             qdebug!([self], "Set ACK timer to {:?}", self.ack_time);
+        } else if pn == self.next_unacknowledged {
+            // If the packet was not ack-eliciting, then it won't be acknowledged,
+            // but - assuming that it arrives in order - disregard it for the purpose
+            // of determining whether to acknowledge subsequent packets immediately.
+            // Ideally, all packets that are not ack-eliciting are ignored when doing
+            // that calculation, but whether packets are ack-eliciting is not tracked.
+            // Instead, this increments `next_unacknowledged`.  This isn't perfect,
+            // because even if no received packet is ack-eliciting, the immediate
+            // acknowledgment calculation will start at the first reordered packet
+            // non-ack-eliciting packet rather than the first ack-eliciting packet.
+            self.next_unacknowledged += 1;
         }
+    }
+
+    /// If we just received a PING frame, we should immediately acknowledge.
+    pub fn immediate_ack(&mut self, now: Instant) {
+        self.ack_time = Some(now);
+        qdebug!([self], "immediate_ack at {:?}", now);
     }
 
     /// Check if the packet is a duplicate.
@@ -451,13 +520,10 @@ impl RecvdPackets {
         if pn < self.min_tracked {
             return true;
         }
-        // TODO(mt) consider a binary search or early exit.
-        for range in &self.ranges {
-            if range.contains(pn) {
-                return true;
-            }
-        }
-        false
+        self.ranges
+            .iter()
+            .take_while(|r| pn <= r.largest)
+            .any(|r| r.contains(pn))
     }
 
     /// Mark the given range as having been acknowledged.
@@ -521,12 +587,12 @@ impl RecvdPackets {
 
         // We've sent an ACK, reset the timer.
         self.ack_time = None;
-        self.pkts_since_last_ack = 0;
+        self.next_unacknowledged = first.largest + 1;
 
         let ack_delay = now.duration_since(self.largest_pn_time.unwrap());
         // We use the default exponent so
         // ack_delay is in multiples of 8 microseconds.
-        if let Ok(delay) = (ack_delay.as_micros() / 8).try_into() {
+        if let Ok(delay) = u64::try_from(ack_delay.as_micros() / 8) {
             let ack = Frame::Ack {
                 largest_acknowledged: first.largest,
                 ack_delay: delay,
@@ -563,6 +629,27 @@ pub struct AckTracker {
 }
 
 impl AckTracker {
+    /// Update acknowledgment delay parameters.
+    pub fn update_ack_freq(
+        &mut self,
+        seqno: u64,
+        delay: Duration,
+        packet_threshold: u64,
+        loss_threshold: u64,
+    ) {
+        // Only ApplicationData ever delays ACK.
+        self.get_mut(PNSpace::ApplicationData)
+            .unwrap()
+            .update_ack_freq(seqno, delay, packet_threshold, loss_threshold);
+    }
+
+    // Force an ACK to be generated immediately (a PING was received).
+    pub fn immediate_ack(&mut self, now: Instant) {
+        self.get_mut(PNSpace::ApplicationData)
+            .unwrap()
+            .immediate_ack(now);
+    }
+
     pub fn drop_space(&mut self, space: PNSpace) {
         let sp = match space {
             PNSpace::Initial => self.spaces.pop(),
@@ -586,6 +673,10 @@ impl AckTracker {
 
     /// Determine the earliest time that an ACK might be needed.
     pub fn ack_time(&self, now: Instant) -> Option<Instant> {
+        for recvd in &self.spaces {
+            qtrace!("ack_time for {} = {:?}", recvd.space, recvd.ack_time());
+        }
+
         if self.spaces.len() == 1 {
             self.spaces[0].ack_time()
         } else {
@@ -632,12 +723,12 @@ impl Default for AckTracker {
 #[cfg(test)]
 mod tests {
     use super::{
-        AckTracker, Duration, Instant, PNSpace, PNSpaceSet, RecoveryToken, RecvdPackets, ACK_DELAY,
-        MAX_TRACKED_RANGES, MAX_UNACKED_PKTS,
+        AckTracker, Duration, Instant, PNSpace, PNSpaceSet, RecoveryToken, RecvdPackets,
+        MAX_TRACKED_RANGES,
     };
+    use crate::packet::PacketNumber;
     use lazy_static::lazy_static;
     use std::collections::HashSet;
-    use std::convert::TryFrom;
 
     lazy_static! {
         static ref NOW: Instant = Instant::now();
@@ -717,22 +808,25 @@ mod tests {
 
     #[test]
     fn ack_delay() {
+        const COUNT: PacketNumber = 9;
+        const DELAY: Duration = Duration::from_millis(7);
         // Only application data packets are delayed.
         let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
         assert!(rp.ack_time().is_none());
         assert!(!rp.ack_now(*NOW));
 
+        rp.update_ack_freq(0, DELAY, COUNT, 1);
+
         // Some packets won't cause an ACK to be needed.
-        let max_unacked = u64::try_from(MAX_UNACKED_PKTS).unwrap();
-        for num in 0..max_unacked {
-            rp.set_received(*NOW, num, true);
-            assert_eq!(Some(*NOW + ACK_DELAY), rp.ack_time());
+        for i in 0..COUNT {
+            rp.set_received(*NOW, i, true);
+            assert_eq!(Some(*NOW + DELAY), rp.ack_time());
             assert!(!rp.ack_now(*NOW));
-            assert!(rp.ack_now(*NOW + ACK_DELAY));
+            assert!(rp.ack_now(*NOW + DELAY));
         }
 
-        // Exceeding MAX_UNACKED_PKTS will move the ACK time to now.
-        rp.set_received(*NOW, max_unacked, true);
+        // Exceeding COUNT will move the ACK time to now.
+        rp.set_received(*NOW, COUNT, true);
         assert_eq!(Some(*NOW), rp.ack_time());
         assert!(rp.ack_now(*NOW));
     }
@@ -744,7 +838,7 @@ mod tests {
             assert!(rp.ack_time().is_none());
             assert!(!rp.ack_now(*NOW));
 
-            // Any packet will be acknowledged straight away.
+            // Any packet in these spaces is acknowledged straight away.
             rp.set_received(*NOW, 0, true);
             assert_eq!(Some(*NOW), rp.ack_time());
             assert!(rp.ack_now(*NOW));
@@ -752,26 +846,119 @@ mod tests {
     }
 
     #[test]
-    fn ooo_no_ack_delay() {
-        for space in &[
-            PNSpace::Initial,
-            PNSpace::Handshake,
-            PNSpace::ApplicationData,
-        ] {
-            let mut rp = RecvdPackets::new(*space);
-            assert!(rp.ack_time().is_none());
-            assert!(!rp.ack_now(*NOW));
+    fn ooo_no_ack_delay_new() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+        assert!(rp.ack_time().is_none());
+        assert!(!rp.ack_now(*NOW));
 
-            // Any OoO packet will be acknowledged straight away.
-            rp.set_received(*NOW, 3, true);
-            assert_eq!(Some(*NOW), rp.ack_time());
-            assert!(rp.ack_now(*NOW));
-        }
+        // Anything other than packet 0 is acknowledged immediately.
+        rp.set_received(*NOW, 1, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
+        assert!(rp.ack_now(*NOW));
+    }
+
+    #[test]
+    fn ooo_no_ack_delay_gap() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+        assert!(rp.ack_time().is_none());
+        assert!(!rp.ack_now(*NOW));
+
+        // Packet number 0 causes delayed acknowledgment.
+        rp.set_received(*NOW, 0, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+
+        // A gap causes immediate acknowledgment.
+        rp.set_received(*NOW, 2, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
+        assert!(rp.ack_now(*NOW));
+    }
+
+    #[test]
+    fn ooo_no_ack_delay_fill() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+        rp.set_received(*NOW, 1, true);
+        assert!(rp.get_frame(*NOW).is_some());
+
+        // Filling in behind the largest acknowledged causes immediate ACK.
+        rp.set_received(*NOW, 0, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
+        assert!(rp.ack_now(*NOW));
+    }
+
+    #[test]
+    fn ooo_no_ack_delay_threshold_new() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+
+        // Set loss threshold to 3 and then it takes three packets.
+        rp.update_ack_freq(0, Duration::from_millis(10), 10, 3);
+
+        rp.set_received(*NOW, 1, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        rp.set_received(*NOW, 2, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        rp.set_received(*NOW, 3, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
+    }
+
+    #[test]
+    fn ooo_no_ack_delay_threshold_gap() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+        rp.set_received(*NOW, 1, true);
+        assert!(rp.get_frame(*NOW).is_some());
+
+        // Set loss threshold to 3 and then it takes three packets.
+        rp.update_ack_freq(0, Duration::from_millis(10), 10, 3);
+
+        rp.set_received(*NOW, 3, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        rp.set_received(*NOW, 4, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        rp.set_received(*NOW, 5, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
+    }
+
+    /// Test that an in-order packet that is not ack-eliciting doesn't
+    /// increase the number of packets needed to cause an ACK.
+    #[test]
+    fn non_ack_eliciting_skip() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+        rp.update_ack_freq(0, Duration::from_millis(10), 2, 2);
+
+        // This should be ignored.
+        rp.set_received(*NOW, 0, false);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        // Skip 1 (it has no effect).
+        rp.set_received(*NOW, 2, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        rp.set_received(*NOW, 3, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
+    }
+
+    /// If a packet that is not ack-eliciting is reordered, we lose track
+    /// and start counting it toward the limit.
+    #[test]
+    fn non_ack_eliciting_reorder() {
+        let mut rp = RecvdPackets::new(PNSpace::ApplicationData);
+        rp.update_ack_freq(0, Duration::from_millis(10), 2, 2);
+
+        // This won't be counted as it arrives out of order.
+        rp.set_received(*NOW, 1, false);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        // This should be ignored, but packet 1 has no such chance.
+        rp.set_received(*NOW, 0, false);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        // This counts 0, but not 1.
+        rp.set_received(*NOW, 2, true);
+        assert_ne!(Some(*NOW), rp.ack_time());
+        rp.set_received(*NOW, 3, true);
+        assert_eq!(Some(*NOW), rp.ack_time());
     }
 
     #[test]
     fn aggregate_ack_time() {
+        const DELAY: Duration = Duration::from_millis(17);
         let mut tracker = AckTracker::default();
+        tracker.update_ack_freq(0, DELAY, 1, 1);
         // This packet won't trigger an ACK.
         tracker
             .get_mut(PNSpace::Handshake)
@@ -784,10 +971,10 @@ mod tests {
             .get_mut(PNSpace::ApplicationData)
             .unwrap()
             .set_received(*NOW, 0, true);
-        assert_eq!(Some(*NOW + ACK_DELAY), tracker.ack_time(*NOW));
+        assert_eq!(Some(*NOW + DELAY), tracker.ack_time(*NOW));
 
         // This should move the time forward.
-        let later = *NOW + ACK_DELAY.checked_div(2).unwrap();
+        let later = *NOW + DELAY / 2;
         tracker
             .get_mut(PNSpace::Initial)
             .unwrap()

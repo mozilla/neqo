@@ -50,7 +50,7 @@ use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::{
     self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
 };
-use crate::tracking::{AckTracker, PNSpace, SentPacket};
+use crate::tracking::{AckTracker, PNSpace, SentPacket, DEFAULT_ACK_DELAY};
 use crate::{AppError, ConnectionError, Error, Res, LOCAL_IDLE_TIMEOUT};
 
 #[derive(Debug, Default)]
@@ -547,6 +547,14 @@ impl Connection {
             u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
         );
         tps.set_empty(tparams::DISABLE_MIGRATION);
+        tps.set_integer(
+            tparams::MAX_ACK_DELAY,
+            u64::try_from(DEFAULT_ACK_DELAY.as_micros()).unwrap(),
+        );
+        tps.set_integer(
+            tparams::MIN_ACK_DELAY,
+            u64::try_from(GRANULARITY.as_micros()).unwrap(),
+        );
     }
 
     fn new(
@@ -1933,6 +1941,10 @@ impl Connection {
                 // If we get a PING and there are outstanding CRYPTO frames,
                 // prepare to resend them.
                 self.crypto.resend_unacked(space);
+                if PNSpace::from(ptype) == PNSpace::ApplicationData {
+                    // Send an ACK immediately if we might not otherwise do so.
+                    self.acks.immediate_ack(now);
+                }
             }
             Frame::Ack {
                 largest_acknowledged,
@@ -2125,6 +2137,19 @@ impl Connection {
                 }
                 self.set_state(State::Confirmed);
                 self.discard_keys(PNSpace::Handshake, now);
+            }
+            Frame::AckFrequency {
+                seqno,
+                delay,
+                packet_threshold,
+                loss_threshold,
+            } => {
+                let delay = Duration::from_millis(delay);
+                if delay < GRANULARITY {
+                    return Err(Error::ProtocolViolation);
+                }
+                self.acks
+                    .update_ack_freq(seqno, delay, packet_threshold, loss_threshold);
             }
         };
 
@@ -2664,7 +2689,7 @@ mod tests {
     use crate::recovery::ACK_ONLY_SIZE_LIMIT;
     use crate::recovery::PTO_PACKET_COUNT;
     use crate::send_stream::SEND_BUFFER_SIZE;
-    use crate::tracking::{ACK_DELAY, MAX_UNACKED_PKTS};
+    use crate::tracking::{DEFAULT_ACK_DELAY, DEFAULT_ACK_PACKET_THRESHOLD};
     use std::convert::TryInto;
 
     use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AllowZeroRtt};
@@ -2941,7 +2966,7 @@ mod tests {
             let out = server.process(Some(d), now());
             assert_eq!(
                 out.as_dgram_ref().is_some(),
-                (d_num + 1) % (MAX_UNACKED_PKTS + 1) == 0
+                (d_num + 1) % usize::try_from(DEFAULT_ACK_PACKET_THRESHOLD + 1).unwrap() == 0
             );
             qdebug!("Output={:0x?}", out.as_dgram_ref());
         }
@@ -3504,61 +3529,67 @@ mod tests {
 
     #[test]
     fn idle_send_packet1() {
+        const DELTA: Duration = Duration::from_millis(10);
+
         let mut client = default_client();
         let mut server = default_server();
+        let mut now = now();
         connect_force_idle(&mut client, &mut server);
 
-        let now = now();
+        let timeout = client.process(None, now).callback();
+        assert_eq!(timeout, LOCAL_IDLE_TIMEOUT);
 
-        let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
+        now += Duration::from_secs(10);
+        let dgram = send_and_receive(&mut client, &mut server, now);
+        assert!(dgram.is_none());
 
-        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);
-
-        let out = client.process(None, now + Duration::from_secs(10));
-        let out = server.process(out.dgram(), now + Duration::from_secs(10));
-
-        // Still connected after 39 seconds because idle timer reset by outgoing
-        // packet
-        let _ = client.process(
-            out.dgram(),
-            now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(9),
-        );
-        assert!(matches!(client.state(), State::Confirmed));
+        // Still connected after 39 seconds because idle timer reset by the
+        // outgoing packet.
+        now += LOCAL_IDLE_TIMEOUT - DELTA;
+        let dgram = client.process(None, now).dgram();
+        assert!(dgram.is_some()); // PTO
+        assert!(client.state().connected());
 
         // Not connected after 40 seconds.
-        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
-
-        assert!(matches!(client.state(), State::Closed(_)));
+        now += DELTA;
+        let out = client.process(None, now);
+        assert!(matches!(out, Output::None));
+        assert!(client.state().closed());
     }
 
     #[test]
     fn idle_send_packet2() {
+        const GAP: Duration = Duration::from_secs(10);
+        const DELTA: Duration = Duration::from_millis(10);
+
         let mut client = default_client();
         let mut server = default_server();
         connect_force_idle(&mut client, &mut server);
 
-        let now = now();
+        let mut now = now();
 
-        let res = client.process(None, now);
-        assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
+        let timeout = client.process(None, now).callback();
+        assert_eq!(timeout, LOCAL_IDLE_TIMEOUT);
 
-        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);
+        // First transmission at t=GAP.
+        now += GAP;
+        let _ = send_something(&mut client, now);
 
-        let _out = client.process(None, now + Duration::from_secs(10));
+        // Second transmission at t=2*GAP.
+        let _ = send_something(&mut client, now + GAP);
+        assert!((GAP * 2 + DELTA) < LOCAL_IDLE_TIMEOUT);
 
-        assert_eq!(client.stream_send(2, b"there").unwrap(), 5);
-        let _out = client.process(None, now + Duration::from_secs(20));
-
-        // Still connected after 39 seconds.
-        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(9));
+        // Still connected just before GAP + LOCAL_IDLE_TIMEOUT.
+        now += LOCAL_IDLE_TIMEOUT - DELTA;
+        let dgram = client.process(None, now).dgram();
+        assert!(dgram.is_some()); // PTO
         assert!(matches!(client.state(), State::Confirmed));
 
         // Not connected after 40 seconds because timer not reset by second
         // outgoing packet
-        let _ = client.process(None, now + LOCAL_IDLE_TIMEOUT + Duration::from_secs(10));
+        now += DELTA;
+        let out = client.process(None, now);
+        assert!(matches!(out, Output::None));
         assert!(matches!(client.state(), State::Closed(_)));
     }
 
@@ -4151,7 +4182,7 @@ mod tests {
         // Client receive ack for the first packet
         let cb = client.process(pkt, now).callback();
         // Ack delay timer for the packet carrying HANDSHAKE_DONE.
-        assert_eq!(cb, ACK_DELAY);
+        assert_eq!(cb, DEFAULT_ACK_DELAY);
 
         // Let the ack timer expire.
         now += cb;
@@ -4161,7 +4192,7 @@ mod tests {
         // The handshake keys are discarded, but now we're back to the idle timeout.
         // We don't send another PING because the handshake space is done and there
         // is nothing to probe for.
-        assert_eq!(cb, LOCAL_IDLE_TIMEOUT - ACK_DELAY);
+        assert_eq!(cb, LOCAL_IDLE_TIMEOUT - DEFAULT_ACK_DELAY);
     }
 
     /// Test that PTO in the Handshake space contains the right frames.
@@ -4598,7 +4629,8 @@ mod tests {
             // Until we process all the packets, the congestion window remains the same.
             // Note that we need the client to process ACK frames in stages, so split the
             // datagrams into two, ensuring that we allow for an ACK for each batch.
-            let most = c_tx_dgrams.len() - usize::try_from(MAX_UNACKED_PKTS + 1).unwrap();
+            let most =
+                c_tx_dgrams.len() - usize::try_from(DEFAULT_ACK_PACKET_THRESHOLD).unwrap() - 1;
             let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams.drain(..most), now);
             for dgram in s_tx_dgram {
                 assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
@@ -4843,8 +4875,6 @@ mod tests {
         assert_eq!(client.get_epochs(), (Some(3), Some(3))); // (write, read)
         assert_eq!(server.get_epochs(), (Some(3), Some(3)));
 
-        // TODO(mt) this needs to wait for handshake confirmation,
-        // but for now, we can do this immediately.
         assert!(client.initiate_key_update().is_ok());
         assert!(client.initiate_key_update().is_err());
 

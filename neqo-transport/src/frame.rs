@@ -45,6 +45,7 @@ const FRAME_TYPE_PATH_RESPONSE: FrameType = 0x1b;
 pub const FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT: FrameType = 0x1c;
 pub const FRAME_TYPE_CONNECTION_CLOSE_APPLICATION: FrameType = 0x1d;
 const FRAME_TYPE_HANDSHAKE_DONE: FrameType = 0x1e;
+pub const FRAME_TYPE_ACK_FREQUENCY: FrameType = 0xaf;
 
 const STREAM_FRAME_BIT_FIN: u64 = 0x01;
 const STREAM_FRAME_BIT_LEN: u64 = 0x02;
@@ -202,6 +203,19 @@ pub enum Frame {
         reason_phrase: Vec<u8>,
     },
     HandshakeDone,
+    AckFrequency {
+        /// The current ACK frequency sequence number.
+        seqno: u64,
+        /// The time to delay after receiving the first packet that is
+        /// not immediately acknowledged.
+        delay: u64,
+        /// The number of contiguous packets that can be received without
+        /// acknowledging immediately.
+        packet_threshold: u64,
+        /// The number of non-contiguous packets that can be received without
+        /// acknowledging immediately.
+        loss_threshold: u64,
+    },
 }
 
 impl Frame {
@@ -247,6 +261,7 @@ impl Frame {
                 FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT + error_code.frame_type_bit()
             }
             Self::HandshakeDone => FRAME_TYPE_HANDSHAKE_DONE,
+            Self::AckFrequency { .. } => FRAME_TYPE_ACK_FREQUENCY,
         }
     }
 
@@ -452,6 +467,17 @@ impl Frame {
                 enc.encode_vvec(reason_phrase);
             }
             Self::HandshakeDone => (),
+            Self::AckFrequency {
+                seqno,
+                delay,
+                packet_threshold,
+                loss_threshold,
+            } => {
+                enc.encode_varint(*seqno);
+                enc.encode_varint(*delay);
+                enc.encode_varint(*packet_threshold);
+                enc.encode_varint(*loss_threshold);
+            }
         }
     }
 
@@ -727,6 +753,18 @@ impl Frame {
                 })
             }
             FRAME_TYPE_HANDSHAKE_DONE => Ok(Self::HandshakeDone),
+            FRAME_TYPE_ACK_FREQUENCY => {
+                let seqno = dv!(dec);
+                let delay = dv!(dec);
+                let packet_threshold = dv!(dec);
+                let loss_threshold = dv!(dec);
+                Ok(Self::AckFrequency {
+                    seqno,
+                    delay,
+                    packet_threshold,
+                    loss_threshold,
+                })
+            }
             _ => Err(Error::UnknownFrameType),
         }
     }
@@ -1198,5 +1236,16 @@ mod tests {
         } else {
             panic!("Wrong frame type");
         }
+    }
+
+    #[test]
+    fn ack_frequency() {
+        let f = Frame::AckFrequency {
+            seqno: 10,
+            delay: 2000,
+            packet_threshold: 5,
+            loss_threshold: 1,
+        };
+        enc_dec(&f, "40af0a47d00501");
     }
 }
