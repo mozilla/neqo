@@ -2689,7 +2689,7 @@ mod tests {
     use crate::recovery::ACK_ONLY_SIZE_LIMIT;
     use crate::recovery::PTO_PACKET_COUNT;
     use crate::send_stream::SEND_BUFFER_SIZE;
-    use crate::tracking::DEFAULT_ACK_PACKET_THRESHOLD;
+    use crate::tracking::{DEFAULT_ACK_DELAY, DEFAULT_ACK_PACKET_THRESHOLD};
     use std::convert::TryInto;
 
     use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AllowZeroRtt};
@@ -4180,15 +4180,19 @@ mod tests {
 
         now += Duration::from_millis(10);
         // Client receive ack for the first packet
-        let dgram = client.process(pkt, now).dgram();
-        // The PTO included a PING, so we acknowledge immediately.
-        assert!(dgram.is_some());
+        let cb = client.process(pkt, now).callback();
+        // Ack delay timer for the packet carrying HANDSHAKE_DONE.
+        assert_eq!(cb, DEFAULT_ACK_DELAY);
 
+        // Let the ack timer expire.
+        now += cb;
+        let out = client.process(None, now).dgram();
+        assert!(out.is_some());
         let cb = client.process(None, now).callback();
         // The handshake keys are discarded, but now we're back to the idle timeout.
         // We don't send another PING because the handshake space is done and there
         // is nothing to probe for.
-        assert_eq!(cb, LOCAL_IDLE_TIMEOUT);
+        assert_eq!(cb, LOCAL_IDLE_TIMEOUT - DEFAULT_ACK_DELAY);
     }
 
     /// Test that PTO in the Handshake space contains the right frames.
