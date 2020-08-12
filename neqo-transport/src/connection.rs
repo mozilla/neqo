@@ -5874,8 +5874,10 @@ mod tests {
         corrupted[idx] ^= 0x76;
         let dgram = Datagram::new(d.source(), d.destination(), corrupted);
         server.process_input(dgram, now());
-        // The server should have received some packets, but dropped all of them.
-        assert_ne!(server.stats().packets_rx, 0);
-        assert_eq!(server.stats().packets_rx, server.stats().dropped_rx);
+        // The server should have received two packets,
+        // the first should be dropped, the second saved.
+        assert_eq!(server.stats().packets_rx, 2);
+        assert_eq!(server.stats().dropped_rx, 1);
+        // assert_eq!(server.stats().saved_datagram, 1);
     }
 }
