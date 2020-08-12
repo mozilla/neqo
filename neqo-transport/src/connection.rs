@@ -4622,7 +4622,7 @@ mod tests {
             // Until we process all the packets, the congestion window remains the same.
             // Note that we need the client to process ACK frames in stages, so split the
             // datagrams into two, ensuring that we allow for an ACK for each batch.
-            let most = c_tx_dgrams.len() - usize::try_from(MAX_UNACKED_PKTS + 1).unwrap();
+            let most = c_tx_dgrams.len() - MAX_UNACKED_PKTS - 1;
             let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams.drain(..most), now);
             for dgram in s_tx_dgram {
                 assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
