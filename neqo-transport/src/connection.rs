@@ -587,6 +587,7 @@ impl Connection {
             u64::try_from(LOCAL_IDLE_TIMEOUT.as_millis()).unwrap(),
         );
         tps.set_empty(tparams::DISABLE_MIGRATION);
+        tps.set_empty(tparams::GREASE_QUIC_BIT);
     }
 
     fn new(
@@ -655,6 +656,13 @@ impl Connection {
     /// Get the qlog (if any) for this connection.
     pub fn qlog_mut(&mut self) -> &mut NeqoQlog {
         &mut self.qlog
+    }
+
+    /// Get the original destination connection id for this connection. This
+    /// will always be present for Role::Client but not if Role::Server is in
+    /// State::Init.
+    pub fn odcid(&self) -> Option<&ConnectionId> {
+        self.remote_original_destination_cid.as_ref()
     }
 
     /// Set a local transport parameter, possibly overriding a default value.
@@ -1479,6 +1487,7 @@ impl Connection {
         tx: &CryptoDxState,
         retry_info: &Option<RetryInfo>,
         quic_version: QuicVersion,
+        grease_quic_bit: bool,
     ) -> (PacketType, PacketNumber, PacketBuilder) {
         let pt = PacketType::from(cspace);
         let mut builder = if pt == PacketType::Short {
@@ -1500,6 +1509,7 @@ impl Connection {
                 path.local_cid(),
             )
         };
+        builder.scramble(grease_quic_bit);
         if pt == PacketType::Initial {
             builder.initial_token(if let Some(info) = retry_info {
                 &info.token
@@ -1513,8 +1523,20 @@ impl Connection {
         (pt, pn, builder)
     }
 
+    fn can_grease_quic_bit(&self) -> bool {
+        let tph = self.tps.borrow();
+        if let Some(r) = &tph.remote {
+            r.get_empty(tparams::GREASE_QUIC_BIT)
+        } else if let Some(r) = &tph.remote_0rtt {
+            r.get_empty(tparams::GREASE_QUIC_BIT)
+        } else {
+            false
+        }
+    }
+
     fn output_close(&mut self, path: &Path, frame: &Frame) -> Res<SendOption> {
         let mut encoder = Encoder::with_capacity(path.mtu());
+        let grease_quic_bit = self.can_grease_quic_bit();
         for space in PNSpace::iter() {
             let (cspace, tx) = if let Some(crypto) = self.crypto.states.select_tx(*space) {
                 crypto
@@ -1522,8 +1544,16 @@ impl Connection {
                 continue;
             };
 
-            let (_, _, mut builder) =
-                Self::build_packet_header(path, cspace, encoder, tx, &None, self.quic_version);
+            let (_, _, mut builder) = Self::build_packet_header(
+                path,
+                cspace,
+                encoder,
+                tx,
+                &None,
+                self.quic_version,
+                grease_quic_bit,
+            );
+
             // ConnectionError::Application is only allowed at 1RTT.
             if *space == PNSpace::ApplicationData {
                 frame.marshal(&mut builder);
@@ -1599,6 +1629,7 @@ impl Connection {
     fn output_path(&mut self, path: &mut Path, now: Instant) -> Res<SendOption> {
         let mut initial_sent = None;
         let mut needs_padding = false;
+        let grease_quic_bit = self.can_grease_quic_bit();
 
         // Determine how we are sending packets (PTO, etc..).
         let profile = self.loss_recovery.send_profile(now, path.mtu());
@@ -1623,18 +1654,20 @@ impl Connection {
                 tx,
                 &self.retry_info,
                 self.quic_version,
+                grease_quic_bit,
             );
             let payload_start = builder.len();
 
             // Work out if we have space left.
-            if builder.len() + tx.expansion() > profile.limit() {
+            let aead_expansion = tx.expansion();
+            if builder.len() + aead_expansion > profile.limit() {
                 // No space for a packet of this type.
                 encoder = builder.abort();
                 continue;
             }
 
             // Add frames to the packet.
-            let limit = profile.limit() - tx.expansion();
+            let limit = profile.limit() - aead_expansion;
             let (tokens, ack_eliciting) =
                 self.add_frames(&mut builder, *space, limit, &profile, now);
             if builder.is_empty() {
@@ -1648,7 +1681,7 @@ impl Connection {
                 &mut self.qlog,
                 pt,
                 pn,
-                builder.len(),
+                builder.len() - header_start + aead_expansion,
                 &builder[payload_start..],
             );
 
@@ -2671,7 +2704,7 @@ impl ::std::fmt::Display for Connection {
 mod tests {
     use super::*;
     use crate::cc::PACING_BURST_SIZE;
-    use crate::cc::{INITIAL_CWND_PKTS, MIN_CONG_WINDOW};
+    use crate::cc::{INITIAL_CWND_PKTS, MAX_DATAGRAM_SIZE, MIN_CONG_WINDOW};
     use crate::frame::{CloseError, StreamType};
     use crate::packet::PACKET_BIT_LONG;
     use crate::path::PATH_MTU_V6;
@@ -2955,7 +2988,7 @@ mod tests {
             let out = server.process(Some(d), now());
             assert_eq!(
                 out.as_dgram_ref().is_some(),
-                (d_num as u64 + 1) % (MAX_UNACKED_PKTS + 1) == 0
+                (d_num + 1) % (MAX_UNACKED_PKTS + 1) == 0
             );
             qdebug!("Output={:0x?}", out.as_dgram_ref());
         }
@@ -4348,15 +4381,20 @@ mod tests {
     }
 
     // Receive multiple packets and generate an ack-only packet.
-    fn ack_bytes(
+    fn ack_bytes<D>(
         dest: &mut Connection,
         stream: u64,
-        in_dgrams: Vec<Datagram>,
+        in_dgrams: D,
         now: Instant,
-    ) -> (Vec<Datagram>, Vec<Frame>) {
+    ) -> (Vec<Datagram>, Vec<Frame>)
+    where
+        D: IntoIterator<Item = Datagram>,
+        D::IntoIter: ExactSizeIterator,
+    {
         let mut srv_buf = [0; 4_096];
         let mut recvd_frames = Vec::new();
 
+        let in_dgrams = in_dgrams.into_iter();
         qdebug!([dest], "ack_bytes {} datagrams", in_dgrams.len());
         for dgram in in_dgrams {
             recvd_frames.extend(dest.test_process_input(dgram, now));
@@ -4583,33 +4621,44 @@ mod tests {
         }
 
         // Should be in CARP now.
-        let cwnd1 = client.loss_recovery.cwnd();
 
         now += Duration::from_millis(10); // Time passes. CARP -> CA
 
-        // Client: Send more data
-        let (mut c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
-        now = next_now;
+        // Now make sure that we increase congestion window according to the
+        // accurate byte counting version of congestion avoidance.
+        // Check over several increases to be sure.
+        let mut expected_cwnd = client.loss_recovery.cwnd();
+        for i in 0..5 {
+            println!("{}", i);
+            // Client: Send more data
+            let (mut c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
+            now = next_now;
 
-        // Only sent 2 packets, to generate an ack but also keep cwnd increase
-        // small
-        c_tx_dgrams.truncate(2);
+            let c_tx_size: usize = c_tx_dgrams.iter().map(|d| d.len()).sum();
+            println!(
+                "client sending {} bytes into cwnd of {}",
+                c_tx_size,
+                client.loss_recovery.cwnd()
+            );
+            assert_eq!(c_tx_size, expected_cwnd);
 
-        // Generate ACK
-        let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
-
-        for dgram in s_tx_dgram {
-            client.test_process_input(dgram, now);
+            // Until we process all the packets, the congestion window remains the same.
+            // Note that we need the client to process ACK frames in stages, so split the
+            // datagrams into two, ensuring that we allow for an ACK for each batch.
+            let most = c_tx_dgrams.len() - MAX_UNACKED_PKTS - 1;
+            let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams.drain(..most), now);
+            for dgram in s_tx_dgram {
+                assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
+                client.process_input(dgram, now);
+            }
+            let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
+            for dgram in s_tx_dgram {
+                assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
+                client.process_input(dgram, now);
+            }
+            expected_cwnd += MAX_DATAGRAM_SIZE;
+            assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
         }
-
-        // ACK of pkts sent after start of recovery period should have caused
-        // exit from recovery period to just regular congestion avoidance. cwnd
-        // should now be a little higher but not as high as acked pkts during
-        // slow-start would cause it to be.
-        let cwnd2 = client.loss_recovery.cwnd();
-
-        assert!(cwnd2 > cwnd1);
-        assert!(cwnd2 < cwnd1 + 500);
     }
 
     fn induce_persistent_congestion(
@@ -6079,8 +6128,10 @@ mod tests {
         corrupted[idx] ^= 0x76;
         let dgram = Datagram::new(d.source(), d.destination(), corrupted);
         server.process_input(dgram, now());
-        // The server should have received some packets, but dropped all of them.
-        assert_ne!(server.stats().packets_rx, 0);
-        assert_eq!(server.stats().packets_rx, server.stats().dropped_rx);
+        // The server should have received two packets,
+        // the first should be dropped, the second saved.
+        assert_eq!(server.stats().packets_rx, 2);
+        assert_eq!(server.stats().dropped_rx, 1);
+        // assert_eq!(server.stats().saved_datagram, 1);
     }
 }
