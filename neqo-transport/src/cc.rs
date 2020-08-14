@@ -6,7 +6,7 @@
 
 // Congestion control
 
-use std::cmp::max;
+use std::cmp::{max, min};
 use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
@@ -31,6 +31,7 @@ const PERSISTENT_CONG_THRESH: u32 = 3;
 pub struct CongestionControl {
     congestion_window: usize, // = kInitialWindow
     bytes_in_flight: usize,
+    acked_bytes: usize,
     congestion_recovery_start_time: Option<Instant>,
     ssthresh: usize,
     pacer: Option<Pacer>,
@@ -45,6 +46,7 @@ impl Default for CongestionControl {
         Self {
             congestion_window: INITIAL_WINDOW,
             bytes_in_flight: 0,
+            acked_bytes: 0,
             congestion_recovery_start_time: None,
             ssthresh: std::usize::MAX,
             pacer: None,
@@ -126,31 +128,40 @@ impl CongestionControl {
                 continue;
             }
 
-            if self.congestion_window < self.ssthresh {
-                self.congestion_window += pkt.size;
-                qinfo!([self], "slow start");
-                qlog::congestion_state_updated(
-                    &mut self.qlog,
-                    &mut self.qlog_curr_cong_state,
-                    CongestionState::SlowStart,
-                );
-            } else {
-                self.congestion_window += (MAX_DATAGRAM_SIZE * pkt.size) / self.congestion_window;
-                qinfo!([self], "congestion avoidance");
-                qlog::congestion_state_updated(
-                    &mut self.qlog,
-                    &mut self.qlog_curr_cong_state,
-                    CongestionState::CongestionAvoidance,
-                );
-            }
-            qlog::metrics_updated(
+            self.acked_bytes += pkt.size;
+        }
+        qtrace!([self], "ACK received, acked_bytes = {}", self.acked_bytes);
+
+        // Slow start, up to the slow start threshold.
+        if self.congestion_window < self.ssthresh {
+            let increase = min(self.ssthresh - self.congestion_window, self.acked_bytes);
+            self.congestion_window += increase;
+            self.acked_bytes -= increase;
+            qinfo!([self], "slow start += {}", increase);
+            qlog::congestion_state_updated(
                 &mut self.qlog,
-                &[
-                    QlogMetric::CongestionWindow(self.congestion_window),
-                    QlogMetric::BytesInFlight(self.bytes_in_flight),
-                ],
+                &mut self.qlog_curr_cong_state,
+                CongestionState::SlowStart,
             );
         }
+        // Congestion avoidance, above the slow start threshold.
+        if self.acked_bytes >= self.congestion_window {
+            self.acked_bytes -= self.congestion_window;
+            self.congestion_window += MAX_DATAGRAM_SIZE;
+            qinfo!([self], "congestion avoidance += {}", MAX_DATAGRAM_SIZE);
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                &mut self.qlog_curr_cong_state,
+                CongestionState::CongestionAvoidance,
+            );
+        }
+        qlog::metrics_updated(
+            &mut self.qlog,
+            &[
+                QlogMetric::CongestionWindow(self.congestion_window),
+                QlogMetric::BytesInFlight(self.bytes_in_flight),
+            ],
+        );
     }
 
     pub fn on_packets_lost(
@@ -187,11 +198,11 @@ impl CongestionControl {
         {
             if last_lost_pkt.time_sent.duration_since(first.time_sent) > congestion_period {
                 self.congestion_window = MIN_CONG_WINDOW;
+                self.acked_bytes = 0;
                 qlog::metrics_updated(
                     &mut self.qlog,
                     &[QlogMetric::CongestionWindow(self.congestion_window)],
                 );
-
                 qinfo!([self], "persistent congestion");
             }
         }
@@ -247,6 +258,7 @@ impl CongestionControl {
         if self.after_recovery_start(sent_time) {
             self.congestion_recovery_start_time = Some(now);
             self.congestion_window /= 2; // kLossReductionFactor = 0.5
+            self.acked_bytes /= 2;
             self.congestion_window = max(self.congestion_window, MIN_CONG_WINDOW);
             self.ssthresh = self.congestion_window;
             qinfo!(
@@ -312,14 +324,14 @@ mod tests {
 
     #[test]
     fn issue_876() {
+        const PTO: Duration = Duration::from_millis(100);
+        const RTT: Duration = Duration::from_millis(98);
         let mut cc = CongestionControl::default();
         let time_now = now();
         let time_before = time_now - Duration::from_millis(100);
         let time_after1 = time_now + Duration::from_millis(100);
         let time_after2 = time_now + Duration::from_millis(150);
         let time_after3 = time_now + Duration::from_millis(175);
-        let pto = Duration::from_millis(100);
-        let rtt = Duration::from_millis(98);
 
         cc.start_pacer(time_now);
 
@@ -350,39 +362,44 @@ mod tests {
             ),
         ];
 
-        cc.on_packet_sent(&sent_packets[0], rtt);
+        cc.on_packet_sent(&sent_packets[0], RTT);
+        assert_eq!(cc.acked_bytes, 0);
         assert_eq!(cc.cwnd(), INITIAL_WINDOW);
         assert_eq!(cc.ssthresh(), std::usize::MAX);
         assert_eq!(cc.bif(), 103);
 
-        cc.on_packet_sent(&sent_packets[1], rtt);
+        cc.on_packet_sent(&sent_packets[1], RTT);
+        assert_eq!(cc.acked_bytes, 0);
         assert_eq!(cc.cwnd(), INITIAL_WINDOW);
         assert_eq!(cc.ssthresh(), std::usize::MAX);
         assert_eq!(cc.bif(), 208);
 
-        cc.on_packets_lost(time_after1, None, pto, &sent_packets[0..1]);
+        cc.on_packets_lost(time_after1, None, PTO, &sent_packets[0..1]);
 
         // We are now in recovery
+        assert_eq!(cc.acked_bytes, 0);
         assert_eq!(cc.cwnd(), INITIAL_WINDOW / 2);
         assert_eq!(cc.ssthresh(), INITIAL_WINDOW / 2);
         assert_eq!(cc.bif(), 105);
 
         // Send a packet after recovery starts
-        cc.on_packet_sent(&sent_packets[2], rtt);
+        cc.on_packet_sent(&sent_packets[2], RTT);
+        assert_eq!(cc.acked_bytes, 0);
         assert_eq!(cc.cwnd(), INITIAL_WINDOW / 2);
         assert_eq!(cc.ssthresh(), INITIAL_WINDOW / 2);
         assert_eq!(cc.bif(), 212);
 
         // and ack it. cwnd increases slightly
-        let cwnd_increase = (MAX_DATAGRAM_SIZE * sent_packets[2].size) / cc.cwnd();
         cc.on_packets_acked(&sent_packets[2..3]);
-        assert_eq!(cc.cwnd(), (INITIAL_WINDOW / 2) + cwnd_increase);
+        assert_eq!(cc.acked_bytes, sent_packets[2].size);
+        assert_eq!(cc.cwnd(), INITIAL_WINDOW / 2);
         assert_eq!(cc.ssthresh(), INITIAL_WINDOW / 2);
         assert_eq!(cc.bif(), 105);
 
         // Packet from before is lost. Should not hurt cwnd.
-        cc.on_packets_lost(time_after3, None, pto, &sent_packets[1..2]);
-        assert_eq!(cc.cwnd(), (INITIAL_WINDOW / 2) + cwnd_increase);
+        cc.on_packets_lost(time_after3, None, PTO, &sent_packets[1..2]);
+        assert_eq!(cc.acked_bytes, sent_packets[2].size);
+        assert_eq!(cc.cwnd(), INITIAL_WINDOW / 2);
         assert_eq!(cc.ssthresh(), INITIAL_WINDOW / 2);
         assert_eq!(cc.bif(), 0);
     }
