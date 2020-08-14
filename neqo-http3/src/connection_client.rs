@@ -5419,7 +5419,6 @@ mod tests {
 
         // Headers on the second request are blocked as well are blocked
         // waiting fro the encoder instructions.
-        let header_ready_event = |e| matches!(e, Http3ClientEvent::HeaderReady { .. });
         assert!(!client.events().any(header_ready_event));
 
         // Now read headers.
