@@ -48,7 +48,7 @@ impl Default for CongestionControl {
             bytes_in_flight: 0,
             acked_bytes: 0,
             congestion_recovery_start_time: None,
-            ssthresh: std::usize::MAX,
+            ssthresh: usize::MAX,
             pacer: None,
             in_recovery: false,
             qlog: NeqoQlog::disabled(),
