@@ -5408,7 +5408,7 @@ mod tests {
             true,
         );
 
-        // Headers are blocked waiting fro the encoder instructions.
+        // Headers are blocked waiting for the encoder instructions.
         let header_ready_event = |e| matches!(e, Http3ClientEvent::HeaderReady { .. });
         assert!(!client.events().any(header_ready_event));
 
@@ -5418,13 +5418,13 @@ mod tests {
         server_send_response_and_exchange_packet(&mut client, &mut server, request2, &d, true);
 
         // Headers on the second request are blocked as well are blocked
-        // waiting fro the encoder instructions.
+        // waiting for the encoder instructions.
         assert!(!client.events().any(header_ready_event));
 
-        // Now read headers.
+        // Now make the encoder instructions available.
         let _ = client.process(encoder_insts.dgram(), now());
 
-        // find the new request/response stream and send frame v on it.
+        // Header blocks for both streams should be ready.
         let mut count_responses = 0;
         while let Some(e) = client.next_event() {
             if let Http3ClientEvent::HeaderReady { stream_id, .. } = e {
