@@ -205,6 +205,8 @@ impl Http3Client {
         if *self.conn.zero_rtt_state() == ZeroRttState::Sending {
             self.base_handler
                 .set_0rtt_settings(&mut self.conn, settings)?;
+            self.events
+                .connection_state_change(self.base_handler.state());
             self.push_handler
                 .borrow_mut()
                 .maybe_send_max_push_id_frame(&mut self.base_handler);
@@ -3246,6 +3248,8 @@ mod tests {
             .expect("Set resumption token.");
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
+        let zerortt_event = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::ZeroRtt));
+        assert!(client.events().any(zerortt_event));
 
         (client, server)
     }
@@ -3354,6 +3358,8 @@ mod tests {
         client
             .set_resumption_token(now(), &token)
             .expect("Set resumption token.");
+        let zerortt_event = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::ZeroRtt));
+        assert!(client.events().any(zerortt_event));
 
         // Send ClientHello.
         let client_hs = client.process(None, now());
