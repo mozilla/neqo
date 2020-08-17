@@ -123,7 +123,7 @@ impl std::fmt::Debug for PNSpaceSet {
 #[derive(Debug, Clone)]
 pub struct SentPacket {
     pub pt: PacketType,
-    pub pn: u64,
+    pub pn: PacketNumber,
     ack_eliciting: bool,
     pub time_sent: Instant,
     pub tokens: Rc<Vec<RecoveryToken>>,
@@ -138,7 +138,7 @@ pub struct SentPacket {
 impl SentPacket {
     pub fn new(
         pt: PacketType,
-        pn: u64,
+        pn: PacketNumber,
         time_sent: Instant,
         ack_eliciting: bool,
         tokens: Rc<Vec<RecoveryToken>>,
@@ -405,7 +405,7 @@ impl RecvdPackets {
     }
 
     /// Add the packet to the tracked set.
-    pub fn set_received(&mut self, now: Instant, pn: u64, ack_eliciting: bool) {
+    pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) {
         let next_in_order_pn = self.ranges.front().map_or(0, |pr| pr.largest + 1);
         qdebug!(
             [self],
