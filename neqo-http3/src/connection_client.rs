@@ -214,11 +214,6 @@ impl Http3Client {
         Ok(())
     }
 
-    #[must_use]
-    pub fn is_zerortt(&self) -> bool {
-        self.base_handler.state() == Http3State::ZeroRtt
-    }
-
     /// This is call to close a connection.
     pub fn close<S>(&mut self, now: Instant, error: AppError, msg: S)
     where
@@ -3255,7 +3250,6 @@ mod tests {
         assert_eq!(client.state(), Http3State::ZeroRtt);
         let zerortt_event = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::ZeroRtt));
         assert!(client.events().any(zerortt_event));
-        assert!(client.is_zerortt());
 
         (client, server)
     }
@@ -3366,7 +3360,6 @@ mod tests {
             .expect("Set resumption token.");
         let zerortt_event = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::ZeroRtt));
         assert!(client.events().any(zerortt_event));
-        assert!(client.is_zerortt());
 
         // Send ClientHello.
         let client_hs = client.process(None, now());
