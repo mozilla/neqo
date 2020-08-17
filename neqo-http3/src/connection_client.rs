@@ -214,6 +214,7 @@ impl Http3Client {
         Ok(())
     }
 
+    #[must_use]
     pub fn is_zerortt(&self) -> bool {
         self.base_handler.state() == Http3State::ZeroRtt
     }
