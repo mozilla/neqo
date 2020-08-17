@@ -184,6 +184,9 @@ impl Http3ClientEvents {
         // If closing, existing events no longer relevant.
         match state {
             Http3State::Closing { .. } | Http3State::Closed(_) => self.events.borrow_mut().clear(),
+            Http3State::Connected => {
+                self.remove(|evt| matches!(evt, Http3ClientEvent::StateChange(Http3State::ZeroRtt)))
+            }
             _ => (),
         }
         self.insert(Http3ClientEvent::StateChange(state));
