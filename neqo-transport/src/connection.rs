@@ -2673,7 +2673,12 @@ impl Connection {
 
 impl ::std::fmt::Display for Connection {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{:?} {:p}", self.role, self as *const Self)
+        write!(f, "{:?} ", self.role)?;
+        if let Some(cid) = self.odcid() {
+            std::fmt::Display::fmt(&cid, f)
+        } else {
+            write!(f, "...")
+        }
     }
 }
 
