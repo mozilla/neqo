@@ -418,13 +418,13 @@ mod tests {
         cc.on_packet_sent(&sent_packets[0], RTT);
         assert_eq!(cc.acked_bytes, 0);
         assert_eq!(cc.cwnd(), CWND_INITIAL);
-        assert_eq!(cc.ssthresh(), std::usize::MAX);
+        assert_eq!(cc.ssthresh(), usize::MAX);
         assert_eq!(cc.bif(), 103);
 
         cc.on_packet_sent(&sent_packets[1], RTT);
         assert_eq!(cc.acked_bytes, 0);
         assert_eq!(cc.cwnd(), CWND_INITIAL);
-        assert_eq!(cc.ssthresh(), std::usize::MAX);
+        assert_eq!(cc.ssthresh(), usize::MAX);
         assert_eq!(cc.bif(), 208);
 
         cc.on_packets_lost(time_after1, Some(time_now), None, PTO, &sent_packets[0..1]);
