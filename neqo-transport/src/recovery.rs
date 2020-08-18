@@ -53,7 +53,7 @@ pub enum RecoveryToken {
 
 #[derive(Debug)]
 struct RttVals {
-    samples: u64,
+    first_sample_time: Option<Instant>,
     latest_rtt: Duration,
     smoothed_rtt: Duration,
     rttvar: Duration,
@@ -64,7 +64,7 @@ struct RttVals {
 impl RttVals {
     pub fn set_initial_rtt(&mut self, rtt: Duration) {
         // Only allow this when there are no samples.
-        debug_assert!(self.samples == 0);
+        debug_assert!(self.first_sample_time.is_none());
         self.latest_rtt = rtt;
         self.min_rtt = rtt;
         self.smoothed_rtt = rtt;
@@ -76,6 +76,7 @@ impl RttVals {
         mut qlog: &mut NeqoQlog,
         mut rtt_sample: Duration,
         ack_delay: Duration,
+        now: Instant,
     ) {
         // min_rtt ignores ack delay.
         self.min_rtt = min(self.min_rtt, rtt_sample);
@@ -86,8 +87,9 @@ impl RttVals {
             rtt_sample -= ack_delay;
         }
 
-        if self.samples == 0 {
+        if self.first_sample_time.is_none() {
             self.set_initial_rtt(rtt_sample);
+            self.first_sample_time = Some(now);
         } else {
             // Calculate EWMA RTT (based on {{?RFC6298}}).
             let rttvar_sample = if self.smoothed_rtt > rtt_sample {
@@ -100,7 +102,6 @@ impl RttVals {
             self.rttvar = (self.rttvar * 3 + rttvar_sample) / 4;
             self.smoothed_rtt = (self.smoothed_rtt * 7 + rtt_sample) / 8;
         }
-        self.samples += 1;
         qtrace!(
             "RTT latest={:?} -> estimate={:?}~{:?}",
             self.latest_rtt,
@@ -130,12 +131,16 @@ impl RttVals {
                 Duration::from_millis(0)
             }
     }
+
+    fn first_sample_time(&self) -> Option<Instant> {
+        self.first_sample_time
+    }
 }
 
 impl Default for RttVals {
     fn default() -> Self {
         Self {
-            samples: 0,
+            first_sample_time: None,
             latest_rtt: INITIAL_RTT,
             smoothed_rtt: INITIAL_RTT,
             rttvar: INITIAL_RTT / 2,
@@ -703,7 +708,7 @@ impl LossRecovery {
             if any_ack_eliciting {
                 let latest_rtt = now - largest_acked_pkt.time_sent;
                 self.rtt_vals
-                    .update_rtt(&mut self.qlog, latest_rtt, ack_delay);
+                    .update_rtt(&mut self.qlog, latest_rtt, ack_delay, now);
             }
         }
 
@@ -725,8 +730,9 @@ impl LossRecovery {
         // The PTO for congestion control is the raw number, without exponential
         // backoff, so that we can determine persistent congestion.
         let pto_raw = self.pto_raw(pn_space);
+        let first_rtt_sample = self.rtt_vals.first_sample_time();
         self.cc
-            .on_packets_lost(now, prev_largest_acked, pto_raw, &lost);
+            .on_packets_lost(now, first_rtt_sample, prev_largest_acked, pto_raw, &lost);
 
         // This must happen after on_packets_lost. If in recovery, this could
         // take us out, and then lost packets will start a new recovery period
@@ -920,6 +926,8 @@ impl LossRecovery {
         qtrace!([self], "timeout {:?}", now);
 
         let loss_delay = self.loss_delay();
+        let first_rtt_sample = self.rtt_vals.first_sample_time();
+
         let mut lost_packets = Vec::new();
         for space in self.spaces.iter_mut() {
             let first = lost_packets.len(); // The first packet lost in this space.
@@ -927,6 +935,7 @@ impl LossRecovery {
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
             self.cc.on_packets_lost(
                 now,
+                first_rtt_sample,
                 space.largest_acked_sent_time,
                 Self::pto_raw_inner(&self.rtt_vals, space.space()),
                 &lost_packets[first..],
