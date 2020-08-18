@@ -48,7 +48,7 @@ impl Default for CongestionControl {
             bytes_in_flight: 0,
             acked_bytes: 0,
             congestion_recovery_start_time: None,
-            ssthresh: std::usize::MAX,
+            ssthresh: usize::MAX,
             pacer: None,
             in_recovery: false,
             qlog: NeqoQlog::disabled(),
@@ -401,13 +401,13 @@ mod tests {
         cc.on_packet_sent(&sent_packets[0], RTT);
         assert_eq!(cc.acked_bytes, 0);
         assert_eq!(cc.cwnd(), INITIAL_WINDOW);
-        assert_eq!(cc.ssthresh(), std::usize::MAX);
+        assert_eq!(cc.ssthresh(), usize::MAX);
         assert_eq!(cc.bif(), 103);
 
         cc.on_packet_sent(&sent_packets[1], RTT);
         assert_eq!(cc.acked_bytes, 0);
         assert_eq!(cc.cwnd(), INITIAL_WINDOW);
-        assert_eq!(cc.ssthresh(), std::usize::MAX);
+        assert_eq!(cc.ssthresh(), usize::MAX);
         assert_eq!(cc.bif(), 208);
 
         cc.on_packets_lost(time_after1, None, PTO, &sent_packets[0..1]);
