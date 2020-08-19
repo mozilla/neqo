@@ -33,11 +33,11 @@ RUN set -eux; \
 
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
 
-# Copy the .git directory from the local clone so that it is possible to do
-# local updates to the docker image.
+# Copy the .git directory from the local clone so that it is possible to create
+# an image that includes local updates.
 RUN mkdir -p /tmp/neqo-reference
 ADD . /tmp/neqo-reference
-RUN if [[ -d /tmp/neqo-reference/.git ]]; then \
+RUN if [ -d /tmp/neqo-reference/.git ]; then \
       source=/tmp/neqo-reference; \
     else \
       source=https://github.com/mozilla/neqo; \
