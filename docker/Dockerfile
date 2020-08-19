@@ -3,7 +3,7 @@
 # Push to `docker` to trigger a build:
 #  $ git push origin main:docker
 
-FROM ubuntu:18.04
+FROM ubuntu:20.04
 LABEL maintainer="Martin Thomson <mt@lowentropy.net>"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
