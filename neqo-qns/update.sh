@@ -8,8 +8,12 @@ else
   push=0
 fi
 
-tag="neqoquic/neqo-qns:${1:-latest}"
-branch="${1:-main}"
+branch="${1:-$(git rev-parse --abbrev-ref HEAD)}"
+if [[ "$branch" == "main" ]]; then
+  tag="neqoquic/neqo-qns:latest"
+else
+  tag="neqoquic/neqo-qns:${branch}"
+fi
 
 cd "$(dirname "$0")"
 
