@@ -1,5 +1,8 @@
 FROM martenseemann/quic-network-simulator-endpoint:latest AS buildimage
 
+# Which branch to build from.
+ARG NEQO_BRANCH=main
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates coreutils curl git make mercurial ssh \
     build-essential clang llvm libclang-dev lld \
@@ -22,7 +25,7 @@ RUN set -eux; \
 
 ENV NSS_DIR=$HOME/nss \
     NSPR_DIR=$HOME/nspr \
-    LD_LIBRARY_PATH=$HOME/dist/Debug/lib
+    LD_LIBRARY_PATH=$HOME/dist/Release/lib
 
 RUN set -eux; \
     hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"; \
@@ -30,23 +33,33 @@ RUN set -eux; \
 
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
 
-RUN git clone --depth 1 https://github.com/mozilla/neqo $HOME/neqo
+# Copy the .git directory from the local clone so that it is possible to do
+# local updates to the docker image.
+RUN mkdir -p /tmp/neqo-reference
+ADD . /tmp/neqo-reference
+RUN if [[ -d /tmp/neqo-reference/.git ]]; then \
+      source=/tmp/neqo-reference; \
+    else \
+      source=https://github.com/mozilla/neqo; \
+    fi; \
+    git clone --depth 1 --branch "$NEQO_BRANCH" "$source" $HOME/neqo; \
+    rm -rf /tmp/neqo-reference
 
 RUN set -eux; \
     cd $HOME/neqo; \
     RUSTFLAGS="-g -C link-arg=-fuse-ld=lld" cargo build --release; \
-    cp target/debug/neqo-client target; \
-    cp target/debug/neqo-http3-server target; \
-    rm -rf target/debug
+    cp target/release/neqo-client target; \
+    cp target/release/neqo-server target; \
+    rm -rf target/release
 
-# Copy only binaries to the final image to keep it small
+# Copy only binaries to the final image to keep it small.
 
 FROM martenseemann/quic-network-simulator-endpoint:latest
 
 ENV LD_LIBRARY_PATH=/neqo/lib
 COPY --from=buildimage $HOME/neqo/target /neqo/target
 COPY --from=buildimage $HOME/neqo/test-fixture/db /neqo/test-fixture/db
-COPY --from=buildimage $HOME/dist/Debug/lib/*.so /neqo/lib/
+COPY --from=buildimage $HOME/dist/Release/lib/*.so /neqo/lib/
 
 COPY run_endpoint.sh .
 RUN chmod +x run_endpoint.sh
