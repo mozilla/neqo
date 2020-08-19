@@ -40,7 +40,7 @@ const TIMER_TOKEN: Token = Token(0xffff_ffff);
 mod old_https;
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "neqo-http3-server", about = "A basic HTTP3 server.")]
+#[structopt(name = "neqo-server", about = "A basic HTTP3 server.")]
 struct Args {
     /// List of IP:port to listen on
     #[structopt(default_value = "[::]:4433")]
