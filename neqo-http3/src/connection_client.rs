@@ -151,6 +151,12 @@ impl Http3Client {
         &self.conn.odcid().expect("Client always has odcid")
     }
 
+    /// Returns a raw tls resumption token if present.
+    #[must_use]
+    pub fn tls_resumption_token(&self) -> Option<&Vec<u8>> {
+        self.conn.tls_resumption_token()
+    }
+
     /// Returns a resumption token if present.
     /// A resumption token encodes transport and settings parameter as well.
     #[must_use]
@@ -3241,6 +3247,7 @@ mod tests {
         assert!(out.as_dgram_ref().is_some());
         client.process_input(out.dgram().unwrap(), now());
         assert_eq!(client.state(), Http3State::Connected);
+        assert!(client.tls_resumption_token().is_some());
         client.resumption_token().expect("should have token")
     }
 

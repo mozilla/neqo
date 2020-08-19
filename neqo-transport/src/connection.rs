@@ -689,6 +689,16 @@ impl Connection {
         Ok(())
     }
 
+    pub fn tls_resumption_token(&self) -> Option<&Vec<u8>> {
+        if self.state < State::Connected {
+            return None;
+        }
+        match self.crypto.tls {
+            Agent::Client(ref c) => c.resumption_token(),
+            Agent::Server(_) => None,
+        }
+    }
+
     /// Access the latest resumption token on the connection.
     pub fn resumption_token(&self) -> Option<Vec<u8>> {
         if self.state < State::Connected {
@@ -3124,6 +3134,7 @@ mod tests {
         assert!(ticket.is_some());
         client.process_input(ticket.unwrap(), now);
         assert_eq!(*client.state(), State::Confirmed);
+        assert!(client.tls_resumption_token().is_some());
         client.resumption_token().expect("should have token")
     }
 
