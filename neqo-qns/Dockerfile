@@ -23,9 +23,9 @@ RUN set -eux; \
     rm -f rustup-init; \
     chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
 
-ENV NSS_DIR=$HOME/nss \
-    NSPR_DIR=$HOME/nspr \
-    LD_LIBRARY_PATH=$HOME/dist/Release/lib
+ENV NSS_DIR=/nss \
+    NSPR_DIR=/nspr \
+    LD_LIBRARY_PATH=/dist/Release/lib
 
 RUN set -eux; \
     hg clone https://hg.mozilla.org/projects/nss "$NSS_DIR"; \
@@ -35,18 +35,18 @@ RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -o
 
 # Copy the .git directory from the local clone so that it is possible to create
 # an image that includes local updates.
-RUN mkdir -p /tmp/neqo-reference
-ADD . /tmp/neqo-reference
-RUN if [ -d /tmp/neqo-reference/.git ]; then \
-      source=/tmp/neqo-reference; \
+RUN mkdir -p /neqo-reference
+ADD . /neqo-reference
+RUN if [ -d /neqo-reference/.git ]; then \
+      source=/neqo-reference; \
     else \
       source=https://github.com/mozilla/neqo; \
     fi; \
-    git clone --depth 1 --branch "$NEQO_BRANCH" "$source" $HOME/neqo; \
-    rm -rf /tmp/neqo-reference
+    git clone --depth 1 --branch "$NEQO_BRANCH" "$source" /neqo; \
+    rm -rf /neqo-reference
 
 RUN set -eux; \
-    cd $HOME/neqo; \
+    cd /neqo; \
     RUSTFLAGS="-g -C link-arg=-fuse-ld=lld" cargo build --release \
       --bin neqo-client --bin neqo-server; \
     cp target/release/neqo-client target; \
@@ -58,9 +58,9 @@ RUN set -eux; \
 FROM martenseemann/quic-network-simulator-endpoint:latest
 
 ENV LD_LIBRARY_PATH=/neqo/lib
-COPY --from=buildimage $HOME/neqo/target /neqo/target
-COPY --from=buildimage $HOME/neqo/test-fixture/db /neqo/test-fixture/db
-COPY --from=buildimage $HOME/dist/Release/lib/*.so /neqo/lib/
+COPY --from=buildimage /neqo/target /neqo/target
+COPY --from=buildimage /neqo/test-fixture/db /neqo/test-fixture/db
+COPY --from=buildimage /dist/Release/lib/*.so /neqo/lib/
 
 COPY run_endpoint.sh .
 RUN chmod +x run_endpoint.sh
