@@ -1,5 +1,5 @@
 [package]
-name = "neqo-http3-server"
+name = "neqo-server"
 version = "0.4.10"
 authors = ["Dragana Damjanovic <dragana.damjano@gmail.com>"]
 edition = "2018"
