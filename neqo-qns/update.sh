@@ -13,8 +13,11 @@ branch="${1:-main}"
 
 cd "$(dirname "$0")"
 
-rev=$(git log -n 1 --format='format:%H' -- .)
-[[ "$rev" != "$(cat .last-update)" ]] || (echo "No change since $rev."; exit 0)
+rev=$(git log -n 1 --format='format:%H')
+if [[ "$rev" == "$(cat ".last-update-$branch")" ]]; then
+  echo "No change since $rev."
+  exit 0
+fi
 
 # This makes the local .git directory the source, allowing for the current
 # build to be build and pushed.
@@ -28,4 +31,4 @@ if [[ "$push" == "1" ]]; then
   docker push "$tag"
 fi
 
-echo "$rev" > .last-update
+echo "$rev" > ".last-update-$branch"
