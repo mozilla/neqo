@@ -47,7 +47,8 @@ RUN if [ -d /tmp/neqo-reference/.git ]; then \
 
 RUN set -eux; \
     cd $HOME/neqo; \
-    RUSTFLAGS="-g -C link-arg=-fuse-ld=lld" cargo build --release; \
+    RUSTFLAGS="-g -C link-arg=-fuse-ld=lld" cargo build --release \
+      --bin neqo-client --bin neqo-server; \
     cp target/release/neqo-client target; \
     cp target/release/neqo-server target; \
     rm -rf target/release
