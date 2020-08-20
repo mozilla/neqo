@@ -149,7 +149,7 @@ fn exchange_ticket(client: &mut Connection, server: &mut Connection, now: Instan
     assert!(ticket.is_some());
     client.process_input(ticket.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
-    client.resumption_token().expect("should have token")
+    client.resumption_token().expect("should have token").token
 }
 
 /// Connect with an RTT and then force both peers to be idle.

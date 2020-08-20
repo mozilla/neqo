@@ -930,7 +930,7 @@ mod old {
         process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
         Ok(if args.resume {
-            client.resumption_token()
+            client.resumption_token().map(|t| t.token)
         } else {
             None
         })

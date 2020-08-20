@@ -24,8 +24,8 @@ use neqo_common::{
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, HandshakeState, SecretAgentInfo,
-    Server, ZeroRttChecker,
+    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, HandshakeState, ResumptionToken,
+    SecretAgentInfo, Server, ZeroRttChecker,
 };
 
 use crate::addr_valid::{AddressValidation, NewTokenState};
@@ -496,14 +496,14 @@ impl Connection {
     }
 
     /// Access the latest resumption token on the connection.
-    pub fn resumption_token(&mut self) -> Option<Vec<u8>> {
+    pub fn resumption_token(&mut self) -> Option<ResumptionToken> {
         if self.state < State::Connected {
             return None;
         }
         match self.crypto.tls {
             Agent::Client(ref mut c) => match c.resumption_token() {
                 Some(ref t) => {
-                    qtrace!("TLS token {}", hex(&t));
+                    qtrace!("TLS token {}", hex(&t.token));
                     let mut enc = Encoder::default();
                     let rtt = self.loss_recovery.rtt();
                     let rtt = u64::try_from(rtt.as_millis()).unwrap_or(0);
@@ -518,9 +518,12 @@ impl Connection {
                     });
                     let token = self.new_token.take_token();
                     enc.encode_vvec(token.as_ref().map_or(&[], |t| &t[..]));
-                    enc.encode(&t[..]);
+                    enc.encode(&t.token[..]);
                     qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
-                    Some(enc.into())
+                    Some(ResumptionToken {
+                        token: enc.into(),
+                        expiration_time: t.expiration_time,
+                    })
                 }
                 None => None,
             },

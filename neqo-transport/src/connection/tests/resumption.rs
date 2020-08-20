@@ -89,11 +89,9 @@ fn address_validation_token_resume() {
     assert!(server.crypto.tls.info().unwrap().resumed());
 }
 
-fn can_resume(mut token: Option<Vec<u8>>, initial_has_token: bool) {
+fn can_resume(token: &[u8], initial_has_token: bool) {
     let mut client = default_client();
-    client
-        .enable_resumption(now(), token.take().as_ref().unwrap())
-        .unwrap();
+    client.enable_resumption(now(), token).unwrap();
     let initial = client.process_output(now()).dgram();
     assertions::assert_initial(initial.as_ref().unwrap(), initial_has_token);
 }
@@ -110,15 +108,13 @@ fn two_tickets() {
     let pkt = send_something(&mut server, now());
 
     client.process_input(pkt, now());
-    let token1 = client.resumption_token();
-    assert!(token1.is_some());
-    let token2 = client.resumption_token();
-    assert!(token2.is_some());
+    let token1 = client.resumption_token().unwrap().token;
+    let token2 = client.resumption_token().unwrap().token;
     assert_ne!(token1, token2);
     assert!(client.resumption_token().is_none());
 
-    can_resume(token1, false);
-    can_resume(token2, false);
+    can_resume(&token1, false);
+    can_resume(&token2, false);
 }
 
 #[test]
@@ -136,11 +132,11 @@ fn two_tickets_and_tokens() {
     let pkt = send_something(&mut server, now());
 
     client.process_input(pkt, now());
-    let token1 = client.resumption_token();
-    let token2 = client.resumption_token();
+    let token1 = client.resumption_token().unwrap().token;
+    let token2 = client.resumption_token().unwrap().token;
     assert_ne!(token1, token2);
     assert!(client.resumption_token().is_none());
 
-    can_resume(token1, true);
-    can_resume(token2, true);
+    can_resume(&token1, true);
+    can_resume(&token2, true);
 }

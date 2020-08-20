@@ -978,7 +978,9 @@ mod tests {
 
         let mut server = create_server(settings);
         let mut client = default_client();
-        client.enable_resumption(now(), &token.unwrap()).unwrap();
+        client
+            .enable_resumption(now(), &token.unwrap().token)
+            .unwrap();
 
         connect_transport(&mut server, &mut client, true);
         assert!(client.tls_info().unwrap().resumed());

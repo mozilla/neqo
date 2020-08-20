@@ -284,7 +284,7 @@ fn get_ticket(server: &mut Server) -> Vec<u8> {
 
     // Calling active_connections clears the set of active connections.
     assert_eq!(server.active_connections().len(), 1);
-    client.resumption_token().unwrap()
+    client.resumption_token().unwrap().token
 }
 
 // Attempt a retry with 0-RTT, and have 0-RTT packets sent with the second ClientHello.

@@ -17,7 +17,7 @@ use crate::RecvMessageEvents;
 use neqo_common::{
     hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Decoder, Encoder, Role,
 };
-use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
+use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::{stats::Stats, QpackSettings};
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdManager, Output, QuicVersion,
@@ -154,13 +154,16 @@ impl Http3Client {
     /// Returns a resumption token if present.
     /// A resumption token encodes transport and settings parameter as well.
     #[must_use]
-    pub fn resumption_token(&mut self) -> Option<Vec<u8>> {
+    pub fn resumption_token(&mut self) -> Option<ResumptionToken> {
         if let Some(token) = self.conn.resumption_token() {
             if let Some(settings) = self.base_handler.get_settings() {
                 let mut enc = Encoder::default();
                 settings.encode_frame_contents(&mut enc);
-                enc.encode(&token[..]);
-                Some(enc.into())
+                enc.encode(&token.token[..]);
+                Some(ResumptionToken {
+                    token: enc.into(),
+                    expiration_time: token.expiration_time,
+                })
             } else {
                 None
             }
@@ -3255,7 +3258,7 @@ mod tests {
         assert!(out.as_dgram_ref().is_some());
         client.process_input(out.dgram().unwrap(), now());
         assert_eq!(client.state(), Http3State::Connected);
-        client.resumption_token().expect("should have token")
+        client.resumption_token().expect("should have token").token
     }
 
     fn start_with_0rtt() -> (Http3Client, TestServer) {

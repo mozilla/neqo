@@ -341,7 +341,7 @@ fn reorder_05rtt_with_0rtt() {
     let ticket = server.process_output(now).dgram().unwrap();
     now += RTT / 2;
     client.process_input(ticket, now);
-    let token = client.resumption_token().unwrap();
+    let token = client.resumption_token().unwrap().token;
     let mut client = default_client();
     client.enable_resumption(now, &token[..]).unwrap();
     let mut server = default_server();
