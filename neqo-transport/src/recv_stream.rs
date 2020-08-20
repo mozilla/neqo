@@ -241,6 +241,9 @@ impl RxStreamOrderer {
                 copied += copy_bytes;
                 buf_remaining -= copy_bytes;
                 self.retired += copy_bytes as u64;
+                if buf_remaining == 0 {
+                    break; // we have fill the buffer.
+                }
             } else {
                 break; // we're missing bytes
             }
