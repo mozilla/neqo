@@ -24,8 +24,8 @@ use neqo_common::{
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, HandshakeState, SecretAgentInfo,
-    Server, ZeroRttChecker,
+    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, HandshakeState, ResumptionToken,
+    SecretAgentInfo, Server, ZeroRttChecker,
 };
 
 use crate::addr_valid::{AddressValidation, NewTokenState};
@@ -496,14 +496,14 @@ impl Connection {
     }
 
     /// Access the latest resumption token on the connection.
-    pub fn resumption_token(&mut self) -> Option<Vec<u8>> {
+    pub fn resumption_token(&mut self) -> Option<ResumptionToken> {
         if self.state < State::Connected {
             return None;
         }
         match self.crypto.tls {
             Agent::Client(ref mut c) => match c.resumption_token() {
                 Some(ref t) => {
-                    qtrace!("TLS token {}", hex(&t));
+                    qtrace!("TLS token {}", hex(t.as_ref()));
                     let mut enc = Encoder::default();
                     let rtt = self.loss_recovery.rtt();
                     let rtt = u64::try_from(rtt.as_millis()).unwrap_or(0);
@@ -518,9 +518,9 @@ impl Connection {
                     });
                     let token = self.new_token.take_token();
                     enc.encode_vvec(token.as_ref().map_or(&[], |t| &t[..]));
-                    enc.encode(&t[..]);
+                    enc.encode(t.as_ref());
                     qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
-                    Some(enc.into())
+                    Some(ResumptionToken::new(enc.into(), t.expiration_time()))
                 }
                 None => None,
             },
@@ -532,7 +532,7 @@ impl Connection {
     /// This can only be called once and only on the client.
     /// After calling the function, it should be possible to attempt 0-RTT
     /// if the token supports that.
-    pub fn enable_resumption(&mut self, now: Instant, token: &[u8]) -> Res<()> {
+    pub fn enable_resumption(&mut self, now: Instant, token: impl AsRef<[u8]>) -> Res<()> {
         if self.state != State::Init {
             qerror!([self], "set token in state {:?}", self.state);
             return Err(Error::ConnectionState);
@@ -541,8 +541,12 @@ impl Connection {
             return Err(Error::ConnectionState);
         }
 
-        qinfo!([self], "resumption token {}", hex_snip_middle(token));
-        let mut dec = Decoder::from(token);
+        qinfo!(
+            [self],
+            "resumption token {}",
+            hex_snip_middle(token.as_ref())
+        );
+        let mut dec = Decoder::from(token.as_ref());
 
         let smoothed_rtt =
             Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);

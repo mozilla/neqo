@@ -22,7 +22,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use neqo_common::{qdebug, qtrace, Datagram, Decoder};
-use neqo_crypto::{AllowZeroRtt, AuthenticationStatus};
+use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{self, fixture_init, loopback, now};
 
 // All the tests.
@@ -143,7 +143,11 @@ fn assert_error(c: &Connection, err: &ConnectionError) {
     }
 }
 
-fn exchange_ticket(client: &mut Connection, server: &mut Connection, now: Instant) -> Vec<u8> {
+fn exchange_ticket(
+    client: &mut Connection,
+    server: &mut Connection,
+    now: Instant,
+) -> ResumptionToken {
     server.send_ticket(now, &[]).expect("can send ticket");
     let ticket = server.process_output(now).dgram();
     assert!(ticket.is_some());
