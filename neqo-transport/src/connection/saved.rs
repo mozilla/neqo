@@ -5,12 +5,10 @@
 // except according to those terms.
 
 use std::mem;
-use std::time::{Instant};
+use std::time::Instant;
 
-use neqo_common::{
-    qdebug, qinfo, Datagram,
-};
-use crate::crypto::{CryptoSpace};
+use crate::crypto::CryptoSpace;
+use neqo_common::{qdebug, qinfo, Datagram};
 
 /// The number of datagrams that are saved during the handshake when
 /// keys to decrypt them are not yet available.
@@ -57,4 +55,3 @@ impl SavedDatagrams {
         mem::take(self.store(cspace))
     }
 }
-
