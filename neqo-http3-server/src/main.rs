@@ -465,8 +465,8 @@ impl ServersRunner {
                     }
                     self.process_datagrams_and_events(event.token().0, true)?;
                 }
-                self.process_active_conns()?;
             }
+            self.process_active_conns()?;
         }
     }
 }

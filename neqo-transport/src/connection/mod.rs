@@ -2428,7 +2428,12 @@ impl Connection {
 
 impl ::std::fmt::Display for Connection {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        write!(f, "{:?} {:p}", self.role, self as *const Self)
+        write!(f, "{:?} ", self.role)?;
+        if let Some(cid) = self.odcid() {
+            std::fmt::Display::fmt(&cid, f)
+        } else {
+            write!(f, "...")
+        }
     }
 }
 
@@ -2436,7 +2441,7 @@ impl ::std::fmt::Display for Connection {
 mod tests {
     use super::*;
     use crate::cc::PACING_BURST_SIZE;
-    use crate::cc::{INITIAL_CWND_PKTS, MAX_DATAGRAM_SIZE, MIN_CONG_WINDOW};
+    use crate::cc::{CWND_INITIAL_PKTS, CWND_MIN, MAX_DATAGRAM_SIZE};
     use crate::frame::{CloseError, StreamType};
     use crate::packet::PACKET_BIT_LONG;
     use crate::path::PATH_MTU_V6;
@@ -4163,7 +4168,7 @@ mod tests {
     /// value could fail as a result of variations, so it's OK to just
     /// change this value, but it is good to first understand where the
     /// change came from.
-    const POST_HANDSHAKE_CWND: usize = PATH_MTU_V6 * (INITIAL_CWND_PKTS + 1) + 75;
+    const POST_HANDSHAKE_CWND: usize = PATH_MTU_V6 * (CWND_INITIAL_PKTS + 1) + 75;
 
     /// Determine the number of packets required to fill the CWND.
     const fn cwnd_packets(data: usize) -> usize {
@@ -4427,7 +4432,7 @@ mod tests {
             client.process_input(dgram, now);
         }
 
-        assert_eq!(client.loss_recovery.cwnd(), MIN_CONG_WINDOW);
+        assert_eq!(client.loss_recovery.cwnd(), CWND_MIN);
         now
     }
 
