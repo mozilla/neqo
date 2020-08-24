@@ -7,7 +7,7 @@
 // The class implementing a QUIC connection.
 
 use std::cell::RefCell;
-use std::cmp::{max, min, Ordering};
+use std::cmp::max;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{self, Debug};
@@ -53,78 +53,22 @@ use crate::tparams::{
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
 use crate::{AppError, ConnectionError, Error, Res, LOCAL_IDLE_TIMEOUT};
 
+mod idle;
+mod saved;
+mod state;
+
+use idle::IdleTimeout;
+use saved::SavedDatagrams;
+pub use state::State;
+use state::StateSignaling;
+
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
 
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
-/// The number of datagrams that are saved during the handshake when
-/// keys to decrypt them are not yet available.
-///
-/// This value exceeds what should be possible to send during the handshake.
-/// Neither endpoint should have enough congestion window to send this
-/// much before the handshake completes.
-const MAX_SAVED_DATAGRAMS: usize = 32;
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
-
-#[derive(Clone, Debug, PartialEq, Ord, Eq)]
-/// The state of the Connection.
-pub enum State {
-    Init,
-    WaitInitial,
-    Handshaking,
-    Connected,
-    Confirmed,
-    Closing {
-        error: ConnectionError,
-        timeout: Instant,
-    },
-    Draining {
-        error: ConnectionError,
-        timeout: Instant,
-    },
-    Closed(ConnectionError),
-}
-
-impl State {
-    #[must_use]
-    pub fn connected(&self) -> bool {
-        matches!(self, Self::Connected | Self::Confirmed)
-    }
-
-    #[must_use]
-    pub fn closed(&self) -> bool {
-        matches!(self, Self::Closing { .. } | Self::Draining { .. } | Self::Closed(_))
-    }
-}
-
-// Implement Ord so that we can enforce monotonic state progression.
-impl PartialOrd for State {
-    #[allow(clippy::match_same_arms)] // Lint bug: rust-lang/rust-clippy#860
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if mem::discriminant(self) == mem::discriminant(other) {
-            return Some(Ordering::Equal);
-        }
-        Some(match (self, other) {
-            (Self::Init, _) => Ordering::Less,
-            (_, Self::Init) => Ordering::Greater,
-            (Self::WaitInitial, _) => Ordering::Less,
-            (_, Self::WaitInitial) => Ordering::Greater,
-            (Self::Handshaking, _) => Ordering::Less,
-            (_, Self::Handshaking) => Ordering::Greater,
-            (Self::Connected, _) => Ordering::Less,
-            (_, Self::Connected) => Ordering::Greater,
-            (Self::Confirmed, _) => Ordering::Less,
-            (_, Self::Confirmed) => Ordering::Greater,
-            (Self::Closing { .. }, _) => Ordering::Less,
-            (_, Self::Closing { .. }) => Ordering::Greater,
-            (Self::Draining { .. }, _) => Ordering::Less,
-            (_, Self::Draining { .. }) => Ordering::Greater,
-            (Self::Closed(_), _) => unreachable!(),
-        })
-    }
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ZeroRttState {
@@ -227,218 +171,6 @@ impl RetryInfo {
             token,
             retry_source_cid,
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-/// There's a little bit of different behavior for resetting idle timeout. See
-/// -transport 10.2 ("Idle Timeout").
-enum IdleTimeoutState {
-    Init,
-    New(Instant),
-    PacketReceived(Instant),
-    AckElicitingPacketSent(Instant),
-}
-
-#[derive(Debug, Clone)]
-/// There's a little bit of different behavior for resetting idle timeout. See
-/// -transport 10.2 ("Idle Timeout").
-struct IdleTimeout {
-    timeout: Duration,
-    state: IdleTimeoutState,
-}
-
-impl Default for IdleTimeout {
-    fn default() -> Self {
-        Self {
-            timeout: LOCAL_IDLE_TIMEOUT,
-            state: IdleTimeoutState::Init,
-        }
-    }
-}
-
-impl IdleTimeout {
-    pub fn set_peer_timeout(&mut self, peer_timeout: Duration) {
-        self.timeout = min(self.timeout, peer_timeout);
-    }
-
-    pub fn expiry(&mut self, now: Instant, pto: Duration) -> Instant {
-        let start = match self.state {
-            IdleTimeoutState::Init => {
-                self.state = IdleTimeoutState::New(now);
-                now
-            }
-            IdleTimeoutState::New(t)
-            | IdleTimeoutState::PacketReceived(t)
-            | IdleTimeoutState::AckElicitingPacketSent(t) => t,
-        };
-        start + max(self.timeout, pto * 3)
-    }
-
-    fn on_packet_sent(&mut self, now: Instant) {
-        // Only reset idle timeout if we've received a packet since the last
-        // time we reset the timeout here.
-        match self.state {
-            IdleTimeoutState::AckElicitingPacketSent(_) => {}
-            IdleTimeoutState::Init
-            | IdleTimeoutState::New(_)
-            | IdleTimeoutState::PacketReceived(_) => {
-                self.state = IdleTimeoutState::AckElicitingPacketSent(now);
-            }
-        }
-    }
-
-    fn on_packet_received(&mut self, now: Instant) {
-        self.state = IdleTimeoutState::PacketReceived(now);
-    }
-
-    pub fn expired(&mut self, now: Instant, pto: Duration) -> bool {
-        now >= self.expiry(now, pto)
-    }
-}
-
-/// `StateSignaling` manages whether we need to send HANDSHAKE_DONE and CONNECTION_CLOSE.
-/// Valid state transitions are:
-/// * Idle -> HandshakeDone: at the server when the handshake completes
-/// * HandshakeDone -> Idle: when a HANDSHAKE_DONE frame is sent
-/// * Idle/HandshakeDone -> Closing/Draining: when closing or draining
-/// * Closing/Draining -> CloseSent: after sending CONNECTION_CLOSE
-/// * CloseSent -> Closing: any time a new CONNECTION_CLOSE is needed
-/// * -> Reset: from any state in case of a stateless reset
-#[derive(Debug, Clone, PartialEq)]
-enum StateSignaling {
-    Idle,
-    HandshakeDone,
-    /// These states save the frame that needs to be sent.
-    Closing(Frame),
-    Draining(Frame),
-    /// This state saves the frame that might need to be sent again.
-    /// If it is `None`, then we are draining and don't send.
-    CloseSent(Option<Frame>),
-    Reset,
-}
-
-impl StateSignaling {
-    pub fn handshake_done(&mut self) {
-        if *self != Self::Idle {
-            debug_assert!(false, "StateSignaling must be in Idle state.");
-            return;
-        }
-        *self = Self::HandshakeDone
-    }
-
-    pub fn send_done(&mut self) -> Option<(Frame, Option<RecoveryToken>)> {
-        if *self == Self::HandshakeDone {
-            *self = Self::Idle;
-            Some((Frame::HandshakeDone, Some(RecoveryToken::HandshakeDone)))
-        } else {
-            None
-        }
-    }
-
-    fn make_close_frame(
-        error: ConnectionError,
-        frame_type: FrameType,
-        message: impl AsRef<str>,
-    ) -> Frame {
-        let reason_phrase = message.as_ref().as_bytes().to_owned();
-        Frame::ConnectionClose {
-            error_code: CloseError::from(error),
-            frame_type,
-            reason_phrase,
-        }
-    }
-
-    pub fn close(
-        &mut self,
-        error: ConnectionError,
-        frame_type: FrameType,
-        message: impl AsRef<str>,
-    ) {
-        if *self != Self::Reset {
-            *self = Self::Closing(Self::make_close_frame(error, frame_type, message));
-        }
-    }
-
-    pub fn drain(
-        &mut self,
-        error: ConnectionError,
-        frame_type: FrameType,
-        message: impl AsRef<str>,
-    ) {
-        if *self != Self::Reset {
-            *self = Self::Draining(Self::make_close_frame(error, frame_type, message));
-        }
-    }
-
-    /// If a close is pending, take a frame.
-    pub fn close_frame(&mut self) -> Option<Frame> {
-        match self {
-            Self::Closing(frame) => {
-                // When we are closing, we might need to send the close frame again.
-                let frame = mem::replace(frame, Frame::Padding);
-                *self = Self::CloseSent(Some(frame.clone()));
-                Some(frame)
-            }
-            Self::Draining(frame) => {
-                // When we are draining, just send once.
-                let frame = mem::replace(frame, Frame::Padding);
-                *self = Self::CloseSent(None);
-                Some(frame)
-            }
-            _ => None,
-        }
-    }
-
-    /// If a close can be sent again, prepare to send it again.
-    pub fn send_close(&mut self) {
-        if let Self::CloseSent(Some(frame)) = self {
-            let frame = mem::replace(frame, Frame::Padding);
-            *self = Self::Closing(frame);
-        }
-    }
-
-    /// We just got a stateless reset.  Terminate.
-    pub fn reset(&mut self) {
-        *self = Self::Reset;
-    }
-}
-
-struct SavedDatagram {
-    /// The datagram.
-    d: Datagram,
-    /// The time that the datagram was received.
-    t: Instant,
-}
-
-#[derive(Default)]
-struct SavedDatagrams {
-    handshake: Vec<SavedDatagram>,
-    application_data: Vec<SavedDatagram>,
-}
-
-impl SavedDatagrams {
-    fn store(&mut self, cspace: CryptoSpace) -> &mut Vec<SavedDatagram> {
-        match cspace {
-            CryptoSpace::Handshake => &mut self.handshake,
-            CryptoSpace::ApplicationData => &mut self.application_data,
-            _ => panic!("unexpected space"),
-        }
-    }
-
-    pub fn save(&mut self, cspace: CryptoSpace, d: Datagram, t: Instant) {
-        let store = self.store(cspace);
-
-        if store.len() < MAX_SAVED_DATAGRAMS {
-            qdebug!("saving datagram of {} bytes", d.len());
-            store.push(SavedDatagram { d, t });
-        } else {
-            qinfo!("not saving datagram of {} bytes", d.len());
-        }
-    }
-
-    pub fn take_saved(&mut self, cspace: CryptoSpace) -> Vec<SavedDatagram> {
-        mem::take(self.store(cspace))
     }
 }
 
@@ -885,7 +617,7 @@ impl Connection {
                 }
                 State::Init => {
                     // We have not even sent anything just close the connection without sending any error.
-                    // This may happen when clieeent_start fails.
+                    // This may happen when client_start fails.
                     self.set_state(State::Closed(error));
                 }
                 State::WaitInitial => {
@@ -3490,7 +3222,7 @@ mod tests {
             .borrow_mut()
             .local
             .set_integer(tparams::IDLE_TIMEOUT, LOWER_TIMEOUT_MS);
-        server.idle_timeout.timeout = LOWER_TIMEOUT;
+        server.idle_timeout = IdleTimeout::new(LOWER_TIMEOUT);
 
         // Now connect and force idleness manually.
         connect(&mut client, &mut server);
@@ -3522,7 +3254,7 @@ mod tests {
                 TransportParameter::Integer(LOWER_TIMEOUT_MS),
             )
             .unwrap();
-        server.idle_timeout.timeout = LOWER_TIMEOUT;
+        server.idle_timeout = IdleTimeout::new(LOWER_TIMEOUT);
 
         // Now connect with an RTT and force idleness manually.
         let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
