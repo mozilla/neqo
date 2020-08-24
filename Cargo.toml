@@ -4,7 +4,7 @@ members = [
   "neqo-common",
   "neqo-crypto",
   "neqo-http3",
-  "neqo-http3-server",
+  "neqo-server",
   "neqo-qpack",
   "neqo-transport",
   "neqo-interop",

@@ -2,10 +2,10 @@
 
 ![neqo logo](https://github.com/mozilla/neqo/raw/main/neqo.png "neqo logo")
 
-To run test HTTP/3 programs (neqo-client and neqo-http3-server):
+To run test HTTP/3 programs (neqo-client and neqo-server):
 
 * `cargo build`
-* `./target/debug/neqo-http3-server [::]:12345 --db ./test-fixture/db`
+* `./target/debug/neqo-server [::]:12345 --db ./test-fixture/db`
 * `./target/debug/neqo-client http://127.0.0.1:12345/`
 
 ## Faster Builds with Separate NSS/NSPR
