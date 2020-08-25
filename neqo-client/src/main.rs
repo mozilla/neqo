@@ -910,7 +910,7 @@ mod old {
         )?;
 
         if let Some(tok) = token {
-            client.set_resumption_token(Instant::now(), &tok)?;
+            client.enable_resumption(Instant::now(), &tok)?;
         }
 
         let ciphers = args.get_ciphers();

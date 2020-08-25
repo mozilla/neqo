@@ -154,7 +154,7 @@ impl Http3Client {
     /// Returns a resumption token if present.
     /// A resumption token encodes transport and settings parameter as well.
     #[must_use]
-    pub fn resumption_token(&self) -> Option<Vec<u8>> {
+    pub fn resumption_token(&mut self) -> Option<Vec<u8>> {
         if let Some(token) = self.conn.resumption_token() {
             if let Some(settings) = self.base_handler.get_settings() {
                 let mut enc = Encoder::default();
@@ -172,7 +172,7 @@ impl Http3Client {
     /// This may be call if an application has a resumption token. This must be called before connection starts.
     /// # Errors
     /// An error is return if token cannot be decoded or a connection is is a wrong state.
-    pub fn set_resumption_token(&mut self, now: Instant, token: &[u8]) -> Res<()> {
+    pub fn enable_resumption(&mut self, now: Instant, token: &[u8]) -> Res<()> {
         if self.base_handler.state != Http3State::Initializing {
             return Err(Error::InvalidState);
         }
@@ -189,9 +189,7 @@ impl Http3Client {
             .map_err(|_| Error::InvalidResumptionToken)?;
         let tok = dec.decode_remainder();
         qtrace!([self], "  Transport token {}", hex(&tok));
-        self.conn
-            .set_resumption_token(now, tok)
-            .map_err(|e| Error::map_set_resumption_errors(&e))?;
+        self.conn.enable_resumption(now, tok)?;
         if self.conn.state().closed() {
             let state = self.conn.state().clone();
             debug_assert!(
@@ -3254,7 +3252,7 @@ mod tests {
 
         assert_eq!(client.state(), Http3State::Initializing);
         client
-            .set_resumption_token(now(), &token)
+            .enable_resumption(now(), &token)
             .expect("Set resumption token.");
 
         assert_eq!(client.state(), Http3State::ZeroRtt);
@@ -3366,7 +3364,7 @@ mod tests {
 
         assert_eq!(client.state(), Http3State::Initializing);
         client
-            .set_resumption_token(now(), &token)
+            .enable_resumption(now(), &token)
             .expect("Set resumption token.");
         let zerortt_event = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::ZeroRtt));
         assert!(client.events().any(zerortt_event));
@@ -3427,7 +3425,7 @@ mod tests {
         let mut server = TestServer::new_with_settings(resumption_settings);
         assert_eq!(client.state(), Http3State::Initializing);
         client
-            .set_resumption_token(now(), &token)
+            .enable_resumption(now(), &token)
             .expect("Set resumption token.");
         assert_eq!(client.state(), Http3State::ZeroRtt);
         let out = client.process(None, now());
