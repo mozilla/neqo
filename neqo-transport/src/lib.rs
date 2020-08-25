@@ -40,7 +40,6 @@ pub use self::packet::QuicVersion;
 pub use self::stats::Stats;
 pub use self::stream_id::StreamId;
 
-const LOCAL_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30); // 30 second
 pub use self::recv_stream::RECV_BUFFER_SIZE;
 pub use self::send_stream::SEND_BUFFER_SIZE;
 

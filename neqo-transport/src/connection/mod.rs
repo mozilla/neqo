@@ -52,13 +52,14 @@ use crate::tparams::{
     self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
 };
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
-use crate::{AppError, ConnectionError, Error, Res, LOCAL_IDLE_TIMEOUT};
+use crate::{AppError, ConnectionError, Error, Res};
 
 mod idle;
 mod saved;
 mod state;
 
 use idle::IdleTimeout;
+pub use idle::LOCAL_IDLE_TIMEOUT;
 use saved::SavedDatagrams;
 pub use state::State;
 use state::StateSignaling;
