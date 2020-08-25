@@ -225,9 +225,9 @@ impl RxStreamOrderer {
     fn read(&mut self, buf: &mut [u8]) -> usize {
         qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
         let mut copied = 0;
-        let mut keep = None;
 
         for (&range_start, range_data) in &mut self.data_ranges {
+            let mut keep = false;
             if self.retired >= range_start {
                 // Frame data has new contiguous bytes.
                 let copy_offset =
@@ -235,32 +235,30 @@ impl RxStreamOrderer {
                 let available = range_data.len() - copy_offset;
                 let space = buf.len() - copied;
                 let copy_bytes = if available > space {
-                    keep = Some(range_start);
-                    if space == 0 {
-                        break;
-                    }
+                    keep = true;
                     space
                 } else {
                     available
                 };
-                let copy_slc = &range_data[copy_offset..copy_offset + copy_bytes];
-                buf[copied..copied + copy_bytes].copy_from_slice(copy_slc);
-                copied += copy_bytes;
-                self.retired += u64::try_from(copy_bytes).unwrap();
+
+                if copy_bytes > 0 {
+                    let copy_slc = &range_data[copy_offset..copy_offset + copy_bytes];
+                    buf[copied..copied + copy_bytes].copy_from_slice(copy_slc);
+                    copied += copy_bytes;
+                    self.retired += u64::try_from(copy_bytes).unwrap();
+                }
             } else {
                 // The data in the buffer isn't contiguous.
-                keep = Some(range_start);
-                break;
+                keep = true;
+            }
+            if keep {
+                let mut keep = self.data_ranges.split_off(&range_start);
+                mem::swap(&mut self.data_ranges, &mut keep);
+                return copied;
             }
         }
 
-        if let Some(k) = &keep {
-            let mut keep = self.data_ranges.split_off(k);
-            mem::swap(&mut self.data_ranges, &mut keep);
-        } else {
-            self.data_ranges.clear();
-        }
-
+        self.data_ranges.clear();
         copied
     }
 
@@ -731,6 +729,48 @@ mod tests {
         s.inbound_frame(offset, vec![0; EXTRA_SIZE]).unwrap();
         let count = s.read(&mut buf[..]);
         assert_eq!(count, EXTRA_SIZE * 2);
+    }
+
+    /// Reading exactly one chunk works, when there is a gap.
+    #[test]
+    fn stop_reading_in_chunk() {
+        const CHUNK_SIZE: usize = 10;
+        const EXTRA_SIZE: usize = 3;
+        let mut s = RxStreamOrderer::new();
+
+        // Add two chunks.
+        s.inbound_frame(0, vec![0; CHUNK_SIZE]).unwrap();
+        let offset = u64::try_from(CHUNK_SIZE).unwrap();
+        s.inbound_frame(offset, vec![0; EXTRA_SIZE]).unwrap();
+
+        // Read, providing only enough space for some of the first chunk.
+        let mut buf = vec![0; 100];
+        let count = s.read(&mut buf[..CHUNK_SIZE - EXTRA_SIZE]);
+        assert_eq!(count, CHUNK_SIZE - EXTRA_SIZE);
+
+        let count = s.read(&mut buf[..]);
+        assert_eq!(count, EXTRA_SIZE * 2);
+    }
+
+    /// Read one byte at a time.
+    #[test]
+    fn read_byte_at_a_time() {
+        const CHUNK_SIZE: usize = 10;
+        const EXTRA_SIZE: usize = 3;
+        let mut s = RxStreamOrderer::new();
+
+        // Add two chunks.
+        s.inbound_frame(0, vec![0; CHUNK_SIZE]).unwrap();
+        let offset = u64::try_from(CHUNK_SIZE).unwrap();
+        s.inbound_frame(offset, vec![0; EXTRA_SIZE]).unwrap();
+
+        let mut buf = vec![0; 1];
+        for _ in 0..CHUNK_SIZE + EXTRA_SIZE {
+            // Read, providing only enough space for some of the first chunk.
+            let count = s.read(&mut buf[..]);
+            assert_eq!(count, 1);
+        }
+        assert_eq!(0, s.read(&mut buf[..]));
     }
 
     #[test]
