@@ -72,6 +72,10 @@ impl RttVals {
         self.rttvar = rtt / 2;
     }
 
+    pub fn set_peer_max_ack_delay(&mut self, mad: Duration) {
+        self.max_ack_delay = mad;
+    }
+
     fn update_rtt(
         &mut self,
         mut qlog: &mut NeqoQlog,
@@ -81,9 +85,8 @@ impl RttVals {
     ) {
         // min_rtt ignores ack delay.
         self.min_rtt = min(self.min_rtt, rtt_sample);
-        // Limit ack_delay by max_ack_delay
-        let ack_delay = min(ack_delay, self.max_ack_delay);
-        // Adjust for ack delay if it's plausible.
+        // Note: the caller adjusts `ack_delay` based on `max_ack_delay`.
+        // Adjust for ack delay unless it goes below `min_rtt`.
         if rtt_sample - self.min_rtt >= ack_delay {
             rtt_sample -= ack_delay;
         }
@@ -623,6 +626,10 @@ impl LossRecovery {
         self.rtt_vals.set_initial_rtt(rtt)
     }
 
+    pub fn set_peer_max_ack_delay(&mut self, mad: Duration) {
+        self.rtt_vals.set_peer_max_ack_delay(mad);
+    }
+
     pub fn cwnd_avail(&self) -> usize {
         self.cc.cwnd_avail()
     }
@@ -670,6 +677,23 @@ impl LossRecovery {
         }
     }
 
+    /// Record an RTT sample.
+    fn rtt_sample(&mut self, send_time: Instant, now: Instant, ack_delay: Duration) {
+        // Limit ack delay by max_ack_delay if confirmed.
+        let delay = if let Some(confirmed) = self.confirmed_time {
+            if confirmed < send_time {
+                ack_delay
+            } else {
+                min(ack_delay, self.rtt_vals.max_ack_delay)
+            }
+        } else {
+            ack_delay
+        };
+
+        let sample = now - send_time;
+        self.rtt_vals.update_rtt(&mut self.qlog, sample, delay, now);
+    }
+
     /// Returns (acked packets, lost packets)
     pub fn on_ack_received(
         &mut self,
@@ -686,12 +710,12 @@ impl LossRecovery {
             largest_acked
         );
 
-        let stats = &mut *self.stats.borrow_mut();
         let space = self
             .spaces
             .get_mut(pn_space)
             .expect("ACK on discarded space");
-        let (acked_packets, any_ack_eliciting) = space.remove_acked(acked_ranges, stats);
+        let (acked_packets, any_ack_eliciting) =
+            space.remove_acked(acked_ranges, &mut *self.stats.borrow_mut());
         if acked_packets.is_empty() {
             // No new information.
             return (Vec::new(), Vec::new());
@@ -707,9 +731,7 @@ impl LossRecovery {
             let largest_acked_pkt = acked_packets.first().expect("must be there");
             space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
             if any_ack_eliciting {
-                let latest_rtt = now - largest_acked_pkt.time_sent;
-                self.rtt_vals
-                    .update_rtt(&mut self.qlog, latest_rtt, ack_delay, now);
+                self.rtt_sample(largest_acked_pkt.time_sent, now, ack_delay);
             }
         }
 
@@ -725,7 +747,7 @@ impl LossRecovery {
             .get_mut(pn_space)
             .unwrap()
             .detect_lost_packets(now, loss_delay, cleanup, &mut lost);
-        stats.lost += lost.len();
+        self.stats.borrow_mut().lost += lost.len();
 
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential

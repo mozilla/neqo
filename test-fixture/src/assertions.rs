@@ -12,17 +12,21 @@ use neqo_transport::QuicVersion;
 
 const PACKET_TYPE_MASK: u8 = 0b1011_0000;
 
+fn assert_default_version(dec: &mut Decoder) {
+    let version: QuicVersion = u32::try_from(dec.decode_uint(4).unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    assert_eq!(version, QuicVersion::default());
+}
+
 // Do a simple decode of the datagram to verify that it is coalesced.
 pub fn assert_coalesced_0rtt(payload: &[u8]) {
     assert!(payload.len() >= 1200);
     let mut dec = Decoder::from(payload);
     let initial_type = dec.decode_byte().unwrap(); // Initial
     assert_eq!(initial_type & PACKET_TYPE_MASK, 0b1000_0000);
-    let version: QuicVersion = u32::try_from(dec.decode_uint(4).unwrap())
-        .unwrap()
-        .try_into()
-        .unwrap();
-    assert_eq!(version, QuicVersion::default());
+    assert_default_version(&mut dec);
     dec.skip_vec(1); // DCID
     dec.skip_vec(1); // SCID
     dec.skip_vvec();
@@ -46,4 +50,19 @@ pub fn assert_initial(payload: &[u8], expect_token: bool) {
     dec.skip_vec(1); // Source Connection ID.
     let token = dec.decode_vvec().unwrap();
     assert_eq!(expect_token, !token.is_empty());
+}
+
+pub fn assert_no_1rtt(payload: &[u8]) {
+    let mut dec = Decoder::from(payload);
+    while let Some(b1) = dec.decode_byte() {
+        assert_eq!(b1 & 0x80, 0x80); // This has to be a long header.
+        assert_ne!(b1 & 0b0011_0000, 0b0011_0000); // This can't be Retry.
+        assert_default_version(&mut dec);
+        dec.skip_vec(1); // DCID
+        dec.skip_vec(1); // SCID
+        if (b1 & 0b0011_0000) == 0b0000_0000 {
+            dec.skip_vvec(); // Initial token.
+        }
+        dec.skip_vvec(); // Skip the payload.
+    }
 }
