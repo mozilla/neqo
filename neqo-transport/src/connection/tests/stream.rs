@@ -193,7 +193,7 @@ fn max_data() {
     );
     assert_eq!(
         client
-            .stream_send(stream_id, &[b'a'; RECV_BUFFER_SIZE])
+            .stream_send(stream_id, &vec![b'a'; RECV_BUFFER_SIZE].into_boxed_slice())
             .unwrap(),
         SMALL_MAX_DATA
     );
