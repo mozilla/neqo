@@ -9,7 +9,7 @@ use super::{
 };
 use crate::cc::CWND_INITIAL_PKTS;
 use crate::events::ConnectionEvent;
-use crate::frame::{Frame, StreamType};
+use crate::frame::StreamType;
 use crate::path::PATH_MTU_V6;
 use crate::recovery::ACK_ONLY_SIZE_LIMIT;
 use crate::QuicVersion;
@@ -224,47 +224,6 @@ fn fill_cwnd(src: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagr
     }
 
     (total_dgrams, now)
-}
-
-// Receive multiple packets and generate an ack-only packet.
-fn ack_bytes<D>(
-    dest: &mut Connection,
-    stream: u64,
-    in_dgrams: D,
-    now: Instant,
-) -> (Vec<Datagram>, Vec<Frame>)
-where
-    D: IntoIterator<Item = Datagram>,
-    D::IntoIter: ExactSizeIterator,
-{
-    let mut srv_buf = [0; 4_096];
-    let mut recvd_frames = Vec::new();
-
-    let in_dgrams = in_dgrams.into_iter();
-    qdebug!([dest], "ack_bytes {} datagrams", in_dgrams.len());
-    for dgram in in_dgrams {
-        recvd_frames.extend(dest.test_process_input(dgram, now));
-    }
-
-    loop {
-        let (bytes_read, _fin) = dest.stream_recv(stream, &mut srv_buf).unwrap();
-        qtrace!([dest], "ack_bytes read {} bytes", bytes_read);
-        if bytes_read == 0 {
-            break;
-        }
-    }
-
-    let mut tx_dgrams = Vec::new();
-    while let Output::Datagram(dg) = dest.process_output(now) {
-        tx_dgrams.push(dg);
-    }
-
-    assert!((tx_dgrams.len() == 1) || (tx_dgrams.len() == 2));
-
-    (
-        tx_dgrams,
-        recvd_frames.into_iter().map(|(f, _e)| f).collect(),
-    )
 }
 
 /// This magic number is the size of the client's CWND after the handshake completes.

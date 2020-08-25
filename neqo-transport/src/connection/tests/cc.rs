@@ -4,10 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::Connection;
+use super::super::{Connection, Output};
 use super::{
-    ack_bytes, assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, cwnd_packets,
-    default_client, default_server, fill_cwnd, AT_LEAST_PTO, POST_HANDSHAKE_CWND,
+    assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, cwnd_packets, default_client,
+    default_server, fill_cwnd, AT_LEAST_PTO, POST_HANDSHAKE_CWND,
 };
 use crate::cc::{CWND_MIN, MAX_DATAGRAM_SIZE, PACING_BURST_SIZE};
 use crate::frame::{Frame, StreamType};
@@ -16,7 +16,7 @@ use crate::recovery::ACK_ONLY_SIZE_LIMIT;
 use crate::tparams::{self, TransportParameter};
 use crate::tracking::{PNSpace, MAX_UNACKED_PKTS};
 
-use neqo_common::{qdebug, qtrace};
+use neqo_common::{qdebug, qtrace, Datagram};
 use std::convert::TryFrom;
 use std::time::{Duration, Instant};
 use test_fixture::{self, now};
@@ -57,6 +57,47 @@ fn induce_persistent_congestion(
 
     assert_eq!(client.loss_recovery.cwnd(), CWND_MIN);
     now
+}
+
+// Receive multiple packets and generate an ack-only packet.
+fn ack_bytes<D>(
+    dest: &mut Connection,
+    stream: u64,
+    in_dgrams: D,
+    now: Instant,
+) -> (Vec<Datagram>, Vec<Frame>)
+where
+    D: IntoIterator<Item = Datagram>,
+    D::IntoIter: ExactSizeIterator,
+{
+    let mut srv_buf = [0; 4_096];
+    let mut recvd_frames = Vec::new();
+
+    let in_dgrams = in_dgrams.into_iter();
+    qdebug!([dest], "ack_bytes {} datagrams", in_dgrams.len());
+    for dgram in in_dgrams {
+        recvd_frames.extend(dest.test_process_input(dgram, now));
+    }
+
+    loop {
+        let (bytes_read, _fin) = dest.stream_recv(stream, &mut srv_buf).unwrap();
+        qtrace!([dest], "ack_bytes read {} bytes", bytes_read);
+        if bytes_read == 0 {
+            break;
+        }
+    }
+
+    let mut tx_dgrams = Vec::new();
+    while let Output::Datagram(dg) = dest.process_output(now) {
+        tx_dgrams.push(dg);
+    }
+
+    assert!((tx_dgrams.len() == 1) || (tx_dgrams.len() == 2));
+
+    (
+        tx_dgrams,
+        recvd_frames.into_iter().map(|(f, _e)| f).collect(),
+    )
 }
 
 #[test]
