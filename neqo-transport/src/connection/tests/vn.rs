@@ -56,14 +56,14 @@ fn server_receive_unknown_first_packet() {
 
 fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
     let mut dec = Decoder::from(&initial_pkt[5..]); // Skip past version.
-    let dcid = dec.decode_vec(1).expect("client DCID");
-    let scid = dec.decode_vec(1).expect("client SCID");
+    let dst_cid = dec.decode_vec(1).expect("client DCID");
+    let src_cid = dec.decode_vec(1).expect("client SCID");
 
     let mut encoder = Encoder::default();
     encoder.encode_byte(PACKET_BIT_LONG);
     encoder.encode(&[0; 4]); // Zero version == VN.
-    encoder.encode_vec(1, dcid);
-    encoder.encode_vec(1, scid);
+    encoder.encode_vec(1, dst_cid);
+    encoder.encode_vec(1, src_cid);
 
     for v in versions {
         encoder.encode_uint(4, *v);
@@ -83,7 +83,7 @@ fn version_negotiation_current_version() {
 
     let vn = create_vn(
         &initial_pkt,
-        &[0x1a1_a1a1a, QuicVersion::default().as_u32()],
+        &[0x1a1a_1a1a, QuicVersion::default().as_u32()],
     );
 
     let dgram = Datagram::new(loopback(), loopback(), vn);

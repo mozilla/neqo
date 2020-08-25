@@ -34,10 +34,12 @@ fn resume() {
 
 #[test]
 fn remember_smoothed_rtt() {
+    const RTT1: Duration = Duration::from_millis(130);
+    const RTT2: Duration = Duration::from_millis(70);
+
     let mut client = default_client();
     let mut server = default_server();
 
-    const RTT1: Duration = Duration::from_millis(130);
     let now = connect_with_rtt(&mut client, &mut server, now(), RTT1);
     assert_eq!(client.loss_recovery.rtt(), RTT1);
 
@@ -51,7 +53,6 @@ fn remember_smoothed_rtt() {
         "client should remember previous RTT"
     );
 
-    const RTT2: Duration = Duration::from_millis(70);
     connect_with_rtt(&mut client, &mut server, now, RTT2);
     assert_eq!(
         client.loss_recovery.rtt(),

@@ -142,7 +142,7 @@ fn cc_slow_start_to_cong_avoidance_recovery_period() {
     let flight1_largest = PacketNumber::try_from(c_tx_dgrams.len()).unwrap();
 
     // Server: Receive and generate ack
-    let (s_tx_dgram, _recvd_frames) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
+    let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
     // Client: Process ack
     for dgram in s_tx_dgram {
@@ -170,7 +170,7 @@ fn cc_slow_start_to_cong_avoidance_recovery_period() {
 
     // Server: Receive and generate ack again, but drop first packet
     c_tx_dgrams.remove(0);
-    let (s_tx_dgram, _recvd_frames) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
+    let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
     // Client: Process ack
     for dgram in s_tx_dgram {
@@ -352,7 +352,7 @@ fn cc_slow_start_to_persistent_congestion_some_acks() {
     }
 
     // send bytes that will be lost
-    let (_c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
+    let (_, next_now) = fill_cwnd(&mut client, 0, now);
     now = next_now + Duration::from_millis(100);
 
     induce_persistent_congestion(&mut client, &mut server, now);
@@ -375,7 +375,7 @@ fn cc_persistent_congestion_to_slow_start() {
 
     // Server: Receive and generate ack
     now += Duration::from_millis(10);
-    let (_s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams, now);
+    let _ = ack_bytes(&mut server, 0, c_tx_dgrams, now);
 
     // ACK lost.
 

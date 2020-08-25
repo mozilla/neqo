@@ -131,19 +131,19 @@ fn transfer() {
         _ => None,
     });
     let stream_id = stream_ids.next().expect("should have a new stream event");
-    let (received, fin) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
-    assert_eq!(received, 4000);
-    assert_eq!(fin, false);
-    let (received, fin) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
-    assert_eq!(received, 140);
-    assert_eq!(fin, false);
+    let (received1, fin1) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
+    assert_eq!(received1, 4000);
+    assert_eq!(fin1, false);
+    let (received2, fin2) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
+    assert_eq!(received2, 140);
+    assert_eq!(fin2, false);
 
     let stream_id = stream_ids
         .next()
         .expect("should have a second new stream event");
-    let (received, fin) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
-    assert_eq!(received, 60);
-    assert_eq!(fin, true);
+    let (received3, fin3) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
+    assert_eq!(received3, 60);
+    assert_eq!(fin3, true);
 }
 
 #[test]
@@ -170,10 +170,10 @@ fn report_fin_when_stream_closed_wo_data() {
 
 #[test]
 fn max_data() {
+    const SMALL_MAX_DATA: usize = 16383;
+
     let mut client = default_client();
     let mut server = default_server();
-
-    const SMALL_MAX_DATA: usize = 16383;
 
     server
         .set_local_tparam(

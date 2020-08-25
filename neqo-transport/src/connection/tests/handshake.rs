@@ -102,8 +102,8 @@ fn handshake_failed_authentication() {
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     qdebug!("Output={:0x?}", out.as_dgram_ref());
-    assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(44)));
-    assert_error(&server, ConnectionError::Transport(Error::PeerError(300)));
+    assert_error(&client, &ConnectionError::Transport(Error::CryptoAlert(44)));
+    assert_error(&server, &ConnectionError::Transport(Error::PeerError(300)));
 }
 
 #[test]
@@ -124,7 +124,10 @@ fn no_alpn() {
     // TODO (mt): errors are immediate, which means that we never send CONNECTION_CLOSE
     // and the client never sees the server's rejection of its handshake.
     //assert_error(&client, ConnectionError::Transport(Error::CryptoAlert(120)));
-    assert_error(&server, ConnectionError::Transport(Error::CryptoAlert(120)));
+    assert_error(
+        &server,
+        &ConnectionError::Transport(Error::CryptoAlert(120)),
+    );
 }
 
 #[test]
@@ -348,7 +351,7 @@ fn reorder_05rtt_with_0rtt() {
     assertions::assert_coalesced_0rtt(&c1[..]);
     // Drop the 0-RTT from the coalesced datagram, so that the server
     // acknowledges the next 0-RTT packet.
-    let (c1, _) = split_datagram(c1);
+    let (c1, _) = split_datagram(&c1);
     let c2 = send_something(&mut client, now);
 
     // Handle the first packet and send 0.5-RTT in response.  Drop the response.
@@ -463,7 +466,7 @@ fn reorder_handshake() {
     assert!(s1.is_some());
 
     // Drop the Initial packet from this.
-    let (_, s_hs) = split_datagram(s1.unwrap());
+    let (_, s_hs) = split_datagram(&s1.unwrap());
     assert!(s_hs.is_some());
 
     // Pass just the handshake packet in and the client can't handle it.
@@ -482,7 +485,7 @@ fn reorder_handshake() {
     let s2 = server.process(c2, now).dgram();
     assert!(s2.is_some());
 
-    let (s_init, s_hs) = split_datagram(s2.unwrap());
+    let (s_init, s_hs) = split_datagram(&s2.unwrap());
     assert!(s_hs.is_some());
 
     // Processing the Handshake packet first should save it.

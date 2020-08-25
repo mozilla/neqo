@@ -117,6 +117,8 @@ fn zero_rtt_before_resumption_token() {
 
 #[test]
 fn zero_rtt_send_reject() {
+    const MESSAGE: &[u8] = &[1, 2, 3];
+
     let mut client = default_client();
     let mut server = default_server();
     connect(&mut client, &mut server);
@@ -147,8 +149,7 @@ fn zero_rtt_send_reject() {
 
     // Write some data on the client.
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
-    let msg = &[1, 2, 3];
-    client.stream_send(stream_id, msg).unwrap();
+    client.stream_send(stream_id, MESSAGE).unwrap();
     let client_0rtt = client.process(None, now());
     assert!(client_0rtt.as_dgram_ref().is_some());
 
@@ -173,21 +174,19 @@ fn zero_rtt_send_reject() {
     assert!(client_out.as_dgram_ref().is_none());
 
     // ...and the client stream should be gone.
-    let res = client.stream_send(stream_id, msg);
+    let res = client.stream_send(stream_id, MESSAGE);
     assert!(res.is_err());
     assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
     // Open a new stream and send data. StreamId should start with 0.
     let stream_id_after_reject = client.stream_create(StreamType::UniDi).unwrap();
     assert_eq!(stream_id, stream_id_after_reject);
-    let msg = &[1, 2, 3];
-    client.stream_send(stream_id_after_reject, msg).unwrap();
+    client.stream_send(stream_id_after_reject, MESSAGE).unwrap();
     let client_after_reject = client.process(None, now());
     assert!(client_after_reject.as_dgram_ref().is_some());
 
     // The server should receive new stream
     let server_out = server.process(client_after_reject.dgram(), now());
     assert!(server_out.as_dgram_ref().is_none()); // suppress the ack
-    let recvd_stream_evt = |e| matches!(e, ConnectionEvent::NewStream { .. });
     assert!(server.events().any(recvd_stream_evt));
 }

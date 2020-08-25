@@ -302,14 +302,14 @@ fn pto_handshake_complete() {
 
     // Check that the PTO packets (pkt2, pkt3) are Handshake packets.
     // The server discarded the Handshake keys already, therefore they are dropped.
-    let dropped_before = server.stats().dropped_rx;
+    let dropped_before1 = server.stats().dropped_rx;
     let frames = server.test_process_input(pkt2.unwrap(), now);
-    assert_eq!(1, server.stats().dropped_rx - dropped_before);
+    assert_eq!(1, server.stats().dropped_rx - dropped_before1);
     assert!(frames.is_empty());
 
-    let dropped_before = server.stats().dropped_rx;
+    let dropped_before2 = server.stats().dropped_rx;
     let frames = server.test_process_input(pkt3.unwrap(), now);
-    assert_eq!(1, server.stats().dropped_rx - dropped_before);
+    assert_eq!(1, server.stats().dropped_rx - dropped_before2);
     assert!(frames.is_empty());
 
     now += Duration::from_millis(10);
@@ -347,7 +347,7 @@ fn pto_handshake_frames() {
     let pkt = client.process(pkt.dgram(), now);
 
     now += Duration::from_millis(10);
-    let _pkt = server.process(pkt.dgram(), now);
+    let _ = server.process(pkt.dgram(), now);
 
     now += Duration::from_millis(10);
     client.authenticated(AuthenticationStatus::Ok, now);
@@ -403,7 +403,7 @@ fn handshake_ack_pto() {
 
     // Now let the client have the Initial, but drop the first coalesced Handshake packet.
     now += RTT / 2;
-    let (initial, _) = split_datagram(s1.unwrap());
+    let (initial, _) = split_datagram(&s1.unwrap());
     client.process_input(initial, now);
     let c2 = client.process(s2, now).dgram();
     assert!(c2.is_some()); // This is an ACK.  Drop it.
@@ -614,7 +614,7 @@ fn loss_time_past_largest_acked() {
     // This includes an ACK, but it also includes HANDSHAKE_DONE,
     // which we need to remove because that will cause the Handshake loss
     // recovery state to be dropped.
-    let (s_hs_ack, _s_ap_ack) = split_datagram(s_ack.unwrap());
+    let (s_hs_ack, _s_ap_ack) = split_datagram(&s_ack.unwrap());
 
     // Now the client should start its loss recovery timer based on the ACK.
     now += RTT / 2;

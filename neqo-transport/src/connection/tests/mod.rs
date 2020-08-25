@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![deny(clippy::pedantic)]
+
 use super::{
     Connection, ConnectionError, FixedConnectionIdManager, Output, State, LOCAL_IDLE_TIMEOUT,
 };
@@ -71,7 +73,7 @@ pub fn default_server() -> Connection {
     c
 }
 
-/// If state is AuthenticationNeeded call authenticated(). This function will
+/// If state is `AuthenticationNeeded` call `authenticated()`. This function will
 /// consume all outstanding events on the connection.
 pub fn maybe_authenticate(conn: &mut Connection) -> bool {
     let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
@@ -132,10 +134,10 @@ fn connect(client: &mut Connection, server: &mut Connection) {
     connect_with_rtt(client, server, now(), Duration::new(0, 0));
 }
 
-fn assert_error(c: &Connection, err: ConnectionError) {
+fn assert_error(c: &Connection, err: &ConnectionError) {
     match c.state() {
         State::Closing { error, .. } | State::Draining { error, .. } | State::Closed(error) => {
-            assert_eq!(*error, err);
+            assert_eq!(*error, *err);
         }
         _ => panic!("bad state {:?}", c.state()),
     }
@@ -152,7 +154,7 @@ fn exchange_ticket(client: &mut Connection, server: &mut Connection, now: Instan
 
 /// Connect with an RTT and then force both peers to be idle.
 /// Getting the client and server to reach an idle state is surprisingly hard.
-/// The server sends HANDSHAKE_DONE at the end of the handshake, and the client
+/// The server sends `HANDSHAKE_DONE` at the end of the handshake, and the client
 /// doesn't immediately acknowledge it.  Reordering packets does the trick.
 fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Duration) -> Instant {
     let mut now = connect_with_rtt(client, server, now(), rtt);
@@ -219,7 +221,7 @@ fn fill_cwnd(src: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagr
                 }
                 now += t;
             }
-            _ => panic!(),
+            Output::None => panic!(),
         }
     }
 
@@ -310,7 +312,7 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
 }
 
 /// Split the first datagram off a coalesced datagram.
-fn split_datagram(d: Datagram) -> (Datagram, Option<Datagram>) {
+fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
     let (a, b) = split_packet(&d[..]);
     (
         Datagram::new(d.source(), d.destination(), a),
