@@ -13,7 +13,7 @@ use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
@@ -28,6 +28,7 @@ use neqo_crypto::{
     Server, ZeroRttChecker,
 };
 
+use crate::addr_valid::{AddressValidation, NewTokenState};
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
 use crate::crypto::{Crypto, CryptoDxState};
 use crate::dump::*;
@@ -209,16 +210,48 @@ impl ConnectionIdManager for FixedConnectionIdManager {
     }
 }
 
-struct RetryInfo {
-    token: Vec<u8>,
-    retry_source_cid: ConnectionId,
+/// `AddressValidationInfo` holds information relevant to either
+/// responding to address validation (`NewToken`, `Retry`) or generating
+/// tokens for address validation (`Server`).
+enum AddressValidationInfo {
+    None,
+    // We are a client and have information from `NEW_TOKEN`.
+    NewToken(Vec<u8>),
+    // We are a client and have received a `Retry` packet.
+    Retry {
+        token: Vec<u8>,
+        retry_source_cid: ConnectionId,
+    },
+    // We are a server and can generate tokens.
+    Server(Weak<RefCell<AddressValidation>>),
 }
 
-impl RetryInfo {
-    fn new(retry_source_cid: ConnectionId, token: Vec<u8>) -> Self {
-        Self {
-            token,
-            retry_source_cid,
+impl AddressValidationInfo {
+    pub fn token(&self) -> &[u8] {
+        match self {
+            Self::NewToken(token) | Self::Retry { token, .. } => &token,
+            _ => &[],
+        }
+    }
+
+    pub fn generate_new_token(
+        &mut self,
+        peer_address: SocketAddr,
+        now: Instant,
+    ) -> Option<Vec<u8>> {
+        match self {
+            Self::Server(ref w) => {
+                if let Some(validation) = w.upgrade() {
+                    validation
+                        .borrow()
+                        .generate_new_token(peer_address, now)
+                        .ok()
+                } else {
+                    None
+                }
+            }
+            Self::None => None,
+            _ => unreachable!("called a server function on a client"),
         }
     }
 }
@@ -426,7 +459,7 @@ pub struct Connection {
     /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     valid_cids: Vec<ConnectionId>,
-    retry_info: Option<RetryInfo>,
+    address_validation: AddressValidationInfo,
 
     /// Since we need to communicate this to our peer in tparams, setting this
     /// value is part of constructing the struct.
@@ -458,7 +491,7 @@ pub struct Connection {
     state_signaling: StateSignaling,
     loss_recovery: LossRecovery,
     events: ConnectionEvents,
-    token: Option<Vec<u8>>,
+    new_token: NewTokenState,
     stats: StatsCell,
     qlog: NeqoQlog,
 
@@ -577,7 +610,7 @@ impl Connection {
             valid_cids: Vec::new(),
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
-            retry_info: None,
+            address_validation: AddressValidationInfo::None,
             local_initial_source_cid,
             remote_initial_source_cid: None,
             remote_original_destination_cid: None,
@@ -593,7 +626,7 @@ impl Connection {
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(stats.clone()),
             events: ConnectionEvents::default(),
-            token: None,
+            new_token: NewTokenState::new(role),
             stats,
             qlog: NeqoQlog::disabled(),
             quic_version,
@@ -690,12 +723,12 @@ impl Connection {
     }
 
     /// Access the latest resumption token on the connection.
-    pub fn resumption_token(&self) -> Option<Vec<u8>> {
+    pub fn resumption_token(&mut self) -> Option<Vec<u8>> {
         if self.state < State::Connected {
             return None;
         }
         match self.crypto.tls {
-            Agent::Client(ref c) => match c.resumption_token() {
+            Agent::Client(ref mut c) => match c.resumption_token() {
                 Some(ref t) => {
                     qtrace!("TLS token {}", hex(&t));
                     let mut enc = Encoder::default();
@@ -710,6 +743,8 @@ impl Connection {
                             .expect("should have transport parameters")
                             .encode(enc_inner);
                     });
+                    let token = self.new_token.take_token();
+                    enc.encode_vvec(token.as_ref().map_or(&[], |t| &t[..]));
                     enc.encode(&t[..]);
                     qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
                     Some(enc.into())
@@ -724,35 +759,38 @@ impl Connection {
     /// This can only be called once and only on the client.
     /// After calling the function, it should be possible to attempt 0-RTT
     /// if the token supports that.
-    pub fn set_resumption_token(&mut self, now: Instant, token: &[u8]) -> Res<()> {
+    pub fn enable_resumption(&mut self, now: Instant, token: &[u8]) -> Res<()> {
         if self.state != State::Init {
             qerror!([self], "set token in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
+        if self.role == Role::Server {
+            return Err(Error::ConnectionState);
+        }
+
         qinfo!([self], "resumption token {}", hex_snip_middle(token));
         let mut dec = Decoder::from(token);
 
-        let smoothed_rtt = match dec.decode_varint() {
-            Some(v) => Duration::from_millis(v),
-            _ => return Err(Error::InvalidResumptionToken),
-        };
+        let smoothed_rtt =
+            Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);
+        qtrace!([self], "  RTT {:?}", smoothed_rtt);
 
-        let tp_slice = match dec.decode_vvec() {
-            Some(v) => v,
-            _ => return Err(Error::InvalidResumptionToken),
-        };
+        let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!([self], "  transport parameters {}", hex(&tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
         let tp =
             TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
 
+        let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
+        qtrace!([self], "  Initial token {}", hex(&init_token));
+
         let tok = dec.decode_remainder();
         qtrace!([self], "  TLS token {}", hex(&tok));
         match self.crypto.tls {
             Agent::Client(ref mut c) => {
-                let res = c.set_resumption_token(&tok);
+                let res = c.enable_resumption(&tok);
                 if let Err(e) = res {
-                    self.absorb_error::<Error>(now, Err(Error::CryptoError(e)));
+                    self.absorb_error::<Error>(now, Err(Error::from(e)));
                     return Ok(());
                 }
             }
@@ -760,7 +798,9 @@ impl Connection {
         }
 
         self.tps.borrow_mut().remote_0rtt = Some(tp);
-
+        if !init_token.is_empty() {
+            self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
+        }
         if smoothed_rtt > GRANULARITY {
             self.loss_recovery.set_initial_rtt(smoothed_rtt);
         }
@@ -772,23 +812,45 @@ impl Connection {
         Ok(())
     }
 
-    /// Send a TLS session ticket.
+    pub(crate) fn set_validation(&mut self, validation: Rc<RefCell<AddressValidation>>) {
+        qtrace!([self], "Enabling NEW_TOKEN");
+        assert_eq!(self.role, Role::Server);
+        self.address_validation = AddressValidationInfo::Server(Rc::downgrade(&validation));
+    }
+
+    /// Send a TLS session ticket AND a NEW_TOKEN frame (if possible).
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
-        let tps = &self.tps;
-        match self.crypto.tls {
-            Agent::Server(ref mut s) => {
-                let mut enc = Encoder::default();
-                enc.encode_vvec_with(|mut enc_inner| {
-                    tps.borrow().local.encode(&mut enc_inner);
-                });
-                enc.encode(extra);
-                let records = s.send_ticket(now, &enc)?;
-                qinfo!([self], "send session ticket {}", hex(&enc));
-                self.crypto.buffer_records(records)?;
-                Ok(())
-            }
-            Agent::Client(_) => Err(Error::WrongRole),
+        if self.role == Role::Client {
+            return Err(Error::WrongRole);
         }
+
+        let tps = &self.tps;
+        if let Agent::Server(ref mut s) = self.crypto.tls {
+            let mut enc = Encoder::default();
+            enc.encode_vvec_with(|mut enc_inner| {
+                tps.borrow().local.encode(&mut enc_inner);
+            });
+            enc.encode(extra);
+            let records = s.send_ticket(now, &enc)?;
+            qinfo!([self], "send session ticket {}", hex(&enc));
+            self.crypto.buffer_records(records)?;
+        } else {
+            unreachable!();
+        }
+
+        // If we are able, also send a NEW_TOKEN frame.
+        // This should be recording all remote addresses that are valid,
+        // but there are just 0 or 1 in the current implementation.
+        if let Some(p) = self.path.as_ref() {
+            if let Some(token) = self
+                .address_validation
+                .generate_new_token(p.remote_address(), now)
+            {
+                self.new_token.send_new_token(token);
+            }
+        }
+
+        Ok(())
     }
 
     pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
@@ -1018,7 +1080,7 @@ impl Connection {
 
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
         qinfo!([self], "received Retry");
-        if self.retry_info.is_some() {
+        if matches!(self.address_validation, AddressValidationInfo::Retry { .. }) {
             self.stats.borrow_mut().pkt_dropped("Extra Retry");
             return Ok(());
         }
@@ -1040,24 +1102,24 @@ impl Connection {
             return Err(Error::InternalError);
         };
 
+        let retry_scid = ConnectionId::from(packet.scid());
         qinfo!(
             [self],
             "Valid Retry received, token={} scid={}",
             hex(packet.token()),
-            packet.scid()
+            retry_scid
         );
-
-        self.retry_info = Some(RetryInfo::new(
-            ConnectionId::from(packet.scid()),
-            packet.token().to_vec(),
-        ));
 
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
         self.crypto
             .states
-            .init(self.quic_version, self.role, packet.scid());
+            .init(self.quic_version, self.role, &retry_scid);
+        self.address_validation = AddressValidationInfo::Retry {
+            token: packet.token().to_vec(),
+            retry_source_cid: retry_scid,
+        };
         Ok(())
     }
 
@@ -1459,7 +1521,7 @@ impl Connection {
         space: PNSpace,
         encoder: Encoder,
         tx: &CryptoDxState,
-        retry_info: &Option<RetryInfo>,
+        address_validation: &AddressValidationInfo,
         quic_version: QuicVersion,
         grease_quic_bit: bool,
     ) -> (PacketType, PacketNumber, PacketBuilder) {
@@ -1495,11 +1557,7 @@ impl Connection {
         };
         builder.scramble(grease_quic_bit);
         if pt == PacketType::Initial {
-            builder.initial_token(if let Some(info) = retry_info {
-                &info.token
-            } else {
-                &[]
-            });
+            builder.initial_token(address_validation.token());
         }
         // TODO(mt) work out packet number length based on `4*path CWND/path MTU`.
         let pn = tx.next_pn();
@@ -1538,7 +1596,7 @@ impl Connection {
                 *space,
                 encoder,
                 tx,
-                &None,
+                &AddressValidationInfo::None,
                 self.quic_version,
                 grease_quic_bit,
             );
@@ -1596,6 +1654,9 @@ impl Connection {
                 if frame.is_none() {
                     frame = self.send_streams.get_frame(space, remaining);
                 }
+                if frame.is_none() && space == PNSpace::ApplicationData {
+                    frame = self.new_token.get_frame(remaining);
+                }
             }
 
             if let Some((frame, token)) = frame {
@@ -1640,7 +1701,7 @@ impl Connection {
                 *space,
                 encoder,
                 tx,
-                &self.retry_info,
+                &self.address_validation,
                 self.quic_version,
                 grease_quic_bit,
             );
@@ -1819,8 +1880,8 @@ impl Connection {
     }
 
     fn validate_cids_draft_27(&mut self) -> Res<()> {
-        if let Some(info) = &self.retry_info {
-            debug_assert!(!info.token.is_empty());
+        if let AddressValidationInfo::Retry { token, .. } = &self.address_validation {
+            debug_assert!(!token.is_empty());
             let tph = self.tps.borrow();
             let tp = tph
                 .remote
@@ -1877,10 +1938,14 @@ impl Connection {
             }
 
             let tp = remote_tps.get_bytes(tparams::RETRY_SOURCE_CONNECTION_ID);
-            let expected = self
-                .retry_info
-                .as_ref()
-                .map(|ri| ri.retry_source_cid.as_cid_ref());
+            let expected = if let AddressValidationInfo::Retry {
+                retry_source_cid, ..
+            } = &self.address_validation
+            {
+                Some(retry_source_cid.as_cid_ref())
+            } else {
+                None
+            };
             if expected != tp.map(ConnectionIdRef::from) {
                 qwarn!(
                     "{} RSCID test failed. self cid {:?} != tp cid {:?}",
@@ -2012,7 +2077,9 @@ impl Connection {
                     self.crypto.resend_unacked(space);
                 }
             }
-            Frame::NewToken { token } => self.token = Some(token),
+            Frame::NewToken { token } => {
+                self.new_token.save_token(token);
+            }
             Frame::Stream {
                 fin,
                 stream_id,
@@ -2173,6 +2240,7 @@ impl Connection {
                         &mut self.indexes,
                     ),
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
+                    RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
                 }
             }
         }
@@ -2226,6 +2294,7 @@ impl Connection {
                         self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
                     }
                     RecoveryToken::HandshakeDone => (),
+                    RecoveryToken::NewToken(seqno) => self.new_token.acked(*seqno),
                 }
             }
         }
@@ -2685,8 +2754,8 @@ impl ::std::fmt::Display for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cc::PACING_BURST_SIZE;
-    use crate::cc::{CWND_INITIAL_PKTS, CWND_MIN, MAX_DATAGRAM_SIZE};
+    use crate::addr_valid::{AddressValidation, ValidateAddress};
+    use crate::cc::{CWND_INITIAL_PKTS, CWND_MIN, MAX_DATAGRAM_SIZE, PACING_BURST_SIZE};
     use crate::frame::{CloseError, StreamType};
     use crate::packet::PACKET_BIT_LONG;
     use crate::path::PATH_MTU_V6;
@@ -3167,7 +3236,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -3187,7 +3256,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now);
         let mut client = default_client();
         let mut server = default_server();
-        client.set_resumption_token(now, &token[..]).unwrap();
+        client.enable_resumption(now, &token[..]).unwrap();
         assert_eq!(
             client.loss_recovery.rtt(),
             RTT1,
@@ -3214,7 +3283,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -3231,7 +3300,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
 
@@ -3271,7 +3340,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
 
@@ -3312,7 +3381,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
@@ -5861,6 +5930,90 @@ mod tests {
             |(f, _)| matches!(f, Frame::MaxStreamData { maximum_stream_data, .. }
 				   if *maximum_stream_data == RECV_BUFFER_SIZE as u64)
         ));
+    }
+
+    /// Check that a resumed connection uses a token on Initial packets.
+    #[test]
+    fn address_validation_token_resume() {
+        const RTT: Duration = Duration::from_millis(10);
+
+        let mut client = default_client();
+        let mut server = default_server();
+        let validation = AddressValidation::new(now(), ValidateAddress::Always).unwrap();
+        let validation = Rc::new(RefCell::new(validation));
+        server.set_validation(Rc::clone(&validation));
+        let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
+
+        let token = exchange_ticket(&mut client, &mut server, now);
+        let mut client = default_client();
+        client.enable_resumption(now, &token[..]).unwrap();
+        let mut server = default_server();
+
+        // Grab an Initial packet from the client.
+        let dgram = client.process(None, now).dgram();
+        assertions::assert_initial(dgram.as_ref().unwrap(), true);
+
+        // Now try to complete the handshake after giving time for a client PTO.
+        now += AT_LEAST_PTO;
+        connect_with_rtt(&mut client, &mut server, now, RTT);
+        assert!(client.crypto.tls.info().unwrap().resumed());
+        assert!(server.crypto.tls.info().unwrap().resumed());
+    }
+
+    fn can_resume(mut token: Option<Vec<u8>>, initial_has_token: bool) {
+        let mut client = default_client();
+        client
+            .enable_resumption(now(), token.take().as_ref().unwrap())
+            .unwrap();
+        let initial = client.process_output(now()).dgram();
+        assertions::assert_initial(initial.as_ref().unwrap(), initial_has_token);
+    }
+
+    #[test]
+    fn two_tickets() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        // Send two tickets and then bundle those into a packet.
+        server.send_ticket(now(), &[]).expect("send ticket1");
+        server.send_ticket(now(), &[]).expect("send ticket2");
+        let pkt = send_something(&mut server, now());
+
+        client.process_input(pkt, now());
+        let token1 = client.resumption_token();
+        assert!(token1.is_some());
+        let token2 = client.resumption_token();
+        assert!(token2.is_some());
+        assert_ne!(token1, token2);
+        assert!(client.resumption_token().is_none());
+
+        can_resume(token1, false);
+        can_resume(token2, false);
+    }
+
+    #[test]
+    fn two_tickets_and_tokens() {
+        let mut client = default_client();
+        let mut server = default_server();
+        let validation = AddressValidation::new(now(), ValidateAddress::Always).unwrap();
+        let validation = Rc::new(RefCell::new(validation));
+        server.set_validation(Rc::clone(&validation));
+        connect(&mut client, &mut server);
+
+        // Send two tickets with tokens and then bundle those into a packet.
+        server.send_ticket(now(), &[]).expect("send ticket1");
+        server.send_ticket(now(), &[]).expect("send ticket2");
+        let pkt = send_something(&mut server, now());
+
+        client.process_input(pkt, now());
+        let token1 = client.resumption_token();
+        let token2 = client.resumption_token();
+        assert_ne!(token1, token2);
+        assert!(client.resumption_token().is_none());
+
+        can_resume(token1, true);
+        can_resume(token2, true);
     }
 
     #[test]
