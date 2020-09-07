@@ -7,13 +7,13 @@
 // The class implementing a QUIC connection.
 
 use std::cell::RefCell;
-use std::cmp::{max, min, Ordering};
+use std::cmp::max;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::SocketAddr;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
 use smallvec::SmallVec;
@@ -28,8 +28,9 @@ use neqo_crypto::{
     Server, ZeroRttChecker,
 };
 
+use crate::addr_valid::{AddressValidation, NewTokenState};
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
-use crate::crypto::{Crypto, CryptoDxState};
+use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
@@ -53,6 +54,15 @@ use crate::tparams::{
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
 use crate::{AppError, ConnectionError, Error, Res, LOCAL_IDLE_TIMEOUT};
 
+mod idle;
+mod saved;
+mod state;
+
+use idle::IdleTimeout;
+use saved::SavedDatagrams;
+pub use state::State;
+use state::StateSignaling;
+
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
 
@@ -60,64 +70,6 @@ pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
-
-#[derive(Clone, Debug, PartialEq, Ord, Eq)]
-/// The state of the Connection.
-pub enum State {
-    Init,
-    WaitInitial,
-    Handshaking,
-    Connected,
-    Confirmed,
-    Closing {
-        error: ConnectionError,
-        timeout: Instant,
-    },
-    Draining {
-        error: ConnectionError,
-        timeout: Instant,
-    },
-    Closed(ConnectionError),
-}
-
-impl State {
-    #[must_use]
-    pub fn connected(&self) -> bool {
-        matches!(self, Self::Connected | Self::Confirmed)
-    }
-
-    #[must_use]
-    pub fn closed(&self) -> bool {
-        matches!(self, Self::Closing { .. } | Self::Draining { .. } | Self::Closed(_))
-    }
-}
-
-// Implement Ord so that we can enforce monotonic state progression.
-impl PartialOrd for State {
-    #[allow(clippy::match_same_arms)] // Lint bug: rust-lang/rust-clippy#860
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if mem::discriminant(self) == mem::discriminant(other) {
-            return Some(Ordering::Equal);
-        }
-        Some(match (self, other) {
-            (Self::Init, _) => Ordering::Less,
-            (_, Self::Init) => Ordering::Greater,
-            (Self::WaitInitial, _) => Ordering::Less,
-            (_, Self::WaitInitial) => Ordering::Greater,
-            (Self::Handshaking, _) => Ordering::Less,
-            (_, Self::Handshaking) => Ordering::Greater,
-            (Self::Connected, _) => Ordering::Less,
-            (_, Self::Connected) => Ordering::Greater,
-            (Self::Confirmed, _) => Ordering::Less,
-            (_, Self::Confirmed) => Ordering::Greater,
-            (Self::Closing { .. }, _) => Ordering::Less,
-            (_, Self::Closing { .. }) => Ordering::Greater,
-            (Self::Draining { .. }, _) => Ordering::Less,
-            (_, Self::Draining { .. }) => Ordering::Greater,
-            (Self::Closed(_), _) => unreachable!(),
-        })
-    }
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ZeroRttState {
@@ -209,191 +161,49 @@ impl ConnectionIdManager for FixedConnectionIdManager {
     }
 }
 
-struct RetryInfo {
-    token: Vec<u8>,
-    retry_source_cid: ConnectionId,
+/// `AddressValidationInfo` holds information relevant to either
+/// responding to address validation (`NewToken`, `Retry`) or generating
+/// tokens for address validation (`Server`).
+enum AddressValidationInfo {
+    None,
+    // We are a client and have information from `NEW_TOKEN`.
+    NewToken(Vec<u8>),
+    // We are a client and have received a `Retry` packet.
+    Retry {
+        token: Vec<u8>,
+        retry_source_cid: ConnectionId,
+    },
+    // We are a server and can generate tokens.
+    Server(Weak<RefCell<AddressValidation>>),
 }
 
-impl RetryInfo {
-    fn new(retry_source_cid: ConnectionId, token: Vec<u8>) -> Self {
-        Self {
-            token,
-            retry_source_cid,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-/// There's a little bit of different behavior for resetting idle timeout. See
-/// -transport 10.2 ("Idle Timeout").
-enum IdleTimeoutState {
-    Init,
-    New(Instant),
-    PacketReceived(Instant),
-    AckElicitingPacketSent(Instant),
-}
-
-#[derive(Debug, Clone)]
-/// There's a little bit of different behavior for resetting idle timeout. See
-/// -transport 10.2 ("Idle Timeout").
-struct IdleTimeout {
-    timeout: Duration,
-    state: IdleTimeoutState,
-}
-
-impl Default for IdleTimeout {
-    fn default() -> Self {
-        Self {
-            timeout: LOCAL_IDLE_TIMEOUT,
-            state: IdleTimeoutState::Init,
-        }
-    }
-}
-
-impl IdleTimeout {
-    pub fn set_peer_timeout(&mut self, peer_timeout: Duration) {
-        self.timeout = min(self.timeout, peer_timeout);
-    }
-
-    pub fn expiry(&mut self, now: Instant, pto: Duration) -> Instant {
-        let start = match self.state {
-            IdleTimeoutState::Init => {
-                self.state = IdleTimeoutState::New(now);
-                now
-            }
-            IdleTimeoutState::New(t)
-            | IdleTimeoutState::PacketReceived(t)
-            | IdleTimeoutState::AckElicitingPacketSent(t) => t,
-        };
-        start + max(self.timeout, pto * 3)
-    }
-
-    fn on_packet_sent(&mut self, now: Instant) {
-        // Only reset idle timeout if we've received a packet since the last
-        // time we reset the timeout here.
-        match self.state {
-            IdleTimeoutState::AckElicitingPacketSent(_) => {}
-            IdleTimeoutState::Init
-            | IdleTimeoutState::New(_)
-            | IdleTimeoutState::PacketReceived(_) => {
-                self.state = IdleTimeoutState::AckElicitingPacketSent(now);
-            }
-        }
-    }
-
-    fn on_packet_received(&mut self, now: Instant) {
-        self.state = IdleTimeoutState::PacketReceived(now);
-    }
-
-    pub fn expired(&mut self, now: Instant, pto: Duration) -> bool {
-        now >= self.expiry(now, pto)
-    }
-}
-
-/// `StateSignaling` manages whether we need to send HANDSHAKE_DONE and CONNECTION_CLOSE.
-/// Valid state transitions are:
-/// * Idle -> HandshakeDone: at the server when the handshake completes
-/// * HandshakeDone -> Idle: when a HANDSHAKE_DONE frame is sent
-/// * Idle/HandshakeDone -> Closing/Draining: when closing or draining
-/// * Closing/Draining -> CloseSent: after sending CONNECTION_CLOSE
-/// * CloseSent -> Closing: any time a new CONNECTION_CLOSE is needed
-/// * -> Reset: from any state in case of a stateless reset
-#[derive(Debug, Clone, PartialEq)]
-enum StateSignaling {
-    Idle,
-    HandshakeDone,
-    /// These states save the frame that needs to be sent.
-    Closing(Frame),
-    Draining(Frame),
-    /// This state saves the frame that might need to be sent again.
-    /// If it is `None`, then we are draining and don't send.
-    CloseSent(Option<Frame>),
-    Reset,
-}
-
-impl StateSignaling {
-    pub fn handshake_done(&mut self) {
-        if *self != Self::Idle {
-            debug_assert!(false, "StateSignaling must be in Idle state.");
-            return;
-        }
-        *self = Self::HandshakeDone
-    }
-
-    pub fn send_done(&mut self) -> Option<(Frame, Option<RecoveryToken>)> {
-        if *self == Self::HandshakeDone {
-            *self = Self::Idle;
-            Some((Frame::HandshakeDone, Some(RecoveryToken::HandshakeDone)))
-        } else {
-            None
-        }
-    }
-
-    fn make_close_frame(
-        error: ConnectionError,
-        frame_type: FrameType,
-        message: impl AsRef<str>,
-    ) -> Frame {
-        let reason_phrase = message.as_ref().as_bytes().to_owned();
-        Frame::ConnectionClose {
-            error_code: CloseError::from(error),
-            frame_type,
-            reason_phrase,
-        }
-    }
-
-    pub fn close(
-        &mut self,
-        error: ConnectionError,
-        frame_type: FrameType,
-        message: impl AsRef<str>,
-    ) {
-        if *self != Self::Reset {
-            *self = Self::Closing(Self::make_close_frame(error, frame_type, message));
-        }
-    }
-
-    pub fn drain(
-        &mut self,
-        error: ConnectionError,
-        frame_type: FrameType,
-        message: impl AsRef<str>,
-    ) {
-        if *self != Self::Reset {
-            *self = Self::Draining(Self::make_close_frame(error, frame_type, message));
-        }
-    }
-
-    /// If a close is pending, take a frame.
-    pub fn close_frame(&mut self) -> Option<Frame> {
+impl AddressValidationInfo {
+    pub fn token(&self) -> &[u8] {
         match self {
-            Self::Closing(frame) => {
-                // When we are closing, we might need to send the close frame again.
-                let frame = mem::replace(frame, Frame::Padding);
-                *self = Self::CloseSent(Some(frame.clone()));
-                Some(frame)
-            }
-            Self::Draining(frame) => {
-                // When we are draining, just send once.
-                let frame = mem::replace(frame, Frame::Padding);
-                *self = Self::CloseSent(None);
-                Some(frame)
-            }
-            _ => None,
+            Self::NewToken(token) | Self::Retry { token, .. } => &token,
+            _ => &[],
         }
     }
 
-    /// If a close can be sent again, prepare to send it again.
-    pub fn send_close(&mut self) {
-        if let Self::CloseSent(Some(frame)) = self {
-            let frame = mem::replace(frame, Frame::Padding);
-            *self = Self::Closing(frame);
+    pub fn generate_new_token(
+        &mut self,
+        peer_address: SocketAddr,
+        now: Instant,
+    ) -> Option<Vec<u8>> {
+        match self {
+            Self::Server(ref w) => {
+                if let Some(validation) = w.upgrade() {
+                    validation
+                        .borrow()
+                        .generate_new_token(peer_address, now)
+                        .ok()
+                } else {
+                    None
+                }
+            }
+            Self::None => None,
+            _ => unreachable!("called a server function on a client"),
         }
-    }
-
-    /// We just got a stateless reset.  Terminate.
-    pub fn reset(&mut self) {
-        *self = Self::Reset;
     }
 }
 
@@ -426,7 +236,7 @@ pub struct Connection {
     /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     valid_cids: Vec<ConnectionId>,
-    retry_info: Option<RetryInfo>,
+    address_validation: AddressValidationInfo,
 
     /// Since we need to communicate this to our peer in tparams, setting this
     /// value is part of constructing the struct.
@@ -436,16 +246,11 @@ pub struct Connection {
     /// Checked against tparam value from peer
     remote_original_destination_cid: Option<ConnectionId>,
 
-    /// We sometimes save a datagram (just one) against the possibility that keys
-    /// will later become available.
-    /// One example of this is the case where a Handshake packet containing a
-    /// certificate is received coalesced with a 1-RTT packet.  The certificate
-    /// might need to authenticated by the application before the 1-RTT packet can
-    /// be processed.
-    /// The boolean indicates whether processing should be deferred: after saving,
-    /// we usually immediately try to process this, but that won't work until after
-    /// returning to the application.
-    saved_datagram: Option<(Datagram, bool)>,
+    /// We sometimes save a datagram against the possibility that keys will later
+    /// become available.  This avoids reporting packets as dropped during the handshake
+    /// when they are either just reordered or we haven't been able to install keys yet.
+    /// In particular, this occurs when asynchronous certificate validation happens.
+    saved_datagrams: SavedDatagrams,
 
     pub(crate) crypto: Crypto,
     pub(crate) acks: AckTracker,
@@ -458,7 +263,7 @@ pub struct Connection {
     state_signaling: StateSignaling,
     loss_recovery: LossRecovery,
     events: ConnectionEvents,
-    token: Option<Vec<u8>>,
+    new_token: NewTokenState,
     stats: StatsCell,
     qlog: NeqoQlog,
 
@@ -577,11 +382,11 @@ impl Connection {
             valid_cids: Vec::new(),
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
-            retry_info: None,
+            address_validation: AddressValidationInfo::None,
             local_initial_source_cid,
             remote_initial_source_cid: None,
             remote_original_destination_cid: None,
-            saved_datagram: None,
+            saved_datagrams: SavedDatagrams::default(),
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::default(),
@@ -593,7 +398,7 @@ impl Connection {
             state_signaling: StateSignaling::Idle,
             loss_recovery: LossRecovery::new(stats.clone()),
             events: ConnectionEvents::default(),
-            token: None,
+            new_token: NewTokenState::new(role),
             stats,
             qlog: NeqoQlog::disabled(),
             quic_version,
@@ -690,12 +495,12 @@ impl Connection {
     }
 
     /// Access the latest resumption token on the connection.
-    pub fn resumption_token(&self) -> Option<Vec<u8>> {
+    pub fn resumption_token(&mut self) -> Option<Vec<u8>> {
         if self.state < State::Connected {
             return None;
         }
         match self.crypto.tls {
-            Agent::Client(ref c) => match c.resumption_token() {
+            Agent::Client(ref mut c) => match c.resumption_token() {
                 Some(ref t) => {
                     qtrace!("TLS token {}", hex(&t));
                     let mut enc = Encoder::default();
@@ -710,6 +515,8 @@ impl Connection {
                             .expect("should have transport parameters")
                             .encode(enc_inner);
                     });
+                    let token = self.new_token.take_token();
+                    enc.encode_vvec(token.as_ref().map_or(&[], |t| &t[..]));
                     enc.encode(&t[..]);
                     qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
                     Some(enc.into())
@@ -724,35 +531,38 @@ impl Connection {
     /// This can only be called once and only on the client.
     /// After calling the function, it should be possible to attempt 0-RTT
     /// if the token supports that.
-    pub fn set_resumption_token(&mut self, now: Instant, token: &[u8]) -> Res<()> {
+    pub fn enable_resumption(&mut self, now: Instant, token: &[u8]) -> Res<()> {
         if self.state != State::Init {
             qerror!([self], "set token in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
+        if self.role == Role::Server {
+            return Err(Error::ConnectionState);
+        }
+
         qinfo!([self], "resumption token {}", hex_snip_middle(token));
         let mut dec = Decoder::from(token);
 
-        let smoothed_rtt = match dec.decode_varint() {
-            Some(v) => Duration::from_millis(v),
-            _ => return Err(Error::InvalidResumptionToken),
-        };
+        let smoothed_rtt =
+            Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);
+        qtrace!([self], "  RTT {:?}", smoothed_rtt);
 
-        let tp_slice = match dec.decode_vvec() {
-            Some(v) => v,
-            _ => return Err(Error::InvalidResumptionToken),
-        };
+        let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!([self], "  transport parameters {}", hex(&tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
         let tp =
             TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
 
+        let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
+        qtrace!([self], "  Initial token {}", hex(&init_token));
+
         let tok = dec.decode_remainder();
         qtrace!([self], "  TLS token {}", hex(&tok));
         match self.crypto.tls {
             Agent::Client(ref mut c) => {
-                let res = c.set_resumption_token(&tok);
+                let res = c.enable_resumption(&tok);
                 if let Err(e) = res {
-                    self.absorb_error::<Error>(now, Err(Error::CryptoError(e)));
+                    self.absorb_error::<Error>(now, Err(Error::from(e)));
                     return Ok(());
                 }
             }
@@ -760,7 +570,9 @@ impl Connection {
         }
 
         self.tps.borrow_mut().remote_0rtt = Some(tp);
-
+        if !init_token.is_empty() {
+            self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
+        }
         if smoothed_rtt > GRANULARITY {
             self.loss_recovery.set_initial_rtt(smoothed_rtt);
         }
@@ -772,23 +584,45 @@ impl Connection {
         Ok(())
     }
 
-    /// Send a TLS session ticket.
+    pub(crate) fn set_validation(&mut self, validation: Rc<RefCell<AddressValidation>>) {
+        qtrace!([self], "Enabling NEW_TOKEN");
+        assert_eq!(self.role, Role::Server);
+        self.address_validation = AddressValidationInfo::Server(Rc::downgrade(&validation));
+    }
+
+    /// Send a TLS session ticket AND a NEW_TOKEN frame (if possible).
     pub fn send_ticket(&mut self, now: Instant, extra: &[u8]) -> Res<()> {
-        let tps = &self.tps;
-        match self.crypto.tls {
-            Agent::Server(ref mut s) => {
-                let mut enc = Encoder::default();
-                enc.encode_vvec_with(|mut enc_inner| {
-                    tps.borrow().local.encode(&mut enc_inner);
-                });
-                enc.encode(extra);
-                let records = s.send_ticket(now, &enc)?;
-                qinfo!([self], "send session ticket {}", hex(&enc));
-                self.crypto.buffer_records(records)?;
-                Ok(())
-            }
-            Agent::Client(_) => Err(Error::WrongRole),
+        if self.role == Role::Client {
+            return Err(Error::WrongRole);
         }
+
+        let tps = &self.tps;
+        if let Agent::Server(ref mut s) = self.crypto.tls {
+            let mut enc = Encoder::default();
+            enc.encode_vvec_with(|mut enc_inner| {
+                tps.borrow().local.encode(&mut enc_inner);
+            });
+            enc.encode(extra);
+            let records = s.send_ticket(now, &enc)?;
+            qinfo!([self], "send session ticket {}", hex(&enc));
+            self.crypto.buffer_records(records)?;
+        } else {
+            unreachable!();
+        }
+
+        // If we are able, also send a NEW_TOKEN frame.
+        // This should be recording all remote addresses that are valid,
+        // but there are just 0 or 1 in the current implementation.
+        if let Some(p) = self.path.as_ref() {
+            if let Some(token) = self
+                .address_validation
+                .generate_new_token(p.remote_address(), now)
+            {
+                self.new_token.send_new_token(token);
+            }
+        }
+
+        Ok(())
     }
 
     pub fn tls_info(&self) -> Option<&SecretAgentInfo> {
@@ -806,8 +640,6 @@ impl Connection {
         self.crypto.tls.authenticated(status);
         let res = self.handshake(now, PNSpace::Handshake, None);
         self.absorb_error(now, res);
-        // Try to handle packets that couldn't be processed before.
-        self.process_saved(now, true);
     }
 
     /// Get the role of the connection.
@@ -847,7 +679,7 @@ impl Connection {
                 }
                 State::Init => {
                     // We have not even sent anything just close the connection without sending any error.
-                    // This may happen when clieeent_start fails.
+                    // This may happen when client_start fails.
                     self.set_state(State::Closed(error));
                 }
                 State::WaitInitial => {
@@ -874,7 +706,7 @@ impl Connection {
         self.capture_error(now, 0, res).ok()
     }
 
-    pub fn process_timer(&mut self, now: Instant) {
+    fn process_timer(&mut self, now: Instant) {
         if let State::Closing { error, timeout } | State::Draining { error, timeout } = &self.state
         {
             if *timeout <= now {
@@ -898,8 +730,6 @@ impl Connection {
             )));
             return;
         }
-
-        self.process_saved(now, false);
 
         let res = self.crypto.states.check_key_update(now);
         self.absorb_error(now, res);
@@ -1018,7 +848,7 @@ impl Connection {
 
     fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
         qinfo!([self], "received Retry");
-        if self.retry_info.is_some() {
+        if matches!(self.address_validation, AddressValidationInfo::Retry { .. }) {
             self.stats.borrow_mut().pkt_dropped("Extra Retry");
             return Ok(());
         }
@@ -1040,24 +870,24 @@ impl Connection {
             return Err(Error::InternalError);
         };
 
+        let retry_scid = ConnectionId::from(packet.scid());
         qinfo!(
             [self],
             "Valid Retry received, token={} scid={}",
             hex(packet.token()),
-            packet.scid()
+            retry_scid
         );
-
-        self.retry_info = Some(RetryInfo::new(
-            ConnectionId::from(packet.scid()),
-            packet.token().to_vec(),
-        ));
 
         let lost_packets = self.loss_recovery.retry();
         self.handle_lost_packets(&lost_packets);
 
         self.crypto
             .states
-            .init(self.quic_version, self.role, packet.scid());
+            .init(self.quic_version, self.role, &retry_scid);
+        self.address_validation = AddressValidationInfo::Retry {
+            token: packet.token().to_vec(),
+            retry_source_cid: retry_scid,
+        };
         Ok(())
     }
 
@@ -1115,49 +945,36 @@ impl Connection {
         }
     }
 
-    /// Process any saved packet.
-    /// When `always` is false, the packet is only processed if time has
-    /// passed since it was saved.  Otherwise saved packets are saved and then
-    /// dropped instantly.
-    fn process_saved(&mut self, now: Instant, always: bool) {
-        if let Some((_, ref mut defer)) = self.saved_datagram {
-            if always || !*defer {
-                let d = self.saved_datagram.take().unwrap().0;
-                qdebug!([self], "process saved datagram: {:?}", d);
-                self.process_input(d, now);
-            } else {
-                *defer = false;
+    /// Process any saved packets if the appropriate keys are available.
+    fn process_saved(&mut self, cspace: CryptoSpace) {
+        if self.crypto.states.rx_hp(cspace).is_some() {
+            for saved in self.saved_datagrams.take_saved(cspace) {
+                qtrace!([self], "process saved @{:?}: {:?}", saved.t, saved.d);
+                self.process_input(saved.d, saved.t);
             }
         }
     }
 
     /// In case a datagram arrives that we can only partially process, save any
     /// part that we don't have keys for.
-    fn maybe_save_datagram<'a, 'b>(
-        &'a mut self,
-        d: &'b Datagram,
-        slice: &'b [u8],
-        now: Instant,
-    ) -> bool {
-        // Only save partial datagrams to avoid looping.
-        // It also means that we don't have to worry about it being a stateless reset.
-        if slice.len() < d.len() {
-            let save = Datagram::new(d.source(), d.destination(), slice);
-            qdebug!([self], "saving datagram@{:?} {:?}", now, save);
-            self.saved_datagram = Some((save, true));
-            true
+    fn save_datagram(&mut self, cspace: CryptoSpace, d: Datagram, remaining: usize, now: Instant) {
+        let d = if remaining < d.len() {
+            Datagram::new(d.source(), d.destination(), &d[d.len() - remaining..])
         } else {
-            false
-        }
+            d
+        };
+        self.saved_datagrams.save(cspace, d, now);
+        self.stats.borrow_mut().saved_datagrams += 1;
     }
 
+    /// Take a datagram as input.  This reports an error if the packet was bad.
     fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, PNSpace)>> {
         let mut slc = &d[..];
         let mut frames = Vec::new();
 
         qtrace!([self], "input {}", hex(&**d));
 
-        // Handle each packet in the datagram
+        // Handle each packet in the datagram.
         while !slc.is_empty() {
             self.stats.borrow_mut().packets_rx += 1;
             let (packet, remainder) =
@@ -1300,9 +1117,12 @@ impl Connection {
                     self.process_migrations(&d)?;
                 }
                 Err(e) => {
-                    // While connecting we might want to save the remainder of a packet.
-                    if matches!(e, Error::KeysNotFound) && self.maybe_save_datagram(&d, slc, now) {
-                        break;
+                    if let Error::KeysPending(cspace) = e {
+                        // This packet can't be decrypted because we don't have the keys yet.
+                        // Don't check this packet for a stateless reset, just return.
+                        let remaining = slc.len();
+                        self.save_datagram(cspace, d, remaining, now);
+                        return Ok(frames);
                     }
                     // Decryption failure, or not having keys is not fatal.
                     // If the state isn't available, or we can't decrypt the packet, drop
@@ -1456,24 +1276,14 @@ impl Connection {
 
     fn build_packet_header(
         path: &Path,
-        space: PNSpace,
+        cspace: CryptoSpace,
         encoder: Encoder,
         tx: &CryptoDxState,
-        retry_info: &Option<RetryInfo>,
+        address_validation: &AddressValidationInfo,
         quic_version: QuicVersion,
         grease_quic_bit: bool,
     ) -> (PacketType, PacketNumber, PacketBuilder) {
-        let pt = match space {
-            PNSpace::Initial => PacketType::Initial,
-            PNSpace::Handshake => PacketType::Handshake,
-            PNSpace::ApplicationData => {
-                if tx.is_0rtt() {
-                    PacketType::ZeroRtt
-                } else {
-                    PacketType::Short
-                }
-            }
-        };
+        let pt = PacketType::from(cspace);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {}", path.remote_cid());
             PacketBuilder::short(encoder, tx.key_phase(), path.remote_cid())
@@ -1495,11 +1305,7 @@ impl Connection {
         };
         builder.scramble(grease_quic_bit);
         if pt == PacketType::Initial {
-            builder.initial_token(if let Some(info) = retry_info {
-                &info.token
-            } else {
-                &[]
-            });
+            builder.initial_token(address_validation.token());
         }
         // TODO(mt) work out packet number length based on `4*path CWND/path MTU`.
         let pn = tx.next_pn();
@@ -1522,26 +1328,22 @@ impl Connection {
         let mut encoder = Encoder::with_capacity(path.mtu());
         let grease_quic_bit = self.can_grease_quic_bit();
         for space in PNSpace::iter() {
-            let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
-                tx_state
+            let (cspace, tx) = if let Some(crypto) = self.crypto.states.select_tx(*space) {
+                crypto
             } else {
                 continue;
             };
 
-            // ConnectionClose frame not allowed for 0RTT.
-            if tx.is_0rtt() {
-                continue;
-            }
-
             let (_, _, mut builder) = Self::build_packet_header(
                 path,
-                *space,
+                cspace,
                 encoder,
                 tx,
-                &None,
+                &AddressValidationInfo::None,
                 self.quic_version,
                 grease_quic_bit,
             );
+
             // ConnectionError::Application is only allowed at 1RTT.
             if *space == PNSpace::ApplicationData {
                 frame.marshal(&mut builder);
@@ -1596,6 +1398,9 @@ impl Connection {
                 if frame.is_none() {
                     frame = self.send_streams.get_frame(space, remaining);
                 }
+                if frame.is_none() && space == PNSpace::ApplicationData {
+                    frame = self.new_token.get_frame(remaining);
+                }
             }
 
             if let Some((frame, token)) = frame {
@@ -1628,8 +1433,8 @@ impl Connection {
         let mut encoder = Encoder::with_capacity(profile.limit());
         for space in PNSpace::iter() {
             // Ensure we have tx crypto state for this epoch, or skip it.
-            let tx = if let Some(tx_state) = self.crypto.states.tx(*space) {
-                tx_state
+            let (cspace, tx) = if let Some(crypto) = self.crypto.states.select_tx(*space) {
+                crypto
             } else {
                 continue;
             };
@@ -1637,10 +1442,10 @@ impl Connection {
             let header_start = encoder.len();
             let (pt, pn, mut builder) = Self::build_packet_header(
                 path,
-                *space,
+                cspace,
                 encoder,
                 tx,
-                &self.retry_info,
+                &self.address_validation,
                 self.quic_version,
                 grease_quic_bit,
             );
@@ -1674,7 +1479,7 @@ impl Connection {
             );
 
             self.stats.borrow_mut().packets_tx += 1;
-            encoder = builder.build(self.crypto.states.tx(*space).unwrap())?;
+            encoder = builder.build(self.crypto.states.tx(cspace).unwrap())?;
             debug_assert!(encoder.len() <= path.mtu());
 
             if ack_eliciting {
@@ -1796,18 +1601,27 @@ impl Connection {
     /// Process the final set of transport parameters.
     fn process_tps(&mut self) -> Res<()> {
         self.validate_cids()?;
-        if let Some(token) = self
-            .tps
-            .borrow()
-            .remote
-            .as_ref()
-            .unwrap()
-            .get_bytes(tparams::STATELESS_RESET_TOKEN)
         {
-            let reset_token = <[u8; 16]>::try_from(token).unwrap().to_owned();
-            self.path.as_mut().unwrap().set_reset_token(reset_token);
+            let tps = self.tps.borrow();
+            if let Some(token) = tps
+                .remote
+                .as_ref()
+                .unwrap()
+                .get_bytes(tparams::STATELESS_RESET_TOKEN)
+            {
+                let reset_token = <[u8; 16]>::try_from(token).unwrap().to_owned();
+                self.path.as_mut().unwrap().set_reset_token(reset_token);
+            }
+            let mad = Duration::from_millis(
+                tps.remote
+                    .as_ref()
+                    .unwrap()
+                    .get_integer(tparams::MAX_ACK_DELAY),
+            );
+            self.loss_recovery.set_peer_max_ack_delay(mad);
         }
         self.set_initial_limits();
+        qlog::connection_tparams_set(&mut self.qlog, &*self.tps.borrow());
         Ok(())
     }
 
@@ -1819,8 +1633,8 @@ impl Connection {
     }
 
     fn validate_cids_draft_27(&mut self) -> Res<()> {
-        if let Some(info) = &self.retry_info {
-            debug_assert!(!info.token.is_empty());
+        if let AddressValidationInfo::Retry { token, .. } = &self.address_validation {
+            debug_assert!(!token.is_empty());
             let tph = self.tps.borrow();
             let tp = tph
                 .remote
@@ -1877,10 +1691,14 @@ impl Connection {
             }
 
             let tp = remote_tps.get_bytes(tparams::RETRY_SOURCE_CONNECTION_ID);
-            let expected = self
-                .retry_info
-                .as_ref()
-                .map(|ri| ri.retry_source_cid.as_cid_ref());
+            let expected = if let AddressValidationInfo::Retry {
+                retry_source_cid, ..
+            } = &self.address_validation
+            {
+                Some(retry_source_cid.as_cid_ref())
+            } else {
+                None
+            };
             if expected != tp.map(ConnectionIdRef::from) {
                 qwarn!(
                     "{} RSCID test failed. self cid {:?} != tp cid {:?}",
@@ -1919,7 +1737,9 @@ impl Connection {
             if self.tps.borrow().remote.is_some() {
                 self.set_initial_limits();
             }
-            self.crypto.install_keys(self.role);
+            if self.crypto.install_keys(self.role)? {
+                self.process_saved(CryptoSpace::Handshake);
+            }
         }
 
         Ok(())
@@ -2012,7 +1832,9 @@ impl Connection {
                     self.crypto.resend_unacked(space);
                 }
             }
-            Frame::NewToken { token } => self.token = Some(token),
+            Frame::NewToken { token } => {
+                self.new_token.save_token(token);
+            }
             Frame::Stream {
                 fin,
                 stream_id,
@@ -2173,6 +1995,7 @@ impl Connection {
                         &mut self.indexes,
                     ),
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
+                    RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
                 }
             }
         }
@@ -2226,6 +2049,7 @@ impl Connection {
                         self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
                     }
                     RecoveryToken::HandshakeDone => (),
+                    RecoveryToken::NewToken(seqno) => self.new_token.acked(*seqno),
                 }
             }
         }
@@ -2279,13 +2103,13 @@ impl Connection {
         self.crypto.install_application_keys(now + pto)?;
         self.process_tps()?;
         self.set_state(State::Connected);
+        self.process_saved(CryptoSpace::ApplicationData);
         self.stats.borrow_mut().resumed = self.crypto.tls.info().unwrap().resumed();
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
             self.set_state(State::Confirmed);
         }
         qinfo!([self], "Connection established");
-        qlog::connection_tparams_set(&mut self.qlog, &*self.tps.borrow());
         Ok(())
     }
 
@@ -2685,8 +2509,8 @@ impl ::std::fmt::Display for Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cc::PACING_BURST_SIZE;
-    use crate::cc::{CWND_INITIAL_PKTS, CWND_MIN, MAX_DATAGRAM_SIZE};
+    use crate::addr_valid::{AddressValidation, ValidateAddress};
+    use crate::cc::{CWND_INITIAL_PKTS, CWND_MIN, MAX_DATAGRAM_SIZE, PACING_BURST_SIZE};
     use crate::frame::{CloseError, StreamType};
     use crate::packet::PACKET_BIT_LONG;
     use crate::path::PATH_MTU_V6;
@@ -3167,7 +2991,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -3187,7 +3011,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now);
         let mut client = default_client();
         let mut server = default_server();
-        client.set_resumption_token(now, &token[..]).unwrap();
+        client.enable_resumption(now, &token[..]).unwrap();
         assert_eq!(
             client.loss_recovery.rtt(),
             RTT1,
@@ -3214,7 +3038,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
         connect(&mut client, &mut server);
@@ -3231,7 +3055,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
 
@@ -3271,7 +3095,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = default_server();
 
@@ -3312,7 +3136,7 @@ mod tests {
         let token = exchange_ticket(&mut client, &mut server, now());
         let mut client = default_client();
         client
-            .set_resumption_token(now(), &token[..])
+            .enable_resumption(now(), &token[..])
             .expect("should set token");
         let mut server = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
@@ -3472,7 +3296,7 @@ mod tests {
             .borrow_mut()
             .local
             .set_integer(tparams::IDLE_TIMEOUT, LOWER_TIMEOUT_MS);
-        server.idle_timeout.timeout = LOWER_TIMEOUT;
+        server.idle_timeout = IdleTimeout::new(LOWER_TIMEOUT);
 
         // Now connect and force idleness manually.
         connect(&mut client, &mut server);
@@ -3504,7 +3328,7 @@ mod tests {
                 TransportParameter::Integer(LOWER_TIMEOUT_MS),
             )
             .unwrap();
-        server.idle_timeout.timeout = LOWER_TIMEOUT;
+        server.idle_timeout = IdleTimeout::new(LOWER_TIMEOUT);
 
         // Now connect with an RTT and force idleness manually.
         let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
@@ -5421,12 +5245,12 @@ mod tests {
         }
         let mut dec = Decoder::from(buf);
         let first = dec.decode_byte().unwrap();
+        assert_ne!(first & 0b0011_0000, 0b0011_0000, "retry not supported");
         dec.skip(4); // Version.
         dec.skip_vec(1); // DCID
         dec.skip_vec(1); // SCID
-        if first & 0x30 == 0 {
-            // Initial
-            dec.skip_vvec();
+        if first & 0b0011_0000 == 0 {
+            dec.skip_vvec(); // Initial token
         }
         dec.skip_vvec(); // The rest of the packet.
         let p1 = &buf[..dec.offset()];
@@ -5593,19 +5417,17 @@ mod tests {
 
         let c1 = client.process(None, now()).dgram();
         assert!(c1.is_some());
-        let s1 = server.process(c1, now()).dgram();
-        assert!(s1.is_some());
+        let s1 = server.process(c1, now()).dgram().unwrap();
 
         // The server should accept writes at this point.
         let s2 = send_something(&mut server, now());
 
-        // We can't use the standard facility to complete the handshake, so
-        // drive it as aggressively as possible.
-        let _ = client.process(s1, now()).dgram(); // Just an ACK out of this.
-        client.authenticated(AuthenticationStatus::Ok, now());
+        // Complete the handshake at the client.
+        client.process_input(s1, now());
+        maybe_authenticate(&mut client);
         assert_eq!(*client.state(), State::Connected);
 
-        // The client should accept data now.
+        // The client should receive the 0.5-RTT data now.
         client.process_input(s2, now());
         let mut buf = vec![0; DEFAULT_STREAM_DATA.len() + 1];
         let stream_id = client
@@ -5621,6 +5443,110 @@ mod tests {
         let (l, ended) = client.stream_recv(stream_id, &mut buf).unwrap();
         assert_eq!(&buf[..l], DEFAULT_STREAM_DATA);
         assert!(ended);
+    }
+
+    /// Test that a client buffers 0.5-RTT data when it arrives early.
+    #[test]
+    fn reorder_05rtt() {
+        let mut client = default_client();
+        let mut server = default_server();
+
+        let c1 = client.process(None, now()).dgram();
+        assert!(c1.is_some());
+        let s1 = server.process(c1, now()).dgram().unwrap();
+
+        // The server should accept writes at this point.
+        let s2 = send_something(&mut server, now());
+
+        // We can't use the standard facility to complete the handshake, so
+        // drive it as aggressively as possible.
+        client.process_input(s2, now());
+        assert_eq!(client.stats().saved_datagrams, 1);
+
+        // After processing the first packet, the client should go back and
+        // process the 0.5-RTT packet data, which should make data available.
+        client.process_input(s1, now());
+        // We can't use `maybe_authenticate` here as that consumes events.
+        client.authenticated(AuthenticationStatus::Ok, now());
+        assert_eq!(*client.state(), State::Connected);
+
+        let mut buf = vec![0; DEFAULT_STREAM_DATA.len() + 1];
+        let stream_id = client
+            .events()
+            .find_map(|e| {
+                if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                    Some(stream_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let (l, ended) = client.stream_recv(stream_id, &mut buf).unwrap();
+        assert_eq!(&buf[..l], DEFAULT_STREAM_DATA);
+        assert!(ended);
+    }
+
+    #[test]
+    fn reorder_05rtt_with_0rtt() {
+        const RTT: Duration = Duration::from_millis(100);
+
+        let mut client = default_client();
+        let mut server = default_server();
+        let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
+
+        // Include RTT in sending the ticket or the ticket age reported by the
+        // client is wrong, which causes the server to reject 0-RTT.
+        now += RTT / 2;
+        server.send_ticket(now, &[]).unwrap();
+        let ticket = server.process_output(now).dgram().unwrap();
+        now += RTT / 2;
+        client.process_input(ticket, now);
+        let token = client.resumption_token().unwrap();
+        let mut client = default_client();
+        client.enable_resumption(now, &token[..]).unwrap();
+        let mut server = default_server();
+
+        // Send ClientHello and some 0-RTT.
+        let c1 = send_something(&mut client, now);
+        assertions::assert_coalesced_0rtt(&c1[..]);
+        // Drop the 0-RTT from the coalesced datagram, so that the server
+        // acknowledges the next 0-RTT packet.
+        let (c1, _) = split_datagram(c1);
+        let c2 = send_something(&mut client, now);
+
+        // Handle the first packet and send 0.5-RTT in response.  Drop the response.
+        now += RTT / 2;
+        let _ = server.process(Some(c1), now).dgram().unwrap();
+        // The gap in 0-RTT will result in this 0.5 RTT containing an ACK.
+        server.process_input(c2, now);
+        let s2 = send_something(&mut server, now);
+
+        // Save the 0.5 RTT.
+        now += RTT / 2;
+        client.process_input(s2, now);
+        assert_eq!(client.stats().saved_datagrams, 1);
+
+        // Now PTO at the client and cause the server to re-send handshake packets.
+        now += AT_LEAST_PTO;
+        let c3 = client.process(None, now).dgram();
+
+        now += RTT / 2;
+        let s3 = server.process(c3, now).dgram().unwrap();
+        assertions::assert_no_1rtt(&s3[..]);
+
+        // The client should be able to process the 0.5 RTT now.
+        // This should contain an ACK, so we are processing an ACK from the past.
+        now += RTT / 2;
+        client.process_input(s3, now);
+        maybe_authenticate(&mut client);
+        let c4 = client.process(None, now).dgram();
+        assert_eq!(*client.state(), State::Connected);
+        assert_eq!(client.loss_recovery.rtt(), RTT);
+
+        now += RTT / 2;
+        server.process_input(c4.unwrap(), now);
+        assert_eq!(*server.state(), State::Confirmed);
+        assert_eq!(server.loss_recovery.rtt(), RTT);
     }
 
     /// Test that a server that coalesces 0.5 RTT with handshake packets
@@ -5662,14 +5588,16 @@ mod tests {
         let _ = client.process(s2, now).dgram();
         // This packet will contain an ACK, but we can ignore it.
         assert_eq!(client.stats().dropped_rx, 0);
-        assert!(client.saved_datagram.is_some());
+        assert_eq!(client.stats().packets_rx, 3);
+        assert_eq!(client.stats().saved_datagrams, 1);
 
         // After (successful) authentication, the packet is processed.
         maybe_authenticate(&mut client);
         let c3 = client.process(None, now).dgram();
         assert!(c3.is_some());
         assert_eq!(client.stats().dropped_rx, 0);
-        assert!(client.saved_datagram.is_none());
+        assert_eq!(client.stats().packets_rx, 4);
+        assert_eq!(client.stats().saved_datagrams, 1);
 
         // Allow the handshake to complete.
         now += RTT / 2;
@@ -5677,11 +5605,138 @@ mod tests {
         assert!(s3.is_some());
         assert_eq!(*server.state(), State::Confirmed);
         now += RTT / 2;
-        let c5 = client.process(s3, now).dgram();
-        assert!(c5.is_none());
+        let _ = client.process(s3, now).dgram();
         assert_eq!(*client.state(), State::Confirmed);
 
         assert_eq!(client.stats().dropped_rx, 0);
+    }
+
+    #[test]
+    fn reorder_handshake() {
+        const RTT: Duration = Duration::from_millis(100);
+        let mut client = default_client();
+        let mut server = default_server();
+        let mut now = now();
+
+        let c1 = client.process(None, now).dgram();
+        assert!(c1.is_some());
+
+        now += RTT / 2;
+        let s1 = server.process(c1, now).dgram();
+        assert!(s1.is_some());
+
+        // Drop the Initial packet from this.
+        let (_, s_hs) = split_datagram(s1.unwrap());
+        assert!(s_hs.is_some());
+
+        // Pass just the handshake packet in and the client can't handle it.
+        now += RTT / 2;
+        let res = client.process(s_hs, now);
+        assert_ne!(res.callback(), Duration::new(0, 0));
+        assert_eq!(client.stats().saved_datagrams, 1);
+        assert_eq!(client.stats().packets_rx, 1);
+
+        // Get the server to try again.
+        // Though we currently allow the server to arm its PTO timer, use
+        // a second client Initial packet to cause it to send again.
+        now += AT_LEAST_PTO;
+        let c2 = client.process(None, now).dgram();
+        now += RTT / 2;
+        let s2 = server.process(c2, now).dgram();
+        assert!(s2.is_some());
+
+        let (s_init, s_hs) = split_datagram(s2.unwrap());
+        assert!(s_hs.is_some());
+
+        // Processing the Handshake packet first should save it.
+        now += RTT / 2;
+        client.process_input(s_hs.unwrap(), now);
+        assert_eq!(client.stats().saved_datagrams, 2);
+        assert_eq!(client.stats().packets_rx, 2);
+
+        client.process_input(s_init, now);
+        // Each saved packet should now be "received" again.
+        assert_eq!(client.stats().packets_rx, 5);
+        maybe_authenticate(&mut client);
+        let c3 = client.process(None, now).dgram();
+        assert!(c3.is_some());
+
+        // Note that though packets were saved and processed very late,
+        // they don't cause the RTT to change.
+        now += RTT / 2;
+        let s3 = server.process(c3, now).dgram();
+        assert_eq!(*server.state(), State::Confirmed);
+        assert_eq!(server.loss_recovery.rtt(), RTT);
+
+        now += RTT / 2;
+        client.process_input(s3.unwrap(), now);
+        assert_eq!(*client.state(), State::Confirmed);
+        assert_eq!(client.loss_recovery.rtt(), RTT);
+    }
+
+    #[test]
+    fn reorder_1rtt() {
+        const RTT: Duration = Duration::from_millis(100);
+        const PACKETS: usize = 6; // Many, but not enough to overflow cwnd.
+        let mut client = default_client();
+        let mut server = default_server();
+        let mut now = now();
+
+        let c1 = client.process(None, now).dgram();
+        assert!(c1.is_some());
+
+        now += RTT / 2;
+        let s1 = server.process(c1, now).dgram();
+        assert!(s1.is_some());
+
+        now += RTT / 2;
+        client.process_input(s1.unwrap(), now);
+        maybe_authenticate(&mut client);
+        let c2 = client.process(None, now).dgram();
+        assert!(c2.is_some());
+
+        // Now get a bunch of packets from the client.
+        // Give them to the server before giving it `c2`.
+        for _ in 0..PACKETS {
+            let d = send_something(&mut client, now);
+            server.process_input(d, now + RTT / 2);
+        }
+        // The server has now received those packets, and saved them.
+        // The two extra received are Initial + the junk we use for padding.
+        assert_eq!(server.stats().packets_rx, PACKETS + 2);
+        assert_eq!(server.stats().saved_datagrams, PACKETS);
+        assert_eq!(server.stats().dropped_rx, 1);
+
+        now += RTT / 2;
+        let s2 = server.process(c2, now).dgram();
+        // The server has now received those packets, and saved them.
+        // The two additional are an Initial ACK and Handshake.
+        assert_eq!(server.stats().packets_rx, PACKETS * 2 + 4);
+        assert_eq!(server.stats().saved_datagrams, PACKETS);
+        assert_eq!(server.stats().dropped_rx, 1);
+        assert_eq!(*server.state(), State::Confirmed);
+        assert_eq!(server.loss_recovery.rtt(), RTT);
+
+        now += RTT / 2;
+        client.process_input(s2.unwrap(), now);
+        assert_eq!(client.loss_recovery.rtt(), RTT);
+
+        // All the stream data that was sent should now be available.
+        let packets = server
+            .events()
+            .filter_map(|e| {
+                if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                    let mut buf = vec![0; DEFAULT_STREAM_DATA.len() + 1];
+                    let (recvd, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
+                    assert_eq!(recvd, DEFAULT_STREAM_DATA.len());
+                    assert!(fin);
+                    Some(())
+                } else {
+                    None
+                }
+            })
+            .count();
+        assert_eq!(packets, PACKETS);
     }
 
     #[test]
@@ -5861,6 +5916,90 @@ mod tests {
             |(f, _)| matches!(f, Frame::MaxStreamData { maximum_stream_data, .. }
 				   if *maximum_stream_data == RECV_BUFFER_SIZE as u64)
         ));
+    }
+
+    /// Check that a resumed connection uses a token on Initial packets.
+    #[test]
+    fn address_validation_token_resume() {
+        const RTT: Duration = Duration::from_millis(10);
+
+        let mut client = default_client();
+        let mut server = default_server();
+        let validation = AddressValidation::new(now(), ValidateAddress::Always).unwrap();
+        let validation = Rc::new(RefCell::new(validation));
+        server.set_validation(Rc::clone(&validation));
+        let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
+
+        let token = exchange_ticket(&mut client, &mut server, now);
+        let mut client = default_client();
+        client.enable_resumption(now, &token[..]).unwrap();
+        let mut server = default_server();
+
+        // Grab an Initial packet from the client.
+        let dgram = client.process(None, now).dgram();
+        assertions::assert_initial(dgram.as_ref().unwrap(), true);
+
+        // Now try to complete the handshake after giving time for a client PTO.
+        now += AT_LEAST_PTO;
+        connect_with_rtt(&mut client, &mut server, now, RTT);
+        assert!(client.crypto.tls.info().unwrap().resumed());
+        assert!(server.crypto.tls.info().unwrap().resumed());
+    }
+
+    fn can_resume(mut token: Option<Vec<u8>>, initial_has_token: bool) {
+        let mut client = default_client();
+        client
+            .enable_resumption(now(), token.take().as_ref().unwrap())
+            .unwrap();
+        let initial = client.process_output(now()).dgram();
+        assertions::assert_initial(initial.as_ref().unwrap(), initial_has_token);
+    }
+
+    #[test]
+    fn two_tickets() {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+
+        // Send two tickets and then bundle those into a packet.
+        server.send_ticket(now(), &[]).expect("send ticket1");
+        server.send_ticket(now(), &[]).expect("send ticket2");
+        let pkt = send_something(&mut server, now());
+
+        client.process_input(pkt, now());
+        let token1 = client.resumption_token();
+        assert!(token1.is_some());
+        let token2 = client.resumption_token();
+        assert!(token2.is_some());
+        assert_ne!(token1, token2);
+        assert!(client.resumption_token().is_none());
+
+        can_resume(token1, false);
+        can_resume(token2, false);
+    }
+
+    #[test]
+    fn two_tickets_and_tokens() {
+        let mut client = default_client();
+        let mut server = default_server();
+        let validation = AddressValidation::new(now(), ValidateAddress::Always).unwrap();
+        let validation = Rc::new(RefCell::new(validation));
+        server.set_validation(Rc::clone(&validation));
+        connect(&mut client, &mut server);
+
+        // Send two tickets with tokens and then bundle those into a packet.
+        server.send_ticket(now(), &[]).expect("send ticket1");
+        server.send_ticket(now(), &[]).expect("send ticket2");
+        let pkt = send_something(&mut server, now());
+
+        client.process_input(pkt, now());
+        let token1 = client.resumption_token();
+        let token2 = client.resumption_token();
+        assert_ne!(token1, token2);
+        assert!(client.resumption_token().is_none());
+
+        can_resume(token1, true);
+        can_resume(token2, true);
     }
 
     #[test]

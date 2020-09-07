@@ -9,6 +9,7 @@
 
 use neqo_common::qinfo;
 
+mod addr_valid;
 mod cc;
 mod cid;
 mod connection;
@@ -79,11 +80,12 @@ pub enum Error {
     InvalidResumptionToken,
     InvalidRetry,
     InvalidStreamId,
+    KeysDiscarded,
     /// Packet protection keys are exhausted.
     /// Also used when too many key updates have happened.
     KeysExhausted,
-    /// Packet protection keys aren't available yet, or they have been discarded.
-    KeysNotFound,
+    /// Packet protection keys aren't available yet for the identified space.
+    KeysPending(crypto::CryptoSpace),
     /// An attempt to update keys can be blocked if
     /// a packet sent with the current keys hasn't been acknowledged.
     KeyUpdateBlocked,
