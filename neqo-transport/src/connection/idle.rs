@@ -7,7 +7,7 @@
 use std::cmp::{max, min};
 use std::time::{Duration, Instant};
 
-use crate::LOCAL_IDLE_TIMEOUT;
+pub const LOCAL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 /// There's a little bit of different behavior for resetting idle timeout. See

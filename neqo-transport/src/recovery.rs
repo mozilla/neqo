@@ -19,13 +19,13 @@ use smallvec::{smallvec, SmallVec};
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
 use crate::cc::CongestionControl;
+use crate::connection::LOCAL_IDLE_TIMEOUT;
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
 use crate::qlog::{self, QlogMetric};
 use crate::send_stream::StreamRecoveryToken;
 use crate::stats::{Stats, StatsCell};
 use crate::tracking::{AckToken, PNSpace, PNSpaceSet, SentPacket};
-use crate::LOCAL_IDLE_TIMEOUT;
 
 pub const GRANULARITY: Duration = Duration::from_millis(20);
 /// The default value for the maximum time a peer can delay acknowledgment
