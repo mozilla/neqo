@@ -766,7 +766,6 @@ mod tests {
 
         let mut buf = vec![0; 1];
         for _ in 0..CHUNK_SIZE + EXTRA_SIZE {
-            // Read, providing only enough space for some of the first chunk.
             let count = s.read(&mut buf[..]);
             assert_eq!(count, 1);
         }
