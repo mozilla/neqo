@@ -761,6 +761,11 @@ mod tests {
     // resumed settings.
     const ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION: &[u8] = &[0x2, 0x3f, 0x45];
 
+    const ENCODER_STREAM_DATA_WITH_CAP_INST_AND_ENCODING_INST: &[u8] = &[
+        0x2, 0x3f, 0x45, 0x67, 0xa7, 0xd4, 0xe5, 0x1c, 0x85, 0xb1, 0x1f, 0x86, 0xa7, 0xd7, 0x71,
+        0xd1, 0x69, 0x7f,
+    ];
+
     // Decoder stream data
     const DECODER_STREAM_DATA: &[u8] = &[0x3];
 
@@ -799,7 +804,7 @@ mod tests {
                 encoder: QPackEncoder::new(
                     QpackSettings {
                         max_table_size_encoder: 128,
-                        max_table_size_decoder: 0,
+                        max_table_size_decoder: 128,
                         max_blocked_streams: 0,
                     },
                     true,
@@ -819,7 +824,7 @@ mod tests {
                 encoder: QPackEncoder::new(
                     QpackSettings {
                         max_table_size_encoder: 128,
-                        max_table_size_decoder: 0,
+                        max_table_size_decoder: 128,
                         max_blocked_streams: 0,
                     },
                     true,
@@ -872,16 +877,23 @@ mod tests {
         }
 
         pub fn check_client_control_qpack_streams_no_resumption(&mut self) {
-            self.check_client_control_qpack_streams(ENCODER_STREAM_DATA, false, true);
+            self.check_client_control_qpack_streams(
+                ENCODER_STREAM_DATA,
+                EXPECTED_REQUEST_HEADER_FRAME,
+                false,
+                true,
+            );
         }
 
         pub fn check_control_qpack_request_streams_resumption(
             &mut self,
             expect_encoder_stream_data: &[u8],
+            expect_request_header: &[u8],
             expect_request: bool,
         ) {
             self.check_client_control_qpack_streams(
                 expect_encoder_stream_data,
+                expect_request_header,
                 expect_request,
                 false,
             );
@@ -891,6 +903,7 @@ mod tests {
         pub fn check_client_control_qpack_streams(
             &mut self,
             expect_encoder_stream_data: &[u8],
+            expect_request_header: &[u8],
             expect_request: bool,
             expect_connected: bool,
         ) {
@@ -928,11 +941,7 @@ mod tests {
                             qpack_decoder_stream = true;
                         } else if stream_id == 0 {
                             assert!(expect_request);
-                            self.read_and_check_stream_data(
-                                stream_id,
-                                EXPECTED_REQUEST_HEADER_FRAME,
-                                true,
-                            );
+                            self.read_and_check_stream_data(stream_id, expect_request_header, true);
                             request = true;
                         } else {
                             panic!("unexpected event");
@@ -1031,10 +1040,10 @@ mod tests {
         (client, server)
     }
 
-    // Fetch request fetch("GET", "https", "something.com", "/", &[]).
-    fn make_request(client: &mut Http3Client, close_sending_side: bool) -> u64 {
+    // Fetch request fetch("GET", "https", "something.com", "/", headers).
+    fn make_request(client: &mut Http3Client, close_sending_side: bool, headers: &[Header]) -> u64 {
         let request_stream_id = client
-            .fetch(now(), "GET", "https", "something.com", "/", &[])
+            .fetch(now(), "GET", "https", "something.com", "/", headers)
             .unwrap();
         if close_sending_side {
             let _ = client.stream_close_send(request_stream_id);
@@ -1047,6 +1056,13 @@ mod tests {
     const EXPECTED_REQUEST_HEADER_FRAME: &[u8] = &[
         0x01, 0x10, 0x00, 0x00, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67, 0x35, 0x53, 0x2e,
         0x43, 0xd3, 0xc1,
+    ];
+
+    // For fetch request fetch("GET", "https", "something.com", "/", &[(String::from("myheaders"), String::from("myvalue"))])
+    // the following request header frame will be sent:
+    const EXPECTED_REQUEST_HEADER_FRAME_VERSION2: &[u8] = &[
+        0x01, 0x11, 0x02, 0x80, 0xd1, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67, 0x35, 0x53, 0x2e,
+        0x43, 0xd3, 0xc1, 0x10,
     ];
 
     const HTTP_HEADER_FRAME_0: &[u8] = &[0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x30];
@@ -1122,7 +1138,7 @@ mod tests {
         server: &mut TestServer,
         close_sending_side: bool,
     ) -> u64 {
-        let request_stream_id = make_request(client, close_sending_side);
+        let request_stream_id = make_request(client, close_sending_side, &[]);
 
         let out = client.process(None, now());
         let _ = server.conn.process(out.dgram(), now());
@@ -2512,11 +2528,11 @@ mod tests {
     #[test]
     fn test_goaway() {
         let (mut client, mut server) = connect();
-        let request_stream_id_1 = make_request(&mut client, false);
+        let request_stream_id_1 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_1, 0);
-        let request_stream_id_2 = make_request(&mut client, false);
+        let request_stream_id_2 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_2, 4);
-        let request_stream_id_3 = make_request(&mut client, false);
+        let request_stream_id_3 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_3, 8);
 
         let out = client.process(None, now());
@@ -2586,11 +2602,11 @@ mod tests {
     #[test]
     fn multiple_goaways() {
         let (mut client, mut server) = connect();
-        let request_stream_id_1 = make_request(&mut client, false);
+        let request_stream_id_1 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_1, 0);
-        let request_stream_id_2 = make_request(&mut client, false);
+        let request_stream_id_2 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_2, 4);
-        let request_stream_id_3 = make_request(&mut client, false);
+        let request_stream_id_3 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_3, 8);
 
         let out = client.process(None, now());
@@ -2664,11 +2680,11 @@ mod tests {
     #[test]
     fn multiple_goaways_stream_id_increased() {
         let (mut client, mut server) = connect();
-        let request_stream_id_1 = make_request(&mut client, false);
+        let request_stream_id_1 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_1, 0);
-        let request_stream_id_2 = make_request(&mut client, false);
+        let request_stream_id_2 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_2, 4);
-        let request_stream_id_3 = make_request(&mut client, false);
+        let request_stream_id_3 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_3, 8);
 
         // First send a Goaway frame with a smaller number
@@ -3278,6 +3294,7 @@ mod tests {
         // the peer settings already.
         server.check_control_qpack_request_streams_resumption(
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
+            EXPECTED_REQUEST_HEADER_FRAME,
             false,
         );
 
@@ -3296,7 +3313,11 @@ mod tests {
     fn zero_rtt_send_request() {
         let (mut client, mut server) = start_with_0rtt();
 
-        let request_stream_id = make_request(&mut client, true);
+        let request_stream_id = make_request(
+            &mut client,
+            true,
+            &[(String::from("myheaders"), String::from("myvalue"))],
+        );
         assert_eq!(request_stream_id, 0);
 
         let out = client.process(None, now());
@@ -3310,7 +3331,8 @@ mod tests {
         // Also qpack encoder stream will send "change capacity" instruction because it has
         // the peer settings already.
         server.check_control_qpack_request_streams_resumption(
-            ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
+            ENCODER_STREAM_DATA_WITH_CAP_INST_AND_ENCODING_INST,
+            EXPECTED_REQUEST_HEADER_FRAME_VERSION2,
             true,
         );
 
@@ -3374,7 +3396,7 @@ mod tests {
         assert!(client_hs.as_dgram_ref().is_some());
 
         // Create a request
-        let request_stream_id = make_request(&mut client, false);
+        let request_stream_id = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id, 0);
 
         let client_0rtt = client.process(None, now());
@@ -3405,7 +3427,7 @@ mod tests {
         TestServer::new_with_conn(server).check_client_control_qpack_streams_no_resumption();
 
         // Check that we can send a request and that the stream_id starts again from 0.
-        assert_eq!(make_request(&mut client, false), 0);
+        assert_eq!(make_request(&mut client, false, &[]), 0);
     }
 
     // Connect to a server, get token and reconnect using 0-rtt. Seerver sends new Settings.
@@ -3437,7 +3459,11 @@ mod tests {
         // Check that control and qpack streams anda SETTINGS frame are received.
         // Also qpack encoder stream will send "change capacity" instruction because it has
         // the peer settings already.
-        server.check_control_qpack_request_streams_resumption(expected_encoder_stream_data, false);
+        server.check_control_qpack_request_streams_resumption(
+            expected_encoder_stream_data,
+            EXPECTED_REQUEST_HEADER_FRAME,
+            false,
+        );
 
         assert_eq!(*server.conn.state(), State::Handshaking);
         let out = client.process(out.dgram(), now());
@@ -4022,7 +4048,7 @@ mod tests {
         let qpack_pkt1 = server.conn.process(None, now());
         // delay delivery of this packet.
 
-        let request_stream_id = make_request(&mut client, true);
+        let request_stream_id = make_request(&mut client, true, &[]);
         let out = client.process(None, now());
         let _ = server.conn.process(out.dgram(), now());
 
@@ -4399,7 +4425,7 @@ mod tests {
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id, 5);
 
         // make a second request.
-        let request_stream_id_2 = make_request(&mut client, false);
+        let request_stream_id_2 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_2, 4);
 
         let out = client.process(None, now());
@@ -4435,7 +4461,7 @@ mod tests {
         send_push_data_and_exchange_packets(&mut client, &mut server, 5, true);
 
         // make a second request.
-        let request_stream_id_2 = make_request(&mut client, false);
+        let request_stream_id_2 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_2, 4);
 
         let out = client.process(None, now());
@@ -4483,7 +4509,7 @@ mod tests {
         );
 
         // make a second request.
-        let request_stream_id_2 = make_request(&mut client, false);
+        let request_stream_id_2 = make_request(&mut client, false, &[]);
         assert_eq!(request_stream_id_2, 4);
 
         let out = client.process(None, now());
