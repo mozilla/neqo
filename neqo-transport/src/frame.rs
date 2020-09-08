@@ -994,16 +994,19 @@ mod tests {
     }
 
     #[test]
-    fn connection_close() {
-        let mut f = Frame::ConnectionClose {
+    fn connection_close_transport() {
+        let f = Frame::ConnectionClose {
             error_code: CloseError::Transport(0x5678),
             frame_type: 0x1234,
             reason_phrase: vec![0x01, 0x02, 0x03],
         };
 
         enc_dec(&f, "1c80005678523403010203");
+    }
 
-        f = Frame::ConnectionClose {
+    #[test]
+    fn connection_close_application() {
+        let f = Frame::ConnectionClose {
             error_code: CloseError::Application(0x5678),
             frame_type: 0,
             reason_phrase: vec![0x01, 0x02, 0x03],
