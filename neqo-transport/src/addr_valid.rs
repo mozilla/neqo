@@ -26,10 +26,6 @@ const TOKEN_IDENTIFIER_RETRY: &[u8] = &[0x52, 0x65, 0x74, 0x72, 0x79];
 /// A prefix on NEW_TOKEN tokens, that is maximally Hamming distant from NEW_TOKEN.
 const TOKEN_IDENTIFIER_NEW_TOKEN: &[u8] = &[0xad, 0x9a, 0x8b, 0x8d, 0x86];
 
-/// The maximum number of tokens we'll save from NEW_TOKEN.
-/// This should be the same as the value of MAX_TICKETS in neqo-crypto.
-const MAX_NEW_TOKEN: usize = 4;
-
 /// `ValidateAddress` determines what sort of address validation is performed.
 /// In short, this determines when a Retry packet is sent.
 #[derive(Debug, PartialEq, Eq)]
@@ -263,23 +259,23 @@ impl AddressValidation {
 }
 
 pub enum NewTokenState {
-    Client(Vec<Vec<u8>>),
+    Client(Option<Vec<u8>>),
     Server(NewTokenSender),
 }
 
 impl NewTokenState {
     pub fn new(role: Role) -> Self {
         match role {
-            Role::Client => Self::Client(Vec::new()),
+            Role::Client => Self::Client(None),
             Role::Server => Self::Server(NewTokenSender::default()),
         }
     }
 
     /// If this is a client, take a token if there is one.
     /// If this is a server, panic.
-    pub fn take_token(&mut self) -> Option<Vec<u8>> {
-        if let Self::Client(ref mut tokens) = self {
-            tokens.pop()
+    pub fn token(&mut self) -> Option<Vec<u8>> {
+        if let Self::Client(token) = self {
+            token.clone()
         } else {
             unreachable!();
         }
@@ -288,18 +284,8 @@ impl NewTokenState {
     /// If this is a client, save a token.
     /// If this is a server, panic.
     pub fn save_token(&mut self, token: Vec<u8>) {
-        if let Self::Client(ref mut tokens) = self {
-            for t in tokens.iter().rev() {
-                if t == &token {
-                    qinfo!("NewTokenState discarding duplicate NEW_TOKEN");
-                    return;
-                }
-            }
-
-            if tokens.len() >= MAX_NEW_TOKEN {
-                tokens.remove(0);
-            }
-            tokens.push(token);
+        if let Self::Client(saved_token) = self {
+            *saved_token = Some(token);
         } else {
             unreachable!();
         }

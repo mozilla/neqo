@@ -5,8 +5,8 @@
 // except according to those terms.
 
 use super::{
-    connect, connect_with_rtt, default_client, default_server, exchange_ticket, send_something,
-    AT_LEAST_PTO,
+    connect, connect_with_rtt, default_client, default_server, exchange_ticket, get_tokens,
+    send_something, AT_LEAST_PTO,
 };
 use crate::addr_valid::{AddressValidation, ValidateAddress};
 
@@ -108,13 +108,12 @@ fn two_tickets() {
     let pkt = send_something(&mut server, now());
 
     client.process_input(pkt, now());
-    let token1 = client.resumption_token().unwrap().token;
-    let token2 = client.resumption_token().unwrap().token;
-    assert_ne!(token1, token2);
-    assert!(client.resumption_token().is_none());
+    let tokens = get_tokens(&mut client);
+    assert_eq!(tokens.len(), 2);
+    assert_ne!(tokens[0].token, tokens[1].token);
 
-    can_resume(&token1, false);
-    can_resume(&token2, false);
+    can_resume(&tokens[0].token, false);
+    can_resume(&tokens[1].token, false);
 }
 
 #[test]
@@ -132,11 +131,17 @@ fn two_tickets_and_tokens() {
     let pkt = send_something(&mut server, now());
 
     client.process_input(pkt, now());
-    let token1 = client.resumption_token().unwrap().token;
-    let token2 = client.resumption_token().unwrap().token;
-    assert_ne!(token1, token2);
-    assert!(client.resumption_token().is_none());
+    let tokens = get_tokens(&mut client);
+    assert_eq!(tokens.len(), 4);
+    assert_ne!(tokens[0].token, tokens[1].token);
+    assert_ne!(tokens[0].token, tokens[2].token);
+    assert_ne!(tokens[0].token, tokens[3].token);
+    assert_ne!(tokens[1].token, tokens[2].token);
+    assert_ne!(tokens[1].token, tokens[3].token);
+    assert_ne!(tokens[2].token, tokens[3].token);
 
-    can_resume(&token1, true);
-    can_resume(&token2, true);
+    can_resume(&tokens[0].token, false);
+    can_resume(&tokens[1].token, false);
+    can_resume(&tokens[2].token, true);
+    can_resume(&tokens[3].token, true);
 }

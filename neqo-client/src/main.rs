@@ -668,7 +668,7 @@ mod old {
     use super::{qlog_new, Res};
 
     use neqo_common::Datagram;
-    use neqo_crypto::AuthenticationStatus;
+    use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, Error, FixedConnectionIdManager, Output, QuicVersion, State,
         StreamType,
@@ -681,6 +681,7 @@ mod old {
         url_queue: VecDeque<Url>,
         all_paths: Vec<PathBuf>,
         args: &'b Args,
+        token: Option<ResumptionToken>,
     }
 
     impl<'b> HandlerOld<'b> {
@@ -808,6 +809,9 @@ mod old {
                         println!("{:?}", event);
                         self.download_urls(client);
                     }
+                    ConnectionEvent::ResumptionToken(token) => {
+                        self.token = Some(token);
+                    }
                     _ => {
                         println!("Unhandled event {:?}", event);
                     }
@@ -925,12 +929,13 @@ mod old {
             url_queue: VecDeque::from(urls.to_vec()),
             all_paths: Vec::new(),
             args: &args,
+            token: None,
         };
 
         process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
         Ok(if args.resume {
-            client.resumption_token().map(|t| t.token)
+            h.token.map(|t| t.token)
         } else {
             None
         })

@@ -22,7 +22,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use neqo_common::{qdebug, qtrace, Datagram, Decoder};
-use neqo_crypto::{AllowZeroRtt, AuthenticationStatus};
+use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{self, fixture_init, loopback, now};
 
 // All the tests.
@@ -149,7 +149,7 @@ fn exchange_ticket(client: &mut Connection, server: &mut Connection, now: Instan
     assert!(ticket.is_some());
     client.process_input(ticket.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
-    client.resumption_token().expect("should have token").token
+    get_last_token(client).expect("should have token").token
 }
 
 /// Connect with an RTT and then force both peers to be idle.
@@ -318,4 +318,27 @@ fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
         Datagram::new(d.source(), d.destination(), a),
         b.map(|b| Datagram::new(d.source(), d.destination(), b)),
     )
+}
+
+fn get_tokens(client: &mut Connection) -> Vec<ResumptionToken> {
+    client
+        .events()
+        .filter_map(|e| {
+            if let ConnectionEvent::ResumptionToken(token) = e {
+                Some(token)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn get_last_token(client: &mut Connection) -> Option<ResumptionToken> {
+    client.events().fold(None, |res, e| {
+        if let ConnectionEvent::ResumptionToken(token) = e {
+            Some(token)
+        } else {
+            res
+        }
+    })
 }

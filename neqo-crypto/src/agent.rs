@@ -686,7 +686,7 @@ impl ::std::fmt::Display for SecretAgent {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub struct ResumptionToken {
     pub token: Vec<u8>,
     pub expiration_time: i64,

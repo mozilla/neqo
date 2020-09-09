@@ -151,24 +151,16 @@ impl Http3Client {
         &self.conn.odcid().expect("Client always has odcid")
     }
 
-    /// Returns a resumption token if present.
     /// A resumption token encodes transport and settings parameter as well.
-    #[must_use]
-    pub fn resumption_token(&mut self) -> Option<ResumptionToken> {
-        if let Some(token) = self.conn.resumption_token() {
-            if let Some(settings) = self.base_handler.get_settings() {
-                let mut enc = Encoder::default();
-                settings.encode_frame_contents(&mut enc);
-                enc.encode(&token.token[..]);
-                Some(ResumptionToken {
-                    token: enc.into(),
-                    expiration_time: token.expiration_time,
-                })
-            } else {
-                None
-            }
-        } else {
-            None
+    fn create_resumption_token(&mut self, token: ResumptionToken) {
+        if let Some(settings) = self.base_handler.get_settings() {
+            let mut enc = Encoder::default();
+            settings.encode_frame_contents(&mut enc);
+            enc.encode(&token.token[..]);
+            self.events.resumption_token(ResumptionToken {
+                token: enc.into(),
+                expiration_time: token.expiration_time,
+            });
         }
     }
 
@@ -568,6 +560,9 @@ impl Http3Client {
                     self.base_handler.handle_zero_rtt_rejected()?;
                     self.events.zero_rtt_rejected();
                     self.push_handler.borrow_mut().handle_zero_rtt_rejected();
+                }
+                ConnectionEvent::ResumptionToken(token) => {
+                    self.create_resumption_token(token);
                 }
             }
         }
@@ -3258,7 +3253,17 @@ mod tests {
         assert!(out.as_dgram_ref().is_some());
         client.process_input(out.dgram().unwrap(), now());
         assert_eq!(client.state(), Http3State::Connected);
-        client.resumption_token().expect("should have token").token
+        client
+            .events()
+            .find_map(|e| {
+                if let Http3ClientEvent::ResumptionToken(token) = e {
+                    Some(token)
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+            .token
     }
 
     fn start_with_0rtt() -> (Http3Client, TestServer) {
