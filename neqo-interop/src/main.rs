@@ -623,7 +623,7 @@ fn test_h3_rz(
         path: String::from("/"),
     };
 
-    hc.h3.enable_resumption(Instant::now(), &res_token).unwrap();
+    hc.h3.enable_resumption(Instant::now(), res_token).unwrap();
 
     if *test == Test::Z {
         println!("Test 0RTT");

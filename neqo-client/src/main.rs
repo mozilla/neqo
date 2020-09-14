@@ -12,7 +12,7 @@ use qlog::QlogStreamer;
 use neqo_common::{self as common, hex, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
-    init, AuthenticationStatus, Cipher,
+    init, AuthenticationStatus, Cipher, ResumptionToken,
 };
 use neqo_http3::{
     self, Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Output,
@@ -633,7 +633,7 @@ fn main() -> Res<()> {
                 token,
             )?;
         } else {
-            let mut token: Option<Vec<u8>> = None;
+            let mut token: Option<ResumptionToken> = None;
 
             for url in urls {
                 token = old::old_client(
@@ -668,7 +668,7 @@ mod old {
     use super::{qlog_new, Res};
 
     use neqo_common::Datagram;
-    use neqo_crypto::AuthenticationStatus;
+    use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, Error, FixedConnectionIdManager, Output, QuicVersion, State,
         StreamType,
@@ -892,8 +892,8 @@ mod old {
         remote_addr: SocketAddr,
         origin: &str,
         urls: &[Url],
-        token: Option<Vec<u8>>,
-    ) -> Res<Option<Vec<u8>>> {
+        token: Option<ResumptionToken>,
+    ) -> Res<Option<ResumptionToken>> {
         let (quic_protocol, alpn) = match args.alpn.as_str() {
             "hq-27" => (QuicVersion::Draft27, "hq-27"),
             "hq-28" => (QuicVersion::Draft28, "hq-28"),

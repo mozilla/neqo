@@ -343,7 +343,7 @@ fn reorder_05rtt_with_0rtt() {
     client.process_input(ticket, now);
     let token = client.resumption_token().unwrap();
     let mut client = default_client();
-    client.enable_resumption(now, &token[..]).unwrap();
+    client.enable_resumption(now, token).unwrap();
     let mut server = default_server();
 
     // Send ClientHello and some 0-RTT.
