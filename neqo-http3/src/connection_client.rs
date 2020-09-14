@@ -695,8 +695,8 @@ mod tests {
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
         Http3Parameters, Http3State, QpackSettings, Rc, RefCell, StreamType,
     };
-    use crate::hframe::{HFrame, H3_RESERVED_FRAME_TYPES};
-    use crate::settings::{HSetting, HSettingType};
+    use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
+    use crate::settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS};
     use neqo_common::{Datagram, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
@@ -5467,6 +5467,28 @@ mod tests {
             test_wrong_frame_on_control_stream(&enc);
             test_wrong_frame_on_push_stream(&enc);
             test_wrong_frame_on_request_stream(&enc);
+        }
+    }
+
+    #[test]
+    fn send_reserved_settings() {
+        for s in H3_RESERVED_SETTINGS {
+            let (mut client, mut server) = connect_only_transport();
+            let control_stream = server.conn.stream_create(StreamType::UniDi).unwrap();
+            // Send the control stream type(0x0).
+            let _ = server.conn.stream_send(control_stream, CONTROL_STREAM_TYPE);
+            // Create a settings frame of length 2.
+            let mut enc = Encoder::default();
+            enc.encode_varint(H3_FRAME_TYPE_SETTINGS);
+            enc.encode_varint(2_u64);
+            // The settings frame contains a reserved settings type and some value (0x1).
+            enc.encode_varint(*s);
+            enc.encode_varint(1_u64);
+            let sent = server.conn.stream_send(control_stream, &enc);
+            assert_eq!(sent, Ok(4));
+            let out = server.conn.process(None, now());
+            client.process(out.dgram(), now());
+            assert_closed(&client, &Error::HttpSettings);
         }
     }
 }
