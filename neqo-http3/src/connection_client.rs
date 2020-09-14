@@ -17,7 +17,7 @@ use crate::RecvMessageEvents;
 use neqo_common::{
     hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Decoder, Encoder, Role,
 };
-use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, SecretAgentInfo};
+use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::{stats::Stats, QpackSettings};
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdManager, Output, QuicVersion,
@@ -154,13 +154,13 @@ impl Http3Client {
     /// Returns a resumption token if present.
     /// A resumption token encodes transport and settings parameter as well.
     #[must_use]
-    pub fn resumption_token(&mut self) -> Option<Vec<u8>> {
+    pub fn resumption_token(&mut self) -> Option<ResumptionToken> {
         if let Some(token) = self.conn.resumption_token() {
             if let Some(settings) = self.base_handler.get_settings() {
                 let mut enc = Encoder::default();
                 settings.encode_frame_contents(&mut enc);
-                enc.encode(&token[..]);
-                Some(enc.into())
+                enc.encode(token.as_ref());
+                Some(ResumptionToken::new(enc.into(), token.expiration_time()))
             } else {
                 None
             }
@@ -172,11 +172,11 @@ impl Http3Client {
     /// This may be call if an application has a resumption token. This must be called before connection starts.
     /// # Errors
     /// An error is return if token cannot be decoded or a connection is is a wrong state.
-    pub fn enable_resumption(&mut self, now: Instant, token: &[u8]) -> Res<()> {
+    pub fn enable_resumption(&mut self, now: Instant, token: impl AsRef<[u8]>) -> Res<()> {
         if self.base_handler.state != Http3State::Initializing {
             return Err(Error::InvalidState);
         }
-        let mut dec = Decoder::from(token);
+        let mut dec = Decoder::from(token.as_ref());
         let settings_slice = match dec.decode_vvec() {
             Some(v) => v,
             None => return Err(Error::InvalidResumptionToken),
@@ -698,7 +698,7 @@ mod tests {
     use crate::hframe::HFrame;
     use crate::settings::{HSetting, HSettingType};
     use neqo_common::{Datagram, Encoder};
-    use neqo_crypto::{AllowZeroRtt, AntiReplay};
+    use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
         CloseError, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State,
@@ -3249,7 +3249,7 @@ mod tests {
         assert!(recv_header);
     }
 
-    fn exchange_token(client: &mut Http3Client, server: &mut Connection) -> Vec<u8> {
+    fn exchange_token(client: &mut Http3Client, server: &mut Connection) -> ResumptionToken {
         server.send_ticket(now(), &[]).expect("can send ticket");
         let out = server.process_output(now());
         assert!(out.as_dgram_ref().is_some());

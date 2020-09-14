@@ -13,7 +13,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf,
     hp::HpKey,
-    AllowZeroRtt, AuthenticationStatus,
+    AllowZeroRtt, AuthenticationStatus, ResumptionToken,
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
@@ -274,7 +274,7 @@ fn retry_expired() {
     assert!(dgram.is_none());
 }
 
-fn get_ticket(server: &mut Server) -> Vec<u8> {
+fn get_ticket(server: &mut Server) -> ResumptionToken {
     let mut client = default_client();
     let mut server_conn = connect(&mut client, server);
 
