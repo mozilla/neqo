@@ -13,6 +13,8 @@ use std::fmt::{self, Debug};
 use std::ops::Deref;
 use std::rc::Rc;
 
+pub(crate) const MAX_PTO_COUNTS: usize = 10;
+
 /// Connection statistics
 #[derive(Default, Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -40,6 +42,10 @@ pub struct Stats {
 
     /// Whether the connection was resumed successfully.
     pub resumed: bool,
+
+    /// Count PTOs. Single PTOs, 2 PTOs in a row, 3 PTOs in row, etc. are counted
+    /// separately.
+    pub pto_counts: [usize; MAX_PTO_COUNTS],
 }
 
 impl Stats {
@@ -55,6 +61,23 @@ impl Stats {
             reason.as_ref(),
             self.dropped_rx
         )
+    }
+
+    pub fn add_pto_count(&mut self, count: usize) {
+        if count > 0 {
+            let inx = if count < MAX_PTO_COUNTS {
+                count - 1
+            } else {
+                MAX_PTO_COUNTS - 1
+            };
+            if inx > 0 {
+                // if this is a second, third, etc. PTO in a row remove the count for the previous
+                // one. 
+                debug_assert!(self.pto_counts[inx - 1] > 0);
+                self.pto_counts[inx - 1] -= 1;
+            }
+            self.pto_counts[inx] += 1;
+        }
     }
 }
 

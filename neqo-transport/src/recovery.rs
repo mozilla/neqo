@@ -552,8 +552,9 @@ struct PtoState {
 }
 
 impl PtoState {
-    pub fn new(space: PNSpace, probe: PNSpaceSet) -> Self {
+    pub fn new(space: PNSpace, probe: PNSpaceSet, stats: &mut Stats) -> Self {
         debug_assert!(probe[space]);
+        stats.add_pto_count(1);
         Self {
             space,
             count: 1,
@@ -562,10 +563,11 @@ impl PtoState {
         }
     }
 
-    pub fn pto(&mut self, space: PNSpace, probe: PNSpaceSet) {
+    pub fn pto(&mut self, space: PNSpace, probe: PNSpaceSet, stats: &mut Stats) {
         debug_assert!(probe[space]);
         self.space = space;
         self.count += 1;
+        stats.add_pto_count(self.count);
         self.packets = PTO_PACKET_COUNT;
         self.probe = probe;
     }
@@ -811,6 +813,7 @@ impl LossRecovery {
         // The spec says that clients should not do this until confirming that
         // the server has completed address validation, but ignore that.
         self.pto_state = None;
+
         if space == PNSpace::Handshake {
             self.confirmed(now);
         }
@@ -904,9 +907,13 @@ impl LossRecovery {
 
     fn fire_pto(&mut self, pn_space: PNSpace, allow_probes: PNSpaceSet) {
         if let Some(st) = &mut self.pto_state {
-            st.pto(pn_space, allow_probes);
+            st.pto(pn_space, allow_probes, &mut *self.stats.borrow_mut());
         } else {
-            self.pto_state = Some(PtoState::new(pn_space, allow_probes));
+            self.pto_state = Some(PtoState::new(
+                pn_space,
+                allow_probes,
+                &mut *self.stats.borrow_mut(),
+            ));
         }
         qlog::metrics_updated(
             &mut self.qlog,
