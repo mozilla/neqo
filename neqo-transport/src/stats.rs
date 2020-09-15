@@ -13,7 +13,7 @@ use std::fmt::{self, Debug};
 use std::ops::Deref;
 use std::rc::Rc;
 
-pub(crate) const MAX_PTO_COUNTS: usize = 10;
+pub(crate) const MAX_PTO_COUNTS: usize = 16;
 
 /// Connection statistics
 #[derive(Default, Clone)]
@@ -65,18 +65,15 @@ impl Stats {
 
     pub fn add_pto_count(&mut self, count: usize) {
         if count > 0 {
-            let inx = if count < MAX_PTO_COUNTS {
-                count - 1
-            } else {
-                MAX_PTO_COUNTS - 1
-            };
-            if inx > 0 {
-                // if this is a second, third, etc. PTO in a row remove the count for the previous
-                // one. 
-                debug_assert!(self.pto_counts[inx - 1] > 0);
-                self.pto_counts[inx - 1] -= 1;
+            if count >= MAX_PTO_COUNTS {
+                // We can't move this count any further, so stop.
+                return;
             }
-            self.pto_counts[inx] += 1;
+            self.pto_counts[count - 1] += 1;
+            if count > 1 {
+                debug_assert!(self.pto_counts[count - 2] > 0);
+                self.pto_counts[count - 2] -= 1;
+            }
         }
     }
 }

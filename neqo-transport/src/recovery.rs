@@ -552,9 +552,8 @@ struct PtoState {
 }
 
 impl PtoState {
-    pub fn new(space: PNSpace, probe: PNSpaceSet, stats: &mut Stats) -> Self {
+    pub fn new(space: PNSpace, probe: PNSpaceSet) -> Self {
         debug_assert!(probe[space]);
-        stats.add_pto_count(1);
         Self {
             space,
             count: 1,
@@ -563,17 +562,20 @@ impl PtoState {
         }
     }
 
-    pub fn pto(&mut self, space: PNSpace, probe: PNSpaceSet, stats: &mut Stats) {
+    pub fn pto(&mut self, space: PNSpace, probe: PNSpaceSet) {
         debug_assert!(probe[space]);
         self.space = space;
         self.count += 1;
-        stats.add_pto_count(self.count);
         self.packets = PTO_PACKET_COUNT;
         self.probe = probe;
     }
 
     pub fn count(&self) -> usize {
         self.count
+    }
+
+    pub fn count_pto(&self, stats: &mut Stats) {
+        stats.add_pto_count(self.count);
     }
 
     /// Generate a sending profile, indicating what space it should be from.
@@ -907,14 +909,16 @@ impl LossRecovery {
 
     fn fire_pto(&mut self, pn_space: PNSpace, allow_probes: PNSpaceSet) {
         if let Some(st) = &mut self.pto_state {
-            st.pto(pn_space, allow_probes, &mut *self.stats.borrow_mut());
+            st.pto(pn_space, allow_probes);
         } else {
-            self.pto_state = Some(PtoState::new(
-                pn_space,
-                allow_probes,
-                &mut *self.stats.borrow_mut(),
-            ));
+            self.pto_state = Some(PtoState::new(pn_space, allow_probes));
         }
+
+        self.pto_state
+            .as_mut()
+            .unwrap()
+            .count_pto(&mut *self.stats.borrow_mut());
+
         qlog::metrics_updated(
             &mut self.qlog,
             &[QlogMetric::PtoCount(
