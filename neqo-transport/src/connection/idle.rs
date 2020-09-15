@@ -78,7 +78,7 @@ impl IdleTimeout {
     }
 
     pub fn on_packet_received(&mut self, now: Instant) {
-        // Only update if this would extend the idle timeout.
+        // Only update if this doesn't rewind the idle timeout.
         // We sometimes process packets after caching them, which uses
         // the time the packet was received.  That could be in the past.
         let update = match self.state {
