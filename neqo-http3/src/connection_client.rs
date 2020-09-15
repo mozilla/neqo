@@ -695,7 +695,7 @@ mod tests {
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
         Http3Parameters, Http3State, QpackSettings, Rc, RefCell, StreamType,
     };
-    use crate::hframe::HFrame;
+    use crate::hframe::{HFrame, H3_RESERVED_FRAME_TYPES};
     use crate::settings::{HSetting, HSettingType};
     use neqo_common::{Datagram, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
@@ -5457,5 +5457,16 @@ mod tests {
             }
         }
         assert_eq!(count_responses, 2);
+    }
+
+    #[test]
+    fn reserved_frames() {
+        for f in H3_RESERVED_FRAME_TYPES {
+            let mut enc = Encoder::default();
+            enc.encode_varint(*f);
+            test_wrong_frame_on_control_stream(&enc);
+            test_wrong_frame_on_push_stream(&enc);
+            test_wrong_frame_on_request_stream(&enc);
+        }
     }
 }

@@ -25,6 +25,8 @@ const H3_FRAME_TYPE_PUSH_PROMISE: HFrameType = 0x5;
 const H3_FRAME_TYPE_GOAWAY: HFrameType = 0x7;
 const H3_FRAME_TYPE_MAX_PUSH_ID: HFrameType = 0xd;
 
+pub const H3_RESERVED_FRAME_TYPES: &[HFrameType] = &[0x2, 0x6, 0x8, 0x9];
+
 const MAX_READ_SIZE: usize = 4096;
 // data for DATA frame is not read into HFrame::Data.
 #[derive(PartialEq, Debug)]
@@ -222,6 +224,9 @@ impl HFrameReader {
                 if let Some(v) = decoder.consume(&mut input) {
                     qtrace!("HFrameReader::receive: read frame type {}", v);
                     self.hframe_type = v;
+                    if H3_RESERVED_FRAME_TYPES.contains(&self.hframe_type) {
+                        return Err(Error::HttpFrameUnexpected);
+                    }
                     self.state = HFrameReaderState::GetLength {
                         decoder: IncrementalDecoderUint::default(),
                     };
