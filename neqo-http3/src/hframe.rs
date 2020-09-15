@@ -20,7 +20,7 @@ pub(crate) type HFrameType = u64;
 pub(crate) const H3_FRAME_TYPE_DATA: HFrameType = 0x0;
 pub(crate) const H3_FRAME_TYPE_HEADERS: HFrameType = 0x1;
 const H3_FRAME_TYPE_CANCEL_PUSH: HFrameType = 0x3;
-const H3_FRAME_TYPE_SETTINGS: HFrameType = 0x4;
+pub(crate) const H3_FRAME_TYPE_SETTINGS: HFrameType = 0x4;
 const H3_FRAME_TYPE_PUSH_PROMISE: HFrameType = 0x5;
 const H3_FRAME_TYPE_GOAWAY: HFrameType = 0x7;
 const H3_FRAME_TYPE_MAX_PUSH_ID: HFrameType = 0xd;
@@ -317,9 +317,13 @@ impl HFrameReader {
             },
             H3_FRAME_TYPE_SETTINGS => {
                 let mut settings = HSettings::default();
-                settings
-                    .decode_frame_contents(&mut dec)
-                    .map_err(|_| Error::HttpFrame)?;
+                settings.decode_frame_contents(&mut dec).map_err(|e| {
+                    if e == Error::HttpSettings {
+                        e
+                    } else {
+                        Error::HttpFrame
+                    }
+                })?;
                 HFrame::Settings { settings }
             }
             H3_FRAME_TYPE_PUSH_PROMISE => HFrame::PushPromise {
