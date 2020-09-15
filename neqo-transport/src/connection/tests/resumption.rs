@@ -5,8 +5,8 @@
 // except according to those terms.
 
 use super::{
-    connect, connect_with_rtt, default_client, default_server, exchange_ticket, send_something,
-    AT_LEAST_PTO,
+    connect, connect_with_rtt, default_client, default_server, exchange_ticket, get_tokens,
+    send_something, AT_LEAST_PTO,
 };
 use crate::addr_valid::{AddressValidation, ValidateAddress};
 
@@ -108,10 +108,16 @@ fn two_tickets() {
     let pkt = send_something(&mut server, now());
 
     client.process_input(pkt, now());
-    let token1 = client.resumption_token().unwrap();
-    let token2 = client.resumption_token().unwrap();
+    // Increase the current time with a large number to trigger
+    // the resumption_token_timer before calling get_tokens.
+    let mut now = now() + Duration::from_millis(140);
+    let token1 = get_tokens(&mut client, Some(now)).pop().unwrap();
+    now += Duration::from_millis(140);
+    let token2 = get_tokens(&mut client, Some(now)).pop().unwrap();
+    // There is no more tokens.
+    now += Duration::from_millis(140);
+    assert_eq!(get_tokens(&mut client, Some(now)).len(), 0);
     assert_ne!(token1.as_ref(), token2.as_ref());
-    assert!(client.resumption_token().is_none());
 
     can_resume(&token1, false);
     can_resume(&token2, false);
@@ -132,10 +138,11 @@ fn two_tickets_and_tokens() {
     let pkt = send_something(&mut server, now());
 
     client.process_input(pkt, now());
-    let token1 = client.resumption_token().unwrap();
-    let token2 = client.resumption_token().unwrap();
+    let mut tokens = get_tokens(&mut client, None);
+    assert_eq!(tokens.len(), 2);
+    let token1 = tokens.pop().unwrap();
+    let token2 = tokens.pop().unwrap();
     assert_ne!(token1.as_ref(), token2.as_ref());
-    assert!(client.resumption_token().is_none());
 
     can_resume(&token1, true);
     can_resume(&token2, true);

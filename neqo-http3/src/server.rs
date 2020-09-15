@@ -973,7 +973,13 @@ mod tests {
     /// The second should always resume, but it might not always accept early data.
     fn zero_rtt_with_settings(settings: QpackSettings, zero_rtt: &ZeroRttState) {
         let (_, mut client) = connect();
-        let token = client.resumption_token();
+        let token = client.events().find_map(|e| {
+            if let ConnectionEvent::ResumptionToken(token) = e {
+                Some(token)
+            } else {
+                None
+            }
+        });
         assert!(token.is_some());
 
         let mut server = create_server(settings);

@@ -17,8 +17,8 @@ use neqo_crypto::{
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    Connection, ConnectionError, Error, FixedConnectionIdManager, Output, QuicVersion, State,
-    StreamType,
+    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output,
+    QuicVersion, State, StreamType,
 };
 use test_fixture::{self, assertions, default_client, now};
 
@@ -284,7 +284,16 @@ fn get_ticket(server: &mut Server) -> ResumptionToken {
 
     // Calling active_connections clears the set of active connections.
     assert_eq!(server.active_connections().len(), 1);
-    client.resumption_token().unwrap()
+    client
+        .events()
+        .fold(None, |res, e| {
+            if let ConnectionEvent::ResumptionToken(token) = e {
+                Some(token)
+            } else {
+                res
+            }
+        })
+        .unwrap()
 }
 
 // Attempt a retry with 0-RTT, and have 0-RTT packets sent with the second ClientHello.

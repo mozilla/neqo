@@ -153,7 +153,11 @@ fn exchange_ticket(
     assert!(ticket.is_some());
     client.process_input(ticket.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
-    client.resumption_token().expect("should have token")
+    // Increase the current time with a large number to trigger
+    // the resumption_token_timer.
+    get_tokens(client, Some(now + Duration::from_millis(1050)))
+        .pop()
+        .expect("should have token")
 }
 
 /// Connect with an RTT and then force both peers to be idle.
@@ -322,4 +326,20 @@ fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
         Datagram::new(d.source(), d.destination(), a),
         b.map(|b| Datagram::new(d.source(), d.destination(), b)),
     )
+}
+
+fn get_tokens(client: &mut Connection, now: Option<Instant>) -> Vec<ResumptionToken> {
+    if let Some(t) = now {
+        let _ = client.process_output(t);
+    }
+    client
+        .events()
+        .filter_map(|e| {
+            if let ConnectionEvent::ResumptionToken(token) = e {
+                Some(token)
+            } else {
+                None
+            }
+        })
+        .collect()
 }

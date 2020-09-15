@@ -24,8 +24,8 @@ use neqo_common::{
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, HandshakeState, ResumptionToken,
-    SecretAgentInfo, Server, ZeroRttChecker,
+    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, HandshakeState, SecretAgentInfo,
+    Server, ZeroRttChecker,
 };
 
 use crate::addr_valid::{AddressValidation, NewTokenState};
@@ -267,7 +267,7 @@ pub struct Connection {
     new_token: NewTokenState,
     stats: StatsCell,
     qlog: NeqoQlog,
-
+    release_resumption_token_timer: Option<Instant>,
     quic_version: QuicVersion,
 }
 
@@ -402,6 +402,7 @@ impl Connection {
             new_token: NewTokenState::new(role),
             stats,
             qlog: NeqoQlog::disabled(),
+            release_resumption_token_timer: None,
             quic_version,
         };
         c.stats.borrow_mut().init(format!("{}", c));
@@ -495,36 +496,53 @@ impl Connection {
         Ok(())
     }
 
-    /// Access the latest resumption token on the connection.
-    pub fn resumption_token(&mut self) -> Option<ResumptionToken> {
-        if self.state < State::Connected {
-            return None;
+    fn create_resumption_token(&mut self, now: Instant) {
+        if self.role == Role::Server
+            || self.state < State::Connected
+            || !self.crypto.has_resumption_token()
+        {
+            return;
         }
-        match self.crypto.tls {
-            Agent::Client(ref mut c) => match c.resumption_token() {
-                Some(ref t) => {
-                    qtrace!("TLS token {}", hex(t.as_ref()));
-                    let mut enc = Encoder::default();
-                    let rtt = self.loss_recovery.rtt();
-                    let rtt = u64::try_from(rtt.as_millis()).unwrap_or(0);
-                    enc.encode_varint(rtt);
-                    enc.encode_vvec_with(|enc_inner| {
-                        self.tps
-                            .borrow()
-                            .remote
-                            .as_ref()
-                            .expect("should have transport parameters")
-                            .encode(enc_inner);
-                    });
-                    let token = self.new_token.take_token();
-                    enc.encode_vvec(token.as_ref().map_or(&[], |t| &t[..]));
-                    enc.encode(t.as_ref());
-                    qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
-                    Some(ResumptionToken::new(enc.into(), t.expiration_time()))
-                }
-                None => None,
-            },
-            Agent::Server(_) => None,
+
+        // If a NEW_TOKEN frame has not be received yet wait for it for a short time.
+        if !self.new_token.has_token() {
+            if self.release_resumption_token_timer.is_none() {
+                self.release_resumption_token_timer =
+                    Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData));
+                return;
+            }
+            if self.release_resumption_token_timer.unwrap() > now {
+                return;
+            }
+        }
+
+        // Create reumpion tokens:
+        //  1) create only one if we have not receiveed a new_token,
+        //  2) otherwise create as many as possible that contain ticket and token.
+        loop {
+            self.crypto.create_resumption_token(
+                &mut self.new_token,
+                self.tps
+                    .borrow()
+                    .remote
+                    .as_ref()
+                    .expect("should have transport parameters"),
+                &self.events,
+                u64::try_from(self.loss_recovery.rtt().as_millis()).unwrap_or(0),
+            );
+            if !self.new_token.has_token() || !self.crypto.has_resumption_token() {
+                break;
+            }
+        }
+
+        if self.crypto.has_resumption_token() {
+            // If we have more tickets wait for more tokens.
+            // We do not remember when tickets have arrived, therefore we release tokens
+            // without new_token slowly the most one every 3 * PTO.
+            self.release_resumption_token_timer =
+                Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData));
+        } else {
+            self.release_resumption_token_timer = None;
         }
     }
 
@@ -742,6 +760,10 @@ impl Connection {
         let lost = self.loss_recovery.timeout(now);
         self.handle_lost_packets(&lost);
         qlog::packets_lost(&mut self.qlog, &lost);
+
+        if self.release_resumption_token_timer.is_some() {
+            self.create_resumption_token(now);
+        }
     }
 
     /// Call in to process activity on the connection. Either new packets have
@@ -1832,6 +1854,7 @@ impl Connection {
                     let read = self.crypto.streams.read_to_end(space, &mut buf);
                     qdebug!("Read {} bytes", read);
                     self.handshake(now, space, Some(&buf))?;
+                    self.create_resumption_token(now);
                 } else {
                     // If we get a useless CRYPTO frame send outstanding CRYPTO frames again.
                     self.crypto.resend_unacked(space);
@@ -1839,6 +1862,7 @@ impl Connection {
             }
             Frame::NewToken { token } => {
                 self.new_token.save_token(token);
+                self.create_resumption_token(now);
             }
             Frame::Stream {
                 fin,
@@ -2108,6 +2132,7 @@ impl Connection {
         self.crypto.install_application_keys(now + pto)?;
         self.process_tps()?;
         self.set_state(State::Connected);
+        self.create_resumption_token(now + pto);
         self.process_saved(CryptoSpace::ApplicationData);
         self.stats.borrow_mut().resumed = self.crypto.tls.info().unwrap().resumed();
         if self.role == Role::Server {

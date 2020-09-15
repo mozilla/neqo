@@ -681,6 +681,7 @@ mod old {
         url_queue: VecDeque<Url>,
         all_paths: Vec<PathBuf>,
         args: &'b Args,
+        token: Option<ResumptionToken>,
     }
 
     impl<'b> HandlerOld<'b> {
@@ -808,6 +809,9 @@ mod old {
                         println!("{:?}", event);
                         self.download_urls(client);
                     }
+                    ConnectionEvent::ResumptionToken(token) => {
+                        self.token = Some(token);
+                    }
                     _ => {
                         println!("Unhandled event {:?}", event);
                     }
@@ -910,7 +914,7 @@ mod old {
         )?;
 
         if let Some(tok) = token {
-            client.enable_resumption(Instant::now(), &tok)?;
+            client.enable_resumption(Instant::now(), tok)?;
         }
 
         let ciphers = args.get_ciphers();
@@ -925,14 +929,11 @@ mod old {
             url_queue: VecDeque::from(urls.to_vec()),
             all_paths: Vec::new(),
             args: &args,
+            token: None,
         };
 
         process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
-        Ok(if args.resume {
-            client.resumption_token()
-        } else {
-            None
-        })
+        Ok(if args.resume { h.token } else { None })
     }
 }

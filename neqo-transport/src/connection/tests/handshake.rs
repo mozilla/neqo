@@ -6,8 +6,9 @@
 
 use super::super::{Connection, FixedConnectionIdManager, Output, State, LOCAL_IDLE_TIMEOUT};
 use super::{
-    assert_error, connect_force_idle, connect_with_rtt, default_client, default_server, handshake,
-    maybe_authenticate, send_something, split_datagram, AT_LEAST_PTO, DEFAULT_STREAM_DATA,
+    assert_error, connect_force_idle, connect_with_rtt, default_client, default_server, get_tokens,
+    handshake, maybe_authenticate, send_something, split_datagram, AT_LEAST_PTO,
+    DEFAULT_STREAM_DATA,
 };
 use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
@@ -341,7 +342,11 @@ fn reorder_05rtt_with_0rtt() {
     let ticket = server.process_output(now).dgram().unwrap();
     now += RTT / 2;
     client.process_input(ticket, now);
-    let token = client.resumption_token().unwrap();
+
+    // Increase the current time with a large number to trigger
+    // the resumption_token_timer
+    now += 9 * RTT;
+    let token = get_tokens(&mut client, Some(now)).pop().unwrap();
     let mut client = default_client();
     client.enable_resumption(now, token).unwrap();
     let mut server = default_server();
