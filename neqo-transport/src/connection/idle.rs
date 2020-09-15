@@ -85,7 +85,7 @@ impl IdleTimeout {
             IdleTimeoutState::Init => true,
             IdleTimeoutState::New(t)
             | IdleTimeoutState::AckElicitingPacketSent(t)
-            | IdleTimeoutState::PacketReceived(t) => t < now,
+            | IdleTimeoutState::PacketReceived(t) => t <= now,
         };
         if update {
             self.state = IdleTimeoutState::PacketReceived(now);
