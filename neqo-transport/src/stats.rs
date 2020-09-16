@@ -64,16 +64,15 @@ impl Stats {
     }
 
     pub fn add_pto_count(&mut self, count: usize) {
-        if count > 0 {
-            if count >= MAX_PTO_COUNTS {
-                // We can't move this count any further, so stop.
-                return;
-            }
-            self.pto_counts[count - 1] += 1;
-            if count > 1 {
-                debug_assert!(self.pto_counts[count - 2] > 0);
-                self.pto_counts[count - 2] -= 1;
-            }
+        debug_assert!(count > 0);
+        if count >= MAX_PTO_COUNTS {
+            // We can't move this count any further, so stop.
+            return;
+        }
+        self.pto_counts[count - 1] += 1;
+        if count > 1 {
+            debug_assert!(self.pto_counts[count - 2] > 0);
+            self.pto_counts[count - 2] -= 1;
         }
     }
 }
