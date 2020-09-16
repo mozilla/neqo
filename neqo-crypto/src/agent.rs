@@ -804,7 +804,7 @@ impl Client {
     /// Check if there are more resumption tokens.
     #[must_use]
     pub fn has_resumption_token(&self) -> bool {
-        (*self.resumption).len() > 0
+        !(*self.resumption).is_empty()
     }
 
     /// Enable resumption, using a token previously provided.
