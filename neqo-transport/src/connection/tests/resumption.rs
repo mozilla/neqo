@@ -138,10 +138,10 @@ fn two_tickets_and_tokens() {
     let pkt = send_something(&mut server, now());
 
     client.process_input(pkt, now());
-    let mut tokens = get_tokens(&mut client, None);
-    assert_eq!(tokens.len(), 2);
-    let token1 = tokens.pop().unwrap();
-    let token2 = tokens.pop().unwrap();
+    let mut all_tokens = get_tokens(&mut client, None);
+    assert_eq!(all_tokens.len(), 2);
+    let token1 = all_tokens.pop().unwrap();
+    let token2 = all_tokens.pop().unwrap();
     assert_ne!(token1.as_ref(), token2.as_ref());
 
     can_resume(&token1, true);

@@ -152,7 +152,7 @@ impl Http3Client {
     }
 
     /// A resumption token encodes transport and settings parameter as well.
-    fn create_resumption_token(&mut self, token: ResumptionToken) {
+    fn create_resumption_token(&mut self, token: &ResumptionToken) {
         if let Some(settings) = self.base_handler.get_settings() {
             let mut enc = Encoder::default();
             settings.encode_frame_contents(&mut enc);
@@ -560,7 +560,7 @@ impl Http3Client {
                     self.push_handler.borrow_mut().handle_zero_rtt_rejected();
                 }
                 ConnectionEvent::ResumptionToken(token) => {
-                    self.create_resumption_token(token);
+                    self.create_resumption_token(&token);
                 }
             }
         }
