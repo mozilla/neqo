@@ -108,7 +108,7 @@ impl QuicVersion {
 
 impl Default for QuicVersion {
     fn default() -> Self {
-        Self::Draft30
+        Self::Draft29
     }
 }
 
