@@ -898,8 +898,8 @@ mod old {
         let (quic_protocol, alpn) = match args.alpn.as_str() {
             "hq-27" => (QuicVersion::Draft27, "hq-27"),
             "hq-28" => (QuicVersion::Draft28, "hq-28"),
-            "hq-29" => (QuicVersion::Draft28, "hq-29"),
-            _ => (QuicVersion::Draft30, "hq-30"),
+            "hq-30" => (QuicVersion::Draft30, "hq-30"),
+            _ => (QuicVersion::Draft29, "hq-29"),
         };
 
         let mut client = Connection::new_client(
