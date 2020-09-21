@@ -58,10 +58,10 @@ RUN set -eux; \
 FROM martenseemann/quic-network-simulator-endpoint:latest
 
 ENV LD_LIBRARY_PATH=/neqo/lib
-COPY --from=buildimage /neqo/target /neqo/target
-COPY --from=buildimage /neqo/test-fixture/db /neqo/test-fixture/db
+COPY --from=buildimage /neqo/target/neqo-client /neqo/target/neqo-server /neqo/bin/
 COPY --from=buildimage /dist/Release/lib/*.so /neqo/lib/
+COPY --from=buildimage /dist/Release/bin/certutil /dist/Release/bin/pk12util /neqo/nss/bin/
 
-COPY run_endpoint.sh .
-RUN chmod +x run_endpoint.sh
-ENTRYPOINT [ "/run_endpoint.sh" ]
+COPY interop.sh /neqo/
+RUN chmod +x /neqo/interop.sh
+ENTRYPOINT [ "/neqo/interop.sh" ]
