@@ -60,7 +60,7 @@ FROM martenseemann/quic-network-simulator-endpoint:latest
 ENV LD_LIBRARY_PATH=/neqo/lib
 COPY --from=buildimage /neqo/target/neqo-client /neqo/target/neqo-server /neqo/bin/
 COPY --from=buildimage /dist/Release/lib/*.so /neqo/lib/
-COPY --from=buildimage /dist/Release/bin/certutil /dist/Release/bin/pk12util /neqo/nss/bin/
+COPY --from=buildimage /dist/Release/bin/certutil /dist/Release/bin/pk12util /neqo/bin/
 
 COPY interop.sh /neqo/
 RUN chmod +x /neqo/interop.sh
