@@ -10,7 +10,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::env;
 use std::fmt::Display;
 use std::fs::OpenOptions;
 use std::io;
@@ -88,8 +87,9 @@ struct Args {
     /// Enable QLOG logging and QLOG traces to this directory
     qlog_dir: Option<PathBuf>,
 
-    #[structopt(name = "qns-mode", long)]
-    qns_mode: bool,
+    #[structopt(name = "qns-test", long)]
+    /// Enable special behavior for use with QUIC Network Simulator
+    qns_test: Option<String>,
 
     #[structopt(name = "use-old-http", short = "o", long)]
     /// Use http 0.9 instead of HTTP/3
@@ -164,7 +164,7 @@ impl HttpServer for Http3Server {
 
                     let response = headers.and_then(|h| {
                         h.iter().find(|&(k, _)| k == ":path").and_then(|(_, path)| {
-                            if args.qns_mode {
+                            if args.qns_test.is_some() {
                                 qns_read_response(path)
                             } else {
                                 match path.trim_matches(|p| p == '/').parse::<usize>() {
@@ -477,20 +477,14 @@ fn main() -> Result<(), io::Error> {
 
     init_db(args.db.clone());
 
-    if args.qns_mode {
-        match env::var("TESTCASE") {
-            Ok(s) if s == "http3" => {}
-            Ok(s) if s == "handshake" || s == "transfer" || s == "retry" => {
+    if let Some(testcase) = args.qns_test.as_ref() {
+        match testcase.as_str() {
+            "http3" => (),
+            "handshake" | "transfer" | "retry" | "resumption" => {
                 args.use_old_http = true;
                 args.alpn = "hq-29".into();
             }
-
-            Ok(_) => exit(127),
-            Err(_) => exit(1),
-        }
-
-        if let Ok(qlogdir) = env::var("QLOGDIR") {
-            args.qlog_dir = Some(PathBuf::from(qlogdir));
+            _ => exit(127),
         }
     }
 

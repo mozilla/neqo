@@ -83,7 +83,7 @@ impl Http09Server {
             }
         };
 
-        let re = if args.qns_mode {
+        let re = if args.qns_test.is_some() {
             Regex::new(r"GET +/(\S+)(\r)?\n").unwrap()
         } else {
             Regex::new(r"GET +/(\d+)(\r)?\n").unwrap()
@@ -94,7 +94,7 @@ impl Http09Server {
             Some(path) => {
                 let path = path.as_str();
                 eprintln!("Path = '{}'", path);
-                if args.qns_mode {
+                if args.qns_test.is_some() {
                     qns_read_response(path)
                 } else {
                     let count = usize::from_str_radix(path, 10).unwrap();
