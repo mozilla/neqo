@@ -492,9 +492,14 @@ fn main() -> Result<(), io::Error> {
     if let Some(testcase) = args.qns_test.as_ref() {
         match testcase.as_str() {
             "http3" => (),
-            "handshake" | "transfer" | "retry" | "resumption" => {
+            "handshake" | "transfer" | "resumption" => {
                 args.use_old_http = true;
                 args.alpn = "hq-29".into();
+            }
+            "retry" => {
+                args.use_old_http = true;
+                args.alpn = "hq-29".into();
+                args.retry = true;
             }
             _ => exit(127),
         }
