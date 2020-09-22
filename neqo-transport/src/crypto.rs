@@ -20,7 +20,6 @@ use neqo_crypto::{
     TLS_VERSION_1_3,
 };
 
-use crate::addr_valid::NewTokenState;
 use crate::frame::Frame;
 use crate::packet::{PacketNumber, QuicVersion};
 use crate::recovery::RecoveryToken;
@@ -28,7 +27,7 @@ use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
 use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
 use crate::tracking::PNSpace;
-use crate::{ConnectionEvents, Error, Res};
+use crate::{Error, Res};
 
 const MAX_AUTH_TAG: usize = 32;
 
@@ -248,11 +247,10 @@ impl Crypto {
 
     pub fn create_resumption_token(
         &mut self,
-        new_token: &mut NewTokenState,
+        new_token: Option<Vec<u8>>,
         tps: &TransportParameters,
-        events: &ConnectionEvents,
         rtt: u64,
-    ) {
+    ) -> Option<ResumptionToken> {
         if let Agent::Client(ref mut c) = self.tls {
             if let Some(ref t) = c.resumption_token() {
                 qtrace!("TLS token {}", hex(t.as_ref()));
@@ -261,12 +259,12 @@ impl Crypto {
                 enc.encode_vvec_with(|enc_inner| {
                     tps.encode(enc_inner);
                 });
-                let token = new_token.take_token();
-                enc.encode_vvec(token.as_ref().map_or(&[], |t| &t[..]));
+                enc.encode_vvec(new_token.as_ref().map_or(&[], |t| &t[..]));
                 enc.encode(t.as_ref());
                 qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
-                events
-                    .client_resumption_token(ResumptionToken::new(enc.into(), t.expiration_time()));
+                Some(ResumptionToken::new(enc.into(), t.expiration_time()))
+            } else {
+                None
             }
         } else {
             unreachable!("It is a server.");

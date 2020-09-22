@@ -114,7 +114,7 @@ fn two_tickets() {
     let token1 = get_tokens(&mut client, Some(now)).pop().unwrap();
     now += Duration::from_millis(140);
     let token2 = get_tokens(&mut client, Some(now)).pop().unwrap();
-    // There is no more tokens.
+    // There are no more tokens.
     now += Duration::from_millis(140);
     assert_eq!(get_tokens(&mut client, Some(now)).len(), 0);
     assert_ne!(token1.as_ref(), token2.as_ref());

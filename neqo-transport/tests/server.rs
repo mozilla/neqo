@@ -286,11 +286,11 @@ fn get_ticket(server: &mut Server) -> ResumptionToken {
     assert_eq!(server.active_connections().len(), 1);
     client
         .events()
-        .fold(None, |res, e| {
+        .find_map(|e| {
             if let ConnectionEvent::ResumptionToken(token) = e {
                 Some(token)
             } else {
-                res
+                None
             }
         })
         .unwrap()

@@ -267,6 +267,8 @@ pub struct Connection {
     new_token: NewTokenState,
     stats: StatsCell,
     qlog: NeqoQlog,
+    /// A session ticket was received without NEW_TOKEN,
+    /// this is when that turns into an event without NEW_TOKEN.
     release_resumption_token_timer: Option<Instant>,
     quic_version: QuicVersion,
 }
@@ -497,52 +499,57 @@ impl Connection {
     }
 
     fn create_resumption_token(&mut self, now: Instant) {
-        if self.role == Role::Server
-            || self.state < State::Connected
-            || !self.crypto.has_resumption_token()
-        {
+        if self.role == Role::Server || self.state < State::Connected {
             return;
         }
 
-        // If a NEW_TOKEN frame has not be received yet wait for it for a short time.
-        if !self.new_token.has_token() {
-            if self.release_resumption_token_timer.is_none() {
-                self.release_resumption_token_timer =
-                    Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData));
-                return;
-            }
-            if self.release_resumption_token_timer.unwrap() > now {
-                return;
-            }
-        }
-
-        // Create reumpion tokens:
-        //  1) create only one if we have not receiveed a new_token,
-        //  2) otherwise create as many as possible that contain ticket and token.
-        loop {
-            self.crypto.create_resumption_token(
-                &mut self.new_token,
+        while self.crypto.has_resumption_token() && self.new_token.has_token() {
+            if let Some(token) = self.crypto.create_resumption_token(
+                self.new_token.take_token(),
                 self.tps
                     .borrow()
                     .remote
                     .as_ref()
                     .expect("should have transport parameters"),
-                &self.events,
                 u64::try_from(self.loss_recovery.rtt().as_millis()).unwrap_or(0),
-            );
-            if !self.new_token.has_token() || !self.crypto.has_resumption_token() {
-                break;
+            ) {
+                self.events.client_resumption_token(token)
+            } else {
+                unreachable!("This is a client and there must be a ticket.");
             }
         }
 
+        // If we have a resumption ticket check or set a timer.
         if self.crypto.has_resumption_token() {
-            // If we have more tickets wait for more tokens.
-            // We do not remember when tickets have arrived, therefore we release tokens
-            // without new_token slowly the most one every 3 * PTO.
-            self.release_resumption_token_timer =
-                Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData));
-        } else {
-            self.release_resumption_token_timer = None;
+            let arm = if let Some(expiration_time) = self.release_resumption_token_timer {
+                if expiration_time <= now {
+                    if let Some(token) = self.crypto.create_resumption_token(
+                        None,
+                        self.tps
+                            .borrow()
+                            .remote
+                            .as_ref()
+                            .expect("should have transport parameters"),
+                        u64::try_from(self.loss_recovery.rtt().as_millis()).unwrap_or(0),
+                    ) {
+                        self.events.client_resumption_token(token);
+                    } else {
+                        unreachable!("This is a client and there must be a ticket.");
+                    }
+                    // This means that we release one session ticket every 3 PTOs
+                    // if no NEW_TOKEN frame is received.
+                    self.crypto.has_resumption_token()
+                } else {
+                    false
+                }
+            } else {
+                true
+            };
+            self.release_resumption_token_timer = if arm {
+                Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData))
+            } else {
+                None
+            };
         }
     }
 
@@ -792,7 +799,7 @@ impl Connection {
             return timeout.duration_since(now);
         }
 
-        let mut delays = SmallVec::<[_; 5]>::new();
+        let mut delays = SmallVec::<[_; 6]>::new();
         if let Some(ack_time) = self.acks.ack_time(now) {
             qtrace!([self], "Delayed ACK timer {:?}", ack_time);
             delays.push(ack_time);
@@ -818,6 +825,10 @@ impl Connection {
                 qtrace!([self], "Pacing timer {:?}", pace_time);
                 delays.push(pace_time);
             }
+        }
+
+        if let Some(t) = self.release_resumption_token_timer {
+            delays.push(t);
         }
 
         let earliest = delays.into_iter().min().unwrap();
@@ -2132,7 +2143,7 @@ impl Connection {
         self.crypto.install_application_keys(now + pto)?;
         self.process_tps()?;
         self.set_state(State::Connected);
-        self.create_resumption_token(now + pto);
+        self.create_resumption_token(now);
         self.process_saved(CryptoSpace::ApplicationData);
         self.stats.borrow_mut().resumed = self.crypto.tls.info().unwrap().resumed();
         if self.role == Role::Server {
