@@ -503,6 +503,13 @@ impl Connection {
             return;
         }
 
+        qtrace!(
+            [self],
+            "Maybe create resumption token: {} {}",
+            self.crypto.has_resumption_token(),
+            self.new_token.has_token()
+        );
+
         while self.crypto.has_resumption_token() && self.new_token.has_token() {
             if let Some(token) = self.crypto.create_resumption_token(
                 self.new_token.take_token(),
@@ -536,6 +543,8 @@ impl Connection {
                     } else {
                         unreachable!("This is a client and there must be a ticket.");
                     }
+                    self.release_resumption_token_timer = None;
+
                     // This means that we release one session ticket every 3 PTOs
                     // if no NEW_TOKEN frame is received.
                     self.crypto.has_resumption_token()
@@ -545,11 +554,11 @@ impl Connection {
             } else {
                 true
             };
-            self.release_resumption_token_timer = if arm {
-                Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData))
-            } else {
-                None
-            };
+
+            if arm {
+                self.release_resumption_token_timer =
+                    Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData))
+            }
         }
     }
 
@@ -828,6 +837,7 @@ impl Connection {
         }
 
         if let Some(t) = self.release_resumption_token_timer {
+            qtrace!([self], "Resumption token event timer {:?}", t);
             delays.push(t);
         }
 

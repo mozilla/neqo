@@ -9,6 +9,7 @@
 use super::{
     Connection, ConnectionError, FixedConnectionIdManager, Output, State, LOCAL_IDLE_TIMEOUT,
 };
+use crate::addr_valid::{AddressValidation, ValidateAddress};
 use crate::cc::CWND_INITIAL_PKTS;
 use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
@@ -148,16 +149,15 @@ fn exchange_ticket(
     server: &mut Connection,
     now: Instant,
 ) -> ResumptionToken {
+    let validation = AddressValidation::new(now, ValidateAddress::NoToken).unwrap();
+    let validation = Rc::new(RefCell::new(validation));
+    server.set_validation(Rc::clone(&validation));
     server.send_ticket(now, &[]).expect("can send ticket");
     let ticket = server.process_output(now).dgram();
     assert!(ticket.is_some());
     client.process_input(ticket.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
-    // Increase the current time with a large number to trigger
-    // the resumption_token_timer.
-    get_tokens(client, Some(now + Duration::from_millis(1050)))
-        .pop()
-        .expect("should have token")
+    get_tokens(client).pop().expect("should have token")
 }
 
 /// Connect with an RTT and then force both peers to be idle.
@@ -328,10 +328,7 @@ fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
     )
 }
 
-fn get_tokens(client: &mut Connection, now: Option<Instant>) -> Vec<ResumptionToken> {
-    if let Some(t) = now {
-        let _ = client.process_output(t);
-    }
+fn get_tokens(client: &mut Connection) -> Vec<ResumptionToken> {
     client
         .events()
         .filter_map(|e| {

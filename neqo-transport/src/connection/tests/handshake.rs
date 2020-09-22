@@ -10,9 +10,11 @@ use super::{
     handshake, maybe_authenticate, send_something, split_datagram, AT_LEAST_PTO,
     DEFAULT_STREAM_DATA,
 };
+use crate::connection::AddressValidation;
 use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
 use crate::path::PATH_MTU_V6;
+use crate::server::ValidateAddress;
 use crate::{ConnectionError, Error, QuicVersion};
 
 use neqo_common::{qdebug, Datagram};
@@ -333,6 +335,9 @@ fn reorder_05rtt_with_0rtt() {
 
     let mut client = default_client();
     let mut server = default_server();
+    let validation = AddressValidation::new(now(), ValidateAddress::NoToken).unwrap();
+    let validation = Rc::new(RefCell::new(validation));
+    server.set_validation(Rc::clone(&validation));
     let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
 
     // Include RTT in sending the ticket or the ticket age reported by the
@@ -343,10 +348,7 @@ fn reorder_05rtt_with_0rtt() {
     now += RTT / 2;
     client.process_input(ticket, now);
 
-    // Increase the current time with a large number to trigger
-    // the resumption_token_timer
-    now += 9 * RTT;
-    let token = get_tokens(&mut client, Some(now)).pop().unwrap();
+    let token = get_tokens(&mut client).pop().unwrap();
     let mut client = default_client();
     client.enable_resumption(now, token).unwrap();
     let mut server = default_server();

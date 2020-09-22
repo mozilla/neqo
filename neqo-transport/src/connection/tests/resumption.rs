@@ -107,16 +107,27 @@ fn two_tickets() {
     server.send_ticket(now(), &[]).expect("send ticket2");
     let pkt = send_something(&mut server, now());
 
-    client.process_input(pkt, now());
-    // Increase the current time with a large number to trigger
-    // the resumption_token_timer before calling get_tokens.
-    let mut now = now() + Duration::from_millis(140);
-    let token1 = get_tokens(&mut client, Some(now)).pop().unwrap();
-    now += Duration::from_millis(140);
-    let token2 = get_tokens(&mut client, Some(now)).pop().unwrap();
+    // process() will return a ack first
+    assert!(client.process(Some(pkt), now()).dgram().is_some());
+    // We do not have a ResumptionToken evennt yet, because NEW_TOKEN was not sent.
+    assert_eq!(get_tokens(&mut client).len(), 0);
+    // process() will return a Callback that has a value of the resumption token timer.
+    let callback = client.process(None, now());
+
+    let mut now = now() + callback.callback();
+    let callback = client.process(None, now);
+    let mut recv_tokens = get_tokens(&mut client);
+    assert_eq!(recv_tokens.len(), 1);
+    let token1 = recv_tokens.pop().unwrap();
+    now += callback.callback();
+    let _ = client.process(None, now);
+    let mut recv_tokens = get_tokens(&mut client);
+    assert_eq!(recv_tokens.len(), 1);
+    let token2 = recv_tokens.pop().unwrap();
     // There are no more tokens.
-    now += Duration::from_millis(140);
-    assert_eq!(get_tokens(&mut client, Some(now)).len(), 0);
+    now += callback.callback();
+    let _ = client.process(None, now);
+    assert_eq!(get_tokens(&mut client).len(), 0);
     assert_ne!(token1.as_ref(), token2.as_ref());
 
     can_resume(&token1, false);
@@ -138,7 +149,7 @@ fn two_tickets_and_tokens() {
     let pkt = send_something(&mut server, now());
 
     client.process_input(pkt, now());
-    let mut all_tokens = get_tokens(&mut client, None);
+    let mut all_tokens = get_tokens(&mut client);
     assert_eq!(all_tokens.len(), 2);
     let token1 = all_tokens.pop().unwrap();
     let token2 = all_tokens.pop().unwrap();
