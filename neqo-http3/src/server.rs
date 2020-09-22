@@ -15,7 +15,7 @@ use crate::Res;
 use neqo_common::{qtrace, Datagram};
 use neqo_crypto::AntiReplay;
 use neqo_qpack::QpackSettings;
-use neqo_transport::server::{ActiveConnectionRef, Server};
+use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
 use neqo_transport::{ConnectionIdManager, Output};
 use std::cell::RefCell;
 use std::cell::RefMut;
@@ -70,6 +70,10 @@ impl Http3Server {
 
     pub fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
         self.server.set_qlog_dir(dir)
+    }
+
+    pub fn set_validation(&mut self, v: ValidateAddress) {
+        self.server.set_validation(v);
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
