@@ -6,11 +6,15 @@ set -ex
 
 export PATH="${PATH}:/neqo/bin"
 
+[ -n "$TESTCASE" ]
+[ -n "$QLOGDIR" ]
+
 case "$ROLE" in
   client)
     /wait-for-it.sh sim:57832 -s -t 30
     sleep 5
-    RUST_LOG=debug RUST_BACKTRACE=1 neqo-client --qns-mode --output-dir /downloads $REQUESTS
+    RUST_LOG=debug RUST_BACKTRACE=1 neqo-client --qns-test "$TESTCASE" --qlog-dir "$QLOGDIR" \
+        --output-dir /downloads $REQUESTS
     ;;
 
   server)
@@ -23,7 +27,8 @@ case "$ROLE" in
         -name "$CERT" -passout pass: -out "$P12CERT"
     pk12util -d "sql:$DB" -i "$P12CERT" -W ''
     certutil -L -d "sql:$DB" -n "$CERT"
-    RUST_LOG=info RUST_BACKTRACE=1 neqo-server --qns-mode -d "$DB" -k "$CERT" 0.0.0.0:443
+    RUST_LOG=info RUST_BACKTRACE=1 neqo-server --qns-test "$TESTCASE" --qlog-dir "$QLOGDIR" \
+        -d "$DB" -k "$CERT" 0.0.0.0:443
     ;;
 
   *)

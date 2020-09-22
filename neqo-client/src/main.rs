@@ -24,7 +24,6 @@ use neqo_transport::{
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
-use std::env;
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
@@ -132,9 +131,9 @@ pub struct Args {
     /// Save contents of fetched URLs to a directory
     output_dir: Option<PathBuf>,
 
-    #[structopt(name = "qns-mode", long)]
+    #[structopt(name = "qns-test", long)]
     /// Enable special behavior for use with QUIC Network Simulator
-    qns_mode: bool,
+    qns_test: Option<String>,
 
     #[structopt(short = "r", long)]
     /// Client attemps to resume connections when there are multiple connections made.
@@ -518,36 +517,31 @@ fn main() -> Res<()> {
 
     let mut args = Args::from_args();
 
-    if args.qns_mode {
-        match env::var("TESTCASE") {
-            Ok(s) if s == "http3" => {}
-            Ok(s) if s == "handshake" || s == "transfer" || s == "retry" => {
+    if let Some(testcase) = args.qns_test.as_ref() {
+        match testcase.as_str() {
+            "http3" => {}
+            "handshake" | "transfer" | "retry" => {
                 args.use_old_http = true;
             }
-            Ok(s) if s == "zerortt" || s == "resumption" => {
+            "zerortt" | "resumption" => {
                 if args.urls.len() < 2 {
                     eprintln!("Warning: resumption tests won't work without >1 URL");
-                    exit(127)
+                    exit(127);
                 }
                 args.use_old_http = true;
                 args.resume = true;
             }
-            Ok(s) if s == "multiconnect" => {
+            "multiconnect" => {
                 args.use_old_http = true;
                 args.download_in_series = true;
             }
-            Ok(s) if s == "chacha20" => {
+            "chacha20" => {
                 args.use_old_http = true;
                 args.ciphers.clear();
                 args.ciphers
                     .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
             }
-            Ok(_) => exit(127),
-            Err(_) => exit(1),
-        }
-
-        if let Ok(qlogdir) = env::var("QLOGDIR") {
-            args.qlog_dir = Some(PathBuf::from(qlogdir));
+            _ => exit(127),
         }
     }
 
