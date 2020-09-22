@@ -30,7 +30,7 @@ use neqo_common::{qdebug, qinfo, Datagram};
 use neqo_crypto::{init_db, AntiReplay};
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{FixedConnectionIdManager, Output};
+use neqo_transport::{server::ValidateAddress, FixedConnectionIdManager, Output};
 
 use crate::old_https::Http09Server;
 
@@ -94,6 +94,10 @@ struct Args {
     #[structopt(name = "use-old-http", short = "o", long)]
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
+
+    #[structopt(name = "retry", long)]
+    /// Force a retry
+    retry: bool,
 }
 
 impl Args {
@@ -143,6 +147,7 @@ trait HttpServer: Display {
     fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
     fn process_events(&mut self, args: &Args);
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
+    fn validate_address(&mut self, when: ValidateAddress);
 }
 
 impl HttpServer for Http3Server {
@@ -202,6 +207,10 @@ impl HttpServer for Http3Server {
 
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
         Self::set_qlog_dir(self, dir)
+    }
+
+    fn validate_address(&mut self, v: ValidateAddress) {
+        self.set_validation(v);
     }
 }
 
@@ -374,6 +383,9 @@ impl ServersRunner {
             )
         };
         svr.set_qlog_dir(self.args.qlog_dir.clone());
+        if self.args.retry {
+            svr.validate_address(ValidateAddress::Always);
+        }
         svr
     }
 

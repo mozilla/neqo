@@ -19,7 +19,7 @@ use regex::Regex;
 use neqo_common::Datagram;
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
-use neqo_transport::server::{ActiveConnectionRef, Server};
+use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
 use neqo_transport::{ConnectionEvent, ConnectionIdManager, Output};
 
 use super::{qns_read_response, Args, HttpServer};
@@ -180,6 +180,10 @@ impl HttpServer for Http09Server {
 
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
         self.server.set_qlog_dir(dir)
+    }
+
+    fn validate_address(&mut self, v: ValidateAddress) {
+        self.server.set_validation(v);
     }
 }
 
