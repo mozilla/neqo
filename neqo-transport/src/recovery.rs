@@ -18,7 +18,7 @@ use smallvec::{smallvec, SmallVec};
 
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
-use crate::cc::CongestionControl;
+use crate::cc::{CongestionControl, CongestionControlAlgorithm};
 use crate::connection::LOCAL_IDLE_TIMEOUT;
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
@@ -590,18 +590,32 @@ impl PtoState {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct LossRecovery {
     /// When the handshake was confirmed, if it has been.
     confirmed_time: Option<Instant>,
     pto_state: Option<PtoState>,
     rtt_vals: RttVals,
-    cc: CongestionControl,
+    cc: Box<dyn CongestionControl>,
 
     spaces: LossRecoverySpaces,
 
     qlog: NeqoQlog,
     stats: StatsCell,
+}
+
+impl Default for LossRecovery {
+    fn default() -> Self {
+        Self {
+            confirmed_time: None,
+            pto_state: None,
+            rtt_vals: RttVals::default(),
+            cc: CongestionControlAlgorithm::default().create(),
+            spaces: LossRecoverySpaces::default(),
+            qlog: NeqoQlog::default(),
+            stats: StatsCell::default(),
+        }
+    }
 }
 
 impl LossRecovery {
