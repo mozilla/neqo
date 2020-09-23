@@ -107,25 +107,26 @@ fn two_tickets() {
     server.send_ticket(now(), &[]).expect("send ticket2");
     let pkt = send_something(&mut server, now());
 
-    // process() will return a ack first
+    // process() will return an ack first
     assert!(client.process(Some(pkt), now()).dgram().is_some());
-    // We do not have a ResumptionToken evennt yet, because NEW_TOKEN was not sent.
+    // We do not have a ResumptionToken event yet, because NEW_TOKEN was not sent.
     assert_eq!(get_tokens(&mut client).len(), 0);
-    // process() will return a Callback that has a value of the resumption token timer.
-    let callback = client.process(None, now());
 
-    let mut now = now() + callback.callback();
-    let callback = client.process(None, now);
+    // We need to wait for release_resumption_token_timer to expire. The timer will be
+    // set to 3 * PTO
+    let mut now = now() + 3 * client.get_pto();
+    let _ = client.process(None, now);
     let mut recv_tokens = get_tokens(&mut client);
     assert_eq!(recv_tokens.len(), 1);
     let token1 = recv_tokens.pop().unwrap();
-    now += callback.callback();
+    // Wai for anottheer 3 * PTO to get the nex okeen.
+    now += 3 * client.get_pto();
     let _ = client.process(None, now);
     let mut recv_tokens = get_tokens(&mut client);
     assert_eq!(recv_tokens.len(), 1);
     let token2 = recv_tokens.pop().unwrap();
-    // There are no more tokens.
-    now += callback.callback();
+    // Wai for next 3 * PTO, but now there are no more tokens.
+    now += 3 * client.get_pto();
     let _ = client.process(None, now);
     assert_eq!(get_tokens(&mut client).len(), 0);
     assert_ne!(token1.as_ref(), token2.as_ref());

@@ -511,38 +511,39 @@ impl Connection {
         );
 
         while self.crypto.has_resumption_token() && self.new_token.has_token() {
-            if let Some(token) = self.crypto.create_resumption_token(
-                self.new_token.take_token(),
-                self.tps
-                    .borrow()
-                    .remote
-                    .as_ref()
-                    .expect("should have transport parameters"),
-                u64::try_from(self.loss_recovery.rtt().as_millis()).unwrap_or(0),
-            ) {
-                self.events.client_resumption_token(token)
-            } else {
-                unreachable!("This is a client and there must be a ticket.");
-            }
-        }
-
-        // If we have a resumption ticket check or set a timer.
-        if self.crypto.has_resumption_token() {
-            let arm = if let Some(expiration_time) = self.release_resumption_token_timer {
-                if expiration_time <= now {
-                    if let Some(token) = self.crypto.create_resumption_token(
-                        None,
+            self.events.client_resumption_token(
+                self.crypto
+                    .create_resumption_token(
+                        self.new_token.take_token(),
                         self.tps
                             .borrow()
                             .remote
                             .as_ref()
                             .expect("should have transport parameters"),
                         u64::try_from(self.loss_recovery.rtt().as_millis()).unwrap_or(0),
-                    ) {
-                        self.events.client_resumption_token(token);
-                    } else {
-                        unreachable!("This is a client and there must be a ticket.");
-                    }
+                    )
+                    .unwrap(),
+            );
+        }
+
+        // If we have a resumption ticket check or set a timer.
+        if self.crypto.has_resumption_token() {
+            let arm = if let Some(expiration_time) = self.release_resumption_token_timer {
+                if expiration_time <= now {
+                    self.events.client_resumption_token(
+                        self.crypto
+                            .create_resumption_token(
+                                None,
+                                self.tps
+                                    .borrow()
+                                    .remote
+                                    .as_ref()
+                                    .expect("should have transport parameters"),
+                                u64::try_from(self.loss_recovery.rtt().as_millis()).unwrap_or(0),
+                            )
+                            .unwrap(),
+                    );
+
                     self.release_resumption_token_timer = None;
 
                     // This means that we release one session ticket every 3 PTOs
@@ -836,10 +837,10 @@ impl Connection {
             }
         }
 
-        if let Some(t) = self.release_resumption_token_timer {
-            qtrace!([self], "Resumption token event timer {:?}", t);
-            delays.push(t);
-        }
+        // `release_resumption_token_timer` is not considered here, because
+        // it is not important enough to force the application to set a
+        // timeout for it  It is expected thatt other activities will
+        // drive it.
 
         let earliest = delays.into_iter().min().unwrap();
         // TODO(agrover, mt) - need to analyze and fix #47
@@ -2543,6 +2544,11 @@ impl Connection {
     /// previously-queued events, or cause new events to be generated.
     pub fn next_event(&mut self) -> Option<ConnectionEvent> {
         self.events.next_event()
+    }
+
+    #[cfg(test)]
+    pub fn get_pto(&self) -> Duration {
+        self.loss_recovery.pto_raw(PNSpace::ApplicationData)
     }
 }
 
