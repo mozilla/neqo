@@ -5,8 +5,8 @@
 // except according to those terms.
 
 use super::{
-    connect, connect_with_rtt, default_client, default_server, exchange_ticket, send_something,
-    AT_LEAST_PTO,
+    connect, connect_with_rtt, default_client, default_server, exchange_ticket, get_tokens,
+    send_something, AT_LEAST_PTO,
 };
 use crate::addr_valid::{AddressValidation, ValidateAddress};
 
@@ -107,11 +107,29 @@ fn two_tickets() {
     server.send_ticket(now(), &[]).expect("send ticket2");
     let pkt = send_something(&mut server, now());
 
-    client.process_input(pkt, now());
-    let token1 = client.resumption_token().unwrap();
-    let token2 = client.resumption_token().unwrap();
+    // process() will return an ack first
+    assert!(client.process(Some(pkt), now()).dgram().is_some());
+    // We do not have a ResumptionToken event yet, because NEW_TOKEN was not sent.
+    assert_eq!(get_tokens(&mut client).len(), 0);
+
+    // We need to wait for release_resumption_token_timer to expire. The timer will be
+    // set to 3 * PTO
+    let mut now = now() + 3 * client.get_pto();
+    let _ = client.process(None, now);
+    let mut recv_tokens = get_tokens(&mut client);
+    assert_eq!(recv_tokens.len(), 1);
+    let token1 = recv_tokens.pop().unwrap();
+    // Wai for anottheer 3 * PTO to get the nex okeen.
+    now += 3 * client.get_pto();
+    let _ = client.process(None, now);
+    let mut recv_tokens = get_tokens(&mut client);
+    assert_eq!(recv_tokens.len(), 1);
+    let token2 = recv_tokens.pop().unwrap();
+    // Wai for next 3 * PTO, but now there are no more tokens.
+    now += 3 * client.get_pto();
+    let _ = client.process(None, now);
+    assert_eq!(get_tokens(&mut client).len(), 0);
     assert_ne!(token1.as_ref(), token2.as_ref());
-    assert!(client.resumption_token().is_none());
 
     can_resume(&token1, false);
     can_resume(&token2, false);
@@ -132,10 +150,11 @@ fn two_tickets_and_tokens() {
     let pkt = send_something(&mut server, now());
 
     client.process_input(pkt, now());
-    let token1 = client.resumption_token().unwrap();
-    let token2 = client.resumption_token().unwrap();
+    let mut all_tokens = get_tokens(&mut client);
+    assert_eq!(all_tokens.len(), 2);
+    let token1 = all_tokens.pop().unwrap();
+    let token2 = all_tokens.pop().unwrap();
     assert_ne!(token1.as_ref(), token2.as_ref());
-    assert!(client.resumption_token().is_none());
 
     can_resume(&token1, true);
     can_resume(&token2, true);

@@ -11,12 +11,13 @@ use std::ops::{Index, IndexMut, Range};
 use std::rc::Rc;
 use std::time::Instant;
 
-use neqo_common::{hex, qdebug, qinfo, qtrace, Role};
+use neqo_common::{hex, hex_snip_middle, qdebug, qinfo, qtrace, Encoder, Role};
 use neqo_crypto::{
     aead::Aead, hkdf, hp::HpKey, Agent, AntiReplay, Cipher, Epoch, HandshakeState, Record,
-    RecordList, SymKey, ZeroRttChecker, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
-    TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_EPOCH_APPLICATION_DATA,
-    TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT, TLS_VERSION_1_3,
+    RecordList, ResumptionToken, SymKey, ZeroRttChecker, TLS_AES_128_GCM_SHA256,
+    TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE,
+    TLS_EPOCH_APPLICATION_DATA, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL, TLS_EPOCH_ZERO_RTT,
+    TLS_VERSION_1_3,
 };
 
 use crate::frame::Frame;
@@ -24,7 +25,7 @@ use crate::packet::{PacketNumber, QuicVersion};
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
-use crate::tparams::{TpZeroRttChecker, TransportParametersHandler};
+use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
 use crate::tracking::PNSpace;
 use crate::{Error, Res};
 
@@ -242,6 +243,40 @@ impl Crypto {
     pub fn discard(&mut self, space: PNSpace) -> bool {
         self.streams.discard(space);
         self.states.discard(space)
+    }
+
+    pub fn create_resumption_token(
+        &mut self,
+        new_token: Option<Vec<u8>>,
+        tps: &TransportParameters,
+        rtt: u64,
+    ) -> Option<ResumptionToken> {
+        if let Agent::Client(ref mut c) = self.tls {
+            if let Some(ref t) = c.resumption_token() {
+                qtrace!("TLS token {}", hex(t.as_ref()));
+                let mut enc = Encoder::default();
+                enc.encode_varint(rtt);
+                enc.encode_vvec_with(|enc_inner| {
+                    tps.encode(enc_inner);
+                });
+                enc.encode_vvec(new_token.as_ref().map_or(&[], |t| &t[..]));
+                enc.encode(t.as_ref());
+                qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
+                Some(ResumptionToken::new(enc.into(), t.expiration_time()))
+            } else {
+                None
+            }
+        } else {
+            unreachable!("It is a server.");
+        }
+    }
+
+    pub fn has_resumption_token(&self) -> bool {
+        if let Agent::Client(c) = &self.tls {
+            c.has_resumption_token()
+        } else {
+            unreachable!("It is a server.");
+        }
     }
 }
 

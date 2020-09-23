@@ -686,7 +686,7 @@ impl ::std::fmt::Display for SecretAgent {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone)]
 pub struct ResumptionToken {
     token: Vec<u8>,
     expiration_time: Instant,
@@ -799,6 +799,12 @@ impl Client {
     #[must_use]
     pub fn resumption_token(&mut self) -> Option<ResumptionToken> {
         (*self.resumption).pop()
+    }
+
+    /// Check if there are more resumption tokens.
+    #[must_use]
+    pub fn has_resumption_token(&self) -> bool {
+        !(*self.resumption).is_empty()
     }
 
     /// Enable resumption, using a token previously provided.

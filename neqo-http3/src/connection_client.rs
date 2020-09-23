@@ -151,21 +151,14 @@ impl Http3Client {
         &self.conn.odcid().expect("Client always has odcid")
     }
 
-    /// Returns a resumption token if present.
     /// A resumption token encodes transport and settings parameter as well.
-    #[must_use]
-    pub fn resumption_token(&mut self) -> Option<ResumptionToken> {
-        if let Some(token) = self.conn.resumption_token() {
-            if let Some(settings) = self.base_handler.get_settings() {
-                let mut enc = Encoder::default();
-                settings.encode_frame_contents(&mut enc);
-                enc.encode(token.as_ref());
-                Some(ResumptionToken::new(enc.into(), token.expiration_time()))
-            } else {
-                None
-            }
-        } else {
-            None
+    fn create_resumption_token(&mut self, token: &ResumptionToken) {
+        if let Some(settings) = self.base_handler.get_settings() {
+            let mut enc = Encoder::default();
+            settings.encode_frame_contents(&mut enc);
+            enc.encode(token.as_ref());
+            self.events
+                .resumption_token(ResumptionToken::new(enc.into(), token.expiration_time()));
         }
     }
 
@@ -566,6 +559,9 @@ impl Http3Client {
                     self.events.zero_rtt_rejected();
                     self.push_handler.borrow_mut().handle_zero_rtt_rejected();
                 }
+                ConnectionEvent::ResumptionToken(token) => {
+                    self.create_resumption_token(&token);
+                }
             }
         }
         Ok(())
@@ -705,6 +701,7 @@ mod tests {
         RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
+    use std::time::Duration;
     use test_fixture::{
         default_server, fixture_init, loopback, now, DEFAULT_ALPN, DEFAULT_SERVER_NAME,
     };
@@ -3254,8 +3251,19 @@ mod tests {
         let out = server.process_output(now());
         assert!(out.as_dgram_ref().is_some());
         client.process_input(out.dgram().unwrap(), now());
+        // We do not have a token so we need to wait for a resumption token timer to trigger.
+        client.process_output(now() + Duration::from_millis(250));
         assert_eq!(client.state(), Http3State::Connected);
-        client.resumption_token().expect("should have token")
+        client
+            .events()
+            .find_map(|e| {
+                if let Http3ClientEvent::ResumptionToken(token) = e {
+                    Some(token)
+                } else {
+                    None
+                }
+            })
+            .unwrap()
     }
 
     fn start_with_0rtt() -> (Http3Client, TestServer) {

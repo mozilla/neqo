@@ -8,7 +8,7 @@
 #![warn(clippy::use_self)]
 
 use neqo_common::{hex, Datagram};
-use neqo_crypto::{init, AuthenticationStatus};
+use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
@@ -255,6 +255,7 @@ struct H3Handler {
     h3: Http3Client,
     host: String,
     path: String,
+    token: Option<ResumptionToken>,
 }
 
 // TODO(ekr@rtfm.com): Figure out how to merge this.
@@ -357,6 +358,9 @@ impl H3Handler {
                         }
                         return false;
                     }
+                }
+                Http3ClientEvent::ResumptionToken(token) => {
+                    self.token = Some(token);
                 }
                 _ => {}
             }
@@ -517,6 +521,7 @@ fn connect_h3(nctx: &NetworkCtx, peer: &Peer, client: Connection) -> Result<H3Ha
         ),
         host: String::from(peer.host),
         path: String::from("/"),
+        token: None,
     };
 
     if let Err(e) = process_loop_h3(nctx, &mut hc, true, false) {
@@ -591,10 +596,7 @@ fn test_h3_rz(
     }
 
     // get resumption ticket
-    let res_token = hc
-        .h3
-        .resumption_token()
-        .ok_or("ERROR: no resumption token")?;
+    let res_token = hc.token.ok_or("ERROR: no resumption token")?;
 
     let handler = Http3Client::new(
         peer.host,
@@ -621,6 +623,7 @@ fn test_h3_rz(
         h3: handler.unwrap(),
         host: String::from(peer.host),
         path: String::from("/"),
+        token: None,
     };
 
     hc.h3.enable_resumption(Instant::now(), res_token).unwrap();
