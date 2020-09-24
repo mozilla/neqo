@@ -11,7 +11,8 @@ use std::cmp::{max, min};
 use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
-use crate::cc::CongestionControl;
+use super::CongestionControl;
+//use crate::cc::CongestionControl;
 use crate::pace::Pacer;
 use crate::path::PATH_MTU_V6;
 use crate::qlog::{self, QlogMetric};
