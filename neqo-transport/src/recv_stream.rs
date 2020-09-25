@@ -724,11 +724,13 @@ mod tests {
         assert_eq!(count, 100);
         assert_eq!(s.retired, 100);
 
-        // Read second part of first frame and all of the second frame
+        // Add a second frame that overlaps.
+        // This shouldn't truncate the first frame, as we're already
+        // Reading from it.
         s.inbound_frame(120, vec![0; 60]).unwrap();
-
         assert_eq!(s.data_ranges.get(&0).unwrap().len(), 150);
         assert_eq!(s.data_ranges.get(&150).unwrap().len(), 30);
+        // Read second part of first frame and all of the second frame
         let count = s.read(&mut buf);
         assert_eq!(count, 80);
     }
