@@ -75,7 +75,7 @@ impl RxStreamOrderer {
                 (true, true) => {
                     // PPPPPP    ->  PPPPPP
                     //   NNNNNN            NN
-                    // Truncate prev if overlap. Insert new.
+                    // Add a range containing only new data
                     // (In-order frames will take this path, with no overlap)
                     let overlap = prev_end.saturating_sub(new_start);
                     qtrace!(
