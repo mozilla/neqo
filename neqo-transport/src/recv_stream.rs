@@ -113,7 +113,7 @@ impl RxStreamOrderer {
                     );
                     let overlap = prev_end.saturating_sub(new_start);
                     new_data.drain(..overlap as usize);
-                    return self.inbound_frame(prev_end, new_data)
+                    return self.inbound_frame(prev_end, new_data);
                 }
                 (false, false) => {
                     // PPPPPP    ->  PPPPPP
