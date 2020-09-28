@@ -171,7 +171,7 @@ impl RxStreamOrderer {
                 self.data_ranges.remove(&start);
             }
 
-            if new_data.len() > 0 {
+            if !new_data.is_empty() {
                 self.data_ranges.insert(new_start, new_data);
             }
         };
