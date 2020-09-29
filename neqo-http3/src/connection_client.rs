@@ -693,7 +693,7 @@ mod tests {
     };
     use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
     use crate::settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS};
-    use neqo_common::{Datagram, Encoder};
+    use neqo_common::{Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
@@ -736,17 +736,6 @@ mod tests {
         )
         .expect("create a default client")
     }
-
-    // default_http3_client use following setting:
-    //  - max_table_capacity = 100
-    //  - max_blocked_streams = 100
-    // The following is what the server will see on the control stream:
-    //  - 0x0 - control stream type
-    //  - 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64 0xd, 0x1, 0x5,- a setting frame with MaxTableCapacity
-    //    and BlockedStreams both equal to 100 and MaxPushStream equals to 5.
-    const CONTROL_STREAM_DATA: &[u8] = &[
-        0x0, 0x4, 0x6, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64, 0xd, 0x1, 0x5,
-    ];
 
     const CONTROL_STREAM_TYPE: &[u8] = &[0x0];
 
@@ -921,8 +910,7 @@ mod tests {
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         if stream_id == CLIENT_SIDE_CONTROL_STREAM_ID {
-                            // the control stream
-                            self.read_and_check_stream_data(stream_id, CONTROL_STREAM_DATA, false);
+                            self.check_control_stream();
                             control_stream = true;
                         } else if stream_id == CLIENT_SIDE_ENCODER_STREAM_ID {
                             // the qpack encoder stream
@@ -954,6 +942,33 @@ mod tests {
             assert!(qpack_encoder_stream);
             assert!(qpack_decoder_stream);
             assert_eq!(request, expect_request);
+        }
+
+        // Check that the control stream contains default values.
+        // Expect a SETTINGS frame, some grease, and a MAX_PUSH_ID frame.
+        // The default test configuration uses:
+        //  - max_table_capacity = 100
+        //  - max_blocked_streams = 100
+        // and a maximum of 5 push streams.
+        fn check_control_stream(&mut self) {
+            let mut buf = [0_u8; 100];
+            let (amount, fin) = self
+                .conn
+                .stream_recv(CLIENT_SIDE_CONTROL_STREAM_ID, &mut buf)
+                .unwrap();
+            let mut dec = Decoder::from(&buf[..amount]);
+            assert_eq!(dec.decode_varint().unwrap(), 0); // control stream type
+            assert_eq!(dec.decode_varint().unwrap(), 4); // SETTINGS
+            assert_eq!(dec.decode_vvec().unwrap(), &[1, 0x40, 0x64, 7, 0x40, 0x64]);
+
+            assert_eq!((dec.decode_varint().unwrap() - 0x21) % 0x1f, 0); // Grease
+            assert!(dec.decode_vvec().unwrap().len() < 8);
+
+            assert_eq!(dec.decode_varint().unwrap(), 0xd); // MAX_PUSH_ID
+            assert_eq!(dec.decode_vvec().unwrap(), &[5]);
+
+            assert_eq!(dec.remaining(), 0);
+            assert!(!fin);
         }
 
         pub fn read_and_check_stream_data(
