@@ -363,6 +363,12 @@ impl Debug for Encoder {
     }
 }
 
+impl AsRef<[u8]> for Encoder {
+    fn as_ref(&self) -> &[u8] {
+        self.buf.as_ref()
+    }
+}
+
 impl<'a> From<Decoder<'a>> for Encoder {
     #[must_use]
     fn from(dec: Decoder<'a>) -> Self {

@@ -69,6 +69,39 @@ impl From<neqo_transport::Error> for ClientError {
 
 type Res<T> = Result<T, ClientError>;
 
+/// Track whether a key update is needed.
+#[derive(Debug, PartialEq, Eq)]
+struct KeyUpdateState(bool);
+
+impl KeyUpdateState {
+    pub fn maybe_update<F, E>(&mut self, update_fn: F) -> Res<()>
+    where
+        F: FnOnce() -> Result<(), E>,
+        E: Into<ClientError>,
+    {
+        if self.0 {
+            if let Err(e) = update_fn() {
+                let e = e.into();
+                match e {
+                    ClientError::TransportError(TransportError::KeyUpdateBlocked)
+                    | ClientError::Http3Error(Error::TransportError(
+                        TransportError::KeyUpdateBlocked,
+                    )) => (),
+                    _ => return Err(e),
+                }
+            } else {
+                println!("Keys updated");
+                self.0 = false;
+            }
+        }
+        Ok(())
+    }
+
+    fn needed(&self) -> bool {
+        self.0
+    }
+}
+
 #[derive(Debug, StructOpt)]
 #[structopt(
     name = "neqo-client",
@@ -139,6 +172,10 @@ pub struct Args {
     /// Client attemps to resume connections when there are multiple connections made.
     /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
     resume: bool,
+
+    #[structopt(name = "key-update", long)]
+    /// Attempt to initiate a key update immediately after confirming the connection.
+    key_update: bool,
 
     #[structopt(short = "c", long, number_of_values = 1)]
     /// The set of TLS cipher suites to enable.
@@ -269,6 +306,7 @@ fn process_loop(
                 if sz > 0 {
                     let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
                     client.process_input(d, Instant::now());
+                    handler.maybe_key_update(client)?;
                 }
             }
         };
@@ -280,6 +318,7 @@ struct Handler<'a> {
     url_queue: VecDeque<Url>,
     all_paths: Vec<PathBuf>,
     args: &'a Args,
+    key_update: KeyUpdateState,
 }
 
 impl<'a> Handler<'a> {
@@ -295,6 +334,10 @@ impl<'a> Handler<'a> {
     }
 
     fn download_next(&mut self, client: &mut Http3Client) -> bool {
+        if self.key_update.needed() {
+            println!("Deferring requests until first key update");
+            return false;
+        }
         let url = self
             .url_queue
             .pop_front()
@@ -329,6 +372,16 @@ impl<'a> Handler<'a> {
                 panic!("Can't create stream {}", e);
             }
         }
+    }
+
+    fn maybe_key_update(&mut self, c: &mut Http3Client) -> Res<()> {
+        self.key_update.maybe_update(|| c.initiate_key_update())?;
+        self.download_urls(c);
+        Ok(())
+    }
+
+    fn done(&mut self) -> bool {
+        self.streams.is_empty() && self.url_queue.is_empty()
     }
 
     fn handle(&mut self, client: &mut Http3Client) -> Res<bool> {
@@ -393,7 +446,7 @@ impl<'a> Handler<'a> {
 
                     if stream_done {
                         self.streams.remove(&stream_id);
-                        if self.streams.is_empty() && self.url_queue.is_empty() {
+                        if self.done() {
                             client.close(Instant::now(), 0, "kthxbye!");
                             return Ok(false);
                         }
@@ -401,7 +454,6 @@ impl<'a> Handler<'a> {
                 }
                 Http3ClientEvent::StateChange(Http3State::Connected)
                 | Http3ClientEvent::RequestsCreatable => {
-                    println!("{:?}", event);
                     self.download_urls(client);
                 }
                 _ => {
@@ -472,11 +524,13 @@ fn client(
     let qlog = qlog_new(args, hostname, client.connection_id())?;
     client.set_qlog(qlog);
 
+    let key_update = KeyUpdateState(args.key_update);
     let mut h = Handler {
         streams: HashMap::new(),
         url_queue: VecDeque::from(urls.to_vec()),
         all_paths: Vec::new(),
         args: &args,
+        key_update,
     };
 
     process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
@@ -540,6 +594,10 @@ fn main() -> Res<()> {
                 args.ciphers.clear();
                 args.ciphers
                     .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
+            }
+            "keyupdate" => {
+                args.use_old_http = true;
+                args.key_update = true;
             }
             _ => exit(127),
         }
@@ -660,7 +718,7 @@ mod old {
 
     use url::Url;
 
-    use super::{qlog_new, Res};
+    use super::{qlog_new, KeyUpdateState, Res};
 
     use neqo_common::Datagram;
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
@@ -677,6 +735,7 @@ mod old {
         all_paths: Vec<PathBuf>,
         args: &'b Args,
         token: Option<ResumptionToken>,
+        key_update: KeyUpdateState,
     }
 
     impl<'b> HandlerOld<'b> {
@@ -692,6 +751,10 @@ mod old {
         }
 
         fn download_next(&mut self, client: &mut Connection) -> bool {
+            if self.key_update.needed() {
+                println!("Deferring requests until after first key update");
+                return false;
+            }
             let url = self
                 .url_queue
                 .pop_front()
@@ -752,6 +815,12 @@ mod old {
             }
         }
 
+        fn maybe_key_update(&mut self, c: &mut Connection) -> Res<()> {
+            self.key_update.maybe_update(|| c.initiate_key_update())?;
+            self.download_urls(c);
+            Ok(())
+        }
+
         fn handle(&mut self, client: &mut Connection) -> Res<bool> {
             while let Some(event) = client.next_event() {
                 match event {
@@ -803,6 +872,9 @@ mod old {
                     | ConnectionEvent::StateChange(State::Connected) => {
                         println!("{:?}", event);
                         self.download_urls(client);
+                    }
+                    ConnectionEvent::StateChange(State::Confirmed) => {
+                        self.maybe_key_update(client)?;
                     }
                     ConnectionEvent::ResumptionToken(token) => {
                         self.token = Some(token);
@@ -880,6 +952,7 @@ mod old {
             if sz > 0 {
                 let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
                 client.process_input(d, Instant::now());
+                handler.maybe_key_update(client)?;
             }
         }
     }
@@ -920,12 +993,14 @@ mod old {
 
         client.set_qlog(qlog_new(args, origin, &client.odcid().unwrap())?);
 
+        let key_update = KeyUpdateState(args.key_update);
         let mut h = HandlerOld {
             streams: HashMap::new(),
             url_queue: VecDeque::from(urls.to_vec()),
             all_paths: Vec::new(),
             args: &args,
             token: None,
+            key_update,
         };
 
         process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
