@@ -4042,6 +4042,40 @@ mod tests {
     }
 
     #[test]
+    fn zero_length_data_at_end() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        // send response - 200  Content-Length: 7
+        // with content: 'abcdefg'.
+        // The content will be send in 2 DATA frames.
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            HTTP_RESPONSE_1,
+            false,
+        );
+        // Send a zero-length frame at the end of the stream.
+        let _ = server.conn.stream_send(request_stream_id, &[0, 0]).unwrap();
+        server.conn.stream_close_send(request_stream_id).unwrap();
+        let dgram = server.conn.process_output(now()).dgram();
+        let dgram = client.process(dgram, now()).dgram();
+        server.conn.process_input(dgram.unwrap(), now());
+
+        let data_readable_event = |e| matches!(e, Http3ClientEvent::DataReadable { stream_id } if stream_id == request_stream_id);
+        assert!(client.events().any(data_readable_event));
+
+        let mut buf = [0_u8; 10];
+        assert_eq!(
+            (7, true),
+            client
+                .read_response_data(now(), request_stream_id, &mut buf)
+                .unwrap()
+        );
+        assert!(!client.events().any(data_readable_event));
+    }
+
+    #[test]
     fn stream_blocked_no_remote_encoder_stream() {
         let (mut client, mut server) = connect_only_transport();
 

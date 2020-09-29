@@ -320,6 +320,7 @@ impl<'a> Handler<'a> {
                 true
             }
             e @ Err(Error::TransportError(TransportError::StreamLimitError))
+            | e @ Err(Error::StreamLimitError)
             | e @ Err(Error::Unavailable) => {
                 println!("Cannot create stream {:?}", e);
                 self.url_queue.push_front(url);
