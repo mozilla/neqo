@@ -220,6 +220,15 @@ impl Http3Client {
         }
     }
 
+    /// Attempt to force a key update.
+    /// # Errors
+    /// If the connection isn't confirmed, or there is an outstanding key update, this
+    /// returns `Err(Error::TransportError(neqo_transport::Error::KeyUpdateBlocked))`.
+    pub fn initiate_key_update(&mut self) -> Res<()> {
+        self.conn.initiate_key_update()?;
+        Ok(())
+    }
+
     // API: Request/response
 
     /// This is call to make a new http request. Each request can have headers and they are added when request

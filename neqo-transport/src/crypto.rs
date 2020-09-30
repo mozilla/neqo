@@ -854,6 +854,7 @@ impl CryptoStates {
     /// we want to ensure that we can continue to receive any delayed
     /// packets that use the old keys.  So we just set a timer.
     pub fn key_update_received(&mut self, expiration: Instant) -> Res<()> {
+        qtrace!([self], "Key update received");
         // If we received a key update, then we assume that the peer has
         // acknowledged a packet we sent in this epoch. It's OK to do that
         // because they aren't allowed to update without first having received

@@ -1590,7 +1590,7 @@ impl Connection {
             qinfo!([self], "Initiating key update");
             self.crypto.states.initiate_key_update(la)
         } else {
-            Err(Error::NotConnected)
+            Err(Error::KeyUpdateBlocked)
         }
     }
 
