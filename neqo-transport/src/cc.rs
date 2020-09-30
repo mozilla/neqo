@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use crate::pace::Pacer;
 use crate::path::PATH_MTU_V6;
-use crate::qlog::{self, CongestionState, QlogMetric};
+use crate::qlog::{self, QlogMetric};
 use crate::tracking::SentPacket;
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
@@ -28,32 +28,74 @@ pub const CWND_MIN: usize = MAX_DATAGRAM_SIZE * 2;
 pub(crate) const PACING_BURST_SIZE: usize = 2;
 const PERSISTENT_CONG_THRESH: u32 = 3;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum State {
+    /// In either slow start or congestion avoidance, not recovery.
+    SlowStart,
+    /// In congestion avoidance.
+    CongestionAvoidance,
+    /// In a recovery period, but no packets have been sent yet.  This is a
+    /// transient state because we want to exempt the first packet sent after
+    /// entering recovery from the congestion window.
+    RecoveryStart,
+    /// In a recovery period, with the first packet sent at this time.
+    Recovery,
+    /// Start of persistent congestion, which is transient, like `RecoveryStart`.
+    PersistentCongestion,
+}
+
+impl State {
+    pub fn in_recovery(&self) -> bool {
+        matches!(self, Self::RecoveryStart | Self::Recovery)
+    }
+
+    /// These states are transient, we tell qlog on entry, but not on exit.
+    pub fn transient(&self) -> bool {
+        matches!(self, Self::RecoveryStart | Self::PersistentCongestion)
+    }
+
+    /// Update a transient state to the true state.
+    pub fn update(&mut self) {
+        *self = match self {
+            Self::PersistentCongestion => Self::SlowStart,
+            Self::RecoveryStart => Self::Recovery,
+            _ => unreachable!(),
+        };
+    }
+
+    pub fn to_qlog(&self) -> &str {
+        match self {
+            Self::SlowStart | Self::PersistentCongestion => "slow_start",
+            Self::CongestionAvoidance => "congestion_avoidance",
+            Self::Recovery | Self::RecoveryStart => "recovery",
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CongestionControl {
+    state: State,
     congestion_window: usize, // = kInitialWindow
     bytes_in_flight: usize,
     acked_bytes: usize,
-    congestion_recovery_start_time: Option<Instant>,
     ssthresh: usize,
+    recovery_start: Option<Instant>,
     pacer: Option<Pacer>,
-    in_recovery: bool,
 
     qlog: NeqoQlog,
-    qlog_curr_cong_state: CongestionState,
 }
 
 impl Default for CongestionControl {
     fn default() -> Self {
         Self {
+            state: State::SlowStart,
             congestion_window: CWND_INITIAL,
             bytes_in_flight: 0,
             acked_bytes: 0,
-            congestion_recovery_start_time: None,
             ssthresh: usize::MAX,
+            recovery_start: None,
             pacer: None,
-            in_recovery: false,
             qlog: NeqoQlog::disabled(),
-            qlog_curr_cong_state: CongestionState::SlowStart,
         }
     }
 }
@@ -102,30 +144,44 @@ impl CongestionControl {
         self.congestion_window.saturating_sub(self.bytes_in_flight)
     }
 
+    fn set_state(&mut self, state: State) {
+        if self.state != state {
+            qdebug!([self], "state -> {:?}", state);
+            let old_state = self.state;
+            self.qlog.add_event(|| {
+                // No need to tell qlog about exit from transient states.
+                if old_state.transient() {
+                    None
+                } else {
+                    Some(::qlog::event::Event::congestion_state_updated(
+                        Some(old_state.to_qlog().to_owned()),
+                        state.to_qlog().to_owned(),
+                    ))
+                }
+            });
+            self.state = state;
+        }
+    }
+
     // Multi-packet version of OnPacketAckedCC
     pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket]) {
         for pkt in acked_pkts.iter().filter(|pkt| pkt.cc_outstanding()) {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
 
-            if !self.after_recovery_start(pkt.time_sent) {
+            if !self.after_recovery_start(pkt) {
                 // Do not increase congestion window for packets sent before
-                // recovery start.
+                // recovery last started.
                 continue;
             }
 
-            if self.in_recovery {
-                self.in_recovery = false;
+            if self.state.in_recovery() {
+                self.set_state(State::CongestionAvoidance);
                 qlog::metrics_updated(&mut self.qlog, &[QlogMetric::InRecovery(false)]);
             }
 
             if self.app_limited() {
                 // Do not increase congestion_window if application limited.
-                qlog::congestion_state_updated(
-                    &mut self.qlog,
-                    &mut self.qlog_curr_cong_state,
-                    CongestionState::ApplicationLimited,
-                );
                 continue;
             }
 
@@ -139,22 +195,17 @@ impl CongestionControl {
             self.congestion_window += increase;
             self.acked_bytes -= increase;
             qinfo!([self], "slow start += {}", increase);
-            qlog::congestion_state_updated(
-                &mut self.qlog,
-                &mut self.qlog_curr_cong_state,
-                CongestionState::SlowStart,
-            );
+            if self.congestion_window == self.ssthresh {
+                // This doesn't look like it is necessary, but it can happen
+                // after persistent congestion.
+                self.set_state(State::CongestionAvoidance);
+            }
         }
         // Congestion avoidance, above the slow start threshold.
         if self.acked_bytes >= self.congestion_window {
             self.acked_bytes -= self.congestion_window;
             self.congestion_window += MAX_DATAGRAM_SIZE;
             qinfo!([self], "congestion avoidance += {}", MAX_DATAGRAM_SIZE);
-            qlog::congestion_state_updated(
-                &mut self.qlog,
-                &mut self.qlog_curr_cong_state,
-                CongestionState::CongestionAvoidance,
-            );
         }
         qlog::metrics_updated(
             &mut self.qlog,
@@ -201,14 +252,14 @@ impl CongestionControl {
             }
             if let Some(t) = start {
                 if p.time_sent.duration_since(t) > pc_period {
-                    // In persistent congestion.  Stop.
+                    qinfo!([self], "persistent congestion");
                     self.congestion_window = CWND_MIN;
                     self.acked_bytes = 0;
+                    self.set_state(State::PersistentCongestion);
                     qlog::metrics_updated(
                         &mut self.qlog,
                         &[QlogMetric::CongestionWindow(self.congestion_window)],
                     );
-                    qinfo!([self], "persistent congestion");
                     return;
                 }
             } else {
@@ -217,9 +268,9 @@ impl CongestionControl {
         }
     }
 
+    /// Update congestion controller state based on lost packets.
     pub fn on_packets_lost(
         &mut self,
-        now: Instant,
         first_rtt_sample_time: Option<Instant>,
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
@@ -240,8 +291,7 @@ impl CongestionControl {
 
         qdebug!([self], "Pkts lost {}", lost_packets.len());
 
-        let last_lost_pkt = lost_packets.last().unwrap();
-        self.on_congestion_event(now, last_lost_pkt.time_sent);
+        self.on_congestion_event(lost_packets.last().unwrap());
         self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
@@ -268,6 +318,12 @@ impl CongestionControl {
             .unwrap()
             .spend(pkt.time_sent, rtt, self.congestion_window, pkt.size);
 
+        // Record the recovery time and exit any transient state.
+        if self.state.transient() {
+            self.recovery_start = Some(pkt.time_sent);
+            self.state.update();
+        }
+
         if !pkt.ack_eliciting() {
             return;
         }
@@ -287,18 +343,21 @@ impl CongestionControl {
     }
 
     #[must_use]
-    fn after_recovery_start(&mut self, sent_time: Instant) -> bool {
-        match self.congestion_recovery_start_time {
-            Some(crst) => sent_time > crst,
-            None => true,
+    fn after_recovery_start(&mut self, packet: &SentPacket) -> bool {
+        if let Some(t) = self.recovery_start {
+            packet.time_sent >= t
+        } else {
+            // At the start of the first recovery period, if the state is
+            // transient, all packets will have been sent before recovery.
+            !self.state.transient()
         }
     }
 
-    fn on_congestion_event(&mut self, now: Instant, sent_time: Instant) {
+    /// Handle a congestion event.
+    fn on_congestion_event(&mut self, last_packet: &SentPacket) {
         // Start a new congestion event if lost packet was sent after the start
         // of the previous congestion recovery period.
-        if self.after_recovery_start(sent_time) {
-            self.congestion_recovery_start_time = Some(now);
+        if self.after_recovery_start(last_packet) {
             self.congestion_window /= 2; // kLossReductionFactor = 0.5
             self.acked_bytes /= 2;
             self.congestion_window = max(self.congestion_window, CWND_MIN);
@@ -317,13 +376,14 @@ impl CongestionControl {
                     QlogMetric::InRecovery(true),
                 ],
             );
-            self.in_recovery = true;
-            qlog::congestion_state_updated(
-                &mut self.qlog,
-                &mut self.qlog_curr_cong_state,
-                CongestionState::Recovery,
-            );
+            self.set_state(State::RecoveryStart);
         }
+    }
+
+    /// Whether a packet can be sent immediately as a result of entering recovery.
+    #[must_use]
+    pub fn recovery_packet(&self) -> bool {
+        self.state == State::RecoveryStart
     }
 
     #[allow(clippy::unused_self)]
@@ -382,9 +442,7 @@ mod tests {
         let mut cc = CongestionControl::default();
         let time_now = now();
         let time_before = time_now - Duration::from_millis(100);
-        let time_after1 = time_now + Duration::from_millis(100);
         let time_after2 = time_now + Duration::from_millis(150);
-        let time_after3 = time_now + Duration::from_millis(175);
 
         cc.start_pacer(time_now);
 
@@ -427,9 +485,10 @@ mod tests {
         assert_eq!(cc.ssthresh(), usize::MAX);
         assert_eq!(cc.bif(), 208);
 
-        cc.on_packets_lost(time_after1, Some(time_now), None, PTO, &sent_packets[0..1]);
+        cc.on_packets_lost(Some(time_now), None, PTO, &sent_packets[0..1]);
 
         // We are now in recovery
+        assert!(cc.recovery_packet());
         assert_eq!(cc.acked_bytes, 0);
         assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
         assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
@@ -437,6 +496,7 @@ mod tests {
 
         // Send a packet after recovery starts
         cc.on_packet_sent(&sent_packets[2], RTT);
+        assert!(!cc.recovery_packet());
         assert_eq!(cc.acked_bytes, 0);
         assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
         assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
@@ -450,7 +510,8 @@ mod tests {
         assert_eq!(cc.bif(), 105);
 
         // Packet from before is lost. Should not hurt cwnd.
-        cc.on_packets_lost(time_after3, Some(time_now), None, PTO, &sent_packets[1..2]);
+        cc.on_packets_lost(Some(time_now), None, PTO, &sent_packets[1..2]);
+        assert!(!cc.recovery_packet());
         assert_eq!(cc.acked_bytes, sent_packets[2].size);
         assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
         assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
@@ -475,7 +536,7 @@ mod tests {
             cc.on_packet_sent(p, RTT);
         }
 
-        cc.on_packets_lost(now(), Some(now()), None, PTO, lost_packets);
+        cc.on_packets_lost(Some(now()), None, PTO, lost_packets);
         if cc.cwnd() == CWND_INITIAL / 2 {
             false
         } else if cc.cwnd() == CWND_MIN {

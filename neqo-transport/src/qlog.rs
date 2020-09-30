@@ -228,44 +228,6 @@ pub fn packet_received(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CongestionState {
-    SlowStart,
-    CongestionAvoidance,
-    ApplicationLimited,
-    Recovery,
-}
-
-impl CongestionState {
-    fn to_str(&self) -> &str {
-        match self {
-            Self::SlowStart => "slow_start",
-            Self::CongestionAvoidance => "congestion_avoidance",
-            Self::ApplicationLimited => "application_limited",
-            Self::Recovery => "recovery",
-        }
-    }
-}
-
-pub fn congestion_state_updated(
-    qlog: &mut NeqoQlog,
-    curr_state: &mut CongestionState,
-    new_state: CongestionState,
-) {
-    qlog.add_event(|| {
-        if *curr_state != new_state {
-            let evt = Event::congestion_state_updated(
-                Some(curr_state.to_str().to_owned()),
-                new_state.to_str().to_owned(),
-            );
-            *curr_state = new_state;
-            Some(evt)
-        } else {
-            None
-        }
-    });
-}
-
 #[allow(dead_code)]
 pub enum QlogMetric {
     MinRtt(Duration),
