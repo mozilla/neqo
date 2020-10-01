@@ -45,12 +45,12 @@ enum State {
 }
 
 impl State {
-    pub fn in_recovery(&self) -> bool {
+    pub fn in_recovery(self) -> bool {
         matches!(self, Self::RecoveryStart | Self::Recovery)
     }
 
     /// These states are transient, we tell qlog on entry, but not on exit.
-    pub fn transient(&self) -> bool {
+    pub fn transient(self) -> bool {
         matches!(self, Self::RecoveryStart | Self::PersistentCongestion)
     }
 
@@ -63,7 +63,7 @@ impl State {
         };
     }
 
-    pub fn to_qlog(&self) -> &str {
+    pub fn to_qlog(self) -> &'static str {
         match self {
             Self::SlowStart | Self::PersistentCongestion => "slow_start",
             Self::CongestionAvoidance => "congestion_avoidance",
