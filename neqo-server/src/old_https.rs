@@ -20,7 +20,7 @@ use neqo_common::Datagram;
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use neqo_http3::Error;
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
-use neqo_transport::{ConnectionEvent, ConnectionIdManager, Output};
+use neqo_transport::{ConnectionEvent, ConnectionIdManager, Output, State};
 
 use super::{qns_read_response, Args, HttpServer};
 
@@ -146,8 +146,8 @@ impl Http09Server {
 }
 
 impl HttpServer for Http09Server {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
-        self.server.process(dgram, now)
+    fn process(&mut self, dgram: Option<Datagram>) -> Output {
+        self.server.process(dgram, Instant::now())
     }
 
     fn process_events(&mut self, args: &Args) {
@@ -171,7 +171,13 @@ impl HttpServer for Http09Server {
                     ConnectionEvent::SendStreamWritable { stream_id } => {
                         self.stream_writable(stream_id.as_u64(), &mut acr);
                     }
-                    ConnectionEvent::StateChange { .. } => {}
+                    ConnectionEvent::StateChange(State::Connected) => {
+                        acr.connection()
+                            .borrow_mut()
+                            .send_ticket(Instant::now(), b"hi!")
+                            .unwrap();
+                    }
+                    ConnectionEvent::StateChange(_) => (),
                     e => eprintln!("unhandled event {:?}", e),
                 }
             }

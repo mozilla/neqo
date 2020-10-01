@@ -144,15 +144,15 @@ fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
 }
 
 trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+    fn process(&mut self, dgram: Option<Datagram>) -> Output;
     fn process_events(&mut self, args: &Args);
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
     fn validate_address(&mut self, when: ValidateAddress);
 }
 
 impl HttpServer for Http3Server {
-    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
-        self.process(dgram, now)
+    fn process(&mut self, dgram: Option<Datagram>) -> Output {
+        self.process(dgram, Instant::now())
     }
 
     fn process_events(&mut self, args: &Args) {
@@ -222,7 +222,7 @@ fn process(
     timer: &mut Timer<usize>,
     socket: &mut UdpSocket,
 ) -> bool {
-    match server.process(dgram, Instant::now()) {
+    match server.process(dgram) {
         Output::Datagram(dgram) => {
             emit_packet(socket, dgram);
             true
