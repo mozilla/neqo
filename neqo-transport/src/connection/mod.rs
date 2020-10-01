@@ -793,6 +793,7 @@ impl Connection {
 
     /// Just like above but returns frames parsed from the datagram
     #[cfg(test)]
+    #[must_use]
     pub fn test_process_input(&mut self, dgram: Datagram, now: Instant) -> Vec<(Frame, PNSpace)> {
         let res = self.input(dgram, now);
         let frames = self.absorb_error(now, res).unwrap_or_default();

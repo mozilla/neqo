@@ -33,7 +33,7 @@ pub const GRANULARITY: Duration = Duration::from_millis(20);
 pub const MAX_ACK_DELAY: Duration = Duration::from_millis(25);
 // Defined in -recovery 6.2 as 333ms but using lower value.
 const INITIAL_RTT: Duration = Duration::from_millis(100);
-const PACKET_THRESHOLD: u64 = 3;
+pub(crate) const PACKET_THRESHOLD: u64 = 3;
 /// `ACK_ONLY_SIZE_LIMIT` is the minimum size of the congestion window.
 /// If the congestion window is this small, we will only send ACK frames.
 pub(crate) const ACK_ONLY_SIZE_LIMIT: usize = 256;
@@ -759,7 +759,7 @@ impl LossRecovery {
         let pto_raw = self.pto_raw(pn_space);
         let first_rtt_sample = self.rtt_vals.first_sample_time();
         self.cc
-            .on_packets_lost(now, first_rtt_sample, prev_largest_acked, pto_raw, &lost);
+            .on_packets_lost(first_rtt_sample, prev_largest_acked, pto_raw, &lost);
 
         // This must happen after on_packets_lost. If in recovery, this could
         // take us out, and then lost packets will start a new recovery period
@@ -968,12 +968,11 @@ impl LossRecovery {
             let pto = Self::pto_period_inner(&self.rtt_vals, &self.pto_state, space.space());
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
             self.cc.on_packets_lost(
-                now,
                 first_rtt_sample,
                 space.largest_acked_sent_time,
                 Self::pto_raw_inner(&self.rtt_vals, space.space()),
                 &lost_packets[first..],
-            )
+            );
         }
         self.stats.borrow_mut().lost += lost_packets.len();
 
@@ -1006,6 +1005,11 @@ impl LossRecovery {
                 } else {
                     SendProfile::new_limited(mtu)
                 }
+            } else if self.cc.recovery_packet() {
+                // After entering recovery, allow a packet to be sent immediately.
+                // This uses the PTO machinery, probing in all spaces. This will
+                // result in a PING being sent in every active space.
+                SendProfile::new_pto(PNSpace::Initial, mtu, PNSpaceSet::all())
             } else {
                 SendProfile::new_limited(cwnd)
             }

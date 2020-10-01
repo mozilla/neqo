@@ -71,6 +71,16 @@ pub struct PNSpaceSet {
     application_data: bool,
 }
 
+impl PNSpaceSet {
+    pub fn all() -> Self {
+        Self {
+            initial: true,
+            handshake: true,
+            application_data: true,
+        }
+    }
+}
+
 impl Index<PNSpace> for PNSpaceSet {
     type Output = bool;
 

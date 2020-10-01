@@ -38,6 +38,7 @@ mod stream;
 mod vn;
 mod zerortt;
 
+const DEFAULT_RTT: Duration = Duration::from_millis(100);
 const AT_LEAST_PTO: Duration = Duration::from_secs(1);
 const DEFAULT_STREAM_DATA: &[u8] = b"message";
 
