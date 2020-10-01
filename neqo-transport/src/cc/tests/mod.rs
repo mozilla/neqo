@@ -6,8 +6,9 @@
 
 #![deny(clippy::pedantic)]
 
-use crate::cc::new_reno_cubic::{NewRenoCubic, CWND_INITIAL, CWND_MIN};
-use crate::cc::{CongestionControl, CongestionControlAlgorithm};
+use crate::cc::cubic::{CUBIC_BETA_USIZE, CUBIC_DIV};
+use crate::cc::new_reno_cubic::NewRenoCubic;
+use crate::cc::{CongestionControl, CongestionControlAlgorithm, CWND_INITIAL, CWND_MIN};
 use crate::packet::{PacketNumber, PacketType};
 use crate::tracking::SentPacket;
 use std::convert::TryFrom;
@@ -17,7 +18,9 @@ use test_fixture::now;
 
 const PTO: Duration = Duration::from_millis(100);
 const RTT: Duration = Duration::from_millis(98);
+pub const CWND_INITIAL_DECREASE: usize = CWND_INITIAL * CUBIC_BETA_USIZE / CUBIC_DIV;
 
+mod cubic;
 mod new_reno;
 
 fn lost(pn: PacketNumber, ack_eliciting: bool, t: Duration) -> SentPacket {
@@ -43,6 +46,10 @@ fn persistent_congestion(
 
     cc.on_packets_lost(now(), Some(now()), None, PTO, lost_packets);
     if cc.cwnd() == CWND_INITIAL / 2 {
+        assert!(matches!(cc_version, CongestionControlAlgorithm::NewReno));
+        false
+    } else if cc.cwnd() == CWND_INITIAL_DECREASE {
+        assert!(matches!(cc_version, CongestionControlAlgorithm::Cubic));
         false
     } else if cc.cwnd() == CWND_MIN {
         true

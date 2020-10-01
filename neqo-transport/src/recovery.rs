@@ -778,7 +778,8 @@ impl LossRecovery {
         // This must happen after on_packets_lost. If in recovery, this could
         // take us out, and then lost packets will start a new recovery period
         // when it shouldn't.
-        self.cc.on_packets_acked(&acked_packets);
+        self.cc
+            .on_packets_acked(&acked_packets, now, self.rtt_vals.smoothed_rtt);
 
         self.pto_state = None;
 

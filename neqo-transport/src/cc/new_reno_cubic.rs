@@ -11,35 +11,30 @@ use std::cmp::{max, min};
 use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
-use crate::cc::{CongestionControl, CongestionControlAlgorithm};
+use crate::cc::cubic::Cubic;
+use crate::cc::{
+    CongestionControl, CongestionControlAlgorithm, CWND_INITIAL, CWND_MIN, MAX_DATAGRAM_SIZE,
+};
 use crate::pace::Pacer;
-use crate::path::PATH_MTU_V6;
 use crate::qlog::{self, CongestionState, QlogMetric};
 use crate::tracking::SentPacket;
-use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
+use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
-pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
-pub const CWND_INITIAL_PKTS: usize = 10;
-pub const CWND_INITIAL: usize = const_min(
-    CWND_INITIAL_PKTS * MAX_DATAGRAM_SIZE,
-    const_max(2 * MAX_DATAGRAM_SIZE, 14720),
-);
-pub const CWND_MIN: usize = MAX_DATAGRAM_SIZE * 2;
 /// The number of packets we allow to burst from the pacer.
 pub const PACING_BURST_SIZE: usize = 2;
 pub const PERSISTENT_CONG_THRESH: u32 = 3;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum CcVersion {
     NewReno,
-    Cubic,
+    Cubic(Cubic),
 }
 
 impl CcVersion {
     pub fn new(cc: &CongestionControlAlgorithm) -> Self {
         match cc {
             CongestionControlAlgorithm::NewReno => Self::NewReno,
-            //CongestionControlAlgorithm::Cubic => Self::Cubic,
+            CongestionControlAlgorithm::Cubic => Self::Cubic(Cubic::default()),
         }
     }
 }
@@ -51,7 +46,7 @@ impl Display for CcVersion {
             "{}",
             match self {
                 Self::NewReno => "NewReno",
-                Self::Cubic => "Cubic",
+                Self::Cubic(..) => "Cubic",
             }
         )?;
         Ok(())
@@ -118,7 +113,8 @@ impl CongestionControl for NewRenoCubic {
     }
 
     // Multi-packet version of OnPacketAckedCC
-    fn on_packets_acked(&mut self, acked_pkts: &[SentPacket]) {
+    fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], now: Instant, rtt: Duration) {
+        let mut acked_bytes = 0;
         for pkt in acked_pkts.iter().filter(|pkt| pkt.cc_outstanding()) {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
@@ -144,10 +140,11 @@ impl CongestionControl for NewRenoCubic {
                 continue;
             }
 
-            self.acked_bytes += pkt.size;
+            acked_bytes += pkt.size;
         }
         qtrace!([self], "ACK received, acked_bytes = {}", self.acked_bytes);
 
+        self.acked_bytes += acked_bytes;
         // Slow start, up to the slow start threshold.
         if self.congestion_window < self.ssthresh {
             let increase = min(self.ssthresh - self.congestion_window, self.acked_bytes);
@@ -161,17 +158,26 @@ impl CongestionControl for NewRenoCubic {
             );
         } else {
             // Congestion avoidance, above the slow start threshold.
-            if self.cc_version == CcVersion::NewReno {
-                if self.acked_bytes >= self.congestion_window {
-                    self.acked_bytes -= self.congestion_window;
-                    self.congestion_window += MAX_DATAGRAM_SIZE;
-                    qinfo!([self], "congestion avoidance += {}", MAX_DATAGRAM_SIZE);
-                    qlog::congestion_state_updated(
-                        &mut self.qlog,
-                        &mut self.qlog_curr_cong_state,
-                        CongestionState::CongestionAvoidance,
-                    );
+            match self.cc_version {
+                CcVersion::NewReno => {
+                    if self.acked_bytes >= self.congestion_window {
+                        self.acked_bytes -= self.congestion_window;
+                        self.congestion_window += MAX_DATAGRAM_SIZE;
+                        qinfo!([self], "congestion avoidance += {}", MAX_DATAGRAM_SIZE);
+                        qlog::congestion_state_updated(
+                            &mut self.qlog,
+                            &mut self.qlog_curr_cong_state,
+                            CongestionState::CongestionAvoidance,
+                        );
+                    }
                 }
+                CcVersion::Cubic(ref mut c) => c.calculate_cwnd_ca(
+                    &mut self.congestion_window,
+                    now,
+                    rtt,
+                    &mut self.acked_bytes,
+                    acked_bytes,
+                ),
             }
         }
         qlog::metrics_updated(
@@ -350,11 +356,8 @@ impl NewRenoCubic {
             }
             if let Some(t) = start {
                 if p.time_sent.duration_since(t) > pc_period {
-                    if self.cc_version == CcVersion::NewReno {
-                        // In persistent congestion.  Stop.
-                        self.congestion_window = CWND_MIN;
-                        self.acked_bytes = 0;
-                    }
+                    self.congestion_window = CWND_MIN;
+                    self.acked_bytes = 0;
                     qlog::metrics_updated(
                         &mut self.qlog,
                         &[QlogMetric::CongestionWindow(self.congestion_window)],
@@ -381,12 +384,18 @@ impl NewRenoCubic {
         // of the previous congestion recovery period.
         if self.after_recovery_start(sent_time) {
             self.congestion_recovery_start_time = Some(now);
-            if self.cc_version == CcVersion::NewReno {
-                self.congestion_window /= 2; // kLossReductionFactor = 0.5
-                self.acked_bytes /= 2;
-                self.congestion_window = max(self.congestion_window, CWND_MIN);
-                self.ssthresh = self.congestion_window;
+            match self.cc_version {
+                CcVersion::NewReno => {
+                    self.congestion_window /= 2; // kLossReductionFactor = 0.5
+                    self.acked_bytes /= 2;
+                    self.congestion_window = max(self.congestion_window, CWND_MIN);
+                }
+                CcVersion::Cubic(ref mut c) => {
+                    c.on_congestion_event(&mut self.congestion_window);
+                    self.acked_bytes = 0;
+                }
             }
+            self.ssthresh = self.congestion_window;
             qinfo!(
                 [self],
                 "Cong event -> recovery; cwnd {}, ssthresh {}",

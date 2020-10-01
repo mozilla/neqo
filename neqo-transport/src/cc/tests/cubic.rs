@@ -7,7 +7,8 @@
 #![deny(clippy::pedantic)]
 
 use super::{
-    by_pto, lost, make_lost, persistent_congestion, persistent_congestion_by_pto, PTO, RTT,
+    by_pto, lost, make_lost, persistent_congestion, persistent_congestion_by_pto,
+    CWND_INITIAL_DECREASE, PTO, RTT,
 };
 use crate::cc::new_reno_cubic::{NewRenoCubic, PERSISTENT_CONG_THRESH};
 use crate::cc::{CongestionControl, CongestionControlAlgorithm, CWND_INITIAL, CWND_MIN};
@@ -17,7 +18,7 @@ use std::rc::Rc;
 use std::time::Duration;
 use test_fixture::now;
 
-const CC_VERSION: &CongestionControlAlgorithm = &CongestionControlAlgorithm::NewReno;
+const CC_VERSION: &CongestionControlAlgorithm = &CongestionControlAlgorithm::Cubic;
 
 const ZERO: Duration = Duration::from_secs(0);
 const EPSILON: Duration = Duration::from_nanos(1);
@@ -82,29 +83,29 @@ fn issue_876() {
 
     // We are now in recovery
     assert_eq!(cc.acked_bytes(), 0);
-    assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
-    assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
+    assert_eq!(cc.cwnd(), CWND_INITIAL_DECREASE);
+    assert_eq!(cc.ssthresh(), CWND_INITIAL_DECREASE);
     assert_eq!(cc.bif(), 105);
 
     // Send a packet after recovery starts
     cc.on_packet_sent(&sent_packets[2], RTT);
     assert_eq!(cc.acked_bytes(), 0);
-    assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
-    assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
+    assert_eq!(cc.cwnd(), CWND_INITIAL_DECREASE);
+    assert_eq!(cc.ssthresh(), CWND_INITIAL_DECREASE);
     assert_eq!(cc.bif(), 212);
 
     // and ack it. cwnd increases slightly
     cc.on_packets_acked(&sent_packets[2..3], time_now, RTT);
-    assert_eq!(cc.acked_bytes(), sent_packets[2].size);
-    assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
-    assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
+    assert_eq!(cc.acked_bytes(), 0);
+    assert!(cc.cwnd() > CWND_INITIAL_DECREASE);
+    assert_eq!(cc.ssthresh(), CWND_INITIAL_DECREASE);
     assert_eq!(cc.bif(), 105);
 
     // Packet from before is lost. Should not hurt cwnd.
     cc.on_packets_lost(time_after3, Some(time_now), None, PTO, &sent_packets[1..2]);
-    assert_eq!(cc.acked_bytes(), sent_packets[2].size);
-    assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
-    assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
+    assert_eq!(cc.acked_bytes(), 0);
+    assert!(cc.cwnd() > CWND_INITIAL_DECREASE);
+    assert_eq!(cc.ssthresh(), CWND_INITIAL_DECREASE);
     assert_eq!(cc.bif(), 0);
 }
 
