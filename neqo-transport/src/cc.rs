@@ -439,10 +439,20 @@ mod tests {
 
     #[test]
     fn issue_876() {
+        fn cwnd_is_default(cc: &CongestionControl) {
+            assert_eq!(cc.cwnd(), CWND_INITIAL);
+            assert_eq!(cc.ssthresh(), usize::MAX);
+        }
+
+        fn cwnd_is_halved(cc: &CongestionControl) {
+            assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
+            assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
+        }
+
         let mut cc = CongestionControl::default();
         let time_now = now();
         let time_before = time_now - Duration::from_millis(100);
-        let time_after2 = time_now + Duration::from_millis(150);
+        let time_after = time_now + Duration::from_millis(150);
 
         cc.start_pacer(time_now);
 
@@ -466,7 +476,7 @@ mod tests {
             SentPacket::new(
                 PacketType::Short,
                 3,             // pn
-                time_after2,   // time sent
+                time_after,    // time sent
                 true,          // ack eliciting
                 Rc::default(), // tokens
                 107,           // size
@@ -475,14 +485,12 @@ mod tests {
 
         cc.on_packet_sent(&sent_packets[0], RTT);
         assert_eq!(cc.acked_bytes, 0);
-        assert_eq!(cc.cwnd(), CWND_INITIAL);
-        assert_eq!(cc.ssthresh(), usize::MAX);
+        cwnd_is_default(&cc);
         assert_eq!(cc.bif(), 103);
 
         cc.on_packet_sent(&sent_packets[1], RTT);
         assert_eq!(cc.acked_bytes, 0);
-        assert_eq!(cc.cwnd(), CWND_INITIAL);
-        assert_eq!(cc.ssthresh(), usize::MAX);
+        cwnd_is_default(&cc);
         assert_eq!(cc.bif(), 208);
 
         cc.on_packets_lost(Some(time_now), None, PTO, &sent_packets[0..1]);
@@ -490,31 +498,27 @@ mod tests {
         // We are now in recovery
         assert!(cc.recovery_packet());
         assert_eq!(cc.acked_bytes, 0);
-        assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
-        assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
+        cwnd_is_halved(&cc);
         assert_eq!(cc.bif(), 105);
 
         // Send a packet after recovery starts
         cc.on_packet_sent(&sent_packets[2], RTT);
         assert!(!cc.recovery_packet());
+        cwnd_is_halved(&cc);
         assert_eq!(cc.acked_bytes, 0);
-        assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
-        assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
         assert_eq!(cc.bif(), 212);
 
         // and ack it. cwnd increases slightly
         cc.on_packets_acked(&sent_packets[2..3]);
         assert_eq!(cc.acked_bytes, sent_packets[2].size);
-        assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
-        assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
+        cwnd_is_halved(&cc);
         assert_eq!(cc.bif(), 105);
 
         // Packet from before is lost. Should not hurt cwnd.
         cc.on_packets_lost(Some(time_now), None, PTO, &sent_packets[1..2]);
         assert!(!cc.recovery_packet());
         assert_eq!(cc.acked_bytes, sent_packets[2].size);
-        assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
-        assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
+        cwnd_is_halved(&cc);
         assert_eq!(cc.bif(), 0);
     }
 
