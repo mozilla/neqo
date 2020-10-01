@@ -14,10 +14,11 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::time::{Duration, Instant};
 
-mod new_reno_cc;
+mod new_reno_cubic;
 
-use new_reno_cc::NewReno;
-pub use new_reno_cc::{CWND_INITIAL_PKTS, CWND_MIN, MAX_DATAGRAM_SIZE, PACING_BURST_SIZE};
+pub use new_reno_cubic::{
+    NewRenoCubic, CWND_INITIAL_PKTS, CWND_MIN, MAX_DATAGRAM_SIZE, PACING_BURST_SIZE,
+};
 
 pub trait CongestionControl: Display + Debug {
     fn set_qlog(&mut self, qlog: NeqoQlog);
@@ -55,13 +56,12 @@ pub trait CongestionControl: Display + Debug {
 
 pub enum CongestionControlAlgorithm {
     NewReno,
+    //    Cubic,
 }
 
 impl CongestionControlAlgorithm {
     pub fn create(&self) -> Box<dyn CongestionControl> {
-        match self {
-            Self::NewReno => Box::new(NewReno::default()),
-        }
+        Box::new(NewRenoCubic::new(&self))
     }
 }
 
@@ -70,3 +70,6 @@ impl Default for CongestionControlAlgorithm {
         Self::NewReno
     }
 }
+
+#[cfg(test)]
+mod tests;
