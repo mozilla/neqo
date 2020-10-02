@@ -4,11 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, Error, Output, LOCAL_IDLE_TIMEOUT};
+use super::super::super::{ConnectionError, ERROR_AEAD_LIMIT_REACHED};
+use super::super::{Connection, Error, Output, State, StreamType, LOCAL_IDLE_TIMEOUT};
 use super::{
     connect, connect_force_idle, default_client, default_server, maybe_authenticate,
     send_and_receive, send_something, AT_LEAST_PTO,
 };
+use crate::crypto::{OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT};
+use crate::packet::PacketNumber;
 use crate::path::PATH_MTU_V6;
 
 use neqo_common::{qdebug, Datagram};
@@ -31,6 +34,12 @@ fn assert_update_blocked(c: &mut Connection) {
         c.initiate_key_update().unwrap_err(),
         Error::KeyUpdateBlocked
     )
+}
+
+fn overwrite_invocations(n: PacketNumber) {
+    OVERWRITE_INVOCATIONS.with(|v| {
+        *v.borrow_mut() = Some(n);
+    });
 }
 
 #[test]
@@ -233,4 +242,89 @@ fn key_update_before_confirmed() {
     let dgram = client.process(dgram, now()).dgram();
     assert!(dgram.is_none());
     assert!(client.initiate_key_update().is_ok());
+}
+
+#[test]
+fn exhaust_write_keys() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    overwrite_invocations(0);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert!(client.stream_send(stream_id, b"explode!").is_ok());
+    let dgram = client.process_output(now()).dgram();
+    assert!(dgram.is_none());
+    assert!(matches!(
+        client.state(),
+        State::Closed(ConnectionError::Transport(Error::KeysExhausted))
+    ));
+}
+
+#[test]
+fn exhaust_read_keys() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let dgram = send_something(&mut client, now());
+
+    overwrite_invocations(0);
+    let dgram = server.process(Some(dgram), now()).dgram();
+    assert!(matches!(
+        server.state(),
+        State::Closed(ConnectionError::Transport(Error::KeysExhausted))
+    ));
+
+    client.process_input(dgram.unwrap(), now());
+    assert!(matches!(client.state(), State::Draining {
+        error: ConnectionError::Transport(Error::PeerError(ERROR_AEAD_LIMIT_REACHED)), ..
+    }));
+}
+
+#[test]
+fn automatic_update_write_keys() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    overwrite_invocations(UPDATE_WRITE_KEYS_AT);
+    let _ = send_something(&mut client, now());
+    assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+}
+
+#[test]
+fn automatic_update_write_keys_later() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    overwrite_invocations(UPDATE_WRITE_KEYS_AT + 2);
+    // No update after the first.
+    let _ = send_something(&mut client, now());
+    assert_eq!(client.get_epochs(), (Some(3), Some(3)));
+    // The second will update though.
+    let _ = send_something(&mut client, now());
+    assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+}
+
+#[test]
+fn automatic_update_write_keys_blocked() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    // An outstanding key update will block the automatic update.
+    client.initiate_key_update().unwrap();
+
+    overwrite_invocations(UPDATE_WRITE_KEYS_AT);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert!(client.stream_send(stream_id, b"explode!").is_ok());
+    let dgram = client.process_output(now()).dgram();
+    // Not being able to update is fatal.
+    assert!(dgram.is_none());
+    assert!(matches!(
+        client.state(),
+        State::Closed(ConnectionError::Transport(Error::KeysExhausted))
+    ));
 }

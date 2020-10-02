@@ -34,7 +34,15 @@ const MAX_AUTH_TAG: usize = 32;
 /// to update keys.  This has to be much smaller than the number returned
 /// by `CryptoDxState::limit` or updates will happen too often.  As we don't
 /// need to ask permission to update, this can be quite small.
-const UPDATE_WRITE_KEYS_AT: PacketNumber = 100;
+pub(crate) const UPDATE_WRITE_KEYS_AT: PacketNumber = 100;
+
+// This is a testing kludge that allows for overwriting the number of
+// invocations of the next cipher to operate.  With this, it is possible
+// to test what happens when the number of invocations reaches 0, or
+// when it hits `UPDATE_WRITE_KEYS_AT` and an automatic update should occur.
+// This is a little crude, but it saves a lot of plumbing.
+#[cfg(test)]
+thread_local!(pub(crate) static OVERWRITE_INVOCATIONS: RefCell<Option<PacketNumber>> = RefCell::default());
 
 #[derive(Debug)]
 pub struct Crypto {
@@ -405,6 +413,13 @@ impl CryptoDxState {
     }
 
     fn invoked(&mut self) -> Res<()> {
+        #[cfg(test)]
+        OVERWRITE_INVOCATIONS.with(|v| {
+            if let Some(i) = v.borrow_mut().take() {
+                neqo_common::qwarn!("Setting {:?} invocations to {}", self.direction, i);
+                self.invocations = i;
+            }
+        });
         self.invocations = self
             .invocations
             .checked_sub(1)
