@@ -306,8 +306,14 @@ pub struct CryptoDxState {
     /// for verifying that packet numbers before a key update are strictly lower
     /// than packet numbers after a key update.
     used_pn: Range<PacketNumber>,
-    /// This is the minimum allowed.
+    /// This is the minimum and maximum packet numbers that are allowed.
     min_pn: PacketNumber,
+    /// The total number of operations that are remaining before the keys are used up.
+    /// For `CryptoDxDirection::Read`, this is the total number of invocations,
+    /// even if those invocations aren't successful.
+    /// For `CryptoDxDirection::Write`, only successful invocations count, but
+    /// those should always be successful anyway.
+    invocations: PacketNumber,
 }
 
 impl CryptoDxState {
@@ -332,6 +338,7 @@ impl CryptoDxState {
             hpkey: HpKey::extract(TLS_VERSION_1_3, cipher, secret, "quic hp").unwrap(),
             used_pn: 0..0,
             min_pn: 0,
+            invocations: Self::limit(direction, cipher),
         }
     }
 
@@ -375,8 +382,44 @@ impl CryptoDxState {
         Self::new(direction, TLS_EPOCH_INITIAL, &secret, cipher)
     }
 
+    /// Determine the confidentiality and integrity limits for the cipher.
+    fn limit(direction: CryptoDxDirection, cipher: Cipher) -> PacketNumber {
+        match direction {
+            // This uses the smaller limits for 2^16 byte packets
+            // as we don't control incoming packet size.
+            CryptoDxDirection::Read => match cipher {
+                TLS_AES_128_GCM_SHA256 => 1 << 52,
+                TLS_AES_256_GCM_SHA384 => PacketNumber::MAX,
+                TLS_CHACHA20_POLY1305_SHA256 => 1 << 36,
+                _ => unreachable!(),
+            },
+            // This uses the larger limits for 2^11 byte packets.
+            CryptoDxDirection::Write => match cipher {
+                TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => 1 << 28,
+                TLS_CHACHA20_POLY1305_SHA256 => PacketNumber::MAX,
+                _ => unreachable!(),
+            },
+        }
+    }
+
+    fn invoked(&mut self) -> Res<()> {
+        self.invocations = self
+            .invocations
+            .checked_sub(1)
+            .ok_or(Error::KeysExhausted)?;
+        Ok(())
+    }
+
     pub fn next(&self, next_secret: &SymKey, cipher: Cipher) -> Self {
         let pn = self.next_pn();
+        // We count invocations of each write key just for that key, but all
+        // attempts to invocations to read count toward a single limit.
+        // This doesn't count use of Handshake keys.
+        let invocations = if self.direction == CryptoDxDirection::Read {
+            self.invocations
+        } else {
+            Self::limit(CryptoDxDirection::Write, cipher)
+        };
         Self {
             direction: self.direction,
             epoch: self.epoch + 1,
@@ -384,6 +427,7 @@ impl CryptoDxState {
             hpkey: self.hpkey.clone(),
             used_pn: pn..pn,
             min_pn: pn,
+            invocations,
         }
     }
 
@@ -477,6 +521,9 @@ impl CryptoDxState {
             hex(hdr),
             hex(body)
         );
+        // The numbers in `Self::limit` assume a maximum packet size of 2^11.
+        assert!(body.len() <= 2048);
+        self.invoked()?;
 
         let size = body.len() + MAX_AUTH_TAG;
         let mut out = vec![0; size];
@@ -502,6 +549,7 @@ impl CryptoDxState {
             hex(hdr),
             hex(body)
         );
+        self.invoked()?;
         let mut out = vec![0; body.len()];
         let res = self.aead.decrypt(pn, hdr, body, &mut out)?;
         self.used(pn)?;
@@ -978,6 +1026,7 @@ impl CryptoStates {
                 .unwrap(),
                 used_pn: 0..645_971_972,
                 min_pn: 0,
+                invocations: 10,
             },
             cipher: TLS_CHACHA20_POLY1305_SHA256,
             next_secret: secret.clone(),
