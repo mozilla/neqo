@@ -7,29 +7,29 @@
 // Congestion control
 #![deny(clippy::pedantic)]
 
+use crate::path::PATH_MTU_V6;
 use crate::tracking::SentPacket;
 use neqo_common::qlog::NeqoQlog;
 
-use std::fmt::Debug;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::time::{Duration, Instant};
 
 mod new_reno_cc;
 
-use new_reno_cc::NewReno;
-pub use new_reno_cc::{CWND_INITIAL_PKTS, CWND_MIN, MAX_DATAGRAM_SIZE, PACING_BURST_SIZE};
+pub use new_reno_cc::NewReno;
+pub use new_reno_cc::{CWND_INITIAL_PKTS, CWND_MIN};
+
+pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
 
 pub trait CongestionControl: Display + Debug {
     fn set_qlog(&mut self, qlog: NeqoQlog);
 
-    #[cfg(test)]
     fn cwnd(&self) -> usize;
 
     #[cfg(test)]
     fn ssthresh(&self) -> usize;
 
-    #[cfg(test)]
-    fn bif(&self) -> usize;
+    fn bytes_in_flight(&self) -> usize;
 
     fn cwnd_avail(&self) -> usize;
 
@@ -37,32 +37,21 @@ pub trait CongestionControl: Display + Debug {
 
     fn on_packets_lost(
         &mut self,
-        now: Instant,
         first_rtt_sample_time: Option<Instant>,
         prev_largest_acked_sent: Option<Instant>,
         pto: Duration,
         lost_packets: &[SentPacket],
     );
 
+    fn recovery_packet(&self) -> bool;
+
     fn discard(&mut self, pkt: &SentPacket);
 
-    fn on_packet_sent(&mut self, pkt: &SentPacket, rtt: Duration);
-
-    fn start_pacer(&mut self, now: Instant);
-
-    fn next_paced(&self, rtt: Duration) -> Option<Instant>;
+    fn on_packet_sent(&mut self, pkt: &SentPacket);
 }
 
 pub enum CongestionControlAlgorithm {
     NewReno,
-}
-
-impl CongestionControlAlgorithm {
-    pub fn create(&self) -> Box<dyn CongestionControl> {
-        match self {
-            Self::NewReno => Box::new(NewReno::default()),
-        }
-    }
 }
 
 impl Default for CongestionControlAlgorithm {

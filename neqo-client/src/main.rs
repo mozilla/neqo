@@ -19,7 +19,8 @@ use neqo_http3::{
 };
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    Connection, ConnectionId, Error as TransportError, FixedConnectionIdManager, QuicVersion,
+    CongestionControlAlgorithm, Connection, ConnectionId, Error as TransportError,
+    FixedConnectionIdManager, QuicVersion,
 };
 
 use std::cell::RefCell;
@@ -504,6 +505,7 @@ fn client(
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
         remote_addr,
+        CongestionControlAlgorithm::default(),
         quic_protocol,
     )?;
     let ciphers = args.get_ciphers();
@@ -724,8 +726,8 @@ mod old {
     use neqo_common::Datagram;
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
-        Connection, ConnectionEvent, Error, FixedConnectionIdManager, Output, QuicVersion, State,
-        StreamType,
+        CongestionControlAlgorithm, Connection, ConnectionEvent, Error, FixedConnectionIdManager,
+        Output, QuicVersion, State, StreamType,
     };
 
     use super::{emit_datagram, get_output_file, Args};
@@ -980,6 +982,7 @@ mod old {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
             local_addr,
             remote_addr,
+            CongestionControlAlgorithm::default(),
             quic_protocol,
         )?;
 

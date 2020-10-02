@@ -29,6 +29,7 @@ use neqo_crypto::{
 };
 
 use crate::addr_valid::{AddressValidation, NewTokenState};
+use crate::cc::CongestionControlAlgorithm;
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
 use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
@@ -291,6 +292,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
+        cc_algorithm: CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
@@ -300,6 +302,7 @@ impl Connection {
             cid_manager,
             protocols,
             None,
+            cc_algorithm,
             quic_version,
         )?;
         c.crypto.states.init(quic_version, Role::Client, &dcid);
@@ -313,6 +316,7 @@ impl Connection {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         cid_manager: CidMgr,
+        cc_algorithm: CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         Self::new(
@@ -321,6 +325,7 @@ impl Connection {
             cid_manager,
             protocols,
             None,
+            cc_algorithm,
             quic_version,
         )
     }
@@ -364,6 +369,7 @@ impl Connection {
         cid_manager: CidMgr,
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
+        cc_algorithm: CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
@@ -399,7 +405,7 @@ impl Connection {
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new(stats.clone()),
+            loss_recovery: LossRecovery::new_with_stats(cc_algorithm, stats.clone()),
             events: ConnectionEvents::default(),
             new_token: NewTokenState::new(role),
             stats,

@@ -9,10 +9,11 @@ use super::{
     assert_full_cwnd, connect_force_idle, connect_rtt_idle, cwnd_packets, default_client,
     default_server, fill_cwnd, send_something, AT_LEAST_PTO, DEFAULT_RTT, POST_HANDSHAKE_CWND,
 };
-use crate::cc::{CWND_MIN, MAX_DATAGRAM_SIZE, PACING_BURST_SIZE};
+use crate::cc::{CWND_MIN, MAX_DATAGRAM_SIZE};
 use crate::frame::{Frame, StreamType};
 use crate::packet::PacketNumber;
 use crate::recovery::{ACK_ONLY_SIZE_LIMIT, PACKET_THRESHOLD};
+use crate::sender::PACING_BURST_SIZE;
 use crate::stats::MAX_PTO_COUNTS;
 use crate::tparams::{self, TransportParameter};
 use crate::tracking::{PNSpace, MAX_UNACKED_PKTS};
