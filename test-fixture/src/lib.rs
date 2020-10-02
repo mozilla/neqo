@@ -10,7 +10,10 @@
 use neqo_crypto::{init_db, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{Connection, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State};
+use neqo_transport::{
+    CongestionControlAlgorithm, Connection, ConnectionEvent, FixedConnectionIdManager, QuicVersion,
+    State,
+};
 
 use std::cell::RefCell;
 use std::mem;
@@ -81,6 +84,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
+        CongestionControlAlgorithm::default(),
         QuicVersion::default(),
     )
     .expect("create a default client")
@@ -95,6 +99,7 @@ pub fn default_server() -> Connection {
         DEFAULT_KEYS,
         DEFAULT_ALPN,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+        CongestionControlAlgorithm::default(),
         QuicVersion::default(),
     )
     .expect("create a default server");
@@ -148,6 +153,7 @@ pub fn default_http3_client() -> Http3Client {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
+        CongestionControlAlgorithm::default(),
         QuicVersion::default(),
         &Http3Parameters {
             qpack_settings: QpackSettings {

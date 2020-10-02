@@ -20,8 +20,8 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::{stats::Stats, QpackSettings};
 use neqo_transport::{
-    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdManager, Output, QuicVersion,
-    StreamId, StreamType, ZeroRttState,
+    AppError, CongestionControlAlgorithm, Connection, ConnectionEvent, ConnectionId,
+    ConnectionIdManager, Output, QuicVersion, StreamId, StreamType, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -84,6 +84,7 @@ impl Http3Client {
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
+        cc_algorithm: CongestionControlAlgorithm,
         quic_version: QuicVersion,
         http3_parameters: &Http3Parameters,
     ) -> Res<Self> {
@@ -94,6 +95,7 @@ impl Http3Client {
                 cid_manager,
                 local_addr,
                 remote_addr,
+                cc_algorithm,
                 quic_version,
             )?,
             http3_parameters,
@@ -706,8 +708,8 @@ mod tests {
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
-        CloseError, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State,
-        RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
+        CloseError, CongestionControlAlgorithm, ConnectionEvent, FixedConnectionIdManager,
+        QuicVersion, State, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
     use std::time::Duration;
@@ -733,6 +735,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
+            CongestionControlAlgorithm::default(),
             QuicVersion::default(),
             &Http3Parameters {
                 qpack_settings: QpackSettings {
@@ -3405,6 +3408,7 @@ mod tests {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+            CongestionControlAlgorithm::default(),
             QuicVersion::default(),
         )
         .unwrap();

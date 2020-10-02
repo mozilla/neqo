@@ -25,18 +25,21 @@ mod qlog;
 mod recovery;
 mod recv_stream;
 mod send_stream;
+mod sender;
 pub mod server;
 mod stats;
 mod stream_id;
 pub mod tparams;
 mod tracking;
 
+pub use self::cc::CongestionControlAlgorithm;
 pub use self::cid::{ConnectionId, ConnectionIdManager};
 pub use self::connection::{Connection, FixedConnectionIdManager, Output, State, ZeroRttState};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
 pub use self::packet::QuicVersion;
+pub use self::sender::PacketSender;
 pub use self::stats::Stats;
 pub use self::stream_id::StreamId;
 

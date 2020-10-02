@@ -12,22 +12,18 @@ use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
 use super::CongestionControl;
-//use crate::cc::CongestionControl;
-use crate::pace::Pacer;
-use crate::path::PATH_MTU_V6;
+
+use crate::cc::MAX_DATAGRAM_SIZE;
 use crate::qlog::{self, QlogMetric};
 use crate::tracking::SentPacket;
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
-pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
 pub const CWND_INITIAL_PKTS: usize = 10;
 const CWND_INITIAL: usize = const_min(
     CWND_INITIAL_PKTS * MAX_DATAGRAM_SIZE,
     const_max(2 * MAX_DATAGRAM_SIZE, 14720),
 );
 pub const CWND_MIN: usize = MAX_DATAGRAM_SIZE * 2;
-/// The number of packets we allow to burst from the pacer.
-pub const PACING_BURST_SIZE: usize = 2;
 const PERSISTENT_CONG_THRESH: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +78,6 @@ pub struct NewReno {
     acked_bytes: usize,
     ssthresh: usize,
     recovery_start: Option<Instant>,
-    pacer: Option<Pacer>,
 
     qlog: NeqoQlog,
 }
@@ -96,7 +91,6 @@ impl Default for NewReno {
             acked_bytes: 0,
             ssthresh: usize::MAX,
             recovery_start: None,
-            pacer: None,
             qlog: NeqoQlog::disabled(),
         }
     }
@@ -109,9 +103,6 @@ impl Display for NewReno {
             "CongCtrl {}/{} ssthresh {}",
             self.bytes_in_flight, self.congestion_window, self.ssthresh,
         )?;
-        if let Some(p) = &self.pacer {
-            write!(f, " {}", p)?;
-        }
         Ok(())
     }
 }
@@ -121,7 +112,6 @@ impl CongestionControl for NewReno {
         self.qlog = qlog;
     }
 
-    #[cfg(test)]
     #[must_use]
     fn cwnd(&self) -> usize {
         self.congestion_window
@@ -133,9 +123,8 @@ impl CongestionControl for NewReno {
         self.ssthresh
     }
 
-    #[cfg(test)]
     #[must_use]
-    fn bif(&self) -> usize {
+    fn bytes_in_flight(&self) -> usize {
         self.bytes_in_flight
     }
 
@@ -243,12 +232,7 @@ impl CongestionControl for NewReno {
         }
     }
 
-    fn on_packet_sent(&mut self, pkt: &SentPacket, rtt: Duration) {
-        self.pacer
-            .as_mut()
-            .unwrap()
-            .spend(pkt.time_sent, rtt, self.congestion_window, pkt.size);
-
+    fn on_packet_sent(&mut self, pkt: &SentPacket) {
         // Record the recovery time and exit any transient state.
         if self.state.transient() {
             self.recovery_start = Some(pkt.time_sent);
@@ -271,29 +255,6 @@ impl CongestionControl for NewReno {
             &mut self.qlog,
             &[QlogMetric::BytesInFlight(self.bytes_in_flight)],
         );
-    }
-
-    fn start_pacer(&mut self, now: Instant) {
-        // Start the pacer with a small burst size.
-        self.pacer = Some(Pacer::new(
-            now,
-            MAX_DATAGRAM_SIZE * PACING_BURST_SIZE,
-            MAX_DATAGRAM_SIZE,
-        ));
-    }
-
-    fn next_paced(&self, rtt: Duration) -> Option<Instant> {
-        // Only pace if there are bytes in flight.
-        if self.bytes_in_flight > 0 {
-            Some(
-                self.pacer
-                    .as_ref()
-                    .unwrap()
-                    .next(rtt, self.congestion_window),
-            )
-        } else {
-            None
-        }
     }
 
     /// Whether a packet can be sent immediately as a result of entering recovery.
@@ -459,8 +420,6 @@ mod tests {
         let time_before = time_now - Duration::from_millis(100);
         let time_after = time_now + Duration::from_millis(150);
 
-        cc.start_pacer(time_now);
-
         let sent_packets = vec![
             SentPacket::new(
                 PacketType::Short,
@@ -488,15 +447,15 @@ mod tests {
             ),
         ];
 
-        cc.on_packet_sent(&sent_packets[0], RTT);
+        cc.on_packet_sent(&sent_packets[0]);
         assert_eq!(cc.acked_bytes, 0);
         cwnd_is_default(&cc);
-        assert_eq!(cc.bif(), 103);
+        assert_eq!(cc.bytes_in_flight(), 103);
 
-        cc.on_packet_sent(&sent_packets[1], RTT);
+        cc.on_packet_sent(&sent_packets[1]);
         assert_eq!(cc.acked_bytes, 0);
         cwnd_is_default(&cc);
-        assert_eq!(cc.bif(), 208);
+        assert_eq!(cc.bytes_in_flight(), 208);
 
         cc.on_packets_lost(Some(time_now), None, PTO, &sent_packets[0..1]);
 
@@ -504,27 +463,27 @@ mod tests {
         assert!(cc.recovery_packet());
         assert_eq!(cc.acked_bytes, 0);
         cwnd_is_halved(&cc);
-        assert_eq!(cc.bif(), 105);
+        assert_eq!(cc.bytes_in_flight(), 105);
 
         // Send a packet after recovery starts
-        cc.on_packet_sent(&sent_packets[2], RTT);
+        cc.on_packet_sent(&sent_packets[2]);
         assert!(!cc.recovery_packet());
         cwnd_is_halved(&cc);
         assert_eq!(cc.acked_bytes, 0);
-        assert_eq!(cc.bif(), 212);
+        assert_eq!(cc.bytes_in_flight(), 212);
 
         // and ack it. cwnd increases slightly
         cc.on_packets_acked(&sent_packets[2..3]);
         assert_eq!(cc.acked_bytes, sent_packets[2].size);
         cwnd_is_halved(&cc);
-        assert_eq!(cc.bif(), 105);
+        assert_eq!(cc.bytes_in_flight(), 105);
 
         // Packet from before is lost. Should not hurt cwnd.
         cc.on_packets_lost(Some(time_now), None, PTO, &sent_packets[1..2]);
         assert!(!cc.recovery_packet());
         assert_eq!(cc.acked_bytes, sent_packets[2].size);
         cwnd_is_halved(&cc);
-        assert_eq!(cc.bif(), 0);
+        assert_eq!(cc.bytes_in_flight(), 0);
     }
 
     fn lost(pn: PacketNumber, ack_eliciting: bool, t: Duration) -> SentPacket {
@@ -540,9 +499,8 @@ mod tests {
 
     fn persistent_congestion(lost_packets: &[SentPacket]) -> bool {
         let mut cc = NewReno::default();
-        cc.start_pacer(now());
         for p in lost_packets {
-            cc.on_packet_sent(p, RTT);
+            cc.on_packet_sent(p);
         }
 
         cc.on_packets_lost(Some(now()), None, PTO, lost_packets);

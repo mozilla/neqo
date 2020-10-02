@@ -8,7 +8,7 @@ use super::super::{Connection, FixedConnectionIdManager};
 use super::{connect, default_client, default_server, exchange_ticket};
 use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
-use crate::{Error, QuicVersion};
+use crate::{CongestionControlAlgorithm, Error, QuicVersion};
 
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use std::cell::RefCell;
@@ -132,6 +132,7 @@ fn zero_rtt_send_reject() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+        CongestionControlAlgorithm::default(),
         QuicVersion::default(),
     )
     .unwrap();
