@@ -584,7 +584,7 @@ impl CryptoDxAppData {
         }
         let next_secret = Self::update_secret(self.cipher, &self.next_secret)?;
         Ok(Self {
-            dx: self.dx.next(&next_secret, self.cipher),
+            dx: self.dx.next(&self.next_secret, self.cipher),
             cipher: self.cipher,
             next_secret,
         })
