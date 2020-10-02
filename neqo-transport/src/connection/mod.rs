@@ -1531,6 +1531,7 @@ impl Connection {
             self.stats.borrow_mut().packets_tx += 1;
             encoder = builder.build(self.crypto.states.tx(cspace).unwrap())?;
             debug_assert!(encoder.len() <= path.mtu());
+            self.crypto.states.auto_update()?;
 
             if ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);

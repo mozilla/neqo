@@ -30,6 +30,11 @@ use crate::tracking::PNSpace;
 use crate::{Error, Res};
 
 const MAX_AUTH_TAG: usize = 32;
+/// The number of invocations remaining on a write cipher before we try
+/// to update keys.  This has to be much smaller than the number returned
+/// by `CryptoDxState::limit` or updates will happen too often.  As we don't
+/// need to ask permission to update, this can be quite small.
+const UPDATE_WRITE_KEYS_AT: PacketNumber = 100;
 
 #[derive(Debug)]
 pub struct Crypto {
@@ -306,13 +311,10 @@ pub struct CryptoDxState {
     /// for verifying that packet numbers before a key update are strictly lower
     /// than packet numbers after a key update.
     used_pn: Range<PacketNumber>,
-    /// This is the minimum and maximum packet numbers that are allowed.
+    /// This is the minimum packet numbers that is allowed.
     min_pn: PacketNumber,
-    /// The total number of operations that are remaining before the keys are used up.
-    /// For `CryptoDxDirection::Read`, this is the total number of invocations,
-    /// even if those invocations aren't successful.
-    /// For `CryptoDxDirection::Write`, only successful invocations count, but
-    /// those should always be successful anyway.
+    /// The total number of operations that are remaining before the keys
+    /// become exhausted and can't be used any more.
     invocations: PacketNumber,
 }
 
@@ -408,6 +410,13 @@ impl CryptoDxState {
             .checked_sub(1)
             .ok_or(Error::KeysExhausted)?;
         Ok(())
+    }
+
+    /// Determine whether we should initiate a key update.
+    pub fn should_update(&self) -> bool {
+        // There is no point in updating read keys as the limit is global.
+        debug_assert_eq!(self.direction, CryptoDxDirection::Write);
+        self.invocations <= UPDATE_WRITE_KEYS_AT
     }
 
     pub fn next(&self, next_secret: &SymKey, cipher: Cipher) -> Self {
@@ -636,6 +645,10 @@ impl CryptoDxAppData {
             cipher: self.cipher,
             next_secret,
         })
+    }
+
+    pub fn epoch(&self) -> usize {
+        self.dx.epoch
     }
 }
 
@@ -880,15 +893,30 @@ impl CryptoStates {
         // ahead of the read keys.  If we initiated the key update, the write keys
         // will already be ahead.
         debug_assert!(self.read_update_time.is_none());
-        let write = &self.app_write.as_ref().unwrap().dx;
-        let read = &self.app_read.as_ref().unwrap().dx;
-        if write.epoch == read.epoch {
-            qdebug!([self], "Updating write keys to epoch={}", write.epoch + 1);
-            self.app_write = Some(self.app_write.as_ref().unwrap().next()?);
+        let write = &self.app_write.as_ref().unwrap();
+        let read = &self.app_read.as_ref().unwrap();
+        if write.epoch() == read.epoch() {
+            qdebug!([self], "Update write keys to epoch={}", write.epoch() + 1);
+            self.app_write = Some(write.next()?);
             Ok(true)
         } else {
             Ok(false)
         }
+    }
+
+    /// Check whether write keys are close to running out of invocations.
+    /// If that is close, update them if possible.  Failing to update at
+    /// this stage is cause for a fatal error.
+    pub fn auto_update(&mut self) -> Res<()> {
+        if let Some(app_write) = self.app_write.as_ref() {
+            if app_write.dx.should_update() {
+                qinfo!([self], "Initiating automatic key update");
+                if !self.maybe_update_write()? {
+                    return Err(Error::KeysExhausted);
+                }
+            }
+        }
+        Ok(())
     }
 
     fn has_0rtt_read(&self) -> bool {
