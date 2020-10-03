@@ -11,9 +11,10 @@ use std::cmp::{max, min};
 use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
-use super::CongestionControl;
+use super::{CongestionControl, CongestionControlAlgorithm};
 
-use crate::cc::MAX_DATAGRAM_SIZE;
+use crate::cc::new_reno::NewReno;
+use crate::cc::{CwndFn, MAX_DATAGRAM_SIZE};
 use crate::qlog::{self, QlogMetric};
 use crate::tracking::SentPacket;
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
@@ -71,7 +72,8 @@ impl State {
 }
 
 #[derive(Debug)]
-pub struct NewReno {
+pub struct ClassicCongestionControl {
+    cc_algorithm: Box<dyn CwndFn>,
     state: State,
     congestion_window: usize, // = kInitialWindow
     bytes_in_flight: usize,
@@ -82,32 +84,18 @@ pub struct NewReno {
     qlog: NeqoQlog,
 }
 
-impl Default for NewReno {
-    fn default() -> Self {
-        Self {
-            state: State::SlowStart,
-            congestion_window: CWND_INITIAL,
-            bytes_in_flight: 0,
-            acked_bytes: 0,
-            ssthresh: usize::MAX,
-            recovery_start: None,
-            qlog: NeqoQlog::disabled(),
-        }
-    }
-}
-
-impl Display for NewReno {
+impl Display for ClassicCongestionControl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "CongCtrl {}/{} ssthresh {}",
-            self.bytes_in_flight, self.congestion_window, self.ssthresh,
+            "{} CongCtrl {}/{} ssthresh {}",
+            self.cc_algorithm, self.bytes_in_flight, self.congestion_window, self.ssthresh,
         )?;
         Ok(())
     }
 }
 
-impl CongestionControl for NewReno {
+impl CongestionControl for ClassicCongestionControl {
     fn set_qlog(&mut self, qlog: NeqoQlog) {
         self.qlog = qlog;
     }
@@ -174,10 +162,12 @@ impl CongestionControl for NewReno {
             }
         }
         // Congestion avoidance, above the slow start threshold.
-        if self.acked_bytes >= self.congestion_window {
-            self.acked_bytes -= self.congestion_window;
-            self.congestion_window += MAX_DATAGRAM_SIZE;
-            qinfo!([self], "congestion avoidance += {}", MAX_DATAGRAM_SIZE);
+        if self.congestion_window >= self.ssthresh {
+            let (cwnd, acked_bytes) = self
+                .cc_algorithm
+                .on_packets_acked(self.congestion_window, self.acked_bytes);
+            self.congestion_window = cwnd;
+            self.acked_bytes = acked_bytes;
         }
         qlog::metrics_updated(
             &mut self.qlog,
@@ -264,7 +254,22 @@ impl CongestionControl for NewReno {
     }
 }
 
-impl NewReno {
+impl ClassicCongestionControl {
+    pub fn new(alg: CongestionControlAlgorithm) -> Self {
+        Self {
+            cc_algorithm: match alg {
+                CongestionControlAlgorithm::NewReno => Box::new(NewReno::default()),
+            },
+            state: State::SlowStart,
+            congestion_window: CWND_INITIAL,
+            bytes_in_flight: 0,
+            acked_bytes: 0,
+            ssthresh: usize::MAX,
+            recovery_start: None,
+            qlog: NeqoQlog::disabled(),
+        }
+    }
+
     fn set_state(&mut self, state: State) {
         if self.state != state {
             qdebug!([self], "state -> {:?}", state);
@@ -352,9 +357,11 @@ impl NewReno {
         // Start a new congestion event if lost packet was sent after the start
         // of the previous congestion recovery period.
         if self.after_recovery_start(last_packet) {
-            self.congestion_window /= 2; // kLossReductionFactor = 0.5
-            self.acked_bytes /= 2;
-            self.congestion_window = max(self.congestion_window, CWND_MIN);
+            let (cwnd, acked_bytes) = self
+                .cc_algorithm
+                .on_congestion_event(self.congestion_window, self.acked_bytes);
+            self.congestion_window = max(cwnd, CWND_MIN);
+            self.acked_bytes = acked_bytes;
             self.ssthresh = self.congestion_window;
             qinfo!(
                 [self],
@@ -383,8 +390,8 @@ impl NewReno {
 
 #[cfg(test)]
 mod tests {
-    use crate::cc::new_reno_cc::{NewReno, CWND_INITIAL, CWND_MIN, PERSISTENT_CONG_THRESH};
-    use crate::cc::CongestionControl;
+    use super::{ClassicCongestionControl, CWND_INITIAL, CWND_MIN, PERSISTENT_CONG_THRESH};
+    use crate::cc::{CongestionControl, CongestionControlAlgorithm};
     use crate::packet::{PacketNumber, PacketType};
     use crate::tracking::SentPacket;
     use std::convert::TryFrom;
@@ -405,17 +412,17 @@ mod tests {
 
     #[test]
     fn issue_876() {
-        fn cwnd_is_default(cc: &NewReno) {
+        fn cwnd_is_default(cc: &ClassicCongestionControl) {
             assert_eq!(cc.cwnd(), CWND_INITIAL);
             assert_eq!(cc.ssthresh(), usize::MAX);
         }
 
-        fn cwnd_is_halved(cc: &NewReno) {
+        fn cwnd_is_halved(cc: &ClassicCongestionControl) {
             assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
             assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
         }
 
-        let mut cc = NewReno::default();
+        let mut cc = ClassicCongestionControl::new(CongestionControlAlgorithm::NewReno);
         let time_now = now();
         let time_before = time_now - Duration::from_millis(100);
         let time_after = time_now + Duration::from_millis(150);
@@ -498,7 +505,7 @@ mod tests {
     }
 
     fn persistent_congestion(lost_packets: &[SentPacket]) -> bool {
-        let mut cc = NewReno::default();
+        let mut cc = ClassicCongestionControl::new(CongestionControlAlgorithm::NewReno);
         for p in lost_packets {
             cc.on_packet_sent(p);
         }
@@ -674,7 +681,7 @@ mod tests {
     /// `last_ack` and `rtt_time` are times in multiples of `PTO`, relative to `now()`,
     /// for the time of the largest acknowledged and the first RTT sample, respectively.
     fn persistent_congestion_by_pto(last_ack: u32, rtt_time: u32, lost: &[SentPacket]) -> bool {
-        let mut cc = NewReno::default();
+        let mut cc = ClassicCongestionControl::new(CongestionControlAlgorithm::NewReno);
         assert_eq!(cc.cwnd(), CWND_INITIAL);
 
         let last_ack = Some(by_pto(last_ack));
@@ -745,7 +752,7 @@ mod tests {
     #[test]
     fn persistent_congestion_no_prev_ack() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
-        let mut cc = NewReno::default();
+        let mut cc = ClassicCongestionControl::new(CongestionControlAlgorithm::NewReno);
         cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, &lost);
         assert_eq!(cc.cwnd(), CWND_MIN);
     }
