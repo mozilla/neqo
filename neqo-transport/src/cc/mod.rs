@@ -14,10 +14,11 @@ use neqo_common::qlog::NeqoQlog;
 use std::fmt::{Debug, Display};
 use std::time::{Duration, Instant};
 
-mod new_reno_cc;
+mod classic_cc;
+mod new_reno;
 
-pub use new_reno_cc::NewReno;
-pub use new_reno_cc::{CWND_INITIAL_PKTS, CWND_MIN};
+pub use classic_cc::ClassicCongestionControl;
+pub use classic_cc::{CWND_INITIAL_PKTS, CWND_MIN};
 
 pub const MAX_DATAGRAM_SIZE: usize = PATH_MTU_V6;
 
@@ -48,6 +49,11 @@ pub trait CongestionControl: Display + Debug {
     fn discard(&mut self, pkt: &SentPacket);
 
     fn on_packet_sent(&mut self, pkt: &SentPacket);
+}
+
+trait CwndFn: Display + Debug {
+    fn on_packets_acked(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize);
+    fn on_congestion_event(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize);
 }
 
 pub enum CongestionControlAlgorithm {

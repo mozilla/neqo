@@ -7,7 +7,9 @@
 // Congestion control
 #![deny(clippy::pedantic)]
 
-use crate::cc::{CongestionControl, CongestionControlAlgorithm, NewReno, MAX_DATAGRAM_SIZE};
+use crate::cc::{
+    ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, MAX_DATAGRAM_SIZE,
+};
 use crate::pace::Pacer;
 use crate::tracking::SentPacket;
 use neqo_common::qlog::NeqoQlog;
@@ -37,9 +39,7 @@ impl Display for PacketSender {
 impl PacketSender {
     pub fn new(alg: CongestionControlAlgorithm) -> Self {
         Self {
-            cc: match alg {
-                CongestionControlAlgorithm::NewReno => Box::new(NewReno::default()),
-            },
+            cc: Box::new(ClassicCongestionControl::new(alg)),
             pacer: None,
         }
     }
