@@ -319,7 +319,7 @@ pub struct CryptoDxState {
     /// for verifying that packet numbers before a key update are strictly lower
     /// than packet numbers after a key update.
     used_pn: Range<PacketNumber>,
-    /// This is the minimum packet numbers that is allowed.
+    /// This is the minimum packet number that is allowed.
     min_pn: PacketNumber,
     /// The total number of operations that are remaining before the keys
     /// become exhausted and can't be used any more.
