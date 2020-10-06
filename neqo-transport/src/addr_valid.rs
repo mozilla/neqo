@@ -269,6 +269,7 @@ impl AddressValidation {
     }
 }
 
+#[allow(dead_code)] // false positive in older rustc, remove when possible.
 pub enum NewTokenState {
     Client {
         /// Tokens that haven't been taken yet.
