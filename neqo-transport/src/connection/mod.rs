@@ -24,8 +24,8 @@ use neqo_common::{
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
-    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, HandshakeState, SecretAgentInfo,
-    Server, ZeroRttChecker,
+    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, HandshakeState, ResumptionToken,
+    SecretAgentInfo, Server, ZeroRttChecker,
 };
 
 use crate::addr_valid::{AddressValidation, NewTokenState};
@@ -498,6 +498,22 @@ impl Connection {
         Ok(())
     }
 
+    fn make_resumption_token(&mut self) -> ResumptionToken {
+        debug_assert_eq!(self.role, Role::Client);
+        debug_assert!(self.crypto.has_resumption_token());
+        self.crypto
+            .create_resumption_token(
+                self.new_token.take_token(),
+                self.tps
+                    .borrow()
+                    .remote
+                    .as_ref()
+                    .expect("should have transport parameters"),
+                u64::try_from(self.loss_recovery.rtt().as_millis()).unwrap_or(0),
+            )
+            .unwrap()
+    }
+
     fn create_resumption_token(&mut self, now: Instant) {
         if self.role == Role::Server || self.state < State::Connected {
             return;
@@ -511,39 +527,16 @@ impl Connection {
         );
 
         while self.crypto.has_resumption_token() && self.new_token.has_token() {
-            self.events.client_resumption_token(
-                self.crypto
-                    .create_resumption_token(
-                        self.new_token.take_token(),
-                        self.tps
-                            .borrow()
-                            .remote
-                            .as_ref()
-                            .expect("should have transport parameters"),
-                        u64::try_from(self.loss_recovery.rtt().as_millis()).unwrap_or(0),
-                    )
-                    .unwrap(),
-            );
+            let token = self.make_resumption_token();
+            self.events.client_resumption_token(token);
         }
 
         // If we have a resumption ticket check or set a timer.
         if self.crypto.has_resumption_token() {
             let arm = if let Some(expiration_time) = self.release_resumption_token_timer {
                 if expiration_time <= now {
-                    self.events.client_resumption_token(
-                        self.crypto
-                            .create_resumption_token(
-                                None,
-                                self.tps
-                                    .borrow()
-                                    .remote
-                                    .as_ref()
-                                    .expect("should have transport parameters"),
-                                u64::try_from(self.loss_recovery.rtt().as_millis()).unwrap_or(0),
-                            )
-                            .unwrap(),
-                    );
-
+                    let token = self.make_resumption_token();
+                    self.events.client_resumption_token(token);
                     self.release_resumption_token_timer = None;
 
                     // This means that we release one session ticket every 3 PTOs
@@ -558,8 +551,32 @@ impl Connection {
 
             if arm {
                 self.release_resumption_token_timer =
-                    Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData))
+                    Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData));
             }
+        }
+    }
+
+    /// Get a resumption token.  The correct way to obtain a resumption token is
+    /// waiting for the `ConnectionEvent::ResumptionToken` event.  However, some
+    /// servers don't send `NEW_TOKEN` frames and so that event might be slow in
+    /// arriving.  This is especially a problem for short-lived connections, where
+    /// the connection is closed before any events are released.  This retrieves
+    /// the token, without waiting for the `NEW_TOKEN` frame to arrive.
+    ///
+    /// # Panics
+    /// If this is called on a server.
+    pub fn take_resumption_token(&mut self, now: Instant) -> Option<ResumptionToken> {
+        assert_eq!(self.role, Role::Client);
+
+        if self.crypto.has_resumption_token() {
+            let token = self.make_resumption_token();
+            if self.crypto.has_resumption_token() {
+                self.release_resumption_token_timer =
+                    Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData));
+            }
+            Some(token)
+        } else {
+            None
         }
     }
 
