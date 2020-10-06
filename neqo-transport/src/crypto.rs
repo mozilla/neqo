@@ -247,7 +247,7 @@ impl Crypto {
 
     pub fn create_resumption_token(
         &mut self,
-        new_token: Option<Vec<u8>>,
+        new_token: Option<&[u8]>,
         tps: &TransportParameters,
         rtt: u64,
     ) -> Option<ResumptionToken> {
@@ -259,7 +259,7 @@ impl Crypto {
                 enc.encode_vvec_with(|enc_inner| {
                     tps.encode(enc_inner);
                 });
-                enc.encode_vvec(new_token.as_ref().map_or(&[], |t| &t[..]));
+                enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
                 qinfo!("resumption token {}", hex_snip_middle(&enc[..]));
                 Some(ResumptionToken::new(enc.into(), t.expiration_time()))

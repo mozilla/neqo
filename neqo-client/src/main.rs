@@ -610,8 +610,7 @@ fn main() -> Res<()> {
         entry.push(url.clone());
     }
 
-    for ((_scheme, host, port), mut urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k
-    {
+    for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
         Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
         Origin::Opaque(x) => {
             eprintln!("Opaque origin {:?}", x);
@@ -662,15 +661,13 @@ fn main() -> Res<()> {
                     exit(127)
                 }
 
-                let first_url = urls.remove(0);
-
                 old::old_client(
                     &args,
                     &socket,
                     local_addr,
                     remote_addr,
                     &format!("{}", host),
-                    &[first_url],
+                    &urls[..1],
                     None,
                 )?
             } else {
@@ -683,7 +680,7 @@ fn main() -> Res<()> {
                 local_addr,
                 remote_addr,
                 &format!("{}", host),
-                &urls,
+                &urls[1..],
                 token,
             )?;
         } else {
@@ -1006,6 +1003,15 @@ mod old {
 
         process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
 
-        Ok(if args.resume { h.token } else { None })
+        let token = if args.resume {
+            // If we haven't received an event, take a token if there is one.
+            // Lots of servers don't provide NEW_TOKEN, but a session ticket
+            // without NEW_TOKEN is better than nothing.
+            h.token
+                .or_else(|| client.take_resumption_token(Instant::now()))
+        } else {
+            None
+        };
+        Ok(token)
     }
 }
