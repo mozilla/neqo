@@ -292,7 +292,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        cc_algorithm: CongestionControlAlgorithm,
+        cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
@@ -316,7 +316,7 @@ impl Connection {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         cid_manager: CidMgr,
-        cc_algorithm: CongestionControlAlgorithm,
+        cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         Self::new(
@@ -369,7 +369,7 @@ impl Connection {
         cid_manager: CidMgr,
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
-        cc_algorithm: CongestionControlAlgorithm,
+        cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
