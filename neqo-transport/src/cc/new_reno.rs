@@ -9,7 +9,7 @@
 
 use std::fmt::{self, Display};
 
-use crate::cc::{CwndFn, MAX_DATAGRAM_SIZE};
+use crate::cc::{classic_cc::WindowAdjustment, MAX_DATAGRAM_SIZE};
 use neqo_common::qinfo;
 
 #[derive(Debug)]
@@ -28,7 +28,7 @@ impl Display for NewReno {
     }
 }
 
-impl CwndFn for NewReno {
+impl WindowAdjustment for NewReno {
     fn on_packets_acked(&mut self, mut curr_cwnd: usize, mut acked_bytes: usize) -> (usize, usize) {
         if acked_bytes >= curr_cwnd {
             acked_bytes -= curr_cwnd;

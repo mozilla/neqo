@@ -6,9 +6,11 @@
 
 // Congestion control
 #![deny(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
 
 use crate::cc::{
-    ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, MAX_DATAGRAM_SIZE,
+    ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, NewReno,
+    MAX_DATAGRAM_SIZE,
 };
 use crate::pace::Pacer;
 use crate::tracking::SentPacket;
@@ -37,9 +39,14 @@ impl Display for PacketSender {
 }
 
 impl PacketSender {
-    pub fn new(alg: CongestionControlAlgorithm) -> Self {
+    #[must_use]
+    pub fn new(alg: &CongestionControlAlgorithm) -> Self {
         Self {
-            cc: Box::new(ClassicCongestionControl::new(alg)),
+            cc: match alg {
+                CongestionControlAlgorithm::NewReno => {
+                    Box::new(ClassicCongestionControl::<NewReno>::new())
+                }
+            },
             pacer: None,
         }
     }
@@ -100,6 +107,7 @@ impl PacketSender {
         ));
     }
 
+    #[must_use]
     pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {
         // Only pace if there are bytes in flight.
         if self.cc.bytes_in_flight() > 0 {
@@ -109,6 +117,7 @@ impl PacketSender {
         }
     }
 
+    #[must_use]
     pub fn recovery_packet(&self) -> bool {
         self.cc.recovery_packet()
     }
