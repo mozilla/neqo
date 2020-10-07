@@ -208,9 +208,6 @@ fn cc_slow_start_to_cong_avoidance_recovery_period() {
             panic!("Expected an application ACK");
         }
     }
-
-    // If we just triggered cong avoidance, these should be equal
-    assert_eq!(client.loss_recovery.cwnd(), client.loss_recovery.ssthresh());
 }
 
 #[test]
@@ -239,9 +236,7 @@ fn cc_cong_avoidance_recovery_period_unchanged() {
         client.process_input(dgram, now);
     }
 
-    // If we just triggered cong avoidance, these should be equal
     let cwnd1 = client.loss_recovery.cwnd();
-    assert_eq!(cwnd1, client.loss_recovery.ssthresh());
 
     // Generate ACK for more received packets
     let (s_tx_dgram, _) = ack_bytes(&mut server, 0, c_tx_dgrams2, now);
@@ -284,7 +279,6 @@ fn single_packet_on_recovery() {
     // The client should see the loss and enter recovery.
     // As there are many outstanding packets, there should be no available cwnd.
     client.process_input(ack.unwrap(), now());
-    assert_eq!(client.loss_recovery.cwnd(), client.loss_recovery.ssthresh());
     assert_eq!(client.loss_recovery.cwnd_avail(), 0);
 
     // The client should send one packet, ignoring the cwnd.

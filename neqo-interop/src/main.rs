@@ -462,7 +462,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
-        CongestionControlAlgorithm::default(),
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
     .expect("must succeed");
@@ -605,7 +605,7 @@ fn test_h3_rz(
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
-        CongestionControlAlgorithm::default(),
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
         &Http3Parameters {
             qpack_settings: QpackSettings {
@@ -689,7 +689,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
-        CongestionControlAlgorithm::default(),
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
     .expect("must succeed");

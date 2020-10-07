@@ -118,7 +118,7 @@ fn no_alpn() {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
         loopback(),
         loopback(),
-        CongestionControlAlgorithm::default(),
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
     .unwrap();
@@ -189,7 +189,7 @@ fn crypto_frame_split() {
         test_fixture::LONG_CERT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
-        CongestionControlAlgorithm::default(),
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
     .expect("create a server");
@@ -247,7 +247,7 @@ fn chacha20poly1305() {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         loopback(),
         loopback(),
-        CongestionControlAlgorithm::default(),
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
     .expect("create a default client");
