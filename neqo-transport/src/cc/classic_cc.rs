@@ -105,12 +105,6 @@ impl CongestionControl for ClassicCongestionControl {
         self.congestion_window
     }
 
-    #[cfg(test)]
-    #[must_use]
-    fn ssthresh(&self) -> usize {
-        self.ssthresh
-    }
-
     #[must_use]
     fn bytes_in_flight(&self) -> usize {
         self.bytes_in_flight
@@ -268,6 +262,12 @@ impl ClassicCongestionControl {
             recovery_start: None,
             qlog: NeqoQlog::disabled(),
         }
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub fn ssthresh(&self) -> usize {
+        self.ssthresh
     }
 
     fn set_state(&mut self, state: State) {

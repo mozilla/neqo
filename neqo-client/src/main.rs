@@ -505,7 +505,7 @@ fn client(
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         local_addr,
         remote_addr,
-        CongestionControlAlgorithm::default(),
+        CongestionControlAlgorithm::NewReno,
         quic_protocol,
     )?;
     let ciphers = args.get_ciphers();
@@ -982,7 +982,7 @@ mod old {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
             local_addr,
             remote_addr,
-            CongestionControlAlgorithm::default(),
+            CongestionControlAlgorithm::NewReno,
             quic_protocol,
         )?;
 

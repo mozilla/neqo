@@ -735,7 +735,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
-            CongestionControlAlgorithm::default(),
+            CongestionControlAlgorithm::NewReno,
             QuicVersion::default(),
             &Http3Parameters {
                 qpack_settings: QpackSettings {
@@ -3408,7 +3408,7 @@ mod tests {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-            CongestionControlAlgorithm::default(),
+            CongestionControlAlgorithm::NewReno,
             QuicVersion::default(),
         )
         .unwrap();

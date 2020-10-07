@@ -23,7 +23,7 @@ impl Default for NewReno {
 
 impl Display for NewReno {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "NewReno",)?;
+        write!(f, "NewReno")?;
         Ok(())
     }
 }

@@ -54,12 +54,6 @@ impl PacketSender {
         self.cc.cwnd()
     }
 
-    #[cfg(test)]
-    #[must_use]
-    pub fn ssthresh(&self) -> usize {
-        self.cc.ssthresh()
-    }
-
     #[must_use]
     pub fn cwnd_avail(&self) -> usize {
         self.cc.cwnd_avail()

@@ -27,9 +27,6 @@ pub trait CongestionControl: Display + Debug {
 
     fn cwnd(&self) -> usize;
 
-    #[cfg(test)]
-    fn ssthresh(&self) -> usize;
-
     fn bytes_in_flight(&self) -> usize;
 
     fn cwnd_avail(&self) -> usize;
@@ -58,10 +55,4 @@ trait CwndFn: Display + Debug {
 
 pub enum CongestionControlAlgorithm {
     NewReno,
-}
-
-impl Default for CongestionControlAlgorithm {
-    fn default() -> Self {
-        Self::NewReno
-    }
 }
