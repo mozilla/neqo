@@ -65,6 +65,7 @@ pub const DEFAULT_SERVER_NAME: &str = "example.com";
 pub const DEFAULT_KEYS: &[&str] = &["key"];
 pub const LONG_CERT_KEYS: &[&str] = &["A long cert"];
 pub const DEFAULT_ALPN: &[&str] = &["alpn"];
+pub const DEFAULT_ALPN_H3: &[&str] = &["h3-29"];
 
 /// Create a default socket address.
 #[must_use]
@@ -93,11 +94,21 @@ pub fn default_client() -> Connection {
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
+    make_default_server(DEFAULT_ALPN)
+}
+
+/// Create a transport server with default configuration.
+#[must_use]
+pub fn default_server_h3() -> Connection {
+    make_default_server(DEFAULT_ALPN_H3)
+}
+
+fn make_default_server(alpn: &[impl AsRef<str>]) -> Connection {
     fixture_init();
 
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
-        DEFAULT_ALPN,
+        alpn,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
@@ -149,7 +160,6 @@ pub fn default_http3_client() -> Http3Client {
     fixture_init();
     Http3Client::new(
         DEFAULT_SERVER_NAME,
-        DEFAULT_ALPN,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
@@ -174,7 +184,7 @@ pub fn default_http3_server() -> Http3Server {
     Http3Server::new(
         now(),
         DEFAULT_KEYS,
-        DEFAULT_ALPN,
+        DEFAULT_ALPN_H3,
         anti_replay(),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         QpackSettings {
