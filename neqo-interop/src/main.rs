@@ -601,7 +601,6 @@ fn test_h3_rz(
 
     let handler = Http3Client::new(
         peer.host,
-        &test.alpn(),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,

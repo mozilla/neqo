@@ -347,7 +347,8 @@ impl<T: WindowAdjustment + Default> ClassicCongestionControl<T> {
     fn after_recovery_start(&mut self, packet: &SentPacket) -> bool {
         // At the start of the first recovery period, if the state is
         // transient, all packets will have been sent before recovery.
-        self.recovery_start.map_or(!self.state.transient(), |t| packet.time_sent >= t)
+        self.recovery_start
+            .map_or(!self.state.transient(), |t| packet.time_sent >= t)
     }
 
     /// Handle a congestion event.
