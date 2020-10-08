@@ -6,7 +6,7 @@
 
 // Tracking of received packets and generating acks thereof.
 
-//#![deny(clippy::pedantic)]
+#![deny(clippy::pedantic)]
 
 use std::collections::VecDeque;
 use std::convert::TryInto;

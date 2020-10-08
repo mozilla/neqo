@@ -44,7 +44,7 @@ impl PacketSender {
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
-                    Box::new(ClassicCongestionControl::<NewReno>::new())
+                    Box::new(ClassicCongestionControl::new(NewReno::default()))
                 }
             },
             pacer: None,

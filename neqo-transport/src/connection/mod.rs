@@ -405,7 +405,7 @@ impl Connection {
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new_with_stats(cc_algorithm, stats.clone()),
+            loss_recovery: LossRecovery::new(cc_algorithm, stats.clone()),
             events: ConnectionEvents::default(),
             new_token: NewTokenState::new(role),
             stats,

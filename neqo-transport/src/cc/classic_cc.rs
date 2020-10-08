@@ -76,7 +76,7 @@ pub trait WindowAdjustment: Display + Debug {
 }
 
 #[derive(Debug)]
-pub struct ClassicCongestionControl<T: WindowAdjustment + Default> {
+pub struct ClassicCongestionControl<T> {
     cc_algorithm: T,
     state: State,
     congestion_window: usize, // = kInitialWindow
@@ -88,7 +88,7 @@ pub struct ClassicCongestionControl<T: WindowAdjustment + Default> {
     qlog: NeqoQlog,
 }
 
-impl<T: WindowAdjustment + Default> Display for ClassicCongestionControl<T> {
+impl<T: WindowAdjustment> Display for ClassicCongestionControl<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -99,7 +99,7 @@ impl<T: WindowAdjustment + Default> Display for ClassicCongestionControl<T> {
     }
 }
 
-impl<T: WindowAdjustment + Default> CongestionControl for ClassicCongestionControl<T> {
+impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
     fn set_qlog(&mut self, qlog: NeqoQlog) {
         self.qlog = qlog;
     }
@@ -252,10 +252,10 @@ impl<T: WindowAdjustment + Default> CongestionControl for ClassicCongestionContr
     }
 }
 
-impl<T: WindowAdjustment + Default> ClassicCongestionControl<T> {
-    pub fn new() -> Self {
+impl<T: WindowAdjustment> ClassicCongestionControl<T> {
+    pub fn new(cc_algorithm: T) -> Self {
         Self {
-            cc_algorithm: T::default(),
+            cc_algorithm,
             state: State::SlowStart,
             congestion_window: CWND_INITIAL,
             bytes_in_flight: 0,
@@ -422,7 +422,7 @@ mod tests {
             assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
         }
 
-        let mut cc = ClassicCongestionControl::<NewReno>::new();
+        let mut cc = ClassicCongestionControl::new(NewReno::default());
         let time_now = now();
         let time_before = time_now - Duration::from_millis(100);
         let time_after = time_now + Duration::from_millis(150);
@@ -505,7 +505,7 @@ mod tests {
     }
 
     fn persistent_congestion(lost_packets: &[SentPacket]) -> bool {
-        let mut cc = ClassicCongestionControl::<NewReno>::new();
+        let mut cc = ClassicCongestionControl::new(NewReno::default());
         for p in lost_packets {
             cc.on_packet_sent(p);
         }
@@ -681,7 +681,7 @@ mod tests {
     /// `last_ack` and `rtt_time` are times in multiples of `PTO`, relative to `now()`,
     /// for the time of the largest acknowledged and the first RTT sample, respectively.
     fn persistent_congestion_by_pto(last_ack: u32, rtt_time: u32, lost: &[SentPacket]) -> bool {
-        let mut cc = ClassicCongestionControl::<NewReno>::new();
+        let mut cc = ClassicCongestionControl::new(NewReno::default());
         assert_eq!(cc.cwnd(), CWND_INITIAL);
 
         let last_ack = Some(by_pto(last_ack));
@@ -752,7 +752,7 @@ mod tests {
     #[test]
     fn persistent_congestion_no_prev_ack() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
-        let mut cc = ClassicCongestionControl::<NewReno>::new();
+        let mut cc = ClassicCongestionControl::new(NewReno::default());
         cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, &lost);
         assert_eq!(cc.cwnd(), CWND_MIN);
     }
