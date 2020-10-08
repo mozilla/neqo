@@ -14,7 +14,7 @@ use crate::tparams::{self, TransportParameter};
 use crate::tracking::MAX_UNACKED_PKTS;
 use crate::Error;
 
-use neqo_common::qdebug;
+use neqo_common::{event::Provider, qdebug};
 use std::convert::TryFrom;
 use test_fixture::now;
 
@@ -130,18 +130,21 @@ fn transfer() {
         ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
         _ => None,
     });
-    let stream_id = stream_ids.next().expect("should have a new stream event");
-    let (received1, fin1) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
+    let first_stream = stream_ids.next().expect("should have a new stream event");
+    let second_stream = stream_ids
+        .next()
+        .expect("should have a second new stream event");
+    assert!(stream_ids.next().is_none());
+    let (received1, fin1) = server.stream_recv(first_stream.as_u64(), &mut buf).unwrap();
     assert_eq!(received1, 4000);
     assert_eq!(fin1, false);
-    let (received2, fin2) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
+    let (received2, fin2) = server.stream_recv(first_stream.as_u64(), &mut buf).unwrap();
     assert_eq!(received2, 140);
     assert_eq!(fin2, false);
 
-    let stream_id = stream_ids
-        .next()
-        .expect("should have a second new stream event");
-    let (received3, fin3) = server.stream_recv(stream_id.as_u64(), &mut buf).unwrap();
+    let (received3, fin3) = server
+        .stream_recv(second_stream.as_u64(), &mut buf)
+        .unwrap();
     assert_eq!(received3, 60);
     assert_eq!(fin3, true);
 }

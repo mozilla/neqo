@@ -15,7 +15,8 @@ use crate::settings::HSettings;
 use crate::Header;
 use crate::RecvMessageEvents;
 use neqo_common::{
-    hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Decoder, Encoder, Role,
+    event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
+    Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::{stats::Stats, QpackSettings};
@@ -408,27 +409,6 @@ impl Http3Client {
         }
     }
 
-    // API: Events
-
-    /// Get all current events. Best used just in debug/testing code, use
-    /// `next_event` instead.
-    pub fn events(&mut self) -> impl Iterator<Item = Http3ClientEvent> {
-        self.events.events()
-    }
-
-    /// Return true if there are outstanding events.
-    #[must_use]
-    pub fn has_events(&self) -> bool {
-        self.events.has_events()
-    }
-
-    /// Get events that indicate state changes on the connection. This method
-    /// correctly handles cases where handling one event can obsolete
-    /// previously-queued events, or cause new events to be generated.
-    pub fn next_event(&mut self) -> Option<Http3ClientEvent> {
-        self.events.next_event()
-    }
-
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         qtrace!([self], "Process.");
         if let Some(d) = dgram {
@@ -694,6 +674,22 @@ impl Http3Client {
     }
 }
 
+impl EventProvider for Http3Client {
+    type Event = Http3ClientEvent;
+
+    /// Return true if there are outstanding events.
+    fn has_events(&self) -> bool {
+        self.events.has_events()
+    }
+
+    /// Get events that indicate state changes on the connection. This method
+    /// correctly handles cases where handling one event can obsolete
+    /// previously-queued events, or cause new events to be generated.
+    fn next_event(&mut self) -> Option<Self::Event> {
+        self.events.next_event()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -702,7 +698,7 @@ mod tests {
     };
     use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
     use crate::settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS};
-    use neqo_common::{Datagram, Decoder, Encoder};
+    use neqo_common::{event::Provider, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
@@ -4086,8 +4082,10 @@ mod tests {
         let dgram = client.process(dgram, now()).dgram();
         server.conn.process_input(dgram.unwrap(), now());
 
-        let data_readable_event = |e| matches!(e, Http3ClientEvent::DataReadable { stream_id } if stream_id == request_stream_id);
-        assert!(client.events().any(data_readable_event));
+        // TODO(dragana) - https://github.com/mozilla/neqo/issues/973
+        // This should only have one event, but there are currently many.
+        let data_readable_event = |e: &_| matches!(e, Http3ClientEvent::DataReadable { stream_id } if *stream_id == request_stream_id);
+        assert!(client.events().filter(data_readable_event).count() > 0);
 
         let mut buf = [0_u8; 10];
         assert_eq!(
@@ -4096,7 +4094,7 @@ mod tests {
                 .read_response_data(now(), request_stream_id, &mut buf)
                 .unwrap()
         );
-        assert!(!client.events().any(data_readable_event));
+        assert!(!client.events().any(|e| data_readable_event(&e)));
     }
 
     #[test]

@@ -10,6 +10,7 @@ use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
 use crate::{Error, QuicVersion};
 
+use neqo_common::event::Provider;
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
 use std::cell::RefCell;
 use std::rc::Rc;

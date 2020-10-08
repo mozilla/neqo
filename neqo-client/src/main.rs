@@ -9,7 +9,7 @@
 
 use qlog::QlogStreamer;
 
-use neqo_common::{self as common, hex, qlog::NeqoQlog, Datagram, Role};
+use neqo_common::{self as common, event::Provider, hex, qlog::NeqoQlog, Datagram, Role};
 use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init, AuthenticationStatus, Cipher, ResumptionToken,
@@ -718,7 +718,7 @@ mod old {
 
     use super::{qlog_new, KeyUpdateState, Res};
 
-    use neqo_common::Datagram;
+    use neqo_common::{event::Provider, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
         Connection, ConnectionEvent, Error, FixedConnectionIdManager, Output, QuicVersion, State,

@@ -17,7 +17,7 @@ use crate::path::PATH_MTU_V6;
 use crate::server::ValidateAddress;
 use crate::{ConnectionError, Error, QuicVersion};
 
-use neqo_common::{qdebug, Datagram};
+use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AuthenticationStatus};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -569,21 +569,23 @@ fn reorder_1rtt() {
     assert_eq!(client.loss_recovery.rtt(), RTT);
 
     // All the stream data that was sent should now be available.
-    let packets = server
+    let streams = server
         .events()
         .filter_map(|e| {
             if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-                let mut buf = vec![0; DEFAULT_STREAM_DATA.len() + 1];
-                let (recvd, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
-                assert_eq!(recvd, DEFAULT_STREAM_DATA.len());
-                assert!(fin);
-                Some(())
+                Some(stream_id)
             } else {
                 None
             }
         })
-        .count();
-    assert_eq!(packets, PACKETS);
+        .collect::<Vec<_>>();
+    assert_eq!(streams.len(), PACKETS);
+    for stream_id in streams {
+        let mut buf = vec![0; DEFAULT_STREAM_DATA.len() + 1];
+        let (recvd, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
+        assert_eq!(recvd, DEFAULT_STREAM_DATA.len());
+        assert!(fin);
+    }
 }
 
 #[test]

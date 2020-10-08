@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use neqo_common::{
-    hex, hex_snip_middle, qdebug, qerror, qinfo, qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder,
-    Encoder, Role,
+    event::Provider as EventProvider, hex, hex_snip_middle, qdebug, qerror, qinfo, qlog::NeqoQlog,
+    qtrace, qwarn, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::agent::CertificateInfo;
 use neqo_crypto::{
@@ -2546,27 +2546,25 @@ impl Connection {
         Ok(())
     }
 
-    /// Get all current events. Best used just in debug/testing code, use
-    /// next_event() instead.
-    pub fn events(&mut self) -> impl Iterator<Item = ConnectionEvent> {
-        self.events.events()
+    #[cfg(test)]
+    pub fn get_pto(&self) -> Duration {
+        self.loss_recovery.pto_raw(PNSpace::ApplicationData)
     }
+}
+
+impl EventProvider for Connection {
+    type Event = ConnectionEvent;
 
     /// Return true if there are outstanding events.
-    pub fn has_events(&self) -> bool {
+    fn has_events(&self) -> bool {
         self.events.has_events()
     }
 
     /// Get events that indicate state changes on the connection. This method
     /// correctly handles cases where handling one event can obsolete
     /// previously-queued events, or cause new events to be generated.
-    pub fn next_event(&mut self) -> Option<ConnectionEvent> {
+    fn next_event(&mut self) -> Option<Self::Event> {
         self.events.next_event()
-    }
-
-    #[cfg(test)]
-    pub fn get_pto(&self) -> Duration {
-        self.loss_recovery.pto_raw(PNSpace::ApplicationData)
     }
 }
 
