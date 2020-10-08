@@ -8,13 +8,15 @@ use std::iter::Iterator;
 use std::marker::PhantomData;
 
 /// An event provider is able to generate a stream of events.
-pub trait Provider: Sized {
+pub trait Provider {
     type Event;
 
     /// Get the next event.
+    #[must_use]
     fn next_event(&mut self) -> Option<Self::Event>;
 
     /// Determine whether there are pending events.
+    #[must_use]
     fn has_events(&self) -> bool;
 
     /// Construct an iterator that produces all events.
@@ -23,16 +25,19 @@ pub trait Provider: Sized {
     }
 }
 
-pub struct Iter<'a, P, E> {
+pub struct Iter<'a, P, E>
+where
+    P: ?Sized,
+{
     p: &'a mut P,
     _e: PhantomData<E>,
 }
 
 impl<'a, P, E> Iter<'a, P, E>
 where
-    P: Provider<Event = E>,
+    P: Provider<Event = E> + ?Sized,
 {
-    pub fn new(p: &'a mut P) -> Self {
+    fn new(p: &'a mut P) -> Self {
         Self { p, _e: PhantomData }
     }
 }
