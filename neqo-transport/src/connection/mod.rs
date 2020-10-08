@@ -794,6 +794,8 @@ impl Connection {
             return;
         }
 
+        self.cleanup_streams();
+
         let res = self.crypto.states.check_key_update(now);
         self.absorb_error(now, res);
 
@@ -882,6 +884,7 @@ impl Connection {
     /// by the application.
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
+    #[must_use = "Output of the process_output function must be handled"]
     pub fn process_output(&mut self, now: Instant) -> Output {
         qtrace!([self], "process_output {:?} {:?}", self.state, now);
 
@@ -910,7 +913,8 @@ impl Connection {
     #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         if let Some(d) = dgram {
-            self.process_input(d, now);
+            let res = self.input(d, now);
+            self.absorb_error(now, res);
         }
         self.process_output(now)
     }
@@ -2208,11 +2212,19 @@ impl Connection {
     }
 
     fn cleanup_streams(&mut self) {
+        self.send_streams.clear_terminal();
         let recv_to_remove = self
             .recv_streams
             .iter()
-            .filter(|(_, stream)| stream.is_terminal())
-            .map(|(id, _)| *id)
+            .filter_map(|(id, stream)| {
+                // Remove all streams for which the receiving is done (or aborted).
+                // But only if they are unidirectional, or we have finished sending.
+                if stream.is_terminal() && (id.is_uni() || !self.send_streams.exists(*id)) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
 
         let mut removed_bidi = 0;
@@ -2241,8 +2253,6 @@ impl Connection {
                 .borrow_mut()
                 .max_streams(self.indexes.local_max_stream_uni, StreamType::UniDi)
         }
-
-        self.send_streams.clear_terminal();
     }
 
     /// Get or make a stream, and implicitly open additional streams as
