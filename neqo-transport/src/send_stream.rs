@@ -1470,11 +1470,11 @@ mod tests {
         s.close();
         s.mark_as_sent(len_u64, 0, true);
 
-        // Ack the fin, then the data.
+        // Ack the fin, then mark it lost.
         s.mark_as_acked(len_u64, 0, true);
-        s.mark_as_lost(len_u64, 0, true); // Should be a noop.
+        s.mark_as_lost(len_u64, 0, true);
 
-        // Sending should result in no new frame being sent here.
+        // No frame should be sent here.
         let mut builder = SendStreams(IndexMap::default());
         builder.insert(id, s);
         assert!(builder.get_frame(PNSpace::ApplicationData, 1000).is_none());
