@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use super::super::State;
-use super::{connect, default_client, default_server, maybe_authenticate};
+use super::{connect, default_client, default_server, maybe_authenticate, send_something};
 use crate::events::ConnectionEvent;
 use crate::frame::{Frame, StreamType};
 use crate::recv_stream::RECV_BUFFER_SIZE;
@@ -444,4 +444,59 @@ fn stream_data_blocked_generates_max_stream_data() {
         |(f, _)| matches!(f, Frame::MaxStreamData { maximum_stream_data, .. }
 				   if *maximum_stream_data == RECV_BUFFER_SIZE as u64)
     ));
+}
+
+/// See <https://github.com/mozilla/neqo/issues/871>
+#[test]
+fn max_streams_after_bidi_closed() {
+    const REQUEST: &[u8] = b"ping";
+    const RESPONSE: &[u8] = b"pong";
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    while client.stream_create(StreamType::BiDi).is_ok() {
+        // Exhaust the stream limit.
+    }
+    // Write on the one stream and send that out.
+    let _ = client.stream_send(stream_id, REQUEST).unwrap();
+    client.stream_close_send(stream_id).unwrap();
+    let dgram = client.process(None, now()).dgram();
+
+    // Now handle the stream and send an incomplete response.
+    server.process_input(dgram.unwrap(), now());
+    server.stream_send(stream_id, RESPONSE).unwrap();
+    let dgram = server.process_output(now()).dgram();
+
+    // The server shouldn't have released more stream credit.
+    client.process_input(dgram.unwrap(), now());
+    let e = client.stream_create(StreamType::BiDi).unwrap_err();
+    assert!(matches!(e, Error::StreamLimitError));
+
+    // Closing the stream isn't enough.
+    server.stream_close_send(stream_id).unwrap();
+    let dgram = server.process_output(now()).dgram();
+    client.process_input(dgram.unwrap(), now());
+    assert!(client.stream_create(StreamType::BiDi).is_err());
+
+    // The server needs to see an acknowledgment from the client for its
+    // response AND the server has to read all of the request.
+    // and the server needs to read all the data.  Read first.
+    let mut buf = [0; REQUEST.len()];
+    let (count, fin) = server.stream_recv(stream_id, &mut buf).unwrap();
+    assert_eq!(&buf[..count], REQUEST);
+    assert!(fin);
+
+    // We need an ACK from the client now, but that isn't guaranteed,
+    // so give the client one more packet just in case.
+    let dgram = send_something(&mut server, now());
+    client.process_input(dgram, now());
+
+    // Now get the client to send the ACK and have the server handle that.
+    let dgram = send_something(&mut client, now());
+    let dgram = server.process(Some(dgram), now()).dgram();
+    client.process_input(dgram.unwrap(), now());
+    assert!(client.stream_create(StreamType::BiDi).is_ok());
+    assert!(client.stream_create(StreamType::BiDi).is_err());
 }
