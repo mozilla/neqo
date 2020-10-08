@@ -56,7 +56,7 @@ where
     move |id, v| f((id, v)).is_none()
 }
 
-fn protocol_from_quic_version(version: QuicVersion) -> &'static str {
+fn alpn_from_quic_version(version: QuicVersion) -> &'static str {
     match version {
         QuicVersion::Draft27 => "h3-27",
         QuicVersion::Draft28 => "h3-28",
@@ -99,7 +99,7 @@ impl Http3Client {
         Ok(Self::new_with_conn(
             Connection::new_client(
                 server_name,
-                &[protocol_from_quic_version(quic_version)],
+                &[alpn_from_quic_version(quic_version)],
                 cid_manager,
                 local_addr,
                 remote_addr,
