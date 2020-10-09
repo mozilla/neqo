@@ -21,6 +21,7 @@ use std::time::Duration;
 
 /// The amount of transfer.  Much more than this takes a surprising amount of time.
 const TRANSFER_AMOUNT: usize = 1 << 20; // 1M
+const TRANSFER_AMOUNT_10: usize = 10 * (1 << 20); // 10M
 const ZERO: Duration = Duration::from_millis(0);
 const DELAY: Duration = Duration::from_millis(50);
 const DELAY_RANGE: Range<Duration> = DELAY..Duration::from_millis(55);
@@ -165,4 +166,72 @@ fn transfer_fixed_seed() {
     );
     sim.seed_str("117f65d90ee5c1a7fb685f3af502c7730ba5d31866b758d98f5e3c2117cf9b86");
     sim.run();
+}
+
+// bandwidth 50Mbps
+// delay by 10ms, 25ms, 50ms, 100ms, 250ms
+// loss 1%, 2%, 5%, 10% and 20%
+// With tail-drop queue
+#[test]
+#[ignore]
+fn diff_conditions_loss() {
+    let b = 50;
+    for delay in &[10, 25, 50, 100, 250] {
+        for loss in &[1, 2, 5, 10, 20] {
+            Simulator::new(
+                format!("diff conditions download {} {} {}", b, *delay, *loss),
+                boxed![
+                    ConnectionNode::new_client(boxed![
+                        ReachState::new(State::Confirmed),
+                        ReceiveData::new(TRANSFER_AMOUNT_10),
+                    ]),
+                    // TailDrop requires bandwidth in bytes/s
+                    TailDrop::new(b * (1 << 17), 32_768, Duration::from_millis(*delay)),
+                    ConnectionNode::new_server(boxed![
+                        ReachState::new(State::Confirmed),
+                        SendData::new(TRANSFER_AMOUNT_10),
+                    ]),
+                    Drop::percentage(*loss),
+                    // TailDrop requires bandwidth in bytes/s
+                    TailDrop::new(b * (1 << 17), 32_768, Duration::from_millis(*delay)),
+                ],
+            )
+            .run();
+        }
+    }
+}
+
+// bandwidth 10Mbps, 20Mbps, 50Mbps and 100Mbps
+// delay by 10ms, 50ms, 100ms and 250ms
+// loss 0%
+// With tail-drop queue
+#[test]
+#[ignore]
+fn diff_conditions_tail_drop() {
+    for b in &[10, 20, 50, 100] {
+        for delay in &[10, 25, 50, 100, 250] {
+            Simulator::new(
+                format!("diff conditions download taildrop only {} {}", b, *delay),
+                boxed![
+                    ConnectionNode::new_client(boxed![
+                        ReachState::new(State::Confirmed),
+                        ReceiveData::new(
+                            TRANSFER_AMOUNT * if b * delay < 25 { 1 } else { b * delay / 25 }
+                        ),
+                    ]),
+                    // TailDrop requires bandwidth in bytes/s
+                    TailDrop::new(b * (1 << 17), 32_768, Duration::from_millis(*delay as u64)),
+                    ConnectionNode::new_server(boxed![
+                        ReachState::new(State::Confirmed),
+                        SendData::new(
+                            TRANSFER_AMOUNT * if b * delay < 25 { 1 } else { b * delay / 25 }
+                        ),
+                    ]),
+                    // TailDrop requires bandwidth in bytes/s
+                    TailDrop::new(b * (1 << 17), 32_768, Duration::from_millis(*delay as u64)),
+                ],
+            )
+            .run();
+        }
+    }
 }
