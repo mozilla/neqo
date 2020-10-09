@@ -1101,8 +1101,14 @@ impl Connection {
             (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
                 match packet.supported_versions() {
                     Ok(versions) => {
-                        if versions.is_empty() || versions.contains(&self.quic_version.as_u32()) {
+                        if versions.is_empty()
+                            || versions.contains(&self.quic_version.as_u32())
+                            || packet.dcid() != self.odcid().unwrap()
+                            || matches!(self.address_validation, AddressValidationInfo::Retry { .. })
+                        {
                             // Ignore VersionNegotiation packets that contain the current version.
+                            // Or don't have the right connection ID.
+                            // Or are received after a Retry.
                             self.stats.borrow_mut().pkt_dropped("Invalid VN");
                             return Ok(PreprocessResult::End);
                         }

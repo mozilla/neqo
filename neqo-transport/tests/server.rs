@@ -20,7 +20,7 @@ use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output,
     QuicVersion, State, StreamType,
 };
-use test_fixture::{self, assertions, default_client, now};
+use test_fixture::{self, assertions, default_client, loopback, now};
 
 use std::cell::RefCell;
 use std::convert::TryFrom;
@@ -572,6 +572,36 @@ fn retry_after_pto() {
 
     let ci2 = client.process(retry, now).dgram();
     assert!(ci2.unwrap().len() >= 1200);
+}
+
+#[test]
+fn vn_after_retry() {
+    let mut server = default_server();
+    server.set_validation(ValidateAddress::Always);
+    let mut client = default_client();
+
+    let dgram = client.process(None, now()).dgram(); // Initial
+    assert!(dgram.is_some());
+    let dgram = server.process(dgram, now()).dgram(); // Retry
+    assert!(dgram.is_some());
+
+    assertions::assert_retry(&dgram.as_ref().unwrap());
+
+    let dgram = client.process(dgram, now()).dgram(); // Initial w/token
+    assert!(dgram.is_some());
+
+    let mut encoder = Encoder::default();
+    encoder.encode_byte(0x80);
+    encoder.encode(&[0; 4]); // Zero version == VN.
+    encoder.encode_vec(1, &client.odcid().unwrap()[..]);
+    encoder.encode_vec(1, &[]);
+    encoder.encode_uint(4, 0x5a5a_6a6a_u64);
+    let vn = Datagram::new(loopback(), loopback(), encoder);
+
+    assert_ne!(
+        client.process(Some(vn), now()).callback(),
+        Duration::from_secs(0)
+    );
 }
 
 // Generate an AEAD and header protection object for a client Initial.

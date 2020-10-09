@@ -545,7 +545,7 @@ impl<'a> PublicPacket<'a> {
 
     pub fn is_valid_initial(&self) -> bool {
         // Packet has to be an initial, with a DCID of 8 bytes, or a token.
-        // Assume that the Server class validates the token.
+        // Note: the Server class validates the token and checks the length.
         self.packet_type == PacketType::Initial
             && (self.dcid().len() >= 8 || !self.token.is_empty())
     }
