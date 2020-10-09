@@ -572,7 +572,7 @@ impl<'a> PublicPacket<'a> {
         self.quic_version
     }
 
-    pub fn packet_len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.data.len()
     }
 

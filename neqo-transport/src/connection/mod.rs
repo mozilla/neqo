@@ -71,6 +71,10 @@ struct Packet(Vec<u8>);
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
+/// The number of Initial packets that the client will send in response
+/// to receiving an undecryptable packet during the early part of the
+/// handshake.  This is a hack, but a useful one.
+const EXTRA_INITIALS: usize = 4;
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
 #[derive(Debug, PartialEq, Eq)]
@@ -135,6 +139,18 @@ impl Default for SendOption {
     fn default() -> Self {
         Self::No(false)
     }
+}
+
+/// Used by `Connection::preprocess` to determine what to do
+/// with an packet before attempting to remove protection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreprocessResult {
+    /// End processing and return successfully.
+    End,
+    /// Stop processing this datagram and move on to the next.
+    Next,
+    /// Continue and process this packet.
+    Continue,
 }
 
 /// Alias the common form for ConnectionIdManager.
@@ -927,7 +943,7 @@ impl Connection {
         self.valid_cids.iter().any(|c| c == cid) || self.path.iter().any(|p| p.valid_local_cid(cid))
     }
 
-    fn handle_retry(&mut self, packet: PublicPacket) -> Res<()> {
+    fn handle_retry(&mut self, packet: &PublicPacket) -> Res<()> {
         qinfo!([self], "received Retry");
         if matches!(self.address_validation, AddressValidationInfo::Retry { .. }) {
             self.stats.borrow_mut().pkt_dropped("Extra Retry");
@@ -1006,12 +1022,10 @@ impl Connection {
     fn check_stateless_reset<'a, 'b>(
         &'a mut self,
         d: &'b Datagram,
-        slice: &'b [u8],
+        first: bool,
         now: Instant,
     ) -> Res<()> {
-        // Only look for a stateless reset if we are dealing with the entire
-        // datagram.  No point in running the check multiple times.
-        if d.len() == slice.len() && self.is_stateless_reset(d) {
+        if first && self.is_stateless_reset(d) {
             // Failing to process a packet in a datagram might
             // indicate that there is a stateless reset present.
             qdebug!([self], "Stateless reset: {}", hex(&d[d.len() - 16..]));
@@ -1048,10 +1062,135 @@ impl Connection {
         self.stats.borrow_mut().saved_datagrams += 1;
     }
 
+    /// Perform any processing that we might have to do on packets prior to
+    /// attempting to remove protection.
+    fn preprocess(
+        &mut self,
+        packet: &PublicPacket,
+        first: bool,
+        now: Instant,
+    ) -> Res<PreprocessResult> {
+        match (packet.packet_type(), &self.state, &self.role) {
+            (PacketType::Initial, State::Init, Role::Server) => {
+                if !packet.is_valid_initial() {
+                    self.stats.borrow_mut().pkt_dropped("Invalid Initial");
+                    return Ok(PreprocessResult::Next);
+                }
+                qinfo!(
+                    [self],
+                    "Received valid Initial packet with scid {:?} dcid {:?}",
+                    packet.scid(),
+                    packet.dcid()
+                );
+                self.set_state(State::WaitInitial);
+                self.loss_recovery.start_pacer(now);
+                self.crypto
+                    .states
+                    .init(self.quic_version, self.role, &packet.dcid());
+
+                // We need to make sure that we set this transport parameter.
+                // This has to happen prior to processing the packet so that
+                // the TLS handshake has all it needs.
+                if !self.retry_sent() {
+                    self.tps.borrow_mut().local.set_bytes(
+                        tparams::ORIGINAL_DESTINATION_CONNECTION_ID,
+                        packet.dcid().to_vec(),
+                    )
+                }
+            }
+            (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
+                match packet.supported_versions() {
+                    Ok(versions) => {
+                        if versions.is_empty() || versions.contains(&self.quic_version.as_u32()) {
+                            // Ignore VersionNegotiation packets that contain the current version.
+                            self.stats.borrow_mut().pkt_dropped("Invalid VN");
+                            return Ok(PreprocessResult::End);
+                        }
+
+                        self.set_state(State::Closed(ConnectionError::Transport(
+                            Error::VersionNegotiation,
+                        )));
+                        return Err(Error::VersionNegotiation);
+                    }
+                    Err(_) => {
+                        self.stats.borrow_mut().pkt_dropped("Invalid VN");
+                        return Ok(PreprocessResult::End);
+                    }
+                }
+            }
+            (PacketType::Retry, State::WaitInitial, Role::Client) => {
+                self.handle_retry(packet)?;
+                return Ok(PreprocessResult::Next);
+            }
+            (PacketType::Handshake, State::WaitInitial, Role::Client)
+            | (PacketType::Short, State::WaitInitial, Role::Client) => {
+                // This packet can't be processed now, but it could be a sign
+                // that Initial packets were lost.
+                // Resend Initial CRYPTO frames immediately a few times just
+                // in case.  As we don't have an RTT estimate yet, this helps
+                // when there is a short RTT and losses.
+                if first
+                    && self.is_valid_cid(packet.dcid())
+                    && self.stats.borrow().saved_datagrams <= EXTRA_INITIALS
+                {
+                    self.crypto.resend_unacked(PNSpace::Initial);
+                }
+            }
+            (PacketType::VersionNegotiation, ..)
+            | (PacketType::Retry, ..)
+            | (PacketType::OtherVersion, ..) => {
+                self.stats
+                    .borrow_mut()
+                    .pkt_dropped(format!("{:?}", packet.packet_type()));
+                return Ok(PreprocessResult::Next);
+            }
+            _ => {}
+        }
+
+        let res = match self.state {
+            State::Init => {
+                self.stats
+                    .borrow_mut()
+                    .pkt_dropped("Received while in Init state");
+                PreprocessResult::Next
+            }
+            State::WaitInitial => PreprocessResult::Continue,
+            State::Handshaking | State::Connected | State::Confirmed => {
+                if !self.is_valid_cid(packet.dcid()) {
+                    self.stats
+                        .borrow_mut()
+                        .pkt_dropped(format!("Ignoring packet with CID {:?}", packet.dcid()));
+                    PreprocessResult::Next
+                } else {
+                    if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
+                        // Server has received a Handshake packet -> discard Initial keys and states
+                        self.discard_keys(PNSpace::Initial, now);
+                    }
+                    PreprocessResult::Continue
+                }
+            }
+            State::Closing { .. } => {
+                // Don't bother processing the packet. Instead ask to get a
+                // new close frame.
+                self.state_signaling.send_close();
+                PreprocessResult::Next
+            }
+            State::Draining { .. } | State::Closed(..) => {
+                // Do nothing.
+                self.stats
+                    .borrow_mut()
+                    .pkt_dropped(format!("State {:?}", self.state));
+                PreprocessResult::Next
+            }
+        };
+        Ok(res)
+    }
+
     /// Take a datagram as input.  This reports an error if the packet was bad.
     fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, PNSpace)>> {
         let mut slc = &d[..];
         let mut frames = Vec::new();
+        let mut first = true;
 
         qtrace!([self], "input {}", hex(&**d));
 
@@ -1068,102 +1207,10 @@ impl Connection {
                         break;
                     }
                 };
-            match (packet.packet_type(), &self.state, &self.role) {
-                (PacketType::Initial, State::Init, Role::Server) => {
-                    if !packet.is_valid_initial() {
-                        self.stats.borrow_mut().pkt_dropped("Invalid Initial");
-                        break;
-                    }
-                    qinfo!(
-                        [self],
-                        "Received valid Initial packet with scid {:?} dcid {:?}",
-                        packet.scid(),
-                        packet.dcid()
-                    );
-                    self.set_state(State::WaitInitial);
-                    self.loss_recovery.start_pacer(now);
-                    self.crypto
-                        .states
-                        .init(self.quic_version, self.role, &packet.dcid());
-
-                    // We need to make sure that we set this transport parameter.
-                    // This has to happen prior to processing the packet so that
-                    // the TLS handshake has all it needs.
-                    if !self.retry_sent() {
-                        self.tps.borrow_mut().local.set_bytes(
-                            tparams::ORIGINAL_DESTINATION_CONNECTION_ID,
-                            packet.dcid().to_vec(),
-                        )
-                    }
-                }
-                (PacketType::VersionNegotiation, State::WaitInitial, Role::Client) => {
-                    match packet.supported_versions() {
-                        Ok(versions) => {
-                            if versions.is_empty() || versions.contains(&self.quic_version.as_u32())
-                            {
-                                // Ignore VersionNegotiation packets that contain the current version.
-                                self.stats.borrow_mut().dropped_rx += 1;
-                                return Ok(frames);
-                            }
-                            self.set_state(State::Closed(ConnectionError::Transport(
-                                Error::VersionNegotiation,
-                            )));
-                            return Err(Error::VersionNegotiation);
-                        }
-                        Err(_) => {
-                            self.stats.borrow_mut().dropped_rx += 1;
-                            return Ok(frames);
-                        }
-                    }
-                }
-                (PacketType::Retry, State::WaitInitial, Role::Client) => {
-                    self.handle_retry(packet)?;
-                    break;
-                }
-                (PacketType::VersionNegotiation, ..)
-                | (PacketType::Retry, ..)
-                | (PacketType::OtherVersion, ..) => {
-                    self.stats
-                        .borrow_mut()
-                        .pkt_dropped(format!("{:?}", packet.packet_type()));
-                    break;
-                }
-                _ => {}
-            };
-
-            match self.state {
-                State::Init => {
-                    self.stats
-                        .borrow_mut()
-                        .pkt_dropped("Received while in Init state");
-                    break;
-                }
-                State::WaitInitial => {}
-                State::Handshaking | State::Connected | State::Confirmed => {
-                    if !self.is_valid_cid(packet.dcid()) {
-                        self.stats
-                            .borrow_mut()
-                            .pkt_dropped(format!("Ignoring packet with CID {:?}", packet.dcid()));
-                        break;
-                    }
-                    if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
-                        // Server has received a Handshake packet -> discard Initial keys and states
-                        self.discard_keys(PNSpace::Initial, now);
-                    }
-                }
-                State::Closing { .. } => {
-                    // Don't bother processing the packet. Instead ask to get a
-                    // new close frame.
-                    self.state_signaling.send_close();
-                    break;
-                }
-                State::Draining { .. } | State::Closed(..) => {
-                    // Do nothing.
-                    self.stats
-                        .borrow_mut()
-                        .pkt_dropped(format!("State {:?}", self.state));
-                    break;
-                }
+            match self.preprocess(&packet, first, now)? {
+                PreprocessResult::Continue => (),
+                PreprocessResult::Next => break,
+                PreprocessResult::End => return Ok(frames),
             }
 
             qtrace!([self], "Received unverified packet {:?}", packet);
@@ -1215,14 +1262,15 @@ impl Connection {
                     // Decryption failure, or not having keys is not fatal.
                     // If the state isn't available, or we can't decrypt the packet, drop
                     // the rest of the datagram on the floor, but don't generate an error.
-                    self.check_stateless_reset(&d, slc, now)?;
+                    self.check_stateless_reset(&d, first, now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
                     qlog::packet_dropped(&mut self.qlog, &packet);
                 }
             }
             slc = remainder;
+            first = false;
         }
-        self.check_stateless_reset(&d, slc, now)?;
+        self.check_stateless_reset(&d, first, now)?;
         Ok(frames)
     }
 

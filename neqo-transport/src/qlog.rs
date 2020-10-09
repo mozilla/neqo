@@ -169,7 +169,7 @@ pub fn packet_dropped(qlog: &mut NeqoQlog, payload: &PublicPacket) {
     qlog.add_event(|| {
         Some(Event::packet_dropped(
             Some(to_qlog_pkt_type(payload.packet_type())),
-            Some(u64::try_from(payload.packet_len()).unwrap()),
+            Some(u64::try_from(payload.len()).unwrap()),
             None,
         ))
     })
@@ -202,7 +202,7 @@ pub fn packet_received(
             to_qlog_pkt_type(payload.packet_type()),
             PacketHeader::new(
                 payload.pn(),
-                Some(u64::try_from(public_packet.packet_len()).unwrap()),
+                Some(u64::try_from(public_packet.len()).unwrap()),
                 None,
                 None,
                 None,
