@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use regex::Regex;
 
-use neqo_common::Datagram;
+use neqo_common::{event::Provider, Datagram};
 use neqo_crypto::{AllowZeroRtt, AntiReplay, Cipher};
 use neqo_http3::Error;
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};

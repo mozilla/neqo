@@ -859,6 +859,7 @@ mod tests {
     use super::*;
 
     use crate::events::ConnectionEvent;
+    use neqo_common::event::Provider;
 
     #[test]
     fn test_mark_range() {
@@ -1178,7 +1179,7 @@ mod tests {
     fn send_stream_writable_event_gen() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         flow_mgr.borrow_mut().conn_increase_max_credit(2);
-        let conn_events = ConnectionEvents::default();
+        let mut conn_events = ConnectionEvents::default();
 
         let mut s = SendStream::new(4.into(), 0, Rc::clone(&flow_mgr), conn_events.clone());
 
@@ -1242,7 +1243,7 @@ mod tests {
     fn send_stream_writable_event_new_stream() {
         let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
         flow_mgr.borrow_mut().conn_increase_max_credit(2);
-        let conn_events = ConnectionEvents::default();
+        let mut conn_events = ConnectionEvents::default();
 
         let _s = SendStream::new(4.into(), 100, flow_mgr, conn_events.clone());
 
