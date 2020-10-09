@@ -27,7 +27,10 @@ use mio_extras::timer::{Builder, Timeout, Timer};
 use structopt::StructOpt;
 
 use neqo_common::{qdebug, qinfo, Datagram};
-use neqo_crypto::{init_db, AntiReplay};
+use neqo_crypto::{
+    constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
+    init_db, AntiReplay, Cipher,
+};
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{server::ValidateAddress, FixedConnectionIdManager, Output};
@@ -98,9 +101,26 @@ struct Args {
     #[structopt(name = "retry", long)]
     /// Force a retry
     retry: bool,
+
+    #[structopt(short = "c", long, number_of_values = 1)]
+    /// The set of TLS cipher suites to enable.
+    /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
+    ciphers: Vec<String>,
 }
 
 impl Args {
+    fn get_ciphers(&self) -> Vec<Cipher> {
+        self.ciphers
+            .iter()
+            .filter_map(|c| match c.as_str() {
+                "TLS_AES_128_GCM_SHA256" => Some(TLS_AES_128_GCM_SHA256),
+                "TLS_AES_256_GCM_SHA384" => Some(TLS_AES_256_GCM_SHA384),
+                "TLS_CHACHA20_POLY1305_SHA256" => Some(TLS_CHACHA20_POLY1305_SHA256),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    }
+
     fn host_socket_addrs(&self) -> Vec<SocketAddr> {
         self.hosts
             .iter()
@@ -147,6 +167,7 @@ trait HttpServer: Display {
     fn process(&mut self, dgram: Option<Datagram>) -> Output;
     fn process_events(&mut self, args: &Args);
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
+    fn set_ciphers(&mut self, ciphers: &[Cipher]);
     fn validate_address(&mut self, when: ValidateAddress);
 }
 
@@ -211,6 +232,10 @@ impl HttpServer for Http3Server {
 
     fn validate_address(&mut self, v: ValidateAddress) {
         self.set_validation(v);
+    }
+
+    fn set_ciphers(&mut self, ciphers: &[Cipher]) {
+        Self::set_ciphers(self, ciphers);
     }
 }
 
@@ -382,6 +407,7 @@ impl ServersRunner {
                 .expect("We cannot make a server!"),
             )
         };
+        svr.set_ciphers(&self.args.get_ciphers());
         svr.set_qlog_dir(self.args.qlog_dir.clone());
         if self.args.retry {
             svr.validate_address(ValidateAddress::Always);
@@ -495,6 +521,13 @@ fn main() -> Result<(), io::Error> {
             "handshake" | "transfer" | "resumption" => {
                 args.use_old_http = true;
                 args.alpn = "hq-29".into();
+            }
+            "chacha20" => {
+                args.use_old_http = true;
+                args.alpn = "hq-29".into();
+                args.ciphers.clear();
+                args.ciphers
+                    .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
             }
             "retry" => {
                 args.use_old_http = true;

@@ -17,7 +17,7 @@ use std::time::Instant;
 use regex::Regex;
 
 use neqo_common::Datagram;
-use neqo_crypto::{AllowZeroRtt, AntiReplay};
+use neqo_crypto::{AllowZeroRtt, AntiReplay, Cipher};
 use neqo_http3::Error;
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
 use neqo_transport::{ConnectionEvent, ConnectionIdManager, Output, State};
@@ -190,6 +190,10 @@ impl HttpServer for Http09Server {
 
     fn validate_address(&mut self, v: ValidateAddress) {
         self.server.set_validation(v);
+    }
+
+    fn set_ciphers(&mut self, ciphers: &[Cipher]) {
+        self.server.set_ciphers(ciphers);
     }
 }
 
