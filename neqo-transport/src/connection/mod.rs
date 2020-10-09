@@ -753,10 +753,14 @@ impl Connection {
                 }
                 _ => {
                     self.state_signaling.close(error.clone(), frame_type, msg);
-                    self.set_state(State::Closing {
-                        error,
-                        timeout: self.get_closing_period_time(now),
-                    });
+                    if matches!(v, Error::KeysExhausted) {
+                        self.set_state(State::Closed(error));
+                    } else {
+                        self.set_state(State::Closing {
+                            error,
+                            timeout: self.get_closing_period_time(now),
+                        });
+                    }
                 }
             }
         }
@@ -1194,12 +1198,19 @@ impl Connection {
                     self.process_migrations(&d)?;
                 }
                 Err(e) => {
-                    if let Error::KeysPending(cspace) = e {
-                        // This packet can't be decrypted because we don't have the keys yet.
-                        // Don't check this packet for a stateless reset, just return.
-                        let remaining = slc.len();
-                        self.save_datagram(cspace, d, remaining, now);
-                        return Ok(frames);
+                    match e {
+                        Error::KeysPending(cspace) => {
+                            // This packet can't be decrypted because we don't have the keys yet.
+                            // Don't check this packet for a stateless reset, just return.
+                            let remaining = slc.len();
+                            self.save_datagram(cspace, d, remaining, now);
+                            return Ok(frames);
+                        }
+                        Error::KeysExhausted => {
+                            // Exhausting read keys is fatal.
+                            return Err(e);
+                        }
+                        _ => (),
                     }
                     // Decryption failure, or not having keys is not fatal.
                     // If the state isn't available, or we can't decrypt the packet, drop
@@ -1558,6 +1569,7 @@ impl Connection {
             self.stats.borrow_mut().packets_tx += 1;
             encoder = builder.build(self.crypto.states.tx(cspace).unwrap())?;
             debug_assert!(encoder.len() <= path.mtu());
+            self.crypto.states.auto_update()?;
 
             if ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
