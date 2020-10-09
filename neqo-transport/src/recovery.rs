@@ -34,6 +34,11 @@ pub const GRANULARITY: Duration = Duration::from_millis(20);
 pub const MAX_ACK_DELAY: Duration = Duration::from_millis(25);
 // Defined in -recovery 6.2 as 333ms but using lower value.
 const INITIAL_RTT: Duration = Duration::from_millis(100);
+/// The number of Initial packets that the client will send in response
+/// to receiving an undecryptable packet during the early part of the
+/// handshake.  This is a hack, but a useful one.
+pub(crate) const EXTRA_INITIALS: usize = 4;
+/// The number of packets of reordering that is tolerated.
 pub(crate) const PACKET_THRESHOLD: u64 = 3;
 /// `ACK_ONLY_SIZE_LIMIT` is the minimum size of the congestion window.
 /// If the congestion window is this small, we will only send ACK frames.
@@ -547,6 +552,7 @@ struct PtoState {
     space: PNSpace,
     /// The number of probes that we have sent.
     count: usize,
+    /// The number of probes that can be sent.
     packets: usize,
     /// The complete set of packet number spaces that can have probes sent.
     probe: PNSpaceSet,
@@ -579,6 +585,11 @@ impl PtoState {
         stats.add_pto_count(self.count);
     }
 
+    /// This tweaks the packet counter so that another probe can be sent.
+    pub fn add_probes(&mut self) {
+        self.packets = PTO_PACKET_COUNT;
+    }
+
     /// Generate a sending profile, indicating what space it should be from.
     /// This takes a packet from the supply or returns an ack-only profile if it can't.
     pub fn send_profile(&mut self, mtu: usize) -> SendProfile {
@@ -601,6 +612,8 @@ pub(crate) struct LossRecovery {
     spaces: LossRecoverySpaces,
     qlog: NeqoQlog,
     stats: StatsCell,
+    /// The number of extra initials we allow each PTO.
+    extra_initials: usize,
 }
 
 impl LossRecovery {
@@ -613,6 +626,7 @@ impl LossRecovery {
             spaces: LossRecoverySpaces::default(),
             qlog: NeqoQlog::default(),
             stats,
+            extra_initials: EXTRA_INITIALS,
         }
     }
 
@@ -917,6 +931,7 @@ impl LossRecovery {
             .as_mut()
             .unwrap()
             .count_pto(&mut *self.stats.borrow_mut());
+        self.extra_initials = EXTRA_INITIALS;
 
         qlog::metrics_updated(
             &mut self.qlog,
@@ -977,6 +992,21 @@ impl LossRecovery {
 
         self.maybe_fire_pto(now, &mut lost_packets);
         lost_packets
+    }
+
+    /// Take an extra Initial packet.
+    pub fn take_extra_initial(&mut self) -> bool {
+        debug_assert!(self.spaces.get(PNSpace::Initial).is_some());
+        if self.extra_initials > 0 {
+            self.extra_initials -= 1;
+            if let Some(pto) = self.pto_state.as_mut() {
+                // Add another probe, just in case.
+                pto.add_probes();
+            }
+            true
+        } else {
+            false
+        }
     }
 
     /// Start the packet pacer.

@@ -21,7 +21,7 @@ use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AuthenticationStatus};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use test_fixture::{self, assertions, fixture_init, loopback, now};
 
 #[test]
@@ -635,12 +635,13 @@ fn verify_pkt_honors_mtu() {
     assert_eq!(pkt0.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
 }
 
-#[test]
-fn extra_initial_hs() {
-    let mut client = default_client();
-    let mut server = default_server();
-    let mut now = now();
-
+/// Run a test for sending extra initial packets.
+fn check_extra_initials(
+    mut client: Connection,
+    mut server: Connection,
+    mut now: Instant,
+    ptos: u32,
+) {
     let c_init = client.process(None, now).dgram();
     assert!(c_init.is_some());
     now += DEFAULT_RTT / 2;
@@ -655,18 +656,23 @@ fn extra_initial_hs() {
     // Feed the same undecryptable packet into the client a few times.
     // Do that EXTRA_INITIALS times and each time the client will emit
     // another Initial packet.
-    for _ in 0..=super::super::EXTRA_INITIALS {
+    for i in 0..crate::recovery::EXTRA_INITIALS {
+        qdebug!("undecryptable {}", i);
         let c_init = client.process(undecryptable.clone(), now).dgram();
         assertions::assert_initial(&c_init.as_ref().unwrap(), false);
         now += DEFAULT_RTT / 10;
+    }
+    if ptos > 0 {
+        // Absorb the extra probe packet from the PTO.
+        assert!(client.process(None, now).dgram().is_some());
     }
 
     // After EXTRA_INITIALS, the client stops sending Initial packets.
     let nothing = client.process(undecryptable, now).dgram();
     assert!(nothing.is_none());
 
-    // Until PTO, where another Initial can be used to complete the handshake.
-    now += AT_LEAST_PTO;
+    // Until the next PTO, where another Initial will complete the handshake.
+    now += AT_LEAST_PTO * (1 << ptos);
     let c_init = client.process(None, now).dgram();
     assertions::assert_initial(c_init.as_ref().unwrap(), false);
     now += DEFAULT_RTT / 2;
@@ -679,6 +685,38 @@ fn extra_initial_hs() {
     now += DEFAULT_RTT / 2;
     server.process_input(c_fin.unwrap(), now);
     assert_eq!(*server.state(), State::Confirmed);
+}
+
+#[test]
+fn extra_initials() {
+    let client = default_client();
+    let server = default_server();
+    check_extra_initials(client, server, now(), 0);
+}
+
+#[test]
+fn extra_initials_one_pto() {
+    let mut client = default_client();
+    let server = default_server();
+    let mut now = now();
+
+    // Drop the first Initial and wait for a PTO.  Nothing should change.
+    let _ = client.process(None, now).dgram();
+    now += AT_LEAST_PTO;
+    check_extra_initials(client, server, now, 1);
+}
+
+#[test]
+fn extra_initials_two_pto() {
+    let mut client = default_client();
+    let server = default_server();
+    let mut now = now();
+
+    let _ = client.process(None, now).dgram();
+    now += AT_LEAST_PTO;
+    let _ = client.process(None, now).dgram();
+    now += AT_LEAST_PTO * 2;
+    check_extra_initials(client, server, now, 2);
 }
 
 #[test]

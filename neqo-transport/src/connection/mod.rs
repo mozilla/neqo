@@ -71,10 +71,6 @@ struct Packet(Vec<u8>);
 pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
-/// The number of Initial packets that the client will send in response
-/// to receiving an undecryptable packet during the early part of the
-/// handshake.  This is a hack, but a useful one.
-const EXTRA_INITIALS: usize = 4;
 const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1131,7 +1127,7 @@ impl Connection {
                 // when there is a short RTT and losses.
                 if first
                     && self.is_valid_cid(packet.dcid())
-                    && self.stats.borrow().saved_datagrams <= EXTRA_INITIALS
+                    && self.loss_recovery.take_extra_initial()
                 {
                     self.crypto.resend_unacked(PNSpace::Initial);
                 }
