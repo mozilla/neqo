@@ -21,8 +21,8 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::{stats::Stats, QpackSettings};
 use neqo_transport::{
-    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdManager, Output, QuicVersion,
-    StreamId, StreamType, ZeroRttState,
+    AppError, CongestionControlAlgorithm, Connection, ConnectionEvent, ConnectionId,
+    ConnectionIdManager, Output, QuicVersion, StreamId, StreamType, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -57,6 +57,15 @@ where
     move |id, v| f((id, v)).is_none()
 }
 
+fn alpn_from_quic_version(version: QuicVersion) -> &'static str {
+    match version {
+        QuicVersion::Draft27 => "h3-27",
+        QuicVersion::Draft28 => "h3-28",
+        QuicVersion::Draft29 => "h3-29",
+        QuicVersion::Draft30 => "h3-30",
+    }
+}
+
 pub struct Http3Parameters {
     pub qpack_settings: QpackSettings,
     pub max_concurrent_push_streams: u64,
@@ -81,20 +90,21 @@ impl Http3Client {
     /// the socket can't be created or configured.
     pub fn new(
         server_name: &str,
-        protocols: &[impl AsRef<str>],
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
+        cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
         http3_parameters: &Http3Parameters,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
             Connection::new_client(
                 server_name,
-                protocols,
+                &[alpn_from_quic_version(quic_version)],
                 cid_manager,
                 local_addr,
                 remote_addr,
+                cc_algorithm,
                 quic_version,
             )?,
             http3_parameters,
@@ -702,14 +712,12 @@ mod tests {
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
-        CloseError, ConnectionEvent, FixedConnectionIdManager, QuicVersion, State,
-        RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
+        CloseError, CongestionControlAlgorithm, ConnectionEvent, FixedConnectionIdManager,
+        QuicVersion, State, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
     use std::time::Duration;
-    use test_fixture::{
-        default_server, fixture_init, loopback, now, DEFAULT_ALPN, DEFAULT_SERVER_NAME,
-    };
+    use test_fixture::{default_server_h3, fixture_init, loopback, now, DEFAULT_SERVER_NAME};
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
         match client.state() {
@@ -725,10 +733,10 @@ mod tests {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
-            DEFAULT_ALPN,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
+            &CongestionControlAlgorithm::NewReno,
             QuicVersion::default(),
             &Http3Parameters {
                 qpack_settings: QpackSettings {
@@ -790,7 +798,7 @@ mod tests {
                 settings: HFrame::Settings {
                     settings: HSettings::new(server_settings),
                 },
-                conn: default_server(),
+                conn: default_server_h3(),
                 control_stream_id: None,
                 encoder: QPackEncoder::new(
                     QpackSettings {
@@ -3399,8 +3407,9 @@ mod tests {
         let mut client = default_http3_client();
         let mut server = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
-            test_fixture::DEFAULT_ALPN,
+            test_fixture::DEFAULT_ALPN_H3,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+            &CongestionControlAlgorithm::NewReno,
             QuicVersion::default(),
         )
         .unwrap();

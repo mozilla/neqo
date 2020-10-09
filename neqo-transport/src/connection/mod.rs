@@ -29,6 +29,7 @@ use neqo_crypto::{
 };
 
 use crate::addr_valid::{AddressValidation, NewTokenState};
+use crate::cc::CongestionControlAlgorithm;
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
 use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
@@ -291,6 +292,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
+        cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
@@ -300,6 +302,7 @@ impl Connection {
             cid_manager,
             protocols,
             None,
+            cc_algorithm,
             quic_version,
         )?;
         c.crypto.states.init(quic_version, Role::Client, &dcid);
@@ -313,6 +316,7 @@ impl Connection {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         cid_manager: CidMgr,
+        cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         Self::new(
@@ -321,6 +325,7 @@ impl Connection {
             cid_manager,
             protocols,
             None,
+            cc_algorithm,
             quic_version,
         )
     }
@@ -364,6 +369,7 @@ impl Connection {
         cid_manager: CidMgr,
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
+        cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
@@ -399,7 +405,7 @@ impl Connection {
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new(stats.clone()),
+            loss_recovery: LossRecovery::new(cc_algorithm, stats.clone()),
             events: ConnectionEvents::default(),
             new_token: NewTokenState::new(role),
             stats,
@@ -747,10 +753,14 @@ impl Connection {
                 }
                 _ => {
                     self.state_signaling.close(error.clone(), frame_type, msg);
-                    self.set_state(State::Closing {
-                        error,
-                        timeout: self.get_closing_period_time(now),
-                    });
+                    if matches!(v, Error::KeysExhausted) {
+                        self.set_state(State::Closed(error));
+                    } else {
+                        self.set_state(State::Closing {
+                            error,
+                            timeout: self.get_closing_period_time(now),
+                        });
+                    }
                 }
             }
         }
@@ -787,6 +797,8 @@ impl Connection {
             )));
             return;
         }
+
+        self.cleanup_streams();
 
         let res = self.crypto.states.check_key_update(now);
         self.absorb_error(now, res);
@@ -876,6 +888,7 @@ impl Connection {
     /// by the application.
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
+    #[must_use = "Output of the process_output function must be handled"]
     pub fn process_output(&mut self, now: Instant) -> Output {
         qtrace!([self], "process_output {:?} {:?}", self.state, now);
 
@@ -904,7 +917,8 @@ impl Connection {
     #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         if let Some(d) = dgram {
-            self.process_input(d, now);
+            let res = self.input(d, now);
+            self.absorb_error(now, res);
         }
         self.process_output(now)
     }
@@ -1184,12 +1198,19 @@ impl Connection {
                     self.process_migrations(&d)?;
                 }
                 Err(e) => {
-                    if let Error::KeysPending(cspace) = e {
-                        // This packet can't be decrypted because we don't have the keys yet.
-                        // Don't check this packet for a stateless reset, just return.
-                        let remaining = slc.len();
-                        self.save_datagram(cspace, d, remaining, now);
-                        return Ok(frames);
+                    match e {
+                        Error::KeysPending(cspace) => {
+                            // This packet can't be decrypted because we don't have the keys yet.
+                            // Don't check this packet for a stateless reset, just return.
+                            let remaining = slc.len();
+                            self.save_datagram(cspace, d, remaining, now);
+                            return Ok(frames);
+                        }
+                        Error::KeysExhausted => {
+                            // Exhausting read keys is fatal.
+                            return Err(e);
+                        }
+                        _ => (),
                     }
                     // Decryption failure, or not having keys is not fatal.
                     // If the state isn't available, or we can't decrypt the packet, drop
@@ -1548,6 +1569,7 @@ impl Connection {
             self.stats.borrow_mut().packets_tx += 1;
             encoder = builder.build(self.crypto.states.tx(cspace).unwrap())?;
             debug_assert!(encoder.len() <= path.mtu());
+            self.crypto.states.auto_update()?;
 
             if ack_eliciting {
                 self.idle_timeout.on_packet_sent(now);
@@ -2202,11 +2224,19 @@ impl Connection {
     }
 
     fn cleanup_streams(&mut self) {
+        self.send_streams.clear_terminal();
         let recv_to_remove = self
             .recv_streams
             .iter()
-            .filter(|(_, stream)| stream.is_terminal())
-            .map(|(id, _)| *id)
+            .filter_map(|(id, stream)| {
+                // Remove all streams for which the receiving is done (or aborted).
+                // But only if they are unidirectional, or we have finished sending.
+                if stream.is_terminal() && (id.is_uni() || !self.send_streams.exists(*id)) {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
 
         let mut removed_bidi = 0;
@@ -2235,8 +2265,6 @@ impl Connection {
                 .borrow_mut()
                 .max_streams(self.indexes.local_max_stream_uni, StreamType::UniDi)
         }
-
-        self.send_streams.clear_terminal();
     }
 
     /// Get or make a stream, and implicitly open additional streams as

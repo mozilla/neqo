@@ -12,8 +12,8 @@ use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output,
-    QuicVersion, State, StreamType,
+    CongestionControlAlgorithm, Connection, ConnectionError, ConnectionEvent, Error,
+    FixedConnectionIdManager, Output, QuicVersion, State, StreamType,
 };
 
 use std::cell::RefCell;
@@ -462,6 +462,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
+        &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
     .expect("must succeed");
@@ -600,10 +601,10 @@ fn test_h3_rz(
 
     let handler = Http3Client::new(
         peer.host,
-        &test.alpn(),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
+        &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
         &Http3Parameters {
             qpack_settings: QpackSettings {
@@ -687,6 +688,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
         nctx.local_addr,
         nctx.remote_addr,
+        &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
     .expect("must succeed");
