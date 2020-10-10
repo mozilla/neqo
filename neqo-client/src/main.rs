@@ -612,7 +612,8 @@ fn main() -> Res<()> {
         entry.push(url.clone());
     }
 
-    for ((_scheme, host, port), urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k {
+    for ((_scheme, host, port), mut urls) in urls_by_origin.into_iter().filter_map(|(k, v)| match k
+    {
         Origin::Tuple(s, h, p) => Some(((s, h, p), v)),
         Origin::Opaque(x) => {
             eprintln!("Opaque origin {:?}", x);
@@ -663,13 +664,15 @@ fn main() -> Res<()> {
                     exit(127)
                 }
 
+                let first_url = urls.remove(0);
+
                 old::old_client(
                     &args,
                     &socket,
                     local_addr,
                     remote_addr,
                     &format!("{}", host),
-                    &urls[..1],
+                    &[first_url],
                     None,
                 )?
             } else {
@@ -682,7 +685,7 @@ fn main() -> Res<()> {
                 local_addr,
                 remote_addr,
                 &format!("{}", host),
-                &urls[1..],
+                &urls,
                 token,
             )?;
         } else {
