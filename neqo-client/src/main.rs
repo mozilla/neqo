@@ -764,7 +764,7 @@ mod old {
                 .expect("download_next called with empty queue");
             match client.stream_create(StreamType::BiDi) {
                 Ok(client_stream_id) => {
-                    println!("Successfully created stream id {}", client_stream_id);
+                    println!("Created stream {} for {}", client_stream_id, url);
                     let req = format!("GET {}\r\n", url.path());
                     client
                         .stream_send(client_stream_id, req.as_bytes())
@@ -775,13 +775,13 @@ mod old {
                     self.streams.insert(client_stream_id, out_file);
                     true
                 }
-                e @ Err(Error::StreamLimitError) | e @ Err(Error::ConnectionState) => {
+                Err(e @ Error::StreamLimitError) | Err(e @ Error::ConnectionState) => {
                     println!("Cannot create stream {:?}", e);
                     self.url_queue.push_front(url);
                     false
                 }
                 Err(e) => {
-                    panic!("Can't create stream {}", e);
+                    panic!("Error creating stream {:?}", e);
                 }
             }
         }
