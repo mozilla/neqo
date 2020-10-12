@@ -4091,10 +4091,8 @@ mod tests {
         let dgram = client.process(dgram, now()).dgram();
         server.conn.process_input(dgram.unwrap(), now());
 
-        // TODO(dragana) - https://github.com/mozilla/neqo/issues/973
-        // This should only have one event, but there are currently many.
         let data_readable_event = |e: &_| matches!(e, Http3ClientEvent::DataReadable { stream_id } if *stream_id == request_stream_id);
-        assert!(client.events().filter(data_readable_event).count() > 0);
+        assert_eq!(client.events().filter(data_readable_event).count(), 1);
 
         let mut buf = [0_u8; 10];
         assert_eq!(
