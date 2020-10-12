@@ -520,14 +520,14 @@ fn no_dupdata_readable_events() {
     let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
     assert!(server.events().any(stream_readable));
 
-    // Send one more datta frame from client. The previous stream data has not been read yet,
+    // Send one more data frame from client. The previous stream data has not been read yet,
     // therefore there should not be a new DataReadable event.
     client.stream_send(stream_id, &[0x00]).unwrap();
     let out_second_data_frame = client.process(None, now());
     let _ = server.process(out_second_data_frame.dgram(), now());
     assert!(!server.events().any(stream_readable));
 
-    // One more frame with a fin will not produce a new DataReadable event, becasue the
+    // One more frame with a fin will not produce a new DataReadable event, because the
     // previous stream data has not been read yet.
     client.stream_send(stream_id, &[0x00]).unwrap();
     client.stream_close_send(stream_id).unwrap();
