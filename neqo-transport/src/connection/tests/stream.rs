@@ -271,8 +271,8 @@ fn do_not_accept_data_after_stop_sending() {
         server.stream_stop_sending(stream_id, Error::NoError.code())
     );
 
-    // Receive the second data frame. The frame should be ignored and now
-    // DataReadable events should be posted.
+    // Receive the second data frame. The frame should be ignored and
+    // DataReadable events shouldn't be posted.
     let out = server.process(out_second_data_frame.dgram(), now());
     assert!(!server.events().any(stream_readable));
 
@@ -313,8 +313,8 @@ fn simultaneous_stop_sending_and_reset() {
         server.stream_stop_sending(stream_id, Error::NoError.code())
     );
 
-    // Receive the second data frame. The frame should be ignored and now
-    // DataReadable events should be posted.
+    // Receive the second data frame. The frame should be ignored and
+    // DataReadable events shouldn't be posted.
     let out = server.process(out_reset_frame.dgram(), now());
     assert!(!server.events().any(stream_readable));
 
@@ -502,4 +502,60 @@ fn max_streams_after_bidi_closed() {
     client.process_input(dgram.unwrap(), now());
     assert!(client.stream_create(StreamType::BiDi).is_ok());
     assert!(client.stream_create(StreamType::BiDi).is_err());
+}
+
+#[test]
+fn no_dupdata_readable_events() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // create a stream
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_send(stream_id, &[0x00]).unwrap();
+    let out = client.process(None, now());
+    let _ = server.process(out.dgram(), now());
+
+    // We have a data_readable event.
+    let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
+    assert!(server.events().any(stream_readable));
+
+    // Send one more datta frame from client. The previous stream data has not been read yet,
+    // therefore there should not be a new DataReadable event.
+    client.stream_send(stream_id, &[0x00]).unwrap();
+    let out_second_data_frame = client.process(None, now());
+    let _ = server.process(out_second_data_frame.dgram(), now());
+    assert!(!server.events().any(stream_readable));
+
+    // One more frame with a fin will not produce a new DataReadable event, becasue the
+    // previous stream data has not been read yet.
+    client.stream_send(stream_id, &[0x00]).unwrap();
+    client.stream_close_send(stream_id).unwrap();
+    let out_third_data_frame = client.process(None, now());
+    let _ = server.process(out_third_data_frame.dgram(), now());
+    assert!(!server.events().any(stream_readable));
+}
+
+#[test]
+fn no_dupdata_readable_events_empty_last_frame() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // create a stream
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_send(stream_id, &[0x00]).unwrap();
+    let out = client.process(None, now());
+    let _ = server.process(out.dgram(), now());
+
+    // We have a data_readable event.
+    let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
+    assert!(server.events().any(stream_readable));
+
+    // An empty frame with a fin will not produce a new DataReadable event, because
+    // the previous stream data has not been read yet.
+    client.stream_close_send(stream_id).unwrap();
+    let out_second_data_frame = client.process(None, now());
+    let _ = server.process(out_second_data_frame.dgram(), now());
+    assert!(!server.events().any(stream_readable));
 }
