@@ -179,7 +179,6 @@ impl HFrameReader {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     /// returns true if quic stream was closed.
     /// # Errors
     /// May return `HttpFrame` if a frame cannot be decoded.
