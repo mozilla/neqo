@@ -154,7 +154,6 @@ impl PacketBuilder {
     #[allow(clippy::reversed_empty_ranges)]
     pub fn short(mut encoder: Encoder, key_phase: bool, dcid: &ConnectionId) -> Self {
         let header_start = encoder.len();
-        // TODO(mt) randomize the spin bit
         encoder.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | (u8::from(key_phase) << 2));
         encoder.encode(&dcid);
         Self {

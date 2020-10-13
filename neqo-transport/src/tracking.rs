@@ -8,16 +8,16 @@
 
 #![deny(clippy::pedantic)]
 
+use std::cmp::min;
 use std::collections::VecDeque;
-use std::convert::TryInto;
+use std::convert::TryFrom;
 use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use neqo_common::{qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{qdebug, qinfo, qtrace, qwarn, Encoder};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
-use crate::frame::{AckRange, Frame};
 use crate::packet::{PacketNumber, PacketType};
 use crate::recovery::RecoveryToken;
 
@@ -495,66 +495,55 @@ impl RecvdPackets {
     ///
     /// We don't send ranges that have been acknowledged, but they still need
     /// to be tracked so that duplicates can be detected.
-    fn get_frame(&mut self, now: Instant) -> Option<(Frame, Option<RecoveryToken>)> {
+    fn write_frame(&mut self, now: Instant, enc: &mut Encoder) -> Option<RecoveryToken> {
         // Check that we aren't delaying ACKs.
         if !self.ack_now(now) {
             return None;
         }
 
+        enc.encode_varint(crate::frame::FRAME_TYPE_ACK);
         // Limit the number of ACK ranges we send so that we'll always
         // have space for data in packets.
-        let ranges: Vec<PacketRange> = self
+        let ranges = self
             .ranges
             .iter()
             .filter(|r| r.ack_needed())
             .take(MAX_ACKS_PER_FRAME)
             .cloned()
-            .collect();
-        let mut iter = ranges.iter();
+            .collect::<Vec<_>>();
 
+        let mut iter = ranges.iter();
         let first = match iter.next() {
             Some(v) => v,
             None => return None, // Nothing to send.
         };
-        let mut ack_ranges = Vec::new();
-        let mut last = first.smallest;
+        enc.encode_varint(first.largest);
 
-        for range in iter {
-            ack_ranges.push(AckRange {
-                // the difference must be at least 2 because 0-length gaps,
-                // (difference 1) are illegal.
-                gap: last - range.largest - 2,
-                range: range.len() - 1,
-            });
-            last = range.smallest;
+        let elapsed = now.duration_since(self.largest_pn_time.unwrap());
+        // We use the default exponent, so delay is in multiples of 8 microseconds.
+        let ack_delay = u64::try_from(elapsed.as_micros() / 8).unwrap_or(u64::MAX);
+        let ack_delay = min((1 << 62) - 1, ack_delay);
+        enc.encode_varint(ack_delay);
+        enc.encode_varint(u64::try_from(ranges.len() - 1).unwrap()); // extra ranges
+        enc.encode_varint(first.len() - 1); // first range
+
+        let mut last = first.smallest;
+        for r in iter {
+            // the difference must be at least 2 because 0-length gaps,
+            // (difference 1) are illegal.
+            enc.encode_varint(last - r.largest - 2); // Gap
+            enc.encode_varint(r.len() - 1); // Range
+            last = r.smallest;
         }
 
         // We've sent an ACK, reset the timer.
         self.ack_time = None;
         self.pkts_since_last_ack = 0;
 
-        let ack_delay = now.duration_since(self.largest_pn_time.unwrap());
-        // We use the default exponent so
-        // ack_delay is in multiples of 8 microseconds.
-        if let Ok(delay) = (ack_delay.as_micros() / 8).try_into() {
-            let ack = Frame::Ack {
-                largest_acknowledged: first.largest,
-                ack_delay: delay,
-                first_ack_range: first.len() - 1,
-                ack_ranges,
-            };
-            let token = RecoveryToken::Ack(AckToken {
-                space: self.space,
-                ranges,
-            });
-            Some((ack, Some(token)))
-        } else {
-            qwarn!(
-                "ack_delay.as_micros() did not fit a u64 {:?}",
-                ack_delay.as_micros()
-            );
-            None
-        }
+        Some(RecoveryToken::Ack(AckToken {
+            space: self.space,
+            ranges,
+        }))
     }
 }
 
@@ -617,13 +606,14 @@ impl AckTracker {
         }
     }
 
-    pub(crate) fn get_frame(
+    pub(crate) fn write_frame(
         &mut self,
-        now: Instant,
         pn_space: PNSpace,
-    ) -> Option<(Frame, Option<RecoveryToken>)> {
+        now: Instant,
+        enc: &mut Encoder,
+    ) -> Option<RecoveryToken> {
         self.get_mut(pn_space)
-            .and_then(|space| space.get_frame(now))
+            .and_then(|space| space.write_frame(now, enc))
     }
 }
 
@@ -646,6 +636,7 @@ mod tests {
         MAX_TRACKED_RANGES, MAX_UNACKED_PKTS,
     };
     use lazy_static::lazy_static;
+    use neqo_common::Encoder;
     use std::collections::HashSet;
     use std::convert::TryFrom;
 
@@ -822,13 +813,14 @@ mod tests {
     #[test]
     fn drop_spaces() {
         let mut tracker = AckTracker::default();
+        let mut enc = Encoder::new();
         tracker
             .get_mut(PNSpace::Initial)
             .unwrap()
             .set_received(*NOW, 0, true);
         // The reference time for `ack_time` has to be in the past or we filter out the timer.
         assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
-        let (_ack, token) = tracker.get_frame(*NOW, PNSpace::Initial).unwrap();
+        let token = tracker.write_frame(PNSpace::Initial, *NOW, &mut enc);
         assert!(token.is_some());
 
         // Mark another packet as received so we have cause to send another ACK in that space.
@@ -843,9 +835,11 @@ mod tests {
 
         assert!(tracker.get_mut(PNSpace::Initial).is_none());
         assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_none());
-        assert!(tracker.get_frame(*NOW, PNSpace::Initial).is_none());
-        if let RecoveryToken::Ack(tok) = token.as_ref().unwrap() {
-            tracker.acked(tok); // Should be a noop.
+        assert!(tracker
+            .write_frame(PNSpace::Initial, *NOW, &mut enc)
+            .is_none());
+        if let RecoveryToken::Ack(tok) = token.unwrap() {
+            tracker.acked(&tok); // Should be a noop.
         } else {
             panic!("not an ACK token");
         }
