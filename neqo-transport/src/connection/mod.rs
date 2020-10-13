@@ -1536,6 +1536,7 @@ impl Connection {
         }
 
         // All useful frames are at least 2 bytes.
+<<<<<<< HEAD
         while builder.remaining() >= 2 {
             let remaining = builder.remaining();
             // If we are CC limited we can only send acks!
@@ -1544,6 +1545,15 @@ impl Connection {
             } else {
                 None
             };
+=======
+        while builder.len() + 2 < limit {
+            let remaining = limit - builder.len();
+            // If we are CC limited we can only send acks!
+            let mut frame = None;
+            if space == PNSpace::ApplicationData && self.role == Role::Server {
+                frame = self.state_signaling.send_done();
+            }
+>>>>>>> Write ACK frames directly
             if frame.is_none() {
                 frame = self.crypto.streams.get_frame(space, remaining)
             }
