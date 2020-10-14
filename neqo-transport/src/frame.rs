@@ -544,15 +544,16 @@ impl Frame {
     }
 
     pub fn is_allowed(&self, pt: PacketType) -> bool {
-        if matches!(self, Self::Padding | Self::Ping) {
-            true
-        } else if matches!(self, Self::Crypto {..} | Self::Ack {..} | Self::ConnectionClose { error_code: CloseError::Transport(_), .. })
-        {
-            pt != PacketType::ZeroRtt
-        } else if matches!(self, Self::NewToken {..} | Self::ConnectionClose {..}) {
-            pt == PacketType::Short
-        } else {
-            pt == PacketType::ZeroRtt || pt == PacketType::Short
+        match self {
+            Self::Padding | Self::Ping => true,
+            Self::Crypto { .. }
+            | Self::Ack { .. }
+            | Self::ConnectionClose {
+                error_code: CloseError::Transport(_),
+                ..
+            } => pt != PacketType::ZeroRtt,
+            Self::NewToken { .. } | Self::ConnectionClose { .. } => pt == PacketType::Short,
+            _ => pt == PacketType::ZeroRtt || pt == PacketType::Short,
         }
     }
 
