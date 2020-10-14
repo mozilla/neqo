@@ -650,6 +650,7 @@ mod tests {
         AckTracker, Duration, Instant, PNSpace, PNSpaceSet, RecoveryToken, RecvdPackets, ACK_DELAY,
         MAX_TRACKED_RANGES, MAX_UNACKED_PKTS,
     };
+    use crate::frame::Frame;
     use crate::packet::PacketBuilder;
     use lazy_static::lazy_static;
     use neqo_common::Encoder;
@@ -829,14 +830,14 @@ mod tests {
     #[test]
     fn drop_spaces() {
         let mut tracker = AckTracker::default();
-        let mut enc = PacketBuilder::short(Encoder::new(), false, &[]);
+        let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         tracker
             .get_mut(PNSpace::Initial)
             .unwrap()
             .set_received(*NOW, 0, true);
         // The reference time for `ack_time` has to be in the past or we filter out the timer.
         assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
-        let token = tracker.write_frame(PNSpace::Initial, *NOW, &mut enc);
+        let token = tracker.write_frame(PNSpace::Initial, *NOW, &mut builder);
         assert!(token.is_some());
 
         // Mark another packet as received so we have cause to send another ACK in that space.
@@ -852,12 +853,58 @@ mod tests {
         assert!(tracker.get_mut(PNSpace::Initial).is_none());
         assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_none());
         assert!(tracker
-            .write_frame(PNSpace::Initial, *NOW, &mut enc)
+            .write_frame(PNSpace::Initial, *NOW, &mut builder)
             .is_none());
         if let RecoveryToken::Ack(tok) = token.unwrap() {
             tracker.acked(&tok); // Should be a noop.
         } else {
             panic!("not an ACK token");
+        }
+    }
+
+    #[test]
+    fn no_room_for_ack() {
+        let mut tracker = AckTracker::default();
+        tracker
+            .get_mut(PNSpace::Initial)
+            .unwrap()
+            .set_received(*NOW, 0, true);
+        assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
+
+        let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
+        builder.set_limit(10);
+
+        let token = tracker.write_frame(PNSpace::Initial, *NOW, &mut builder);
+        assert!(token.is_none());
+        assert_eq!(builder.len(), 1); // Only the short packet header has been added.
+    }
+
+    #[test]
+    fn no_room_for_extra_range() {
+        let mut tracker = AckTracker::default();
+        tracker
+            .get_mut(PNSpace::Initial)
+            .unwrap()
+            .set_received(*NOW, 0, true);
+        tracker
+            .get_mut(PNSpace::Initial)
+            .unwrap()
+            .set_received(*NOW, 2, true);
+        assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
+
+        let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
+        builder.set_limit(32);
+
+        let token = tracker.write_frame(PNSpace::Initial, *NOW, &mut builder);
+        assert!(token.is_some());
+
+        let mut dec = builder.as_decoder();
+        let _ = dec.decode_byte().unwrap(); // Skip the short header.
+        let frame = Frame::decode(&mut dec).unwrap();
+        if let Frame::Ack { ack_ranges, .. } = frame {
+            assert_eq!(ack_ranges.len(), 0);
+        } else {
+            panic!("not an ACK!");
         }
     }
 
