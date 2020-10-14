@@ -10,9 +10,11 @@ use super::{
     maybe_authenticate, send_something, AT_LEAST_PTO,
 };
 use crate::frame::{Frame, StreamType};
+use crate::packet::PacketBuilder;
 use crate::tparams::{self, TransportParameter};
 use crate::tracking::PNSpace;
 
+use neqo_common::Encoder;
 use std::time::Duration;
 use test_fixture::{self, now, split_datagram};
 
@@ -215,6 +217,7 @@ fn idle_caching() {
     let mut client = default_client();
     let mut server = default_server();
     let start = now();
+    let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
 
     // Perform the first round trip, but drop the Initial from the server.
     // The client then caches the Handshake packet.
@@ -235,9 +238,15 @@ fn idle_caching() {
     // to send CRYPTO frames again, so manually extract and discard those.
     let frames = server.test_process_input(dgram.unwrap(), middle);
     assert_eq!(frames, vec![(Frame::Ping, PNSpace::Initial)]);
-    let crypto = server.crypto.streams.get_frame(PNSpace::Initial, 1000);
+    let crypto = server
+        .crypto
+        .streams
+        .write_frame(PNSpace::Initial, &mut builder);
     assert!(crypto.is_some());
-    let crypto = server.crypto.streams.get_frame(PNSpace::Initial, 1000);
+    let crypto = server
+        .crypto
+        .streams
+        .write_frame(PNSpace::Initial, &mut builder);
     assert!(crypto.is_none());
     let dgram = server.process_output(middle).dgram();
 

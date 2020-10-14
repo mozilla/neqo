@@ -26,7 +26,7 @@ pub const FRAME_TYPE_ACK: FrameType = 0x2;
 const FRAME_TYPE_ACK_ECN: FrameType = 0x3;
 const FRAME_TYPE_RST_STREAM: FrameType = 0x4;
 const FRAME_TYPE_STOP_SENDING: FrameType = 0x5;
-const FRAME_TYPE_CRYPTO: FrameType = 0x6;
+pub const FRAME_TYPE_CRYPTO: FrameType = 0x6;
 const FRAME_TYPE_NEW_TOKEN: FrameType = 0x7;
 const FRAME_TYPE_STREAM: FrameType = 0x8;
 const FRAME_TYPE_STREAM_MAX: FrameType = 0xf;
@@ -250,23 +250,6 @@ impl Frame {
         }
     }
 
-    /// Create a CRYPTO frame that fits the available space and its length.
-    pub fn new_crypto(offset: u64, data: &[u8], space: usize) -> (Self, usize) {
-        // Subtract the frame type and offset from available space.
-        let mut remaining = space - 1 - Encoder::varint_len(offset);
-        // Then subtract space for the length field.
-        let data_len = min(remaining - 1, data.len());
-        remaining -= Encoder::varint_len(u64::try_from(data_len).unwrap());
-        remaining = min(data.len(), remaining);
-        (
-            Self::Crypto {
-                offset,
-                data: data[..remaining].to_vec(),
-            },
-            remaining,
-        )
-    }
-
     /// Create a STREAM frame that fits the available space.
     /// Return a tuple of a frame and the amount of data it carries.
     pub fn new_stream(
@@ -338,7 +321,7 @@ impl Frame {
 
         match self {
             Self::Padding | Self::Ping => (),
-            Self::Ack { .. } => unreachable!(),
+            Self::Ack { .. } | Self::Crypto { .. } | Self::HandshakeDone => unreachable!(),
             Self::ResetStream {
                 stream_id,
                 application_error_code,
@@ -354,10 +337,6 @@ impl Frame {
             } => {
                 enc.encode_varint(stream_id.as_u64());
                 enc.encode_varint(*application_error_code);
-            }
-            Self::Crypto { offset, data } => {
-                enc.encode_varint(*offset);
-                enc.encode_vvec(&data);
             }
             Self::NewToken { token } => {
                 enc.encode_vvec(token);
@@ -439,7 +418,6 @@ impl Frame {
                 }
                 enc.encode_vvec(reason_phrase);
             }
-            Self::HandshakeDone => (),
         }
     }
 
@@ -802,13 +780,13 @@ mod tests {
     }
 
     #[test]
-    fn test_crypto() {
+    fn crypto() {
         let f = Frame::Crypto {
             offset: 1,
             data: vec![1, 2, 3],
         };
 
-        enc_dec(&f, "060103010203");
+        just_dec(&f, "060103010203");
     }
 
     #[test]

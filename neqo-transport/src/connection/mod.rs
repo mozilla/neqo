@@ -1541,14 +1541,15 @@ impl Connection {
                 tokens.push(t);
             }
         }
+        if let Some(t) = self.crypto.streams.write_frame(space, builder) {
+            ack_eliciting = true;
+            tokens.push(t);
+        }
 
         // All useful frames are at least 2 bytes.
         while builder.remaining() >= 2 {
             let remaining = builder.remaining();
-            let mut frame = self.crypto.streams.get_frame(space, remaining);
-            if frame.is_none() {
-                frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
-            }
+            let mut frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
             if frame.is_none() {
                 frame = self.send_streams.get_frame(space, remaining);
             }
