@@ -9,6 +9,7 @@ use std::mem;
 use std::time::Instant;
 
 use crate::frame::{Frame, FrameType};
+use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::{CloseError, ConnectionError};
 
@@ -100,10 +101,11 @@ impl StateSignaling {
         *self = Self::HandshakeDone
     }
 
-    pub fn send_done(&mut self) -> Option<(Frame, Option<RecoveryToken>)> {
-        if *self == Self::HandshakeDone {
+    pub fn write_done(&mut self, builder: &mut PacketBuilder) -> Option<RecoveryToken> {
+        if *self == Self::HandshakeDone && builder.remaining() >= 1 {
             *self = Self::Idle;
-            Some((Frame::HandshakeDone, Some(RecoveryToken::HandshakeDone)))
+            builder.encode_varint(Frame::HandshakeDone.get_type());
+            Some(RecoveryToken::HandshakeDone)
         } else {
             None
         }

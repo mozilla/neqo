@@ -1532,21 +1532,20 @@ impl Connection {
         }
 
         if profile.ack_only(space) {
+            // If we are CC limited we can only send acks!
             return (tokens, ack_eliciting);
+        }
+        if space == PNSpace::ApplicationData && self.role == Role::Server {
+            if let Some(t) = self.state_signaling.write_done(builder) {
+                ack_eliciting = true;
+                tokens.push(t);
+            }
         }
 
         // All useful frames are at least 2 bytes.
         while builder.remaining() >= 2 {
             let remaining = builder.remaining();
-            // If we are CC limited we can only send acks!
-            let mut frame = if space == PNSpace::ApplicationData && self.role == Role::Server {
-                self.state_signaling.send_done()
-            } else {
-                None
-            };
-            if frame.is_none() {
-                frame = self.crypto.streams.get_frame(space, remaining)
-            }
+            let mut frame = self.crypto.streams.get_frame(space, remaining);
             if frame.is_none() {
                 frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
             }
