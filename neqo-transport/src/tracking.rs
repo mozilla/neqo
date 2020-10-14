@@ -15,7 +15,7 @@ use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use neqo_common::{qdebug, qinfo, qtrace, qwarn, Encoder};
+use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::packet::{PacketBuilder, PacketNumber, PacketType};
