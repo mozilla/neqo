@@ -396,6 +396,7 @@ impl<'a> Handler<'a> {
                     stream_id,
                     headers,
                     fin,
+                    ..
                 } => match self.streams.get(&stream_id) {
                     Some(out_file) => {
                         if out_file.is_none() {

@@ -188,18 +188,20 @@ impl HttpServer for Http3Server {
 
                     let default_ret = b"Hello World".to_vec();
 
-                    let response = headers.and_then(|h| {
-                        h.iter().find(|&(k, _)| k == ":path").and_then(|(_, path)| {
-                            if args.qns_test.is_some() {
-                                qns_read_response(path)
-                            } else {
-                                match path.trim_matches(|p| p == '/').parse::<usize>() {
-                                    Ok(v) => Some(vec![b'a'; v]),
-                                    Err(_) => Some(default_ret),
+                    let response =
+                        headers
+                            .iter()
+                            .find(|&(k, _)| k == ":path")
+                            .and_then(|(_, path)| {
+                                if args.qns_test.is_some() {
+                                    qns_read_response(path)
+                                } else {
+                                    match path.trim_matches(|p| p == '/').parse::<usize>() {
+                                        Ok(v) => Some(vec![b'a'; v]),
+                                        Err(_) => Some(default_ret),
+                                    }
                                 }
-                            }
-                        })
-                    });
+                            });
 
                     if response.is_none() {
                         let _ = request.stream_reset(Error::HttpRequestIncomplete.code());
