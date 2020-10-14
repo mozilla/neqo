@@ -1505,7 +1505,6 @@ impl Connection {
         &mut self,
         builder: &mut PacketBuilder,
         space: PNSpace,
-        limit: usize,
         profile: &SendProfile,
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool) {
@@ -1520,34 +1519,40 @@ impl Connection {
             false
         };
 
+        // Try to get a frame from all frame sources.
+        if let Some(t) = self.acks.write_frame(space, now, builder) {
+            tokens.push(t);
+        }
+
+        if profile.ack_only(space) {
+            return (tokens, ack_eliciting);
+        }
+
         // All useful frames are at least 2 bytes.
-        while builder.len() + 2 < limit {
-            let remaining = limit - builder.len();
-            // Try to get a frame from frame sources
-            let mut frame = self.acks.get_frame(now, space);
+        while builder.remaining() >= 2 {
+            let remaining = builder.remaining();
             // If we are CC limited we can only send acks!
-            if !profile.ack_only(space) {
-                if frame.is_none() && space == PNSpace::ApplicationData && self.role == Role::Server
-                {
-                    frame = self.state_signaling.send_done();
-                }
-                if frame.is_none() {
-                    frame = self.crypto.streams.get_frame(space, remaining)
-                }
-                if frame.is_none() {
-                    frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
-                }
-                if frame.is_none() {
-                    frame = self.send_streams.get_frame(space, remaining);
-                }
-                if frame.is_none() && space == PNSpace::ApplicationData {
-                    frame = self.new_token.get_frame(remaining);
-                }
+            let mut frame = if space == PNSpace::ApplicationData && self.role == Role::Server {
+                self.state_signaling.send_done()
+            } else {
+                None
+            };
+            if frame.is_none() {
+                frame = self.crypto.streams.get_frame(space, remaining)
+            }
+            if frame.is_none() {
+                frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
+            }
+            if frame.is_none() {
+                frame = self.send_streams.get_frame(space, remaining);
+            }
+            if frame.is_none() && space == PNSpace::ApplicationData {
+                frame = self.new_token.get_frame(remaining);
             }
 
             if let Some((frame, token)) = frame {
-                ack_eliciting |= frame.ack_eliciting();
-                debug_assert_ne!(frame, Frame::Padding);
+                ack_eliciting = true;
+                debug_assert!(frame.ack_eliciting());
                 frame.marshal(builder);
                 if let Some(t) = token {
                     tokens.push(t);
@@ -1603,8 +1608,8 @@ impl Connection {
 
             // Add frames to the packet.
             let limit = profile.limit() - aead_expansion;
-            let (tokens, ack_eliciting) =
-                self.add_frames(&mut builder, *space, limit, &profile, now);
+            builder.set_limit(limit);
+            let (tokens, ack_eliciting) = self.add_frames(&mut builder, *space, &profile, now);
             if builder.is_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();

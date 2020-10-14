@@ -22,7 +22,7 @@ pub type FrameType = u64;
 
 const FRAME_TYPE_PADDING: FrameType = 0x0;
 const FRAME_TYPE_PING: FrameType = 0x1;
-const FRAME_TYPE_ACK: FrameType = 0x2;
+pub const FRAME_TYPE_ACK: FrameType = 0x2;
 const FRAME_TYPE_ACK_ECN: FrameType = 0x3;
 const FRAME_TYPE_RST_STREAM: FrameType = 0x4;
 const FRAME_TYPE_STOP_SENDING: FrameType = 0x5;
@@ -338,21 +338,7 @@ impl Frame {
 
         match self {
             Self::Padding | Self::Ping => (),
-            Self::Ack {
-                largest_acknowledged,
-                ack_delay,
-                first_ack_range,
-                ack_ranges,
-            } => {
-                enc.encode_varint(*largest_acknowledged);
-                enc.encode_varint(*ack_delay);
-                enc.encode_varint(ack_ranges.len() as u64);
-                enc.encode_varint(*first_ack_range);
-                for r in ack_ranges {
-                    enc.encode_varint(r.gap);
-                    enc.encode_varint(r.range);
-                }
-            }
+            Self::Ack { .. } => unreachable!(),
             Self::ResetStream {
                 stream_id,
                 application_error_code,
@@ -739,16 +725,22 @@ impl Frame {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use neqo_common::hex;
+
+    fn just_dec(f: &Frame, s: &str) {
+        let encoded = Encoder::from_hex(s);
+        let decoded = Frame::decode(&mut encoded.as_decoder()).unwrap();
+        assert_eq!(*f, decoded);
+    }
 
     fn enc_dec(f: &Frame, s: &str) {
-        let mut d = Encoder::default();
+        let mut enc = Encoder::default();
+        let expected = Encoder::from_hex(s);
 
-        f.marshal(&mut d);
-        assert_eq!(d, Encoder::from_hex(s));
+        f.marshal(&mut enc);
+        assert_eq!(enc, expected);
 
-        let f2 = Frame::decode(&mut d.as_decoder()).unwrap();
-        assert_eq!(*f, f2);
+        let decoded = Frame::decode(&mut expected.as_decoder()).unwrap();
+        assert_eq!(*f, decoded);
     }
 
     #[test]
@@ -764,7 +756,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ack() {
+    fn ack() {
         let ar = vec![AckRange { gap: 1, range: 2 }, AckRange { gap: 3, range: 4 }];
 
         let f = Frame::Ack {
@@ -774,7 +766,7 @@ mod tests {
             ack_ranges: ar,
         };
 
-        enc_dec(&f, "025234523502523601020304");
+        just_dec(&f, "025234523502523601020304");
 
         // Try to parse ACK_ECN without ECN values
         let enc = Encoder::from_hex("035234523502523601020304");
@@ -1034,38 +1026,6 @@ mod tests {
         assert_eq!(f3, f4);
         assert_ne!(f3, f5);
         assert_ne!(f3, f6);
-    }
-
-    #[test]
-    fn encode_ack_frame() {
-        let ack_frame = Frame::Ack {
-            largest_acknowledged: 7,
-            ack_delay: 12_000,
-            first_ack_range: 2, // [7], 6, 5
-            ack_ranges: vec![AckRange {
-                gap: 0,   // 4
-                range: 1, // 3, 2
-            }],
-        };
-        let mut enc = Encoder::default();
-        ack_frame.marshal(&mut enc);
-        println!("Encoded ACK={}", hex(&enc[..]));
-
-        let f = Frame::decode(&mut enc.as_decoder()).unwrap();
-        if let Frame::Ack {
-            largest_acknowledged,
-            ack_delay,
-            first_ack_range,
-            ack_ranges,
-        } = f
-        {
-            assert_eq!(largest_acknowledged, 7);
-            assert_eq!(ack_delay, 12_000);
-            assert_eq!(first_ack_range, 2);
-            assert_eq!(ack_ranges.len(), 1);
-            assert_eq!(ack_ranges[0].gap, 0);
-            assert_eq!(ack_ranges[0].range, 1);
-        }
     }
 
     #[test]
