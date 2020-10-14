@@ -1478,10 +1478,11 @@ impl Connection {
         while builder.remaining() >= 2 {
             let remaining = builder.remaining();
             // If we are CC limited we can only send acks!
-            let mut frame = None;
-            if space == PNSpace::ApplicationData && self.role == Role::Server {
-                frame = self.state_signaling.send_done();
-            }
+            let mut frame = if space == PNSpace::ApplicationData && self.role == Role::Server {
+                self.state_signaling.send_done()
+            } else {
+                None
+            };
             if frame.is_none() {
                 frame = self.crypto.streams.get_frame(space, remaining)
             }
