@@ -1451,7 +1451,6 @@ impl Connection {
         &mut self,
         builder: &mut PacketBuilder,
         space: PNSpace,
-        limit: usize,
         profile: &SendProfile,
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool) {
@@ -1476,8 +1475,8 @@ impl Connection {
         }
 
         // All useful frames are at least 2 bytes.
-        while builder.len() + 2 < limit {
-            let remaining = limit - builder.len();
+        while builder.remaining() >= 2 {
+            let remaining = builder.remaining();
             // If we are CC limited we can only send acks!
             let mut frame = None;
             if space == PNSpace::ApplicationData && self.role == Role::Server {
@@ -1554,8 +1553,8 @@ impl Connection {
 
             // Add frames to the packet.
             let limit = profile.limit() - aead_expansion;
-            let (tokens, ack_eliciting) =
-                self.add_frames(&mut builder, *space, limit, &profile, now);
+            builder.set_limit(limit);
+            let (tokens, ack_eliciting) = self.add_frames(&mut builder, *space, &profile, now);
             if builder.is_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();

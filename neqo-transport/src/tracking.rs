@@ -15,10 +15,10 @@ use std::ops::{Index, IndexMut};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use neqo_common::{qdebug, qinfo, qtrace, qwarn, Encoder};
+use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
-use crate::packet::{PacketNumber, PacketType};
+use crate::packet::{PacketBuilder, PacketNumber, PacketType};
 use crate::recovery::RecoveryToken;
 
 use smallvec::{smallvec, SmallVec};
@@ -495,44 +495,59 @@ impl RecvdPackets {
     ///
     /// We don't send ranges that have been acknowledged, but they still need
     /// to be tracked so that duplicates can be detected.
-    fn write_frame(&mut self, now: Instant, enc: &mut Encoder) -> Option<RecoveryToken> {
+    fn write_frame(&mut self, now: Instant, builder: &mut PacketBuilder) -> Option<RecoveryToken> {
+        // The worst possible ACK frame, assuming only one range.
+        // Note that this assumes one byte for the type and count of extra ranges.
+        const LONGEST_ACK_HEADER: usize = 1 + 8 + 8 + 1 + 8;
+
         // Check that we aren't delaying ACKs.
         if !self.ack_now(now) {
             return None;
         }
 
-        enc.encode_varint(crate::frame::FRAME_TYPE_ACK);
-        // Limit the number of ACK ranges we send so that we'll always
-        // have space for data in packets.
+        // Drop extra ACK ranges to fit the available space.  Do this based on
+        // a worst-case estimate of frame size for simplicity.
+        //
+        // When congestion limited, ACK-only packets are 255 bytes at most
+        // (`recovery::ACK_ONLY_SIZE_LIMIT - 1`).  This results in limiting the
+        // ranges to 13 here.
+        let max_ranges = if let Some(avail) = builder.remaining().checked_sub(LONGEST_ACK_HEADER) {
+            // Apply a hard maximum to keep plenty of space for other stuff.
+            min(1 + (avail / 16), MAX_ACKS_PER_FRAME)
+        } else {
+            return None;
+        };
+
         let ranges = self
             .ranges
             .iter()
             .filter(|r| r.ack_needed())
-            .take(MAX_ACKS_PER_FRAME)
+            .take(max_ranges)
             .cloned()
             .collect::<Vec<_>>();
 
+        builder.encode_varint(crate::frame::FRAME_TYPE_ACK);
         let mut iter = ranges.iter();
         let first = match iter.next() {
             Some(v) => v,
             None => return None, // Nothing to send.
         };
-        enc.encode_varint(first.largest);
+        builder.encode_varint(first.largest);
 
         let elapsed = now.duration_since(self.largest_pn_time.unwrap());
         // We use the default exponent, so delay is in multiples of 8 microseconds.
         let ack_delay = u64::try_from(elapsed.as_micros() / 8).unwrap_or(u64::MAX);
         let ack_delay = min((1 << 62) - 1, ack_delay);
-        enc.encode_varint(ack_delay);
-        enc.encode_varint(u64::try_from(ranges.len() - 1).unwrap()); // extra ranges
-        enc.encode_varint(first.len() - 1); // first range
+        builder.encode_varint(ack_delay);
+        builder.encode_varint(u64::try_from(ranges.len() - 1).unwrap()); // extra ranges
+        builder.encode_varint(first.len() - 1); // first range
 
         let mut last = first.smallest;
         for r in iter {
             // the difference must be at least 2 because 0-length gaps,
             // (difference 1) are illegal.
-            enc.encode_varint(last - r.largest - 2); // Gap
-            enc.encode_varint(r.len() - 1); // Range
+            builder.encode_varint(last - r.largest - 2); // Gap
+            builder.encode_varint(r.len() - 1); // Range
             last = r.smallest;
         }
 
@@ -610,10 +625,10 @@ impl AckTracker {
         &mut self,
         pn_space: PNSpace,
         now: Instant,
-        enc: &mut Encoder,
+        builder: &mut PacketBuilder,
     ) -> Option<RecoveryToken> {
         self.get_mut(pn_space)
-            .and_then(|space| space.write_frame(now, enc))
+            .and_then(|space| space.write_frame(now, builder))
     }
 }
 
@@ -635,6 +650,7 @@ mod tests {
         AckTracker, Duration, Instant, PNSpace, PNSpaceSet, RecoveryToken, RecvdPackets, ACK_DELAY,
         MAX_TRACKED_RANGES, MAX_UNACKED_PKTS,
     };
+    use crate::packet::PacketBuilder;
     use lazy_static::lazy_static;
     use neqo_common::Encoder;
     use std::collections::HashSet;
@@ -813,7 +829,7 @@ mod tests {
     #[test]
     fn drop_spaces() {
         let mut tracker = AckTracker::default();
-        let mut enc = Encoder::new();
+        let mut enc = PacketBuilder::short(Encoder::new(), false, &[]);
         tracker
             .get_mut(PNSpace::Initial)
             .unwrap()
