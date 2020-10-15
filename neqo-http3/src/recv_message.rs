@@ -141,31 +141,29 @@ impl RecvMessage {
         fin: bool,
         decoder: &mut QPackDecoder,
     ) -> Res<()> {
-        match (fin, self.is_interim(&headers)?) {
-            (true, true) => Err(Error::HttpGeneralProtocolStream),
-            (false, true) => {
-                self.conn_events
-                    .header_ready(self.stream_id, headers, true, fin);
-                self.state = RecvMessageState::WaitingForResponseHeaders {
-                    frame_reader: HFrameReader::new(),
-                };
-                Ok(())
-            }
-            (true, false) => {
-                self.conn_events
-                    .header_ready(self.stream_id, headers, false, fin);
-                self.set_closed(decoder);
-                Ok(())
-            }
-            (false, false) => {
-                self.conn_events
-                    .header_ready(self.stream_id, headers, false, fin);
-                self.state = RecvMessageState::WaitingForData {
-                    frame_reader: HFrameReader::new(),
-                };
-                Ok(())
-            }
+        let interim = self.is_interim(&headers)?;
+
+        if fin && interim {
+            return Err(Error::HttpGeneralProtocolStream);
         }
+
+        self.conn_events
+            .header_ready(self.stream_id, headers, interim, fin);
+
+        if fin {
+            self.set_closed(decoder);
+        } else {
+            self.state = if interim {
+                RecvMessageState::WaitingForResponseHeaders {
+                    frame_reader: HFrameReader::new(),
+                }
+            } else {
+                RecvMessageState::WaitingForData {
+                    frame_reader: HFrameReader::new(),
+                }
+            };
+        }
+        Ok(())
     }
 
     fn set_state_to_close_pending(&mut self, post_readable_event: bool) -> Res<()> {
@@ -325,11 +323,11 @@ impl RecvMessage {
     fn is_interim(&self, headers: &[Header]) -> Res<bool> {
         match self.message_type {
             MessageType::Response => {
-                let status = headers.iter().find(|e| e.0 == ":status");
-                if let Some(s) = status {
-                    let status_code =
-                        s.1.parse::<i32>()
-                            .map_err(|_| Error::HttpGeneralProtocolStream)?;
+                let status = headers.iter().find(|(name, _value)| name == ":status");
+                if let Some((_name, value)) = status {
+                    let status_code = value
+                        .parse::<i32>()
+                        .map_err(|_| Error::HttpGeneralProtocolStream)?;
                     Ok(status_code >= 100 && status_code < 200)
                 } else {
                     Err(Error::HttpGeneralProtocolStream)

@@ -274,7 +274,7 @@ pub(crate) trait RecvMessageEvents: Debug {
     fn reset(&self, stream_id: u64, error: AppError, local: bool);
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResetType {
     App,
     Remote,

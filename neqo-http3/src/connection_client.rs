@@ -698,13 +698,12 @@ impl Http3Client {
 
     fn reset_stream_on_error(&mut self, stream_id: u64, app_error: AppError) {
         let _ = self.conn.stream_stop_sending(stream_id, app_error);
-        if let Some(rs) = self.base_handler.recv_streams.get_mut(&stream_id) {
+        if let Some(rs) = self.base_handler.recv_streams.remove(&stream_id) {
             rs.stream_reset(
                 app_error,
                 &mut self.base_handler.qpack_decoder,
                 ResetType::Local,
             );
-            self.base_handler.recv_streams.remove(&stream_id);
         }
     }
 }
@@ -1020,6 +1019,22 @@ mod tests {
             assert_eq!(fin, expected_fin);
             assert_eq!(amount, expected_data.len());
             assert_eq!(&buf[..amount], expected_data);
+        }
+
+        pub fn encode_headers(
+            &mut self,
+            stream_id: u64,
+            headers: &[Header],
+            encoder: &mut Encoder,
+        ) {
+            let header_block = self
+                .encoder
+                .encode_header_block(&mut self.conn, &headers, stream_id)
+                .unwrap();
+            let hframe = HFrame::Headers {
+                header_block: header_block.to_vec(),
+            };
+            hframe.encode(encoder);
         }
     }
 
@@ -1337,6 +1352,27 @@ mod tests {
     //  2) push_id
     //  3) PUSH_DATA that contains encoded headers and a data frame.
     // This function can only handle small push_id numbers that fit in a varint of length 1 byte.
+    fn send_data_on_push(
+        conn: &mut Connection,
+        push_stream_id: u64,
+        push_id: u8,
+        data: &[u8],
+        close_push_stream: bool,
+    ) {
+        // send data
+        let _ = conn.stream_send(push_stream_id, PUSH_STREAM_TYPE).unwrap();
+        let _ = conn.stream_send(push_stream_id, &[push_id]).unwrap();
+        let _ = conn.stream_send(push_stream_id, data).unwrap();
+        if close_push_stream {
+            conn.stream_close_send(push_stream_id).unwrap();
+        }
+    }
+
+    // Send push data on a push stream:
+    //  1) push_stream_type PUSH_STREAM_TYPE
+    //  2) push_id
+    //  3) PUSH_DATA that contains encoded headers and a data frame.
+    // This function can only handle small push_id numbers that fit in a varint of length 1 byte.
     fn send_push_data(conn: &mut Connection, push_id: u8, close_push_stream: bool) -> u64 {
         send_push_with_data(conn, push_id, PUSH_DATA, close_push_stream)
     }
@@ -1355,12 +1391,7 @@ mod tests {
         // create a push stream
         let push_stream_id = conn.stream_create(StreamType::UniDi).unwrap();
         // send data
-        let _ = conn.stream_send(push_stream_id, PUSH_STREAM_TYPE).unwrap();
-        let _ = conn.stream_send(push_stream_id, &[push_id]).unwrap();
-        let _ = conn.stream_send(push_stream_id, data).unwrap();
-        if close_push_stream {
-            conn.stream_close_send(push_stream_id).unwrap();
-        }
+        send_data_on_push(conn, push_stream_id, push_id, data, close_push_stream);
         push_stream_id
     }
 
@@ -5663,31 +5694,17 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
-        let headers1xx = vec![(String::from(":status"), String::from("101"))];
-
-        let encoded_headers = server
-            .encoder
-            .encode_header_block(&mut server.conn, &headers1xx, request_stream_id)
-            .unwrap();
-        let hframe = HFrame::Headers {
-            header_block: encoded_headers.to_vec(),
-        };
         let mut d = Encoder::default();
-        hframe.encode(&mut d);
-        let headers = vec![
+        let headers1xx = vec![(String::from(":status"), String::from("103"))];
+        server.encode_headers(request_stream_id, &headers1xx, &mut d);
+
+        let headers200 = vec![
             (String::from(":status"), String::from("200")),
             (String::from("my-header"), String::from("my-header")),
             (String::from("content-length"), String::from("3")),
         ];
+        server.encode_headers(request_stream_id, &headers200, &mut d);
 
-        let encoded_headers = server
-            .encoder
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
-            .unwrap();
-        let hframe = HFrame::Headers {
-            header_block: encoded_headers.to_vec(),
-        };
-        hframe.encode(&mut d);
         // Send 1xx and 200 headers response.
         server_send_response_and_exchange_packet(
             &mut client,
@@ -5697,33 +5714,40 @@ mod tests {
             false,
         );
 
+        // Sending response data.
         server_send_response_and_exchange_packet(
             &mut client,
             &mut server,
             request_stream_id,
-            &[0x0, 0x0, 0x0],
-            false,
+            HTTP_RESPONSE_DATA_FRAME_ONLY_2,
+            true,
         );
-        let mut events = client.events();
-        let headers_1xx_event = |e| {
-            matches!(e, Http3ClientEvent::HeaderReady {
-            stream_id,
-            interim,
-            headers,
-            ..
-        } if stream_id == request_stream_id && interim == true && headers == headers1xx)
-        };
-        let headers_200_event = |e| {
-            matches!(e, Http3ClientEvent::HeaderReady {
-            stream_id,
-            interim,
-            headers,
-            ..
-        } if stream_id == request_stream_id && interim == false && headers == headers)
-        };
 
-        assert!(events.any(headers_1xx_event));
-        assert!(events.any(headers_200_event));
+        let mut events = client.events().filter_map(|e| {
+            if let Http3ClientEvent::HeaderReady {
+                stream_id,
+                interim,
+                headers,
+                ..
+            } = e
+            {
+                Some((stream_id, interim, headers))
+            } else {
+                None
+            }
+        });
+        let (stream_id_1xx_rec, interim1xx_rec, headers1xx_rec) = events.next().unwrap();
+        assert_eq!(
+            (stream_id_1xx_rec, interim1xx_rec, headers1xx_rec),
+            (request_stream_id, true, headers1xx)
+        );
+
+        let (stream_id_200_rec, interim200_rec, headers200_rec) = events.next().unwrap();
+        assert_eq!(
+            (stream_id_200_rec, interim200_rec, headers200_rec),
+            (request_stream_id, false, headers200)
+        );
+        assert!(events.next().is_none());
     }
 
     #[test]
@@ -5732,23 +5756,14 @@ mod tests {
 
         setup_server_side_encoder(&mut client, &mut server);
 
+        let mut d = Encoder::default();
         let headers = vec![
             (String::from("my-header"), String::from("my-header")),
             (String::from("content-length"), String::from("3")),
         ];
-        let encoded_headers = server
-            .encoder
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
-            .unwrap();
-        let hframe = HFrame::Headers {
-            header_block: encoded_headers.to_vec(),
-        };
-        let mut d = Encoder::default();
-        hframe.encode(&mut d);
+        server.encode_headers(request_stream_id, &headers, &mut d);
 
         // Send response
-        let mut d = Encoder::default();
-        hframe.encode(&mut d);
         server_send_response_and_exchange_packet(
             &mut client,
             &mut server,
@@ -5797,36 +5812,24 @@ mod tests {
 
         // Send a push promise.
         send_push_promise(&mut server.conn, request_stream_id, FIRST_PUSH_ID);
+        // Create a push stream
+        let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
 
-        let headers1xx = vec![(String::from(":status"), String::from("101"))];
-
-        let encoded_headers = server
-            .encoder
-            .encode_header_block(&mut server.conn, &headers1xx, request_stream_id)
-            .unwrap();
-        let hframe = HFrame::Headers {
-            header_block: encoded_headers.to_vec(),
-        };
         let mut d = Encoder::default();
-        hframe.encode(&mut d);
-        let headers = vec![
+        let headers1xx = vec![(String::from(":status"), String::from("101"))];
+        server.encode_headers(push_stream_id, &headers1xx, &mut d);
+
+        let headers200 = vec![
             (String::from(":status"), String::from("200")),
             (String::from("my-header"), String::from("my-header")),
             (String::from("content-length"), String::from("3")),
         ];
-
-        let encoded_headers = server
-            .encoder
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
-            .unwrap();
-        let hframe = HFrame::Headers {
-            header_block: encoded_headers.to_vec(),
-        };
-        hframe.encode(&mut d);
+        server.encode_headers(push_stream_id, &headers200, &mut d);
 
         // create a push stream.
-        let _ = send_push_with_data(
+        send_data_on_push(
             &mut server.conn,
+            push_stream_id,
             u8::try_from(FIRST_PUSH_ID).unwrap(),
             &d,
             true,
@@ -5840,26 +5843,32 @@ mod tests {
             true,
         );
 
-        let mut events = client.events();
-        let headers_1xx_event = |e| {
-            matches!(e, Http3ClientEvent::PushHeaderReady {
-            push_id,
-            interim,
-            headers,
-            ..
-        } if push_id == FIRST_PUSH_ID && interim == true && headers == headers1xx)
-        };
-        let headers_200_event = |e| {
-            matches!(e, Http3ClientEvent::PushHeaderReady {
-            push_id,
-            interim,
-            headers,
-            ..
-        } if push_id == FIRST_PUSH_ID && interim == false && headers == headers)
-        };
+        let mut events = client.events().filter_map(|e| {
+            if let Http3ClientEvent::PushHeaderReady {
+                push_id,
+                interim,
+                headers,
+                ..
+            } = e
+            {
+                Some((push_id, interim, headers))
+            } else {
+                None
+            }
+        });
 
-        assert!(events.any(headers_1xx_event));
-        assert!(events.any(headers_200_event));
+        let (push_id_1xx_rec, interim1xx_rec, headers1xx_rec) = events.next().unwrap();
+        assert_eq!(
+            (push_id_1xx_rec, interim1xx_rec, headers1xx_rec),
+            (FIRST_PUSH_ID, true, headers1xx)
+        );
+
+        let (push_id_200_rec, interim200_rec, headers200_rec) = events.next().unwrap();
+        assert_eq!(
+            (push_id_200_rec, interim200_rec, headers200_rec),
+            (FIRST_PUSH_ID, false, headers200)
+        );
+        assert!(events.next().is_none());
     }
 
     // Client: receive a push stream
@@ -5871,25 +5880,19 @@ mod tests {
 
         // Send a push promise.
         send_push_promise(&mut server.conn, request_stream_id, FIRST_PUSH_ID);
+        // Create a push stream
+        let push_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
 
+        let mut d = Encoder::default();
         let headers = vec![
             (String::from("my-header"), String::from("my-header")),
             (String::from("content-length"), String::from("3")),
         ];
+        server.encode_headers(request_stream_id, &headers, &mut d);
 
-        let encoded_headers = server
-            .encoder
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
-            .unwrap();
-        let hframe = HFrame::Headers {
-            header_block: encoded_headers.to_vec(),
-        };
-        let mut d = Encoder::default();
-        hframe.encode(&mut d);
-
-        // create a push stream.
-        let push_stream_id = send_push_with_data(
+        send_data_on_push(
             &mut server.conn,
+            push_stream_id,
             u8::try_from(FIRST_PUSH_ID).unwrap(),
             &d,
             false,
