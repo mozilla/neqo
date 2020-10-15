@@ -1545,14 +1545,14 @@ impl Connection {
             ack_eliciting = true;
             tokens.push(t);
         }
+        self.flow_mgr
+            .borrow_mut()
+            .write_frames(space, builder, &mut tokens);
 
         // All useful frames are at least 2 bytes.
         while builder.remaining() >= 2 {
             let remaining = builder.remaining();
-            let mut frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
-            if frame.is_none() {
-                frame = self.send_streams.get_frame(space, remaining);
-            }
+            let mut frame = self.send_streams.get_frame(space, remaining);
             if frame.is_none() && space == PNSpace::ApplicationData {
                 frame = self.new_token.get_frame(remaining);
             }

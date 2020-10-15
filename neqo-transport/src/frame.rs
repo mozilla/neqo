@@ -321,23 +321,17 @@ impl Frame {
 
         match self {
             Self::Padding | Self::Ping => (),
-            Self::Ack { .. } | Self::Crypto { .. } | Self::HandshakeDone => unreachable!(),
-            Self::ResetStream {
-                stream_id,
-                application_error_code,
-                final_size,
-            } => {
-                enc.encode_varint(stream_id.as_u64());
-                enc.encode_varint(*application_error_code);
-                enc.encode_varint(*final_size);
-            }
-            Self::StopSending {
-                stream_id,
-                application_error_code,
-            } => {
-                enc.encode_varint(stream_id.as_u64());
-                enc.encode_varint(*application_error_code);
-            }
+            Self::Ack { .. }
+            | Self::Crypto { .. }
+            | Self::HandshakeDone
+            | Self::ResetStream { .. }
+            | Self::StopSending { .. }
+            | Self::MaxData { .. }
+            | Self::MaxStreamData { .. }
+            | Self::MaxStreams { .. }
+            | Self::DataBlocked { .. }
+            | Self::StreamDataBlocked { .. }
+            | Self::StreamsBlocked { .. } => unreachable!(),
             Self::NewToken { token } => {
                 enc.encode_vvec(token);
             }
@@ -357,34 +351,6 @@ impl Frame {
                 } else {
                     enc.encode_vvec(&data);
                 }
-            }
-            Self::MaxData { maximum_data } => {
-                enc.encode_varint(*maximum_data);
-            }
-            Self::MaxStreamData {
-                stream_id,
-                maximum_stream_data,
-            } => {
-                enc.encode_varint(stream_id.as_u64());
-                enc.encode_varint(*maximum_stream_data);
-            }
-            Self::MaxStreams {
-                maximum_streams, ..
-            } => {
-                enc.encode_varint(maximum_streams.as_u64());
-            }
-            Self::DataBlocked { data_limit } => {
-                enc.encode_varint(*data_limit);
-            }
-            Self::StreamDataBlocked {
-                stream_id,
-                stream_data_limit,
-            } => {
-                enc.encode_varint(stream_id.as_u64());
-                enc.encode_varint(*stream_data_limit);
-            }
-            Self::StreamsBlocked { stream_limit, .. } => {
-                enc.encode_varint(stream_limit.as_u64());
             }
             Self::NewConnectionId {
                 sequence_number,
@@ -759,24 +725,24 @@ mod tests {
     }
 
     #[test]
-    fn test_reset_stream() {
+    fn reset_stream() {
         let f = Frame::ResetStream {
             stream_id: 0x1234.into(),
             application_error_code: 0x77,
             final_size: 0x3456,
         };
 
-        enc_dec(&f, "04523440777456");
+        just_dec(&f, "04523440777456");
     }
 
     #[test]
-    fn test_stop_sending() {
+    fn stop_sending() {
         let f = Frame::StopSending {
             stream_id: 63.into(),
             application_error_code: 0x77,
         };
 
-        enc_dec(&f, "053F4077")
+        just_dec(&f, "053F4077")
     }
 
     #[test]
@@ -842,73 +808,73 @@ mod tests {
     }
 
     #[test]
-    fn test_max_data() {
+    fn max_data() {
         let f = Frame::MaxData {
             maximum_data: 0x1234,
         };
 
-        enc_dec(&f, "105234");
+        just_dec(&f, "105234");
     }
 
     #[test]
-    fn test_max_stream_data() {
+    fn max_stream_data() {
         let f = Frame::MaxStreamData {
             stream_id: 5.into(),
             maximum_stream_data: 0x1234,
         };
 
-        enc_dec(&f, "11055234");
+        just_dec(&f, "11055234");
     }
 
     #[test]
-    fn test_max_streams() {
+    fn max_streams() {
         let mut f = Frame::MaxStreams {
             stream_type: StreamType::BiDi,
             maximum_streams: StreamIndex::new(0x1234),
         };
 
-        enc_dec(&f, "125234");
+        just_dec(&f, "125234");
 
         f = Frame::MaxStreams {
             stream_type: StreamType::UniDi,
             maximum_streams: StreamIndex::new(0x1234),
         };
 
-        enc_dec(&f, "135234");
+        just_dec(&f, "135234");
     }
 
     #[test]
-    fn test_data_blocked() {
+    fn data_blocked() {
         let f = Frame::DataBlocked { data_limit: 0x1234 };
 
-        enc_dec(&f, "145234");
+        just_dec(&f, "145234");
     }
 
     #[test]
-    fn test_stream_data_blocked() {
+    fn stream_data_blocked() {
         let f = Frame::StreamDataBlocked {
             stream_id: 5.into(),
             stream_data_limit: 0x1234,
         };
 
-        enc_dec(&f, "15055234");
+        just_dec(&f, "15055234");
     }
 
     #[test]
-    fn test_streams_blocked() {
+    fn streams_blocked() {
         let mut f = Frame::StreamsBlocked {
             stream_type: StreamType::BiDi,
             stream_limit: StreamIndex::new(0x1234),
         };
 
-        enc_dec(&f, "165234");
+        just_dec(&f, "165234");
 
         f = Frame::StreamsBlocked {
             stream_type: StreamType::UniDi,
             stream_limit: StreamIndex::new(0x1234),
         };
 
-        enc_dec(&f, "175234");
+        just_dec(&f, "175234");
     }
 
     #[test]

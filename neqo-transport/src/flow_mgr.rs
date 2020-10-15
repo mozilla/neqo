@@ -10,9 +10,11 @@
 use std::collections::HashMap;
 use std::mem;
 
-use neqo_common::{qinfo, qtrace, qwarn, Encoder};
+use neqo_common::{qinfo, qwarn, Encoder};
+use smallvec::{smallvec, SmallVec};
 
 use crate::frame::{Frame, StreamType};
+use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RecvStreams;
 use crate::send_stream::SendStreams;
@@ -275,30 +277,61 @@ impl FlowMgr {
         }
     }
 
-    pub(crate) fn get_frame(
+    pub(crate) fn write_frames(
         &mut self,
         space: PNSpace,
-        remaining: usize,
-    ) -> Option<(Frame, Option<RecoveryToken>)> {
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+    ) {
         if space != PNSpace::ApplicationData {
-            return None;
+            return;
         }
 
-        if let Some(frame) = self.peek() {
-            // A suboptimal way to figure out if the frame fits within remaining
-            // space.
-            let mut d = Encoder::default();
-            frame.marshal(&mut d);
-            if d.len() > remaining {
-                qtrace!("flowc frame doesn't fit in remaining");
-                return None;
+        while let Some(frame) = self.peek() {
+            // All these frames are bags of varints, so we can just extract the
+            // varints and use common code for writing.
+            let values: SmallVec<[_; 3]> = match frame {
+                Frame::ResetStream {
+                    stream_id,
+                    application_error_code,
+                    final_size,
+                } => smallvec![stream_id.as_u64(), *application_error_code, *final_size],
+                Frame::StopSending {
+                    stream_id,
+                    application_error_code,
+                } => smallvec![stream_id.as_u64(), *application_error_code],
+
+                Frame::MaxStreams {
+                    maximum_streams, ..
+                } => smallvec![maximum_streams.as_u64()],
+                Frame::StreamsBlocked { stream_limit, .. } => smallvec![stream_limit.as_u64()],
+
+                Frame::MaxData { maximum_data } => smallvec![*maximum_data],
+                Frame::DataBlocked { data_limit } => smallvec![*data_limit],
+
+                Frame::MaxStreamData {
+                    stream_id,
+                    maximum_stream_data,
+                } => smallvec![stream_id.as_u64(), *maximum_stream_data],
+                Frame::StreamDataBlocked {
+                    stream_id,
+                    stream_data_limit,
+                } => smallvec![stream_id.as_u64(), *stream_data_limit],
+
+                _ => unreachable!("{:?}", frame),
+            };
+            debug_assert!(!values.spilled());
+
+            if builder.remaining() >= values.iter().map(|&v| Encoder::varint_len(v)).sum() {
+                builder.encode_varint(frame.get_type());
+                for v in values {
+                    builder.encode_varint(v);
+                }
+                tokens.push(RecoveryToken::Flow(self.next().unwrap()));
+            } else {
+                return;
             }
-        } else {
-            return None;
         }
-        // There is enough space we can add this frame to the packet.
-        let frame = self.next().expect("just peeked this");
-        Some((frame.clone(), Some(RecoveryToken::Flow(frame))))
     }
 }
 
