@@ -612,7 +612,7 @@ fn corrupted_initial() {
     // the first should be dropped, the second saved.
     assert_eq!(server.stats().packets_rx, 2);
     assert_eq!(server.stats().dropped_rx, 1);
-    assert_eq!(server.stats().saved_datagrams, 1);
+    assert_eq!(server.stats().saved_datagrams, 0);
 }
 
 #[test]

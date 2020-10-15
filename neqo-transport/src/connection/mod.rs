@@ -1255,8 +1255,10 @@ impl Connection {
                         Error::KeysPending(cspace) => {
                             // This packet can't be decrypted because we don't have the keys yet.
                             // Don't check this packet for a stateless reset, just return.
-                            let remaining = slc.len();
-                            self.save_datagram(cspace, d, remaining, now);
+                            if self.is_valid_cid(&packet.dcid()) {
+                                let remaining = slc.len();
+                                self.save_datagram(cspace, d, remaining, now);
+                            }
                             return Ok(frames);
                         }
                         Error::KeysExhausted => {
