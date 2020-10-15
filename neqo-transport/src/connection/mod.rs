@@ -1067,9 +1067,16 @@ impl Connection {
     fn preprocess(
         &mut self,
         packet: &PublicPacket,
-        first: bool,
+        dcid: Option<&ConnectionId>,
         now: Instant,
     ) -> Res<PreprocessResult> {
+        if dcid.map_or(false, |d| d != packet.dcid()) {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Coalesced packet has different DCID");
+            return Ok(PreprocessResult::Next);
+        }
+
         match (packet.packet_type(), &self.state, &self.role) {
             (PacketType::Initial, State::Init, Role::Server) => {
                 if !packet.is_valid_initial() {
@@ -1135,7 +1142,7 @@ impl Connection {
                 // Resend Initial CRYPTO frames immediately a few times just
                 // in case.  As we don't have an RTT estimate yet, this helps
                 // when there is a short RTT and losses.
-                if first
+                if dcid.is_none()
                     && self.is_valid_cid(packet.dcid())
                     && self.stats.borrow().saved_datagrams <= EXTRA_INITIALS
                 {
@@ -1165,7 +1172,7 @@ impl Connection {
                 if !self.is_valid_cid(packet.dcid()) {
                     self.stats
                         .borrow_mut()
-                        .pkt_dropped(format!("Ignoring packet with CID {:?}", packet.dcid()));
+                        .pkt_dropped(format!("Invalid DCID {:?}", packet.dcid()));
                     PreprocessResult::Next
                 } else {
                     if self.role == Role::Server && packet.packet_type() == PacketType::Handshake {
@@ -1196,7 +1203,7 @@ impl Connection {
     fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, PNSpace)>> {
         let mut slc = &d[..];
         let mut frames = Vec::new();
-        let mut first = true;
+        let mut dcid = None;
 
         qtrace!([self], "input {}", hex(&**d));
 
@@ -1213,7 +1220,7 @@ impl Connection {
                         break;
                     }
                 };
-            match self.preprocess(&packet, first, now)? {
+            match self.preprocess(&packet, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
                 PreprocessResult::End => return Ok(frames),
@@ -1268,15 +1275,15 @@ impl Connection {
                     // Decryption failure, or not having keys is not fatal.
                     // If the state isn't available, or we can't decrypt the packet, drop
                     // the rest of the datagram on the floor, but don't generate an error.
-                    self.check_stateless_reset(&d, first, now)?;
+                    self.check_stateless_reset(&d, dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
                     qlog::packet_dropped(&mut self.qlog, &packet);
                 }
             }
             slc = remainder;
-            first = false;
+            dcid = Some(ConnectionId::from(packet.dcid()));
         }
-        self.check_stateless_reset(&d, first, now)?;
+        self.check_stateless_reset(&d, dcid.is_none(), now)?;
         Ok(frames)
     }
 
