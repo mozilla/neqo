@@ -55,6 +55,10 @@ pub fn assert_initial(payload: &[u8], expect_token: bool) {
 pub fn assert_no_1rtt(payload: &[u8]) {
     let mut dec = Decoder::from(payload);
     while let Some(b1) = dec.decode_byte() {
+        // If this is just padding, that's OK.  Check.
+        if payload.iter().skip(dec.offset()).all(|b| *b == 0) {
+            return;
+        }
         assert_eq!(b1 & 0x80, 0x80); // This has to be a long header.
         assert_ne!(b1 & 0b0011_0000, 0b0011_0000); // This can't be Retry.
         assert_default_version(&mut dec);
