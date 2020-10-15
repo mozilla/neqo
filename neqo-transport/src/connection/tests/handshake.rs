@@ -30,19 +30,16 @@ fn full_handshake() {
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(out.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(out.as_dgram_ref().unwrap().len(), PATH_MTU_V6);
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     qdebug!("---- client: cert verification");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none());
@@ -52,19 +49,16 @@ fn full_handshake() {
     qdebug!("---- client: SH..FIN -> FIN");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
     assert_eq!(*client.state(), State::Connected);
 
     qdebug!("---- server: FIN -> ACKS");
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
     assert_eq!(*server.state(), State::Confirmed);
 
     qdebug!("---- client: ACKS -> 0");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
     assert_eq!(*client.state(), State::Confirmed);
 }
 
@@ -74,22 +68,18 @@ fn handshake_failed_authentication() {
     let mut client = default_client();
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     qdebug!("---- client: cert verification");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
     assert!(client.events().any(authentication_needed));
@@ -99,12 +89,10 @@ fn handshake_failed_authentication() {
     qdebug!("---- client: -> Alert(certificate_revoked)");
     let out = client.process(None, now());
     assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
 
     qdebug!("---- server: Alert(certificate_revoked)");
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
-    qdebug!("Output={:0x?}", out.as_dgram_ref());
     assert_error(&client, &ConnectionError::Transport(Error::CryptoAlert(44)));
     assert_error(&server, &ConnectionError::Transport(Error::PeerError(300)));
 }
