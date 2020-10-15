@@ -7,8 +7,8 @@
 use super::super::{Output, State, LOCAL_IDLE_TIMEOUT};
 use super::{
     assert_full_cwnd, connect, connect_force_idle, connect_with_rtt, default_client,
-    default_server, fill_cwnd, maybe_authenticate, send_and_receive, send_something,
-    split_datagram, AT_LEAST_PTO, POST_HANDSHAKE_CWND,
+    default_server, fill_cwnd, maybe_authenticate, send_and_receive, send_something, AT_LEAST_PTO,
+    POST_HANDSHAKE_CWND,
 };
 use crate::frame::{Frame, StreamType};
 use crate::path::PATH_MTU_V6;
@@ -20,7 +20,7 @@ use crate::tracking::{PNSpace, ACK_DELAY};
 use neqo_common::qdebug;
 use neqo_crypto::AuthenticationStatus;
 use std::time::Duration;
-use test_fixture::{self, now};
+use test_fixture::{self, now, split_datagram};
 
 #[test]
 fn pto_works_basic() {

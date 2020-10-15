@@ -1641,13 +1641,13 @@ impl Connection {
                 Rc::new(tokens),
                 encoder.len() - header_start,
             );
-            if pt == PacketType::Initial && self.role == Role::Client {
+            if pt == PacketType::Initial && (self.role == Role::Client || ack_eliciting) {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
                 initial_sent = Some(sent);
                 needs_padding = true;
             } else {
-                if pt != PacketType::ZeroRtt {
+                if pt != PacketType::ZeroRtt && self.role == Role::Client {
                     needs_padding = false;
                 }
                 self.loss_recovery.on_packet_sent(sent);

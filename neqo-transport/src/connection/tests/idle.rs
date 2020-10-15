@@ -7,14 +7,14 @@
 use super::super::{IdleTimeout, Output, State, LOCAL_IDLE_TIMEOUT};
 use super::{
     connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    maybe_authenticate, send_something, split_datagram, AT_LEAST_PTO,
+    maybe_authenticate, send_something, AT_LEAST_PTO,
 };
 use crate::frame::{Frame, StreamType};
 use crate::tparams::{self, TransportParameter};
 use crate::tracking::PNSpace;
 
 use std::time::Duration;
-use test_fixture::{self, now};
+use test_fixture::{self, now, split_datagram};
 
 #[test]
 fn idle_timeout() {
