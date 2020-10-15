@@ -57,7 +57,6 @@ fn pto_works_basic() {
     let frames = server.test_process_input(out.dgram().unwrap(), now);
 
     assert!(frames.iter().all(|(_, sp)| *sp == PNSpace::ApplicationData));
-    assert!(frames.iter().any(|(f, _)| *f == Frame::Ping));
     assert!(frames
         .iter()
         .any(|(f, _)| matches!(f, Frame::Stream { stream_id, .. } if stream_id.as_u64() == 2)));
@@ -80,27 +79,22 @@ fn pto_works_full_cwnd() {
     let (dgrams, now) = fill_cwnd(&mut client, 2, now());
     assert_full_cwnd(&dgrams, POST_HANDSHAKE_CWND);
 
+    neqo_common::qwarn!("waiting over");
     // Fill the CWND after waiting for a PTO.
     let (dgrams, now) = fill_cwnd(&mut client, 2, now + AT_LEAST_PTO);
     assert_eq!(dgrams.len(), 2); // Two packets in the PTO.
+                                 // The first should be full sized; the second might be small.
+    assert_eq!(dgrams[0].len(), PATH_MTU_V6);
 
-    // All (2) datagrams contain one PING frame and at least one STREAM frame.
+    // All (2) datagrams contain a STREAM frame.
     for d in dgrams {
-        assert_eq!(d.len(), PATH_MTU_V6);
         let frames = server.test_process_input(d, now);
         assert_eq!(
             frames
                 .iter()
-                .filter(|i| matches!(i, (Frame::Ping, PNSpace::ApplicationData)))
+                .filter(|i| matches!(i, (Frame::Stream { .. }, PNSpace::ApplicationData)))
                 .count(),
             1
-        );
-        assert!(
-            frames
-                .iter()
-                .filter(|i| matches!(i, (Frame::Stream { .. }, PNSpace::ApplicationData)))
-                .count()
-                >= 1
         );
     }
 }
@@ -383,10 +377,9 @@ fn pto_handshake_frames() {
     now += Duration::from_millis(10);
     let frames = server.test_process_input(pkt2.unwrap(), now);
 
-    assert_eq!(frames.len(), 2);
-    assert_eq!(frames[0], (Frame::Ping, PNSpace::Handshake));
+    assert_eq!(frames.len(), 1);
     assert!(matches!(
-        frames[1],
+        frames[0],
         (Frame::Crypto { .. }, PNSpace::Handshake)
     ));
 }

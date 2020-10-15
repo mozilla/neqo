@@ -19,7 +19,6 @@ use crate::recovery::RecoveryToken;
 use crate::recv_stream::RecvStreams;
 use crate::send_stream::SendStreams;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
-use crate::tracking::PNSpace;
 use crate::AppError;
 
 pub type FlowControlRecoveryToken = Frame;
@@ -279,14 +278,9 @@ impl FlowMgr {
 
     pub(crate) fn write_frames(
         &mut self,
-        space: PNSpace,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
     ) {
-        if space != PNSpace::ApplicationData {
-            return;
-        }
-
         while let Some(frame) = self.peek() {
             // All these frames are bags of varints, so we can just extract the
             // varints and use common code for writing.
@@ -317,6 +311,18 @@ impl FlowMgr {
                     stream_id,
                     stream_data_limit,
                 } => smallvec![stream_id.as_u64(), *stream_data_limit],
+
+                // A special case, just write it out and move on..
+                Frame::PathResponse { data } => {
+                    if builder.remaining() < 1 + 8 {
+                        builder.encode_varint(frame.get_type());
+                        builder.encode(&data[..]);
+                        tokens.push(RecoveryToken::Flow(self.next().unwrap()));
+                        continue;
+                    } else {
+                        return;
+                    }
+                }
 
                 _ => unreachable!("{:?}", frame),
             };

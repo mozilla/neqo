@@ -13,7 +13,7 @@ use neqo_crypto::{
 };
 
 use crate::cid::ConnectionId;
-use crate::frame::Frame;
+use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::Res;
 
@@ -349,11 +349,9 @@ impl NewTokenState {
 
     /// If this is a server, maybe send a frame.
     /// If this is a client, do nothing.
-    pub fn get_frame(&mut self, space: usize) -> Option<(Frame, Option<RecoveryToken>)> {
+    pub fn write_frames(&mut self, builder: &mut PacketBuilder, tokens: &mut Vec<RecoveryToken>) {
         if let Self::Server(ref mut sender) = self {
-            sender.get_frame(space)
-        } else {
-            None
+            sender.write_frames(builder, tokens);
         }
     }
 
@@ -421,19 +419,17 @@ impl NewTokenSender {
         self.next_seqno += 1;
     }
 
-    pub fn get_frame(&mut self, space: usize) -> Option<(Frame, Option<RecoveryToken>)> {
+    pub fn write_frames(&mut self, builder: &mut PacketBuilder, tokens: &mut Vec<RecoveryToken>) {
         for t in self.tokens.iter_mut() {
-            if t.needs_sending && t.fits(space) {
+            if t.needs_sending && t.fits(builder.remaining()) {
                 t.needs_sending = false;
-                return Some((
-                    Frame::NewToken {
-                        token: t.token.clone(),
-                    },
-                    Some(RecoveryToken::NewToken(t.seqno)),
-                ));
+
+                builder.encode_varint(crate::frame::FRAME_TYPE_NEW_TOKEN);
+                builder.encode_vvec(&t.token);
+
+                tokens.push(RecoveryToken::NewToken(t.seqno));
             }
         }
-        None
     }
 
     pub fn lost(&mut self, seqno: usize) {

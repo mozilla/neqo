@@ -1506,67 +1506,59 @@ impl Connection {
         Ok(SendOption::Yes(path.datagram(encoder)))
     }
 
-    /// Add frames to the provided builder and
-    /// return whether any of them were ACK eliciting.
-    fn add_frames(
+    /// Write frames to the provided builder.  Returns a list of tokens used for
+    /// tracking loss or acknowledgment and whether any frame was ACK eliciting.
+    fn write_frames(
         &mut self,
-        builder: &mut PacketBuilder,
         space: PNSpace,
         profile: &SendProfile,
+        builder: &mut PacketBuilder,
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool) {
         let mut tokens = Vec::new();
 
-        let mut ack_eliciting = if profile.should_probe(space) {
-            // Send PING in all spaces that allow a probe.
-            // This might get a more expedient ACK.
-            builder.encode_varint(Frame::Ping.get_type());
-            true
-        } else {
-            false
-        };
-
-        // Try to get a frame from all frame sources.
-        if let Some(t) = self.acks.write_frame(space, now, builder) {
-            tokens.push(t);
-        }
+        let ack_token = self.acks.write_frame(space, now, builder);
 
         if profile.ack_only(space) {
             // If we are CC limited we can only send acks!
-            return (tokens, ack_eliciting);
+            if let Some(t) = ack_token {
+                tokens.push(t);
+            }
+            return (tokens, false);
         }
+
         if space == PNSpace::ApplicationData && self.role == Role::Server {
             if let Some(t) = self.state_signaling.write_done(builder) {
-                ack_eliciting = true;
                 tokens.push(t);
             }
         }
+
         if let Some(t) = self.crypto.streams.write_frame(space, builder) {
-            ack_eliciting = true;
             tokens.push(t);
         }
-        self.flow_mgr
-            .borrow_mut()
-            .write_frames(space, builder, &mut tokens);
 
-        // All useful frames are at least 2 bytes.
-        while builder.remaining() >= 2 {
-            let remaining = builder.remaining();
-            let mut frame = self.send_streams.get_frame(space, remaining);
-            if frame.is_none() && space == PNSpace::ApplicationData {
-                frame = self.new_token.get_frame(remaining);
-            }
+        if space == PNSpace::ApplicationData {
+            self.flow_mgr
+                .borrow_mut()
+                .write_frames(builder, &mut tokens);
 
-            if let Some((frame, token)) = frame {
-                ack_eliciting = true;
-                debug_assert!(frame.ack_eliciting());
-                frame.marshal(builder);
-                if let Some(t) = token {
-                    tokens.push(t);
-                }
+            self.send_streams.write_frames(builder, &mut tokens);
+            self.new_token.write_frames(builder, &mut tokens);
+        }
+
+        // Anything - other than ACK - that registered a token wants an acknowledgment.
+        let ack_eliciting = !tokens.is_empty()
+            || if profile.should_probe(space) {
+                // Nothing ack-eliciting and we need to probe; send PING.
+                debug_assert_ne!(builder.remaining(), 0);
+                builder.encode_varint(crate::frame::FRAME_TYPE_PING);
+                true
             } else {
-                return (tokens, ack_eliciting);
-            }
+                false
+            };
+
+        if let Some(t) = ack_token {
+            tokens.push(t);
         }
         (tokens, ack_eliciting)
     }
@@ -1616,8 +1608,8 @@ impl Connection {
             // Add frames to the packet.
             let limit = profile.limit() - aead_expansion;
             builder.set_limit(limit);
-            let (tokens, ack_eliciting) = self.add_frames(&mut builder, *space, &profile, now);
-            if builder.is_empty() {
+            let (tokens, ack_eliciting) = self.write_frames(*space, &profile, &mut builder, now);
+            if builder.packet_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
                 continue;

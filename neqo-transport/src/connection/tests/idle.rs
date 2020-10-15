@@ -255,8 +255,8 @@ fn idle_caching() {
     let (initial, _) = split_datagram(&dgram.unwrap());
     let frames = client.test_process_input(initial, middle);
     assert_eq!(frames.len(), 2);
-    assert_eq!(frames[0], (Frame::Ping, PNSpace::Initial));
-    assert!(matches!(frames[1], (Frame::Ack { .. }, PNSpace::Initial)));
+    assert!(matches!(frames[0], (Frame::Ack { .. }, PNSpace::Initial)));
+    assert_eq!(frames[1], (Frame::Ping, PNSpace::Initial));
 
     let end = start + LOCAL_IDLE_TIMEOUT + (AT_LEAST_PTO / 2);
     // Now let the server Initial through, with the CRYPTO frame.
