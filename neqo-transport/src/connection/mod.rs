@@ -1494,10 +1494,25 @@ impl Connection {
             );
 
             // ConnectionError::Application is only allowed at 1RTT.
-            if *space == PNSpace::ApplicationData {
-                frame.marshal(&mut builder);
+            let sanitized = if *space == PNSpace::ApplicationData {
+                &frame
             } else {
-                frame.sanitize_close().marshal(&mut builder);
+                frame.sanitize_close()
+            };
+            if let Frame::ConnectionClose {
+                error_code,
+                frame_type,
+                reason_phrase,
+            } = sanitized
+            {
+                builder.encode_varint(sanitized.get_type());
+                builder.encode_varint(error_code.code());
+                if let CloseError::Transport(_) = error_code {
+                    builder.encode_varint(*frame_type);
+                }
+                builder.encode_vvec(reason_phrase);
+            } else {
+                unreachable!();
             }
 
             encoder = builder.build(tx)?;

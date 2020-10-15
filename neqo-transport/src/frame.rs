@@ -6,7 +6,7 @@
 
 // Directly relating to QUIC frames.
 
-use neqo_common::{qtrace, Decoder, Encoder};
+use neqo_common::{qtrace, Decoder};
 
 use crate::cid::MAX_CONNECTION_ID_LEN;
 use crate::packet::PacketType;
@@ -249,59 +249,6 @@ impl Frame {
             t |= STREAM_FRAME_BIT_LEN;
         }
         t
-    }
-
-    pub fn marshal(&self, enc: &mut Encoder) {
-        enc.encode_varint(self.get_type());
-
-        match self {
-            Self::Padding | Self::Ping => (),
-            Self::Ack { .. }
-            | Self::Crypto { .. }
-            | Self::HandshakeDone
-            | Self::ResetStream { .. }
-            | Self::StopSending { .. }
-            | Self::MaxData { .. }
-            | Self::MaxStreamData { .. }
-            | Self::MaxStreams { .. }
-            | Self::DataBlocked { .. }
-            | Self::StreamDataBlocked { .. }
-            | Self::StreamsBlocked { .. }
-            | Self::Stream { .. }
-            | Self::NewToken { .. } => unreachable!(),
-            Self::NewConnectionId {
-                sequence_number,
-                retire_prior,
-                connection_id,
-                stateless_reset_token,
-            } => {
-                enc.encode_varint(*sequence_number);
-                enc.encode_varint(*retire_prior);
-                enc.encode_uint(1, connection_id.len() as u64);
-                enc.encode(connection_id);
-                enc.encode(stateless_reset_token);
-            }
-            Self::RetireConnectionId { sequence_number } => {
-                enc.encode_varint(*sequence_number);
-            }
-            Self::PathChallenge { data } => {
-                enc.encode(data);
-            }
-            Self::PathResponse { data } => {
-                enc.encode(data);
-            }
-            Self::ConnectionClose {
-                error_code,
-                frame_type,
-                reason_phrase,
-            } => {
-                enc.encode_varint(error_code.code());
-                if let CloseError::Transport(_) = error_code {
-                    enc.encode_varint(*frame_type);
-                }
-                enc.encode_vvec(reason_phrase);
-            }
-        }
     }
 
     /// Convert a CONNECTION_CLOSE into a nicer CONNECTION_CLOSE.
@@ -587,6 +534,7 @@ impl Frame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use neqo_common::{Decoder, Encoder};
 
     fn just_dec(f: &Frame, s: &str) {
         let encoded = Encoder::from_hex(s);
@@ -594,27 +542,16 @@ mod tests {
         assert_eq!(*f, decoded);
     }
 
-    fn enc_dec(f: &Frame, s: &str) {
-        let mut enc = Encoder::default();
-        let expected = Encoder::from_hex(s);
-
-        f.marshal(&mut enc);
-        assert_eq!(enc, expected);
-
-        let decoded = Frame::decode(&mut expected.as_decoder()).unwrap();
-        assert_eq!(*f, decoded);
-    }
-
     #[test]
-    fn test_padding_frame() {
+    fn padding() {
         let f = Frame::Padding;
-        enc_dec(&f, "00");
+        just_dec(&f, "00");
     }
 
     #[test]
-    fn test_ping_frame() {
+    fn ping() {
         let f = Frame::Ping;
-        enc_dec(&f, "01");
+        just_dec(&f, "01");
     }
 
     #[test]
@@ -795,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_connection_id() {
+    fn new_connection_id() {
         let f = Frame::NewConnectionId {
             sequence_number: 0x1234,
             retire_prior: 0,
@@ -803,7 +740,7 @@ mod tests {
             stateless_reset_token: [9; 16],
         };
 
-        enc_dec(&f, "1852340002010209090909090909090909090909090909");
+        just_dec(&f, "1852340002010209090909090909090909090909090909");
     }
 
     #[test]
@@ -818,26 +755,26 @@ mod tests {
     }
 
     #[test]
-    fn test_retire_connection_id() {
+    fn retire_connection_id() {
         let f = Frame::RetireConnectionId {
             sequence_number: 0x1234,
         };
 
-        enc_dec(&f, "195234");
+        just_dec(&f, "195234");
     }
 
     #[test]
-    fn test_path_challenge() {
+    fn path_challenge() {
         let f = Frame::PathChallenge { data: [9; 8] };
 
-        enc_dec(&f, "1a0909090909090909");
+        just_dec(&f, "1a0909090909090909");
     }
 
     #[test]
-    fn test_path_response() {
+    fn path_response() {
         let f = Frame::PathResponse { data: [9; 8] };
 
-        enc_dec(&f, "1b0909090909090909");
+        just_dec(&f, "1b0909090909090909");
     }
 
     #[test]
@@ -848,7 +785,7 @@ mod tests {
             reason_phrase: vec![0x01, 0x02, 0x03],
         };
 
-        enc_dec(&f, "1c80005678523403010203");
+        just_dec(&f, "1c80005678523403010203");
     }
 
     #[test]
@@ -859,7 +796,7 @@ mod tests {
             reason_phrase: vec![0x01, 0x02, 0x03],
         };
 
-        enc_dec(&f, "1d8000567803010203");
+        just_dec(&f, "1d8000567803010203");
     }
 
     #[test]
