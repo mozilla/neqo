@@ -28,7 +28,7 @@ case "$ROLE" in
     pk12util -d "sql:$DB" -i "$P12CERT" -W ''
     certutil -L -d "sql:$DB" -n "$CERT"
     RUST_LOG=info RUST_BACKTRACE=1 neqo-server --qns-test "$TESTCASE" --qlog-dir "$QLOGDIR" \
-        -d "$DB" -k "$CERT" 0.0.0.0:443
+        -d "$DB" -k "$CERT" [::]:443
     ;;
 
   *)
