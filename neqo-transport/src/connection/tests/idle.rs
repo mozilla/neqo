@@ -9,7 +9,7 @@ use super::{
     connect, connect_force_idle, connect_with_rtt, default_client, default_server,
     maybe_authenticate, send_something, AT_LEAST_PTO,
 };
-use crate::frame::{Frame, StreamType};
+use crate::frame::StreamType;
 use crate::packet::PacketBuilder;
 use crate::tparams::{self, TransportParameter};
 use crate::tracking::PNSpace;
@@ -236,8 +236,9 @@ fn idle_caching() {
     let _ = server.process_output(middle).dgram();
     // Now let the server process the client PING.  This causes the server
     // to send CRYPTO frames again, so manually extract and discard those.
-    let frames = server.test_process_input(dgram.unwrap(), middle);
-    assert_eq!(frames, vec![(Frame::Ping, PNSpace::Initial)]);
+    let ping_before_s = server.stats().frame_rx.ping;
+    server.process_input(dgram.unwrap(), middle);
+    assert_eq!(server.stats().frame_rx.ping, ping_before_s + 1);
     let crypto = server
         .crypto
         .streams
@@ -253,10 +254,11 @@ fn idle_caching() {
     // Now only allow the Initial packet from the server through;
     // it shouldn't contain a CRYPTO frame.
     let (initial, _) = split_datagram(&dgram.unwrap());
-    let frames = client.test_process_input(initial, middle);
-    assert_eq!(frames.len(), 2);
-    assert!(matches!(frames[0], (Frame::Ack { .. }, PNSpace::Initial)));
-    assert_eq!(frames[1], (Frame::Ping, PNSpace::Initial));
+    let ping_before_c = client.stats().frame_rx.ping;
+    let ack_before = client.stats().frame_rx.ack;
+    client.process_input(initial, middle);
+    assert_eq!(client.stats().frame_rx.ping, ping_before_c + 1);
+    assert_eq!(client.stats().frame_rx.ack, ack_before + 1);
 
     let end = start + LOCAL_IDLE_TIMEOUT + (AT_LEAST_PTO / 2);
     // Now let the server Initial through, with the CRYPTO frame.

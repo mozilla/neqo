@@ -18,23 +18,25 @@ use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RecvStreams;
 use crate::send_stream::SendStreams;
+use crate::stats::FrameStats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::AppError;
 
-pub type FlowControlRecoveryToken = Frame;
+type FlowFrame = Frame<'static>;
+pub type FlowControlRecoveryToken = FlowFrame;
 
 #[derive(Debug, Default)]
 pub struct FlowMgr {
     // Discriminant as key ensures only 1 of every frame type will be queued.
-    from_conn: HashMap<mem::Discriminant<Frame>, Frame>,
+    from_conn: HashMap<mem::Discriminant<FlowFrame>, FlowFrame>,
 
     // (id, discriminant) as key ensures only 1 of every frame type per stream
     // will be queued.
-    from_streams: HashMap<(StreamId, mem::Discriminant<Frame>), Frame>,
+    from_streams: HashMap<(StreamId, mem::Discriminant<FlowFrame>), FlowFrame>,
 
     // (stream_type, discriminant) as key ensures only 1 of every frame type
     // per stream type will be queued.
-    from_stream_types: HashMap<(StreamType, mem::Discriminant<Frame>), Frame>,
+    from_stream_types: HashMap<(StreamType, mem::Discriminant<FlowFrame>), FlowFrame>,
 
     used_data: u64,
     max_data: u64,
@@ -54,10 +56,10 @@ impl FlowMgr {
 
     /// Returns whether max credit was actually increased.
     pub fn conn_increase_max_credit(&mut self, new: u64) -> bool {
+        const DB_FRAME: FlowFrame = Frame::DataBlocked { data_limit: 0 };
+
         if new > self.max_data {
             self.max_data = new;
-
-            const DB_FRAME: Frame = Frame::DataBlocked { data_limit: 0 };
             self.from_conn.remove(&mem::discriminant(&DB_FRAME));
 
             true
@@ -280,6 +282,7 @@ impl FlowMgr {
         &mut self,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
     ) {
         while let Some(frame) = self.peek() {
             // All these frames are bags of varints, so we can just extract the
@@ -289,34 +292,59 @@ impl FlowMgr {
                     stream_id,
                     application_error_code,
                     final_size,
-                } => smallvec![stream_id.as_u64(), *application_error_code, *final_size],
+                } => {
+                    stats.reset_stream += 1;
+                    smallvec![stream_id.as_u64(), *application_error_code, *final_size]
+                }
                 Frame::StopSending {
                     stream_id,
                     application_error_code,
-                } => smallvec![stream_id.as_u64(), *application_error_code],
+                } => {
+                    stats.stop_sending += 1;
+                    smallvec![stream_id.as_u64(), *application_error_code]
+                }
 
                 Frame::MaxStreams {
                     maximum_streams, ..
-                } => smallvec![maximum_streams.as_u64()],
-                Frame::StreamsBlocked { stream_limit, .. } => smallvec![stream_limit.as_u64()],
+                } => {
+                    stats.max_streams += 1;
+                    smallvec![maximum_streams.as_u64()]
+                }
+                Frame::StreamsBlocked { stream_limit, .. } => {
+                    stats.streams_blocked += 1;
+                    smallvec![stream_limit.as_u64()]
+                }
 
-                Frame::MaxData { maximum_data } => smallvec![*maximum_data],
-                Frame::DataBlocked { data_limit } => smallvec![*data_limit],
+                Frame::MaxData { maximum_data } => {
+                    stats.max_data += 1;
+                    smallvec![*maximum_data]
+                }
+                Frame::DataBlocked { data_limit } => {
+                    stats.data_blocked += 1;
+                    smallvec![*data_limit]
+                }
 
                 Frame::MaxStreamData {
                     stream_id,
                     maximum_stream_data,
-                } => smallvec![stream_id.as_u64(), *maximum_stream_data],
+                } => {
+                    stats.max_stream_data += 1;
+                    smallvec![stream_id.as_u64(), *maximum_stream_data]
+                }
                 Frame::StreamDataBlocked {
                     stream_id,
                     stream_data_limit,
-                } => smallvec![stream_id.as_u64(), *stream_data_limit],
+                } => {
+                    stats.stream_data_blocked += 1;
+                    smallvec![stream_id.as_u64(), *stream_data_limit]
+                }
 
                 // A special case, just write it out and move on..
                 Frame::PathResponse { data } => {
-                    if builder.remaining() < 1 + 8 {
+                    stats.path_response += 1;
+                    if builder.remaining() < 1 + data.len() {
                         builder.encode_varint(frame.get_type());
-                        builder.encode(&data[..]);
+                        builder.encode(data);
                         tokens.push(RecoveryToken::Flow(self.next().unwrap()));
                         continue;
                     } else {
@@ -342,9 +370,10 @@ impl FlowMgr {
 }
 
 impl Iterator for FlowMgr {
-    type Item = Frame;
+    type Item = FlowFrame;
+
     /// Used by generator to get a flow control frame.
-    fn next(&mut self) -> Option<Frame> {
+    fn next(&mut self) -> Option<Self::Item> {
         let first_key = self.from_conn.keys().next();
         if let Some(&first_key) = first_key {
             return self.from_conn.remove(&first_key);

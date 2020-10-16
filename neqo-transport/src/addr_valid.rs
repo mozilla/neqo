@@ -15,6 +15,7 @@ use neqo_crypto::{
 use crate::cid::ConnectionId;
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
+use crate::stats::FrameStats;
 use crate::Res;
 
 use smallvec::SmallVec;
@@ -349,9 +350,14 @@ impl NewTokenState {
 
     /// If this is a server, maybe send a frame.
     /// If this is a client, do nothing.
-    pub fn write_frames(&mut self, builder: &mut PacketBuilder, tokens: &mut Vec<RecoveryToken>) {
+    pub fn write_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) {
         if let Self::Server(ref mut sender) = self {
-            sender.write_frames(builder, tokens);
+            sender.write_frames(builder, tokens, stats);
         }
     }
 
@@ -419,7 +425,12 @@ impl NewTokenSender {
         self.next_seqno += 1;
     }
 
-    pub fn write_frames(&mut self, builder: &mut PacketBuilder, tokens: &mut Vec<RecoveryToken>) {
+    pub fn write_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) {
         for t in self.tokens.iter_mut() {
             if t.needs_sending && t.fits(builder.remaining()) {
                 t.needs_sending = false;
@@ -428,6 +439,7 @@ impl NewTokenSender {
                 builder.encode_vvec(&t.token);
 
                 tokens.push(RecoveryToken::NewToken(t.seqno));
+                stats.new_token += 1;
             }
         }
     }

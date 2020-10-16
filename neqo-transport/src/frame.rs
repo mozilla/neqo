@@ -126,7 +126,7 @@ pub struct AckRange {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum Frame {
+pub enum Frame<'a> {
     Padding,
     Ping,
     Ack {
@@ -146,16 +146,16 @@ pub enum Frame {
     },
     Crypto {
         offset: u64,
-        data: Vec<u8>,
+        data: &'a [u8],
     },
     NewToken {
-        token: Vec<u8>,
+        token: &'a [u8],
     },
     Stream {
-        fin: bool,
         stream_id: StreamId,
         offset: u64,
-        data: Vec<u8>,
+        data: &'a [u8],
+        fin: bool,
         fill: bool,
     },
     MaxData {
@@ -183,8 +183,8 @@ pub enum Frame {
     NewConnectionId {
         sequence_number: u64,
         retire_prior: u64,
-        connection_id: Vec<u8>,
-        stateless_reset_token: [u8; 16],
+        connection_id: &'a [u8],
+        stateless_reset_token: &'a [u8; 16],
     },
     RetireConnectionId {
         sequence_number: u64,
@@ -198,12 +198,14 @@ pub enum Frame {
     ConnectionClose {
         error_code: CloseError,
         frame_type: u64,
+        // Not a reference as we use this to hold the value.
+        // This is not used in optimized builds anyway.
         reason_phrase: Vec<u8>,
     },
     HandshakeDone,
 }
 
-impl Frame {
+impl<'a> Frame<'a> {
     pub fn get_type(&self) -> FrameType {
         match self {
             Self::Padding => FRAME_TYPE_PADDING,
@@ -325,7 +327,7 @@ impl Frame {
                 data,
                 fin,
             } => Some(format!(
-                "Stream {{ stream_id: {}, offset: {}, len: {}{} fin: {} }}",
+                "Stream {{ stream_id: {}, offset: {}, len: {}{}, fin: {} }}",
                 stream_id.as_u64(),
                 offset,
                 if *fill { ">>" } else { "" },
@@ -351,7 +353,7 @@ impl Frame {
         }
     }
 
-    pub fn decode(dec: &mut Decoder) -> Res<Self> {
+    pub fn decode(dec: &mut Decoder<'a>) -> Res<Self> {
         fn d<T>(v: Option<T>) -> Res<T> {
             v.ok_or(Error::NoMoreData)
         }
@@ -365,7 +367,7 @@ impl Frame {
             FRAME_TYPE_PADDING => Ok(Self::Padding),
             FRAME_TYPE_PING => Ok(Self::Ping),
             FRAME_TYPE_RST_STREAM => Ok(Self::ResetStream {
-                stream_id: dv(dec)?.into(),
+                stream_id: StreamId::from(dv(dec)?),
                 application_error_code: d(dec.decode_varint())?,
                 final_size: match dec.decode_varint() {
                     Some(v) => v,
@@ -401,22 +403,19 @@ impl Frame {
                 })
             }
             FRAME_TYPE_STOP_SENDING => Ok(Self::StopSending {
-                stream_id: dv(dec)?.into(),
+                stream_id: StreamId::from(dv(dec)?),
                 application_error_code: d(dec.decode_varint())?,
             }),
             FRAME_TYPE_CRYPTO => {
-                let o = dv(dec)?;
+                let offset = dv(dec)?;
                 let data = d(dec.decode_vvec())?;
-                if o + u64::try_from(data.len()).unwrap() > ((1 << 62) - 1) {
+                if offset + u64::try_from(data.len()).unwrap() > ((1 << 62) - 1) {
                     return Err(Error::FrameEncodingError);
                 }
-                Ok(Self::Crypto {
-                    offset: o,
-                    data: data.to_vec(), // TODO(mt) unnecessary copy
-                })
+                Ok(Self::Crypto { offset, data })
             }
             FRAME_TYPE_NEW_TOKEN => {
-                let token = d(dec.decode_vvec())?.to_vec();
+                let token = d(dec.decode_vvec())?;
                 if token.is_empty() {
                     return Err(Error::FrameEncodingError);
                 }
@@ -442,9 +441,9 @@ impl Frame {
                 }
                 Ok(Self::Stream {
                     fin: (t & STREAM_FRAME_BIT_FIN) != 0,
-                    stream_id: s.into(),
+                    stream_id: StreamId::from(s),
                     offset: o,
-                    data: data.to_vec(), // TODO(mt) unnecessary copy.
+                    data,
                     fill,
                 })
             }
@@ -452,7 +451,7 @@ impl Frame {
                 maximum_data: dv(dec)?,
             }),
             FRAME_TYPE_MAX_STREAM_DATA => Ok(Self::MaxStreamData {
-                stream_id: dv(dec)?.into(),
+                stream_id: StreamId::from(dv(dec)?),
                 maximum_stream_data: dv(dec)?,
             }),
             FRAME_TYPE_MAX_STREAMS_BIDI | FRAME_TYPE_MAX_STREAMS_UNIDI => {
@@ -479,21 +478,20 @@ impl Frame {
                 })
             }
             FRAME_TYPE_NEW_CONNECTION_ID => {
-                let s = dv(dec)?;
+                let sequence_number = dv(dec)?;
                 let retire_prior = dv(dec)?;
-                let cid = d(dec.decode_vec(1))?.to_vec(); // TODO(mt) unnecessary copy
-                if cid.len() > MAX_CONNECTION_ID_LEN {
+                let connection_id = d(dec.decode_vec(1))?;
+                if connection_id.len() > MAX_CONNECTION_ID_LEN {
                     return Err(Error::DecodingFrame);
                 }
                 let srt = d(dec.decode(16))?;
-                let mut srtv: [u8; 16] = [0; 16];
-                srtv.copy_from_slice(&srt);
+                let stateless_reset_token = <&[_; 16]>::try_from(srt).unwrap();
 
                 Ok(Self::NewConnectionId {
-                    sequence_number: s,
+                    sequence_number,
                     retire_prior,
-                    connection_id: cid,
-                    stateless_reset_token: srtv,
+                    connection_id,
+                    stateless_reset_token,
                 })
             }
             FRAME_TYPE_RETIRE_CONNECTION_ID => Ok(Self::RetireConnectionId {
@@ -518,7 +516,8 @@ impl Frame {
                 } else {
                     0
                 };
-                let reason_phrase = d(dec.decode_vvec())?.to_vec(); // TODO(mt) unnecessary copy
+                // We can tolerate this copy for now.
+                let reason_phrase = d(dec.decode_vvec())?.to_vec();
                 Ok(Self::ConnectionClose {
                     error_code,
                     frame_type,
@@ -581,7 +580,7 @@ mod tests {
     #[test]
     fn reset_stream() {
         let f = Frame::ResetStream {
-            stream_id: 0x1234.into(),
+            stream_id: StreamId::from(0x1234),
             application_error_code: 0x77,
             final_size: 0x3456,
         };
@@ -592,7 +591,7 @@ mod tests {
     #[test]
     fn stop_sending() {
         let f = Frame::StopSending {
-            stream_id: 63.into(),
+            stream_id: StreamId::from(63),
             application_error_code: 0x77,
         };
 
@@ -603,7 +602,7 @@ mod tests {
     fn crypto() {
         let f = Frame::Crypto {
             offset: 1,
-            data: vec![1, 2, 3],
+            data: &[1, 2, 3],
         };
 
         just_dec(&f, "060103010203");
@@ -612,7 +611,7 @@ mod tests {
     #[test]
     fn new_token() {
         let f = Frame::NewToken {
-            token: vec![0x12, 0x34, 0x56],
+            token: &[0x12, 0x34, 0x56],
         };
 
         just_dec(&f, "0703123456");
@@ -632,9 +631,9 @@ mod tests {
         // First, just set the length bit.
         let f = Frame::Stream {
             fin: false,
-            stream_id: 5.into(),
+            stream_id: StreamId::from(5),
             offset: 0,
-            data: vec![1, 2, 3],
+            data: &[1, 2, 3],
             fill: false,
         };
 
@@ -643,9 +642,9 @@ mod tests {
         // Now with offset != 0 and FIN
         let f = Frame::Stream {
             fin: true,
-            stream_id: 5.into(),
+            stream_id: StreamId::from(5),
             offset: 1,
-            data: vec![1, 2, 3],
+            data: &[1, 2, 3],
             fill: false,
         };
         just_dec(&f, "0f050103010203");
@@ -653,9 +652,9 @@ mod tests {
         // Now to fill the packet.
         let f = Frame::Stream {
             fin: true,
-            stream_id: 5.into(),
+            stream_id: StreamId::from(5),
             offset: 0,
-            data: vec![1, 2, 3],
+            data: &[1, 2, 3],
             fill: true,
         };
         just_dec(&f, "0905010203");
@@ -673,7 +672,7 @@ mod tests {
     #[test]
     fn max_stream_data() {
         let f = Frame::MaxStreamData {
-            stream_id: 5.into(),
+            stream_id: StreamId::from(5),
             maximum_stream_data: 0x1234,
         };
 
@@ -707,7 +706,7 @@ mod tests {
     #[test]
     fn stream_data_blocked() {
         let f = Frame::StreamDataBlocked {
-            stream_id: 5.into(),
+            stream_id: StreamId::from(5),
             stream_data_limit: 0x1234,
         };
 
@@ -736,8 +735,8 @@ mod tests {
         let f = Frame::NewConnectionId {
             sequence_number: 0x1234,
             retire_prior: 0,
-            connection_id: vec![0x01, 0x02],
-            stateless_reset_token: [9; 16],
+            connection_id: &[0x01, 0x02],
+            stateless_reset_token: &[9; 16],
         };
 
         just_dec(&f, "1852340002010209090909090909090909090909090909");
@@ -805,19 +804,19 @@ mod tests {
         let f2 = Frame::Padding;
         let f3 = Frame::Crypto {
             offset: 0,
-            data: vec![1, 2, 3],
+            data: &[1, 2, 3],
         };
         let f4 = Frame::Crypto {
             offset: 0,
-            data: vec![1, 2, 3],
+            data: &[1, 2, 3],
         };
         let f5 = Frame::Crypto {
             offset: 1,
-            data: vec![1, 2, 3],
+            data: &[1, 2, 3],
         };
         let f6 = Frame::Crypto {
             offset: 0,
-            data: vec![1, 2, 4],
+            data: &[1, 2, 4],
         };
 
         assert_eq!(f1, f2);
