@@ -46,7 +46,7 @@ impl RxStreamOrderer {
     /// Process an incoming stream frame off the wire. This may result in data
     /// being available to upper layers if frame is not out of order (ooo) or
     /// if the frame fills a gap.
-    pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) -> Res<()> {
+    pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) {
         qtrace!("Inbound data offset={} len={}", new_start, new_data.len());
 
         // Get entry before where new entry would go, so we can see if we already
@@ -56,7 +56,7 @@ impl RxStreamOrderer {
 
         if new_end <= self.retired {
             // Range already read by application, this frame is very late and unneeded.
-            return Ok(());
+            return;
         }
 
         if new_start < self.retired {
@@ -66,7 +66,7 @@ impl RxStreamOrderer {
 
         if new_data.is_empty() {
             // No data to insert
-            return Ok(());
+            return;
         }
 
         let extend = if let Some((&prev_start, prev_vec)) = self
@@ -104,7 +104,7 @@ impl RxStreamOrderer {
                     new_start,
                     new_end
                 );
-                return Ok(());
+                return;
             }
         } else {
             qtrace!("New frame {}-{} received", new_start, new_end);
@@ -158,8 +158,6 @@ impl RxStreamOrderer {
                 self.data_ranges.insert(new_start, to_add.to_vec());
             }
         }
-
-        Ok(())
     }
 
     /// Are any bytes readable?
@@ -411,7 +409,7 @@ impl RecvStream {
                     if final_size < recv_buf.highest_seen_offset() {
                         return Err(Error::FinalSizeError);
                     }
-                    recv_buf.inbound_frame(offset, data)?;
+                    recv_buf.inbound_frame(offset, data);
 
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     if final_size == buf.retired() + buf.bytes_ready() as u64 {
@@ -423,14 +421,14 @@ impl RecvStream {
                         });
                     }
                 } else {
-                    recv_buf.inbound_frame(offset, data)?;
+                    recv_buf.inbound_frame(offset, data);
                 }
             }
             RecvStreamState::SizeKnown {
                 recv_buf,
                 final_size,
             } => {
-                recv_buf.inbound_frame(offset, data)?;
+                recv_buf.inbound_frame(offset, data);
                 if *final_size == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     self.set_state(RecvStreamState::DataRecvd { recv_buf: buf });
@@ -557,7 +555,7 @@ mod tests {
         let mut s = RxStreamOrderer::default();
         for r in ranges {
             let data = &ZEROES[..usize::try_from(r.end - r.start).unwrap()];
-            s.inbound_frame(r.start, data).unwrap();
+            s.inbound_frame(r.start, data);
         }
 
         let mut buf = [0xff; 100];
@@ -685,11 +683,11 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add three chunks.
-        s.inbound_frame(0, &[0; CHUNK_SIZE]).unwrap();
+        s.inbound_frame(0, &[0; CHUNK_SIZE]);
         let offset = u64::try_from(CHUNK_SIZE).unwrap();
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
         let offset = u64::try_from(CHUNK_SIZE + EXTRA_SIZE).unwrap();
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
 
         // Read, providing only enough space for the first.
         let mut buf = vec![0; 100];
@@ -704,7 +702,7 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add a chunk
-        s.inbound_frame(0, &[0; 150]).unwrap();
+        s.inbound_frame(0, &[0; 150]);
         assert_eq!(s.data_ranges.get(&0).unwrap().len(), 150);
         // Read, providing only enough space for the first 100.
         let mut buf = [0; 100];
@@ -715,7 +713,7 @@ mod tests {
         // Add a second frame that overlaps.
         // This shouldn't truncate the first frame, as we're already
         // Reading from it.
-        s.inbound_frame(120, &[0; 60]).unwrap();
+        s.inbound_frame(120, &[0; 60]);
         assert_eq!(s.data_ranges.get(&0).unwrap().len(), 180);
         // Read second part of first frame and all of the second frame
         let count = s.read(&mut buf[..]);
@@ -730,9 +728,9 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add three chunks.
-        s.inbound_frame(0, &[0; CHUNK_SIZE]).unwrap();
+        s.inbound_frame(0, &[0; CHUNK_SIZE]);
         let offset = u64::try_from(CHUNK_SIZE + EXTRA_SIZE).unwrap();
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
 
         // Read, providing only enough space for the first chunk.
         let mut buf = [0; 100];
@@ -741,7 +739,7 @@ mod tests {
 
         // Now fill the gap and ensure that everything can be read.
         let offset = u64::try_from(CHUNK_SIZE).unwrap();
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
         let count = s.read(&mut buf[..]);
         assert_eq!(count, EXTRA_SIZE * 2);
     }
@@ -754,9 +752,9 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add two chunks.
-        s.inbound_frame(0, &[0; CHUNK_SIZE]).unwrap();
+        s.inbound_frame(0, &[0; CHUNK_SIZE]);
         let offset = u64::try_from(CHUNK_SIZE).unwrap();
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
 
         // Read, providing only enough space for some of the first chunk.
         let mut buf = [0; 100];
@@ -775,9 +773,9 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add two chunks.
-        s.inbound_frame(0, &[0; CHUNK_SIZE]).unwrap();
+        s.inbound_frame(0, &[0; CHUNK_SIZE]);
         let offset = u64::try_from(CHUNK_SIZE).unwrap();
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
 
         let mut buf = [0; 1];
         for _ in 0..CHUNK_SIZE + EXTRA_SIZE {
@@ -839,14 +837,9 @@ mod tests {
         s.read(&mut buf).unwrap_err();
     }
 
-    fn check_chunks(s: &mut RecvStream, expected: &[(u64, usize)]) {
-        assert_eq!(
-            s.state.recv_buf().unwrap().data_ranges.len(),
-            expected.len()
-        );
-        for ((start, buf), (expected_start, expected_len)) in
-            s.state.recv_buf().unwrap().data_ranges.iter().zip(expected)
-        {
+    fn check_chunks(s: &mut RxStreamOrderer, expected: &[(u64, usize)]) {
+        assert_eq!(s.data_ranges.len(), expected.len());
+        for ((start, buf), (expected_start, expected_len)) in s.data_ranges.iter().zip(expected) {
             assert_eq!((*start, buf.len()), (*expected_start, *expected_len));
         }
     }
@@ -854,136 +847,119 @@ mod tests {
     // Test deduplication when the new data is at the end.
     #[test]
     fn stream_rx_dedupe_tail() {
-        // let mut rx_ord = RxStreamOrderer::new();
+        let mut s = RxStreamOrderer::new();
 
-        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let conn_events = ConnectionEvents::default();
-
-        let mut s = RecvStream::new(StreamId::from(3), 1024, Rc::clone(&flow_mgr), conn_events);
-
-        s.inbound_stream_frame(false, 0, &[1; 6]).unwrap();
+        s.inbound_frame(0, &[1; 6]);
         check_chunks(&mut s, &[(0, 6)]);
 
         // New data that overlaps entirely (starting from the head), is ignored.
-        s.inbound_stream_frame(false, 0, &[2; 3]).unwrap();
+        s.inbound_frame(0, &[2; 3]);
         check_chunks(&mut s, &[(0, 6)]);
 
         // New data that overlaps at the tail has any new data appended.
-        s.inbound_stream_frame(false, 2, &[3; 6]).unwrap();
+        s.inbound_frame(2, &[3; 6]);
         check_chunks(&mut s, &[(0, 8)]);
 
         // New data that overlaps entirely (up to the tail), is ignored.
-        s.inbound_stream_frame(false, 4, &[4; 4]).unwrap();
+        s.inbound_frame(4, &[4; 4]);
         check_chunks(&mut s, &[(0, 8)]);
 
         // New data that overlaps, starting from the beginning is appended too.
-        s.inbound_stream_frame(false, 0, &[5; 10]).unwrap();
+        s.inbound_frame(0, &[5; 10]);
         check_chunks(&mut s, &[(0, 10)]);
 
         // New data that is entirely subsumed is ignored.
-        s.inbound_stream_frame(false, 2, &[6; 2]).unwrap();
+        s.inbound_frame(2, &[6; 2]);
         check_chunks(&mut s, &[(0, 10)]);
 
         let mut buf = [0; 16];
-        assert_eq!(s.read(&mut buf[..]).unwrap(), (10, false));
+        assert_eq!(s.read(&mut buf[..]), 10);
         assert_eq!(buf[..10], [1, 1, 1, 1, 1, 1, 3, 3, 5, 5]);
     }
 
     /// When chunks are added before existing data, they aren't merged.
     #[test]
     fn stream_rx_dedupe_head() {
-        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let conn_events = ConnectionEvents::default();
+        let mut s = RxStreamOrderer::new();
 
-        let mut s = RecvStream::new(StreamId::from(3), 1024, Rc::clone(&flow_mgr), conn_events);
-
-        s.inbound_stream_frame(false, 1, &[6; 6]).unwrap();
+        s.inbound_frame(1, &[6; 6]);
         check_chunks(&mut s, &[(1, 6)]);
 
         // Insertion before an existing chunk causes truncation of the new chunk.
-        s.inbound_stream_frame(false, 0, &[7; 6]).unwrap();
+        s.inbound_frame(0, &[7; 6]);
         check_chunks(&mut s, &[(0, 1), (1, 6)]);
 
         // Perfect overlap with existing slices has no effect.
-        s.inbound_stream_frame(false, 0, &[8; 7]).unwrap();
+        s.inbound_frame(0, &[8; 7]);
         check_chunks(&mut s, &[(0, 1), (1, 6)]);
 
         let mut buf = [0; 16];
-        assert_eq!(s.read(&mut buf[..]).unwrap(), (7, false));
+        assert_eq!(s.read(&mut buf[..]), 7);
         assert_eq!(buf[..7], [7, 6, 6, 6, 6, 6, 6]);
     }
 
     #[test]
     fn stream_rx_dedupe_new_tail() {
-        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let conn_events = ConnectionEvents::default();
+        let mut s = RxStreamOrderer::new();
 
-        let mut s = RecvStream::new(StreamId::from(3), 1024, Rc::clone(&flow_mgr), conn_events);
-
-        s.inbound_stream_frame(false, 1, &[6; 6]).unwrap();
+        s.inbound_frame(1, &[6; 6]);
         check_chunks(&mut s, &[(1, 6)]);
 
         // Insertion before an existing chunk causes truncation of the new chunk.
-        s.inbound_stream_frame(false, 0, &[7; 6]).unwrap();
+        s.inbound_frame(0, &[7; 6]);
         check_chunks(&mut s, &[(0, 1), (1, 6)]);
 
         // New data at the end causes the tail to be added to the first chunk,
         // replacing later chunks entirely.
-        s.inbound_stream_frame(false, 0, &[9; 8]).unwrap();
+        s.inbound_frame(0, &[9; 8]);
         check_chunks(&mut s, &[(0, 8)]);
 
         let mut buf = [0; 16];
-        assert_eq!(s.read(&mut buf[..]).unwrap(), (8, false));
+        assert_eq!(s.read(&mut buf[..]), 8);
         assert_eq!(buf[..8], [7, 9, 9, 9, 9, 9, 9, 9]);
     }
 
     #[test]
     fn stream_rx_dedupe_replace() {
-        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let conn_events = ConnectionEvents::default();
+        let mut s = RxStreamOrderer::new();
 
-        let mut s = RecvStream::new(StreamId::from(3), 1024, Rc::clone(&flow_mgr), conn_events);
-
-        s.inbound_stream_frame(false, 2, &[6; 6]).unwrap();
+        s.inbound_frame(2, &[6; 6]);
         check_chunks(&mut s, &[(2, 6)]);
 
         // Insertion before an existing chunk causes truncation of the new chunk.
-        s.inbound_stream_frame(false, 1, &[7; 6]).unwrap();
+        s.inbound_frame(1, &[7; 6]);
         check_chunks(&mut s, &[(1, 1), (2, 6)]);
 
         // New data at the start and end replaces all the slices.
-        s.inbound_stream_frame(false, 0, &[9; 10]).unwrap();
+        s.inbound_frame(0, &[9; 10]);
         check_chunks(&mut s, &[(0, 10)]);
 
         let mut buf = [0; 16];
-        assert_eq!(s.read(&mut buf[..]).unwrap(), (10, false));
+        assert_eq!(s.read(&mut buf[..]), 10);
         assert_eq!(buf[..10], [9; 10]);
     }
 
     #[test]
     fn trim_retired() {
-        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let conn_events = ConnectionEvents::default();
-
-        let mut s = RecvStream::new(StreamId::from(3), 1024, Rc::clone(&flow_mgr), conn_events);
+        let mut s = RxStreamOrderer::new();
 
         let mut buf = [0; 18];
-        s.inbound_stream_frame(false, 0, &buf[..10]).unwrap();
+        s.inbound_frame(0, &[1; 10]);
 
         // Partially read slices are retained.
-        assert_eq!(s.read(&mut buf[..6]).unwrap(), (6, false));
+        assert_eq!(s.read(&mut buf[..6]), 6);
         check_chunks(&mut s, &[(0, 10)]);
 
         // Partially read slices are kept and so are added to.
-        s.inbound_stream_frame(false, 3, &buf[..10]).unwrap();
+        s.inbound_frame(3, &buf[..10]);
         check_chunks(&mut s, &[(0, 13)]);
 
         // Wholly read pieces are dropped.
-        assert_eq!(s.read(&mut buf[..]).unwrap(), (7, false));
-        assert!(s.state.recv_buf().unwrap().data_ranges.is_empty());
+        assert_eq!(s.read(&mut buf[..]), 7);
+        assert!(s.data_ranges.is_empty());
 
         // New data that overlaps with retired data is trimmed.
-        s.inbound_stream_frame(false, 0, &buf[..]).unwrap();
+        s.inbound_frame(0, &buf[..]);
         check_chunks(&mut s, &[(13, 5)]);
     }
 
@@ -1047,7 +1023,7 @@ mod tests {
     fn stream_orderer_bytes_ready() {
         let mut rx_ord = RxStreamOrderer::new();
 
-        rx_ord.inbound_frame(0, &[1; 6]).unwrap();
+        rx_ord.inbound_frame(0, &[1; 6]);
         assert_eq!(rx_ord.bytes_ready(), 6);
         assert_eq!(rx_ord.buffered(), 6);
         assert_eq!(rx_ord.retired(), 0);
@@ -1060,19 +1036,19 @@ mod tests {
         assert_eq!(rx_ord.retired(), 2);
 
         // an overlapping frame
-        rx_ord.inbound_frame(5, &[2; 6]).unwrap();
+        rx_ord.inbound_frame(5, &[2; 6]);
         assert_eq!(rx_ord.bytes_ready(), 9);
         assert_eq!(rx_ord.buffered(), 9);
         assert_eq!(rx_ord.retired(), 2);
 
         // a noncontig frame
-        rx_ord.inbound_frame(20, &[3; 6]).unwrap();
+        rx_ord.inbound_frame(20, &[3; 6]);
         assert_eq!(rx_ord.bytes_ready(), 9);
         assert_eq!(rx_ord.buffered(), 15);
         assert_eq!(rx_ord.retired(), 2);
 
         // an old frame
-        rx_ord.inbound_frame(0, &[4; 2]).unwrap();
+        rx_ord.inbound_frame(0, &[4; 2]);
         assert_eq!(rx_ord.bytes_ready(), 9);
         assert_eq!(rx_ord.buffered(), 15);
         assert_eq!(rx_ord.retired(), 2);

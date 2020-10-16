@@ -1149,8 +1149,8 @@ impl CryptoStreams {
         self.get_mut(space).unwrap().tx.send(data);
     }
 
-    pub fn inbound_frame(&mut self, space: PNSpace, offset: u64, data: &[u8]) -> Res<()> {
-        self.get_mut(space).unwrap().rx.inbound_frame(offset, data)
+    pub fn inbound_frame(&mut self, space: PNSpace, offset: u64, data: &[u8]) {
+        self.get_mut(space).unwrap().rx.inbound_frame(offset, data);
     }
 
     pub fn data_ready(&self, space: PNSpace) -> bool {
