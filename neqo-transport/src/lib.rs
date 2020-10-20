@@ -72,6 +72,7 @@ pub enum Error {
     // All internal errors from here.
     AckedUnsentPacket,
     ConnectionState,
+    ConnectionIdLimitExceeded,
     DecodingFrame,
     DecryptError,
     HandshakeFailed,
@@ -100,6 +101,7 @@ pub enum Error {
     StatelessReset,
     TooMuchData,
     UnexpectedMessage,
+    UnknownConnectionId,
     UnknownFrameType,
     VersionNegotiation,
     WrongRole,
