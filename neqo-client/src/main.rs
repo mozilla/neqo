@@ -824,6 +824,45 @@ mod old {
             Ok(())
         }
 
+        fn read(&mut self, client: &mut Connection, stream_id: u64) -> Res<bool> {
+            let mut maybe_maybe_out_file = self.streams.get_mut(&stream_id);
+            match &mut maybe_maybe_out_file {
+                None => {
+                    println!("Data on unexpected stream: {}", stream_id);
+                    return Ok(false);
+                }
+                Some(maybe_out_file) => {
+                    let fin_recvd = Self::read_from_stream(
+                        client,
+                        stream_id,
+                        self.args.output_read_data,
+                        maybe_out_file,
+                    )?;
+
+                    if fin_recvd {
+                        if maybe_out_file.is_none() {
+                            println!("<FIN[{}]>", stream_id);
+                        }
+                        self.streams.remove(&stream_id);
+                        if self.streams.is_empty() && self.url_queue.is_empty() {
+                            return Ok(false);
+                        }
+                    }
+                }
+            }
+            Ok(true)
+        }
+
+        /// Just in case we didn't get a resumption token event, this
+        /// iterates through events until one is found.
+        fn get_token(&mut self, client: &mut Connection) {
+            for event in client.events() {
+                if let ConnectionEvent::ResumptionToken(token) = event {
+                    self.token = Some(token);
+                }
+            }
+        }
+
         fn handle(&mut self, client: &mut Connection) -> Res<bool> {
             while let Some(event) = client.next_event() {
                 match event {
@@ -831,32 +870,11 @@ mod old {
                         client.authenticated(AuthenticationStatus::Ok, Instant::now());
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
-                        let mut maybe_maybe_out_file = self.streams.get_mut(&stream_id);
-                        match &mut maybe_maybe_out_file {
-                            None => {
-                                println!("Data on unexpected stream: {}", stream_id);
-                                return Ok(false);
-                            }
-                            Some(maybe_out_file) => {
-                                let fin_recvd = Self::read_from_stream(
-                                    client,
-                                    stream_id,
-                                    self.args.output_read_data,
-                                    maybe_out_file,
-                                )?;
-
-                                if fin_recvd {
-                                    if maybe_out_file.is_none() {
-                                        println!("<FIN[{}]>", stream_id);
-                                    }
-                                    self.streams.remove(&stream_id);
-                                    if self.streams.is_empty() && self.url_queue.is_empty() {
-                                        client.close(Instant::now(), 0, "kthxbye!");
-                                        return Ok(false);
-                                    }
-                                }
-                            }
-                        }
+                        if !self.read(client, stream_id)? {
+                            self.get_token(client);
+                            client.close(Instant::now(), 0, "kthxbye!");
+                            return Ok(false);
+                        };
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
                         println!("stream {} writable", stream_id)
