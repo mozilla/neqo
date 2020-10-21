@@ -150,7 +150,7 @@ impl RecvStream for PushStream {
                 if let Some(push_id) = self.state.push_id() {
                     self.push_handler
                         .borrow_mut()
-                        .push_stream_reset(push_id, app_error, &t);
+                        .push_stream_reset(push_id, app_error, t);
                 }
             }
         }

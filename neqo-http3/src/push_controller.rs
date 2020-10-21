@@ -369,7 +369,7 @@ impl PushController {
         }
     }
 
-    pub fn push_stream_reset(&mut self, push_id: u64, app_error: AppError, reset_type: &ResetType) {
+    pub fn push_stream_reset(&mut self, push_id: u64, app_error: AppError, reset_type: ResetType) {
         qtrace!("Push stream has been reset, push_id={}", push_id);
 
         if let Some(push_state) = self.push_streams.get(push_id) {
@@ -380,7 +380,7 @@ impl PushController {
                 PushState::Active { .. } => {
                     self.push_streams.close(push_id);
                     self.conn_events.remove_events_for_push_id(push_id);
-                    if *reset_type == ResetType::Local {
+                    if reset_type == ResetType::Local {
                         self.conn_events.push_reset(push_id, app_error);
                     } else {
                         self.conn_events.push_canceled(push_id);
