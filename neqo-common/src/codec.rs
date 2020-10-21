@@ -165,7 +165,7 @@ impl<'a> Deref for Decoder<'a> {
 
 impl<'a> Debug for Decoder<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(&hex_with_len(self))
+        f.write_str(&hex_with_len(&self[..]))
     }
 }
 

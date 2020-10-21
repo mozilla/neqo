@@ -274,7 +274,7 @@ pub struct Connection {
     pub(crate) acks: AckTracker,
     idle_timeout: IdleTimeout,
     pub(crate) indexes: StreamIndexes,
-    connection_ids: HashMap<u64, (Vec<u8>, [u8; 16])>, // (sequence number, (connection id, reset token))
+    connection_ids: HashMap<u64, (ConnectionId, [u8; 16])>, // (sequence number, (connection id, reset token))
     pub(crate) send_streams: SendStreams,
     pub(crate) recv_streams: RecvStreams,
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
@@ -836,16 +836,6 @@ impl Connection {
         self.cleanup_streams();
     }
 
-    /// Just like above but returns frames parsed from the datagram
-    #[cfg(test)]
-    #[must_use]
-    pub fn test_process_input(&mut self, dgram: Datagram, now: Instant) -> Vec<(Frame, PNSpace)> {
-        let res = self.input(dgram, now);
-        let frames = self.absorb_error(now, res).unwrap_or_default();
-        self.cleanup_streams();
-        frames
-    }
-
     /// Get the time that we next need to be called back, relative to `now`.
     fn next_delay(&mut self, now: Instant, paced: bool) -> Duration {
         qtrace!([self], "Get callback delay {:?}", now);
@@ -1200,9 +1190,8 @@ impl Connection {
     }
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
-    fn input(&mut self, d: Datagram, now: Instant) -> Res<Vec<(Frame, PNSpace)>> {
+    fn input(&mut self, d: Datagram, now: Instant) -> Res<()> {
         let mut slc = &d[..];
-        let mut frames = Vec::new();
         let mut dcid = None;
 
         qtrace!([self], "input {}", hex(&**d));
@@ -1223,7 +1212,7 @@ impl Connection {
             match self.preprocess(&packet, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
-                PreprocessResult::End => return Ok(frames),
+                PreprocessResult::End => return Ok(()),
             }
 
             qtrace!([self], "Received unverified packet {:?}", packet);
@@ -1251,7 +1240,7 @@ impl Connection {
                         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
                         self.initialize_path(d.destination(), d.source());
                     }
-                    frames.extend(res?);
+                    res?;
                     if self.state == State::WaitInitial {
                         self.start_handshake(&packet, &d)?;
                     }
@@ -1264,7 +1253,7 @@ impl Connection {
                             // Don't check this packet for a stateless reset, just return.
                             let remaining = slc.len();
                             self.save_datagram(cspace, d, remaining, now);
-                            return Ok(frames);
+                            return Ok(());
                         }
                         Error::KeysExhausted => {
                             // Exhausting read keys is fatal.
@@ -1284,14 +1273,10 @@ impl Connection {
             dcid = Some(ConnectionId::from(packet.dcid()));
         }
         self.check_stateless_reset(&d, dcid.is_none(), now)?;
-        Ok(frames)
+        Ok(())
     }
 
-    fn process_packet(
-        &mut self,
-        packet: &DecryptedPacket,
-        now: Instant,
-    ) -> Res<Vec<(Frame, PNSpace)>> {
+    fn process_packet(&mut self, packet: &DecryptedPacket, now: Instant) -> Res<()> {
         // TODO(ekr@rtfm.com): Have the server blow away the initial
         // crypto state if this fails? Otherwise, we will get a panic
         // on the assert for doesn't exist.
@@ -1301,14 +1286,12 @@ impl Connection {
         if self.acks.get_mut(space).unwrap().is_duplicate(packet.pn()) {
             qdebug!([self], "Duplicate packet from {} pn={}", space, packet.pn());
             self.stats.borrow_mut().dups_rx += 1;
-            return Ok(vec![]);
+            return Ok(());
         }
 
         let mut ack_eliciting = false;
         let mut d = Decoder::from(&packet[..]);
         let mut consecutive_padding = 0;
-        #[allow(unused_mut)]
-        let mut frames = Vec::new();
         while d.remaining() > 0 {
             let mut f = Frame::decode(&mut d)?;
 
@@ -1326,9 +1309,6 @@ impl Connection {
                 consecutive_padding = 0;
             }
 
-            if cfg!(test) {
-                frames.push((f.clone(), space));
-            }
             ack_eliciting |= f.ack_eliciting();
             let t = f.get_type();
             let res = self.input_frame(packet.packet_type(), f, now);
@@ -1339,7 +1319,7 @@ impl Connection {
             .unwrap()
             .set_received(now, packet.pn(), ack_eliciting);
 
-        Ok(frames)
+        Ok(())
     }
 
     fn initialize_path(&mut self, local_addr: SocketAddr, remote_addr: SocketAddr) {
@@ -1494,10 +1474,25 @@ impl Connection {
             );
 
             // ConnectionError::Application is only allowed at 1RTT.
-            if *space == PNSpace::ApplicationData {
-                frame.marshal(&mut builder);
+            let sanitized = if *space == PNSpace::ApplicationData {
+                &frame
             } else {
-                frame.sanitize_close().marshal(&mut builder);
+                frame.sanitize_close()
+            };
+            if let Frame::ConnectionClose {
+                error_code,
+                frame_type,
+                reason_phrase,
+            } = sanitized
+            {
+                builder.encode_varint(sanitized.get_type());
+                builder.encode_varint(error_code.code());
+                if let CloseError::Transport(_) = error_code {
+                    builder.encode_varint(*frame_type);
+                }
+                builder.encode_vvec(reason_phrase);
+            } else {
+                unreachable!();
             }
 
             encoder = builder.build(tx)?;
@@ -1506,68 +1501,66 @@ impl Connection {
         Ok(SendOption::Yes(path.datagram(encoder)))
     }
 
-    /// Add frames to the provided builder and
-    /// return whether any of them were ACK eliciting.
-    fn add_frames(
+    /// Write frames to the provided builder.  Returns a list of tokens used for
+    /// tracking loss or acknowledgment and whether any frame was ACK eliciting.
+    fn write_frames(
         &mut self,
-        builder: &mut PacketBuilder,
         space: PNSpace,
         profile: &SendProfile,
+        builder: &mut PacketBuilder,
         now: Instant,
     ) -> (Vec<RecoveryToken>, bool) {
         let mut tokens = Vec::new();
+        let stats = &mut self.stats.borrow_mut().frame_tx;
 
-        let mut ack_eliciting = if profile.should_probe(space) {
-            // Send PING in all spaces that allow a probe.
-            // This might get a more expedient ACK.
-            builder.encode_varint(Frame::Ping.get_type());
-            true
-        } else {
-            false
-        };
-
-        // Try to get a frame from all frame sources.
-        if let Some(t) = self.acks.write_frame(space, now, builder) {
-            tokens.push(t);
-        }
+        let ack_token = self.acks.write_frame(space, now, builder, stats);
 
         if profile.ack_only(space) {
-            return (tokens, ack_eliciting);
-        }
-
-        // All useful frames are at least 2 bytes.
-        while builder.remaining() >= 2 {
-            let remaining = builder.remaining();
             // If we are CC limited we can only send acks!
-            let mut frame = if space == PNSpace::ApplicationData && self.role == Role::Server {
-                self.state_signaling.send_done()
-            } else {
-                None
-            };
-            if frame.is_none() {
-                frame = self.crypto.streams.get_frame(space, remaining)
+            if let Some(t) = ack_token {
+                tokens.push(t);
             }
-            if frame.is_none() {
-                frame = self.flow_mgr.borrow_mut().get_frame(space, remaining);
-            }
-            if frame.is_none() {
-                frame = self.send_streams.get_frame(space, remaining);
-            }
-            if frame.is_none() && space == PNSpace::ApplicationData {
-                frame = self.new_token.get_frame(remaining);
-            }
+            return (tokens, false);
+        }
 
-            if let Some((frame, token)) = frame {
-                ack_eliciting = true;
-                debug_assert!(frame.ack_eliciting());
-                frame.marshal(builder);
-                if let Some(t) = token {
-                    tokens.push(t);
-                }
-            } else {
-                return (tokens, ack_eliciting);
+        if space == PNSpace::ApplicationData && self.role == Role::Server {
+            if let Some(t) = self.state_signaling.write_done(builder) {
+                tokens.push(t);
+                stats.handshake_done += 1;
             }
         }
+
+        if let Some(t) = self.crypto.streams.write_frame(space, builder) {
+            tokens.push(t);
+            stats.crypto += 1;
+        }
+
+        if space == PNSpace::ApplicationData {
+            self.flow_mgr
+                .borrow_mut()
+                .write_frames(builder, &mut tokens, stats);
+
+            self.send_streams.write_frames(builder, &mut tokens, stats);
+            self.new_token.write_frames(builder, &mut tokens, stats);
+        }
+
+        // Anything - other than ACK - that registered a token wants an acknowledgment.
+        let ack_eliciting = !tokens.is_empty()
+            || if profile.should_probe(space) {
+                // Nothing ack-eliciting and we need to probe; send PING.
+                debug_assert_ne!(builder.remaining(), 0);
+                builder.encode_varint(crate::frame::FRAME_TYPE_PING);
+                stats.ping += 1;
+                stats.all += 1;
+                true
+            } else {
+                false
+            };
+
+        if let Some(t) = ack_token {
+            tokens.push(t);
+        }
+        stats.all += tokens.len();
         (tokens, ack_eliciting)
     }
 
@@ -1616,8 +1609,8 @@ impl Connection {
             // Add frames to the packet.
             let limit = profile.limit() - aead_expansion;
             builder.set_limit(limit);
-            let (tokens, ack_eliciting) = self.add_frames(&mut builder, *space, &profile, now);
-            if builder.is_empty() {
+            let (tokens, ack_eliciting) = self.write_frames(*space, &profile, &mut builder, now);
+            if builder.packet_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
                 continue;
@@ -1923,14 +1916,17 @@ impl Connection {
             qerror!("frame not allowed: {:?} {:?}", frame, ptype);
             return Err(Error::ProtocolViolation);
         }
+        self.stats.borrow_mut().frame_rx.all += 1;
         let space = PNSpace::from(ptype);
         match frame {
             Frame::Padding => {
-                // Ignore
+                // Note: This counts contiguous padding as a single frame.
+                self.stats.borrow_mut().frame_rx.padding += 1;
             }
             Frame::Ping => {
                 // If we get a PING and there are outstanding CRYPTO frames,
                 // prepare to resend them.
+                self.stats.borrow_mut().frame_rx.ping += 1;
                 self.crypto.resend_unacked(space);
             }
             Frame::Ack {
@@ -1954,6 +1950,7 @@ impl Connection {
                 ..
             } => {
                 // TODO(agrover@mozilla.com): use final_size for connection MaxData calc
+                self.stats.borrow_mut().frame_rx.reset_stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
                     rs.reset(application_error_code);
                 }
@@ -1962,6 +1959,7 @@ impl Connection {
                 stream_id,
                 application_error_code,
             } => {
+                self.stats.borrow_mut().frame_rx.stop_sending += 1;
                 self.events
                     .send_stream_stop_sending(stream_id, application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(stream_id)? {
@@ -1976,6 +1974,7 @@ impl Connection {
                     offset,
                     &data
                 );
+                self.stats.borrow_mut().frame_rx.crypto += 1;
                 self.crypto.streams.inbound_frame(space, offset, data)?;
                 if self.crypto.streams.data_ready(space) {
                     let mut buf = Vec::new();
@@ -1989,7 +1988,8 @@ impl Connection {
                 }
             }
             Frame::NewToken { token } => {
-                self.new_token.save_token(token);
+                self.stats.borrow_mut().frame_rx.new_token += 1;
+                self.new_token.save_token(token.to_vec());
                 self.create_resumption_token(now);
             }
             Frame::Stream {
@@ -1999,15 +1999,20 @@ impl Connection {
                 data,
                 ..
             } => {
+                self.stats.borrow_mut().frame_rx.stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
                     rs.inbound_stream_frame(fin, offset, data)?;
                 }
             }
-            Frame::MaxData { maximum_data } => self.handle_max_data(maximum_data),
+            Frame::MaxData { maximum_data } => {
+                self.stats.borrow_mut().frame_rx.max_data += 1;
+                self.handle_max_data(maximum_data);
+            }
             Frame::MaxStreamData {
                 stream_id,
                 maximum_stream_data,
             } => {
+                self.stats.borrow_mut().frame_rx.max_stream_data += 1;
                 if let (Some(ss), _) = self.obtain_stream(stream_id)? {
                     ss.set_max_stream_data(maximum_stream_data);
                 }
@@ -2016,6 +2021,7 @@ impl Connection {
                 stream_type,
                 maximum_streams,
             } => {
+                self.stats.borrow_mut().frame_rx.max_streams += 1;
                 let remote_max = match stream_type {
                     StreamType::BiDi => &mut self.indexes.remote_max_stream_bidi,
                     StreamType::UniDi => &mut self.indexes.remote_max_stream_uni,
@@ -2033,6 +2039,7 @@ impl Connection {
                     "Received DataBlocked with data limit {}",
                     data_limit
                 );
+                self.stats.borrow_mut().frame_rx.data_blocked += 1;
                 // But if it does, open it up all the way
                 self.flow_mgr.borrow_mut().max_data(LOCAL_MAX_DATA);
             }
@@ -2040,6 +2047,7 @@ impl Connection {
                 stream_id,
                 stream_data_limit,
             } => {
+                self.stats.borrow_mut().frame_rx.stream_data_blocked += 1;
                 // Terminate connection with STREAM_STATE_ERROR if send-only
                 // stream (-transport 19.13)
                 if stream_id.is_send_only(self.role()) {
@@ -2062,6 +2070,7 @@ impl Connection {
                 }
             }
             Frame::StreamsBlocked { stream_type, .. } => {
+                self.stats.borrow_mut().frame_rx.streams_blocked += 1;
                 let local_max = match stream_type {
                     StreamType::BiDi => &mut self.indexes.local_max_stream_bidi,
                     StreamType::UniDi => &mut self.indexes.local_max_stream_uni,
@@ -2077,23 +2086,31 @@ impl Connection {
                 stateless_reset_token,
                 ..
             } => {
-                self.connection_ids
-                    .insert(sequence_number, (connection_id, stateless_reset_token));
+                self.stats.borrow_mut().frame_rx.new_connection_id += 1;
+                let cid = ConnectionId::from(connection_id);
+                let srt = stateless_reset_token.to_owned();
+                self.connection_ids.insert(sequence_number, (cid, srt));
             }
             Frame::RetireConnectionId { sequence_number } => {
+                self.stats.borrow_mut().frame_rx.retire_connection_id += 1;
                 self.connection_ids.remove(&sequence_number);
             }
-            Frame::PathChallenge { data } => self.flow_mgr.borrow_mut().path_response(data),
+            Frame::PathChallenge { data } => {
+                self.stats.borrow_mut().frame_rx.path_challenge += 1;
+                self.flow_mgr.borrow_mut().path_response(data);
+            }
             Frame::PathResponse { .. } => {
                 // Should never see this, we don't support migration atm and
                 // do not send path challenges
                 qwarn!([self], "Received Path Response");
+                self.stats.borrow_mut().frame_rx.path_response += 1;
             }
             Frame::ConnectionClose {
                 error_code,
                 frame_type,
                 reason_phrase,
             } => {
+                self.stats.borrow_mut().frame_rx.connection_close += 1;
                 let reason_phrase = String::from_utf8_lossy(&reason_phrase);
                 qinfo!(
                     [self],
@@ -2123,6 +2140,7 @@ impl Connection {
                 });
             }
             Frame::HandshakeDone => {
+                self.stats.borrow_mut().frame_rx.handshake_done += 1;
                 if self.role == Role::Server || !self.state.connected() {
                     return Err(Error::ProtocolViolation);
                 }
@@ -2212,6 +2230,9 @@ impl Connection {
         }
         self.handle_lost_packets(&lost_packets);
         qlog::packets_lost(&mut self.qlog, &lost_packets);
+        let stats = &mut self.stats.borrow_mut().frame_rx;
+        stats.ack += 1;
+        stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
         Ok(())
     }
 
