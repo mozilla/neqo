@@ -4,14 +4,29 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use neqo_common::Encoder;
 use std::cmp::Ordering;
 use std::mem;
 use std::time::Instant;
 
-use crate::frame::{Frame, FrameType};
+use crate::frame::{
+    FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION, FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
+    FRAME_TYPE_HANDSHAKE_DONE,
+};
 use crate::packet::PacketBuilder;
+use crate::path::PathId;
 use crate::recovery::RecoveryToken;
-use crate::{CloseError, ConnectionError};
+use crate::{ConnectionError, Error};
+
+/// `APPLICATION_CLOSE` produces the default CONNECTION_CLOSE frame that
+/// is sent when an application error code needs to be sent in an
+/// Initial or Handshake packet.
+const APPLICATION_CLOSE: &ClosingFrame = &ClosingFrame {
+    path: PathId::Primary,
+    error: ConnectionError::Transport(Error::ApplicationError),
+    frame_type: 0,
+    reason_phrase: Vec::new(),
+};
 
 #[derive(Clone, Debug, PartialEq, Ord, Eq)]
 /// The state of the Connection.
@@ -71,7 +86,80 @@ impl PartialOrd for State {
     }
 }
 
-type ClosingFrame = Frame<'static>;
+#[derive(Debug, Clone)]
+pub struct ClosingFrame {
+    path: PathId,
+    error: ConnectionError,
+    frame_type: FrameType,
+    reason_phrase: Vec<u8>,
+}
+
+impl ClosingFrame {
+    fn new(
+        path: PathId,
+        error: ConnectionError,
+        frame_type: FrameType,
+        message: impl AsRef<str>,
+    ) -> Self {
+        let reason_phrase = message.as_ref().as_bytes().to_vec();
+        Self {
+            path,
+            error,
+            frame_type,
+            reason_phrase,
+        }
+    }
+
+    pub fn path(&self) -> PathId {
+        self.path
+    }
+
+    pub fn sanitize(&self) -> &ClosingFrame {
+        if let ConnectionError::Application(_) = self.error {
+            APPLICATION_CLOSE
+        } else {
+            self
+        }
+    }
+
+    pub fn write_frame(&self, builder: &mut PacketBuilder) {
+        // Allow 8 bytes for the reason phrase to ensure that the only reason
+        // that there is insufficient space to truncate is because the reason
+        // phrase is too long by at least 4 bytes.
+        if builder.remaining() < 1 + 8 + 8 + 8 + 8 {
+            return;
+        }
+        match &self.error {
+            ConnectionError::Transport(e) => {
+                builder.encode_varint(FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT);
+                builder.encode_varint(e.code());
+                builder.encode_varint(self.frame_type);
+            }
+            ConnectionError::Application(code) => {
+                builder.encode_varint(FRAME_TYPE_CONNECTION_CLOSE_APPLICATION);
+                builder.encode_varint(*code);
+            }
+        }
+        // Truncate the reason phrase if it doesn't fit.
+        let reason = if builder.remaining() < Encoder::vvec_len(self.reason_phrase.len()) {
+            &self.reason_phrase[..builder.remaining() - 4]
+        } else {
+            &self.reason_phrase
+        };
+        builder.encode_vvec(reason);
+    }
+}
+
+impl Default for ClosingFrame {
+    fn default() -> Self {
+        Self {
+            path: PathId::Primary,
+            error: ConnectionError::Transport(Error::InternalError),
+            frame_type: 0,
+            reason_phrase: Vec::new(),
+        }
+    }
+}
 
 /// `StateSignaling` manages whether we need to send HANDSHAKE_DONE and CONNECTION_CLOSE.
 /// Valid state transitions are:
@@ -81,7 +169,7 @@ type ClosingFrame = Frame<'static>;
 /// * Closing/Draining -> CloseSent: after sending CONNECTION_CLOSE
 /// * CloseSent -> Closing: any time a new CONNECTION_CLOSE is needed
 /// * -> Reset: from any state in case of a stateless reset
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum StateSignaling {
     Idle,
     HandshakeDone,
@@ -96,7 +184,7 @@ pub enum StateSignaling {
 
 impl StateSignaling {
     pub fn handshake_done(&mut self) {
-        if *self != Self::Idle {
+        if !matches!(self, Self::Idle) {
             debug_assert!(false, "StateSignaling must be in Idle state.");
             return;
         }
@@ -104,47 +192,36 @@ impl StateSignaling {
     }
 
     pub fn write_done(&mut self, builder: &mut PacketBuilder) -> Option<RecoveryToken> {
-        if *self == Self::HandshakeDone && builder.remaining() >= 1 {
+        if matches!(self, Self::HandshakeDone) && builder.remaining() >= 1 {
             *self = Self::Idle;
-            builder.encode_varint(Frame::HandshakeDone.get_type());
+            builder.encode_varint(FRAME_TYPE_HANDSHAKE_DONE);
             Some(RecoveryToken::HandshakeDone)
         } else {
             None
         }
     }
 
-    fn make_close_frame(
-        error: ConnectionError,
-        frame_type: FrameType,
-        message: impl AsRef<str>,
-    ) -> ClosingFrame {
-        let reason_phrase = message.as_ref().as_bytes().to_owned();
-        Frame::ConnectionClose {
-            error_code: CloseError::from(error),
-            frame_type,
-            reason_phrase,
-        }
-    }
-
     pub fn close(
         &mut self,
+        path: PathId,
         error: ConnectionError,
         frame_type: FrameType,
         message: impl AsRef<str>,
     ) {
-        if *self != Self::Reset {
-            *self = Self::Closing(Self::make_close_frame(error, frame_type, message));
+        if !matches!(self, Self::Reset) {
+            *self = Self::Closing(ClosingFrame::new(path, error, frame_type, message));
         }
     }
 
     pub fn drain(
         &mut self,
+        path: PathId,
         error: ConnectionError,
         frame_type: FrameType,
         message: impl AsRef<str>,
     ) {
-        if *self != Self::Reset {
-            *self = Self::Draining(Self::make_close_frame(error, frame_type, message));
+        if !matches!(self, Self::Reset) {
+            *self = Self::Draining(ClosingFrame::new(path, error, frame_type, message));
         }
     }
 
@@ -153,13 +230,13 @@ impl StateSignaling {
         match self {
             Self::Closing(frame) => {
                 // When we are closing, we might need to send the close frame again.
-                let frame = mem::replace(frame, Frame::Padding);
+                let frame = mem::take(frame);
                 *self = Self::CloseSent(Some(frame.clone()));
                 Some(frame)
             }
             Self::Draining(frame) => {
                 // When we are draining, just send once.
-                let frame = mem::replace(frame, Frame::Padding);
+                let frame = mem::take(frame);
                 *self = Self::CloseSent(None);
                 Some(frame)
             }
@@ -170,7 +247,7 @@ impl StateSignaling {
     /// If a close can be sent again, prepare to send it again.
     pub fn send_close(&mut self) {
         if let Self::CloseSent(Some(frame)) = self {
-            let frame = mem::replace(frame, Frame::Padding);
+            let frame = mem::take(frame);
             *self = Self::Closing(frame);
         }
     }

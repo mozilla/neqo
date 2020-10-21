@@ -32,6 +32,7 @@ mod close;
 mod handshake;
 mod idle;
 mod keys;
+mod migration;
 mod recovery;
 mod resumption;
 mod stream;

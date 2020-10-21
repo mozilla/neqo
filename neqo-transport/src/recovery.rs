@@ -51,6 +51,7 @@ pub enum RecoveryToken {
     Flow(FlowControlRecoveryToken),
     HandshakeDone,
     NewToken(usize),
+    PathProbe([u8; 8]),
 }
 
 #[derive(Debug)]

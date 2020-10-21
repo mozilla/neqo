@@ -9,7 +9,7 @@ use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdRef, MAX_CONNECT
 use crate::crypto::{CryptoDxState, CryptoSpace, CryptoStates};
 use crate::{Error, Res};
 
-use neqo_common::{hex, hex_with_len, qtrace, Decoder, Encoder};
+use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::random;
 
 use std::convert::TryFrom;
@@ -274,6 +274,11 @@ impl PacketBuilder {
 
     /// Build the packet and return the encoder.
     pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder> {
+        if self.len() > self.limit {
+            qwarn!("Packet contents are more than the limit");
+            return Err(Error::InternalError);
+        }
+
         if self.offsets.len > 0 {
             self.write_len(crypto.expansion());
         }
