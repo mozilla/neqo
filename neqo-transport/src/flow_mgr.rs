@@ -77,11 +77,6 @@ impl FlowMgr {
         self.from_conn.insert(mem::discriminant(&frame), frame);
     }
 
-    pub fn path_response(&mut self, data: [u8; 8]) {
-        let frame = Frame::PathResponse { data };
-        self.from_conn.insert(mem::discriminant(&frame), frame);
-    }
-
     pub fn max_data(&mut self, maximum_data: u64) {
         let frame = Frame::MaxData { maximum_data };
         self.from_conn.insert(mem::discriminant(&frame), frame);
@@ -273,7 +268,6 @@ impl FlowMgr {
                     }
                 }
             }
-            Frame::PathResponse { .. } => qinfo!("Path Response lost, not re-sent"),
             _ => qwarn!("Unexpected Flow frame {:?} lost, not re-sent", token),
         }
     }
@@ -337,19 +331,6 @@ impl FlowMgr {
                 } => {
                     stats.stream_data_blocked += 1;
                     smallvec![stream_id.as_u64(), *stream_data_limit]
-                }
-
-                // A special case, just write it out and move on..
-                Frame::PathResponse { data } => {
-                    stats.path_response += 1;
-                    if builder.remaining() < 1 + data.len() {
-                        builder.encode_varint(frame.get_type());
-                        builder.encode(data);
-                        tokens.push(RecoveryToken::Flow(self.next().unwrap()));
-                        continue;
-                    } else {
-                        return;
-                    }
                 }
 
                 _ => unreachable!("{:?}", frame),

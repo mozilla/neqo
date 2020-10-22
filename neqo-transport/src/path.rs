@@ -134,7 +134,8 @@ impl Paths {
             }
         }
         // The updates here need to match the checks in `Path::received_on`.
-        // Here, we update the remote port number to ensure that we send
+        // Here, we update the remote port number to match the source port on the
+        // datagram that was received.  This ensures that we send subsequent
         // packets back to the right place.
         self.paths[0].update_port(d.source().port());
     }

@@ -1197,6 +1197,7 @@ impl Connection {
         if self.state.connected() {
             self.process_migration(path, d, packet, migrate);
         } else {
+            // This applies path validation for the handshake.
             let path_ref = &mut self.paths[path];
             if path_ref.is_handshake()
                 && (self.role == Role::Client
