@@ -119,7 +119,7 @@ impl Paths {
     }
 
     /// Set the identified path to be primary.
-    pub fn set_primary(&mut self, idx: PathId) {
+    pub fn migrate(&mut self, idx: PathId, d: &Datagram) {
         match idx {
             PathId::Primary => (),
             PathId::Temporary => panic!("a temporary path can't be made primary"),
@@ -133,13 +133,22 @@ impl Paths {
                 self.paths.swap(0, index_of);
             }
         }
+        // The updates here need to match the checks in `Path::received_on`.
+        // Here, we update the remote port number to ensure that we send
+        // packets back to the right place.
+        self.paths[0].update_port(d.source().port());
     }
 
     pub fn get(&self, idx: PathId) -> Option<&Path> {
         match idx {
             PathId::Temporary => self.temp.as_ref(),
             PathId::Primary => self.paths.get(0),
-            PathId::Id(id) => self.paths.iter().find(|p| p.id == id),
+            PathId::Id(id) => self
+                .temp
+                .as_ref()
+                .into_iter()
+                .chain(&self.paths)
+                .find(|p| p.id == id),
         }
     }
 
@@ -147,7 +156,12 @@ impl Paths {
         match idx {
             PathId::Temporary => self.temp.as_mut(),
             PathId::Primary => self.paths.get_mut(0),
-            PathId::Id(id) => self.paths.iter_mut().find(|p| p.id == id),
+            PathId::Id(id) => self
+                .temp
+                .as_mut()
+                .into_iter()
+                .chain(&mut self.paths)
+                .find(|p| p.id == id),
         }
     }
 
@@ -274,6 +288,11 @@ impl Path {
         self.id == 0
     }
 
+    /// Whether this path is a temporary one.
+    pub fn is_temporary(&self) -> bool {
+        self.remote_cid.is_none()
+    }
+
     /// By adding a remote connection ID, we make the path permanent
     /// and one that we will later send packets on.
     /// If `local_cid` is `None`, the existing value will be kept.
@@ -289,11 +308,20 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
+    /// This uses the full local socket address, but ignores the port number on the peer.
+    /// NAT rebinding to the same IP address and a different port is thereby ignored.
     fn received_on(&self, d: &Datagram) -> bool {
-        self.local == d.destination() && self.remote == d.source()
+        self.local == d.destination() && self.remote.ip() == d.source().ip()
     }
 
-    /// Set the current path as valid.
+    /// Update the remote port number.  Any flexibility we allow in `received_on`
+    /// need to be adjusted at this point.
+    fn update_port(&mut self, port: u16) {
+        self.remote.set_port(port);
+    }
+
+    /// Set the current path as valid.  This updates the time that the path was
+    /// last validated and cancels any path validation.
     pub fn set_valid(&mut self, now: Instant) {
         qdebug!([self], "Path validated");
         self.state = PathState::Valid;

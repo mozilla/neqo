@@ -326,7 +326,7 @@ impl Connection {
         c.crypto.states.init(quic_version, Role::Client, &dcid);
         c.remote_original_destination_cid = Some(dcid);
         let _ = c.paths.make_temporary(local_addr, remote_addr).unwrap();
-        c.initialize_hs_path();
+        c.setup_handshake_path();
         Ok(c)
     }
 
@@ -941,7 +941,7 @@ impl Connection {
         self.process_output(now)
     }
 
-    fn handle_retry(&mut self, packet: &PublicPacket) -> Res<()> {
+    fn handle_retry(&mut self, packet: &PublicPacket, now: Instant) -> Res<()> {
         qinfo!([self], "received Retry");
         if matches!(self.address_validation, AddressValidationInfo::Retry { .. }) {
             self.stats.borrow_mut().pkt_dropped("Extra Retry");
@@ -959,7 +959,9 @@ impl Connection {
         }
         // At this point, we should only have the connection ID that we generated.
         // Update to the one that the server prefers.
-        self.paths[PathId::Primary].set_remote_cid(packet.scid());
+        let path_ref = &mut self.paths[PathId::Primary];
+        path_ref.set_remote_cid(packet.scid());
+        path_ref.set_valid(now);
 
         let retry_scid = ConnectionId::from(packet.scid());
         qinfo!(
@@ -1114,7 +1116,7 @@ impl Connection {
                 }
             }
             (PacketType::Retry, State::WaitInitial, Role::Client) => {
-                self.handle_retry(packet)?;
+                self.handle_retry(packet, now)?;
                 return Ok(PreprocessResult::Next);
             }
             (PacketType::Handshake, State::WaitInitial, Role::Client)
@@ -1184,13 +1186,17 @@ impl Connection {
     fn postprocess(
         &mut self,
         path: PathId,
+        d: &Datagram,
         packet: &PublicPacket,
         migrate: bool,
         now: Instant,
     ) -> Res<()> {
         if self.state == State::WaitInitial {
             self.start_handshake(&packet, now)?;
-        } else if !self.state.connected() {
+        }
+        if self.state.connected() {
+            self.process_migration(path, d, packet, migrate);
+        } else {
             let path_ref = &mut self.paths[path];
             if path_ref.is_handshake()
                 && (self.role == Role::Client
@@ -1200,8 +1206,6 @@ impl Connection {
             {
                 path_ref.set_valid(now);
             }
-        } else {
-            self.process_migration(path, &packet, migrate);
         }
         Ok(())
     }
@@ -1218,24 +1222,15 @@ impl Connection {
         let path = path.unwrap();
 
         let res = self.input_path(path, d, now);
-        if res.is_err() {
-            // We need a permanent path to send the error message on.
-
-            // First try to fill in handshake details.
-            self.initialize_hs_path();
-            // Then try to use get a connection ID.
-            let _ = self.ensure_permanent(path);
-        } else {
-            self.paths.discard_temporary();
-        }
         self.absorb_error(path, now, res);
+        self.paths.discard_temporary();
     }
 
     fn input_path(&mut self, path: PathId, d: Datagram, now: Instant) -> Res<()> {
         let mut slc = &d[..];
         let mut dcid = None;
 
-        qtrace!([self], "input {}", hex(&**d));
+        qtrace!([self], "{} input {}", self.paths[path], hex(&**d));
 
         // Handle each packet in the datagram.
         while !slc.is_empty() {
@@ -1271,16 +1266,19 @@ impl Connection {
                         &payload[..],
                     );
 
+                    qlog::packet_received(&mut self.qlog, &packet, &payload);
                     let space = PNSpace::from(payload.packet_type());
                     if self.acks.get_mut(space).unwrap().is_duplicate(payload.pn()) {
                         qdebug!([self], "Duplicate packet {}-{}", space, payload.pn());
                         self.stats.borrow_mut().dups_rx += 1;
-                        continue;
+                    } else {
+                        let res = self.process_packet(path, &payload, now);
+                        if res.is_err() {
+                            self.ensure_error_path(path, &packet);
+                        }
+                        let migrate = res?;
+                        self.postprocess(path, &d, &packet, migrate, now)?;
                     }
-
-                    qlog::packet_received(&mut self.qlog, &packet, &payload);
-                    let migrate = self.process_packet(path, &payload, now)?;
-                    self.postprocess(path, &packet, migrate, now)?;
                 }
                 Err(e) => {
                     match e {
@@ -1363,22 +1361,33 @@ impl Connection {
     /// During connection setup, the first path needs to be setup.
     /// This uses the connection IDs that were provided during the handshake
     /// to setup that path.
-    fn initialize_hs_path(&mut self) {
-        // Only do this if the temporary path is the handshake path.
-        if self.paths[PathId::Temporary].is_handshake() {
-            let _ = self.paths.ensure_permanent(
-                PathId::Temporary,
-                Some(self.local_initial_source_cid.clone()),
-                // Ideally we know what the peer wants us to use for the remote CID.
-                // But we will use our own guess if necessary.
-                ConnectionIdEntry::initial_remote(
-                    self.remote_initial_source_cid
-                        .as_ref()
-                        .or_else(|| self.remote_original_destination_cid.as_ref())
-                        .unwrap()
-                        .clone(),
-                ),
-            );
+    fn setup_handshake_path(&mut self) {
+        let _ = self.paths.ensure_permanent(
+            PathId::Temporary,
+            Some(self.local_initial_source_cid.clone()),
+            // Ideally we know what the peer wants us to use for the remote CID.
+            // But we will use our own guess if necessary.
+            ConnectionIdEntry::initial_remote(
+                self.remote_initial_source_cid
+                    .as_ref()
+                    .or_else(|| self.remote_original_destination_cid.as_ref())
+                    .unwrap()
+                    .clone(),
+            ),
+        );
+    }
+
+    /// After an error, a permanent path is needed to send the CONNECTION_CLOSE.
+    /// This attempts to ensure that this exists.
+    fn ensure_error_path(&mut self, path: PathId, packet: &PublicPacket) {
+        if self.paths[path].is_temporary() {
+            // First try to fill in handshake details.
+            if packet.packet_type() == PacketType::Initial {
+                self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
+                self.setup_handshake_path();
+            }
+            // Then try to get a usable connection ID.
+            let _ = self.ensure_permanent(path);
         }
     }
 
@@ -1393,7 +1402,7 @@ impl Connection {
             let cid = ConnectionIdEntry::new(u64::MAX, ConnectionId::from(packet.dcid()), ());
             self.valid_cids.add_local(cid);
             // Make a path on which to run the handshake.
-            self.initialize_hs_path();
+            self.setup_handshake_path();
 
             self.zero_rtt_state = match self.crypto.enable_0rtt(self.role) {
                 Ok(true) => {
@@ -1432,7 +1441,13 @@ impl Connection {
         }
     }
 
-    fn process_migration(&mut self, path: PathId, p: &PublicPacket, migrate: bool) {
+    fn process_migration(
+        &mut self,
+        path: PathId,
+        d: &Datagram,
+        packet: &PublicPacket,
+        migrate: bool,
+    ) {
         if !migrate {
             qtrace!([self], "No migration necessary");
             return;
@@ -1441,13 +1456,13 @@ impl Connection {
             qdebug!([self], "Ignoring migration by server");
             return;
         }
-        if !self.valid_cids.contains(p.dcid()) {
+        if !self.valid_cids.contains(packet.dcid()) {
             qdebug!([self], "Ignoring migration with invalid CID");
             return;
         }
 
         if let Ok(path) = self.ensure_permanent(path) {
-            self.paths.set_primary(path);
+            self.paths.migrate(path, d);
         } else {
             qinfo!([self], "Peer migrated, but no connection ID available");
         }
@@ -1611,7 +1626,11 @@ impl Connection {
             self.flow_mgr
                 .borrow_mut()
                 .write_frames(builder, &mut tokens, stats);
-            self.paths.write_frames(builder, &mut tokens, stats);
+
+            // Avoid sending probes until the handshake completes.
+            if self.state.connected() {
+                self.paths.write_frames(builder, &mut tokens, stats);
+            }
 
             self.send_streams.write_frames(builder, &mut tokens, stats);
             self.new_token.write_frames(builder, &mut tokens, stats);
@@ -1721,7 +1740,11 @@ impl Connection {
                 initial_sent = Some(sent);
                 needs_padding = true;
             } else {
-                if pt != PacketType::ZeroRtt && self.role == Role::Client {
+                if pt == PacketType::Short
+                    || (pt == PacketType::Handshake && self.role == Role::Client)
+                {
+                    // TODO(mt) we still need to pad Initial packets from the server when
+                    // sending 1-RTT packets, but we can't do that with the current padding scheme.
                     needs_padding = false;
                 }
                 self.loss_recovery.on_packet_sent(sent);
@@ -2360,8 +2383,12 @@ impl Connection {
         if self.role == Role::Server {
             // Remove the randomized client CID from the list of acceptable CIDs.
             self.valid_cids.retire(u64::MAX);
+            // Mark the path as validated, if it isn't already.
+            let path_ref = &mut self.paths[PathId::Primary];
+            debug_assert!(path_ref.is_handshake());
+            path_ref.set_valid(now);
             // Generate a qlog event that the server connection started.
-            qlog::server_connection_started(&mut self.qlog, &self.paths[PathId::Primary]);
+            qlog::server_connection_started(&mut self.qlog, path_ref);
         } else {
             self.zero_rtt_state = if self.crypto.tls.info().unwrap().early_data_accepted() {
                 ZeroRttState::AcceptedClient

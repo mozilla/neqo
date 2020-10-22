@@ -434,7 +434,7 @@ fn coalesce_05rtt() {
     maybe_authenticate(&mut client);
     let c3 = client.process(None, now).dgram();
     assert!(c3.is_some());
-    assert_eq!(client.stats().dropped_rx, 1); // Just Initial padding.
+    assert_eq!(client.stats().dropped_rx, 0);
     assert_eq!(client.stats().packets_rx, 4);
     assert_eq!(client.stats().saved_datagrams, 1);
 
@@ -447,7 +447,7 @@ fn coalesce_05rtt() {
     let _ = client.process(s3, now).dgram();
     assert_eq!(*client.state(), State::Confirmed);
 
-    assert_eq!(client.stats().dropped_rx, 1); // Just Initial padding.
+    assert_eq!(client.stats().dropped_rx, 0);
 }
 
 #[test]
