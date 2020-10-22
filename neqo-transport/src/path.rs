@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![deny(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
 
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
@@ -12,7 +13,7 @@ use std::net::SocketAddr;
 use std::ops::{Index, IndexMut};
 use std::time::Instant;
 
-use crate::cid::{ConnectionId, ConnectionIdRef, RemoteConnectionIdEntry};
+use crate::cid::{ConnectionId, ConnectionIdEntry, ConnectionIdRef, RemoteConnectionIdEntry};
 use crate::frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
@@ -185,13 +186,13 @@ impl Paths {
         }
     }
 
-    pub fn path_response(&mut self, response: &[u8; 8], now: Instant) {
+    pub fn path_response(&mut self, response: [u8; 8], now: Instant) {
         for p in &mut self.paths {
             p.path_response(response, now);
         }
     }
 
-    pub fn lost(&mut self, lost: &[u8; 8]) {
+    pub fn lost(&mut self, lost: [u8; 8]) {
         for p in &mut self.paths {
             p.lost(lost);
         }
@@ -227,7 +228,7 @@ enum PathState {
 impl PathState {
     ///  Determine whether the current state requires probing.
     fn probe_needed(&self) -> bool {
-        matches!(self, PathState::ProbeNeeded { .. })
+        matches!(self, Self::ProbeNeeded { .. })
     }
 }
 
@@ -396,9 +397,9 @@ impl Path {
     }
 
     /// Handle a `PATH_RESPONSE` frame.
-    pub fn path_response(&mut self, response: &[u8; 8], now: Instant) {
+    pub fn path_response(&mut self, response: [u8; 8], now: Instant) {
         if let PathState::Probing { data, .. } = &self.state {
-            if response == data {
+            if response == *data {
                 self.set_valid(now);
             }
         }
@@ -459,15 +460,15 @@ impl Path {
             builder.encode(&data);
 
             stats.path_challenge += 1;
-            tokens.push(RecoveryToken::PathProbe(data.clone()));
+            tokens.push(RecoveryToken::PathProbe(data));
 
             self.state = PathState::Probing { probe_count, data };
         }
     }
 
-    pub fn lost(&mut self, lost: &[u8; 8]) {
+    pub fn lost(&mut self, lost: [u8; 8]) {
         if let PathState::Probing { data, .. } = &self.state {
-            if data == lost {
+            if lost == *data {
                 self.probe();
             }
         }
@@ -482,7 +483,9 @@ impl Display for Path {
             self.id,
             self.local,
             self.remote,
-            self.remote_cid.as_ref().map(|r| r.connection_id())
+            self.remote_cid
+                .as_ref()
+                .map(ConnectionIdEntry::connection_id)
         )
     }
 }

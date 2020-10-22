@@ -114,7 +114,7 @@ impl ClosingFrame {
         self.path
     }
 
-    pub fn sanitize(&self) -> &ClosingFrame {
+    pub fn sanitize(&self) -> &Self {
         if let ConnectionError::Application(_) = self.error {
             APPLICATION_CLOSE
         } else {

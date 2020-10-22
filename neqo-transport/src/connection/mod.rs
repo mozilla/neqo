@@ -2220,7 +2220,7 @@ impl Connection {
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
-                self.paths.path_response(&data, now);
+                self.paths.path_response(data, now);
             }
             Frame::ConnectionClose {
                 error_code,
@@ -2289,7 +2289,7 @@ impl Connection {
                     ),
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
                     RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
-                    RecoveryToken::PathProbe(data) => self.paths.lost(data),
+                    RecoveryToken::PathProbe(data) => self.paths.lost(*data),
                 }
             }
         }
