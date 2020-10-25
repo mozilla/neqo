@@ -12,8 +12,8 @@ use neqo_crypto::{init_db, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionEvent, FixedConnectionIdManager, QuicVersion,
-    State,
+    CongestionControlAlgorithm, Connection, ConnectionEvent, FixedConnectionIdGenerator,
+    QuicVersion, State,
 };
 
 use std::cell::RefCell;
@@ -83,7 +83,7 @@ pub fn default_client() -> Connection {
     Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(3))),
         loopback(),
         loopback(),
         &CongestionControlAlgorithm::NewReno,
@@ -110,7 +110,7 @@ fn make_default_server(alpn: &[impl AsRef<str>]) -> Connection {
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(5))),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
@@ -161,7 +161,7 @@ pub fn default_http3_client() -> Http3Client {
     fixture_init();
     Http3Client::new(
         DEFAULT_SERVER_NAME,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(3))),
         loopback(),
         loopback(),
         &CongestionControlAlgorithm::NewReno,
@@ -187,7 +187,7 @@ pub fn default_http3_server() -> Http3Server {
         DEFAULT_KEYS,
         DEFAULT_ALPN_H3,
         anti_replay(),
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(5))),
         QpackSettings {
             max_table_size_encoder: 100,
             max_table_size_decoder: 100,

@@ -22,7 +22,7 @@ use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken,
 use neqo_qpack::{stats::Stats, QpackSettings};
 use neqo_transport::{
     AppError, CongestionControlAlgorithm, Connection, ConnectionEvent, ConnectionId,
-    ConnectionIdManager, Output, QuicVersion, StreamId, StreamType, ZeroRttState,
+    ConnectionIdGenerator, Output, QuicVersion, StreamId, StreamType, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -90,7 +90,7 @@ impl Http3Client {
     /// the socket can't be created or configured.
     pub fn new(
         server_name: &str,
-        cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
+        cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         cc_algorithm: &CongestionControlAlgorithm,
@@ -712,7 +712,7 @@ mod tests {
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
-        CloseError, CongestionControlAlgorithm, ConnectionEvent, FixedConnectionIdManager,
+        CloseError, CongestionControlAlgorithm, ConnectionEvent, FixedConnectionIdGenerator,
         QuicVersion, State, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
@@ -733,7 +733,7 @@ mod tests {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
+            Rc::new(RefCell::new(FixedConnectionIdGenerator::new(3))),
             loopback(),
             loopback(),
             &CongestionControlAlgorithm::NewReno,
@@ -3408,7 +3408,7 @@ mod tests {
         let mut server = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN_H3,
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+            Rc::new(RefCell::new(FixedConnectionIdGenerator::new(10))),
             &CongestionControlAlgorithm::NewReno,
             QuicVersion::default(),
         )

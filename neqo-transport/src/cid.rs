@@ -13,8 +13,11 @@ use neqo_crypto::random;
 
 use smallvec::SmallVec;
 use std::borrow::Borrow;
+use std::cell::{Ref, RefCell};
 use std::cmp::max;
 use std::convert::AsRef;
+use std::ops::Deref;
+use std::rc::Rc;
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
 pub const LOCAL_ACTIVE_CID_LIMIT: usize = 8;
@@ -146,7 +149,7 @@ pub trait ConnectionIdDecoder {
     fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>>;
 }
 
-pub trait ConnectionIdManager: ConnectionIdDecoder {
+pub trait ConnectionIdGenerator: ConnectionIdDecoder {
     fn generate_cid(&mut self) -> ConnectionId;
     fn as_decoder(&self) -> &dyn ConnectionIdDecoder;
 }
@@ -270,6 +273,35 @@ impl ConnectionIdStore<[u8; 16]> {
 impl ConnectionIdStore<()> {
     pub fn add_local(&mut self, entry: ConnectionIdEntry<()>) {
         self.cids.push(entry);
+    }
+}
+
+pub struct ConnectionIdDecoderRef<'a> {
+    generator: Ref<'a, dyn ConnectionIdGenerator>,
+}
+
+// Ideally this would be an implementation of `Deref`, but it doesn't
+// seem to be possible to convince the compiler to build anything useful.
+impl<'a: 'b, 'b> ConnectionIdDecoderRef<'a> {
+    pub fn as_ref(&'a self) -> &'b dyn ConnectionIdDecoder {
+        self.generator.as_decoder()
+    }
+}
+
+pub struct ConnectionIdManager {
+    /// The `ConnectionIdGenerator` instance that is used to create connection IDs.
+    generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
+}
+
+impl ConnectionIdManager {
+    pub fn new(generator: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
+        Self { generator }
+    }
+
+    pub fn decoder(&self) -> ConnectionIdDecoderRef {
+        ConnectionIdDecoderRef {
+            generator: self.generator.deref().borrow(),
+        }
     }
 }
 

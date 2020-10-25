@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, FixedConnectionIdManager, Output, State, LOCAL_IDLE_TIMEOUT};
+use super::super::{Connection, FixedConnectionIdGenerator, Output, State, LOCAL_IDLE_TIMEOUT};
 use super::{
     assert_error, connect_force_idle, connect_with_rtt, default_client, default_server, get_tokens,
     handshake, maybe_authenticate, send_something, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
@@ -103,7 +103,7 @@ fn no_alpn() {
     let mut client = Connection::new_client(
         "example.com",
         &["bad-alpn"],
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(9))),
         loopback(),
         loopback(),
         &CongestionControlAlgorithm::NewReno,
@@ -177,7 +177,7 @@ fn crypto_frame_split() {
     let mut server = Connection::new_server(
         test_fixture::LONG_CERT_KEYS,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(6))),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
@@ -233,7 +233,7 @@ fn chacha20poly1305() {
     let mut client = Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(0))),
         loopback(),
         loopback(),
         &CongestionControlAlgorithm::NewReno,

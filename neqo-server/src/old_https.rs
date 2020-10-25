@@ -20,7 +20,7 @@ use neqo_common::{event::Provider, Datagram};
 use neqo_crypto::{AllowZeroRtt, AntiReplay, Cipher};
 use neqo_http3::Error;
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
-use neqo_transport::{ConnectionEvent, ConnectionIdManager, Output, State};
+use neqo_transport::{ConnectionEvent, ConnectionIdGenerator, Output, State};
 
 use super::{qns_read_response, Args, HttpServer};
 
@@ -41,7 +41,7 @@ impl Http09Server {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
-        cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
+        cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
     ) -> Result<Self, Error> {
         Ok(Self {
             server: Server::new(

@@ -7,7 +7,7 @@
 #![deny(clippy::pedantic)]
 
 use super::{
-    Connection, ConnectionError, FixedConnectionIdManager, Output, State, LOCAL_IDLE_TIMEOUT,
+    Connection, ConnectionError, FixedConnectionIdGenerator, Output, State, LOCAL_IDLE_TIMEOUT,
 };
 use crate::addr_valid::{AddressValidation, ValidateAddress};
 use crate::cc::CWND_INITIAL_PKTS;
@@ -54,7 +54,7 @@ pub fn default_client() -> Connection {
     Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(3))),
         loopback(),
         loopback(),
         &CongestionControlAlgorithm::NewReno,
@@ -68,7 +68,7 @@ pub fn default_server() -> Connection {
     let mut c = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(5))),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )

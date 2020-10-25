@@ -16,7 +16,7 @@ use neqo_common::{qtrace, Datagram};
 use neqo_crypto::{AntiReplay, Cipher};
 use neqo_qpack::QpackSettings;
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
-use neqo_transport::{ConnectionIdManager, Output};
+use neqo_transport::{ConnectionIdGenerator, Output};
 use std::cell::RefCell;
 use std::cell::RefMut;
 use std::collections::HashMap;
@@ -50,7 +50,7 @@ impl Http3Server {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
-        cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
+        cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         qpack_settings: QpackSettings,
     ) -> Res<Self> {
         Ok(Self {
@@ -231,7 +231,7 @@ mod tests {
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_qpack::QpackSettings;
     use neqo_transport::{
-        CloseError, Connection, ConnectionEvent, FixedConnectionIdManager, State, StreamType,
+        CloseError, Connection, ConnectionEvent, FixedConnectionIdGenerator, State, StreamType,
         ZeroRttState,
     };
     use std::ops::{Deref, DerefMut};
@@ -252,7 +252,7 @@ mod tests {
             DEFAULT_KEYS,
             DEFAULT_ALPN,
             anti_replay(),
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+            Rc::new(RefCell::new(FixedConnectionIdGenerator::new(5))),
             settings,
         )
         .expect("create a server")

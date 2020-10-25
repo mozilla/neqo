@@ -29,8 +29,8 @@ use neqo_crypto::{
 use crate::addr_valid::{AddressValidation, NewTokenState};
 use crate::cc::CongestionControlAlgorithm;
 use crate::cid::{
-    ConnectionId, ConnectionIdDecoder, ConnectionIdEntry, ConnectionIdManager, ConnectionIdRef,
-    ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
+    ConnectionId, ConnectionIdDecoder, ConnectionIdEntry, ConnectionIdGenerator,
+    ConnectionIdManager, ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
 };
 use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
@@ -154,24 +154,21 @@ enum PreprocessResult {
     Continue,
 }
 
-/// Alias the common form for ConnectionIdManager.
-type CidMgr = Rc<RefCell<dyn ConnectionIdManager>>;
-
-/// An FixedConnectionIdManager produces random connection IDs of a fixed length.
-pub struct FixedConnectionIdManager {
+/// An FixedConnectionIdGenerator produces random connection IDs of a fixed length.
+pub struct FixedConnectionIdGenerator {
     len: usize,
 }
-impl FixedConnectionIdManager {
+impl FixedConnectionIdGenerator {
     pub fn new(len: usize) -> Self {
         Self { len }
     }
 }
-impl ConnectionIdDecoder for FixedConnectionIdManager {
+impl ConnectionIdDecoder for FixedConnectionIdGenerator {
     fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
         dec.decode(self.len).map(ConnectionIdRef::from)
     }
 }
-impl ConnectionIdManager for FixedConnectionIdManager {
+impl ConnectionIdGenerator for FixedConnectionIdGenerator {
     fn generate_cid(&mut self) -> ConnectionId {
         ConnectionId::generate(self.len)
     }
@@ -247,15 +244,17 @@ pub struct Connection {
     tps: Rc<RefCell<TransportParametersHandler>>,
     /// What we are doing with 0-RTT.
     zero_rtt_state: ZeroRttState,
-    /// This object will generate connection IDs for the connection.
-    cid_manager: CidMgr,
     /// All of the network paths that we are aware of.
     paths: Paths,
+    /// This object will generate connection IDs for the connection.
+    cid_manager: ConnectionIdManager,
     /// The connection IDs that we will accept.
     /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     valid_cids: ConnectionIdStore<()>,
     address_validation: AddressValidationInfo,
+    /// The connection IDs that were provided by the peer.
+    connection_ids: ConnectionIdStore<[u8; 16]>,
 
     /// Since we need to communicate this to our peer in tparams, setting this
     /// value is part of constructing the struct.
@@ -275,7 +274,6 @@ pub struct Connection {
     pub(crate) acks: AckTracker,
     idle_timeout: IdleTimeout,
     pub(crate) indexes: StreamIndexes,
-    connection_ids: ConnectionIdStore<[u8; 16]>,
     pub(crate) send_streams: SendStreams,
     pub(crate) recv_streams: RecvStreams,
     pub(crate) flow_mgr: Rc<RefCell<FlowMgr>>,
@@ -308,7 +306,7 @@ impl Connection {
     pub fn new_client(
         server_name: &str,
         protocols: &[impl AsRef<str>],
-        cid_manager: CidMgr,
+        cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         cc_algorithm: &CongestionControlAlgorithm,
@@ -318,7 +316,7 @@ impl Connection {
         let mut c = Self::new(
             Role::Client,
             Client::new(server_name)?.into(),
-            cid_manager,
+            cid_generator,
             protocols,
             cc_algorithm,
             quic_version,
@@ -334,14 +332,14 @@ impl Connection {
     pub fn new_server(
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
-        cid_manager: CidMgr,
+        cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         Self::new(
             Role::Server,
             Server::new(certs)?.into(),
-            cid_manager,
+            cid_generator,
             protocols,
             cc_algorithm,
             quic_version,
@@ -388,7 +386,7 @@ impl Connection {
     fn new(
         role: Role,
         agent: Agent,
-        cid_manager: CidMgr,
+        cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         protocols: &[impl AsRef<str>],
         cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
@@ -397,7 +395,7 @@ impl Connection {
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
 
         // Setup the local connection ID.
-        let local_initial_source_cid = cid_manager.borrow_mut().generate_cid();
+        let local_initial_source_cid = cid_generator.borrow_mut().generate_cid();
         tphandler.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
             local_initial_source_cid.to_vec(),
@@ -413,7 +411,7 @@ impl Connection {
         let c = Self {
             role,
             state: State::Init,
-            cid_manager,
+            cid_manager: ConnectionIdManager::new(cid_generator),
             paths: Paths::default(),
             valid_cids,
             tps: tphandler,
@@ -1237,7 +1235,7 @@ impl Connection {
         while !slc.is_empty() {
             self.stats.borrow_mut().packets_rx += 1;
             let (packet, remainder) =
-                match PublicPacket::decode(slc, self.cid_manager.borrow().as_decoder()) {
+                match PublicPacket::decode(slc, self.cid_manager.decoder().as_ref()) {
                     Ok((packet, remainder)) => (packet, remainder),
                     Err(e) => {
                         qinfo!([self], "Garbage packet: {}", e);

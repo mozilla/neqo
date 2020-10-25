@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, FixedConnectionIdManager};
+use super::super::{Connection, FixedConnectionIdGenerator};
 use super::{connect, default_client, default_server, exchange_ticket};
 use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
@@ -132,7 +132,7 @@ fn zero_rtt_send_reject() {
     let mut server = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(10))),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )

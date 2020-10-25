@@ -33,8 +33,8 @@ pub mod tparams;
 mod tracking;
 
 pub use self::cc::CongestionControlAlgorithm;
-pub use self::cid::{ConnectionId, ConnectionIdManager};
-pub use self::connection::{Connection, FixedConnectionIdManager, Output, State, ZeroRttState};
+pub use self::cid::{ConnectionId, ConnectionIdGenerator};
+pub use self::connection::{Connection, FixedConnectionIdGenerator, Output, State, ZeroRttState};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;

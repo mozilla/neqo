@@ -17,7 +17,7 @@ use neqo_crypto::{
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output,
+    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdGenerator, Output,
     QuicVersion, State, StreamType,
 };
 use test_fixture::{self, assertions, default_client, loopback, now, split_datagram};
@@ -37,7 +37,7 @@ fn default_server() -> Server {
         test_fixture::DEFAULT_ALPN,
         test_fixture::anti_replay(),
         Box::new(AllowZeroRtt {}),
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
+        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(9))),
     )
     .expect("should create a server")
 }

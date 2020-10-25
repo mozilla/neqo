@@ -15,7 +15,7 @@ use neqo_crypto::{AntiReplay, Cipher, ZeroRttCheckResult, ZeroRttChecker};
 pub use crate::addr_valid::ValidateAddress;
 use crate::addr_valid::{AddressValidation, AddressValidationResult};
 use crate::cc::CongestionControlAlgorithm;
-use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
+use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef};
 use crate::connection::{Connection, Output, State};
 use crate::packet::{PacketBuilder, PacketType, PublicPacket};
 use crate::{QuicVersion, Res};
@@ -43,7 +43,6 @@ const TIMER_GRANULARITY: Duration = Duration::from_millis(10);
 const TIMER_CAPACITY: usize = 16384;
 
 type StateRef = Rc<RefCell<ServerConnectionState>>;
-type CidMgr = Rc<RefCell<dyn ConnectionIdManager>>;
 type ConnectionTableRef = Rc<RefCell<HashMap<ConnectionId, StateRef>>>;
 
 #[derive(Debug)]
@@ -128,8 +127,8 @@ pub struct Server {
     anti_replay: AntiReplay,
     /// A function for determining if 0-RTT can be accepted.
     zero_rtt_checker: ServerZeroRttChecker,
-    /// A connection ID manager.
-    cid_manager: CidMgr,
+    /// A connection ID generator.
+    cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
     /// Active connection attempts, keyed by `AttemptKey`.  Initial packets with
     /// the same key are routed to the connection that was first accepted.
     /// This is cleared out when the connection is closed or established.
@@ -157,7 +156,7 @@ impl Server {
     /// * `zero_rtt_checker` determines whether 0-RTT should be accepted. This
     ///   will be passed the value of the `extra` argument that was passed to
     ///   `Connection::send_ticket` to see if it is OK.
-    /// * `cid_manager` is responsible for generating connection IDs and parsing them;
+    /// * `cid_generator` is responsible for generating connection IDs and parsing them;
     ///   connection IDs produced by the manager cannot be zero-length.
     pub fn new(
         now: Instant,
@@ -165,7 +164,7 @@ impl Server {
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
         zero_rtt_checker: Box<dyn ZeroRttChecker>,
-        cid_manager: CidMgr,
+        cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
     ) -> Res<Self> {
         let validation = AddressValidation::new(now, ValidateAddress::Never)?;
         Ok(Self {
@@ -174,7 +173,7 @@ impl Server {
             ciphers: Vec::new(),
             anti_replay,
             zero_rtt_checker: ServerZeroRttChecker::new(zero_rtt_checker),
-            cid_manager,
+            cid_generator,
             active_attempts: HashMap::default(),
             connections: Rc::default(),
             active: HashSet::default(),
@@ -292,7 +291,7 @@ impl Server {
                     qerror!([self], "unable to generate token, dropping packet");
                     return None;
                 };
-                let new_dcid = self.cid_manager.borrow_mut().generate_cid();
+                let new_dcid = self.cid_generator.borrow_mut().generate_cid();
                 let packet = PacketBuilder::retry(
                     initial.quic_version,
                     &initial.src_cid,
@@ -396,9 +395,9 @@ impl Server {
         // The internal connection ID manager that we use is not used directly.
         // Instead, wrap it so that we can save connection IDs.
 
-        let cid_mgr = Rc::new(RefCell::new(ServerConnectionIdManager {
+        let cid_mgr = Rc::new(RefCell::new(ServerConnectionIdGenerator {
             c: Weak::new(),
-            cid_manager: Rc::clone(&self.cid_manager),
+            cid_generator: Rc::clone(&self.cid_generator),
             connections: Rc::clone(&self.connections),
             saved_cids: Vec::new(),
         }));
@@ -442,7 +441,7 @@ impl Server {
 
         // This is only looking at the first packet header in the datagram.
         // All packets in the datagram are routed to the same connection.
-        let res = PublicPacket::decode(&dgram[..], self.cid_manager.borrow().as_decoder());
+        let res = PublicPacket::decode(&dgram[..], self.cid_generator.borrow().as_decoder());
         let (packet, _remainder) = match res {
             Ok(res) => res,
             _ => {
@@ -579,18 +578,18 @@ impl PartialEq for ActiveConnectionRef {
 
 impl Eq for ActiveConnectionRef {}
 
-struct ServerConnectionIdManager {
+struct ServerConnectionIdGenerator {
     c: Weak<RefCell<ServerConnectionState>>,
     connections: ConnectionTableRef,
-    cid_manager: CidMgr,
+    cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
     saved_cids: Vec<ConnectionId>,
 }
 
-impl ServerConnectionIdManager {
+impl ServerConnectionIdGenerator {
     pub fn set_connection(&mut self, c: StateRef) {
         let saved = std::mem::replace(&mut self.saved_cids, Vec::with_capacity(0));
         for cid in saved {
-            qtrace!("ServerConnectionIdManager inserting saved cid {}", cid);
+            qtrace!("ServerConnectionIdGenerator inserting saved cid {}", cid);
             self.insert_cid(cid, Rc::clone(&c));
         }
         self.c = Rc::downgrade(&c);
@@ -602,21 +601,21 @@ impl ServerConnectionIdManager {
     }
 }
 
-impl ConnectionIdDecoder for ServerConnectionIdManager {
+impl ConnectionIdDecoder for ServerConnectionIdGenerator {
     fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
-        self.cid_manager.borrow_mut().decode_cid(dec)
+        self.cid_generator.borrow_mut().decode_cid(dec)
     }
 }
 
-impl ConnectionIdManager for ServerConnectionIdManager {
+impl ConnectionIdGenerator for ServerConnectionIdGenerator {
     fn generate_cid(&mut self) -> ConnectionId {
-        let cid = self.cid_manager.borrow_mut().generate_cid();
+        let cid = self.cid_generator.borrow_mut().generate_cid();
         if let Some(rc) = self.c.upgrade() {
             self.insert_cid(cid.clone(), rc);
         } else {
             // This function can be called before the connection is set.
             // So save any connection IDs until that hookup happens.
-            qtrace!("ServerConnectionIdManager saving cid {}", cid);
+            qtrace!("ServerConnectionIdGenerator saving cid {}", cid);
             self.saved_cids.push(cid.clone());
         }
         cid
