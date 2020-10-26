@@ -248,10 +248,6 @@ pub struct Connection {
     paths: Paths,
     /// This object will generate connection IDs for the connection.
     cid_manager: ConnectionIdManager,
-    /// The connection IDs that we will accept.
-    /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
-    /// During the handshake at the server, it also includes the randomized DCID pick by the client.
-    valid_cids: ConnectionIdStore<()>,
     address_validation: AddressValidationInfo,
     /// The connection IDs that were provided by the peer.
     connection_ids: ConnectionIdStore<[u8; 16]>,
@@ -400,10 +396,7 @@ impl Connection {
             tparams::INITIAL_SOURCE_CONNECTION_ID,
             local_initial_source_cid.to_vec(),
         );
-        let mut valid_cids = ConnectionIdStore::default();
-        valid_cids.add_local(ConnectionIdEntry::initial_local(
-            local_initial_source_cid.clone(),
-        ));
+        let cid_manager = ConnectionIdManager::new(cid_generator, local_initial_source_cid.clone());
 
         let crypto = Crypto::new(agent, protocols, tphandler.clone())?;
 
@@ -411,9 +404,8 @@ impl Connection {
         let c = Self {
             role,
             state: State::Init,
-            cid_manager: ConnectionIdManager::new(cid_generator),
             paths: Paths::default(),
-            valid_cids,
+            cid_manager,
             tps: tphandler,
             zero_rtt_state: ZeroRttState::Init,
             address_validation: AddressValidationInfo::None,
@@ -1125,7 +1117,7 @@ impl Connection {
                 // in case.  As we don't have an RTT estimate yet, this helps
                 // when there is a short RTT and losses.
                 if dcid.is_none()
-                    && self.valid_cids.contains(packet.dcid())
+                    && self.cid_manager.is_valid(packet.dcid())
                     && self.stats.borrow().saved_datagrams <= EXTRA_INITIALS
                 {
                     self.crypto.resend_unacked(PNSpace::Initial);
@@ -1151,7 +1143,7 @@ impl Connection {
             }
             State::WaitInitial => PreprocessResult::Continue,
             State::Handshaking | State::Connected | State::Confirmed => {
-                if !self.valid_cids.contains(packet.dcid()) {
+                if !self.cid_manager.is_valid(packet.dcid()) {
                     self.stats
                         .borrow_mut()
                         .pkt_dropped(format!("Invalid DCID {:?}", packet.dcid()));
@@ -1398,8 +1390,8 @@ impl Connection {
             // A server needs to accept the client's selected CID until the
             // server's connection ID is received.  Use an invalid sequence number
             // so that it is easy to identify and remove.
-            let cid = ConnectionIdEntry::new(u64::MAX, ConnectionId::from(packet.dcid()), ());
-            self.valid_cids.add_local(cid);
+            self.cid_manager
+                .add_handshake_cid(ConnectionId::from(packet.dcid()));
             // Make a path on which to run the handshake.
             self.setup_handshake_path();
 
@@ -1455,7 +1447,7 @@ impl Connection {
             qdebug!([self], "Ignoring migration by server");
             return;
         }
-        if !self.valid_cids.contains(packet.dcid()) {
+        if !self.cid_manager.is_valid(packet.dcid()) {
             qdebug!([self], "Ignoring migration with invalid CID");
             return;
         }
@@ -2202,9 +2194,7 @@ impl Connection {
             }
             Frame::RetireConnectionId { sequence_number } => {
                 self.stats.borrow_mut().frame_rx.retire_connection_id += 1;
-                // TODO(mt) - keep connection IDs around for a short while.
-                self.valid_cids.retire(sequence_number);
-                // TODO(mt) - send another NEW_CONNECTION_ID frame.
+                self.cid_manager.retire(sequence_number);
             }
             Frame::PathChallenge { data } => {
                 self.stats.borrow_mut().frame_rx.path_challenge += 1;
@@ -2381,7 +2371,7 @@ impl Connection {
         }
         if self.role == Role::Server {
             // Remove the randomized client CID from the list of acceptable CIDs.
-            self.valid_cids.retire(u64::MAX);
+            self.cid_manager.remove_handshake_cid();
             // Mark the path as validated, if it isn't already.
             let path_ref = &mut self.paths[PathId::Primary];
             debug_assert!(path_ref.is_handshake());

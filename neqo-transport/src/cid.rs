@@ -21,6 +21,8 @@ use std::rc::Rc;
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
 pub const LOCAL_ACTIVE_CID_LIMIT: usize = 8;
+/// A special value.  See `ConnectionIdManager::add_handshake_cid`.
+const HANDSHAKE_SEQNO: u64 = u64::MAX;
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct ConnectionId {
@@ -271,7 +273,7 @@ impl ConnectionIdStore<[u8; 16]> {
 }
 
 impl ConnectionIdStore<()> {
-    pub fn add_local(&mut self, entry: ConnectionIdEntry<()>) {
+    fn add_local(&mut self, entry: ConnectionIdEntry<()>) {
         self.cids.push(entry);
     }
 }
@@ -288,14 +290,26 @@ impl<'a: 'b, 'b> ConnectionIdDecoderRef<'a> {
     }
 }
 
+/// A connection ID manager looks after the generation of connection IDs,
+/// the set of connection IDs that are valid for the connection, and the
+/// generation of NEW_CONNECTION_ID frames.
 pub struct ConnectionIdManager {
     /// The `ConnectionIdGenerator` instance that is used to create connection IDs.
     generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
+    /// The connection IDs that we will accept.
+    /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
+    /// During the handshake at the server, it also includes the randomized DCID pick by the client.
+    connection_ids: ConnectionIdStore<()>,
 }
 
 impl ConnectionIdManager {
-    pub fn new(generator: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
-        Self { generator }
+    pub fn new(generator: Rc<RefCell<dyn ConnectionIdGenerator>>, initial: ConnectionId) -> Self {
+        let mut connection_ids = ConnectionIdStore::default();
+        connection_ids.add_local(ConnectionIdEntry::initial_local(initial));
+        Self {
+            generator,
+            connection_ids,
+        }
     }
 
     pub fn decoder(&self) -> ConnectionIdDecoderRef {
@@ -303,6 +317,34 @@ impl ConnectionIdManager {
             generator: self.generator.deref().borrow(),
         }
     }
+
+    pub fn is_valid(&self, cid: &ConnectionIdRef) -> bool {
+        self.connection_ids.contains(cid)
+    }
+
+    pub fn retire(&mut self, seqno: u64) {
+        // TODO(mt) - keep connection IDs around for a short while.
+
+        self.connection_ids.retire(seqno);
+        // TODO (mt) stop sending NEW_CONNECTION_ID for this cid.
+
+        // TODO(mt) - send another NEW_CONNECTION_ID frame.
+    }
+
+    /// During the handshake, a server needs to regard the client's choice of destination
+    /// connection ID as valid.  This function saves it in the store in a special place.
+    pub fn add_handshake_cid(&mut self, cid: ConnectionId) {
+        let entry = ConnectionIdEntry::new(HANDSHAKE_SEQNO, cid, ());
+        self.connection_ids.add_local(entry);
+    }
+
+    pub fn remove_handshake_cid(&mut self) {
+        self.connection_ids.retire(HANDSHAKE_SEQNO);
+    }
+
+    // pub fn write_frames(&mut self, builder: &mut PacketBuilder, tokens: &mut Vec<ResumptionToken>) {
+
+    // }
 }
 
 #[cfg(test)]
