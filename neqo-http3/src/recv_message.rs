@@ -142,7 +142,7 @@ impl RecvMessage {
         decoder: &mut QPackDecoder,
     ) -> Res<()> {
         let interim = self.is_interim(&headers)?;
-
+        let _valid = self.headers_valid(&headers)?;
         if fin && interim {
             return Err(Error::HttpGeneralProtocolStream);
         }
@@ -332,6 +332,58 @@ impl RecvMessage {
                 } else {
                     Err(Error::HttpGeneralProtocolStream)
                 }
+            }
+            MessageType::Request => Ok(false),
+        }
+    }
+
+    fn headers_valid(&self, headers: &[Header]) -> Res<bool> {
+        match self.message_type {
+            MessageType::Response => {
+                let mut seen_non_colon_header = false;
+                let excluded_headers = vec![
+                    "connection",
+                    "host",
+                    "keep-alive",
+                    "proxy-connection",
+                    "te",
+                    "transfer-encoding",
+                    "upgrade",
+                    "accept-encoding",
+                ];
+                for header in headers {
+                    let mut is_colon_header = false;
+                    for (i, c) in header.0.chars().enumerate() {
+                        if i == 0 && c == ':' {
+                            if seen_non_colon_header {
+                                qdebug!([self], "headers_valid - pseudo header fields after fields");
+                                return Err(Error::HttpGeneralProtocolStream);
+                            }
+                            is_colon_header = true;
+                        }
+
+                        if c.is_uppercase() {
+                            qdebug!([self], "headers_valid - found uppercase in header:{}", header.0);
+                            return Err(Error::HttpGeneralProtocolStream);
+                        }
+                    }
+
+                    if is_colon_header {
+                        // :status pseudo-header field is only defined for response.
+                        if header.0 != ":status" {
+                            qdebug!([self], "headers_valid - undefined pseudo header:{}", header.0);
+                            return Err(Error::HttpGeneralProtocolStream);
+                        }
+                        continue;
+                    }
+
+                    seen_non_colon_header = true;
+                    if excluded_headers.iter().any(|&excluded| excluded == header.0) {
+                        qdebug!([self], "headers_valid - found an excluded header:{}", header.0);
+                        return Err(Error::HttpGeneralProtocolStream);
+                    }
+                }
+                Ok(true)
             }
             MessageType::Request => Ok(false),
         }

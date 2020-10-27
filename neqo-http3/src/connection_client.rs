@@ -5969,4 +5969,142 @@ mod tests {
         server.set_max_uni_stream(2);
         handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
     }
+
+    #[test]
+    fn malformed_response_pseudo_header_after_regular_header() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        let headers = vec![
+            (String::from("content-length"), String::from("3")),
+            (String::from(":status"), String::from("200")),
+        ];
+        server.encode_headers(request_stream_id, &headers, &mut d);
+
+        // Send response
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        // Stream has been reset because of the malformed headers.
+        let e = client.events().next().unwrap();
+        assert_eq!(
+            e,
+            Http3ClientEvent::Reset {
+                stream_id: request_stream_id,
+                error: Error::HttpGeneralProtocolStream.code(),
+                local: true,
+            }
+        );
+    }
+
+    #[test]
+    fn malformed_response_undefined_pseudo_header() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        let headers = vec![
+            (String::from(":status"), String::from("200")),
+            (String::from(":method"), String::from("GET")),
+            (String::from("content-length"), String::from("3")),
+        ];
+        server.encode_headers(request_stream_id, &headers, &mut d);
+
+        // Send response
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        // Stream has been reset because of the malformed headers.
+        let e = client.events().next().unwrap();
+        assert_eq!(
+            e,
+            Http3ClientEvent::Reset {
+                stream_id: request_stream_id,
+                error: Error::HttpGeneralProtocolStream.code(),
+                local: true,
+            }
+        );
+    }
+
+    #[test]
+    fn malformed_response_uppercase_header() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        let headers = vec![
+            (String::from(":status"), String::from("200")),
+            (String::from("content-Length"), String::from("3")),
+        ];
+        server.encode_headers(request_stream_id, &headers, &mut d);
+
+        // Send response
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        // Stream has been reset because of the malformed headers.
+        let e = client.events().next().unwrap();
+        assert_eq!(
+            e,
+            Http3ClientEvent::Reset {
+                stream_id: request_stream_id,
+                error: Error::HttpGeneralProtocolStream.code(),
+                local: true,
+            }
+        );
+    }
+
+    #[test]
+    fn malformed_response_excluded_header() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        let headers = vec![
+            (String::from(":status"), String::from("200")),
+            (String::from("content-length"), String::from("3")),
+            (String::from("connection"), String::from("close")),
+        ];
+        server.encode_headers(request_stream_id, &headers, &mut d);
+
+        // Send response
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        // Stream has been reset because of the malformed headers.
+        let e = client.events().next().unwrap();
+        assert_eq!(
+            e,
+            Http3ClientEvent::Reset {
+                stream_id: request_stream_id,
+                error: Error::HttpGeneralProtocolStream.code(),
+                local: true,
+            }
+        );
+    }
 }
