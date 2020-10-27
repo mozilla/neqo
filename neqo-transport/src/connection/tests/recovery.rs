@@ -241,7 +241,6 @@ fn pto_handshake_complete() {
     qdebug!("---- client: PTO");
     now += Duration::from_millis(60);
     let pkt2 = client.process(None, now).dgram();
-    assert!(pkt2.is_some());
 
     pto_counts[0] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
@@ -252,7 +251,6 @@ fn pto_handshake_complete() {
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_close_send(stream_id).unwrap();
     let pkt3 = client.process(None, now).dgram();
-    assert!(pkt3.is_some());
     let (pkt3_hs, pkt3_1rtt) = split_datagram(&pkt3.unwrap());
 
     // PTO has been doubled.
