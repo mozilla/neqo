@@ -6,7 +6,6 @@
 
 use super::super::StreamType;
 use super::{connect_force_idle, default_client, default_server, send_something};
-use crate::path::PATH_MTU_V4;
 
 use neqo_common::Datagram;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -33,7 +32,6 @@ fn change_source_port(d: &Datagram) -> Datagram {
 }
 
 #[test]
-#[ignore] // This test fails because we don't send NEW_CONNECTION_ID yet.
 fn rebinding_address() {
     let mut client = default_client();
     let mut server = default_server();
@@ -41,11 +39,12 @@ fn rebinding_address() {
 
     let dgram = send_something(&mut client, now());
     let dgram = change_path(&dgram);
+    let challenges = server.stats().frame_tx.path_challenge;
     let dgram = server.process(Some(dgram), now()).dgram();
+    assert_eq!(server.stats().frame_tx.path_challenge, challenges + 1);
     let dgram = dgram.unwrap();
     assert_eq!(dgram.source(), loopback_v4());
     assert_eq!(dgram.destination(), loopback_v4());
-    assert_eq!(dgram.len(), PATH_MTU_V4);
 }
 
 #[test]
