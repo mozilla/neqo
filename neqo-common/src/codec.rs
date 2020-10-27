@@ -212,6 +212,12 @@ impl Encoder {
         }
     }
 
+    /// Static helper to determine how long a varint-prefixed array encodes to.
+    #[must_use]
+    pub fn vvec_len(len: usize) -> usize {
+        Self::varint_len(u64::try_from(len).unwrap()) + len
+    }
+
     /// Default construction of an empty buffer.
     #[must_use]
     pub fn new() -> Self {
@@ -565,6 +571,40 @@ mod tests {
         let enc = Encoder::from_hex("ff");
         let mut dec = enc.as_decoder();
         dec.skip_vvec();
+    }
+
+    #[test]
+    fn encoded_lengths() {
+        assert_eq!(Encoder::varint_len(0), 1);
+        assert_eq!(Encoder::varint_len(0x3f), 1);
+        assert_eq!(Encoder::varint_len(0x40), 2);
+        assert_eq!(Encoder::varint_len(0x3fff), 2);
+        assert_eq!(Encoder::varint_len(0x4000), 4);
+        assert_eq!(Encoder::varint_len(0x3fff_ffff), 4);
+        assert_eq!(Encoder::varint_len(0x4000_0000), 8);
+    }
+
+    #[test]
+    #[should_panic]
+    fn encoded_length_oob() {
+        let _ = Encoder::varint_len(1 << 62);
+    }
+
+    #[test]
+    fn encoded_vvec_lengths() {
+        assert_eq!(Encoder::vvec_len(0), 1);
+        assert_eq!(Encoder::vvec_len(0x3f), 0x40);
+        assert_eq!(Encoder::vvec_len(0x40), 0x42);
+        assert_eq!(Encoder::vvec_len(0x3fff), 0x4001);
+        assert_eq!(Encoder::vvec_len(0x4000), 0x4004);
+        assert_eq!(Encoder::vvec_len(0x3fff_ffff), 0x4000_0003);
+        assert_eq!(Encoder::vvec_len(0x4000_0000), 0x4000_0008);
+    }
+
+    #[test]
+    #[should_panic]
+    fn encoded_vvec_length_oob() {
+        let _ = Encoder::vvec_len(1 << 62);
     }
 
     #[test]
