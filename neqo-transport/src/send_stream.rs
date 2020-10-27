@@ -290,10 +290,7 @@ pub struct TxBuffer {
 
 impl TxBuffer {
     pub fn new() -> Self {
-        Self {
-            send_buf: VecDeque::with_capacity(SEND_BUFFER_SIZE),
-            ..Self::default()
-        }
+        Self::default()
     }
 
     /// Attempt to add some or all of the passed-in buffer to the TxBuffer.
