@@ -19,8 +19,8 @@ use neqo_http3::{
 };
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionId, Error as TransportError,
-    FixedConnectionIdGenerator, QuicVersion,
+    CongestionControlAlgorithm, Connection, ConnectionId, EmptyConnectionIdGenerator,
+    Error as TransportError, QuicVersion,
 };
 
 use std::cell::RefCell;
@@ -502,7 +502,7 @@ fn client(
     let mut transport = Connection::new_client(
         hostname,
         &[&args.alpn],
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(0))),
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         local_addr,
         remote_addr,
         &CongestionControlAlgorithm::NewReno,
@@ -726,7 +726,7 @@ mod old {
     use neqo_common::{event::Provider, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
-        CongestionControlAlgorithm, Connection, ConnectionEvent, Error, FixedConnectionIdGenerator,
+        CongestionControlAlgorithm, Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error,
         Output, QuicVersion, State, StreamType,
     };
 
@@ -979,7 +979,7 @@ mod old {
         let mut client = Connection::new_client(
             origin,
             &[alpn],
-            Rc::new(RefCell::new(FixedConnectionIdGenerator::new(0))),
+            Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
             local_addr,
             remote_addr,
             &CongestionControlAlgorithm::NewReno,

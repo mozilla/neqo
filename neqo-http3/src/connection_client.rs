@@ -712,12 +712,15 @@ mod tests {
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::{
-        CloseError, CongestionControlAlgorithm, ConnectionEvent, FixedConnectionIdGenerator,
-        QuicVersion, State, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
+        CloseError, CongestionControlAlgorithm, ConnectionEvent, QuicVersion, State,
+        RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
     use std::time::Duration;
-    use test_fixture::{default_server_h3, fixture_init, loopback, now, DEFAULT_SERVER_NAME};
+    use test_fixture::{
+        default_server_h3, fixture_init, loopback, now, CountingConnectionIdGenerator,
+        DEFAULT_SERVER_NAME,
+    };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
         match client.state() {
@@ -733,7 +736,7 @@ mod tests {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
-            Rc::new(RefCell::new(FixedConnectionIdGenerator::new(3))),
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             loopback(),
             loopback(),
             &CongestionControlAlgorithm::NewReno,
@@ -3408,7 +3411,7 @@ mod tests {
         let mut server = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN_H3,
-            Rc::new(RefCell::new(FixedConnectionIdGenerator::new(10))),
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             &CongestionControlAlgorithm::NewReno,
             QuicVersion::default(),
         )

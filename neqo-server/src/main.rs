@@ -33,7 +33,7 @@ use neqo_crypto::{
 };
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{server::ValidateAddress, FixedConnectionIdGenerator, Output};
+use neqo_transport::{server::ValidateAddress, Output, RandomConnectionIdGenerator};
 
 use crate::old_https::Http09Server;
 
@@ -377,7 +377,7 @@ impl ServersRunner {
     fn create_server(&self) -> Box<dyn HttpServer> {
         let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
             .expect("unable to setup anti-replay");
-        let cid_mgr = Rc::new(RefCell::new(FixedConnectionIdGenerator::new(10)));
+        let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
         let mut svr: Box<dyn HttpServer> = if self.args.use_old_http {
             Box::new(

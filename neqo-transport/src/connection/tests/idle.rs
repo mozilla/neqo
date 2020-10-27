@@ -59,12 +59,16 @@ fn asymmetric_idle_timeout() {
 
     // Now connect and force idleness manually.
     connect(&mut client, &mut server);
-    let p1 = send_something(&mut server, now());
-    let p2 = send_something(&mut server, now());
-    client.process_input(p2, now());
-    let ack = client.process(Some(p1), now()).dgram();
+    let c1 = send_something(&mut client, now());
+    let c2 = send_something(&mut client, now());
+    server.process_input(c2, now());
+    server.process_input(c1, now());
+    let s1 = send_something(&mut server, now());
+    let s2 = send_something(&mut server, now());
+    client.process_input(s2, now());
+    let ack = client.process(Some(s1), now()).dgram();
     assert!(ack.is_some());
-    // Now the server has its ACK and both should be idle.
+    // Now both should have received ACK frames so should be idle.
     assert_eq!(server.process(ack, now()), Output::Callback(LOWER_TIMEOUT));
     assert_eq!(client.process(None, now()), Output::Callback(LOWER_TIMEOUT));
 }
@@ -91,11 +95,16 @@ fn tiny_idle_timeout() {
 
     // Now connect with an RTT and force idleness manually.
     let mut now = connect_with_rtt(&mut client, &mut server, now(), RTT);
-    let p1 = send_something(&mut server, now);
-    let p2 = send_something(&mut server, now);
+    let c1 = send_something(&mut client, now);
+    let c2 = send_something(&mut client, now);
     now += RTT / 2;
-    client.process_input(p2, now);
-    let ack = client.process(Some(p1), now).dgram();
+    server.process_input(c2, now);
+    server.process_input(c1, now);
+    let s1 = send_something(&mut server, now);
+    let s2 = send_something(&mut server, now);
+    now += RTT / 2;
+    client.process_input(s2, now);
+    let ack = client.process(Some(s1), now).dgram();
     assert!(ack.is_some());
 
     // The client should be idle now, but with a different timer.
@@ -125,8 +134,8 @@ fn idle_send_packet1() {
     let res = client.process(None, now);
     assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
-    assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-    assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 5);
 
     let out = client.process(None, now + Duration::from_secs(10));
     let out = server.process(out.dgram(), now + Duration::from_secs(10));
@@ -156,12 +165,12 @@ fn idle_send_packet2() {
     let res = client.process(None, now);
     assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
-    assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-    assert_eq!(client.stream_send(2, b"hello").unwrap(), 5);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert_eq!(client.stream_send(stream_id, b"hello").unwrap(), 5);
 
     let _out = client.process(None, now + Duration::from_secs(10));
 
-    assert_eq!(client.stream_send(2, b"there").unwrap(), 5);
+    assert_eq!(client.stream_send(stream_id, b"there").unwrap(), 5);
     let _out = client.process(None, now + Duration::from_secs(20));
 
     // Still connected after 39 seconds.

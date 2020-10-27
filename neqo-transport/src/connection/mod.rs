@@ -29,8 +29,8 @@ use neqo_crypto::{
 use crate::addr_valid::{AddressValidation, NewTokenState};
 use crate::cc::CongestionControlAlgorithm;
 use crate::cid::{
-    ConnectionId, ConnectionIdDecoder, ConnectionIdEntry, ConnectionIdGenerator,
-    ConnectionIdManager, ConnectionIdRef, ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
+    ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager, ConnectionIdRef,
+    ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
 };
 use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
@@ -154,29 +154,6 @@ enum PreprocessResult {
     Continue,
 }
 
-/// An FixedConnectionIdGenerator produces random connection IDs of a fixed length.
-pub struct FixedConnectionIdGenerator {
-    len: usize,
-}
-impl FixedConnectionIdGenerator {
-    pub fn new(len: usize) -> Self {
-        Self { len }
-    }
-}
-impl ConnectionIdDecoder for FixedConnectionIdGenerator {
-    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
-        dec.decode(self.len).map(ConnectionIdRef::from)
-    }
-}
-impl ConnectionIdGenerator for FixedConnectionIdGenerator {
-    fn generate_cid(&mut self) -> ConnectionId {
-        ConnectionId::generate(self.len)
-    }
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
-    }
-}
-
 /// `AddressValidationInfo` holds information relevant to either
 /// responding to address validation (`NewToken`, `Retry`) or generating
 /// tokens for address validation (`Server`).
@@ -252,13 +229,16 @@ pub struct Connection {
     /// The connection IDs that were provided by the peer.
     connection_ids: ConnectionIdStore<[u8; 16]>,
 
+    /// The source connection ID that this endpoint uses for the handshake.
     /// Since we need to communicate this to our peer in tparams, setting this
     /// value is part of constructing the struct.
     local_initial_source_cid: ConnectionId,
-    /// Checked against tparam value from peer
+    /// The source connection ID from the first packet from the other end.
+    /// This is checked against the peer's transport parameters.
     remote_initial_source_cid: Option<ConnectionId>,
-    /// Checked against tparam value from peer
-    remote_original_destination_cid: Option<ConnectionId>,
+    /// The destination connection ID from the first packet from the client.
+    /// This is checked by the client against the server's transport parameters.
+    original_destination_cid: Option<ConnectionId>,
 
     /// We sometimes save a datagram against the possibility that keys will later
     /// become available.  This avoids reporting packets as dropped during the handshake
@@ -318,7 +298,7 @@ impl Connection {
             quic_version,
         )?;
         c.crypto.states.init(quic_version, Role::Client, &dcid);
-        c.remote_original_destination_cid = Some(dcid);
+        c.original_destination_cid = Some(dcid);
         let _ = c.paths.make_temporary(local_addr, remote_addr).unwrap();
         c.setup_handshake_path();
         Ok(c)
@@ -391,7 +371,10 @@ impl Connection {
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
 
         // Setup the local connection ID.
-        let local_initial_source_cid = cid_generator.borrow_mut().generate_cid();
+        let local_initial_source_cid = cid_generator
+            .borrow_mut()
+            .generate_cid()
+            .ok_or(Error::ConnectionIdsExhausted)?;
         tphandler.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
             local_initial_source_cid.to_vec(),
@@ -411,7 +394,7 @@ impl Connection {
             address_validation: AddressValidationInfo::None,
             local_initial_source_cid,
             remote_initial_source_cid: None,
-            remote_original_destination_cid: None,
+            original_destination_cid: None,
             saved_datagrams: SavedDatagrams::default(),
             crypto,
             acks: AckTracker::default(),
@@ -449,7 +432,7 @@ impl Connection {
     /// will always be present for Role::Client but not if Role::Server is in
     /// State::Init.
     pub fn odcid(&self) -> Option<&ConnectionId> {
-        self.remote_original_destination_cid.as_ref()
+        self.original_destination_cid.as_ref()
     }
 
     /// Set a local transport parameter, possibly overriding a default value.
@@ -941,7 +924,7 @@ impl Connection {
             self.stats.borrow_mut().pkt_dropped("Retry without a token");
             return Ok(());
         }
-        if !packet.is_valid_retry(&self.remote_original_destination_cid.as_ref().unwrap()) {
+        if !packet.is_valid_retry(&self.original_destination_cid.as_ref().unwrap()) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Retry with bad integrity tag");
@@ -1361,7 +1344,7 @@ impl Connection {
             ConnectionIdEntry::initial_remote(
                 self.remote_initial_source_cid
                     .as_ref()
-                    .or_else(|| self.remote_original_destination_cid.as_ref())
+                    .or_else(|| self.original_destination_cid.as_ref())
                     .unwrap()
                     .clone(),
             ),
@@ -1383,6 +1366,7 @@ impl Connection {
     }
 
     fn start_handshake(&mut self, packet: &PublicPacket, now: Instant) -> Res<()> {
+        qtrace!([self], "Starting the handshake");
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
         if self.role == Role::Server {
             assert_eq!(packet.packet_type(), PacketType::Initial);
@@ -1390,8 +1374,9 @@ impl Connection {
             // A server needs to accept the client's selected CID until the
             // server's connection ID is received.  Use an invalid sequence number
             // so that it is easy to identify and remove.
-            self.cid_manager
-                .add_handshake_cid(ConnectionId::from(packet.dcid()));
+            let dcid = ConnectionId::from(packet.dcid());
+            self.original_destination_cid = Some(dcid.clone());
+            self.cid_manager.add_handshake_cid(dcid);
             // Make a path on which to run the handshake.
             self.setup_handshake_path();
 
@@ -1625,6 +1610,7 @@ impl Connection {
 
             self.send_streams.write_frames(builder, &mut tokens, stats);
             self.new_token.write_frames(builder, &mut tokens, stats);
+            self.cid_manager.write_frames(builder, &mut tokens, stats);
         }
 
         // Anything - other than ACK - that registered a token wants an acknowledgment.
@@ -1840,11 +1826,8 @@ impl Connection {
         self.validate_cids()?;
         {
             let tps = self.tps.borrow();
-            let reset_token = if let Some(token) = tps
-                .remote
-                .as_ref()
-                .unwrap()
-                .get_bytes(tparams::STATELESS_RESET_TOKEN)
+            let remote = tps.remote.as_ref().unwrap();
+            let reset_token = if let Some(token) = remote.get_bytes(tparams::STATELESS_RESET_TOKEN)
             {
                 <[u8; 16]>::try_from(token).unwrap()
             } else {
@@ -1853,13 +1836,10 @@ impl Connection {
                 <[u8; 16]>::try_from(&random(16)[..]).unwrap()
             };
             self.paths[PathId::Primary].set_reset_token(reset_token);
-            let mad = Duration::from_millis(
-                tps.remote
-                    .as_ref()
-                    .unwrap()
-                    .get_integer(tparams::MAX_ACK_DELAY),
-            );
+            let mad = Duration::from_millis(remote.get_integer(tparams::MAX_ACK_DELAY));
             self.loss_recovery.set_peer_max_ack_delay(mad);
+            let max_active_cids = remote.get_integer(tparams::ACTIVE_CONNECTION_ID_LIMIT);
+            self.cid_manager.set_limit(max_active_cids);
         }
         self.set_initial_limits();
         qlog::connection_tparams_set(&mut self.qlog, &*self.tps.borrow());
@@ -1883,7 +1863,7 @@ impl Connection {
                 .unwrap()
                 .get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
             if self
-                .remote_original_destination_cid
+                .original_destination_cid
                 .as_ref()
                 .map(ConnectionId::as_cid_ref)
                 != tp.map(ConnectionIdRef::from)
@@ -1906,8 +1886,8 @@ impl Connection {
             != tp.map(ConnectionIdRef::from)
         {
             qwarn!(
-                "{} ISCID test failed: self cid {:?} != tp cid {:?}",
-                self.role,
+                [self],
+                "ISCID test failed: self cid {:?} != tp cid {:?}",
                 self.remote_initial_source_cid,
                 tp.map(hex),
             );
@@ -1917,15 +1897,15 @@ impl Connection {
         if self.role == Role::Client {
             let tp = remote_tps.get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
             if self
-                .remote_original_destination_cid
+                .original_destination_cid
                 .as_ref()
                 .map(ConnectionId::as_cid_ref)
                 != tp.map(ConnectionIdRef::from)
             {
                 qwarn!(
-                    "{} ODCID test failed: self cid {:?} != tp cid {:?}",
-                    self.role,
-                    self.remote_original_destination_cid,
+                    [self],
+                    "ODCID test failed: self cid {:?} != tp cid {:?}",
+                    self.original_destination_cid,
                     tp.map(hex),
                 );
                 return Err(Error::ProtocolViolation);
@@ -1942,8 +1922,8 @@ impl Connection {
             };
             if expected != tp.map(ConnectionIdRef::from) {
                 qwarn!(
-                    "{} RSCID test failed. self cid {:?} != tp cid {:?}",
-                    self.role,
+                    [self],
+                    "RSCID test failed. self cid {:?} != tp cid {:?}",
                     expected,
                     tp.map(hex),
                 );
@@ -2278,6 +2258,7 @@ impl Connection {
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
                     RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
                     RecoveryToken::PathProbe(data) => self.paths.lost(*data),
+                    RecoveryToken::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
                 }
             }
         }
@@ -2331,6 +2312,7 @@ impl Connection {
                         self.flow_mgr.borrow_mut().acked(ft, &mut self.send_streams)
                     }
                     RecoveryToken::NewToken(seqno) => self.new_token.acked(*seqno),
+                    RecoveryToken::NewConnectionId(entry) => self.cid_manager.acked(entry),
                     // We only worry about when these are lost:
                     RecoveryToken::HandshakeDone | RecoveryToken::PathProbe(_) => (),
                 }

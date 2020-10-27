@@ -19,6 +19,7 @@ use smallvec::{smallvec, SmallVec};
 use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
 use crate::cc::CongestionControlAlgorithm;
+use crate::cid::ConnectionIdEntry;
 use crate::connection::LOCAL_IDLE_TIMEOUT;
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
@@ -52,6 +53,7 @@ pub enum RecoveryToken {
     HandshakeDone,
     NewToken(usize),
     PathProbe([u8; 8]),
+    NewConnectionId(ConnectionIdEntry<[u8; 16]>),
 }
 
 #[derive(Debug)]

@@ -4,17 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, FixedConnectionIdGenerator, Output, State, LOCAL_IDLE_TIMEOUT};
+use super::super::{Connection, Output, State, LOCAL_IDLE_TIMEOUT};
 use super::{
     assert_error, connect_force_idle, connect_with_rtt, default_client, default_server, get_tokens,
-    handshake, maybe_authenticate, send_something, AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    handshake, maybe_authenticate, send_something, CountingConnectionIdGenerator, AT_LEAST_PTO,
+    DEFAULT_RTT, DEFAULT_STREAM_DATA,
 };
 use crate::connection::AddressValidation;
 use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
 use crate::path::PATH_MTU_V6;
 use crate::server::ValidateAddress;
-use crate::{CongestionControlAlgorithm, ConnectionError, Error, QuicVersion};
+use crate::{
+    CongestionControlAlgorithm, ConnectionError, EmptyConnectionIdGenerator, Error, QuicVersion,
+};
 
 use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AuthenticationStatus};
@@ -103,7 +106,7 @@ fn no_alpn() {
     let mut client = Connection::new_client(
         "example.com",
         &["bad-alpn"],
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(9))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         loopback(),
         loopback(),
         &CongestionControlAlgorithm::NewReno,
@@ -177,7 +180,7 @@ fn crypto_frame_split() {
     let mut server = Connection::new_server(
         test_fixture::LONG_CERT_KEYS,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(6))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
@@ -233,7 +236,7 @@ fn chacha20poly1305() {
     let mut client = Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(0))),
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         loopback(),
         loopback(),
         &CongestionControlAlgorithm::NewReno,
@@ -550,8 +553,9 @@ fn reorder_1rtt() {
     now += RTT / 2;
     let s2 = server.process(c2, now).dgram();
     // The server has now received those packets, and saved them.
-    // The two additional are an Initial ACK and Handshake.
-    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 4);
+    // The two additional are: an Initial ACK, a Handshake,
+    // and a 1-RTT (containing NEW_CONNECTION_ID).
+    assert_eq!(server.stats().packets_rx, PACKETS * 2 + 5);
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 1);
     assert_eq!(*server.state(), State::Confirmed);
@@ -617,8 +621,8 @@ fn verify_pkt_honors_mtu() {
     assert_eq!(res, Output::Callback(LOCAL_IDLE_TIMEOUT));
 
     // Try to send a large stream and verify first packet is correctly sized
-    assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-    assert_eq!(client.stream_send(2, &[0xbb; 2000]).unwrap(), 2000);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert_eq!(client.stream_send(stream_id, &[0xbb; 2000]).unwrap(), 2000);
     let pkt0 = client.process(None, now);
     assert!(matches!(pkt0, Output::Datagram(_)));
     assert_eq!(pkt0.as_dgram_ref().unwrap().len(), PATH_MTU_V6);

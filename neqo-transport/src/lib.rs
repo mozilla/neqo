@@ -33,8 +33,11 @@ pub mod tparams;
 mod tracking;
 
 pub use self::cc::CongestionControlAlgorithm;
-pub use self::cid::{ConnectionId, ConnectionIdGenerator};
-pub use self::connection::{Connection, FixedConnectionIdGenerator, Output, State, ZeroRttState};
+pub use self::cid::{
+    ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
+    EmptyConnectionIdGenerator, RandomConnectionIdGenerator,
+};
+pub use self::connection::{Connection, Output, State, ZeroRttState};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
@@ -69,10 +72,11 @@ pub enum Error {
     QlogError,
     CryptoAlert(u8),
 
-    // All internal errors from here.
+    // All internal errors from here.  Please keep these sorted.
     AckedUnsentPacket,
-    ConnectionState,
     ConnectionIdLimitExceeded,
+    ConnectionIdsExhausted,
+    ConnectionState,
     DecodingFrame,
     DecryptError,
     HandshakeFailed,

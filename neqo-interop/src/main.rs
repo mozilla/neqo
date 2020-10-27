@@ -12,8 +12,8 @@ use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionError, ConnectionEvent, Error,
-    FixedConnectionIdGenerator, Output, QuicVersion, State, StreamType,
+    CongestionControlAlgorithm, Connection, ConnectionError, ConnectionEvent,
+    EmptyConnectionIdGenerator, Error, Output, QuicVersion, State, StreamType,
 };
 
 use std::cell::RefCell;
@@ -459,7 +459,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
     let mut client = Connection::new_client(
         peer.host,
         &test.alpn(),
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(0))),
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         nctx.local_addr,
         nctx.remote_addr,
         &CongestionControlAlgorithm::NewReno,
@@ -601,7 +601,7 @@ fn test_h3_rz(
 
     let handler = Http3Client::new(
         peer.host,
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(0))),
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         nctx.local_addr,
         nctx.remote_addr,
         &CongestionControlAlgorithm::NewReno,
@@ -685,7 +685,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
     let mut client = Connection::new_client(
         peer.host,
         &["hq-28"],
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(0))),
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         nctx.local_addr,
         nctx.remote_addr,
         &CongestionControlAlgorithm::NewReno,

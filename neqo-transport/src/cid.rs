@@ -6,16 +6,22 @@
 
 // Representation and management of connection IDs.
 
+use crate::frame::FRAME_TYPE_NEW_CONNECTION_ID;
+use crate::packet::PacketBuilder;
+use crate::recovery::RecoveryToken;
+use crate::stats::FrameStats;
 use crate::{Error, Res};
 
-use neqo_common::{hex, hex_with_len, Decoder};
+use neqo_common::{hex, hex_with_len, qinfo, Decoder, Encoder};
 use neqo_crypto::random;
 
 use smallvec::SmallVec;
 use std::borrow::Borrow;
 use std::cell::{Ref, RefCell};
 use std::cmp::max;
+use std::cmp::min;
 use std::convert::AsRef;
+use std::convert::TryFrom;
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -72,9 +78,9 @@ impl From<Vec<u8>> for ConnectionId {
     }
 }
 
-impl From<&[u8]> for ConnectionId {
-    fn from(buf: &[u8]) -> Self {
-        Self::from(SmallVec::from(buf))
+impl<T: AsRef<[u8]> + ?Sized> From<&T> for ConnectionId {
+    fn from(buf: &T) -> Self {
+        Self::from(SmallVec::from(buf.as_ref()))
     }
 }
 
@@ -127,9 +133,9 @@ impl<'a> ::std::fmt::Display for ConnectionIdRef<'a> {
     }
 }
 
-impl<'a> From<&'a [u8]> for ConnectionIdRef<'a> {
-    fn from(cid: &'a [u8]) -> Self {
-        Self { cid }
+impl<'a, T: AsRef<[u8]> + ?Sized> From<&'a T> for ConnectionIdRef<'a> {
+    fn from(cid: &'a T) -> Self {
+        Self { cid: cid.as_ref() }
     }
 }
 
@@ -148,12 +154,81 @@ impl<'a> PartialEq<ConnectionId> for ConnectionIdRef<'a> {
 }
 
 pub trait ConnectionIdDecoder {
+    /// Decodes a connection ID from the provided decoder.
     fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>>;
 }
 
 pub trait ConnectionIdGenerator: ConnectionIdDecoder {
-    fn generate_cid(&mut self) -> ConnectionId;
+    /// Generates a connection ID.  This can return `None` if the generator
+    /// is exhausted.
+    fn generate_cid(&mut self) -> Option<ConnectionId>;
+    /// Indicates whether the connection IDs are zero-length.
+    /// If this returns true, `generate_cid` must always produce an empty value
+    /// and never `None`.
+    /// If this returns false, `generate_cid` must never produce an empty value,
+    /// though it can return `None`.
+    ///
+    /// You should not need to implement this: if you want zero-length connection IDs,
+    /// use `EmptyConnectionIdGenerator` instead.
+    fn generates_empty_cids(&self) -> bool {
+        false
+    }
     fn as_decoder(&self) -> &dyn ConnectionIdDecoder;
+}
+
+/// An `EmptyConnectionIdGenerator` generates empty connection IDs.
+#[derive(Default)]
+pub struct EmptyConnectionIdGenerator {}
+
+impl ConnectionIdDecoder for EmptyConnectionIdGenerator {
+    fn decode_cid<'a>(&self, _: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        Some(ConnectionIdRef::from(&[]))
+    }
+}
+
+impl ConnectionIdGenerator for EmptyConnectionIdGenerator {
+    fn generate_cid(&mut self) -> Option<ConnectionId> {
+        Some(ConnectionId::from(&[]))
+    }
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
+    fn generates_empty_cids(&self) -> bool {
+        true
+    }
+}
+
+/// An RandomConnectionIdGenerator produces connection IDs of
+/// a fixed length and random content.  No effort is made to
+/// prevent collisions.
+pub struct RandomConnectionIdGenerator {
+    len: usize,
+}
+
+impl RandomConnectionIdGenerator {
+    pub fn new(len: usize) -> Self {
+        Self { len }
+    }
+}
+
+impl ConnectionIdDecoder for RandomConnectionIdGenerator {
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        dec.decode(self.len).map(ConnectionIdRef::from)
+    }
+}
+
+impl ConnectionIdGenerator for RandomConnectionIdGenerator {
+    fn generate_cid(&mut self) -> Option<ConnectionId> {
+        Some(ConnectionId::from(&random(self.len)))
+    }
+
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
+
+    fn generates_empty_cids(&self) -> bool {
+        self.len == 0
+    }
 }
 
 /// A single connection ID, as saved from NEW_CONNECTION_ID.
@@ -251,6 +326,10 @@ impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {
             Some(self.cids.remove(0))
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.cids.len()
+    }
 }
 
 impl ConnectionIdStore<[u8; 16]> {
@@ -261,9 +340,11 @@ impl ConnectionIdStore<[u8; 16]> {
         }
         // It's not OK if any individual piece matches though.
         if self.cids.iter().any(|c| c.any_part_equal(&entry)) {
+            qinfo!("ConnectionIdStore found reused part in NEW_CONNECTION_ID");
             return Err(Error::ProtocolViolation);
         }
         if self.cids.len() >= LOCAL_ACTIVE_CID_LIMIT {
+            qinfo!("ConnectionIdStore received too many connection IDs");
             return Err(Error::ConnectionIdLimitExceeded);
         }
 
@@ -292,14 +373,21 @@ impl<'a: 'b, 'b> ConnectionIdDecoderRef<'a> {
 
 /// A connection ID manager looks after the generation of connection IDs,
 /// the set of connection IDs that are valid for the connection, and the
-/// generation of NEW_CONNECTION_ID frames.
+/// generation of `NEW_CONNECTION_ID` frames.
 pub struct ConnectionIdManager {
     /// The `ConnectionIdGenerator` instance that is used to create connection IDs.
     generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
     /// The connection IDs that we will accept.
-    /// This includes any we advertise in NEW_CONNECTION_ID that haven't been bound to a path yet.
+    /// This includes any we advertise in `NEW_CONNECTION_ID` that haven't been bound to a path yet.
     /// During the handshake at the server, it also includes the randomized DCID pick by the client.
     connection_ids: ConnectionIdStore<()>,
+    /// The maximum number of connection IDs this will accept.  This is at least 2 and won't
+    /// be more than `LOCAL_ACTIVE_CID_LIMIT`.
+    limit: usize,
+    /// The next sequence number that will be used for sending `NEW_CONNECTION_ID` frames.
+    next_seqno: u64,
+    /// Outstanding, but lost NEW_CONNECTION_ID frames will be stored here.
+    lost_new_connection_id: Vec<ConnectionIdEntry<[u8; 16]>>,
 }
 
 impl ConnectionIdManager {
@@ -309,6 +397,16 @@ impl ConnectionIdManager {
         Self {
             generator,
             connection_ids,
+            // A note about initializing the limit to 2.
+            // For a server, the number of connection IDs that are tracked at the point that
+            // it is first possible to send `NEW_CONNECTION_ID` is 2.  One is the client-generated
+            // destination connection (stored with a sequence number of `HANDSHAKE_SEQNO`); the
+            // other being the handshake value (seqno 0).  As a result, `NEW_CONNECTION_ID`
+            // won't be sent until until after the handshake completes, because this initial
+            // value remains until the connection completes and transport parameters are handled.
+            limit: 2,
+            next_seqno: 2, // A different value.
+            lost_new_connection_id: Vec::new(),
         }
     }
 
@@ -323,12 +421,10 @@ impl ConnectionIdManager {
     }
 
     pub fn retire(&mut self, seqno: u64) {
-        // TODO(mt) - keep connection IDs around for a short while.
+        // TODO(mt) - consider keeping connection IDs around for a short while.
 
         self.connection_ids.retire(seqno);
-        // TODO (mt) stop sending NEW_CONNECTION_ID for this cid.
-
-        // TODO(mt) - send another NEW_CONNECTION_ID frame.
+        self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
     }
 
     /// During the handshake, a server needs to regard the client's choice of destination
@@ -342,9 +438,86 @@ impl ConnectionIdManager {
         self.connection_ids.retire(HANDSHAKE_SEQNO);
     }
 
-    // pub fn write_frames(&mut self, builder: &mut PacketBuilder, tokens: &mut Vec<ResumptionToken>) {
+    pub fn set_limit(&mut self, limit: u64) {
+        debug_assert!(limit >= 2);
+        self.limit = min(
+            LOCAL_ACTIVE_CID_LIMIT,
+            usize::try_from(limit).unwrap_or(LOCAL_ACTIVE_CID_LIMIT),
+        );
+    }
 
-    // }
+    fn write_entry(
+        &mut self,
+        entry: &ConnectionIdEntry<[u8; 16]>,
+        builder: &mut PacketBuilder,
+        stats: &mut FrameStats,
+    ) -> bool {
+        let len = 1 + Encoder::varint_len(entry.seqno) + 1 + 1 + entry.cid.len() + 16;
+        if builder.remaining() < len {
+            return false;
+        }
+
+        builder.encode_varint(FRAME_TYPE_NEW_CONNECTION_ID);
+        builder.encode_varint(entry.seqno);
+        builder.encode_varint(0u64);
+        builder.encode_vec(1, &entry.cid);
+        builder.encode(&entry.srt);
+
+        stats.new_connection_id += 1;
+        true
+    }
+
+    pub fn write_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) {
+        if self.generator.deref().borrow().generates_empty_cids() {
+            debug_assert_eq!(self.generator.borrow_mut().generate_cid().unwrap().len(), 0);
+            return;
+        }
+
+        while let Some(entry) = self.lost_new_connection_id.pop() {
+            if self.write_entry(&entry, builder, stats) {
+                tokens.push(RecoveryToken::NewConnectionId(entry));
+            } else {
+                // This shouldn't happen often.
+                self.lost_new_connection_id.push(entry);
+                break;
+            }
+        }
+
+        // Keep writing while we have fewer than the limit of active connection IDs
+        // and while there is room for more.  This uses the longest connection ID
+        // length to simplify (assuming Retire Prior To is just 1 byte).
+        while self.connection_ids.len() < self.limit && builder.remaining() >= 47 {
+            let maybe_cid = self.generator.borrow_mut().generate_cid();
+            if let Some(cid) = maybe_cid {
+                assert_ne!(cid.len(), 0);
+                // TODO: generate the stateless reset tokens from the connection ID and a key.
+                let srt = <[u8; 16]>::try_from(&random(16)[..]).unwrap();
+
+                let seqno = self.next_seqno;
+                self.next_seqno += 1;
+                self.connection_ids
+                    .add_local(ConnectionIdEntry::new(seqno, cid.clone(), ()));
+
+                let entry = ConnectionIdEntry::new(seqno, cid, srt);
+                debug_assert!(self.write_entry(&entry, builder, stats));
+                tokens.push(RecoveryToken::NewConnectionId(entry));
+            }
+        }
+    }
+
+    pub fn lost(&mut self, entry: &ConnectionIdEntry<[u8; 16]>) {
+        self.lost_new_connection_id.push(entry.clone());
+    }
+
+    pub fn acked(&mut self, entry: &ConnectionIdEntry<[u8; 16]>) {
+        self.lost_new_connection_id
+            .retain(|e| e.seqno != entry.seqno);
+    }
 }
 
 #[cfg(test)]

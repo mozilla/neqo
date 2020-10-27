@@ -465,6 +465,11 @@ impl<'a> PublicPacket<'a> {
         let first = Self::opt(decoder.decode_byte())?;
 
         if first & 0x80 == PACKET_BIT_SHORT {
+            // Conveniently, this also guarantees that there is enough space
+            // for a connection ID of any size.
+            if decoder.remaining() < SAMPLE_OFFSET + SAMPLE_SIZE {
+                return Err(Error::InvalidPacket);
+            }
             let dcid = Self::opt(dcid_decoder.decode_cid(&mut decoder))?;
             if decoder.remaining() < SAMPLE_OFFSET + SAMPLE_SIZE {
                 return Err(Error::InvalidPacket);
@@ -764,7 +769,7 @@ impl Deref for DecryptedPacket {
 mod tests {
     use super::*;
     use crate::crypto::{CryptoDxState, CryptoStates};
-    use crate::{FixedConnectionIdGenerator, QuicVersion};
+    use crate::{EmptyConnectionIdGenerator, QuicVersion, RandomConnectionIdGenerator};
     use neqo_common::Encoder;
     use test_fixture::{fixture_init, now};
 
@@ -772,8 +777,8 @@ mod tests {
     const SERVER_CID: &[u8] = &[0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5];
 
     /// This is a connection ID manager, which is only used for decoding short header packets.
-    fn cid_mgr() -> FixedConnectionIdGenerator {
-        FixedConnectionIdGenerator::new(SERVER_CID.len())
+    fn cid_mgr() -> RandomConnectionIdGenerator {
+        RandomConnectionIdGenerator::new(SERVER_CID.len())
     }
 
     const SAMPLE_INITIAL_PAYLOAD: &[u8] = &[
@@ -924,7 +929,7 @@ mod tests {
         fixture_init();
         let (packet, remainder) = PublicPacket::decode(
             SAMPLE_SHORT,
-            &FixedConnectionIdGenerator::new(SERVER_CID.len() - 1),
+            &RandomConnectionIdGenerator::new(SERVER_CID.len() - 1),
         )
         .unwrap();
         assert_eq!(packet.packet_type(), PacketType::Short);
@@ -939,7 +944,7 @@ mod tests {
     fn decode_short_long_cid() {
         assert!(PublicPacket::decode(
             SAMPLE_SHORT,
-            &FixedConnectionIdGenerator::new(SERVER_CID.len() + 1)
+            &RandomConnectionIdGenerator::new(SERVER_CID.len() + 1)
         )
         .is_err());
     }
@@ -1118,7 +1123,7 @@ mod tests {
     fn decode_retry(quic_version: QuicVersion, sample_retry: &[u8]) {
         fixture_init();
         let (packet, remainder) =
-            PublicPacket::decode(sample_retry, &FixedConnectionIdGenerator::new(5)).unwrap();
+            PublicPacket::decode(sample_retry, &RandomConnectionIdGenerator::new(5)).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
         assert_eq!(Some(quic_version), packet.quic_version);
         assert!(packet.dcid().is_empty());
@@ -1151,7 +1156,7 @@ mod tests {
     #[test]
     fn invalid_retry() {
         fixture_init();
-        let cid_mgr = FixedConnectionIdGenerator::new(5);
+        let cid_mgr = RandomConnectionIdGenerator::new(5);
         let odcid = ConnectionId::from(CLIENT_CID);
 
         assert!(PublicPacket::decode(&[], &cid_mgr).is_err());
@@ -1202,7 +1207,7 @@ mod tests {
     #[test]
     fn parse_vn() {
         let (packet, remainder) =
-            PublicPacket::decode(SAMPLE_VN, &FixedConnectionIdGenerator::new(5)).unwrap();
+            PublicPacket::decode(SAMPLE_VN, &EmptyConnectionIdGenerator::default()).unwrap();
         assert!(remainder.is_empty());
         assert_eq!(&packet.dcid[..], SERVER_CID);
         assert!(packet.scid.is_some());
@@ -1223,7 +1228,7 @@ mod tests {
         enc.encode_uint(4, 0x5a6a_7a8a_u64);
 
         let (packet, remainder) =
-            PublicPacket::decode(&enc, &FixedConnectionIdGenerator::new(5)).unwrap();
+            PublicPacket::decode(&enc, &EmptyConnectionIdGenerator::default()).unwrap();
         assert!(remainder.is_empty());
         assert_eq!(&packet.dcid[..], BIG_DCID);
         assert!(packet.scid.is_some());
@@ -1259,7 +1264,7 @@ mod tests {
         ];
         fixture_init();
         let (packet, slice) =
-            PublicPacket::decode(PACKET, &FixedConnectionIdGenerator::new(0)).unwrap();
+            PublicPacket::decode(PACKET, &EmptyConnectionIdGenerator::default()).unwrap();
         assert!(slice.is_empty());
         let decrypted = packet
             .decrypt(&mut CryptoStates::test_chacha(), now())

@@ -9,7 +9,7 @@
 
 use neqo_common::{Datagram, Encoder};
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, FixedConnectionIdGenerator, QuicVersion, State,
+    CongestionControlAlgorithm, Connection, QuicVersion, RandomConnectionIdGenerator, State,
 };
 use test_fixture::{self, loopback, now};
 
@@ -173,7 +173,7 @@ fn make_server(quic_version: QuicVersion) -> Connection {
     Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(5))),
+        Rc::new(RefCell::new(RandomConnectionIdGenerator::new(5))),
         &CongestionControlAlgorithm::NewReno,
         quic_version,
     )

@@ -7,7 +7,7 @@
 #![deny(clippy::pedantic)]
 
 use super::{
-    Connection, ConnectionError, FixedConnectionIdGenerator, Output, State, LOCAL_IDLE_TIMEOUT,
+    Connection, ConnectionError, ConnectionId, ConnectionIdRef, Output, State, LOCAL_IDLE_TIMEOUT,
 };
 use crate::addr_valid::{AddressValidation, ValidateAddress};
 use crate::cc::CWND_INITIAL_PKTS;
@@ -15,15 +15,16 @@ use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
 use crate::path::PATH_MTU_V6;
 use crate::recovery::ACK_ONLY_SIZE_LIMIT;
-use crate::{CongestionControlAlgorithm, QuicVersion};
+use crate::{CongestionControlAlgorithm, ConnectionIdDecoder, ConnectionIdGenerator, QuicVersion};
 
 use std::cell::RefCell;
+use std::convert::TryFrom;
 use std::mem;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use neqo_common::{event::Provider, qdebug, qtrace, Datagram};
-use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
+use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder};
+use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{self, fixture_init, loopback, now};
 
 // All the tests.
@@ -43,10 +44,46 @@ const DEFAULT_RTT: Duration = Duration::from_millis(100);
 const AT_LEAST_PTO: Duration = Duration::from_secs(1);
 const DEFAULT_STREAM_DATA: &[u8] = b"message";
 
+/// WARNING!  In this module, this version of the generator needs to be used.
+/// This copies the implementation from
+/// `test_fixture::CountingConnectionIdGenerator`, but it uses the different
+/// types that are exposed to this module.  See also `default_client`.
+///
+/// This version doesn't randomize the length; as the congestion control tests
+/// count the amount of data sent precisely.
+#[derive(Debug, Default)]
+pub struct CountingConnectionIdGenerator {
+    counter: u32,
+}
+
+impl ConnectionIdDecoder for CountingConnectionIdGenerator {
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        let len = usize::from(dec.peek_byte().unwrap());
+        dec.decode(len).map(ConnectionIdRef::from)
+    }
+}
+
+impl ConnectionIdGenerator for CountingConnectionIdGenerator {
+    fn generate_cid(&mut self) -> Option<ConnectionId> {
+        let mut r = random(20);
+        r[0] = 8;
+        r[1] = u8::try_from(self.counter >> 24).unwrap();
+        r[2] = u8::try_from((self.counter >> 16) & 0xff).unwrap();
+        r[3] = u8::try_from((self.counter >> 8) & 0xff).unwrap();
+        r[4] = u8::try_from(self.counter & 0xff).unwrap();
+        self.counter += 1;
+        Some(ConnectionId::from(&r[..8]))
+    }
+
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
+}
+
 // This is fabulous: because test_fixture uses the public API for Connection,
 // it gets a different type to the ones that are referenced via super::super::*.
 // Thus, this code can't use default_client() and default_server() from
-// test_fixture because they produce different types.
+// test_fixture because they produce different - and incompatible - types.
 //
 // These are a direct copy of those functions.
 pub fn default_client() -> Connection {
@@ -54,7 +91,7 @@ pub fn default_client() -> Connection {
     Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(3))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         loopback(),
         loopback(),
         &CongestionControlAlgorithm::NewReno,
@@ -68,7 +105,7 @@ pub fn default_server() -> Connection {
     let mut c = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(5))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
@@ -112,7 +149,7 @@ fn handshake(
         let output = a.process(input, now).dgram();
         assert!(had_input || output.is_some());
         input = output;
-        qtrace!("t += {:?}", rtt / 2);
+        qtrace!("handshake: t += {:?}", rtt / 2);
         now += rtt / 2;
         mem::swap(&mut a, &mut b);
     }
@@ -128,7 +165,7 @@ fn connect_with_rtt(
 ) -> Instant {
     let now = handshake(client, server, now, rtt);
     assert_eq!(*client.state(), State::Confirmed);
-    assert_eq!(*client.state(), State::Confirmed);
+    assert_eq!(*server.state(), State::Confirmed);
 
     assert_eq!(client.loss_recovery.rtt(), rtt);
     assert_eq!(server.loss_recovery.rtt(), rtt);
@@ -170,22 +207,37 @@ fn exchange_ticket(
 /// doesn't immediately acknowledge it.  Reordering packets does the trick.
 fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Duration) -> Instant {
     let mut now = connect_with_rtt(client, server, now(), rtt);
-    let p1 = send_something(server, now);
-    let p2 = send_something(server, now);
+    // The client has sent NEW_CONNECTION_ID, so ensure that the server generates
+    // an acknowledgment by sending some reordered packets.
+    qtrace!("connect_rtt_idle: send reordered client packets");
+    let c1 = send_something(client, now);
+    let c2 = send_something(client, now);
     now += rtt / 2;
-    // Delivering p2 first at the client causes it to want to ACK.
-    client.process_input(p2, now);
-    // Delivering p1 should not have the client change its mind about the ACK.
-    let ack = client.process(Some(p1), now).dgram();
+    server.process_input(c2, now);
+    server.process_input(c1, now);
+
+    // Now do the same for the server.  (The ACK is in the first one.)
+    qtrace!("connect_rtt_idle: send reordered server packets");
+    let s1 = send_something(server, now);
+    let s2 = send_something(server, now);
+    now += rtt / 2;
+    // Delivering s2 first at the client causes it to want to ACK.
+    client.process_input(s2, now);
+    // Delivering s1 should not have the client change its mind about the ACK.
+    let ack = client.process(Some(s1), now).dgram();
     assert!(ack.is_some());
-    assert_eq!(
-        server.process(ack, now),
-        Output::Callback(LOCAL_IDLE_TIMEOUT)
-    );
     assert_eq!(
         client.process_output(now),
         Output::Callback(LOCAL_IDLE_TIMEOUT)
     );
+    now += rtt / 2;
+    assert_eq!(
+        server.process(ack, now),
+        Output::Callback(LOCAL_IDLE_TIMEOUT)
+    );
+    // Drain events from both as well.
+    let _ = client.events().count();
+    let _ = server.events().count();
     now
 }
 
@@ -240,7 +292,9 @@ fn fill_cwnd(src: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagr
     (total_dgrams, now)
 }
 
-/// This magic number is the size of the client's CWND after the handshake completes.
+/// This magic number is the size of the client's CWND after a handshake
+/// managed by `connect_rtt_idle` completes (other connection attempts might
+/// produce different answers).
 /// This includes the initial congestion window, as increased as a result
 /// receiving acknowledgments for Initial and Handshake packets, which is
 /// at least one full packet (the first Initial) and a little extra.
@@ -250,11 +304,12 @@ fn fill_cwnd(src: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagr
 /// value could fail as a result of variations, so it's OK to just
 /// change this value, but it is good to first understand where the
 /// change came from.
-const POST_HANDSHAKE_CWND: usize = PATH_MTU_V6 * (CWND_INITIAL_PKTS + 1) + 75;
+const POST_HANDSHAKE_CWND: usize = PATH_MTU_V6 * (CWND_INITIAL_PKTS + 1) + 389;
 
 /// Determine the number of packets required to fill the CWND.
 const fn cwnd_packets(data: usize) -> usize {
-    (data + ACK_ONLY_SIZE_LIMIT - 1) / PATH_MTU_V6
+    // Add one if the last chunk is >= ACK_ONLY_SIZE_LIMIT.
+    (data + PATH_MTU_V6 - ACK_ONLY_SIZE_LIMIT) / PATH_MTU_V6
 }
 
 /// Determine the size of the last packet.

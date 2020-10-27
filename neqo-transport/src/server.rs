@@ -291,19 +291,22 @@ impl Server {
                     qerror!([self], "unable to generate token, dropping packet");
                     return None;
                 };
-                let new_dcid = self.cid_generator.borrow_mut().generate_cid();
-                let packet = PacketBuilder::retry(
-                    initial.quic_version,
-                    &initial.src_cid,
-                    &new_dcid,
-                    &token,
-                    &initial.dst_cid,
-                );
-                if let Ok(p) = packet {
-                    let retry = Datagram::new(dgram.destination(), dgram.source(), p);
-                    Some(retry)
+                if let Some(new_dcid) = self.cid_generator.borrow_mut().generate_cid() {
+                    let packet = PacketBuilder::retry(
+                        initial.quic_version,
+                        &initial.src_cid,
+                        &new_dcid,
+                        &token,
+                        &initial.dst_cid,
+                    );
+                    if let Ok(p) = packet {
+                        let retry = Datagram::new(dgram.destination(), dgram.source(), p);
+                        Some(retry)
+                    } else {
+                        qerror!([self], "unable to encode retry, dropping packet");
+                        None
+                    }
                 } else {
-                    qerror!([self], "unable to encode retry, dropping packet");
                     None
                 }
             }
@@ -608,17 +611,21 @@ impl ConnectionIdDecoder for ServerConnectionIdGenerator {
 }
 
 impl ConnectionIdGenerator for ServerConnectionIdGenerator {
-    fn generate_cid(&mut self) -> ConnectionId {
-        let cid = self.cid_generator.borrow_mut().generate_cid();
-        if let Some(rc) = self.c.upgrade() {
-            self.insert_cid(cid.clone(), rc);
+    fn generate_cid(&mut self) -> Option<ConnectionId> {
+        let maybe_cid = self.cid_generator.borrow_mut().generate_cid();
+        if let Some(cid) = maybe_cid {
+            if let Some(rc) = self.c.upgrade() {
+                self.insert_cid(cid.clone(), rc);
+            } else {
+                // This function can be called before the connection is set.
+                // So save any connection IDs until that hookup happens.
+                qtrace!("ServerConnectionIdGenerator saving cid {}", cid);
+                self.saved_cids.push(cid.clone());
+            }
+            Some(cid)
         } else {
-            // This function can be called before the connection is set.
-            // So save any connection IDs until that hookup happens.
-            qtrace!("ServerConnectionIdGenerator saving cid {}", cid);
-            self.saved_cids.push(cid.clone());
+            None
         }
-        cid
     }
 
     fn as_decoder(&self) -> &dyn ConnectionIdDecoder {

@@ -8,15 +8,16 @@
 #![warn(clippy::pedantic)]
 
 use neqo_common::{event::Provider, Datagram, Decoder};
-use neqo_crypto::{init_db, AllowZeroRtt, AntiReplay, AuthenticationStatus};
+use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionEvent, FixedConnectionIdGenerator,
-    QuicVersion, State,
+    CongestionControlAlgorithm, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder,
+    ConnectionIdGenerator, ConnectionIdRef, QuicVersion, State,
 };
 
 use std::cell::RefCell;
+use std::convert::TryFrom;
 use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
@@ -76,6 +77,37 @@ pub fn loopback() -> SocketAddr {
     SocketAddr::new(localhost_v6, 443)
 }
 
+/// This connection ID generation scheme is the worst, but it doesn't produce collisions.
+/// It produces a connection ID with a length byte, 4 counter bytes and random padding.
+#[derive(Debug, Default)]
+pub struct CountingConnectionIdGenerator {
+    counter: u32,
+}
+
+impl ConnectionIdDecoder for CountingConnectionIdGenerator {
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        let len = usize::from(dec.peek_byte().unwrap());
+        dec.decode(len).map(ConnectionIdRef::from)
+    }
+}
+
+impl ConnectionIdGenerator for CountingConnectionIdGenerator {
+    fn generate_cid(&mut self) -> Option<ConnectionId> {
+        let mut r = random(20);
+        r[0] = 5 + ((r[0] >> 4) & r[0]);
+        r[1] = u8::try_from(self.counter >> 24).unwrap();
+        r[2] = u8::try_from((self.counter >> 16) & 0xff).unwrap();
+        r[3] = u8::try_from((self.counter >> 8) & 0xff).unwrap();
+        r[4] = u8::try_from(self.counter & 0xff).unwrap();
+        self.counter += 1;
+        Some(ConnectionId::from(&r[..usize::from(r[0])]))
+    }
+
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
+}
+
 /// Create a transport client with default configuration.
 #[must_use]
 pub fn default_client() -> Connection {
@@ -83,7 +115,7 @@ pub fn default_client() -> Connection {
     Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(3))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         loopback(),
         loopback(),
         &CongestionControlAlgorithm::NewReno,
@@ -110,7 +142,7 @@ fn make_default_server(alpn: &[impl AsRef<str>]) -> Connection {
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(5))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
@@ -161,7 +193,7 @@ pub fn default_http3_client() -> Http3Client {
     fixture_init();
     Http3Client::new(
         DEFAULT_SERVER_NAME,
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(3))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         loopback(),
         loopback(),
         &CongestionControlAlgorithm::NewReno,
@@ -187,7 +219,7 @@ pub fn default_http3_server() -> Http3Server {
         DEFAULT_KEYS,
         DEFAULT_ALPN_H3,
         anti_replay(),
-        Rc::new(RefCell::new(FixedConnectionIdGenerator::new(5))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         QpackSettings {
             max_table_size_encoder: 100,
             max_table_size_decoder: 100,

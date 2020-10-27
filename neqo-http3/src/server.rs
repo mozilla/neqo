@@ -231,12 +231,12 @@ mod tests {
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_qpack::QpackSettings;
     use neqo_transport::{
-        CloseError, Connection, ConnectionEvent, FixedConnectionIdGenerator, State, StreamType,
-        ZeroRttState,
+        CloseError, Connection, ConnectionEvent, State, StreamType, ZeroRttState,
     };
     use std::ops::{Deref, DerefMut};
     use test_fixture::{
-        anti_replay, default_client, fixture_init, now, DEFAULT_ALPN, DEFAULT_KEYS,
+        anti_replay, default_client, fixture_init, now, CountingConnectionIdGenerator,
+        DEFAULT_ALPN, DEFAULT_KEYS,
     };
 
     const DEFAULT_SETTINGS: QpackSettings = QpackSettings {
@@ -252,7 +252,7 @@ mod tests {
             DEFAULT_KEYS,
             DEFAULT_ALPN,
             anti_replay(),
-            Rc::new(RefCell::new(FixedConnectionIdGenerator::new(5))),
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             settings,
         )
         .expect("create a server")
