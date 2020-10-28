@@ -704,7 +704,7 @@ impl Connection {
         self.crypto.tls.authenticated(status);
         let res = self.handshake(now, PNSpace::Handshake, None);
         self.absorb_error(now, res);
-        self.process_saved();
+        self.process_saved(now);
     }
 
     /// Get the role of the connection.
@@ -830,22 +830,9 @@ impl Connection {
 
     /// Process new input datagrams on the connection.
     pub fn process_input(&mut self, d: Datagram, now: Instant) {
-        self.input(d, now);
-        self.process_saved();
+        self.input(d, now, now);
+        self.process_saved(now);
         self.cleanup_streams();
-    }
-
-    /// Process any saved datagrams that might be available for processing.
-    fn process_saved(&mut self) {
-        while let Some(cspace) = self.saved_datagrams.available() {
-            qdebug!([self], "process saved for space {:?}", cspace);
-            if self.crypto.states.rx_hp(cspace).is_some() {
-                for saved in self.saved_datagrams.take_saved() {
-                    qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
-                    self.input(saved.d, saved.t);
-                }
-            }
-        }
     }
 
     /// Get the time that we next need to be called back, relative to `now`.
@@ -935,8 +922,8 @@ impl Connection {
     #[must_use = "Output of the process function must be handled"]
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         if let Some(d) = dgram {
-            self.input(d, now);
-            self.process_saved();
+            self.input(d, now, now);
+            self.process_saved(now);
         }
         self.process_output(now)
     }
@@ -1021,6 +1008,19 @@ impl Connection {
             Err(Error::StatelessReset)
         } else {
             Ok(())
+        }
+    }
+
+    /// Process any saved datagrams that might be available for processing.
+    fn process_saved(&mut self, now: Instant) {
+        while let Some(cspace) = self.saved_datagrams.available() {
+            qdebug!([self], "process saved for space {:?}", cspace);
+            if self.crypto.states.rx_hp(cspace).is_some() {
+                for saved in self.saved_datagrams.take_saved() {
+                    qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
+                    self.input(saved.d, saved.t, now);
+                }
+            }
         }
     }
 
@@ -1199,10 +1199,11 @@ impl Connection {
     }
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
-    fn input(&mut self, d: Datagram, now: Instant) {
+    /// This takes two times: when the datagram was received, and the current time.
+    fn input(&mut self, d: Datagram, received: Instant, now: Instant) {
         // First determine the path.
         let path = self.paths.path_or_temporary(&d);
-        let res = self.input_path(&path, d, now);
+        let res = self.input_path(&path, d, received);
         self.capture_error(Some(path), now, 0, res).ok();
     }
 
