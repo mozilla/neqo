@@ -7,7 +7,7 @@
 // Functions that handle capturing QLOG traces.
 
 use std::convert::TryFrom;
-use std::ops::RangeInclusive;
+use std::ops::{Deref, RangeInclusive};
 use std::string::String;
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
 use crate::connection::State;
 use crate::frame::{self, Frame};
 use crate::packet::{DecryptedPacket, PacketNumber, PacketType, PublicPacket};
-use crate::path::Path;
+use crate::path::PathRef;
 use crate::tparams::{self, TransportParametersHandler};
 use crate::tracking::SentPacket;
 use crate::QuicVersion;
@@ -83,30 +83,31 @@ pub fn connection_tparams_set(qlog: &mut NeqoQlog, tph: &TransportParametersHand
     })
 }
 
-pub fn server_connection_started(qlog: &mut NeqoQlog, path: &Path) {
+pub fn server_connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
     connection_started(qlog, path)
 }
 
-pub fn client_connection_started(qlog: &mut NeqoQlog, path: &Path) {
+pub fn client_connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
     connection_started(qlog, path)
 }
 
-fn connection_started(qlog: &mut NeqoQlog, path: &Path) {
+fn connection_started(qlog: &mut NeqoQlog, path: &PathRef) {
     qlog.add_event(|| {
+        let p = path.deref().borrow();
         Some(Event::connection_started(
-            if path.local_address().ip().is_ipv4() {
+            if p.local_address().ip().is_ipv4() {
                 "ipv4".into()
             } else {
                 "ipv6".into()
             },
-            format!("{}", path.local_address().ip()),
-            format!("{}", path.remote_address().ip()),
+            format!("{}", p.local_address().ip()),
+            format!("{}", p.remote_address().ip()),
             Some("QUIC".into()),
-            path.local_address().port().into(),
-            path.remote_address().port().into(),
+            p.local_address().port().into(),
+            p.remote_address().port().into(),
             Some(format!("{:x}", QuicVersion::default().as_u32())),
-            Some(format!("{}", path.local_cid())),
-            Some(format!("{}", path.remote_cid())),
+            Some(format!("{}", p.local_cid())),
+            Some(format!("{}", p.remote_cid())),
         ))
     })
 }

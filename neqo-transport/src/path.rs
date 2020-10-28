@@ -7,20 +7,20 @@
 #![deny(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::net::SocketAddr;
-use std::ops::{Index, IndexMut};
+use std::rc::Rc;
 use std::time::Instant;
 
-use crate::cid::{ConnectionId, ConnectionIdEntry, ConnectionIdRef, RemoteConnectionIdEntry};
+use crate::cid::{ConnectionId, ConnectionIdRef, RemoteConnectionIdEntry};
 use crate::frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
-use crate::{Error, Res};
 
-use neqo_common::{qdebug, Datagram};
+use neqo_common::{hex, qdebug, qinfo, qtrace, Datagram};
 use neqo_crypto::random;
 
 /// This is the MTU that we assume when using IPv6.
@@ -36,12 +36,7 @@ const MAX_PATH_PROBES: usize = 3;
 /// The maximum number of paths that `Paths` will track.
 const MAX_PATHS: usize = 15;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PathId {
-    Primary,
-    Temporary,
-    Id(u32),
-}
+pub type PathRef = Rc<RefCell<Path>>;
 
 /// A collection for network paths.
 /// This holds a collection of paths that have been used for sending or
@@ -51,164 +46,133 @@ pub enum PathId {
 /// is exposed to too many paths.
 #[derive(Debug, Default)]
 pub struct Paths {
-    paths: Vec<Path>,
-    temp: Option<Path>,
-    next_id: u32,
+    /// All of the paths.
+    paths: Vec<PathRef>,
+    /// This is the primary path.  This will only be `None` initially, so
+    /// care needs to be taken regarding that only during the handshake.
+    /// This path will also be in `paths`.
+    primary: Option<PathRef>,
 }
 
 impl Paths {
-    /// Make a temporary path.
-    pub fn make_temporary(&mut self, local: SocketAddr, remote: SocketAddr) -> Res<PathId> {
-        debug_assert!(self.temp.is_none());
-        let path = Path::temporary(self.next_id, local, remote);
-        let id = path.id();
-        self.temp = Some(path);
-        self.next_id = self.next_id.checked_add(1).ok_or(Error::IntegerOverflow)?;
-        Ok(id)
-    }
-
     /// Find the path that the provided `Datagram` was received on.
-    pub fn path_or_temporary(&mut self, d: &Datagram) -> Res<PathId> {
+    /// This might be a temporary path.
+    pub fn path_or_temporary(&self, d: &Datagram) -> PathRef {
         self.paths
             .iter()
             .find_map(|p| {
-                if p.received_on(d) {
-                    Some(Ok(p.id()))
+                if p.borrow().received_on(d) {
+                    Some(Rc::clone(p))
                 } else {
                     None
                 }
             })
-            .unwrap_or_else(|| self.make_temporary(d.destination(), d.source()))
+            .unwrap_or_else(|| Rc::new(RefCell::new(Path::temporary(d.destination(), d.source()))))
     }
 
-    /// Does this path ID refer to the current temporary path.
-    pub fn is_temporary(&self, path: PathId) -> bool {
-        path == PathId::Temporary || self.temp.as_ref().map_or(false, |p| p.id() == path)
+    /// Get a reference to the primary path.  This will assert if there is no primary
+    /// path, which happens at a server prior to receiving a valid Initial packet
+    /// from a client.  So be careful using this method.
+    pub fn primary(&self) -> PathRef {
+        self.primary_fallible().unwrap()
     }
 
-    /// Discard the temporary path.
-    pub fn discard_temporary(&mut self) {
-        self.temp = None;
+    /// Get a reference to the primary path.
+    pub fn primary_fallible(&self) -> Option<PathRef> {
+        self.primary.as_ref().map(Rc::clone)
     }
 
-    /// Make the temporary path permanent.
-    /// This returns the canonical ID that is assigned to the path.
-    #[must_use]
-    pub fn ensure_permanent(
+    /// Returns true if the path is not permanent.
+    pub fn is_temporary(&self, path: &PathRef) -> bool {
+        // Ask the path first, which is simpler.
+        path.borrow().is_temporary() || !self.paths.iter().any(|p| Rc::ptr_eq(p, path))
+    }
+
+    /// Adopt a temporary path as permanent.
+    /// The first path that is made permanent is made primary.
+    pub fn make_permanent(
         &mut self,
-        path: PathId,
+        path: PathRef,
         local_cid: Option<ConnectionId>,
         remote_cid: RemoteConnectionIdEntry,
-    ) -> PathId {
-        if !self.is_temporary(path) {
-            // This does not refer to the current temporary path.
-            return path;
-        }
+    ) {
+        debug_assert!(self.is_temporary(&path));
 
         // Make sure not to track too many paths.
+        // This protects index 0, which contains the primary path.
         if self.paths.len() >= MAX_PATHS {
             self.paths.remove(1);
             debug_assert!(self.paths.len() < MAX_PATHS);
         }
 
-        let mut path = self.temp.take().unwrap();
-        let id = path.id();
-        qdebug!([path], "Make permanent");
-        path.make_permanent(local_cid, remote_cid);
+        qdebug!([path.borrow()], "Make permanent");
+        path.borrow_mut().make_permanent(local_cid, remote_cid);
+        if self.primary.is_none() {
+            self.primary = Some(Rc::clone(&path));
+            path.borrow_mut().primary = true;
+        }
         self.paths.push(path);
-        id
     }
 
     /// Set the identified path to be primary.
-    pub fn migrate(&mut self, idx: PathId, d: &Datagram) {
-        match idx {
-            PathId::Primary => (),
-            PathId::Temporary => panic!("a temporary path can't be made primary"),
-            PathId::Id(id) => {
-                let index_of = self
-                    .paths
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, p)| if p.id == id { Some(i) } else { None })
-                    .unwrap();
-                self.paths.swap(0, index_of);
-            }
-        }
-        // The updates here need to match the checks in `Path::received_on`.
+    /// This panics if `make_permanent` hasn't been called.
+    pub fn migrate(&mut self, path: &PathRef, d: &Datagram) {
+        // The update here needs to match the checks in `Path::received_on`.
         // Here, we update the remote port number to match the source port on the
         // datagram that was received.  This ensures that we send subsequent
         // packets back to the right place.
-        self.paths[0].update_port(d.source().port());
-    }
+        path.borrow_mut().update_port(d.source().port());
 
-    pub fn get(&self, idx: PathId) -> Option<&Path> {
-        match idx {
-            PathId::Temporary => self.temp.as_ref(),
-            PathId::Primary => self.paths.get(0),
-            PathId::Id(id) => self
-                .temp
-                .as_ref()
-                .into_iter()
-                .chain(&self.paths)
-                .find(|p| p.id == id),
+        if path.borrow().is_primary() {
+            return;
         }
-    }
 
-    pub fn get_mut(&mut self, idx: PathId) -> Option<&mut Path> {
-        match idx {
-            PathId::Temporary => self.temp.as_mut(),
-            PathId::Primary => self.paths.get_mut(0),
-            PathId::Id(id) => self
-                .temp
-                .as_mut()
-                .into_iter()
-                .chain(&mut self.paths)
-                .find(|p| p.id == id),
+        qinfo!([path.borrow()], "migrating to a new path");
+
+        if let Some(old) = self.primary.replace(Rc::clone(path)) {
+            // When migrating to a new path, send a probe on the old one first.
+            old.borrow_mut().primary = false;
+            old.borrow_mut().probe();
         }
+
+        // Swap the primary path into slot 0, so that it is protected from eviction.
+        let idx = self
+            .paths
+            .iter()
+            .enumerate()
+            .find_map(|(i, p)| if Rc::ptr_eq(p, path) { Some(i) } else { None })
+            .expect("migrating to a temporary path");
+        self.paths.swap(0, idx);
+
+        path.borrow_mut().primary = true;
+        path.borrow_mut().probe();
     }
 
-    /// Determine whether any non-primary path has a probe to send.
-    pub fn has_probes(&self) -> Option<PathId> {
+    /// Select a path to send on.  This will select the first path that has
+    /// probes to send, then fall back to the primary path.
+    pub fn select_path(&self) -> Option<PathRef> {
         self.paths
             .iter()
-            .skip(1)
-            .find_map(|p| if p.has_probe() { Some(p.id()) } else { None })
-    }
-
-    pub fn write_frames(
-        &mut self,
-        builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
-        stats: &mut FrameStats,
-    ) {
-        for p in &mut self.paths {
-            p.write_frames(builder, tokens, stats);
-        }
+            .find_map(|p| {
+                if p.borrow().has_probe() {
+                    Some(Rc::clone(p))
+                } else {
+                    None
+                }
+            })
+            .or_else(|| self.primary.as_ref().map(Rc::clone))
     }
 
     pub fn path_response(&mut self, response: [u8; 8], now: Instant) {
-        for p in &mut self.paths {
-            p.path_response(response, now);
+        for p in &self.paths {
+            p.borrow_mut().path_response(response, now);
         }
     }
 
     pub fn lost(&mut self, lost: [u8; 8]) {
-        for p in &mut self.paths {
-            p.lost(lost);
+        for p in &self.paths {
+            p.borrow_mut().lost(lost);
         }
-    }
-}
-
-impl Index<PathId> for Paths {
-    type Output = Path;
-    fn index(&self, idx: PathId) -> &Path {
-        self.get(idx).unwrap()
-    }
-}
-
-impl IndexMut<PathId> for Paths {
-    fn index_mut(&mut self, idx: PathId) -> &mut Path {
-        self.get_mut(idx).unwrap()
     }
 }
 
@@ -243,9 +207,6 @@ impl PathState {
 /// path are communicated to `Paths` afterwards.
 #[derive(Debug)]
 pub struct Path {
-    /// A stable identifier for the path.
-    id: u32,
-
     /// A local socket address.
     local: SocketAddr,
     /// A remote socket address.
@@ -256,38 +217,35 @@ pub struct Path {
     /// The current connection ID that we are using and its details.
     remote_cid: Option<RemoteConnectionIdEntry>,
 
+    /// Whether this is the primary path.
+    primary: bool,
     /// Whether the current path is considered valid.
     state: PathState,
     /// The last time the path was validated.
     last_valid: Option<Instant>,
-    /// A path challenge was received and is not yet sent.
+    /// A path challenge was received and PATH_RESPONSE has not been sent.
     challenge: Option<[u8; 8]>,
 }
 
 impl Path {
     /// Create a path from addresses and a remote connection ID.
-    /// This is used for migration.
-    fn temporary(id: u32, local: SocketAddr, remote: SocketAddr) -> Self {
+    /// This is used for migration and for new datagrams.
+    pub fn temporary(local: SocketAddr, remote: SocketAddr) -> Self {
         Self {
-            id,
             local,
             remote,
             local_cid: None,
             remote_cid: None,
+            primary: false,
             state: PathState::ProbeNeeded { probe_count: 0 },
             last_valid: None,
             challenge: None,
         }
     }
 
-    /// Get the canonical path ID for this path.
-    pub fn id(&self) -> PathId {
-        PathId::Id(self.id)
-    }
-
-    /// The first path is the one used for the handshake and it's special.
-    pub fn is_handshake(&self) -> bool {
-        self.id == 0
+    /// Whether this path is the primary or current path for the connection.
+    pub fn is_primary(&self) -> bool {
+        self.primary
     }
 
     /// Whether this path is a temporary one.
@@ -407,21 +365,26 @@ impl Path {
 
     /// The path has been challenged.  This generates a response.
     /// This only generates a single response at a time.
-    pub fn challenged(&mut self, challenge: [u8; 8]) {
-        self.challenge = Some(challenge.to_owned())
+    pub fn challenged(&mut self, challenge: [u8; 8], probe_back: bool) {
+        self.challenge = Some(challenge.to_owned());
+        if probe_back {
+            self.probe();
+        }
     }
 
     /// At the next opportunity, send a probe.
     /// Unless the probe count has been exhausted already.
-    pub fn probe(&mut self) {
+    fn probe(&mut self) {
         let probe_count = match &self.state {
             PathState::Probing { probe_count, .. } => *probe_count + 1,
             PathState::ProbeNeeded { probe_count, .. } => *probe_count,
             _ => 0,
         };
         self.state = if probe_count >= MAX_PATH_PROBES {
+            qinfo!([self], "Probing failed");
             PathState::Failed
         } else {
+            qdebug!([self], "Initiating probe");
             PathState::ProbeNeeded { probe_count }
         };
     }
@@ -443,6 +406,7 @@ impl Path {
 
         // Send PATH_RESPONSE.
         if let Some(challenge) = self.challenge.take() {
+            qtrace!([self], "Responding to path challenge {}", hex(&challenge));
             builder.encode_varint(FRAME_TYPE_PATH_RESPONSE);
             builder.encode(&challenge[..]);
             stats.path_response += 1;
@@ -455,6 +419,7 @@ impl Path {
 
         // Send PATH_CHALLENGE.
         if let PathState::ProbeNeeded { probe_count } = self.state {
+            qtrace!([self], "Initiating path challenge {}", probe_count);
             let data = <[u8; 8]>::try_from(&random(8)[..]).unwrap();
             builder.encode_varint(FRAME_TYPE_PATH_CHALLENGE);
             builder.encode(&data);
@@ -477,15 +442,17 @@ impl Path {
 
 impl Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "path{} {}->{} {:?}",
-            self.id,
-            self.local,
-            self.remote,
-            self.remote_cid
-                .as_ref()
-                .map(ConnectionIdEntry::connection_id)
-        )
+        if self.is_primary() {
+            write!(f, "pri-")?; // primary
+        }
+        if !self.is_valid() {
+            write!(f, "unv-")?; // unvalidated
+        }
+        write!(f, "path")?;
+        if let Some(entry) = self.remote_cid.as_ref() {
+            write!(f, ":{}", entry.connection_id())?;
+        }
+        write!(f, " {}->{}", self.local, self.remote,)?;
+        Ok(())
     }
 }

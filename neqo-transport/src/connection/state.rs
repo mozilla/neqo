@@ -7,6 +7,7 @@
 use neqo_common::Encoder;
 use std::cmp::Ordering;
 use std::mem;
+use std::rc::Rc;
 use std::time::Instant;
 
 use crate::frame::{
@@ -14,19 +15,9 @@ use crate::frame::{
     FRAME_TYPE_HANDSHAKE_DONE,
 };
 use crate::packet::PacketBuilder;
-use crate::path::PathId;
+use crate::path::PathRef;
 use crate::recovery::RecoveryToken;
 use crate::{ConnectionError, Error};
-
-/// `APPLICATION_CLOSE` produces the default CONNECTION_CLOSE frame that
-/// is sent when an application error code needs to be sent in an
-/// Initial or Handshake packet.
-const APPLICATION_CLOSE: &ClosingFrame = &ClosingFrame {
-    path: PathId::Primary,
-    error: ConnectionError::Transport(Error::ApplicationError),
-    frame_type: 0,
-    reason_phrase: Vec::new(),
-};
 
 #[derive(Clone, Debug, PartialEq, Ord, Eq)]
 /// The state of the Connection.
@@ -88,7 +79,7 @@ impl PartialOrd for State {
 
 #[derive(Debug, Clone)]
 pub struct ClosingFrame {
-    path: PathId,
+    path: PathRef,
     error: ConnectionError,
     frame_type: FrameType,
     reason_phrase: Vec<u8>,
@@ -96,7 +87,7 @@ pub struct ClosingFrame {
 
 impl ClosingFrame {
     fn new(
-        path: PathId,
+        path: PathRef,
         error: ConnectionError,
         frame_type: FrameType,
         message: impl AsRef<str>,
@@ -110,15 +101,22 @@ impl ClosingFrame {
         }
     }
 
-    pub fn path(&self) -> PathId {
-        self.path
+    pub fn path(&self) -> &PathRef {
+        &self.path
     }
 
-    pub fn sanitize(&self) -> &Self {
+    pub fn sanitize(&self) -> Option<Self> {
         if let ConnectionError::Application(_) = self.error {
-            APPLICATION_CLOSE
+            // The default CONNECTION_CLOSE frame that is sent when an application
+            // error code needs to be sent in an Initial or Handshake packet.
+            Some(Self {
+                path: Rc::clone(&self.path),
+                error: ConnectionError::Transport(Error::ApplicationError),
+                frame_type: 0,
+                reason_phrase: Vec::new(),
+            })
         } else {
-            self
+            None
         }
     }
 
@@ -147,17 +145,6 @@ impl ClosingFrame {
             &self.reason_phrase
         };
         builder.encode_vvec(reason);
-    }
-}
-
-impl Default for ClosingFrame {
-    fn default() -> Self {
-        Self {
-            path: PathId::Primary,
-            error: ConnectionError::Transport(Error::InternalError),
-            frame_type: 0,
-            reason_phrase: Vec::new(),
-        }
     }
 }
 
@@ -203,7 +190,7 @@ impl StateSignaling {
 
     pub fn close(
         &mut self,
-        path: PathId,
+        path: PathRef,
         error: ConnectionError,
         frame_type: FrameType,
         message: impl AsRef<str>,
@@ -215,7 +202,7 @@ impl StateSignaling {
 
     pub fn drain(
         &mut self,
-        path: PathId,
+        path: PathRef,
         error: ConnectionError,
         frame_type: FrameType,
         message: impl AsRef<str>,
@@ -230,15 +217,15 @@ impl StateSignaling {
         match self {
             Self::Closing(frame) => {
                 // When we are closing, we might need to send the close frame again.
-                let frame = mem::take(frame);
+                let res = Some(frame.clone());
                 *self = Self::CloseSent(Some(frame.clone()));
-                Some(frame)
+                res
             }
             Self::Draining(frame) => {
                 // When we are draining, just send once.
-                let frame = mem::take(frame);
+                let res = Some(frame.clone());
                 *self = Self::CloseSent(None);
-                Some(frame)
+                res
             }
             _ => None,
         }
@@ -247,8 +234,7 @@ impl StateSignaling {
     /// If a close can be sent again, prepare to send it again.
     pub fn send_close(&mut self) {
         if let Self::CloseSent(Some(frame)) = self {
-            let frame = mem::take(frame);
-            *self = Self::Closing(frame);
+            *self = Self::Closing(frame.clone());
         }
     }
 

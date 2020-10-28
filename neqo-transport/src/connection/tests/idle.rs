@@ -273,6 +273,7 @@ fn idle_caching() {
     // Now let the server Initial through, with the CRYPTO frame.
     let dgram = server.process_output(end).dgram();
     let (initial, _) = split_datagram(&dgram.unwrap());
+    neqo_common::qwarn!("client ingests initial, finally");
     let _ = client.process(Some(initial), end);
     maybe_authenticate(&mut client);
     let dgram = client.process_output(end).dgram();

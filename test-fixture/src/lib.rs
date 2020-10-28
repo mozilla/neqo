@@ -17,6 +17,7 @@ use neqo_transport::{
 };
 
 use std::cell::RefCell;
+use std::cmp::max;
 use std::convert::TryFrom;
 use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -94,7 +95,9 @@ impl ConnectionIdDecoder for CountingConnectionIdGenerator {
 impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
         let mut r = random(20);
-        r[0] = 5 + ((r[0] >> 4) & r[0]);
+        // Randomize length, but ensure that the connection ID is long
+        // enough to pass for an original destination connection ID.
+        r[0] = max(8, 5 + ((r[0] >> 4) & r[0]));
         r[1] = u8::try_from(self.counter >> 24).unwrap();
         r[2] = u8::try_from((self.counter >> 16) & 0xff).unwrap();
         r[3] = u8::try_from((self.counter >> 8) & 0xff).unwrap();

@@ -39,12 +39,23 @@ fn rebinding_address() {
 
     let dgram = send_something(&mut client, now());
     let dgram = change_path(&dgram);
+    server.process_input(dgram, now());
+
+    // The server now probes the new (primary) path.
     let challenges = server.stats().frame_tx.path_challenge;
-    let dgram = server.process(Some(dgram), now()).dgram();
+    let dgram = server.process_output(now()).dgram();
     assert_eq!(server.stats().frame_tx.path_challenge, challenges + 1);
     let dgram = dgram.unwrap();
     assert_eq!(dgram.source(), loopback_v4());
     assert_eq!(dgram.destination(), loopback_v4());
+
+    // The server also probes the old path.
+    let challenges = server.stats().frame_tx.path_challenge;
+    let dgram = server.process_output(now()).dgram();
+    assert_eq!(server.stats().frame_tx.path_challenge, challenges + 1);
+    let dgram = dgram.unwrap();
+    assert_eq!(dgram.source(), loopback());
+    assert_eq!(dgram.destination(), loopback());
 }
 
 #[test]
