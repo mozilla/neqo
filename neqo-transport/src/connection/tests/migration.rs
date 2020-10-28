@@ -85,7 +85,7 @@ fn rebinding_address() {
     // Even after it receives a non-probing packet on the new path.
     client.process_input(server_data, now());
     let client_data2 = send_something(&mut client, now());
-    assert_new_path(&client_data2);
+    assert_old_path(&client_data2);
 }
 
 #[test]
