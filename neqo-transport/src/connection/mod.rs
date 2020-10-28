@@ -1647,7 +1647,11 @@ impl Connection {
                 initial_sent = Some(sent);
                 needs_padding = true;
             } else {
-                if pt != PacketType::ZeroRtt && self.role == Role::Client {
+                if pt == PacketType::Short
+                    || (pt == PacketType::Handshake && self.role == Role::Client)
+                {
+                    // TODO(mt) we still need to pad Initial packets from the server when
+                    // sending 1-RTT packets, but we can't do that with the current padding scheme.
                     needs_padding = false;
                 }
                 self.loss_recovery.on_packet_sent(sent);
