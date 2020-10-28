@@ -604,7 +604,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn encoded_vvec_length_oob() {
-        let _ = Encoder::varint_len(1 << 62);
+        let _ = Encoder::vvec_len(1 << 62);
     }
 
     #[test]

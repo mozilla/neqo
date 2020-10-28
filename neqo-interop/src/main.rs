@@ -328,6 +328,7 @@ impl H3Handler {
                     stream_id,
                     headers,
                     fin,
+                    ..
                 } => {
                     if !self.streams.contains(&stream_id) {
                         eprintln!("Data on unexpected stream: {}", stream_id);
