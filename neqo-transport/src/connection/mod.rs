@@ -713,12 +713,18 @@ impl Connection {
         self.crypto.tls.peer_certificate()
     }
 
-    /// Call by application when the peer cert has been verified
+    /// Call by application when the peer cert has been verified.
+    ///
+    /// This panics if there is no active peer.  It's OK to call this
+    /// when authentication isn't needed, that will likely only cause
+    /// the connection to fail.  However, if no packets have been
+    /// exchanged, it's not OK.
     pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
         qinfo!([self], "Authenticated {:?}", status);
         self.crypto.tls.authenticated(status);
         let res = self.handshake(now, PNSpace::Handshake, None);
         self.absorb_error(now, res);
+        self.process_saved(now);
     }
 
     /// Get the role of the connection.
@@ -828,11 +834,11 @@ impl Connection {
         }
     }
 
-    /// Call in to process activity on the connection. Either new packets have
-    /// arrived or a timeout has expired (or both).
+    /// Process new input datagrams on the connection.
     pub fn process_input(&mut self, d: Datagram, now: Instant) {
         let res = self.input(d, now);
         self.absorb_error(now, res);
+        self.process_saved(now);
         self.cleanup_streams();
     }
 
@@ -925,6 +931,7 @@ impl Connection {
         if let Some(d) = dgram {
             let res = self.input(d, now);
             self.absorb_error(now, res);
+            self.process_saved(now);
         }
         self.process_output(now)
     }
@@ -1030,12 +1037,16 @@ impl Connection {
         }
     }
 
-    /// Process any saved packets if the appropriate keys are available.
-    fn process_saved(&mut self, cspace: CryptoSpace) {
-        if self.crypto.states.rx_hp(cspace).is_some() {
-            for saved in self.saved_datagrams.take_saved(cspace) {
-                qtrace!([self], "process saved @{:?}: {:?}", saved.t, saved.d);
-                self.process_input(saved.d, saved.t);
+    /// Process any saved datagrams that might be available for processing.
+    fn process_saved(&mut self, now: Instant) {
+        while let Some(cspace) = self.saved_datagrams.available() {
+            qdebug!([self], "process saved for space {:?}", cspace);
+            if self.crypto.states.rx_hp(cspace).is_some() {
+                for saved in self.saved_datagrams.take_saved() {
+                    qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
+                    let res = self.input(saved.d, saved.t);
+                    self.absorb_error(now, res);
+                }
             }
         }
     }
@@ -1339,10 +1350,11 @@ impl Connection {
     }
 
     fn start_handshake(&mut self, packet: &PublicPacket, d: &Datagram) -> Res<()> {
+        qtrace!([self], "starting handshake");
+        debug_assert_eq!(packet.packet_type(), PacketType::Initial);
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
-        if self.role == Role::Server {
-            assert_eq!(packet.packet_type(), PacketType::Initial);
 
+        if self.role == Role::Server {
             // A server needs to accept the client's selected CID during the handshake.
             self.valid_cids.push(ConnectionId::from(packet.dcid()));
             // Install a path.
@@ -1364,6 +1376,7 @@ impl Connection {
                 .expect("should have a path for sending Initial");
             p.set_remote_cid(packet.scid());
         }
+
         self.set_state(State::Handshaking);
         Ok(())
     }
@@ -1886,7 +1899,7 @@ impl Connection {
                 self.set_initial_limits();
             }
             if self.crypto.install_keys(self.role)? {
-                self.process_saved(CryptoSpace::Handshake);
+                self.saved_datagrams.make_available(CryptoSpace::Handshake);
             }
         }
 
@@ -2282,7 +2295,8 @@ impl Connection {
         self.process_tps()?;
         self.set_state(State::Connected);
         self.create_resumption_token(now);
-        self.process_saved(CryptoSpace::ApplicationData);
+        self.saved_datagrams
+            .make_available(CryptoSpace::ApplicationData);
         self.stats.borrow_mut().resumed = self.crypto.tls.info().unwrap().resumed();
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
