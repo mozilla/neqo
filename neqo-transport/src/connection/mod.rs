@@ -1502,14 +1502,16 @@ impl Connection {
     }
 
     /// Write frames to the provided builder.  Returns a list of tokens used for
-    /// tracking loss or acknowledgment and whether any frame was ACK eliciting.
+    /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
+    /// whether the packet was padded.
     fn write_frames(
         &mut self,
         space: PNSpace,
         profile: &SendProfile,
         builder: &mut PacketBuilder,
+        mut pad: bool,
         now: Instant,
-    ) -> (Vec<RecoveryToken>, bool) {
+    ) -> (Vec<RecoveryToken>, bool, bool) {
         let mut tokens = Vec::new();
         let stats = &mut self.stats.borrow_mut().frame_tx;
 
@@ -1520,7 +1522,7 @@ impl Connection {
             if let Some(t) = ack_token {
                 tokens.push(t);
             }
-            return (tokens, false);
+            return (tokens, false, false);
         }
 
         if space == PNSpace::ApplicationData && self.role == Role::Server {
@@ -1557,11 +1559,21 @@ impl Connection {
                 false
             };
 
+        // Add padding.  Only pad 1-RTT packets so that we don't prevent coalescing.
+        // And avoid padding packets that otherwise only contain ACK because adding PADDING
+        // causes those packets to consume congestion window, which is not tracked (yet).
+        pad &= ack_eliciting && space == PNSpace::ApplicationData;
+        if pad {
+            builder.pad();
+            stats.padding += 1;
+            stats.all += 1;
+        }
+
         if let Some(t) = ack_token {
             tokens.push(t);
         }
         stats.all += tokens.len();
-        (tokens, ack_eliciting)
+        (tokens, ack_eliciting, pad)
     }
 
     /// Build a datagram, possibly from multiple packets (for different PN
@@ -1609,7 +1621,8 @@ impl Connection {
             // Add frames to the packet.
             let limit = profile.limit() - aead_expansion;
             builder.set_limit(limit);
-            let (tokens, ack_eliciting) = self.write_frames(*space, &profile, &mut builder, now);
+            let (tokens, ack_eliciting, padded) =
+                self.write_frames(*space, &profile, &mut builder, needs_padding, now);
             if builder.packet_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
@@ -1641,17 +1654,16 @@ impl Connection {
                 Rc::new(tokens),
                 encoder.len() - header_start,
             );
-            if pt == PacketType::Initial && (self.role == Role::Client || ack_eliciting) {
+            if padded {
+                needs_padding = false;
+                self.loss_recovery.on_packet_sent(sent);
+            } else if pt == PacketType::Initial && (self.role == Role::Client || ack_eliciting) {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
                 initial_sent = Some(sent);
                 needs_padding = true;
             } else {
-                if pt == PacketType::Short
-                    || (pt == PacketType::Handshake && self.role == Role::Client)
-                {
-                    // TODO(mt) we still need to pad Initial packets from the server when
-                    // sending 1-RTT packets, but we can't do that with the current padding scheme.
+                if pt == PacketType::Handshake && self.role == Role::Client {
                     needs_padding = false;
                 }
                 self.loss_recovery.on_packet_sent(sent);
@@ -1671,7 +1683,7 @@ impl Connection {
         if encoder.is_empty() {
             Ok(SendOption::No(profile.paced()))
         } else {
-            // Pad Initial packets sent by the client to mtu bytes.
+            // Perform additional padding for Initial packets as necessary.
             let mut packets: Vec<u8> = encoder.into();
             if let Some(mut initial) = initial_sent.take() {
                 if needs_padding {
