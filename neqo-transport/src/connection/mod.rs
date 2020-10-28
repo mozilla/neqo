@@ -256,13 +256,16 @@ pub struct Connection {
     valid_cids: Vec<ConnectionId>,
     address_validation: AddressValidationInfo,
 
+    /// The source connection ID that this endpoint uses for the handshake.
     /// Since we need to communicate this to our peer in tparams, setting this
     /// value is part of constructing the struct.
     local_initial_source_cid: ConnectionId,
-    /// Checked against tparam value from peer
+    /// The source connection ID from the first packet from the other end.
+    /// This is checked against the peer's transport parameters.
     remote_initial_source_cid: Option<ConnectionId>,
-    /// Checked against tparam value from peer
-    remote_original_destination_cid: Option<ConnectionId>,
+    /// The destination connection ID from the first packet from the client.
+    /// This is checked by the client against the server's transport parameters.
+    original_destination_cid: Option<ConnectionId>,
 
     /// We sometimes save a datagram against the possibility that keys will later
     /// become available.  This avoids reporting packets as dropped during the handshake
@@ -322,7 +325,7 @@ impl Connection {
             quic_version,
         )?;
         c.crypto.states.init(quic_version, Role::Client, &dcid);
-        c.remote_original_destination_cid = Some(dcid);
+        c.original_destination_cid = Some(dcid);
         c.initialize_path(local_addr, remote_addr);
         Ok(c)
     }
@@ -410,7 +413,7 @@ impl Connection {
             address_validation: AddressValidationInfo::None,
             local_initial_source_cid,
             remote_initial_source_cid: None,
-            remote_original_destination_cid: None,
+            original_destination_cid: None,
             saved_datagrams: SavedDatagrams::default(),
             crypto,
             acks: AckTracker::default(),
@@ -453,7 +456,7 @@ impl Connection {
     /// will always be present for Role::Client but not if Role::Server is in
     /// State::Init.
     pub fn odcid(&self) -> Option<&ConnectionId> {
-        self.remote_original_destination_cid.as_ref()
+        self.original_destination_cid.as_ref()
     }
 
     /// Set a local transport parameter, possibly overriding a default value.
@@ -943,7 +946,7 @@ impl Connection {
             self.stats.borrow_mut().pkt_dropped("Retry without a token");
             return Ok(());
         }
-        if !packet.is_valid_retry(&self.remote_original_destination_cid.as_ref().unwrap()) {
+        if !packet.is_valid_retry(&self.original_destination_cid.as_ref().unwrap()) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Retry with bad integrity tag");
@@ -1332,7 +1335,7 @@ impl Connection {
             // But we will use our own guess if necessary.
             self.remote_initial_source_cid
                 .as_ref()
-                .or_else(|| self.remote_original_destination_cid.as_ref())
+                .or_else(|| self.original_destination_cid.as_ref())
                 .unwrap()
                 .clone(),
         ));
@@ -1345,6 +1348,7 @@ impl Connection {
 
             // A server needs to accept the client's selected CID during the handshake.
             self.valid_cids.push(ConnectionId::from(packet.dcid()));
+            self.original_destination_cid = Some(ConnectionId::from(packet.dcid()));
             // Install a path.
             self.initialize_path(d.destination(), d.source());
 
@@ -1790,7 +1794,7 @@ impl Connection {
                 .unwrap()
                 .get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
             if self
-                .remote_original_destination_cid
+                .original_destination_cid
                 .as_ref()
                 .map(ConnectionId::as_cid_ref)
                 != tp.map(ConnectionIdRef::from)
@@ -1813,8 +1817,8 @@ impl Connection {
             != tp.map(ConnectionIdRef::from)
         {
             qwarn!(
-                "{} ISCID test failed: self cid {:?} != tp cid {:?}",
-                self.role,
+                [self],
+                "ISCID test failed: self cid {:?} != tp cid {:?}",
                 self.remote_initial_source_cid,
                 tp.map(hex),
             );
@@ -1824,15 +1828,15 @@ impl Connection {
         if self.role == Role::Client {
             let tp = remote_tps.get_bytes(tparams::ORIGINAL_DESTINATION_CONNECTION_ID);
             if self
-                .remote_original_destination_cid
+                .original_destination_cid
                 .as_ref()
                 .map(ConnectionId::as_cid_ref)
                 != tp.map(ConnectionIdRef::from)
             {
                 qwarn!(
-                    "{} ODCID test failed: self cid {:?} != tp cid {:?}",
-                    self.role,
-                    self.remote_original_destination_cid,
+                    [self],
+                    "ODCID test failed: self cid {:?} != tp cid {:?}",
+                    self.original_destination_cid,
                     tp.map(hex),
                 );
                 return Err(Error::ProtocolViolation);
@@ -1849,8 +1853,8 @@ impl Connection {
             };
             if expected != tp.map(ConnectionIdRef::from) {
                 qwarn!(
-                    "{} RSCID test failed. self cid {:?} != tp cid {:?}",
-                    self.role,
+                    [self],
+                    "RSCID test failed. self cid {:?} != tp cid {:?}",
                     expected,
                     tp.map(hex),
                 );
