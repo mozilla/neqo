@@ -33,6 +33,15 @@ fn change_source_port(d: &Datagram) -> Datagram {
 
 #[test]
 fn rebinding_address() {
+    fn assert_new_path(dgram: &Datagram) {
+        assert_eq!(dgram.source(), loopback_v4());
+        assert_eq!(dgram.destination(), loopback_v4());
+    }
+    fn assert_old_path(dgram: &Datagram) {
+        assert_eq!(dgram.source(), loopback());
+        assert_eq!(dgram.destination(), loopback());
+    }
+
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
@@ -42,20 +51,41 @@ fn rebinding_address() {
     server.process_input(dgram, now());
 
     // The server now probes the new (primary) path.
-    let challenges = server.stats().frame_tx.path_challenge;
-    let dgram = server.process_output(now()).dgram();
-    assert_eq!(server.stats().frame_tx.path_challenge, challenges + 1);
-    let dgram = dgram.unwrap();
-    assert_eq!(dgram.source(), loopback_v4());
-    assert_eq!(dgram.destination(), loopback_v4());
+    let new_probe = server.process_output(now()).dgram().unwrap();
+    assert_eq!(server.stats().frame_tx.path_challenge, 1);
+    assert_new_path(&new_probe);
 
     // The server also probes the old path.
-    let challenges = server.stats().frame_tx.path_challenge;
-    let dgram = server.process_output(now()).dgram();
-    assert_eq!(server.stats().frame_tx.path_challenge, challenges + 1);
-    let dgram = dgram.unwrap();
-    assert_eq!(dgram.source(), loopback());
-    assert_eq!(dgram.destination(), loopback());
+    let old_probe = server.process_output(now()).dgram().unwrap();
+    assert_eq!(server.stats().frame_tx.path_challenge, 2);
+    assert_old_path(&old_probe);
+
+    // New data from the server is sent on the new path.
+    let server_data = send_something(&mut server, now());
+    assert_new_path(&server_data);
+
+    // The client should respond to the challenge on the new path.
+    let new_resp = client.process(Some(new_probe), now()).dgram().unwrap();
+    assert_eq!(client.stats().frame_rx.path_challenge, 1);
+    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    assert_eq!(client.stats().frame_tx.path_response, 1);
+    assert_new_path(&new_resp);
+
+    // The client also responds to probes on the old path.
+    let old_resp = client.process(Some(old_probe), now()).dgram().unwrap();
+    assert_eq!(client.stats().frame_rx.path_challenge, 2);
+    assert_eq!(client.stats().frame_tx.path_challenge, 2);
+    assert_eq!(client.stats().frame_tx.path_response, 2);
+    assert_old_path(&old_resp);
+
+    // But the client still sends data on the old path.
+    let client_data1 = send_something(&mut client, now());
+    assert_old_path(&client_data1);
+
+    // Even after it receives a non-probing packet on the new path.
+    client.process_input(server_data, now());
+    let client_data2 = send_something(&mut client, now());
+    assert_new_path(&client_data2);
 }
 
 #[test]
