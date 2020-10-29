@@ -372,27 +372,13 @@ impl RecvMessage {
                     return Err(Error::HttpGeneralProtocolStream);
                 }
 
-                match pseudo_header_map.entry(&header.0) {
-                    hash_map::Entry::Occupied(mut e) => {
-                        let found = e.get_mut();
-                        if *found {
-                            qdebug!(
-                                [self],
-                                "headers_valid - found duplicate pseudo header:'{}'",
-                                header.0
-                            );
-                            return Err(Error::HttpGeneralProtocolStream);
-                        }
-                        *found = true;
-                    }
-                    _ => {
-                        qdebug!(
-                            [self],
-                            "headers_valid - found undefined pseudo header:'{}'",
-                            header.0
-                        );
+                if let hash_map::Entry::Occupied(mut e) = pseudo_header_map.entry(&header.0) {
+                    if *e.get_mut() {
                         return Err(Error::HttpGeneralProtocolStream);
                     }
+                    *e.get_mut() = true;
+                } else {
+                    return Err(Error::HttpGeneralProtocolStream);
                 }
 
                 if header.0 == ":method" {
@@ -451,10 +437,10 @@ impl RecvMessage {
                     pseudo_header_map.remove(":authority");
                 }
             }
-            _ => {}
+            MessageType::Response => {}
         }
         // check if we have all required pseudo headers
-        for (key, value) in pseudo_header_map.into_iter() {
+        for (key, value) in pseudo_header_map {
             if !value {
                 qdebug!([self], "headers_valid - missing required header:'{}'", key);
                 return Err(Error::HttpGeneralProtocolStream);
