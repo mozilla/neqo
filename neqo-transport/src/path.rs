@@ -12,7 +12,6 @@ use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::net::SocketAddr;
 use std::rc::Rc;
-use std::time::Instant;
 
 use crate::cid::{ConnectionId, ConnectionIdRef, RemoteConnectionIdEntry};
 use crate::frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE};
@@ -163,9 +162,9 @@ impl Paths {
             .or_else(|| self.primary.as_ref().map(Rc::clone))
     }
 
-    pub fn path_response(&mut self, response: [u8; 8], now: Instant) {
+    pub fn path_response(&mut self, response: [u8; 8]) {
         for p in &self.paths {
-            p.borrow_mut().path_response(response, now);
+            p.borrow_mut().path_response(response);
         }
     }
 
@@ -184,7 +183,14 @@ enum PathState {
     /// The path was previously valid, but a new probe is needed.
     ProbeNeeded { probe_count: usize },
     /// The path hasn't been validated, but a probe has been sent.
-    Probing { probe_count: usize, data: [u8; 8] },
+    Probing {
+        /// The number of probes that have been sent.
+        probe_count: usize,
+        /// The probe that was last sent.
+        data: [u8; 8],
+        /// Whether the probe was sent in a datagram padded to the path MTU.
+        mtu: bool,
+    },
     /// Validation failed the last time it was attempted.
     Failed,
 }
@@ -221,10 +227,18 @@ pub struct Path {
     primary: bool,
     /// Whether the current path is considered valid.
     state: PathState,
-    /// The last time the path was validated.
-    last_valid: Option<Instant>,
+    /// Whether the path was validated.
+    validated: bool,
     /// A path challenge was received and PATH_RESPONSE has not been sent.
     challenge: Option<[u8; 8]>,
+
+    /// The number of bytes received on this path.
+    /// Note that this value might saturate on a long-lived connection,
+    /// but we only use it before the path is validated..
+    received_bytes: usize,
+
+    /// The number of bytes sent on this path.
+    sent_bytes: usize,
 }
 
 impl Path {
@@ -238,8 +252,10 @@ impl Path {
             remote_cid: None,
             primary: false,
             state: PathState::ProbeNeeded { probe_count: 0 },
-            last_valid: None,
+            validated: false,
             challenge: None,
+            received_bytes: 0,
+            sent_bytes: 0,
         }
     }
 
@@ -282,10 +298,10 @@ impl Path {
 
     /// Set the current path as valid.  This updates the time that the path was
     /// last validated and cancels any path validation.
-    pub fn set_valid(&mut self, now: Instant) {
+    pub fn set_valid(&mut self) {
         qdebug!([self], "Path validated");
         self.state = PathState::Valid;
-        self.last_valid = Some(now);
+        self.validated = true;
     }
 
     pub fn mtu(&self) -> usize {
@@ -349,16 +365,20 @@ impl Path {
     }
 
     /// Whether the path has been validated.
-    #[allow(dead_code)]
     pub fn is_valid(&self) -> bool {
-        self.last_valid.is_some()
+        self.validated
     }
 
     /// Handle a `PATH_RESPONSE` frame.
-    pub fn path_response(&mut self, response: [u8; 8], now: Instant) {
-        if let PathState::Probing { data, .. } = &self.state {
+    pub fn path_response(&mut self, response: [u8; 8]) {
+        if let PathState::Probing { data, mtu, .. } = &self.state {
             if response == *data {
-                self.set_valid(now);
+                if *mtu {
+                    self.set_valid();
+                } else {
+                    // Mark the path as valid, but keep probing.
+                    self.validated = true;
+                }
             }
         }
     }
@@ -399,13 +419,14 @@ impl Path {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) {
+        mtu: bool, // Whether the packet we're writing into will be a full MTU.
+    ) -> bool {
         if builder.remaining() < 9 {
-            return;
+            return false;
         }
 
         // Send PATH_RESPONSE.
-        if let Some(challenge) = self.challenge.take() {
+        let resp_sent = if let Some(challenge) = self.challenge.take() {
             qtrace!([self], "Responding to path challenge {}", hex(&challenge));
             builder.encode_varint(FRAME_TYPE_PATH_RESPONSE);
             builder.encode(&challenge[..]);
@@ -413,9 +434,12 @@ impl Path {
             stats.all += 1; // This doesn't add a token, so it needs to count all itself.
 
             if builder.remaining() < 9 {
-                return;
+                return true;
             }
-        }
+            true
+        } else {
+            false
+        };
 
         // Send PATH_CHALLENGE.
         if let PathState::ProbeNeeded { probe_count } = self.state {
@@ -427,7 +451,14 @@ impl Path {
             stats.path_challenge += 1;
             tokens.push(RecoveryToken::PathProbe(data));
 
-            self.state = PathState::Probing { probe_count, data };
+            self.state = PathState::Probing {
+                probe_count,
+                data,
+                mtu,
+            };
+            true
+        } else {
+            resp_sent
         }
     }
 
@@ -436,6 +467,29 @@ impl Path {
             if lost == *data {
                 self.probe();
             }
+        }
+    }
+
+    /// Record received bytes for the path.
+    pub fn add_received(&mut self, count: usize) {
+        self.received_bytes = self.received_bytes.saturating_add(count);
+    }
+
+    /// Record sent bytes for the path.
+    pub fn add_sent(&mut self, count: usize) {
+        self.sent_bytes = self.sent_bytes.saturating_add(count);
+    }
+
+    /// Get the number of bytes that can be written to this path.
+    pub fn amplification_limit(&self) -> usize {
+        if matches!(self.state, PathState::Failed) {
+            0
+        } else if self.is_valid() {
+            usize::MAX
+        } else if let Some(limit) = self.received_bytes.checked_mul(3) {
+            limit.saturating_sub(self.sent_bytes)
+        } else {
+            usize::MAX
         }
     }
 }

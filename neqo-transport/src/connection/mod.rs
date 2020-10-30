@@ -299,7 +299,8 @@ impl Connection {
         )?;
         c.crypto.states.init(quic_version, Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
-        let path = Path::temporary(local_addr, remote_addr);
+        let mut path = Path::temporary(local_addr, remote_addr);
+        path.set_valid();
         c.setup_handshake_path(Rc::new(RefCell::new(path)));
         Ok(c)
     }
@@ -928,7 +929,7 @@ impl Connection {
         self.process_output(now)
     }
 
-    fn handle_retry(&mut self, packet: &PublicPacket, now: Instant) -> Res<()> {
+    fn handle_retry(&mut self, packet: &PublicPacket) -> Res<()> {
         qinfo!([self], "received Retry");
         if matches!(self.address_validation, AddressValidationInfo::Retry { .. }) {
             self.stats.borrow_mut().pkt_dropped("Extra Retry");
@@ -948,7 +949,6 @@ impl Connection {
         // Update to the one that the server prefers.
         let path = self.paths.primary();
         path.borrow_mut().set_remote_cid(packet.scid());
-        path.borrow_mut().set_valid(now);
 
         let retry_scid = ConnectionId::from(packet.scid());
         qinfo!(
@@ -1105,7 +1105,7 @@ impl Connection {
                 }
             }
             (PacketType::Retry, State::WaitInitial, Role::Client) => {
-                self.handle_retry(packet, now)?;
+                self.handle_retry(packet)?;
                 return Ok(PreprocessResult::Next);
             }
             (PacketType::Handshake, State::WaitInitial, Role::Client)
@@ -1179,20 +1179,19 @@ impl Connection {
         d: &Datagram,
         packet: &PublicPacket,
         migrate: bool,
-        now: Instant,
     ) -> Res<()> {
         if self.state == State::WaitInitial {
-            self.start_handshake(path, &packet, now)?;
+            self.start_handshake(path, &packet)?;
         }
         if self.state.connected() {
             self.handle_migration(path, d, packet, migrate);
-        } else if self.role == Role::Client
-            || packet.packet_type() == PacketType::Handshake
-            || (packet.dcid().len() >= 8 && packet.dcid() == &self.local_initial_source_cid)
+        } else if self.role != Role::Client
+            && (packet.packet_type() == PacketType::Handshake
+                || (packet.dcid().len() >= 8 && packet.dcid() == &self.local_initial_source_cid))
         {
             // We only allow one path during setup, so apply handshake
             // path validation to this path.
-            path.borrow_mut().set_valid(now);
+            path.borrow_mut().set_valid();
         }
         Ok(())
     }
@@ -1202,6 +1201,7 @@ impl Connection {
     fn input(&mut self, d: Datagram, received: Instant, now: Instant) {
         // First determine the path.
         let path = self.paths.path_or_temporary(&d);
+        path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
         self.capture_error(Some(path), now, 0, res).ok();
     }
@@ -1253,9 +1253,7 @@ impl Connection {
                         self.stats.borrow_mut().dups_rx += 1;
                     } else {
                         match self.process_packet(&path, &payload, now) {
-                            Ok(migrate) => {
-                                self.postprocess_packet(&path, &d, &packet, migrate, now)?
-                            }
+                            Ok(migrate) => self.postprocess_packet(&path, &d, &packet, migrate)?,
                             Err(e) => {
                                 self.ensure_error_path(Rc::clone(path), &packet);
                                 return Err(e);
@@ -1376,7 +1374,7 @@ impl Connection {
         }
     }
 
-    fn start_handshake(&mut self, path: &PathRef, packet: &PublicPacket, now: Instant) -> Res<()> {
+    fn start_handshake(&mut self, path: &PathRef, packet: &PublicPacket) -> Res<()> {
         qtrace!([self], "starting handshake");
         debug_assert_eq!(packet.packet_type(), PacketType::Initial);
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
@@ -1403,7 +1401,6 @@ impl Connection {
             // the datagram here was received on that path.
             qdebug!([self], "Changing to use Server CID={}", packet.scid());
             path.borrow_mut().set_remote_cid(packet.scid());
-            path.borrow_mut().set_valid(now);
         }
 
         self.set_state(State::Handshaking);
@@ -1595,8 +1592,22 @@ impl Connection {
     ) -> (Vec<RecoveryToken>, bool, bool) {
         let mut tokens = Vec::new();
         let stats = &mut self.stats.borrow_mut().frame_tx;
+        let primary = path.borrow().is_primary();
 
-        let ack_token = self.acks.write_frame(space, now, builder, stats);
+        let ack_token = if primary {
+            self.acks.write_frame(space, now, builder, stats)
+        } else {
+            None
+        };
+
+        // Avoid sending probes until the handshake completes,
+        // but send them even when we don't have space.
+        if space == PNSpace::ApplicationData && self.state.connected() {
+            let full_mtu = profile.limit() == path.borrow().mtu();
+            pad = path
+                .borrow_mut()
+                .write_frames(builder, &mut tokens, stats, full_mtu);
+        }
 
         if profile.ack_only(space) {
             // If we are CC limited we can only send acks!
@@ -1606,31 +1617,28 @@ impl Connection {
             return (tokens, false, false);
         }
 
-        if space == PNSpace::ApplicationData && self.role == Role::Server {
-            if let Some(t) = self.state_signaling.write_done(builder) {
+        if primary {
+            if space == PNSpace::ApplicationData && self.role == Role::Server {
+                if let Some(t) = self.state_signaling.write_done(builder) {
+                    tokens.push(t);
+                    stats.handshake_done += 1;
+                }
+            }
+
+            if let Some(t) = self.crypto.streams.write_frame(space, builder) {
                 tokens.push(t);
-                stats.handshake_done += 1;
-            }
-        }
-
-        if let Some(t) = self.crypto.streams.write_frame(space, builder) {
-            tokens.push(t);
-            stats.crypto += 1;
-        }
-
-        if space == PNSpace::ApplicationData {
-            self.flow_mgr
-                .borrow_mut()
-                .write_frames(builder, &mut tokens, stats);
-
-            // Avoid sending probes until the handshake completes.
-            if self.state.connected() {
-                path.borrow_mut().write_frames(builder, &mut tokens, stats);
+                stats.crypto += 1;
             }
 
-            self.send_streams.write_frames(builder, &mut tokens, stats);
-            self.new_token.write_frames(builder, &mut tokens, stats);
-            self.cid_manager.write_frames(builder, &mut tokens, stats);
+            if space == PNSpace::ApplicationData {
+                self.flow_mgr
+                    .borrow_mut()
+                    .write_frames(builder, &mut tokens, stats);
+
+                self.send_streams.write_frames(builder, &mut tokens, stats);
+                self.new_token.write_frames(builder, &mut tokens, stats);
+                self.cid_manager.write_frames(builder, &mut tokens, stats);
+            }
         }
 
         // Anything - other than ACK - that registered a token wants an acknowledgment.
@@ -1645,10 +1653,13 @@ impl Connection {
             } else {
                 false
             };
+        // If this is not the primary path, this should be ack-eliciting.
+        debug_assert!(primary || ack_eliciting);
 
         // Add padding.  Only pad 1-RTT packets so that we don't prevent coalescing.
         // And avoid padding packets that otherwise only contain ACK because adding PADDING
         // causes those packets to consume congestion window, which is not tracked (yet).
+        // And avoid padding if we don't have a full MTU available.
         pad &= ack_eliciting && space == PNSpace::ApplicationData;
         if pad {
             builder.pad();
@@ -1672,7 +1683,10 @@ impl Connection {
 
         // Determine how we are sending packets (PTO, etc..).
         let mtu = path.borrow().mtu();
-        let profile = self.loss_recovery.send_profile(now, mtu);
+        let amplification_limit = path.borrow().amplification_limit();
+        let profile = self
+            .loss_recovery
+            .send_profile(now, mtu, amplification_limit);
         qdebug!([self], "output_path send_profile {:?}", profile);
 
         // Frames for different epochs must go in different packets, but then these
@@ -1782,6 +1796,7 @@ impl Connection {
                 }
                 self.loss_recovery.on_packet_sent(initial);
             }
+            path.borrow_mut().add_sent(packets.len());
             Ok(SendOption::Yes(path.borrow().datagram(packets)))
         }
     }
@@ -2222,7 +2237,7 @@ impl Connection {
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
-                self.paths.path_response(data, now);
+                self.paths.path_response(data);
             }
             Frame::ConnectionClose {
                 error_code,
@@ -2390,7 +2405,7 @@ impl Connection {
             self.cid_manager.remove_handshake_cid();
             // Mark the path as validated, if it isn't already.
             let path = self.paths.primary();
-            path.borrow_mut().set_valid(now);
+            path.borrow_mut().set_valid();
             // Generate a qlog event that the server connection started.
             qlog::server_connection_started(&mut self.qlog, &path);
         } else {

@@ -6,6 +6,7 @@
 
 use super::super::StreamType;
 use super::{connect_force_idle, default_client, default_server, send_something};
+use crate::path::{PATH_MTU_V4, PATH_MTU_V6};
 
 use neqo_common::Datagram;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -33,13 +34,19 @@ fn change_source_port(d: &Datagram) -> Datagram {
 
 #[test]
 fn rebinding_address() {
-    fn assert_new_path(dgram: &Datagram) {
+    fn assert_new_path(dgram: &Datagram, padded: bool) {
         assert_eq!(dgram.source(), loopback_v4());
         assert_eq!(dgram.destination(), loopback_v4());
+        if padded {
+            assert_eq!(dgram.len(), PATH_MTU_V4);
+        }
     }
-    fn assert_old_path(dgram: &Datagram) {
+    fn assert_old_path(dgram: &Datagram, padded: bool) {
         assert_eq!(dgram.source(), loopback());
         assert_eq!(dgram.destination(), loopback());
+        if padded {
+            assert_eq!(dgram.len(), PATH_MTU_V6);
+        }
     }
 
     let mut client = default_client();
@@ -53,39 +60,58 @@ fn rebinding_address() {
     // The server now probes the new (primary) path.
     let new_probe = server.process_output(now()).dgram().unwrap();
     assert_eq!(server.stats().frame_tx.path_challenge, 1);
-    assert_new_path(&new_probe);
+    assert_new_path(&new_probe, false); // Can't be padded.
 
     // The server also probes the old path.
     let old_probe = server.process_output(now()).dgram().unwrap();
     assert_eq!(server.stats().frame_tx.path_challenge, 2);
-    assert_old_path(&old_probe);
+    assert_old_path(&old_probe, true);
 
-    // New data from the server is sent on the new path.
-    let server_data = send_something(&mut server, now());
-    assert_new_path(&server_data);
+    // New data from the server is sent on the new path, but that is
+    // now constrained by the amplification limit.
+    let stream_id = server.stream_create(StreamType::UniDi).unwrap();
+    server.stream_close_send(stream_id).unwrap();
+    assert!(server.process_output(now()).dgram().is_none());
 
     // The client should respond to the challenge on the new path.
+    // The server couldn't pad, so the client is also amplification limited.
     let new_resp = client.process(Some(new_probe), now()).dgram().unwrap();
     assert_eq!(client.stats().frame_rx.path_challenge, 1);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
     assert_eq!(client.stats().frame_tx.path_response, 1);
-    assert_new_path(&new_resp);
+    assert_new_path(&new_resp, false);
 
     // The client also responds to probes on the old path.
     let old_resp = client.process(Some(old_probe), now()).dgram().unwrap();
     assert_eq!(client.stats().frame_rx.path_challenge, 2);
     assert_eq!(client.stats().frame_tx.path_challenge, 2);
     assert_eq!(client.stats().frame_tx.path_response, 2);
-    assert_old_path(&old_resp);
+    assert_old_path(&old_resp, true);
 
     // But the client still sends data on the old path.
     let client_data1 = send_something(&mut client, now());
-    assert_old_path(&client_data1);
+    assert_old_path(&client_data1, false); // Just data.
 
-    // Even after it receives a non-probing packet on the new path.
-    client.process_input(server_data, now());
-    let client_data2 = send_something(&mut client, now());
-    assert_old_path(&client_data2);
+    // Receiving the PATH_RESPONSE from the client opens the amplification
+    // limit enough for the server to respond.
+    // This is padded because it includes PATH_CHALLENGE.
+    let server_data1 = server.process(Some(new_resp), now()).dgram().unwrap();
+    assert_new_path(&server_data1, true);
+
+    // The client responds to this probe on the new path.
+    client.process_input(server_data1, now());
+    let stream_before = client.stats().frame_tx.stream;
+    let padded_resp = send_something(&mut client, now());
+    assert_eq!(stream_before, client.stats().frame_tx.stream);
+    assert_new_path(&padded_resp, true); // This is padded!
+
+    // But new data from the client stays on the old path.
+    let client_data2 = client.process_output(now()).dgram().unwrap();
+    assert_old_path(&client_data2, false);
+
+    // And now ensure that the server can return to regular sending patterns.
+    let server_data2 = send_something(&mut server, now());
+    assert_new_path(&server_data2, false);
 }
 
 #[test]

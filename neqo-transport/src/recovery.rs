@@ -161,9 +161,13 @@ impl Default for RttVals {
 /// `SendProfile` tells a sender how to send packets.
 #[derive(Debug)]
 pub struct SendProfile {
+    /// The limit on the size of the packet.
     limit: usize,
+    /// Whether this is a PTO, and what space the PTO is for.
     pto: Option<PNSpace>,
+    /// What spaces should be probed.
     probe: PNSpaceSet,
+    /// Whether pacing is active.
     paced: bool,
 }
 
@@ -994,13 +998,22 @@ impl LossRecovery {
 
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
-    pub fn send_profile(&mut self, now: Instant, mtu: usize) -> SendProfile {
+    pub fn send_profile(
+        &mut self,
+        now: Instant,
+        mtu: usize,
+        amplification_limit: usize,
+    ) -> SendProfile {
         qdebug!([self], "get send profile {:?}", now);
         if let Some(pto) = self.pto_state.as_mut() {
-            pto.send_profile(mtu)
+            if amplification_limit < ACK_ONLY_SIZE_LIMIT {
+                SendProfile::new_limited(0)
+            } else {
+                pto.send_profile(mtu)
+            }
         } else {
-            let cwnd = self.cwnd_avail();
-            if cwnd > mtu {
+            let limit = min(self.cwnd_avail(), amplification_limit);
+            if limit > mtu {
                 // More than an MTU available; we might need to pace.
                 if self.next_paced().map_or(false, |t| t > now) {
                     SendProfile::new_paced()
@@ -1013,7 +1026,7 @@ impl LossRecovery {
                 // result in a PING being sent in every active space.
                 SendProfile::new_pto(PNSpace::Initial, mtu, PNSpaceSet::all())
             } else {
-                SendProfile::new_limited(cwnd)
+                SendProfile::new_limited(limit)
             }
         }
     }
@@ -1464,10 +1477,33 @@ mod tests {
         // expired should result in setting a PTO state.
         let expected_pto = pn_time(2) + (INITIAL_RTT * 3) + MAX_ACK_DELAY;
         lr.discard(PNSpace::Handshake, expected_pto);
-        let profile = lr.send_profile(expected_pto, 10000);
+        let profile = lr.send_profile(expected_pto, 10000, 10000);
         assert!(profile.pto.is_some());
         assert!(!profile.should_probe(PNSpace::Initial));
         assert!(!profile.should_probe(PNSpace::Handshake));
         assert!(profile.should_probe(PNSpace::ApplicationData));
+    }
+
+    #[test]
+    fn no_pto_if_amplification_limited() {
+        let mut lr = LossRecovery::new(&CongestionControlAlgorithm::NewReno, StatsCell::default());
+        lr.start_pacer(now());
+        lr.on_packet_sent(SentPacket::new(
+            PacketType::Initial,
+            0,
+            now(),
+            true,
+            Rc::default(),
+            ON_SENT_SIZE,
+        ));
+
+        let expected_pto = now() + (INITIAL_RTT * 3);
+        assert_eq!(lr.pto_time(PNSpace::Initial), Some(expected_pto));
+        let profile = lr.send_profile(expected_pto, 10000, 10);
+        assert!(profile.ack_only(PNSpace::Initial));
+        assert!(profile.pto.is_none());
+        assert!(!profile.should_probe(PNSpace::Initial));
+        assert!(!profile.should_probe(PNSpace::Handshake));
+        assert!(!profile.should_probe(PNSpace::ApplicationData));
     }
 }
