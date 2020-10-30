@@ -1424,11 +1424,10 @@ impl Connection {
         cspace: CryptoSpace,
         encoder: Encoder,
         tx: &CryptoDxState,
-        largest_acknowledged: Option<PacketNumber>,
         address_validation: &AddressValidationInfo,
         quic_version: QuicVersion,
         grease_quic_bit: bool,
-    ) -> (PacketType, PacketNumber, PacketBuilder) {
+    ) -> (PacketType, PacketBuilder) {
         let pt = PacketType::from(cspace);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {}", path.remote_cid());
@@ -1454,6 +1453,14 @@ impl Connection {
             builder.initial_token(address_validation.token());
         }
 
+        (pt, builder)
+    }
+
+    fn add_packet_number(
+        builder: &mut PacketBuilder,
+        tx: &CryptoDxState,
+        largest_acknowledged: Option<PacketNumber>,
+    ) -> PacketNumber {
         // Get the packet number and work out how long it is.
         let pn = tx.next_pn();
         let unacked_range = if let Some(la) = largest_acknowledged {
@@ -1468,7 +1475,7 @@ impl Connection {
         // pn_len can't be zero (unacked_range is > 0)
         // TODO(mt) also use `4*path CWND/path MTU` to set a minimum length.
         builder.pn(pn, pn_len);
-        (pt, pn, builder)
+        pn
     }
 
     fn can_grease_quic_bit(&self) -> bool {
@@ -1492,15 +1499,19 @@ impl Connection {
                 continue;
             };
 
-            let (_, _, mut builder) = Self::build_packet_header(
+            let (_, mut builder) = Self::build_packet_header(
                 path,
                 cspace,
                 encoder,
                 tx,
-                self.loss_recovery.largest_acknowledged_pn(*space),
                 &AddressValidationInfo::None,
                 self.quic_version,
                 grease_quic_bit,
+            );
+            let _ = Self::add_packet_number(
+                &mut builder,
+                tx,
+                self.loss_recovery.largest_acknowledged_pn(*space),
             );
 
             // ConnectionError::Application is only allowed at 1RTT.
@@ -1629,15 +1640,19 @@ impl Connection {
             };
 
             let header_start = encoder.len();
-            let (pt, pn, mut builder) = Self::build_packet_header(
+            let (pt, mut builder) = Self::build_packet_header(
                 path,
                 cspace,
                 encoder,
                 tx,
-                self.loss_recovery.largest_acknowledged_pn(*space),
                 &self.address_validation,
                 self.quic_version,
                 grease_quic_bit,
+            );
+            let pn = Self::add_packet_number(
+                &mut builder,
+                tx,
+                self.loss_recovery.largest_acknowledged_pn(*space),
             );
             let payload_start = builder.len();
 
