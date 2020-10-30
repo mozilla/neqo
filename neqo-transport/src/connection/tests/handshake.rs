@@ -15,6 +15,7 @@ use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
 use crate::path::PATH_MTU_V6;
 use crate::server::ValidateAddress;
+use crate::tparams::TransportParameter;
 use crate::{
     CongestionControlAlgorithm, ConnectionError, EmptyConnectionIdGenerator, Error, QuicVersion,
 };
@@ -701,4 +702,52 @@ fn extra_initial_invalid_cid() {
     let dgram_copy = Datagram::new(hs.destination(), hs.source(), copy);
     let nothing = client.process(Some(dgram_copy), now).dgram();
     assert!(nothing.is_none());
+}
+
+#[test]
+fn anti_amplification() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+
+    // With a gigantic transport parameter, the server is unable to complete
+    // the handshake within the amplification limit.
+    let very_big = TransportParameter::Bytes(vec![0; PATH_MTU_V6 * 3]);
+    server.set_local_tparam(0xce16, very_big).unwrap();
+
+    let c_init = client.process_output(now).dgram();
+    now += DEFAULT_RTT / 2;
+    let s_init1 = server.process(c_init, now).dgram().unwrap();
+    assert_eq!(s_init1.len(), PATH_MTU_V6);
+    let s_init2 = server.process_output(now).dgram().unwrap();
+    assert_eq!(s_init2.len(), PATH_MTU_V6);
+    let s_init3 = server.process_output(now).dgram().unwrap();
+    assert_eq!(s_init3.len(), PATH_MTU_V6);
+    let cb = server.process_output(now).callback();
+    assert_ne!(cb, Duration::new(0, 0));
+
+    now += DEFAULT_RTT / 2;
+    client.process_input(s_init1, now);
+    client.process_input(s_init2, now);
+    let ack_count = client.stats().frame_tx.ack;
+    let frame_count = client.stats().frame_tx.all;
+    let ack = client.process(Some(s_init3), now).dgram().unwrap();
+    assert!(!maybe_authenticate(&mut client)); // No need yet.
+                                               // The client sends a padded datagram, with just ACK for Initial + Handshake.
+    assert_eq!(client.stats().frame_tx.ack, ack_count + 2);
+    assert_eq!(client.stats().frame_tx.all, frame_count + 2);
+    assert_ne!(ack.len(), PATH_MTU_V6); // Not padded (it includes Handshake).
+
+    now += DEFAULT_RTT / 2;
+    let remainder = server.process(Some(ack), now).dgram();
+
+    now += DEFAULT_RTT / 2;
+    client.process_input(remainder.unwrap(), now);
+    assert!(maybe_authenticate(&mut client)); // OK, we have all of it.
+    let fin = client.process_output(now).dgram();
+    assert_eq!(*client.state(), State::Connected);
+
+    now += DEFAULT_RTT / 2;
+    let _ = server.process_input(fin.unwrap(), now);
+    assert_eq!(*server.state(), State::Confirmed);
 }
