@@ -54,6 +54,7 @@ pub enum RecoveryToken {
     NewToken(usize),
     PathProbe([u8; 8]),
     NewConnectionId(ConnectionIdEntry<[u8; 16]>),
+    RetireConnectionId(u64),
 }
 
 #[derive(Debug)]

@@ -270,6 +270,11 @@ impl ConnectionIdEntry<[u8; 16]> {
     fn any_part_equal(&self, other: &Self) -> bool {
         self.seqno == other.seqno || self.cid == other.cid || self.srt == other.srt
     }
+
+    /// The sequence number of this entry.
+    pub fn sequence_number(&self) -> u64 {
+        self.seqno
+    }
 }
 
 impl ConnectionIdEntry<()> {

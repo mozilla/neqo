@@ -14,12 +14,14 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 
 use crate::cid::{ConnectionId, ConnectionIdRef, RemoteConnectionIdEntry};
-use crate::frame::{FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE};
+use crate::frame::{
+    FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID,
+};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
 
-use neqo_common::{hex, qdebug, qinfo, qtrace, Datagram};
+use neqo_common::{hex, qdebug, qinfo, qtrace, Datagram, Encoder};
 use neqo_crypto::random;
 
 /// This is the MTU that we assume when using IPv6.
@@ -51,6 +53,9 @@ pub struct Paths {
     /// care needs to be taken regarding that only during the handshake.
     /// This path will also be in `paths`.
     primary: Option<PathRef>,
+
+    /// Connection IDs that need to be retired.
+    to_retire: Vec<u64>,
 }
 
 impl Paths {
@@ -100,8 +105,15 @@ impl Paths {
         // Make sure not to track too many paths.
         // This protects index 0, which contains the primary path.
         if self.paths.len() >= MAX_PATHS {
-            self.paths.remove(1);
-            debug_assert!(self.paths.len() < MAX_PATHS);
+            debug_assert_eq!(self.paths.len(), MAX_PATHS);
+            let removed = self.paths.remove(1);
+            let seqno = removed
+                .borrow()
+                .remote_cid
+                .as_ref()
+                .unwrap()
+                .sequence_number();
+            self.to_retire.push(seqno);
         }
 
         qdebug!([path.borrow()], "Make permanent");
@@ -168,10 +180,36 @@ impl Paths {
         }
     }
 
-    pub fn lost(&mut self, lost: [u8; 8]) {
+    pub fn lost_challenge(&mut self, lost: [u8; 8]) {
         for p in &self.paths {
             p.borrow_mut().lost(lost);
         }
+    }
+
+    pub fn write_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) {
+        while let Some(seqno) = self.to_retire.pop() {
+            if builder.remaining() < 1 + Encoder::varint_len(seqno) {
+                self.to_retire.push(seqno);
+                break;
+            }
+            builder.encode_varint(FRAME_TYPE_RETIRE_CONNECTION_ID);
+            builder.encode_varint(seqno);
+            tokens.push(RecoveryToken::RetireConnectionId(seqno));
+            stats.retire_connection_id += 1;
+        }
+    }
+
+    pub fn lost_retire_cid(&mut self, lost: u64) {
+        self.to_retire.push(lost);
+    }
+
+    pub fn acked_retire_cid(&mut self, acked: u64) {
+        self.to_retire.retain(|&seqno| seqno != acked);
     }
 }
 
@@ -234,9 +272,8 @@ pub struct Path {
 
     /// The number of bytes received on this path.
     /// Note that this value might saturate on a long-lived connection,
-    /// but we only use it before the path is validated..
+    /// but we only use it before the path is validated.
     received_bytes: usize,
-
     /// The number of bytes sent on this path.
     sent_bytes: usize,
 }

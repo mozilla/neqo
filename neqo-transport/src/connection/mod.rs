@@ -1397,9 +1397,8 @@ impl Connection {
                 _ => ZeroRttState::Rejected,
             };
         } else {
-            // Note that this will update the primary path and not check that
-            // the datagram here was received on that path.
             qdebug!([self], "Changing to use Server CID={}", packet.scid());
+            debug_assert!(path.borrow().is_primary());
             path.borrow_mut().set_remote_cid(packet.scid());
         }
 
@@ -1407,7 +1406,6 @@ impl Connection {
     }
 
     /// If the path isn't permanent, assign it a connection ID to make it so.
-    /// Returns the canonical identifier of the path.
     fn ensure_permanent(&mut self, path: &PathRef) -> Res<()> {
         if self.paths.is_temporary(&path) {
             // If there isn't a connection ID to use for this path, the packet
@@ -1592,6 +1590,7 @@ impl Connection {
         let mut tokens = Vec::new();
         let stats = &mut self.stats.borrow_mut().frame_tx;
         let primary = path.borrow().is_primary();
+        let mut ack_eliciting = false;
 
         let ack_token = if primary {
             self.acks.write_frame(space, now, builder, stats)
@@ -1603,9 +1602,13 @@ impl Connection {
         // but send them even when we don't have space.
         if space == PNSpace::ApplicationData && self.state.connected() {
             let full_mtu = profile.limit() == path.borrow().mtu();
-            pad = path
+            if path
                 .borrow_mut()
-                .write_frames(builder, &mut tokens, stats, full_mtu);
+                .write_frames(builder, &mut tokens, stats, full_mtu)
+            {
+                pad = true;
+                ack_eliciting = true;
+            }
         }
 
         if profile.ack_only(space) {
@@ -1637,21 +1640,20 @@ impl Connection {
                 self.send_streams.write_frames(builder, &mut tokens, stats);
                 self.new_token.write_frames(builder, &mut tokens, stats);
                 self.cid_manager.write_frames(builder, &mut tokens, stats);
+                self.paths.write_frames(builder, &mut tokens, stats);
             }
         }
 
         // Anything - other than ACK - that registered a token wants an acknowledgment.
-        let ack_eliciting = !tokens.is_empty()
-            || if profile.should_probe(space) {
-                // Nothing ack-eliciting and we need to probe; send PING.
-                debug_assert_ne!(builder.remaining(), 0);
-                builder.encode_varint(crate::frame::FRAME_TYPE_PING);
-                stats.ping += 1;
-                stats.all += 1;
-                true
-            } else {
-                false
-            };
+        ack_eliciting |= !tokens.is_empty();
+        if !ack_eliciting && profile.should_probe(space) {
+            // Nothing ack-eliciting and we need to probe; send PING.
+            debug_assert_ne!(builder.remaining(), 0);
+            builder.encode_varint(crate::frame::FRAME_TYPE_PING);
+            stats.ping += 1;
+            stats.all += 1;
+            ack_eliciting = true;
+        }
         // If this is not the primary path, this should be ack-eliciting.
         debug_assert!(primary || ack_eliciting);
 
@@ -2305,8 +2307,9 @@ impl Connection {
                     ),
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
                     RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
-                    RecoveryToken::PathProbe(data) => self.paths.lost(*data),
+                    RecoveryToken::PathProbe(data) => self.paths.lost_challenge(*data),
                     RecoveryToken::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
+                    RecoveryToken::RetireConnectionId(seqno) => self.paths.lost_retire_cid(*seqno),
                 }
             }
         }
@@ -2361,6 +2364,7 @@ impl Connection {
                     }
                     RecoveryToken::NewToken(seqno) => self.new_token.acked(*seqno),
                     RecoveryToken::NewConnectionId(entry) => self.cid_manager.acked(entry),
+                    RecoveryToken::RetireConnectionId(seqno) => self.paths.acked_retire_cid(*seqno),
                     // We only worry about when these are lost:
                     RecoveryToken::HandshakeDone | RecoveryToken::PathProbe(_) => (),
                 }
