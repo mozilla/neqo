@@ -1179,9 +1179,9 @@ impl Connection {
         d: &Datagram,
         packet: &PublicPacket,
         migrate: bool,
-    ) -> Res<()> {
+    ) {
         if self.state == State::WaitInitial {
-            self.start_handshake(path, &packet)?;
+            self.start_handshake(path, &packet);
         }
         if self.state.connected() {
             self.handle_migration(path, d, packet, migrate);
@@ -1193,7 +1193,6 @@ impl Connection {
             // path validation to this path.
             path.borrow_mut().set_valid();
         }
-        Ok(())
     }
 
     /// Take a datagram as input.  This reports an error if the packet was bad.
@@ -1253,7 +1252,7 @@ impl Connection {
                         self.stats.borrow_mut().dups_rx += 1;
                     } else {
                         match self.process_packet(&path, &payload, now) {
-                            Ok(migrate) => self.postprocess_packet(&path, &d, &packet, migrate)?,
+                            Ok(migrate) => self.postprocess_packet(&path, &d, &packet, migrate),
                             Err(e) => {
                                 self.ensure_error_path(Rc::clone(path), &packet);
                                 return Err(e);
@@ -1360,8 +1359,10 @@ impl Connection {
     }
 
     /// After an error, a permanent path is needed to send the CONNECTION_CLOSE.
-    /// This attempts to ensure that this exists.
+    /// This attempts to ensure that this exists.  As the connection is now
+    /// temporary, there is no reason to do anything special here.
     fn ensure_error_path(&mut self, path: PathRef, packet: &PublicPacket) {
+        path.borrow_mut().set_valid();
         if self.paths.is_temporary(&path) {
             // First try to fill in handshake details.
             if packet.packet_type() == PacketType::Initial {
@@ -1374,15 +1375,14 @@ impl Connection {
         }
     }
 
-    fn start_handshake(&mut self, path: &PathRef, packet: &PublicPacket) -> Res<()> {
+    fn start_handshake(&mut self, path: &PathRef, packet: &PublicPacket) {
         qtrace!([self], "starting handshake");
         debug_assert_eq!(packet.packet_type(), PacketType::Initial);
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
 
         if self.role == Role::Server {
-            // A server needs to accept the client's selected CID until the
-            // server's connection ID is received.  Use an invalid sequence number
-            // so that it is easy to identify and remove.
+            // Record the client's selected CID so that it can be accepted until
+            // the client starts using a real connection ID.
             let dcid = ConnectionId::from(packet.dcid());
             self.original_destination_cid = Some(dcid.clone());
             self.cid_manager.add_handshake_cid(dcid);
@@ -1404,7 +1404,6 @@ impl Connection {
         }
 
         self.set_state(State::Handshaking);
-        Ok(())
     }
 
     /// If the path isn't permanent, assign it a connection ID to make it so.
