@@ -1037,7 +1037,7 @@ impl Connection {
 
     /// Perform any processing that we might have to do on packets prior to
     /// attempting to remove protection.
-    fn preprocess(
+    fn preprocess_packet(
         &mut self,
         packet: &PublicPacket,
         dcid: Option<&ConnectionId>,
@@ -1173,7 +1173,7 @@ impl Connection {
     }
 
     /// After a Initial, Handshake, ZeroRtt, or Short packet is successfully processed.
-    fn postprocess(
+    fn postprocess_packet(
         &mut self,
         path: &PathRef,
         d: &Datagram,
@@ -1225,7 +1225,7 @@ impl Connection {
                         break;
                     }
                 };
-            match self.preprocess(&packet, dcid.as_ref(), now)? {
+            match self.preprocess_packet(&packet, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
                 PreprocessResult::End => return Ok(()),
@@ -1253,7 +1253,9 @@ impl Connection {
                         self.stats.borrow_mut().dups_rx += 1;
                     } else {
                         match self.process_packet(&path, &payload, now) {
-                            Ok(migrate) => self.postprocess(&path, &d, &packet, migrate, now)?,
+                            Ok(migrate) => {
+                                self.postprocess_packet(&path, &d, &packet, migrate, now)?
+                            }
                             Err(e) => {
                                 self.ensure_error_path(Rc::clone(path), &packet);
                                 return Err(e);
