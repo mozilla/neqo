@@ -131,7 +131,7 @@ fn report_fin_when_stream_closed_wo_data() {
     let out = client.process(None, now());
     let _ = server.process(out.dgram(), now());
 
-    assert_eq!(Ok(()), server.stream_close_send(stream_id));
+    server.stream_close_send(stream_id).unwrap();
     let out = server.process(None, now());
     let _ = client.process(out.dgram(), now());
     let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
