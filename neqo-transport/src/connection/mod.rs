@@ -1707,7 +1707,7 @@ impl Connection {
             builder.set_limit(limit);
 
             // Add frames to the packet.
-            let (tokens, ack_eliciting) =
+            let (tokens, ack_eliciting, padded) =
                 self.write_frames(path, *space, &profile, &mut builder, needs_padding, now);
 
             if builder.packet_empty() {
