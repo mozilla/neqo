@@ -1015,11 +1015,10 @@ impl Connection {
     fn process_saved(&mut self, now: Instant) {
         while let Some(cspace) = self.saved_datagrams.available() {
             qdebug!([self], "process saved for space {:?}", cspace);
-            if self.crypto.states.rx_hp(cspace).is_some() {
-                for saved in self.saved_datagrams.take_saved() {
-                    qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
-                    self.input(saved.d, saved.t, now);
-                }
+            debug_assert!(self.crypto.states.rx_hp(cspace).is_some());
+            for saved in self.saved_datagrams.take_saved() {
+                qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
+                self.input(saved.d, saved.t, now);
             }
         }
     }
@@ -1376,9 +1375,10 @@ impl Connection {
     }
 
     fn start_handshake(&mut self, path: &PathRef, packet: &PublicPacket, now: Instant) -> Res<()> {
-        qtrace!([self], "Starting the handshake");
+        qtrace!([self], "starting handshake");
+        debug_assert_eq!(packet.packet_type(), PacketType::Initial);
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
-        assert_eq!(packet.packet_type(), PacketType::Initial);
+
         if self.role == Role::Server {
             // A server needs to accept the client's selected CID until the
             // server's connection ID is received.  Use an invalid sequence number
@@ -1403,6 +1403,7 @@ impl Connection {
             path.borrow_mut().set_remote_cid(packet.scid());
             path.borrow_mut().set_valid(now);
         }
+
         self.set_state(State::Handshaking);
         Ok(())
     }
@@ -1579,15 +1580,17 @@ impl Connection {
     }
 
     /// Write frames to the provided builder.  Returns a list of tokens used for
-    /// tracking loss or acknowledgment and whether any frame was ACK eliciting.
+    /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
+    /// whether the packet was padded.
     fn write_frames(
         &mut self,
         path: &PathRef,
         space: PNSpace,
         profile: &SendProfile,
         builder: &mut PacketBuilder,
+        mut pad: bool,
         now: Instant,
-    ) -> (Vec<RecoveryToken>, bool) {
+    ) -> (Vec<RecoveryToken>, bool, bool) {
         let mut tokens = Vec::new();
         let stats = &mut self.stats.borrow_mut().frame_tx;
 
@@ -1598,7 +1601,7 @@ impl Connection {
             if let Some(t) = ack_token {
                 tokens.push(t);
             }
-            return (tokens, false);
+            return (tokens, false, false);
         }
 
         if space == PNSpace::ApplicationData && self.role == Role::Server {
@@ -1641,11 +1644,21 @@ impl Connection {
                 false
             };
 
+        // Add padding.  Only pad 1-RTT packets so that we don't prevent coalescing.
+        // And avoid padding packets that otherwise only contain ACK because adding PADDING
+        // causes those packets to consume congestion window, which is not tracked (yet).
+        pad &= ack_eliciting && space == PNSpace::ApplicationData;
+        if pad {
+            builder.pad();
+            stats.padding += 1;
+            stats.all += 1;
+        }
+
         if let Some(t) = ack_token {
             tokens.push(t);
         }
         stats.all += tokens.len();
-        (tokens, ack_eliciting)
+        (tokens, ack_eliciting, pad)
     }
 
     /// Build a datagram, possibly from multiple packets (for different PN
@@ -1695,7 +1708,7 @@ impl Connection {
 
             // Add frames to the packet.
             let (tokens, ack_eliciting) =
-                self.write_frames(path, *space, &profile, &mut builder, now);
+                self.write_frames(path, *space, &profile, &mut builder, needs_padding, now);
 
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -1728,17 +1741,16 @@ impl Connection {
                 Rc::new(tokens),
                 encoder.len() - header_start,
             );
-            if pt == PacketType::Initial && (self.role == Role::Client || ack_eliciting) {
+            if padded {
+                needs_padding = false;
+                self.loss_recovery.on_packet_sent(sent);
+            } else if pt == PacketType::Initial && (self.role == Role::Client || ack_eliciting) {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
                 initial_sent = Some(sent);
                 needs_padding = true;
             } else {
-                if pt == PacketType::Short
-                    || (pt == PacketType::Handshake && self.role == Role::Client)
-                {
-                    // TODO(mt) we still need to pad Initial packets from the server when
-                    // sending 1-RTT packets, but we can't do that with the current padding scheme.
+                if pt == PacketType::Handshake && self.role == Role::Client {
                     needs_padding = false;
                 }
                 self.loss_recovery.on_packet_sent(sent);
@@ -1758,7 +1770,7 @@ impl Connection {
         if encoder.is_empty() {
             Ok(SendOption::No(profile.paced()))
         } else {
-            // Pad Initial packets sent by the client to mtu bytes.
+            // Perform additional padding for Initial packets as necessary.
             let mut packets: Vec<u8> = encoder.into();
             if let Some(mut initial) = initial_sent.take() {
                 if needs_padding {

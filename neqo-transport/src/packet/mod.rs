@@ -227,6 +227,11 @@ impl PacketBuilder {
         self.limit - self.encoder.len()
     }
 
+    /// Pad with "PADDING" frames.
+    pub fn pad(&mut self) {
+        self.encoder.pad_to(self.limit, 0);
+    }
+
     /// Add unpredictable values for unprotected parts of the packet.
     pub fn scramble(&mut self, quic_bit: bool) {
         let mask = if quic_bit { PACKET_BIT_FIXED_QUIC } else { 0 }
