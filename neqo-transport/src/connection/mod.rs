@@ -1041,12 +1041,11 @@ impl Connection {
     fn process_saved(&mut self, now: Instant) {
         while let Some(cspace) = self.saved_datagrams.available() {
             qdebug!([self], "process saved for space {:?}", cspace);
-            if self.crypto.states.rx_hp(cspace).is_some() {
-                for saved in self.saved_datagrams.take_saved() {
-                    qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
-                    let res = self.input(saved.d, saved.t);
-                    self.absorb_error(now, res);
-                }
+            debug_assert!(self.crypto.states.rx_hp(cspace).is_some());
+            for saved in self.saved_datagrams.take_saved() {
+                qtrace!([self], "input saved @{:?}: {:?}", saved.t, saved.d);
+                let res = self.input(saved.d, saved.t);
+                self.absorb_error(now, res);
             }
         }
     }
