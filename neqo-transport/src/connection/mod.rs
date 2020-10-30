@@ -1424,6 +1424,7 @@ impl Connection {
         cspace: CryptoSpace,
         encoder: Encoder,
         tx: &CryptoDxState,
+        largest_acknowledged: Option<PacketNumber>,
         address_validation: &AddressValidationInfo,
         quic_version: QuicVersion,
         grease_quic_bit: bool,
@@ -1452,9 +1453,21 @@ impl Connection {
         if pt == PacketType::Initial {
             builder.initial_token(address_validation.token());
         }
-        // TODO(mt) work out packet number length based on `4*path CWND/path MTU`.
+
+        // Get the packet number and work out how long it is.
         let pn = tx.next_pn();
-        builder.pn(pn, 3);
+        let unacked_range = if let Some(la) = largest_acknowledged {
+            // Double the range from this to the last acknowledged in this space.
+            (pn - la) << 1
+        } else {
+            pn + 1
+        };
+        // Count how many bytes in this range are non-zero.
+        let pn_len = mem::size_of::<PacketNumber>()
+            - usize::try_from(unacked_range.leading_zeros() / 8).unwrap();
+        // pn_len can't be zero (unacked_range is > 0)
+        // TODO(mt) also use `4*path CWND/path MTU` to set a minimum length.
+        builder.pn(pn, pn_len);
         (pt, pn, builder)
     }
 
@@ -1484,6 +1497,7 @@ impl Connection {
                 cspace,
                 encoder,
                 tx,
+                self.loss_recovery.largest_acknowledged_pn(*space),
                 &AddressValidationInfo::None,
                 self.quic_version,
                 grease_quic_bit,
@@ -1620,6 +1634,7 @@ impl Connection {
                 cspace,
                 encoder,
                 tx,
+                self.loss_recovery.largest_acknowledged_pn(*space),
                 &self.address_validation,
                 self.quic_version,
                 grease_quic_bit,
