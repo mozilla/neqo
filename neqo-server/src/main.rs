@@ -520,7 +520,7 @@ fn main() -> Result<(), io::Error> {
     if let Some(testcase) = args.qns_test.as_ref() {
         match testcase.as_str() {
             "http3" => (),
-            "handshake" | "transfer" | "resumption" | "zerortt" => {
+            "handshake" | "transfer" | "resumption" | "zerortt" | "multiconnect" => {
                 args.use_old_http = true;
                 args.alpn = "hq-29".into();
             }
