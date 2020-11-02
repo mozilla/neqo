@@ -12,6 +12,7 @@ use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::net::SocketAddr;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use crate::cid::{ConnectionId, ConnectionIdRef, RemoteConnectionIdEntry};
 use crate::frame::{
@@ -54,24 +55,27 @@ pub struct Paths {
     /// This path will also be in `paths`.
     primary: Option<PathRef>,
 
+    /// The path that we would prefer to migrate to.
+    migration_target: Option<PathRef>,
+
     /// Connection IDs that need to be retired.
     to_retire: Vec<u64>,
 }
 
 impl Paths {
-    /// Find the path that the provided `Datagram` was received on.
+    /// Find the path for the given addresses.
     /// This might be a temporary path.
-    pub fn path_or_temporary(&self, d: &Datagram) -> PathRef {
+    pub fn path_or_temporary(&self, local: SocketAddr, remote: SocketAddr) -> PathRef {
         self.paths
             .iter()
             .find_map(|p| {
-                if p.borrow().received_on(d) {
+                if p.borrow().received_on(local, remote) {
                     Some(Rc::clone(p))
                 } else {
                     None
                 }
             })
-            .unwrap_or_else(|| Rc::new(RefCell::new(Path::temporary(d.destination(), d.source()))))
+            .unwrap_or_else(|| Rc::new(RefCell::new(Path::temporary(local, remote))))
     }
 
     /// Get a reference to the primary path.  This will assert if there is no primary
@@ -92,11 +96,21 @@ impl Paths {
         path.borrow().is_temporary() || !self.paths.iter().any(|p| Rc::ptr_eq(p, path))
     }
 
+    fn retire(to_retire: &mut Vec<u64>, retired: &PathRef) {
+        let seqno = retired
+            .borrow()
+            .remote_cid
+            .as_ref()
+            .unwrap()
+            .sequence_number();
+        to_retire.push(seqno);
+    }
+
     /// Adopt a temporary path as permanent.
     /// The first path that is made permanent is made primary.
     pub fn make_permanent(
         &mut self,
-        path: PathRef,
+        path: &PathRef,
         local_cid: Option<ConnectionId>,
         remote_cid: RemoteConnectionIdEntry,
     ) {
@@ -107,43 +121,26 @@ impl Paths {
         if self.paths.len() >= MAX_PATHS {
             debug_assert_eq!(self.paths.len(), MAX_PATHS);
             let removed = self.paths.remove(1);
-            let seqno = removed
-                .borrow()
-                .remote_cid
-                .as_ref()
-                .unwrap()
-                .sequence_number();
-            self.to_retire.push(seqno);
+            Self::retire(&mut self.to_retire, &removed);
+            debug_assert_eq!(Rc::strong_count(&removed), 1);
         }
 
         qdebug!([path.borrow()], "Make permanent");
         path.borrow_mut().make_permanent(local_cid, remote_cid);
+        self.paths.push(Rc::clone(&path));
         if self.primary.is_none() {
-            self.primary = Some(Rc::clone(&path));
-            path.borrow_mut().primary = true;
+            self.set_primary(&path, false);
         }
-        self.paths.push(path);
     }
 
-    /// Set the identified path to be primary.
-    /// This panics if `make_permanent` hasn't been called.
-    pub fn migrate(&mut self, path: &PathRef, d: &Datagram) {
-        // The update here needs to match the checks in `Path::received_on`.
-        // Here, we update the remote port number to match the source port on the
-        // datagram that was received.  This ensures that we send subsequent
-        // packets back to the right place.
-        path.borrow_mut().update_port(d.source().port());
-
-        if path.borrow().is_primary() {
-            return;
-        }
-
-        qinfo!([path.borrow()], "migrating to a new path");
-
+    fn set_primary(&mut self, path: &PathRef, probe: bool) {
+        qinfo!([path.borrow()], "migrating to a new path probe={}", probe);
         if let Some(old) = self.primary.replace(Rc::clone(path)) {
-            // When migrating to a new path, send a probe on the old one first.
-            old.borrow_mut().primary = false;
-            old.borrow_mut().probe();
+            old.borrow_mut().set_primary(false);
+            if probe {
+                // When migrating to a new path, send a probe on the old one first.
+                old.borrow_mut().probe();
+            }
         }
 
         // Swap the primary path into slot 0, so that it is protected from eviction.
@@ -152,11 +149,71 @@ impl Paths {
             .iter()
             .enumerate()
             .find_map(|(i, p)| if Rc::ptr_eq(p, path) { Some(i) } else { None })
-            .expect("migrating to a temporary path");
+            .expect("migration target should be permanent");
         self.paths.swap(0, idx);
 
-        path.borrow_mut().primary = true;
-        path.borrow_mut().probe();
+        path.borrow_mut().set_primary(true);
+        if probe {
+            path.borrow_mut().probe();
+        }
+    }
+
+    pub fn migrate(&mut self, path: &PathRef, probe_first: bool) {
+        debug_assert!(!self.is_temporary(path));
+        let valid = path.borrow().is_valid();
+        if valid || !probe_first {
+            self.set_primary(path, false);
+        } else {
+            self.migration_target = Some(Rc::clone(path));
+        }
+        if !valid {
+            path.borrow_mut().probe();
+        }
+    }
+
+    /// Process elapsed time for active paths.
+    /// TODO(mt) - the paths should own the RTT estimator, so they can find the PTO
+    /// for themselves.
+    pub fn process_timeout(&mut self, now: Instant, pto: Duration) {
+        let to_retire = &mut self.to_retire;
+        self.paths.retain(|p| {
+            if p.borrow_mut().process_timeout(now, pto) {
+                true
+            } else {
+                Self::retire(to_retire, p);
+                false
+            }
+        });
+    }
+
+    /// Get when the next call to `process_timeout()` should be scheduled.
+    pub fn next_timeout(&self, pto: Duration) -> Option<Instant> {
+        self.paths
+            .iter()
+            .filter_map(|p| p.borrow().next_timeout(pto))
+            .min()
+    }
+
+    /// Set the identified path to be primary.
+    /// This panics if `make_permanent` hasn't been called.
+    pub fn handle_migration(&mut self, path: &PathRef, remote: SocketAddr, now: Instant) {
+        qtrace!([self.primary().borrow()], "handle_migration");
+        for p in &self.paths {
+            qtrace!("Path {}", p.borrow());
+        }
+        // The update here needs to match the checks in `Path::received_on`.
+        // Here, we update the remote port number to match the source port on the
+        // datagram that was received.  This ensures that we send subsequent
+        // packets back to the right place.
+        path.borrow_mut().update_port(remote.port());
+
+        if path.borrow().is_primary() {
+            // Update when the path was last regarded as valid.
+            path.borrow_mut().update(now);
+            return;
+        }
+
+        self.set_primary(path, true);
     }
 
     /// Select a path to send on.  This will select the first path that has
@@ -174,15 +231,19 @@ impl Paths {
             .or_else(|| self.primary.as_ref().map(Rc::clone))
     }
 
-    pub fn path_response(&mut self, response: [u8; 8]) {
+    pub fn path_response(&mut self, response: [u8; 8], now: Instant) {
         for p in &self.paths {
-            p.borrow_mut().path_response(response);
-        }
-    }
-
-    pub fn lost_challenge(&mut self, lost: [u8; 8]) {
-        for p in &self.paths {
-            p.borrow_mut().lost(lost);
+            if p.borrow_mut().path_response(response, now) {
+                if self
+                    .migration_target
+                    .as_ref()
+                    .map_or(false, |target| Rc::ptr_eq(target, p))
+                {
+                    let primary = self.migration_target.take();
+                    self.set_primary(&primary.unwrap(), false);
+                }
+                break;
+            }
         }
     }
 
@@ -215,8 +276,8 @@ impl Paths {
 
 /// The state of a path with respect to address validation.
 #[derive(Debug)]
-enum PathState {
-    /// The path was validated at the indicated time.
+enum ProbeState {
+    /// The path was last valid at the indicated time.
     Valid,
     /// The path was previously valid, but a new probe is needed.
     ProbeNeeded { probe_count: usize },
@@ -228,12 +289,14 @@ enum PathState {
         data: [u8; 8],
         /// Whether the probe was sent in a datagram padded to the path MTU.
         mtu: bool,
+        /// When the probe was sent.
+        sent: Instant,
     },
     /// Validation failed the last time it was attempted.
     Failed,
 }
 
-impl PathState {
+impl ProbeState {
     ///  Determine whether the current state requires probing.
     fn probe_needed(&self) -> bool {
         matches!(self, Self::ProbeNeeded { .. })
@@ -264,9 +327,10 @@ pub struct Path {
     /// Whether this is the primary path.
     primary: bool,
     /// Whether the current path is considered valid.
-    state: PathState,
-    /// Whether the path was validated.
-    validated: bool,
+    state: ProbeState,
+    /// For a path that is not validated, this is `None`.  For a validated
+    /// path, the time that the path was last valid.
+    validated: Option<Instant>,
     /// A path challenge was received and PATH_RESPONSE has not been sent.
     challenge: Option<[u8; 8]>,
 
@@ -288,8 +352,8 @@ impl Path {
             local_cid: None,
             remote_cid: None,
             primary: false,
-            state: PathState::ProbeNeeded { probe_count: 0 },
-            validated: false,
+            state: ProbeState::ProbeNeeded { probe_count: 0 },
+            validated: None,
             challenge: None,
             received_bytes: 0,
             sent_bytes: 0,
@@ -323,8 +387,8 @@ impl Path {
     /// Determine if this path was the one that the provided datagram was received on.
     /// This uses the full local socket address, but ignores the port number on the peer.
     /// NAT rebinding to the same IP address and a different port is thereby ignored.
-    fn received_on(&self, d: &Datagram) -> bool {
-        self.local == d.destination() && self.remote.ip() == d.source().ip()
+    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
+        self.local == local && self.remote.ip() == remote.ip()
     }
 
     /// Update the remote port number.  Any flexibility we allow in `received_on`
@@ -333,12 +397,26 @@ impl Path {
         self.remote.set_port(port);
     }
 
+    /// Set whether this path is primary.
+    fn set_primary(&mut self, primary: bool) {
+        qdebug!([self], "Make primary {}", primary);
+        self.primary = primary;
+    }
+
     /// Set the current path as valid.  This updates the time that the path was
     /// last validated and cancels any path validation.
-    pub fn set_valid(&mut self) {
-        qdebug!([self], "Path validated");
-        self.state = PathState::Valid;
-        self.validated = true;
+    pub fn set_valid(&mut self, now: Instant) {
+        qdebug!([self], "Path validated {:?}", now);
+        self.state = ProbeState::Valid;
+        self.validated = Some(now);
+    }
+
+    /// Update the last use of this path, if it is valid.
+    /// This will keep the path active slightly longer.
+    pub fn update(&mut self, now: Instant) {
+        if self.validated.is_some() {
+            self.validated = Some(now);
+        }
     }
 
     pub fn mtu(&self) -> usize {
@@ -403,20 +481,25 @@ impl Path {
 
     /// Whether the path has been validated.
     pub fn is_valid(&self) -> bool {
-        self.validated
+        self.validated.is_some()
     }
 
-    /// Handle a `PATH_RESPONSE` frame.
-    pub fn path_response(&mut self, response: [u8; 8]) {
-        if let PathState::Probing { data, mtu, .. } = &self.state {
+    /// Handle a `PATH_RESPONSE` frame. Returns true if the response was accepted.
+    pub fn path_response(&mut self, response: [u8; 8], now: Instant) -> bool {
+        if let ProbeState::Probing { data, mtu, .. } = &self.state {
             if response == *data {
                 if *mtu {
-                    self.set_valid();
+                    self.set_valid(now);
                 } else {
                     // Mark the path as valid, but keep probing.
-                    self.validated = true;
+                    self.validated = Some(now);
                 }
+                true
+            } else {
+                false
             }
+        } else {
+            false
         }
     }
 
@@ -433,16 +516,16 @@ impl Path {
     /// Unless the probe count has been exhausted already.
     fn probe(&mut self) {
         let probe_count = match &self.state {
-            PathState::Probing { probe_count, .. } => *probe_count + 1,
-            PathState::ProbeNeeded { probe_count, .. } => *probe_count,
+            ProbeState::Probing { probe_count, .. } => *probe_count + 1,
+            ProbeState::ProbeNeeded { probe_count, .. } => *probe_count,
             _ => 0,
         };
         self.state = if probe_count >= MAX_PATH_PROBES {
             qinfo!([self], "Probing failed");
-            PathState::Failed
+            ProbeState::Failed
         } else {
             qdebug!([self], "Initiating probe");
-            PathState::ProbeNeeded { probe_count }
+            ProbeState::ProbeNeeded { probe_count }
         };
     }
 
@@ -454,9 +537,9 @@ impl Path {
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
-        tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
         mtu: bool, // Whether the packet we're writing into will be a full MTU.
+        now: Instant,
     ) -> bool {
         if builder.remaining() < 9 {
             return false;
@@ -467,8 +550,11 @@ impl Path {
             qtrace!([self], "Responding to path challenge {}", hex(&challenge));
             builder.encode_varint(FRAME_TYPE_PATH_RESPONSE);
             builder.encode(&challenge[..]);
+
+            // These frames are not retransmitted in the usual fashion.
+            // There is no token, therefore we need to count `all` specially.
             stats.path_response += 1;
-            stats.all += 1; // This doesn't add a token, so it needs to count all itself.
+            stats.all += 1;
 
             if builder.remaining() < 9 {
                 return true;
@@ -479,19 +565,21 @@ impl Path {
         };
 
         // Send PATH_CHALLENGE.
-        if let PathState::ProbeNeeded { probe_count } = self.state {
+        if let ProbeState::ProbeNeeded { probe_count } = self.state {
             qtrace!([self], "Initiating path challenge {}", probe_count);
             let data = <[u8; 8]>::try_from(&random(8)[..]).unwrap();
             builder.encode_varint(FRAME_TYPE_PATH_CHALLENGE);
             builder.encode(&data);
 
+            // As above, no recovery token.
             stats.path_challenge += 1;
-            tokens.push(RecoveryToken::PathProbe(data));
+            stats.all += 1;
 
-            self.state = PathState::Probing {
+            self.state = ProbeState::Probing {
                 probe_count,
                 data,
                 mtu,
+                sent: now,
             };
             true
         } else {
@@ -499,11 +587,38 @@ impl Path {
         }
     }
 
-    pub fn lost(&mut self, lost: [u8; 8]) {
-        if let PathState::Probing { data, .. } = &self.state {
-            if lost == *data {
+    /// Process a timer for this path.
+    /// This returns true if the path should remain active.
+    pub fn process_timeout(&mut self, now: Instant, pto: Duration) -> bool {
+        if let ProbeState::Probing { sent, .. } = &self.state {
+            if now >= *sent + pto {
                 self.probe();
             }
+        }
+        if self.primary {
+            // Keep primary paths always.
+            true
+        } else if let ProbeState::Failed = self.state {
+            // Retire failed paths immediately.
+            false
+        } else if let ProbeState::Valid = self.state {
+            // Retire validated, non-primary paths after 3PTO.
+            self.validated.unwrap() + (pto * 3) > now
+        } else {
+            // Keep those that are being actively probed.
+            true
+        }
+    }
+
+    /// Return the next time that this path needs servicing.
+    /// This only considers retransmissions of probes, not cleanup of the path.
+    /// If there is no other activity, then there is no real need to schedule a
+    /// timer to cleanup old paths.
+    pub fn next_timeout(&self, pto: Duration) -> Option<Instant> {
+        if let ProbeState::Probing { sent, .. } = &self.state {
+            Some(*sent + pto)
+        } else {
+            None
         }
     }
 
@@ -519,7 +634,7 @@ impl Path {
 
     /// Get the number of bytes that can be written to this path.
     pub fn amplification_limit(&self) -> usize {
-        if matches!(self.state, PathState::Failed) {
+        if matches!(self.state, ProbeState::Failed) {
             0
         } else if self.is_valid() {
             usize::MAX

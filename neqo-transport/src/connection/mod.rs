@@ -299,9 +299,8 @@ impl Connection {
         )?;
         c.crypto.states.init(quic_version, Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
-        let mut path = Path::temporary(local_addr, remote_addr);
-        path.set_valid();
-        c.setup_handshake_path(Rc::new(RefCell::new(path)));
+        let path = Path::temporary(local_addr, remote_addr);
+        c.setup_handshake_path(&Rc::new(RefCell::new(path)));
         Ok(c)
     }
 
@@ -827,6 +826,8 @@ impl Connection {
         if self.release_resumption_token_timer.is_some() {
             self.create_resumption_token(now);
         }
+
+        self.paths.process_timeout(now, pto);
     }
 
     /// Process new input datagrams on the connection.
@@ -873,9 +874,14 @@ impl Connection {
             }
         }
 
+        if let Some(path_time) = self.paths.next_timeout(pto) {
+            qtrace!([self], "Path probe timer {:?}", path_time);
+            delays.push(path_time);
+        }
+
         // `release_resumption_token_timer` is not considered here, because
         // it is not important enough to force the application to set a
-        // timeout for it  It is expected thatt other activities will
+        // timeout for it  It is expected that other activities will
         // drive it.
 
         let earliest = delays.into_iter().min().unwrap();
@@ -1179,19 +1185,20 @@ impl Connection {
         d: &Datagram,
         packet: &PublicPacket,
         migrate: bool,
+        now: Instant,
     ) {
         if self.state == State::WaitInitial {
             self.start_handshake(path, &packet);
         }
         if self.state.connected() {
-            self.handle_migration(path, d, packet, migrate);
+            self.handle_migration(path, d, packet, migrate, now);
         } else if self.role != Role::Client
             && (packet.packet_type() == PacketType::Handshake
                 || (packet.dcid().len() >= 8 && packet.dcid() == &self.local_initial_source_cid))
         {
             // We only allow one path during setup, so apply handshake
             // path validation to this path.
-            path.borrow_mut().set_valid();
+            path.borrow_mut().set_valid(now);
         }
     }
 
@@ -1199,7 +1206,7 @@ impl Connection {
     /// This takes two times: when the datagram was received, and the current time.
     fn input(&mut self, d: Datagram, received: Instant, now: Instant) {
         // First determine the path.
-        let path = self.paths.path_or_temporary(&d);
+        let path = self.paths.path_or_temporary(d.destination(), d.source());
         path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
         self.capture_error(Some(path), now, 0, res).ok();
@@ -1252,9 +1259,11 @@ impl Connection {
                         self.stats.borrow_mut().dups_rx += 1;
                     } else {
                         match self.process_packet(&path, &payload, now) {
-                            Ok(migrate) => self.postprocess_packet(&path, &d, &packet, migrate),
+                            Ok(migrate) => {
+                                self.postprocess_packet(&path, &d, &packet, migrate, now)
+                            }
                             Err(e) => {
-                                self.ensure_error_path(Rc::clone(path), &packet);
+                                self.ensure_error_path(path, &packet, now);
                                 return Err(e);
                             }
                         }
@@ -1342,9 +1351,9 @@ impl Connection {
     /// During connection setup, the first path needs to be setup.
     /// This uses the connection IDs that were provided during the handshake
     /// to setup that path.
-    fn setup_handshake_path(&mut self, path: PathRef) {
+    fn setup_handshake_path(&mut self, path: &PathRef) {
         self.paths.make_permanent(
-            path,
+            &path,
             Some(self.local_initial_source_cid.clone()),
             // Ideally we know what the peer wants us to use for the remote CID.
             // But we will use our own guess if necessary.
@@ -1361,13 +1370,13 @@ impl Connection {
     /// After an error, a permanent path is needed to send the CONNECTION_CLOSE.
     /// This attempts to ensure that this exists.  As the connection is now
     /// temporary, there is no reason to do anything special here.
-    fn ensure_error_path(&mut self, path: PathRef, packet: &PublicPacket) {
-        path.borrow_mut().set_valid();
+    fn ensure_error_path(&mut self, path: &PathRef, packet: &PublicPacket, now: Instant) {
+        path.borrow_mut().set_valid(now);
         if self.paths.is_temporary(&path) {
             // First try to fill in handshake details.
             if packet.packet_type() == PacketType::Initial {
                 self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
-                self.setup_handshake_path(path);
+                self.setup_handshake_path(&path);
             } else {
                 // Otherwise try to get a usable connection ID.
                 let _ = self.ensure_permanent(&path);
@@ -1387,7 +1396,7 @@ impl Connection {
             self.original_destination_cid = Some(dcid.clone());
             self.cid_manager.add_handshake_cid(dcid);
             // Make a path on which to run the handshake.
-            self.setup_handshake_path(Rc::clone(path));
+            self.setup_handshake_path(path);
 
             self.zero_rtt_state = match self.crypto.enable_0rtt(self.role) {
                 Ok(true) => {
@@ -1412,7 +1421,7 @@ impl Connection {
             // will be processed, but it won't be attributed to a path.  That means
             // no path probes or PATH_RESPONSE.  But it's not fatal.
             if let Some(cid) = self.connection_ids.next() {
-                self.paths.make_permanent(Rc::clone(path), None, cid);
+                self.paths.make_permanent(path, None, cid);
                 Ok(())
             } else {
                 Err(Error::InvalidMigration)
@@ -1422,12 +1431,26 @@ impl Connection {
         }
     }
 
+    /// Migrate to the provided path.  If `probe` is true, then the path will
+    /// be migrated to only after successfully probing it first.
+    pub fn migrate(&mut self, local: SocketAddr, remote: SocketAddr, probe: bool) -> Res<()> {
+        if self.role != Role::Client {
+            return Err(Error::InvalidMigration);
+        }
+
+        let path = self.paths.path_or_temporary(local, remote);
+        self.ensure_permanent(&path)?;
+        self.paths.migrate(&path, probe);
+        Ok(())
+    }
+
     fn handle_migration(
         &mut self,
         path: &PathRef,
         d: &Datagram,
         packet: &PublicPacket,
         migrate: bool,
+        now: Instant,
     ) {
         if !migrate {
             qtrace!([self], "{} No migration necessary", path.borrow());
@@ -1448,7 +1471,7 @@ impl Connection {
         }
 
         if self.ensure_permanent(path).is_ok() {
-            self.paths.migrate(path, d);
+            self.paths.handle_migration(path, d.source(), now);
         } else {
             qinfo!(
                 [self],
@@ -1600,11 +1623,13 @@ impl Connection {
 
         // Avoid sending probes until the handshake completes,
         // but send them even when we don't have space.
+        let full_mtu = profile.limit() == path.borrow().mtu();
         if space == PNSpace::ApplicationData && self.state.connected() {
-            let full_mtu = profile.limit() == path.borrow().mtu();
+            // Probes should only be padded if the full MTU is available.
+            // The probing code needs to know so it can track that.
             if path
                 .borrow_mut()
-                .write_frames(builder, &mut tokens, stats, full_mtu)
+                .write_frames(builder, stats, full_mtu, now)
             {
                 pad = true;
                 ack_eliciting = true;
@@ -1661,7 +1686,7 @@ impl Connection {
         // And avoid padding packets that otherwise only contain ACK because adding PADDING
         // causes those packets to consume congestion window, which is not tracked (yet).
         // And avoid padding if we don't have a full MTU available.
-        pad &= ack_eliciting && space == PNSpace::ApplicationData;
+        pad &= ack_eliciting && space == PNSpace::ApplicationData && full_mtu;
         if pad {
             builder.pad();
             stats.padding += 1;
@@ -1827,6 +1852,7 @@ impl Connection {
 
         self.handshake(now, PNSpace::Initial, None)?;
         self.set_state(State::WaitInitial);
+        self.paths.primary().borrow_mut().set_valid(now);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.role)? {
             qdebug!([self], "Enabled 0-RTT");
             ZeroRttState::Sending
@@ -2238,7 +2264,7 @@ impl Connection {
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
-                self.paths.path_response(data);
+                self.paths.path_response(data, now);
             }
             Frame::ConnectionClose {
                 error_code,
@@ -2307,7 +2333,6 @@ impl Connection {
                     ),
                     RecoveryToken::HandshakeDone => self.state_signaling.handshake_done(),
                     RecoveryToken::NewToken(seqno) => self.new_token.lost(*seqno),
-                    RecoveryToken::PathProbe(data) => self.paths.lost_challenge(*data),
                     RecoveryToken::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
                     RecoveryToken::RetireConnectionId(seqno) => self.paths.lost_retire_cid(*seqno),
                 }
@@ -2366,7 +2391,7 @@ impl Connection {
                     RecoveryToken::NewConnectionId(entry) => self.cid_manager.acked(entry),
                     RecoveryToken::RetireConnectionId(seqno) => self.paths.acked_retire_cid(*seqno),
                     // We only worry about when these are lost:
-                    RecoveryToken::HandshakeDone | RecoveryToken::PathProbe(_) => (),
+                    RecoveryToken::HandshakeDone => (),
                 }
             }
         }
@@ -2408,7 +2433,7 @@ impl Connection {
             self.cid_manager.remove_handshake_cid();
             // Mark the path as validated, if it isn't already.
             let path = self.paths.primary();
-            path.borrow_mut().set_valid();
+            path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
             qlog::server_connection_started(&mut self.qlog, &path);
         } else {

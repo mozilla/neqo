@@ -733,7 +733,8 @@ fn anti_amplification() {
     let frame_count = client.stats().frame_tx.all;
     let ack = client.process(Some(s_init3), now).dgram().unwrap();
     assert!(!maybe_authenticate(&mut client)); // No need yet.
-                                               // The client sends a padded datagram, with just ACK for Initial + Handshake.
+
+    // The client sends a padded datagram, with just ACK for Initial + Handshake.
     assert_eq!(client.stats().frame_tx.ack, ack_count + 2);
     assert_eq!(client.stats().frame_tx.all, frame_count + 2);
     assert_ne!(ack.len(), PATH_MTU_V6); // Not padded (it includes Handshake).
@@ -748,6 +749,6 @@ fn anti_amplification() {
     assert_eq!(*client.state(), State::Connected);
 
     now += DEFAULT_RTT / 2;
-    let _ = server.process_input(fin.unwrap(), now);
+    server.process_input(fin.unwrap(), now);
     assert_eq!(*server.state(), State::Confirmed);
 }

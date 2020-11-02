@@ -32,8 +32,11 @@ fn change_source_port(d: &Datagram) -> Datagram {
     Datagram::new(new_port(), loopback(), &d[..])
 }
 
+/// This simulates an attack where a valid packet is forwarded on
+/// a different path.  This shows how both paths are probed and the
+/// server eventually returns to the original path.
 #[test]
-fn rebinding_address() {
+fn path_forwarding_attack() {
     fn assert_new_path(dgram: &Datagram, padded: bool) {
         assert_eq!(dgram.source(), loopback_v4());
         assert_eq!(dgram.destination(), loopback_v4());
@@ -109,9 +112,14 @@ fn rebinding_address() {
     let client_data2 = client.process_output(now()).dgram().unwrap();
     assert_old_path(&client_data2, false);
 
-    // And now ensure that the server can return to regular sending patterns.
+    // The server keeps sending on the new path.
     let server_data2 = send_something(&mut server, now());
     assert_new_path(&server_data2, false);
+
+    // Until new data is received from the client on the old path.
+    server.process_input(client_data2, now());
+    let server_data3 = send_something(&mut server, now());
+    assert_old_path(&server_data3, false);
 }
 
 #[test]

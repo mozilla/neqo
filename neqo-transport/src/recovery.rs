@@ -52,7 +52,6 @@ pub enum RecoveryToken {
     Flow(FlowControlRecoveryToken),
     HandshakeDone,
     NewToken(usize),
-    PathProbe([u8; 8]),
     NewConnectionId(ConnectionIdEntry<[u8; 16]>),
     RetireConnectionId(u64),
 }
