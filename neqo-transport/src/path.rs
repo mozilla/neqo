@@ -129,19 +129,20 @@ impl Paths {
         path.borrow_mut().make_permanent(local_cid, remote_cid);
         self.paths.push(Rc::clone(&path));
         if self.primary.is_none() {
-            self.set_primary(&path, false);
+            assert!(self.select_primary(&path).is_none());
         }
     }
 
-    fn set_primary(&mut self, path: &PathRef, probe: bool) {
-        qinfo!([path.borrow()], "set as primary, probe={}", probe);
-        if let Some(old) = self.primary.replace(Rc::clone(path)) {
+    /// Select a path as the primary.  Returns the old primary path.
+    #[must_use]
+    fn select_primary(&mut self, path: &PathRef) -> Option<PathRef> {
+        qinfo!([path.borrow()], "set as primary");
+        let old_path = if let Some(old) = self.primary.replace(Rc::clone(path)) {
             old.borrow_mut().set_primary(false);
-            if probe {
-                // When migrating to a new path, send a probe on the old one first.
-                old.borrow_mut().probe();
-            }
-        }
+            Some(old)
+        } else {
+            None
+        };
 
         // Swap the primary path into slot 0, so that it is protected from eviction.
         let idx = self
@@ -153,9 +154,7 @@ impl Paths {
         self.paths.swap(0, idx);
 
         path.borrow_mut().set_primary(true);
-        if probe {
-            path.borrow_mut().probe();
-        }
+        old_path
     }
 
     /// Migrate to the identified path.  If `force` is true, the path
@@ -166,7 +165,7 @@ impl Paths {
         debug_assert!(!self.is_temporary(path));
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
-            self.set_primary(path, false);
+            let _ = self.select_primary(path);
         } else {
             self.migration_target = Some(Rc::clone(path));
         }
@@ -206,7 +205,7 @@ impl Paths {
                 // Need a clone as `fallback` is borrowed from `self`.
                 let path = Rc::clone(fallback);
                 qinfo!([path.borrow()], "Failing over after primary path failed");
-                self.set_primary(&path, false);
+                let _ = self.select_primary(&path);
                 true
             } else {
                 false
@@ -243,7 +242,11 @@ impl Paths {
             return;
         }
 
-        self.set_primary(path, true);
+        if let Some(old_path) = self.select_primary(path) {
+            // Need to probe the old path if the peer migrates.
+            old_path.borrow_mut().probe();
+            // TODO(mt) - suppress probing if the path was valid within 3PTO.
+        }
     }
 
     /// Select a path to send on.  This will select the first path that has
@@ -270,7 +273,7 @@ impl Paths {
                     .map_or(false, |target| Rc::ptr_eq(target, p))
                 {
                     let primary = self.migration_target.take();
-                    self.set_primary(&primary.unwrap(), false);
+                    let _ = self.select_primary(&primary.unwrap());
                 }
                 break;
             }

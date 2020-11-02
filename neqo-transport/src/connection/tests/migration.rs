@@ -145,8 +145,12 @@ fn path_forwarding_attack() {
 
     // Until new data is received from the client on the old path.
     server.process_input(client_data2, now());
+    // The server sends a probe on the "old" path.
     let server_data3 = send_something(&mut server, now());
-    assert_v6_path(&server_data3, false);
+    assert_v4_path(&server_data3, true);
+    // But switches data transmission to the "new" path.
+    let server_data4 = server.process_output(now()).dgram().unwrap();
+    assert_v6_path(&server_data4, false);
 }
 
 #[test]
@@ -307,7 +311,7 @@ fn migrate_same_fail() {
 }
 
 #[test]
-fn migrate_graceful() {
+fn migration_graceful() {
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
@@ -326,29 +330,45 @@ fn migrate_graceful() {
     assert_eq!(server.stats().frame_tx.path_response, 1);
     assert_eq!(server.stats().frame_tx.path_challenge, 1);
 
-    // The client now migrates to the new path.
+    // Data continues to be exchanged on the new path.
+    let client_data = send_something(&mut client, now);
+    assert_v6_path(&client_data, false);
+    server.process_input(client_data, now);
+    let server_data = send_something(&mut server, now);
+    assert_v6_path(&server_data, false);
+
+    // Once the client receives the probe response, it migrates to the new path.
     client.process_input(resp, now);
     assert_eq!(client.stats().frame_rx.path_challenge, 1);
     let migrate_client = send_something(&mut client, now);
     assert_v4_path(&migrate_client, true); // Responds to server probe.
 
-    // The server now considers the path valid and will continue.
-    // However, it will probe again, even though it has just received
-    // a response to its last probe, because it needs to verify that
-    // the migration is genuine.
+    // The server now sees the migration and will switch over.
+    // However, it will probe the old path again, even though it has just
+    // received a response to its last probe, because it needs to verify
+    // that the migration is genuine.
     server.process_input(migrate_client, now);
     let stream_before = server.stats().frame_tx.stream;
-    let migrate_server = send_something(&mut server, now);
-    assert_v4_path(&migrate_server, true);
+    let probe_old_server = send_something(&mut server, now);
+    // This is just the double-check probe; no STREAM frames.
+    assert_v6_path(&probe_old_server, true);
+    assert_eq!(server.stats().frame_tx.path_challenge, 2);
+    assert_eq!(server.stats().frame_tx.stream, stream_before);
+
+    // The server then sends data on the new path.
+    let migrate_server = server.process_output(now).dgram().unwrap();
+    assert_v4_path(&migrate_server, false);
     assert_eq!(server.stats().frame_tx.path_challenge, 2);
     assert_eq!(server.stats().frame_tx.stream, stream_before + 1);
 
-    // This is just the double-check probe; no STREAM frames.
-    let probe_old_server = server.process_output(now).dgram().unwrap();
-    assert_v6_path(&probe_old_server, true);
-    assert_eq!(server.stats().frame_tx.path_challenge, 3);
-    assert_eq!(server.stats().frame_tx.stream, stream_before + 1);
-
+    // The client receives these checks and responds to the probe, but uses the new path.
     client.process_input(migrate_server, now);
     client.process_input(probe_old_server, now);
+    let old_probe_resp = send_something(&mut client, now);
+    assert_v6_path(&old_probe_resp, true);
+    let client_confirmation = client.process_output(now).dgram().unwrap();
+    assert_v4_path(&client_confirmation, false);
+
+    let server_confirmation = send_something(&mut server, now);
+    assert_v4_path(&server_confirmation, false);
 }
