@@ -14,6 +14,11 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use test_fixture::{self, loopback, now};
 
+// These tests generally use two paths:
+// The connection is established on a path with the same IPv6 loopback address on both ends.
+// Migrations move to a path with the same IPv4 loopback address on both ends.
+// This simplifies validation as the same assertions can be used for client and server.
+// The risk is that there is a place where source/destination local/remote is inverted.
 fn loopback_v4() -> SocketAddr {
     let localhost_v4 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
     SocketAddr::new(localhost_v4, loopback().port())
@@ -299,4 +304,51 @@ fn migrate_same_fail() {
         client.state(),
         State::Closed(ConnectionError::Transport(Error::NoAvailablePath))
     ));
+}
+
+#[test]
+fn migrate_graceful() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    client
+        .migrate(loopback_v4(), loopback_v4(), false, now)
+        .unwrap();
+
+    let probe = client.process_output(now).dgram().unwrap();
+    assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
+    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+
+    let resp = server.process(Some(probe), now).dgram().unwrap();
+    assert_v4_path(&resp, true);
+    assert_eq!(server.stats().frame_tx.path_response, 1);
+    assert_eq!(server.stats().frame_tx.path_challenge, 1);
+
+    // The client now migrates to the new path.
+    client.process_input(resp, now);
+    assert_eq!(client.stats().frame_rx.path_challenge, 1);
+    let migrate_client = send_something(&mut client, now);
+    assert_v4_path(&migrate_client, true); // Responds to server probe.
+
+    // The server now considers the path valid and will continue.
+    // However, it will probe again, even though it has just received
+    // a response to its last probe, because it needs to verify that
+    // the migration is genuine.
+    server.process_input(migrate_client, now);
+    let stream_before = server.stats().frame_tx.stream;
+    let migrate_server = send_something(&mut server, now);
+    assert_v4_path(&migrate_server, true);
+    assert_eq!(server.stats().frame_tx.path_challenge, 2);
+    assert_eq!(server.stats().frame_tx.stream, stream_before + 1);
+
+    // This is just the double-check probe; no STREAM frames.
+    let probe_old_server = server.process_output(now).dgram().unwrap();
+    assert_v6_path(&probe_old_server, true);
+    assert_eq!(server.stats().frame_tx.path_challenge, 3);
+    assert_eq!(server.stats().frame_tx.stream, stream_before + 1);
+
+    client.process_input(migrate_server, now);
+    client.process_input(probe_old_server, now);
 }

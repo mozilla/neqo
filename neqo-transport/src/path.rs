@@ -672,7 +672,14 @@ impl Path {
         } else if self.is_valid() {
             usize::MAX
         } else if let Some(limit) = self.received_bytes.checked_mul(3) {
-            limit.saturating_sub(self.sent_bytes)
+            let budget = if limit == 0 {
+                // If we have received absolutely nothing thus far, then this endpoint
+                // is the one initiating communication on this path.  Allow enough space for probing.
+                self.mtu() * 5
+            } else {
+                limit
+            };
+            budget.saturating_sub(self.sent_bytes)
         } else {
             usize::MAX
         }
