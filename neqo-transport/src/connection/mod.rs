@@ -827,7 +827,10 @@ impl Connection {
             self.create_resumption_token(now);
         }
 
-        self.paths.process_timeout(now, pto);
+        if !self.paths.process_timeout(now, pto) {
+            qinfo!([self], "last available path failed");
+            self.absorb_error::<Error>(now, Err(Error::NoAvailablePath));
+        }
     }
 
     /// Process new input datagrams on the connection.
@@ -1431,16 +1434,29 @@ impl Connection {
         }
     }
 
-    /// Migrate to the provided path.  If `probe` is true, then the path will
-    /// be migrated to only after successfully probing it first.
-    pub fn migrate(&mut self, local: SocketAddr, remote: SocketAddr, probe: bool) -> Res<()> {
+    /// Migrate to the provided path.  If `force` is true, then migration is immediate.
+    /// Otherwise, migration occurs after the path is probed successfully.
+    /// Either way, the path is probed and will be abandoned if the probe fails.
+    pub fn migrate(
+        &mut self,
+        local: SocketAddr,
+        remote: SocketAddr,
+        force: bool,
+        now: Instant,
+    ) -> Res<()> {
         if self.role != Role::Client {
             return Err(Error::InvalidMigration);
         }
 
         let path = self.paths.path_or_temporary(local, remote);
         self.ensure_permanent(&path)?;
-        self.paths.migrate(&path, probe);
+        qinfo!(
+            [self],
+            "Migrate to {} probe {}",
+            path.borrow(),
+            if force { "now" } else { "after" }
+        );
+        self.paths.migrate(&path, force, now);
         Ok(())
     }
 
@@ -2260,7 +2276,7 @@ impl Connection {
                 // If we were challenged, try to make the path permanent.
                 // Report an error if we don't have enough connection IDs.
                 self.ensure_permanent(path)?;
-                path.borrow_mut().challenged(data, self.state.connected());
+                path.borrow_mut().challenged(data);
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;

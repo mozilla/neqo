@@ -134,7 +134,7 @@ impl Paths {
     }
 
     fn set_primary(&mut self, path: &PathRef, probe: bool) {
-        qinfo!([path.borrow()], "migrating to a new path probe={}", probe);
+        qinfo!([path.borrow()], "set as primary, probe={}", probe);
         if let Some(old) = self.primary.replace(Rc::clone(path)) {
             old.borrow_mut().set_primary(false);
             if probe {
@@ -158,32 +158,62 @@ impl Paths {
         }
     }
 
-    pub fn migrate(&mut self, path: &PathRef, probe_first: bool) {
+    /// Migrate to the identified path.  If `force` is true, the path
+    /// is forcibly marked as valid and the path is used immediately.
+    /// Otherwise, migration will occur after probing succeeds.
+    /// The path is always probed and will be abandoned if probing fails.
+    pub fn migrate(&mut self, path: &PathRef, force: bool, now: Instant) {
         debug_assert!(!self.is_temporary(path));
-        let valid = path.borrow().is_valid();
-        if valid || !probe_first {
+        if force || path.borrow().is_valid() {
+            path.borrow_mut().set_valid(now);
             self.set_primary(path, false);
         } else {
             self.migration_target = Some(Rc::clone(path));
         }
-        if !valid {
-            path.borrow_mut().probe();
-        }
+        path.borrow_mut().probe();
     }
 
     /// Process elapsed time for active paths.
+    /// Returns an true if there are viable paths remaining after tidying up.
+    ///
     /// TODO(mt) - the paths should own the RTT estimator, so they can find the PTO
     /// for themselves.
-    pub fn process_timeout(&mut self, now: Instant, pto: Duration) {
+    pub fn process_timeout(&mut self, now: Instant, pto: Duration) -> bool {
         let to_retire = &mut self.to_retire;
+        let mut primary_failed = false;
         self.paths.retain(|p| {
             if p.borrow_mut().process_timeout(now, pto) {
                 true
             } else {
+                qdebug!([p.borrow()], "Retiring path");
+                if p.borrow().is_primary() {
+                    primary_failed = true;
+                }
                 Self::retire(to_retire, p);
                 false
             }
         });
+
+        if primary_failed {
+            self.primary = None;
+            // Find a valid path to fall back to.
+            if let Some(fallback) = self
+                .paths
+                .iter()
+                .rev() // More recent paths are toward the end.
+                .find(|p| p.borrow().is_valid())
+            {
+                // Need a clone as `fallback` is borrowed from `self`.
+                let path = Rc::clone(fallback);
+                qinfo!([path.borrow()], "Failing over after primary path failed");
+                self.set_primary(&path, false);
+                true
+            } else {
+                false
+            }
+        } else {
+            true
+        }
     }
 
     /// Get when the next call to `process_timeout()` should be scheduled.
@@ -486,13 +516,13 @@ impl Path {
 
     /// Handle a `PATH_RESPONSE` frame. Returns true if the response was accepted.
     pub fn path_response(&mut self, response: [u8; 8], now: Instant) -> bool {
-        if let ProbeState::Probing { data, mtu, .. } = &self.state {
+        if let ProbeState::Probing { data, mtu, .. } = &mut self.state {
             if response == *data {
-                if *mtu {
-                    self.set_valid(now);
-                } else {
-                    // Mark the path as valid, but keep probing.
-                    self.validated = Some(now);
+                let need_full_probe = !*mtu;
+                self.set_valid(now);
+                if need_full_probe {
+                    qdebug!([self], "Sub-MTU probe successful, reset probe count");
+                    self.probe();
                 }
                 true
             } else {
@@ -505,9 +535,9 @@ impl Path {
 
     /// The path has been challenged.  This generates a response.
     /// This only generates a single response at a time.
-    pub fn challenged(&mut self, challenge: [u8; 8], probe_back: bool) {
+    pub fn challenged(&mut self, challenge: [u8; 8]) {
         self.challenge = Some(challenge.to_owned());
-        if probe_back {
+        if !self.is_valid() {
             self.probe();
         }
     }
@@ -588,24 +618,27 @@ impl Path {
     }
 
     /// Process a timer for this path.
-    /// This returns true if the path should remain active.
+    /// This returns true if the path is viable and can be kept alive.
     pub fn process_timeout(&mut self, now: Instant, pto: Duration) -> bool {
         if let ProbeState::Probing { sent, .. } = &self.state {
             if now >= *sent + pto {
                 self.probe();
             }
         }
-        if self.primary {
-            // Keep primary paths always.
-            true
-        } else if let ProbeState::Failed = self.state {
+        if let ProbeState::Failed = self.state {
             // Retire failed paths immediately.
             false
+        } else if self.primary {
+            // Keep valid primary paths otherwise.
+            true
         } else if let ProbeState::Valid = self.state {
-            // Retire validated, non-primary paths after 3PTO.
-            self.validated.unwrap() + (pto * 3) > now
+            // Retire validated, non-primary paths.
+            // Allow more than `MAX_PATH_PROBES` times the PTO so that an old
+            // path remains around until after a previous path fails.
+            let count = u32::try_from(MAX_PATH_PROBES + 1).unwrap();
+            self.validated.unwrap() + (pto * count) > now
         } else {
-            // Keep those that are being actively probed.
+            // Keep paths that are being actively probed.
             true
         }
     }

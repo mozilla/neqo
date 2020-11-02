@@ -587,13 +587,14 @@ impl PtoState {
     }
 
     /// Generate a sending profile, indicating what space it should be from.
-    /// This takes a packet from the supply or returns an ack-only profile if it can't.
-    pub fn send_profile(&mut self, mtu: usize) -> SendProfile {
+    /// This takes a packet from the supply if one remains, or returns `None`.
+    pub fn send_profile(&mut self, mtu: usize) -> Option<SendProfile> {
         if self.packets > 0 {
+            // This is a PTO, so ignore the limit.
             self.packets -= 1;
-            SendProfile::new_pto(self.space, mtu, self.probe)
+            Some(SendProfile::new_pto(self.space, mtu, self.probe))
         } else {
-            SendProfile::new_limited(0)
+            None
         }
     }
 }
@@ -1005,12 +1006,12 @@ impl LossRecovery {
         amplification_limit: usize,
     ) -> SendProfile {
         qdebug!([self], "get send profile {:?}", now);
-        if let Some(pto) = self.pto_state.as_mut() {
-            if amplification_limit < ACK_ONLY_SIZE_LIMIT {
-                SendProfile::new_limited(0)
-            } else {
-                pto.send_profile(mtu)
-            }
+        if let Some(profile) = self
+            .pto_state
+            .as_mut()
+            .and_then(|pto| pto.send_profile(mtu))
+        {
+            profile
         } else {
             let limit = min(self.cwnd_avail(), amplification_limit);
             if limit > mtu {

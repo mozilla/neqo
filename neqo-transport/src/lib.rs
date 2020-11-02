@@ -97,6 +97,7 @@ pub enum Error {
     /// An attempt to update keys can be blocked if
     /// a packet sent with the current keys hasn't been acknowledged.
     KeyUpdateBlocked,
+    NoAvailablePath,
     NoMoreData,
     NotConnected,
     PacketNumberOverlap,
