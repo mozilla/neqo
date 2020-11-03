@@ -729,27 +729,6 @@ mod tests {
         .encode(&mut Encoder::new(), PREFERRED_ADDRESS);
     }
 
-    // pub fn new(v4: Option<SocketAddr>, v6: Option<SocketAddr>) -> Self {
-    //     assert!(v4.is_some() || v6.is_some());
-    //     if let Some(a) = v4 {
-    //         if let IpAddr::V4(addr) = a.ip() {
-    //             assert!(!addr.is_unspecified());
-    //         } else {
-    //             panic!("invalid address type for v4 address");
-    //         }
-    //         assert_ne!(a.port(), 0);
-    //     }
-    //     if let Some(a) = v6 {
-    //         if let IpAddr::V6(addr) = a.ip() {
-    //             assert!(!addr.is_unspecified());
-    //         } else {
-    //             panic!("invalid address type for v6 address");
-    //         }
-    //         assert_ne!(a.port(), 0);
-    //     }
-    //     Self { v4, v6 }
-    // }
-
     #[test]
     #[should_panic]
     fn preferred_address_neither() {

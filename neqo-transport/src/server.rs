@@ -316,6 +316,7 @@ impl Server {
                         None
                     }
                 } else {
+                    qerror!([self], "no connection ID for retry, dropping packet");
                     None
                 }
             }

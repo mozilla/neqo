@@ -1195,7 +1195,7 @@ impl Connection {
             self.start_handshake(path, &packet);
         }
         if self.state.connected() {
-            self.handle_migration(path, d, packet, migrate, now);
+            self.handle_migration(path, d, migrate, now);
         } else if self.role != Role::Client
             && (packet.packet_type() == PacketType::Handshake
                 || (packet.dcid().len() >= 8 && packet.dcid() == &self.local_initial_source_cid))
@@ -1494,29 +1494,13 @@ impl Connection {
         Ok(())
     }
 
-    fn handle_migration(
-        &mut self,
-        path: &PathRef,
-        d: &Datagram,
-        packet: &PublicPacket,
-        migrate: bool,
-        now: Instant,
-    ) {
+    fn handle_migration(&mut self, path: &PathRef, d: &Datagram, migrate: bool, now: Instant) {
         if !migrate {
             qtrace!([self], "{} No migration necessary", path.borrow());
             return;
         }
         if self.role == Role::Client {
             qdebug!([self], "{} Ignoring migration by server", path.borrow());
-            return;
-        }
-        if !self.cid_manager.is_valid(packet.dcid()) {
-            qdebug!(
-                [self],
-                "{} Ignoring migration with invalid CID {}",
-                path.borrow(),
-                packet.dcid()
-            );
             return;
         }
 
@@ -1532,9 +1516,6 @@ impl Connection {
     }
 
     /// Set a preferred address.
-    ///
-    /// # Panics
-    /// If neither address is provided, or if either address is of the wrong type.
     pub fn set_preferred_address(&mut self, preferred: &PreferredAddress) -> Res<()> {
         let (cid, srt) = self.cid_manager.preferred_address_cid()?;
         self.set_local_tparam(
@@ -1556,7 +1537,6 @@ impl Connection {
             | State::Handshaking
             | State::Connected
             | State::Confirmed => {
-                // Prior to connection establishment, don't send path probes on other network paths.
                 if let Some(path) = self.paths.select_path() {
                     let res = self.output_path(&path, now);
                     self.capture_error(Some(path), now, 0, res)

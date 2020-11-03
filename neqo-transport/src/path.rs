@@ -78,6 +78,10 @@ impl Paths {
             .unwrap_or_else(|| Rc::new(RefCell::new(Path::temporary(local, remote))))
     }
 
+    /// Find the path, but allow for rebinding.  That matches the pair of addresses
+    /// to paths that match the remote address only based on IP addres, not port.
+    /// We use this when the other side migrates to skip address validation and
+    /// creating a new path.
     pub fn find_path_with_rebinding(&self, local: SocketAddr, remote: SocketAddr) -> PathRef {
         self.paths
             .iter()
@@ -107,7 +111,7 @@ impl Paths {
         self.primary_fallible().unwrap()
     }
 
-    /// Get a reference to the primary path.
+    /// Get a reference to the primary path.  Use this prior to handshake completion.
     pub fn primary_fallible(&self) -> Option<PathRef> {
         self.primary.as_ref().map(Rc::clone)
     }
@@ -156,6 +160,8 @@ impl Paths {
     }
 
     /// Select a path as the primary.  Returns the old primary path.
+    /// The old path is only necessary if this change in path is a reaction to a
+    /// migration from a peer, in which case the old path needs to be probed.
     #[must_use]
     fn select_primary(&mut self, path: &PathRef) -> Option<PathRef> {
         qinfo!([path.borrow()], "set as primary path");
@@ -249,9 +255,6 @@ impl Paths {
     /// This panics if `make_permanent` hasn't been called.
     pub fn handle_migration(&mut self, path: &PathRef, remote: SocketAddr, now: Instant) {
         qtrace!([self.primary().borrow()], "handle_migration");
-        for p in &self.paths {
-            qtrace!("Path {}", p.borrow());
-        }
         // The update here needs to match the checks in `Path::received_on`.
         // Here, we update the remote port number to match the source port on the
         // datagram that was received.  This ensures that we send subsequent
@@ -286,9 +289,12 @@ impl Paths {
             .or_else(|| self.primary.as_ref().map(Rc::clone))
     }
 
+    /// A PATH_RESPONSE was received.
     pub fn path_response(&mut self, response: [u8; 8], now: Instant) {
         for p in &self.paths {
             if p.borrow_mut().path_response(response, now) {
+                // The response was accepted.  If this path is one we intend
+                // to migrate to, then migrate.
                 if self
                     .migration_target
                     .as_ref()
@@ -302,6 +308,7 @@ impl Paths {
         }
     }
 
+    /// Write out any RETIRE_CONNECTION_ID frames that are outstanding.
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
@@ -476,11 +483,12 @@ impl Path {
         }
     }
 
+    /// Get the path MTU.  This is currently a fixed value.
     pub fn mtu(&self) -> usize {
         if self.local.is_ipv4() {
             PATH_MTU_V4
         } else {
-            PATH_MTU_V6 // IPv6
+            PATH_MTU_V6
         }
     }
 
@@ -570,7 +578,7 @@ impl Path {
     }
 
     /// At the next opportunity, send a probe.
-    /// Unless the probe count has been exhausted already.
+    /// If the probe count has been exhausted already, marks the path as failed.
     fn probe(&mut self) {
         let probe_count = match &self.state {
             ProbeState::Probing { probe_count, .. } => *probe_count + 1,

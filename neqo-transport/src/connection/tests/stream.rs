@@ -90,12 +90,9 @@ fn transfer() {
 
     let mut buf = vec![0; 4000];
 
-    let mut stream_ids = server.events().filter_map(|evt| {
-        qdebug!("Event {:?}", evt);
-        match evt {
-            ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
-            _ => None,
-        }
+    let mut stream_ids = server.events().filter_map(|evt| match evt {
+        ConnectionEvent::NewStream { stream_id, .. } => Some(stream_id),
+        _ => None,
     });
     let first_stream = stream_ids.next().expect("should have a new stream event");
     let second_stream = stream_ids

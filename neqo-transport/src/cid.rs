@@ -293,13 +293,13 @@ impl<SRT: Clone + PartialEq> ConnectionIdEntry<SRT> {
 
     /// Update the stateless reset token.  This panics if the sequence number is non-zero.
     pub fn set_stateless_reset_token(&mut self, srt: SRT) {
-        assert_eq!(self.seqno, 0);
+        assert_eq!(self.seqno, CONNECTION_ID_SEQNO_INITIAL);
         self.srt = srt;
     }
 
     /// Replace the connection ID.  This panics if the sequence number is non-zero.
     pub fn update_cid(&mut self, cid: ConnectionId) {
-        assert_eq!(self.seqno, 0);
+        assert_eq!(self.seqno, CONNECTION_ID_SEQNO_INITIAL);
         self.cid = cid;
     }
 
