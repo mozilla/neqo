@@ -15,10 +15,18 @@ use neqo_qpack::decoder::QPackDecoder;
 use neqo_transport::{AppError, Connection};
 use std::cell::RefCell;
 use std::cmp::min;
-use std::collections::{hash_map, HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::rc::Rc;
+
+const PSEUDO_HEADER_STATUS: u8 = 0x1;
+const PSEUDO_HEADER_METHOD: u8 = 0x2;
+const PSEUDO_HEADER_SCHEME: u8 = 0x4;
+const PSEUDO_HEADER_AUTHORITY: u8 = 0x8;
+const PSEUDO_HEADER_PATH: u8 = 0x10;
+const PSEUDO_HEADER_UNDEFINED: u8 = 0x20;
+const REGULAR_HEADER: u8 = 0x80;
 
 #[derive(Debug)]
 pub enum MessageType {
@@ -337,115 +345,93 @@ impl RecvMessage {
         }
     }
 
-    fn headers_valid(&self, headers: &[Header]) -> Res<bool> {
-        let mut pseudo_header_map: HashMap<&str, bool> = HashMap::new();
-        match self.message_type {
-            MessageType::Response => {
-                pseudo_header_map.entry(":status").or_insert(false);
-            }
-            MessageType::Request => {
-                pseudo_header_map.entry(":method").or_insert(false);
-                pseudo_header_map.entry(":scheme").or_insert(false);
-                pseudo_header_map.entry(":authority").or_insert(false);
-                pseudo_header_map.entry(":path").or_insert(false);
-            }
-        }
-        let mut seen_non_colon_header = false;
-        let excluded_headers = vec![
-            "connection",
-            "host",
-            "keep-alive",
-            "proxy-connection",
-            "te",
-            "transfer-encoding",
-            "upgrade",
-            "accept-encoding",
-        ];
-        let excluded_header_byte = vec![0x0, 0x10, 0x13, 0x3a];
-        let mut method_value: Option<&String> = None;
-        for header in headers {
-            let mut header_byte_iterator = header.0.bytes();
-            let is_colon_header = header.0.starts_with(':');
-            if is_colon_header {
-                if seen_non_colon_header {
-                    qdebug!([self], "headers_valid - pseudo header fields after fields");
-                    return Err(Error::HttpGeneralProtocolStream);
-                }
+    fn track_pseudo(&self, name: &str, state: &mut u8) -> Res<bool> {
+        let (pseudo, bit) = if name.starts_with(':') {
+            (
+                true,
+                match self.message_type {
+                    MessageType::Response => match name {
+                        ":status" => PSEUDO_HEADER_STATUS,
+                        _ => PSEUDO_HEADER_UNDEFINED,
+                    },
+                    MessageType::Request => match name {
+                        ":method" => PSEUDO_HEADER_METHOD,
+                        ":scheme" => PSEUDO_HEADER_SCHEME,
+                        ":authority" => PSEUDO_HEADER_AUTHORITY,
+                        ":path" => PSEUDO_HEADER_PATH,
+                        _ => PSEUDO_HEADER_UNDEFINED,
+                    },
+                },
+            )
+        } else {
+            (false, REGULAR_HEADER)
+        };
 
-                if let hash_map::Entry::Occupied(mut e) = pseudo_header_map.entry(&header.0) {
-                    if *e.get_mut() {
-                        return Err(Error::HttpGeneralProtocolStream);
-                    }
-                    *e.get_mut() = true;
-                } else {
+        if *state & bit == 0 || !pseudo {
+            *state |= bit;
+            Ok(pseudo)
+        } else {
+            Err(Error::HttpGeneralProtocolStream)
+        }
+    }
+
+    fn headers_valid(&self, headers: &[Header]) -> Res<bool> {
+        let mut method_value: Option<&String> = None;
+        let mut pseudo_state = 0;
+        for header in headers {
+            let is_pseudo = self.track_pseudo(&header.0, &mut pseudo_state)?;
+
+            let mut bytes = header.0.bytes();
+            if is_pseudo {
+                if (pseudo_state & (PSEUDO_HEADER_UNDEFINED | REGULAR_HEADER)) != 0 {
                     return Err(Error::HttpGeneralProtocolStream);
                 }
 
                 if header.0 == ":method" {
-                    method_value = Some(&header.1)
+                    method_value = Some(&header.1);
                 }
-
-                // skip the first ":"
-                header_byte_iterator.next();
-            } else {
-                seen_non_colon_header = true;
+                let _ = bytes.next();
             }
 
-            for byte in header_byte_iterator {
-                if byte.is_ascii_uppercase() {
-                    qdebug!(
-                        [self],
-                        "headers_valid - found uppercase in header:'{}'",
-                        header.0
-                    );
-                    return Err(Error::HttpGeneralProtocolStream);
-                }
-
-                if excluded_header_byte
-                    .iter()
-                    .any(|&excluded| excluded == byte)
-                {
-                    qdebug!([self], "headers_valid - found an excluded byte");
-                    return Err(Error::HttpGeneralProtocolStream);
-                }
+            if bytes.any(|b| matches!(b, 0 | 0x10 | 0x13 | 0x3a | 0x41..=0x5a)) {
+                return Err(Error::HttpGeneralProtocolStream); // illegal characters.
             }
 
-            if excluded_headers
-                .iter()
-                .any(|&excluded| excluded == header.0)
-            {
-                qdebug!(
-                    [self],
-                    "headers_valid - found an excluded header:'{}'",
-                    header.0
-                );
+            if matches!(
+                header.0.as_str(),
+                "connection"
+                    | "host"
+                    | "keep-alive"
+                    | "proxy-connection"
+                    | "te"
+                    | "transfer-encoding"
+                    | "upgrade"
+                    | "accept-encoding"
+            ) {
                 return Err(Error::HttpGeneralProtocolStream);
             }
         }
 
+        pseudo_state ^= REGULAR_HEADER;
         match self.message_type {
-            MessageType::Request => {
-                // All HTTP/3 requests MUST include exactly one value for the
-                // ":method", ":scheme", and ":path" pseudo-header fields,
-                // unless it is a CONNECT request.
-                // The ":scheme" and ":path" pseudo-header fields are omitted
-                // for CONNECT requests.
-                if method_value == Some(&"CONNECT".to_string()) {
-                    pseudo_header_map.remove(":scheme");
-                    pseudo_header_map.remove(":path");
-                } else {
-                    pseudo_header_map.remove(":authority");
+            MessageType::Response => {
+                let response_mask = PSEUDO_HEADER_STATUS;
+                if pseudo_state & response_mask != response_mask {
+                    return Err(Error::HttpGeneralProtocolStream);
                 }
             }
-            MessageType::Response => {}
-        }
-        // check if we have all required pseudo headers
-        for (key, value) in pseudo_header_map {
-            if !value {
-                qdebug!([self], "headers_valid - missing required header:'{}'", key);
-                return Err(Error::HttpGeneralProtocolStream);
+            MessageType::Request => {
+                let request_mask = if method_value == Some(&"CONNECT".to_string()) {
+                    PSEUDO_HEADER_METHOD | PSEUDO_HEADER_AUTHORITY
+                } else {
+                    PSEUDO_HEADER_METHOD | PSEUDO_HEADER_SCHEME | PSEUDO_HEADER_PATH
+                };
+                if pseudo_state & request_mask != request_mask {
+                    return Err(Error::HttpGeneralProtocolStream);
+                }
             }
         }
+
         Ok(true)
     }
 }

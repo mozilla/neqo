@@ -6002,57 +6002,60 @@ mod tests {
 
     #[test]
     fn malformed_response_pseudo_header_after_regular_header() {
-        let headers = vec![
+        do_malformed_response_test(&[
             (String::from("content-type"), String::from("text/plain")),
-            (String::from(":status"), String::from("200")),
-        ];
-        do_malformed_response_test(&headers);
+            (String::from(":status"), String::from("100")),
+        ]);
     }
 
     #[test]
     fn malformed_response_undefined_pseudo_header() {
-        let headers = vec![
+        do_malformed_response_test(&[
+            (String::from(":status"), String::from("200")),
             (String::from(":cheese"), String::from("200")),
-            (String::from("content-type"), String::from("text/plain")),
-        ];
-        do_malformed_response_test(&headers);
+        ]);
     }
 
     #[test]
     fn malformed_response_duplicate_pseudo_header() {
-        let headers = vec![
+        do_malformed_response_test(&[
             (String::from(":status"), String::from("200")),
             (String::from(":status"), String::from("100")),
             (String::from("content-type"), String::from("text/plain")),
-        ];
-        do_malformed_response_test(&headers);
+        ]);
     }
 
     #[test]
     fn malformed_response_uppercase_header() {
-        let headers = vec![
+        do_malformed_response_test(&[
             (String::from(":status"), String::from("200")),
             (String::from("content-Type"), String::from("text/plain")),
-        ];
-        do_malformed_response_test(&headers);
+        ]);
     }
 
     #[test]
     fn malformed_response_excluded_header() {
-        let headers = vec![
+        do_malformed_response_test(&[
             (String::from(":status"), String::from("200")),
             (String::from("content-type"), String::from("text/plain")),
             (String::from("connection"), String::from("close")),
-        ];
-        do_malformed_response_test(&headers);
+        ]);
     }
 
     #[test]
     fn malformed_response_excluded_byte_in_header() {
-        let headers = vec![
+        do_malformed_response_test(&[
             (String::from(":status"), String::from("200")),
             (String::from("content:type"), String::from("text/plain")),
-        ];
-        do_malformed_response_test(&headers);
+        ]);
+    }
+
+    #[test]
+    fn malformed_response_request_header_in_response() {
+        do_malformed_response_test(&[
+            (String::from(":status"), String::from("200")),
+            (String::from(":method"), String::from("GET")),
+            (String::from("content-type"), String::from("text/plain")),
+        ]);
     }
 }
