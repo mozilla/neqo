@@ -591,6 +591,15 @@ impl CryptoDxState {
             CLIENT_CID,
         )
     }
+
+    /// Get the amount of extra padding packets protected with this profile need.
+    /// This is the difference between the size of the header protection sample
+    /// and the AEAD expansion.
+    pub fn extra_padding(&self) -> usize {
+        self.hpkey
+            .sample_size()
+            .saturating_sub(self.aead.expansion())
+    }
 }
 
 impl std::fmt::Display for CryptoDxState {
