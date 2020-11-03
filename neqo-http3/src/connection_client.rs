@@ -62,6 +62,8 @@ fn alpn_from_quic_version(version: QuicVersion) -> &'static str {
         QuicVersion::Draft28 => "h3-28",
         QuicVersion::Draft29 => "h3-29",
         QuicVersion::Draft30 => "h3-30",
+        QuicVersion::Draft31 => "h3-31",
+        QuicVersion::Draft32 => "h3-32",
     }
 }
 
