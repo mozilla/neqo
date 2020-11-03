@@ -1975,7 +1975,7 @@ impl Connection {
 
     fn input_frame(&mut self, ptype: PacketType, frame: Frame, now: Instant) -> Res<()> {
         if !frame.is_allowed(ptype) {
-            qerror!("frame not allowed: {:?} {:?}", frame, ptype);
+            qinfo!("frame not allowed: {:?} {:?}", frame, ptype);
             return Err(Error::ProtocolViolation);
         }
         self.stats.borrow_mut().frame_rx.all += 1;
