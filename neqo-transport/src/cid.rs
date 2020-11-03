@@ -27,8 +27,10 @@ use std::rc::Rc;
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
 pub const LOCAL_ACTIVE_CID_LIMIT: usize = 8;
-/// A special value.  See `ConnectionIdManager::add_handshake_cid`.
-const HANDSHAKE_SEQNO: u64 = u64::MAX;
+pub const CONNECTION_ID_SEQNO_INITIAL: u64 = 0;
+pub const CONNECTION_ID_SEQNO_PREFERRED: u64 = 1;
+/// A special value.  See `ConnectionIdManager::add_odcid`.
+const CONNECTION_ID_SEQNO_ODCID: u64 = u64::MAX;
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct ConnectionId {
@@ -247,7 +249,7 @@ pub struct ConnectionIdEntry<SRT: Clone + PartialEq> {
 impl ConnectionIdEntry<[u8; 16]> {
     /// Create the first entry, which won't have a stateless reset token.
     pub fn initial_remote(cid: ConnectionId) -> Self {
-        Self::new(0, cid, [0; 16])
+        Self::new(CONNECTION_ID_SEQNO_INITIAL, cid, [0; 16])
     }
 
     fn token_equal(a: &[u8; 16], b: &[u8; 16]) -> bool {
@@ -421,6 +423,26 @@ impl ConnectionIdManager {
         }
     }
 
+    /// Generate a connection ID and stateless reset token for a preferred address.
+    pub fn preferred_address_cid(&mut self) -> Res<(ConnectionId, [u8; 16])> {
+        if self.generator.deref().borrow().generates_empty_cids() {
+            return Err(Error::ConnectionIdsExhausted);
+        }
+        if let Some(cid) = self.generator.borrow_mut().generate_cid() {
+            assert_ne!(cid.len(), 0);
+            self.connection_ids.add_local(ConnectionIdEntry::new(
+                CONNECTION_ID_SEQNO_PREFERRED,
+                cid.clone(),
+                (),
+            ));
+
+            let srt = <[u8; 16]>::try_from(&random(16)[..]).unwrap();
+            Ok((cid, srt))
+        } else {
+            Err(Error::ConnectionIdsExhausted)
+        }
+    }
+
     pub fn is_valid(&self, cid: &ConnectionIdRef) -> bool {
         self.connection_ids.contains(cid)
     }
@@ -434,13 +456,14 @@ impl ConnectionIdManager {
 
     /// During the handshake, a server needs to regard the client's choice of destination
     /// connection ID as valid.  This function saves it in the store in a special place.
-    pub fn add_handshake_cid(&mut self, cid: ConnectionId) {
-        let entry = ConnectionIdEntry::new(HANDSHAKE_SEQNO, cid, ());
+    pub fn add_odcid(&mut self, cid: ConnectionId) {
+        let entry = ConnectionIdEntry::new(CONNECTION_ID_SEQNO_ODCID, cid, ());
         self.connection_ids.add_local(entry);
     }
 
-    pub fn remove_handshake_cid(&mut self) {
-        self.connection_ids.retire(HANDSHAKE_SEQNO);
+    /// Stop treating the original destination connection ID as valid.
+    pub fn remove_odcid(&mut self) {
+        self.connection_ids.retire(CONNECTION_ID_SEQNO_ODCID);
     }
 
     pub fn set_limit(&mut self, limit: u64) {

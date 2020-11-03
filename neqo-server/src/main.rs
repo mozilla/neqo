@@ -33,7 +33,9 @@ use neqo_crypto::{
 };
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{server::ValidateAddress, Output, RandomConnectionIdGenerator};
+use neqo_transport::{
+    server::ValidateAddress, tparams::PreferredAddress, Output, RandomConnectionIdGenerator,
+};
 
 use crate::old_https::Http09Server;
 
@@ -48,20 +50,10 @@ struct Args {
     #[structopt(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[structopt(
-        name = "encoder-table-size",
-        short = "e",
-        long,
-        default_value = "16384"
-    )]
+    #[structopt(name = "encoder-table-size", long, default_value = "16384")]
     max_table_size_encoder: u64,
 
-    #[structopt(
-        name = "decoder-table-size",
-        short = "f",
-        long,
-        default_value = "16384"
-    )]
+    #[structopt(name = "decoder-table-size", long, default_value = "16384")]
     max_table_size_decoder: u64,
 
     #[structopt(short = "b", long, default_value = "10")]
@@ -106,6 +98,14 @@ struct Args {
     /// The set of TLS cipher suites to enable.
     /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
     ciphers: Vec<String>,
+
+    #[structopt(name = "preferred-address-v4", long)]
+    /// An IPv4 address for the server preferred address.
+    preferred_address_v4: Option<String>,
+
+    #[structopt(name = "preferred-address-v6", long)]
+    /// An IPv6 address for the server preferred address.
+    preferred_address_v6: Option<String>,
 }
 
 impl Args {
@@ -121,11 +121,50 @@ impl Args {
             .collect::<Vec<_>>()
     }
 
-    fn host_socket_addrs(&self) -> Vec<SocketAddr> {
+    fn get_sock_addr<F>(opt: &Option<String>, v: &str, f: F) -> Option<SocketAddr>
+    where
+        F: FnMut(&SocketAddr) -> bool,
+    {
+        let addr = opt
+            .iter()
+            .flat_map(|spa| spa.to_socket_addrs().ok())
+            .flatten()
+            .find(f);
+        if opt.is_some() != addr.is_some() {
+            panic!(
+                "unable to resolve '{}' to an {} address",
+                opt.as_ref().unwrap(),
+                v
+            );
+        }
+        addr
+    }
+
+    fn preferred_address_v4(&self) -> Option<SocketAddr> {
+        Self::get_sock_addr(&self.preferred_address_v4, "IPv4", |addr| addr.is_ipv4())
+    }
+
+    fn preferred_address_v6(&self) -> Option<SocketAddr> {
+        Self::get_sock_addr(&self.preferred_address_v6, "IPv6", |addr| addr.is_ipv6())
+    }
+
+    fn preferred_address(&self) -> Option<PreferredAddress> {
+        let v4 = self.preferred_address_v4();
+        let v6 = self.preferred_address_v6();
+        if v4.is_none() && v6.is_none() {
+            None
+        } else {
+            Some(PreferredAddress::new(v4, v6))
+        }
+    }
+
+    fn listen_addresses(&self) -> Vec<SocketAddr> {
         self.hosts
             .iter()
             .filter_map(|host| host.to_socket_addrs().ok())
-            .flat_map(|x| x)
+            .flatten()
+            .chain(self.preferred_address_v4())
+            .chain(self.preferred_address_v6())
             .collect()
     }
 }
@@ -324,7 +363,7 @@ impl ServersRunner {
     /// Init Poll for all hosts. Create sockets, and a map of the
     /// socketaddrs to instances of the HttpServer handling that addr.
     pub fn init(&mut self) -> Result<(), io::Error> {
-        self.hosts = self.args.host_socket_addrs();
+        self.hosts = self.args.listen_addresses();
         if self.hosts.is_empty() {
             eprintln!("No valid hosts defined");
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"));
@@ -347,11 +386,10 @@ impl ServersRunner {
                 Ok(s) => s,
             };
 
-            let res = socket.only_v6();
-            let also_v4 = if res.is_ok() && !res.unwrap() {
-                " as well as V4"
-            } else {
+            let also_v4 = if socket.only_v6().unwrap_or(true) {
                 ""
+            } else {
+                " as well as V4"
             };
             println!(
                 "Server waiting for connection on: {:?}{}",
@@ -389,25 +427,28 @@ impl ServersRunner {
                     &[self.args.alpn.clone()],
                     anti_replay,
                     cid_mgr,
+                    self.args.preferred_address(),
                 )
                 .expect("We cannot make a server!"),
             )
         } else {
-            Box::new(
-                Http3Server::new(
-                    Instant::now(),
-                    &[self.args.key.clone()],
-                    &[self.args.alpn.clone()],
-                    anti_replay,
-                    cid_mgr,
-                    QpackSettings {
-                        max_table_size_encoder: self.args.max_table_size_encoder,
-                        max_table_size_decoder: self.args.max_table_size_decoder,
-                        max_blocked_streams: self.args.max_blocked_streams,
-                    },
-                )
-                .expect("We cannot make a server!"),
+            let mut server = Http3Server::new(
+                Instant::now(),
+                &[self.args.key.clone()],
+                &[self.args.alpn.clone()],
+                anti_replay,
+                cid_mgr,
+                QpackSettings {
+                    max_table_size_encoder: self.args.max_table_size_encoder,
+                    max_table_size_decoder: self.args.max_table_size_decoder,
+                    max_blocked_streams: self.args.max_blocked_streams,
+                },
             )
+            .expect("We cannot make a server!");
+            if let Some(spa) = self.args.preferred_address() {
+                server.set_preferred_address(spa);
+            }
+            Box::new(server)
         };
         svr.set_ciphers(&self.args.get_ciphers());
         svr.set_qlog_dir(self.args.qlog_dir.clone());

@@ -5,8 +5,11 @@
 // except according to those terms.
 
 use super::super::{Output, State, StreamType};
-use super::{connect_force_idle, default_client, default_server, send_something};
+use super::{
+    connect_force_idle, default_client, default_server, maybe_authenticate, send_something,
+};
 use crate::path::{PATH_MTU_V4, PATH_MTU_V6};
+use crate::tparams::PreferredAddress;
 use crate::{ConnectionError, Error};
 
 use neqo_common::Datagram;
@@ -371,4 +374,76 @@ fn migration_graceful() {
 
     let server_confirmation = send_something(&mut server, now);
     assert_v4_path(&server_confirmation, false);
+}
+
+#[test]
+fn preferred_address() {
+    fn assert_toward_spa(d: &Datagram, full_mtu: bool) {
+        assert_eq!(d.destination(), new_port());
+        assert_eq!(d.source(), loopback());
+        if full_mtu {
+            assert_eq!(d.len(), PATH_MTU_V6);
+        }
+    }
+    fn assert_from_spa(d: &Datagram, full_mtu: bool) {
+        assert_eq!(d.destination(), loopback());
+        assert_eq!(d.source(), new_port());
+        if full_mtu {
+            assert_eq!(d.len(), PATH_MTU_V6);
+        }
+    }
+
+    let mut client = default_client();
+    let mut server = default_server();
+    server
+        .set_preferred_address(&PreferredAddress::new(None, Some(new_port())))
+        .unwrap();
+    let now = now();
+
+    // Drive the handshake in the most expeditious fashion.
+    let dgram = client.process_output(now).dgram();
+    let dgram = server.process(dgram, now).dgram();
+    client.process_input(dgram.unwrap(), now);
+    assert!(maybe_authenticate(&mut client));
+    let dgram = client.process_output(now).dgram();
+    let dgram = server.process(dgram, now).dgram();
+
+    // The client is about to process HANDSHAKE_DONE.
+    // It should start probing toward the server's preferred address.
+    let probe = client.process(dgram, now).dgram().unwrap();
+    assert_toward_spa(&probe, true);
+    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    assert_ne!(client.process_output(now).callback(), Duration::new(0, 0));
+
+    // Data continues on the main path for the client.
+    let data = send_something(&mut client, now);
+    assert_v6_path(&data, false);
+
+    // The server responds to the probe.
+    let resp = server.process(Some(probe), now).dgram().unwrap();
+    assert_from_spa(&resp, true);
+    assert_eq!(server.stats().frame_tx.path_challenge, 1);
+    assert_eq!(server.stats().frame_tx.path_response, 1);
+
+    // Data continues on the main path for the server.
+    server.process_input(data, now);
+    let data = send_something(&mut server, now);
+    assert_v6_path(&data, false);
+
+    // Client gets the probe response back and it migrates.
+    client.process_input(resp, now);
+    client.process_input(data, now);
+    let data = send_something(&mut client, now);
+    assert_toward_spa(&data, true);
+    assert_eq!(client.stats().frame_tx.stream, 2);
+    assert_eq!(client.stats().frame_tx.path_response, 1);
+
+    // The server sees the migration and probes the old path.
+    let probe = server.process(Some(data), now).dgram().unwrap();
+    assert_v6_path(&probe, true);
+    assert_eq!(server.stats().frame_tx.path_challenge, 2);
+
+    // But data now goes on the new path.
+    let data = send_something(&mut server, now);
+    assert_from_spa(&data, false);
 }

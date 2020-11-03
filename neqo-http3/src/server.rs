@@ -16,7 +16,7 @@ use neqo_common::{qtrace, Datagram};
 use neqo_crypto::{AntiReplay, Cipher};
 use neqo_qpack::QpackSettings;
 use neqo_transport::server::{ActiveConnectionRef, Server, ValidateAddress};
-use neqo_transport::{ConnectionIdGenerator, Output};
+use neqo_transport::{tparams::PreferredAddress, ConnectionIdGenerator, Output};
 use std::cell::RefCell;
 use std::cell::RefMut;
 use std::collections::HashMap;
@@ -78,6 +78,10 @@ impl Http3Server {
 
     pub fn set_ciphers(&mut self, ciphers: impl AsRef<[Cipher]>) {
         self.server.set_ciphers(ciphers);
+    }
+
+    pub fn set_preferred_address(&mut self, spa: PreferredAddress) {
+        self.server.set_preferred_address(spa);
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {

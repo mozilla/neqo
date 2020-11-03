@@ -51,7 +51,8 @@ use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::{Stats, StatsCell};
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
 use crate::tparams::{
-    self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
+    self, PreferredAddress, TransportParameter, TransportParameterId, TransportParameters,
+    TransportParametersHandler,
 };
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
 use crate::{AppError, ConnectionError, Error, Res};
@@ -1209,7 +1210,9 @@ impl Connection {
     /// This takes two times: when the datagram was received, and the current time.
     fn input(&mut self, d: Datagram, received: Instant, now: Instant) {
         // First determine the path.
-        let path = self.paths.path_or_temporary(d.destination(), d.source());
+        let path = self
+            .paths
+            .find_path_with_rebinding(d.destination(), d.source());
         path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
         self.capture_error(Some(path), now, 0, res).ok();
@@ -1249,6 +1252,7 @@ impl Connection {
                     self.idle_timeout.on_packet_received(now);
                     dump_packet(
                         self,
+                        path,
                         "-> RX",
                         payload.packet_type(),
                         payload.pn(),
@@ -1370,6 +1374,23 @@ impl Connection {
         );
     }
 
+    /// If the path isn't permanent, assign it a connection ID to make it so.
+    fn ensure_permanent(&mut self, path: &PathRef) -> Res<()> {
+        if self.paths.is_temporary(&path) {
+            // If there isn't a connection ID to use for this path, the packet
+            // will be processed, but it won't be attributed to a path.  That means
+            // no path probes or PATH_RESPONSE.  But it's not fatal.
+            if let Some(cid) = self.connection_ids.next() {
+                self.paths.make_permanent(path, None, cid);
+                Ok(())
+            } else {
+                Err(Error::InvalidMigration)
+            }
+        } else {
+            Ok(())
+        }
+    }
+
     /// After an error, a permanent path is needed to send the CONNECTION_CLOSE.
     /// This attempts to ensure that this exists.  As the connection is now
     /// temporary, there is no reason to do anything special here.
@@ -1397,7 +1418,7 @@ impl Connection {
             // the client starts using a real connection ID.
             let dcid = ConnectionId::from(packet.dcid());
             self.original_destination_cid = Some(dcid.clone());
-            self.cid_manager.add_handshake_cid(dcid);
+            self.cid_manager.add_odcid(dcid);
             // Make a path on which to run the handshake.
             self.setup_handshake_path(path);
 
@@ -1417,23 +1438,6 @@ impl Connection {
         self.set_state(State::Handshaking);
     }
 
-    /// If the path isn't permanent, assign it a connection ID to make it so.
-    fn ensure_permanent(&mut self, path: &PathRef) -> Res<()> {
-        if self.paths.is_temporary(&path) {
-            // If there isn't a connection ID to use for this path, the packet
-            // will be processed, but it won't be attributed to a path.  That means
-            // no path probes or PATH_RESPONSE.  But it's not fatal.
-            if let Some(cid) = self.connection_ids.next() {
-                self.paths.make_permanent(path, None, cid);
-                Ok(())
-            } else {
-                Err(Error::InvalidMigration)
-            }
-        } else {
-            Ok(())
-        }
-    }
-
     /// Migrate to the provided path.  If `force` is true, then migration is immediate.
     /// Otherwise, migration occurs after the path is probed successfully.
     /// Either way, the path is probed and will be abandoned if the probe fails.
@@ -1448,7 +1452,7 @@ impl Connection {
             return Err(Error::InvalidMigration);
         }
 
-        let path = self.paths.path_or_temporary(local, remote);
+        let path = self.paths.find_path(local, remote);
         self.ensure_permanent(&path)?;
         qinfo!(
             [self],
@@ -1457,6 +1461,30 @@ impl Connection {
             if force { "now" } else { "after" }
         );
         self.paths.migrate(&path, force, now);
+        Ok(())
+    }
+
+    fn migrate_to_preferred_address(&mut self, now: Instant) -> Res<()> {
+        let spa = self.tps.borrow_mut().remote().get_preferred_address();
+        if let Some((addr, cid)) = spa {
+            // The connection ID isn't special, so just save it.
+            self.connection_ids.add_remote(cid)?;
+
+            // Now, if we started on v4, we only have a v4 local address to work from
+            // here.  So we can only use a v4 server address.  More thought will
+            // be needed to work out how to get addresses from a different family.
+            let local = self.paths.primary().borrow().local_address();
+            let remote = if local.ip().is_ipv4() {
+                addr.ipv4()
+            } else {
+                addr.ipv6()
+            };
+            if let Some(remote) = remote {
+                self.migrate(local, remote, false, now)?;
+            } else {
+                qwarn!([self], "Unable to migrate to a different address family");
+            }
+        }
         Ok(())
     }
 
@@ -1495,6 +1523,23 @@ impl Connection {
                 path.borrow()
             );
         }
+    }
+
+    /// Set a preferred address.
+    ///
+    /// # Panics
+    /// If neither address is provided, or if either address is of the wrong type.
+    pub fn set_preferred_address(&mut self, preferred: &PreferredAddress) -> Res<()> {
+        let (cid, srt) = self.cid_manager.preferred_address_cid()?;
+        self.set_local_tparam(
+            tparams::PREFERRED_ADDRESS,
+            TransportParameter::PreferredAddress {
+                v4: preferred.ipv4(),
+                v6: preferred.ipv6(),
+                cid,
+                srt,
+            },
+        )
     }
 
     fn output(&mut self, now: Instant) -> SendOption {
@@ -1774,7 +1819,7 @@ impl Connection {
                 continue;
             }
 
-            dump_packet(self, "TX ->", pt, pn, &builder[payload_start..]);
+            dump_packet(self, path, "TX ->", pt, pn, &builder[payload_start..]);
             qlog::packet_sent(
                 &mut self.qlog,
                 pt,
@@ -1919,6 +1964,11 @@ impl Connection {
         {
             let tps = self.tps.borrow();
             let remote = tps.remote.as_ref().unwrap();
+
+            if self.role == Role::Server && remote.get_preferred_address().is_some() {
+                return Err(Error::TransportParameterError);
+            }
+
             let reset_token = if let Some(token) = remote.get_bytes(tparams::STATELESS_RESET_TOKEN)
             {
                 <[u8; 16]>::try_from(token).unwrap()
@@ -2324,6 +2374,7 @@ impl Connection {
                 }
                 self.set_state(State::Confirmed);
                 self.discard_keys(PNSpace::Handshake, now);
+                self.migrate_to_preferred_address(now)?;
             }
         };
 
@@ -2446,7 +2497,7 @@ impl Connection {
         }
         if self.role == Role::Server {
             // Remove the randomized client CID from the list of acceptable CIDs.
-            self.cid_manager.remove_handshake_cid();
+            self.cid_manager.remove_odcid();
             // Mark the path as validated, if it isn't already.
             let path = self.paths.primary();
             path.borrow_mut().set_valid(now);

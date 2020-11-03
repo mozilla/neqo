@@ -18,6 +18,7 @@ use crate::cc::CongestionControlAlgorithm;
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef};
 use crate::connection::{Connection, Output, State};
 use crate::packet::{PacketBuilder, PacketType, PublicPacket};
+use crate::tparams::PreferredAddress;
 use crate::{QuicVersion, Res};
 
 use std::cell::RefCell;
@@ -129,6 +130,8 @@ pub struct Server {
     zero_rtt_checker: ServerZeroRttChecker,
     /// A connection ID generator.
     cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
+    /// The preferred address(es).
+    preferred_address: Option<PreferredAddress>,
     /// Active connection attempts, keyed by `AttemptKey`.  Initial packets with
     /// the same key are routed to the connection that was first accepted.
     /// This is cleared out when the connection is closed or established.
@@ -174,6 +177,7 @@ impl Server {
             anti_replay,
             zero_rtt_checker: ServerZeroRttChecker::new(zero_rtt_checker),
             cid_generator,
+            preferred_address: None,
             active_attempts: HashMap::default(),
             connections: Rc::default(),
             active: HashSet::default(),
@@ -198,6 +202,11 @@ impl Server {
     /// default values.
     pub fn set_ciphers(&mut self, ciphers: impl AsRef<[Cipher]>) {
         self.ciphers = Vec::from(ciphers.as_ref());
+    }
+
+    /// Set a preferred address.
+    pub fn set_preferred_address(&mut self, spa: PreferredAddress) {
+        self.preferred_address = Some(spa);
     }
 
     fn remove_timer(&mut self, c: &StateRef) {
@@ -386,6 +395,30 @@ impl Server {
         }
     }
 
+    fn setup_connection(
+        &mut self,
+        c: &mut Connection,
+        attempt_key: &AttemptKey,
+        initial: InitialDetails,
+        orig_dcid: Option<ConnectionId>,
+    ) {
+        let zcheck = self.zero_rtt_checker.clone();
+        if c.server_enable_0rtt(&self.anti_replay, zcheck).is_err() {
+            qwarn!([self], "Unable to enable 0-RTT");
+        }
+        if let Some(odcid) = orig_dcid {
+            // There was a retry, so set the connection IDs for.
+            c.set_retry_cids(odcid, initial.src_cid, initial.dst_cid);
+        }
+        c.set_validation(Rc::clone(&self.address_validation));
+        if let Some(spa) = &self.preferred_address {
+            if c.set_preferred_address(spa).is_err() {
+                qwarn!([self], "Unable to set preferred address");
+            }
+        }
+        c.set_qlog(self.create_qlog_trace(attempt_key));
+    }
+
     fn accept_connection(
         &mut self,
         attempt_key: AttemptKey,
@@ -414,16 +447,7 @@ impl Server {
         );
 
         if let Ok(mut c) = sconn {
-            let zcheck = self.zero_rtt_checker.clone();
-            if c.server_enable_0rtt(&self.anti_replay, zcheck).is_err() {
-                qwarn!([self], "Unable to enable 0-RTT");
-            }
-            if let Some(odcid) = orig_dcid {
-                // There was a retry, so set the connection IDs for.
-                c.set_retry_cids(odcid, initial.src_cid, initial.dst_cid);
-            }
-            c.set_validation(Rc::clone(&self.address_validation));
-            c.set_qlog(self.create_qlog_trace(&attempt_key));
+            self.setup_connection(&mut c, &attempt_key, initial, orig_dcid);
             let c = Rc::new(RefCell::new(ServerConnectionState {
                 c,
                 last_timer: now,

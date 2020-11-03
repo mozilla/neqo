@@ -65,15 +65,37 @@ pub struct Paths {
 impl Paths {
     /// Find the path for the given addresses.
     /// This might be a temporary path.
-    pub fn path_or_temporary(&self, local: SocketAddr, remote: SocketAddr) -> PathRef {
+    pub fn find_path(&self, local: SocketAddr, remote: SocketAddr) -> PathRef {
         self.paths
             .iter()
             .find_map(|p| {
-                if p.borrow().received_on(local, remote) {
+                if p.borrow().received_on(local, remote, false) {
                     Some(Rc::clone(p))
                 } else {
                     None
                 }
+            })
+            .unwrap_or_else(|| Rc::new(RefCell::new(Path::temporary(local, remote))))
+    }
+
+    pub fn find_path_with_rebinding(&self, local: SocketAddr, remote: SocketAddr) -> PathRef {
+        self.paths
+            .iter()
+            .find_map(|p| {
+                if p.borrow().received_on(local, remote, false) {
+                    Some(Rc::clone(p))
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                self.paths.iter().find_map(|p| {
+                    if p.borrow().received_on(local, remote, true) {
+                        Some(Rc::clone(p))
+                    } else {
+                        None
+                    }
+                })
             })
             .unwrap_or_else(|| Rc::new(RefCell::new(Path::temporary(local, remote))))
     }
@@ -418,10 +440,12 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    /// This uses the full local socket address, but ignores the port number on the peer.
-    /// NAT rebinding to the same IP address and a different port is thereby ignored.
-    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
-        self.local == local && self.remote.ip() == remote.ip()
+    /// This uses the full local socket address, but ignores the port number on the peer
+    /// if `flexible` is true, allowing for NAT rebinding that retains the same IP.
+    fn received_on(&self, local: SocketAddr, remote: SocketAddr, flexible: bool) -> bool {
+        self.local == local
+            && self.remote.ip() == remote.ip()
+            && (flexible || self.remote.port() == remote.port())
     }
 
     /// Update the remote port number.  Any flexibility we allow in `received_on`
