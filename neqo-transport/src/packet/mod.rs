@@ -12,6 +12,7 @@ use crate::{Error, Res};
 use neqo_common::{hex, hex_with_len, qtrace, qwarn, Decoder, Encoder};
 use neqo_crypto::random;
 
+use std::cmp::min;
 use std::convert::TryFrom;
 use std::fmt;
 use std::iter::ExactSizeIterator;
@@ -34,6 +35,7 @@ const PACKET_HP_MASK_SHORT: u8 = 0x1f;
 
 const SAMPLE_SIZE: usize = 16;
 const SAMPLE_OFFSET: usize = 4;
+const MAX_PACKET_NUMBER_LEN: usize = 4;
 
 mod retry;
 
@@ -259,14 +261,17 @@ impl PacketBuilder {
             self.offsets.len = self.encoder.len();
             self.encoder.encode(&[0; 2]);
         }
+
+        // This allows the input to be >4, which is absurd, but we can eat that.
+        let pn_len = min(MAX_PACKET_NUMBER_LEN, pn_len);
+        debug_assert_ne!(pn_len, 0);
         // Encode the packet number and save its offset.
-        debug_assert!(pn_len <= 4 && pn_len > 0);
         let pn_offset = self.encoder.len();
         self.encoder.encode_uint(pn_len, pn);
         self.offsets.pn = pn_offset..self.encoder.len();
 
         // Now encode the packet number length and save the header length.
-        self.encoder[self.header.start] |= (pn_len - 1) as u8;
+        self.encoder[self.header.start] |= u8::try_from(pn_len - 1).unwrap();
         self.header.end = self.encoder.len();
         self.pn = pn;
     }
@@ -277,6 +282,18 @@ impl PacketBuilder {
         self.encoder[self.offsets.len + 1] = (len & 0xff) as u8;
     }
 
+    fn pad_for_crypto(&mut self, crypto: &mut CryptoDxState) {
+        // Make sure that there is enough data in the packet.
+        // The length of the packet number plus the payload length needs to
+        // be at least 4 (MAX_PACKET_NUMBER_LEN) plus any amount by which
+        // the header protection sample exceeds the AEAD expansion.
+        let crypto_pad = crypto.extra_padding();
+        self.encoder.pad_to(
+            self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto_pad,
+            0,
+        );
+    }
+
     /// Build the packet and return the encoder.
     pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder> {
         if self.len() > self.limit {
@@ -284,9 +301,11 @@ impl PacketBuilder {
             return Err(Error::InternalError);
         }
 
+        self.pad_for_crypto(crypto);
         if self.offsets.len > 0 {
             self.write_len(crypto.expansion());
         }
+
         let hdr = &self.encoder[self.header.clone()];
         let body = &self.encoder[self.header.end..];
         qtrace!(
@@ -666,7 +685,7 @@ impl<'a> PublicPacket<'a> {
 
         // Unmask the PN.
         let mut pn_encoded: u64 = 0;
-        for i in 0..4 {
+        for i in 0..MAX_PACKET_NUMBER_LEN {
             hdrbytes[self.header_len + i] ^= mask[1 + i];
             pn_encoded <<= 8;
             pn_encoded += u64::from(hdrbytes[self.header_len + i]);
@@ -675,7 +694,7 @@ impl<'a> PublicPacket<'a> {
         // Now decode the packet number length and apply it, hopefully in constant time.
         let pn_len = usize::from((first_byte & 0x3) + 1);
         hdrbytes.truncate(self.header_len + pn_len);
-        pn_encoded >>= 8 * (4 - pn_len);
+        pn_encoded >>= 8 * (MAX_PACKET_NUMBER_LEN - pn_len);
 
         qtrace!("unmasked hdr={}", hex(&hdrbytes));
 
