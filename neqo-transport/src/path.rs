@@ -289,7 +289,7 @@ impl Paths {
             .or_else(|| self.primary.as_ref().map(Rc::clone))
     }
 
-    /// A PATH_RESPONSE was received.
+    /// A `PATH_RESPONSE` was received.
     pub fn path_response(&mut self, response: [u8; 8], now: Instant) {
         for p in &self.paths {
             if p.borrow_mut().path_response(response, now) {
@@ -308,7 +308,7 @@ impl Paths {
         }
     }
 
-    /// Write out any RETIRE_CONNECTION_ID frames that are outstanding.
+    /// Write out any `RETIRE_CONNECTION_ID` frames that are outstanding.
     pub fn write_frames(
         &mut self,
         builder: &mut PacketBuilder,
