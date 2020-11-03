@@ -59,6 +59,7 @@ impl PreferredAddress {
     ///
     /// # Panics
     /// If neither address is provided, or if either address is of the wrong type.
+    #[must_use]
     pub fn new(v4: Option<SocketAddr>, v6: Option<SocketAddr>) -> Self {
         assert!(v4.is_some() || v6.is_some());
         if let Some(a) = v4 {
@@ -80,9 +81,11 @@ impl PreferredAddress {
         Self { v4, v6 }
     }
 
+    #[must_use]
     pub fn ipv4(&self) -> Option<SocketAddr> {
         self.v4
     }
+    #[must_use]
     pub fn ipv6(&self) -> Option<SocketAddr> {
         self.v6
     }
@@ -396,11 +399,12 @@ impl TransportParameters {
                     | ACK_DELAY_EXPONENT
                     | MAX_ACK_DELAY
                     | ACTIVE_CONNECTION_ID_LIMIT
+                    | PREFERRED_ADDRESS
             ) {
                 continue;
             }
-            match self.params.get(k) {
-                Some(v_self) => match (v_self, v_rem) {
+            if let Some(v_self) = self.params.get(k) {
+                match (v_self, v_rem) {
                     (TransportParameter::Integer(i_self), TransportParameter::Integer(i_rem)) => {
                         if *i_self < *i_rem {
                             return false;
@@ -408,14 +412,16 @@ impl TransportParameters {
                     }
                     (TransportParameter::Empty, TransportParameter::Empty) => {}
                     _ => return false,
-                },
-                _ => return false,
+                }
+            } else {
+                return false;
             }
         }
         true
     }
 
     /// Get the preferred address in a usable form.
+    #[must_use]
     pub fn get_preferred_address(&self) -> Option<(PreferredAddress, ConnectionIdEntry<[u8; 16]>)> {
         if let Some(TransportParameter::PreferredAddress { v4, v6, cid, srt }) =
             self.params.get(&PREFERRED_ADDRESS)
@@ -430,6 +436,7 @@ impl TransportParameters {
     }
 
     #[cfg(test)]
+    #[must_use]
     fn was_sent(&self, tp: TransportParameterId) -> bool {
         self.params.contains_key(&tp)
     }
