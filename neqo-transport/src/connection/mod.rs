@@ -1383,7 +1383,12 @@ impl Connection {
             if let Some(cid) = self.connection_ids.next() {
                 self.paths.make_permanent(path, None, cid);
                 Ok(())
+            } else if self.paths.primary().borrow().remote_cid().is_empty() {
+                self.paths
+                    .make_permanent(path, None, ConnectionIdEntry::empty_remote());
+                Ok(())
             } else {
+                qtrace!([self], "Unable to make path permanent: {}", path.borrow());
                 Err(Error::InvalidMigration)
             }
         } else {

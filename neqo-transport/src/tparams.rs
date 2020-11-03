@@ -739,13 +739,13 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_neither() {
-        PreferredAddress::new(None, None);
+        let _ = PreferredAddress::new(None, None);
     }
 
     #[test]
     #[should_panic]
     fn preferred_address_v4_unspecified() {
-        PreferredAddress::new(
+        let _ = PreferredAddress::new(
             Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0)), 443)),
             None,
         );
@@ -754,7 +754,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v4_zero_port() {
-        PreferredAddress::new(
+        let _ = PreferredAddress::new(
             Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0x7f00_0001)), 0)),
             None,
         );
@@ -763,7 +763,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v6_unspecified() {
-        PreferredAddress::new(
+        let _ = PreferredAddress::new(
             None,
             Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(0)), 443)),
         );
@@ -772,7 +772,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v6_zero_port() {
-        PreferredAddress::new(
+        let _ = PreferredAddress::new(
             None,
             Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 0)),
         );
@@ -781,7 +781,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v4_is_v6() {
-        PreferredAddress::new(
+        let _ = PreferredAddress::new(
             Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 443)),
             None,
         );
@@ -790,7 +790,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn preferred_address_v6_is_v4() {
-        PreferredAddress::new(
+        let _ = PreferredAddress::new(
             None,
             Some(SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::from(0x7f00_0001)),

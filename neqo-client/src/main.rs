@@ -188,12 +188,10 @@ impl Args {
     }
 }
 
-fn emit_datagram(socket: &UdpSocket, d: Option<Datagram>) -> io::Result<()> {
-    if let Some(d) = d {
-        let sent = socket.send(&d[..])?;
-        if sent != d.len() {
-            eprintln!("Unable to send all {} bytes of datagram", d.len());
-        }
+fn emit_datagram(socket: &UdpSocket, d: Datagram) -> io::Result<()> {
+    let sent = socket.send_to(&d[..], d.destination())?;
+    if sent != d.len() {
+        eprintln!("Unable to send all {} bytes of datagram", d.len());
     }
     Ok(())
 }
@@ -241,7 +239,6 @@ fn get_output_file(
 
 fn process_loop(
     local_addr: &SocketAddr,
-    remote_addr: &SocketAddr,
     socket: &UdpSocket,
     client: &mut Http3Client,
     handler: &mut Handler,
@@ -258,7 +255,7 @@ fn process_loop(
             let output = client.process_output(Instant::now());
             match output {
                 Output::Datagram(dgram) => {
-                    if let Err(e) = emit_datagram(&socket, Some(dgram)) {
+                    if let Err(e) = emit_datagram(&socket, dgram) {
                         eprintln!("UDP write error: {}", e);
                         client.close(Instant::now(), 0, e.to_string());
                         exiting = true;
@@ -282,20 +279,20 @@ fn process_loop(
             return Ok(client.state());
         }
 
-        match socket.recv(&mut buf[..]) {
+        match socket.recv_from(&mut buf[..]) {
             Err(ref err)
                 if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::Interrupted => {}
             Err(err) => {
                 eprintln!("UDP error: {}", err);
                 exit(1)
             }
-            Ok(sz) => {
+            Ok((sz, remote)) => {
                 if sz == buf.len() {
                     eprintln!("Received more than {} bytes", buf.len());
                     continue;
                 }
                 if sz > 0 {
-                    let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
+                    let d = Datagram::new(remote, *local_addr, &buf[..sz]);
                     client.process_input(d, Instant::now());
                     handler.maybe_key_update(client)?;
                 }
@@ -527,7 +524,7 @@ fn client(
         key_update,
     };
 
-    process_loop(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
+    process_loop(&local_addr, &socket, &mut client, &mut h)?;
 
     Ok(())
 }
@@ -626,22 +623,20 @@ fn main() -> Res<()> {
             }
             Ok(s) => s,
         };
-        socket
-            .connect(&remote_addr)
-            .expect("Unable to connect UDP socket");
 
+        let real_local = socket.local_addr().unwrap();
         println!(
             "{} Client connecting: {:?} -> {:?}",
             if args.use_old_http { "H9" } else { "H3" },
-            socket.local_addr().unwrap(),
-            remote_addr
+            real_local,
+            remote_addr,
         );
 
         if !args.use_old_http {
             client(
                 &args,
                 socket,
-                local_addr,
+                real_local,
                 remote_addr,
                 &format!("{}", host),
                 &urls,
@@ -660,7 +655,7 @@ fn main() -> Res<()> {
                 old::old_client(
                     &args,
                     &socket,
-                    local_addr,
+                    real_local,
                     remote_addr,
                     &format!("{}", host),
                     &[first_url],
@@ -673,7 +668,7 @@ fn main() -> Res<()> {
             old::old_client(
                 &args,
                 &socket,
-                local_addr,
+                real_local,
                 remote_addr,
                 &format!("{}", host),
                 &urls,
@@ -686,7 +681,7 @@ fn main() -> Res<()> {
                 token = old::old_client(
                     &args,
                     &socket,
-                    local_addr,
+                    real_local,
                     remote_addr,
                     &format!("{}", host),
                     &[url],
@@ -903,7 +898,6 @@ mod old {
 
     fn process_loop_old(
         local_addr: &SocketAddr,
-        remote_addr: &SocketAddr,
         socket: &UdpSocket,
         client: &mut Connection,
         handler: &mut HandlerOld,
@@ -920,7 +914,7 @@ mod old {
                 let output = client.process_output(Instant::now());
                 match output {
                     Output::Datagram(dgram) => {
-                        if let Err(e) = emit_datagram(&socket, Some(dgram)) {
+                        if let Err(e) = emit_datagram(&socket, dgram) {
                             eprintln!("UDP write error: {}", e);
                             client.close(Instant::now(), 0, e.to_string());
                             exiting = true;
@@ -944,27 +938,24 @@ mod old {
                 return Ok(client.state().clone());
             }
 
-            let sz = match socket.recv(&mut buf[..]) {
-                Err(ref err)
-                    if err.kind() == ErrorKind::WouldBlock
-                        || err.kind() == ErrorKind::Interrupted =>
-                {
-                    0
-                }
+            match socket.recv_from(&mut buf[..]) {
                 Err(err) => {
-                    eprintln!("UDP error: {}", err);
-                    exit(1)
+                    if err.kind() != ErrorKind::WouldBlock && err.kind() != ErrorKind::Interrupted {
+                        eprintln!("UDP error: {}", err);
+                        exit(1);
+                    }
                 }
-                Ok(sz) => sz,
-            };
-            if sz == buf.len() {
-                eprintln!("Received more than {} bytes", buf.len());
-                continue;
-            }
-            if sz > 0 {
-                let d = Datagram::new(*remote_addr, *local_addr, &buf[..sz]);
-                client.process_input(d, Instant::now());
-                handler.maybe_key_update(client)?;
+                Ok((sz, addr)) => {
+                    if sz == buf.len() {
+                        eprintln!("Received more than {} bytes", buf.len());
+                        continue;
+                    }
+                    if sz > 0 {
+                        let d = Datagram::new(addr, *local_addr, &buf[..sz]);
+                        client.process_input(d, Instant::now());
+                        handler.maybe_key_update(client)?;
+                    }
+                }
             }
         }
     }
@@ -1016,7 +1007,7 @@ mod old {
             key_update,
         };
 
-        process_loop_old(&local_addr, &remote_addr, &socket, &mut client, &mut h)?;
+        process_loop_old(&local_addr, &socket, &mut client, &mut h)?;
 
         let token = if args.resume {
             // If we haven't received an event, take a token if there is one.

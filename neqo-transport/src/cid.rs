@@ -31,6 +31,8 @@ pub const CONNECTION_ID_SEQNO_INITIAL: u64 = 0;
 pub const CONNECTION_ID_SEQNO_PREFERRED: u64 = 1;
 /// A special value.  See `ConnectionIdManager::add_odcid`.
 const CONNECTION_ID_SEQNO_ODCID: u64 = u64::MAX;
+/// A special value.  See `ConnectionIdEntry::empty_remote`.
+const CONNECTION_ID_SEQNO_EMPTY: u64 = u64::MAX - 1;
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct ConnectionId {
@@ -247,9 +249,25 @@ pub struct ConnectionIdEntry<SRT: Clone + PartialEq> {
 }
 
 impl ConnectionIdEntry<[u8; 16]> {
+    /// Create a random stateless reset token so that it is hard to guess the correct
+    /// value and reset the connection.
+    fn random_srt() -> [u8; 16] {
+        <[u8; 16]>::try_from(&random(16)[..]).unwrap()
+    }
+
     /// Create the first entry, which won't have a stateless reset token.
     pub fn initial_remote(cid: ConnectionId) -> Self {
-        Self::new(CONNECTION_ID_SEQNO_INITIAL, cid, [0; 16])
+        Self::new(CONNECTION_ID_SEQNO_INITIAL, cid, Self::random_srt())
+    }
+
+    /// Create an empty for when the peer chooses empty connection IDs.
+    /// This uses a special sequence number just because it can.
+    pub fn empty_remote() -> Self {
+        Self::new(
+            CONNECTION_ID_SEQNO_EMPTY,
+            ConnectionId::from(&[]),
+            Self::random_srt(),
+        )
     }
 
     fn token_equal(a: &[u8; 16], b: &[u8; 16]) -> bool {
@@ -264,8 +282,8 @@ impl ConnectionIdEntry<[u8; 16]> {
 
     /// Determine whether this is a valid stateless reset.
     pub fn is_stateless_reset(&self, token: &[u8; 16]) -> bool {
-        // A sequence number of 0 has no corresponding stateless reset token.
-        Self::token_equal(&self.srt, token)
+        // A sequence number of 2^62 or more has no corresponding stateless reset token.
+        (self.seqno < (1 << 62)) && Self::token_equal(&self.srt, token)
     }
 
     /// Return true if the two contain any equal parts.
