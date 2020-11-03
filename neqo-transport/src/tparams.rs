@@ -589,7 +589,10 @@ mod tests {
 
     fn make_spa() -> TransportParameter {
         TransportParameter::PreferredAddress {
-            v4: Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0x7f000001)), 443)),
+            v4: Some(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::from(0x7f00_0001)),
+                443,
+            )),
             v6: Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 443)),
             cid: ConnectionId::from(&[1, 2, 3, 4, 5]),
             srt: [3; 16],
@@ -766,7 +769,7 @@ mod tests {
     #[should_panic]
     fn preferred_address_v4_zero_port() {
         PreferredAddress::new(
-            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0x7f000001)), 0)),
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0x7f00_0001)), 0)),
             None,
         );
     }
@@ -803,7 +806,10 @@ mod tests {
     fn preferred_address_v6_is_v4() {
         PreferredAddress::new(
             None,
-            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0x7f000001)), 443)),
+            Some(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::from(0x7f00_0001)),
+                443,
+            )),
         );
     }
 
