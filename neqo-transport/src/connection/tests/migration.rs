@@ -447,3 +447,38 @@ fn preferred_address() {
     let data = send_something(&mut server, now);
     assert_from_spa(&data, false);
 }
+
+/// Test that migration isn't permitted if the connection isn't in the right state.
+#[test]
+fn no_migration() {
+    let mut client = default_client();
+    assert!(client
+        .migrate(loopback(), loopback(), false, now())
+        .is_err());
+
+    let mut server = default_server();
+    assert!(server
+        .migrate(loopback(), loopback(), false, now())
+        .is_err());
+    connect_force_idle(&mut client, &mut server);
+
+    assert!(server
+        .migrate(loopback(), loopback(), false, now())
+        .is_err());
+
+    client.close(now(), 0, "closing");
+    assert!(client
+        .migrate(loopback(), loopback(), false, now())
+        .is_err());
+    let close = client.process(None, now()).dgram();
+
+    let dgram = server.process(close, now()).dgram();
+    assert!(server
+        .migrate(loopback(), loopback(), false, now())
+        .is_err());
+
+    client.process_input(dgram.unwrap(), now());
+    assert!(client
+        .migrate(loopback(), loopback(), false, now())
+        .is_err());
+}

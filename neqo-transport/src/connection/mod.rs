@@ -1441,6 +1441,9 @@ impl Connection {
     /// Migrate to the provided path.  If `force` is true, then migration is immediate.
     /// Otherwise, migration occurs after the path is probed successfully.
     /// Either way, the path is probed and will be abandoned if the probe fails.
+    ///
+    /// Fails if this is not a client, not confirmed, or there are not enough connection
+    /// IDs available to use.
     pub fn migrate(
         &mut self,
         local: SocketAddr,
@@ -1449,6 +1452,9 @@ impl Connection {
         now: Instant,
     ) -> Res<()> {
         if self.role != Role::Client {
+            return Err(Error::InvalidMigration);
+        }
+        if !matches!(self.state(), State::Confirmed) {
             return Err(Error::InvalidMigration);
         }
 
