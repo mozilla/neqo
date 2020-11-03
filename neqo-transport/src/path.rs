@@ -158,7 +158,7 @@ impl Paths {
     /// Select a path as the primary.  Returns the old primary path.
     #[must_use]
     fn select_primary(&mut self, path: &PathRef) -> Option<PathRef> {
-        qinfo!([path.borrow()], "set as primary");
+        qinfo!([path.borrow()], "set as primary path");
         let old_path = if let Some(old) = self.primary.replace(Rc::clone(path)) {
             old.borrow_mut().set_primary(false);
             Some(old)
@@ -456,7 +456,7 @@ impl Path {
 
     /// Set whether this path is primary.
     fn set_primary(&mut self, primary: bool) {
-        qdebug!([self], "Make primary {}", primary);
+        qtrace!([self], "Make primary {}", primary);
         self.primary = primary;
     }
 
