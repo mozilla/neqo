@@ -4,18 +4,22 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Output, State, StreamType};
+use super::super::{Connection, Output, State, StreamType};
 use super::{
     connect_force_idle, default_client, default_server, maybe_authenticate, send_something,
 };
 use crate::path::{PATH_MTU_V4, PATH_MTU_V6};
 use crate::tparams::PreferredAddress;
-use crate::{ConnectionError, Error};
+use crate::{
+    CongestionControlAlgorithm, ConnectionError, EmptyConnectionIdGenerator, Error, QuicVersion,
+};
 
 use neqo_common::Datagram;
+use std::cell::RefCell;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::rc::Rc;
 use std::time::Duration;
-use test_fixture::{self, loopback, now};
+use test_fixture::{self, fixture_init, loopback, now};
 
 // These tests generally use two paths:
 // The connection is established on a path with the same IPv6 loopback address on both ends.
@@ -313,9 +317,7 @@ fn migrate_same_fail() {
     ));
 }
 
-#[test]
-fn migration_graceful() {
-    let mut client = default_client();
+fn migration(mut client: Connection) {
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
     let now = now();
@@ -374,6 +376,28 @@ fn migration_graceful() {
 
     let server_confirmation = send_something(&mut server, now);
     assert_v4_path(&server_confirmation, false);
+}
+
+#[test]
+fn migration_graceful() {
+    migration(default_client());
+}
+
+/// A client should be able to migrate when it has a zero-length connection ID.
+#[test]
+fn migration_client_empty_cid() {
+    fixture_init();
+    let client = Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        loopback(),
+        loopback(),
+        &CongestionControlAlgorithm::NewReno,
+        QuicVersion::default(),
+    )
+    .unwrap();
+    migration(client);
 }
 
 #[test]
@@ -446,6 +470,27 @@ fn preferred_address() {
     // But data now goes on the new path.
     let data = send_something(&mut server, now);
     assert_from_spa(&data, false);
+}
+
+#[test]
+fn preferred_address_empty_cid() {
+    fixture_init();
+
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        &CongestionControlAlgorithm::NewReno,
+        QuicVersion::default(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        server
+            .set_preferred_address(&PreferredAddress::new(None, Some(new_port())))
+            .unwrap_err(),
+        Error::ConnectionIdsExhausted
+    );
 }
 
 /// Test that migration isn't permitted if the connection isn't in the right state.
