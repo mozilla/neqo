@@ -140,8 +140,13 @@ pub struct Args {
     use_old_http: bool,
 
     #[structopt(name = "download-in-series", long)]
-    /// Download resources in series using separate connections
+    /// Download resources in series using separate connections.
+    /// Only works with old HTTP (that is, `-o`).
     download_in_series: bool,
+
+    #[structopt(name = "concurrency", long, default_value = "100")]
+    /// The maximum number of requests to have outstanding at one time.
+    concurrency: usize,
 
     #[structopt(name = "output-read-data", long)]
     /// Output received data to stdout
@@ -252,8 +257,7 @@ fn process_loop(
         let mut exiting = !handler.handle(client)?;
 
         loop {
-            let output = client.process_output(Instant::now());
-            match output {
+            match client.process_output(Instant::now()) {
                 Output::Datagram(dgram) => {
                     if let Err(e) = emit_datagram(&socket, dgram) {
                         eprintln!("UDP write error: {}", e);
@@ -313,6 +317,9 @@ impl<'a> Handler<'a> {
     fn download_urls(&mut self, client: &mut Http3Client) {
         loop {
             if self.url_queue.is_empty() {
+                break;
+            }
+            if self.streams.len() >= self.args.concurrency {
                 break;
             }
             if !self.download_next(client) {
@@ -436,6 +443,7 @@ impl<'a> Handler<'a> {
 
                     if stream_done {
                         self.streams.remove(&stream_id);
+                        self.download_urls(client);
                         if self.done() {
                             client.close(Instant::now(), 0, "kthxbye!");
                             return Ok(false);
@@ -733,6 +741,9 @@ mod old {
                 if self.url_queue.is_empty() {
                     break;
                 }
+                if self.streams.len() >= self.args.concurrency {
+                    break;
+                }
                 if !self.download_next(client) {
                     break;
                 }
@@ -830,6 +841,7 @@ mod old {
                             println!("<FIN[{}]>", stream_id);
                         }
                         self.streams.remove(&stream_id);
+                        self.download_urls(client);
                         if self.streams.is_empty() && self.url_queue.is_empty() {
                             return Ok(false);
                         }
@@ -911,8 +923,7 @@ mod old {
             let mut exiting = !handler.handle(client)?;
 
             loop {
-                let output = client.process_output(Instant::now());
-                match output {
+                match client.process_output(Instant::now()) {
                     Output::Datagram(dgram) => {
                         if let Err(e) = emit_datagram(&socket, dgram) {
                             eprintln!("UDP write error: {}", e);
