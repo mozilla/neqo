@@ -571,9 +571,6 @@ impl Path {
     /// This only generates a single response at a time.
     pub fn challenged(&mut self, challenge: [u8; 8]) {
         self.challenge = Some(challenge.to_owned());
-        if !self.is_valid() {
-            self.probe();
-        }
     }
 
     /// At the next opportunity, send a probe.
