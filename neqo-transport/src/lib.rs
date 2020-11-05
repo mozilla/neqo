@@ -130,6 +130,7 @@ impl Error {
             Self::InvalidToken => 11,
             Self::KeysExhausted => ERROR_AEAD_LIMIT_REACHED,
             Self::ApplicationError => ERROR_APPLICATION_CLOSE,
+            Self::NoAvailablePath => 16,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),
             // All the rest are internal errors.
             _ => 1,
