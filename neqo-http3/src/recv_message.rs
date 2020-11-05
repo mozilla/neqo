@@ -25,7 +25,6 @@ const PSEUDO_HEADER_METHOD: u8 = 0x2;
 const PSEUDO_HEADER_SCHEME: u8 = 0x4;
 const PSEUDO_HEADER_AUTHORITY: u8 = 0x8;
 const PSEUDO_HEADER_PATH: u8 = 0x10;
-const PSEUDO_HEADER_UNDEFINED: u8 = 0x20;
 const REGULAR_HEADER: u8 = 0x80;
 
 #[derive(Debug)]
@@ -333,36 +332,35 @@ impl RecvMessage {
             MessageType::Response => {
                 let status = headers.iter().find(|(name, _value)| name == ":status");
                 if let Some((_name, value)) = status {
-                    let status_code = value
-                        .parse::<i32>()
-                        .map_err(|_| Error::HttpGeneralProtocolStream)?;
+                    let status_code = value.parse::<i32>().map_err(|_| Error::HttpInvalidHeader)?;
                     Ok(status_code >= 100 && status_code < 200)
                 } else {
-                    Err(Error::HttpGeneralProtocolStream)
+                    Err(Error::HttpInvalidHeader)
                 }
             }
             MessageType::Request => Ok(false),
         }
     }
 
-    fn track_pseudo(&self, name: &str, state: &mut u8) -> Res<bool> {
+    fn track_pseudo(name: &str, state: &mut u8, message_type: &MessageType) -> Res<bool> {
         let (pseudo, bit) = if name.starts_with(':') {
-            (
-                true,
-                match self.message_type {
-                    MessageType::Response => match name {
-                        ":status" => PSEUDO_HEADER_STATUS,
-                        _ => PSEUDO_HEADER_UNDEFINED,
-                    },
-                    MessageType::Request => match name {
-                        ":method" => PSEUDO_HEADER_METHOD,
-                        ":scheme" => PSEUDO_HEADER_SCHEME,
-                        ":authority" => PSEUDO_HEADER_AUTHORITY,
-                        ":path" => PSEUDO_HEADER_PATH,
-                        _ => PSEUDO_HEADER_UNDEFINED,
-                    },
+            if *state & REGULAR_HEADER != 0 {
+                return Err(Error::HttpInvalidHeader);
+            }
+            let bit = match message_type {
+                MessageType::Response => match name {
+                    ":status" => PSEUDO_HEADER_STATUS,
+                    _ => return Err(Error::HttpInvalidHeader),
                 },
-            )
+                MessageType::Request => match name {
+                    ":method" => PSEUDO_HEADER_METHOD,
+                    ":scheme" => PSEUDO_HEADER_SCHEME,
+                    ":authority" => PSEUDO_HEADER_AUTHORITY,
+                    ":path" => PSEUDO_HEADER_PATH,
+                    _ => return Err(Error::HttpInvalidHeader),
+                },
+            };
+            (true, bit)
         } else {
             (false, REGULAR_HEADER)
         };
@@ -371,7 +369,7 @@ impl RecvMessage {
             *state |= bit;
             Ok(pseudo)
         } else {
-            Err(Error::HttpGeneralProtocolStream)
+            Err(Error::HttpInvalidHeader)
         }
     }
 
@@ -379,14 +377,10 @@ impl RecvMessage {
         let mut method_value: Option<&String> = None;
         let mut pseudo_state = 0;
         for header in headers {
-            let is_pseudo = self.track_pseudo(&header.0, &mut pseudo_state)?;
+            let is_pseudo = Self::track_pseudo(&header.0, &mut pseudo_state, &self.message_type)?;
 
             let mut bytes = header.0.bytes();
             if is_pseudo {
-                if (pseudo_state & (PSEUDO_HEADER_UNDEFINED | REGULAR_HEADER)) != 0 {
-                    return Err(Error::HttpGeneralProtocolStream);
-                }
-
                 if header.0 == ":method" {
                     method_value = Some(&header.1);
                 }
@@ -394,7 +388,7 @@ impl RecvMessage {
             }
 
             if bytes.any(|b| matches!(b, 0 | 0x10 | 0x13 | 0x3a | 0x41..=0x5a)) {
-                return Err(Error::HttpGeneralProtocolStream); // illegal characters.
+                return Err(Error::HttpInvalidHeader); // illegal characters.
             }
 
             if matches!(
@@ -408,28 +402,23 @@ impl RecvMessage {
                     | "upgrade"
                     | "accept-encoding"
             ) {
-                return Err(Error::HttpGeneralProtocolStream);
+                return Err(Error::HttpInvalidHeader);
             }
         }
-
-        pseudo_state ^= REGULAR_HEADER;
-        match self.message_type {
-            MessageType::Response => {
-                let response_mask = PSEUDO_HEADER_STATUS;
-                if pseudo_state & response_mask != response_mask {
-                    return Err(Error::HttpGeneralProtocolStream);
-                }
-            }
+        // Clear the regular header bit, since we only check pseudo headers below.
+        pseudo_state &= !REGULAR_HEADER;
+        let pseudo_header_mask = match self.message_type {
+            MessageType::Response => PSEUDO_HEADER_STATUS,
             MessageType::Request => {
-                let request_mask = if method_value == Some(&"CONNECT".to_string()) {
+                if method_value == Some(&"CONNECT".to_string()) {
                     PSEUDO_HEADER_METHOD | PSEUDO_HEADER_AUTHORITY
                 } else {
                     PSEUDO_HEADER_METHOD | PSEUDO_HEADER_SCHEME | PSEUDO_HEADER_PATH
-                };
-                if pseudo_state & request_mask != request_mask {
-                    return Err(Error::HttpGeneralProtocolStream);
                 }
             }
+        };
+        if pseudo_state & pseudo_header_mask != pseudo_header_mask {
+            return Err(Error::HttpInvalidHeader);
         }
 
         Ok(true)
