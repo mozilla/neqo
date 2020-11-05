@@ -11,7 +11,7 @@ use neqo_common::{Datagram, Encoder};
 use neqo_transport::{
     CongestionControlAlgorithm, Connection, QuicVersion, RandomConnectionIdGenerator, State,
 };
-use test_fixture::{self, loopback, now};
+use test_fixture::{self, addr, now};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -184,7 +184,7 @@ fn process_client_initial(quic_version: QuicVersion, packet: &str) {
     let mut server = make_server(quic_version);
 
     let pkt: Vec<u8> = Encoder::from_hex(packet).into();
-    let dgram = Datagram::new(loopback(), loopback(), pkt);
+    let dgram = Datagram::new(addr(), addr(), pkt);
     assert_eq!(*server.state(), State::Init);
     let out = server.process(Some(dgram), now());
     assert_eq!(*server.state(), State::Handshaking);

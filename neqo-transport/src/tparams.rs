@@ -597,10 +597,13 @@ mod tests {
     fn make_spa() -> TransportParameter {
         TransportParameter::PreferredAddress {
             v4: Some(SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::from(0x7f00_0001)),
+                IpAddr::V4(Ipv4Addr::from(0xc000_0201)),
                 443,
             )),
-            v6: Some(SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 443)),
+            v6: Some(SocketAddr::new(
+                IpAddr::V6(Ipv6Addr::from(0xfe80_0000_0000_0000_0000_0000_0000_0001)),
+                443,
+            )),
             cid: ConnectionId::from(&[1, 2, 3, 4, 5]),
             srt: [3; 16],
         }
@@ -609,7 +612,7 @@ mod tests {
     #[test]
     fn preferred_address_encode_decode() {
         const ENCODED: &[u8] = &[
-            0x0d, 0x2e, 0x7f, 0x00, 0x00, 0x01, 0x01, 0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x0d, 0x2e, 0xc0, 0x00, 0x02, 0x01, 0x01, 0xbb, 0xfe, 0x80, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0xbb, 0x05, 0x01,
             0x02, 0x03, 0x04, 0x05, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
             0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
@@ -755,7 +758,7 @@ mod tests {
     #[should_panic]
     fn preferred_address_v4_zero_port() {
         let _ = PreferredAddress::new(
-            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0x7f00_0001)), 0)),
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(0xc000_0201)), 0)),
             None,
         );
     }
@@ -793,7 +796,7 @@ mod tests {
         let _ = PreferredAddress::new(
             None,
             Some(SocketAddr::new(
-                IpAddr::V4(Ipv4Addr::from(0x7f00_0001)),
+                IpAddr::V4(Ipv4Addr::from(0xc000_0201)),
                 443,
             )),
         );

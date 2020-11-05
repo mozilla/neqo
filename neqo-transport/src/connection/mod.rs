@@ -11,7 +11,7 @@ use std::cmp::max;
 use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::mem;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
@@ -1443,16 +1443,20 @@ impl Connection {
         self.set_state(State::Handshaking);
     }
 
-    /// Migrate to the provided path.  If `force` is true, then migration is immediate.
+    /// Migrate to the provided path.
+    /// Either local or remote address (but not both) may be provided as `None` to have
+    /// the address from the current primary path used.
+    /// If `force` is true, then migration is immediate.
     /// Otherwise, migration occurs after the path is probed successfully.
     /// Either way, the path is probed and will be abandoned if the probe fails.
     ///
+    /// # Errors
     /// Fails if this is not a client, not confirmed, or there are not enough connection
     /// IDs available to use.
     pub fn migrate(
         &mut self,
-        local: SocketAddr,
-        remote: SocketAddr,
+        local: Option<SocketAddr>,
+        remote: Option<SocketAddr>,
         force: bool,
         now: Instant,
     ) -> Res<()> {
@@ -1460,6 +1464,28 @@ impl Connection {
             return Err(Error::InvalidMigration);
         }
         if !matches!(self.state(), State::Confirmed) {
+            return Err(Error::InvalidMigration);
+        }
+
+        // Fill in the blanks, using the current primary path.
+        if local.is_none() && remote.is_none() {
+            // Pointless migration is pointless.
+            return Err(Error::InvalidMigration);
+        }
+        let local = local.unwrap_or_else(|| self.paths.primary().borrow().local_address());
+        let remote = remote.unwrap_or_else(|| self.paths.primary().borrow().remote_address());
+
+        if mem::discriminant(&local.ip()) != mem::discriminant(&remote.ip()) {
+            // Can't mix address families.
+            return Err(Error::InvalidMigration);
+        }
+        if local.port() == 0 || remote.ip().is_unspecified() || remote.port() == 0 {
+            // All but the local address need to be specified.
+            return Err(Error::InvalidMigration);
+        }
+        if (local.ip().is_loopback() ^ remote.ip().is_loopback()) && !local.ip().is_unspecified() {
+            // Block attempts to migrate to a path with loopback on only one end, unless the local
+            // address is unspecified.
             return Err(Error::InvalidMigration);
         }
 
@@ -1481,17 +1507,27 @@ impl Connection {
             // The connection ID isn't special, so just save it.
             self.connection_ids.add_remote(cid)?;
 
-            // Now, if we started on v4, we only have a v4 local address to work from
-            // here.  So we can only use a v4 server address.  More thought will
+            // The preferred address doesn't dictate what the local address is, so this
+            // has to use the existing address.  So only pay attention to a preferred
+            // address from the same family as is currently in use. More thought will
             // be needed to work out how to get addresses from a different family.
-            let local = self.paths.primary().borrow().local_address();
-            let remote = if local.ip().is_ipv4() {
-                addr.ipv4()
-            } else {
-                addr.ipv6()
+            let prev = self.paths.primary().borrow().remote_address();
+            let remote = match prev.ip() {
+                IpAddr::V4(_) => addr.ipv4(),
+                IpAddr::V6(_) => addr.ipv6(),
             };
+
             if let Some(remote) = remote {
-                self.migrate(local, remote, false, now)?;
+                // Ignore preferred address that move to loopback from non-loopback.
+                // `migrate` doesn't enforce this rule.
+                if !prev.ip().is_loopback() && remote.ip().is_loopback() {
+                    qwarn!([self], "Ignoring a move to a loopback address: {}", remote);
+                    return Ok(());
+                }
+
+                if self.migrate(None, Some(remote), false, now).is_err() {
+                    qwarn!([self], "Ignoring bad preferred address: {}", remote);
+                }
             } else {
                 qwarn!([self], "Unable to migrate to a different address family");
             }
@@ -1986,7 +2022,12 @@ impl Connection {
             let tps = self.tps.borrow();
             let remote = tps.remote.as_ref().unwrap();
 
-            if self.role == Role::Server && remote.get_preferred_address().is_some() {
+            // If the peer provided a preferred address, then we have to be a client
+            // and they have to be using a non-empty connection ID.
+            if remote.get_preferred_address().is_some()
+                && (self.role == Role::Server
+                    || self.remote_initial_source_cid.as_ref().unwrap().is_empty())
+            {
                 return Err(Error::TransportParameterError);
             }
 

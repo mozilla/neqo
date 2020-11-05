@@ -742,7 +742,7 @@ mod tests {
     use std::convert::TryFrom;
     use std::time::Duration;
     use test_fixture::{
-        default_server_h3, fixture_init, loopback, now, CountingConnectionIdGenerator,
+        addr, default_server_h3, fixture_init, now, CountingConnectionIdGenerator,
         DEFAULT_SERVER_NAME,
     };
 
@@ -761,8 +761,8 @@ mod tests {
         Http3Client::new(
             DEFAULT_SERVER_NAME,
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            loopback(),
-            loopback(),
+            addr(),
+            addr(),
             &CongestionControlAlgorithm::NewReno,
             QuicVersion::default(),
             &Http3Parameters {

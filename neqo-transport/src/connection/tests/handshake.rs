@@ -25,7 +25,7 @@ use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AuthenticationStatus}
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
-use test_fixture::{self, assertions, fixture_init, loopback, now, split_datagram};
+use test_fixture::{self, addr, assertions, fixture_init, now, split_datagram};
 
 #[test]
 fn full_handshake() {
@@ -108,8 +108,8 @@ fn no_alpn() {
         "example.com",
         &["bad-alpn"],
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        loopback(),
-        loopback(),
+        addr(),
+        addr(),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
@@ -238,8 +238,8 @@ fn chacha20poly1305() {
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        loopback(),
-        loopback(),
+        addr(),
+        addr(),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )

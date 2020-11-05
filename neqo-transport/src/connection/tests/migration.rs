@@ -6,56 +6,68 @@
 
 use super::super::{Connection, Output, State, StreamType};
 use super::{
-    connect_force_idle, default_client, default_server, maybe_authenticate, send_something,
+    connect_fail, connect_force_idle, default_client, default_server, maybe_authenticate,
+    send_something,
 };
 use crate::path::{PATH_MTU_V4, PATH_MTU_V6};
-use crate::tparams::PreferredAddress;
+use crate::tparams::{self, PreferredAddress, TransportParameter};
 use crate::{
     CongestionControlAlgorithm, ConnectionError, EmptyConnectionIdGenerator, Error, QuicVersion,
 };
 
 use neqo_common::Datagram;
 use std::cell::RefCell;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
 use std::time::Duration;
-use test_fixture::{self, fixture_init, loopback, now};
+use test_fixture::{self, addr, fixture_init, now};
+
+/// This should be a valid-seeming transport parameter.
+/// And it should have different values to `addr` and `addr_v4`.
+const SAMPLE_PREFERRED_ADDRESS: &[u8] = &[
+    0xc0, 0x00, 0x02, 0x02, 0x01, 0xbb, 0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x01, 0xbb, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05, 0x03, 0x03,
+    0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
+];
 
 // These tests generally use two paths:
-// The connection is established on a path with the same IPv6 loopback address on both ends.
-// Migrations move to a path with the same IPv4 loopback address on both ends.
+// The connection is established on a path with the same IPv6 address on both ends.
+// Migrations move to a path with the same IPv4 address on both ends.
 // This simplifies validation as the same assertions can be used for client and server.
 // The risk is that there is a place where source/destination local/remote is inverted.
-fn loopback_v4() -> SocketAddr {
-    let localhost_v4 = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-    SocketAddr::new(localhost_v4, loopback().port())
+fn addr_v4() -> SocketAddr {
+    let localhost_v4 = IpAddr::V4(Ipv4Addr::from(0xc000_0201));
+    SocketAddr::new(localhost_v4, addr().port())
+}
+
+fn loopback() -> SocketAddr {
+    SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 443)
 }
 
 fn change_path(d: &Datagram) -> Datagram {
-    let v4 = loopback_v4();
+    let v4 = addr_v4();
     Datagram::new(v4, v4, &d[..])
 }
 
-fn new_port() -> SocketAddr {
-    let lb = loopback();
-    let (port, _) = lb.port().overflowing_add(1);
-    SocketAddr::new(lb.ip(), port)
+fn new_port(a: SocketAddr) -> SocketAddr {
+    let (port, _) = a.port().overflowing_add(410);
+    SocketAddr::new(a.ip(), port)
 }
 
 fn change_source_port(d: &Datagram) -> Datagram {
-    Datagram::new(new_port(), loopback(), &d[..])
+    Datagram::new(new_port(d.source()), d.destination(), &d[..])
 }
 
 fn assert_v4_path(dgram: &Datagram, padded: bool) {
-    assert_eq!(dgram.source(), loopback_v4());
-    assert_eq!(dgram.destination(), loopback_v4());
+    assert_eq!(dgram.source(), addr_v4());
+    assert_eq!(dgram.destination(), addr_v4());
     if padded {
         assert_eq!(dgram.len(), PATH_MTU_V4);
     }
 }
 fn assert_v6_path(dgram: &Datagram, padded: bool) {
-    assert_eq!(dgram.source(), loopback());
-    assert_eq!(dgram.destination(), loopback());
+    assert_eq!(dgram.source(), addr());
+    assert_eq!(dgram.destination(), addr());
     if padded {
         assert_eq!(dgram.len(), PATH_MTU_V6);
     }
@@ -76,8 +88,8 @@ fn rebinding_port() {
     server.stream_close_send(stream_id).unwrap();
     let dgram = server.process_output(now()).dgram();
     let dgram = dgram.unwrap();
-    assert_eq!(dgram.source(), loopback());
-    assert_eq!(dgram.destination(), new_port());
+    assert_eq!(dgram.source(), addr());
+    assert_eq!(dgram.destination(), new_port(addr()));
 }
 
 /// This simulates an attack where a valid packet is forwarded on
@@ -167,7 +179,7 @@ fn migrate_immediate() {
     connect_force_idle(&mut client, &mut server);
 
     client
-        .migrate(loopback_v4(), loopback_v4(), true, now())
+        .migrate(Some(addr_v4()), Some(addr_v4()), true, now())
         .unwrap();
 
     let client1 = send_something(&mut client, now());
@@ -205,7 +217,7 @@ fn migrate_immediate_fail() {
     let mut now = now();
 
     client
-        .migrate(loopback_v4(), loopback_v4(), true, now)
+        .migrate(Some(addr_v4()), Some(addr_v4()), true, now)
         .unwrap();
 
     let probe = client.process_output(now).dgram().unwrap();
@@ -252,7 +264,9 @@ fn migrate_same() {
     connect_force_idle(&mut client, &mut server);
     let now = now();
 
-    client.migrate(loopback(), loopback(), true, now).unwrap();
+    client
+        .migrate(Some(addr()), Some(addr()), true, now)
+        .unwrap();
 
     let probe = client.process_output(now).dgram().unwrap();
     assert_v6_path(&probe, true); // Contains PATH_CHALLENGE.
@@ -277,7 +291,9 @@ fn migrate_same_fail() {
     connect_force_idle(&mut client, &mut server);
     let mut now = now();
 
-    client.migrate(loopback(), loopback(), true, now).unwrap();
+    client
+        .migrate(Some(addr()), Some(addr()), true, now)
+        .unwrap();
 
     let probe = client.process_output(now).dgram().unwrap();
     assert_v6_path(&probe, true); // Contains PATH_CHALLENGE.
@@ -323,7 +339,7 @@ fn migration(mut client: Connection) {
     let now = now();
 
     client
-        .migrate(loopback_v4(), loopback_v4(), false, now)
+        .migrate(Some(addr_v4()), Some(addr_v4()), false, now)
         .unwrap();
 
     let probe = client.process_output(now).dgram().unwrap();
@@ -391,8 +407,8 @@ fn migration_client_empty_cid() {
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        loopback(),
-        loopback(),
+        addr(),
+        addr(),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
@@ -400,76 +416,169 @@ fn migration_client_empty_cid() {
     migration(client);
 }
 
-#[test]
-fn preferred_address() {
-    fn assert_toward_spa(d: &Datagram, full_mtu: bool) {
-        assert_eq!(d.destination(), new_port());
-        assert_eq!(d.source(), loopback());
-        if full_mtu {
-            assert_eq!(d.len(), PATH_MTU_V6);
-        }
-    }
-    fn assert_from_spa(d: &Datagram, full_mtu: bool) {
-        assert_eq!(d.destination(), loopback());
-        assert_eq!(d.source(), new_port());
-        if full_mtu {
-            assert_eq!(d.len(), PATH_MTU_V6);
-        }
-    }
+/// Drive the handshake in the most expeditious fashion.
+/// Returns the packet containing HANDSHAKE_DONE from the server.
+fn fast_handshake(client: &mut Connection, server: &mut Connection) -> Option<Datagram> {
+    let dgram = client.process_output(now()).dgram();
+    let dgram = server.process(dgram, now()).dgram();
+    client.process_input(dgram.unwrap(), now());
+    assert!(maybe_authenticate(client));
+    let dgram = client.process_output(now()).dgram();
+    server.process(dgram, now()).dgram()
+}
 
-    let mut client = default_client();
+fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: SocketAddr) {
+    let mtu = match hs_client.ip() {
+        IpAddr::V4(_) => PATH_MTU_V4,
+        IpAddr::V6(_) => PATH_MTU_V6,
+    };
+    let assert_orig_path = |d: &Datagram, full_mtu: bool| {
+        assert_eq!(
+            d.destination(),
+            if d.source() == hs_client {
+                hs_server
+            } else if d.source() == hs_server {
+                hs_client
+            } else {
+                panic!();
+            }
+        );
+        if full_mtu {
+            assert_eq!(d.len(), mtu);
+        }
+    };
+    let assert_toward_spa = |d: &Datagram, full_mtu: bool| {
+        assert_eq!(d.destination(), preferred);
+        assert_eq!(d.source(), hs_client);
+        if full_mtu {
+            assert_eq!(d.len(), mtu);
+        }
+    };
+    let assert_from_spa = |d: &Datagram, full_mtu: bool| {
+        assert_eq!(d.destination(), hs_client);
+        assert_eq!(d.source(), preferred);
+        if full_mtu {
+            assert_eq!(d.len(), mtu);
+        }
+    };
+
+    fixture_init();
+    let mut client = Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        hs_client,
+        hs_server,
+        &CongestionControlAlgorithm::NewReno,
+        QuicVersion::default(),
+    )
+    .unwrap();
     let mut server = default_server();
-    server
-        .set_preferred_address(&PreferredAddress::new(None, Some(new_port())))
-        .unwrap();
-    let now = now();
+    let spa = if preferred.ip().is_ipv6() {
+        PreferredAddress::new(None, Some(preferred))
+    } else {
+        PreferredAddress::new(Some(preferred), None)
+    };
+    server.set_preferred_address(&spa).unwrap();
 
-    // Drive the handshake in the most expeditious fashion.
-    let dgram = client.process_output(now).dgram();
-    let dgram = server.process(dgram, now).dgram();
-    client.process_input(dgram.unwrap(), now);
-    assert!(maybe_authenticate(&mut client));
-    let dgram = client.process_output(now).dgram();
-    let dgram = server.process(dgram, now).dgram();
+    let dgram = fast_handshake(&mut client, &mut server);
 
     // The client is about to process HANDSHAKE_DONE.
     // It should start probing toward the server's preferred address.
-    let probe = client.process(dgram, now).dgram().unwrap();
+    let probe = client.process(dgram, now()).dgram().unwrap();
     assert_toward_spa(&probe, true);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
-    assert_ne!(client.process_output(now).callback(), Duration::new(0, 0));
+    assert_ne!(client.process_output(now()).callback(), Duration::new(0, 0));
 
     // Data continues on the main path for the client.
-    let data = send_something(&mut client, now);
-    assert_v6_path(&data, false);
+    let data = send_something(&mut client, now());
+    assert_orig_path(&data, false);
 
     // The server responds to the probe.
-    let resp = server.process(Some(probe), now).dgram().unwrap();
+    let resp = server.process(Some(probe), now()).dgram().unwrap();
     assert_from_spa(&resp, true);
     assert_eq!(server.stats().frame_tx.path_challenge, 1);
     assert_eq!(server.stats().frame_tx.path_response, 1);
 
     // Data continues on the main path for the server.
-    server.process_input(data, now);
-    let data = send_something(&mut server, now);
-    assert_v6_path(&data, false);
+    server.process_input(data, now());
+    let data = send_something(&mut server, now());
+    assert_orig_path(&data, false);
 
     // Client gets the probe response back and it migrates.
-    client.process_input(resp, now);
-    client.process_input(data, now);
-    let data = send_something(&mut client, now);
+    client.process_input(resp, now());
+    client.process_input(data, now());
+    let data = send_something(&mut client, now());
     assert_toward_spa(&data, true);
     assert_eq!(client.stats().frame_tx.stream, 2);
     assert_eq!(client.stats().frame_tx.path_response, 1);
 
     // The server sees the migration and probes the old path.
-    let probe = server.process(Some(data), now).dgram().unwrap();
-    assert_v6_path(&probe, true);
+    let probe = server.process(Some(data), now()).dgram().unwrap();
+    assert_orig_path(&probe, true);
     assert_eq!(server.stats().frame_tx.path_challenge, 2);
 
     // But data now goes on the new path.
-    let data = send_something(&mut server, now);
+    let data = send_something(&mut server, now());
     assert_from_spa(&data, false);
+}
+
+/// Migration works for a new port number.
+#[test]
+fn preferred_address_new_port() {
+    let a = addr();
+    preferred_address(a, a, new_port(a));
+}
+
+/// Migration works for a new address too.
+#[test]
+fn preferred_address_new_address() {
+    let mut preferred = addr();
+    preferred.set_ip(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)));
+    preferred_address(addr(), addr(), preferred);
+}
+
+/// Migration works for IPv4 addresses.
+#[test]
+fn preferred_address_new_port_v4() {
+    let a = addr_v4();
+    preferred_address(a, a, new_port(a));
+}
+
+/// Migrating to a loopback address is OK if we started there.
+#[test]
+fn preferred_address_loopback() {
+    let a = loopback();
+    preferred_address(a, a, new_port(a));
+}
+
+fn preferred_address_ignored(spa: &PreferredAddress) {
+    let mut client = default_client();
+    let mut server = default_server();
+    server.set_preferred_address(spa).unwrap();
+
+    let dgram = fast_handshake(&mut client, &mut server);
+
+    // The client won't probe now, though it could; it remains idle.
+    let out = client.process(dgram, now());
+    assert_ne!(out.callback(), Duration::new(0, 0));
+
+    // Data continues on the main path for the client.
+    let data = send_something(&mut client, now());
+    assert_v6_path(&data, false);
+    assert_eq!(client.stats().frame_tx.path_challenge, 0);
+}
+
+/// Using a loopback address in the preferred address is ignored.
+#[test]
+fn preferred_address_ignore_loopback() {
+    preferred_address_ignored(&PreferredAddress::new(None, Some(loopback())));
+}
+
+/// A preferred address in the wrong address family is ignored.
+#[test]
+fn preferred_address_ignore_different_family() {
+    preferred_address_ignored(&PreferredAddress::new(Some(addr_v4()), None));
 }
 
 #[test]
@@ -487,43 +596,159 @@ fn preferred_address_empty_cid() {
 
     assert_eq!(
         server
-            .set_preferred_address(&PreferredAddress::new(None, Some(new_port())))
+            .set_preferred_address(&PreferredAddress::new(None, Some(new_port(addr()))))
             .unwrap_err(),
         Error::ConnectionIdsExhausted
     );
 }
 
+/// A server cannot include a preferred address if it chooses an empty connection ID.
+#[test]
+fn preferred_address_server_empty_cid() {
+    let mut client = default_client();
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        &CongestionControlAlgorithm::NewReno,
+        QuicVersion::default(),
+    )
+    .unwrap();
+
+    server
+        .set_local_tparam(
+            tparams::PREFERRED_ADDRESS,
+            TransportParameter::Bytes(SAMPLE_PREFERRED_ADDRESS.to_vec()),
+        )
+        .unwrap();
+
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::TransportParameterError,
+        Error::PeerError(Error::TransportParameterError.code()),
+    );
+}
+
+/// A client shouldn't send a preferred address transport parameter.
+#[test]
+fn preferred_address_client() {
+    let mut client = default_client();
+    let mut server = default_server();
+
+    client
+        .set_local_tparam(
+            tparams::PREFERRED_ADDRESS,
+            TransportParameter::Bytes(SAMPLE_PREFERRED_ADDRESS.to_vec()),
+        )
+        .unwrap();
+
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::PeerError(Error::TransportParameterError.code()),
+        Error::TransportParameterError,
+    );
+}
+
 /// Test that migration isn't permitted if the connection isn't in the right state.
 #[test]
-fn no_migration() {
+fn migration_invalid_state() {
     let mut client = default_client();
     assert!(client
-        .migrate(loopback(), loopback(), false, now())
+        .migrate(Some(addr()), Some(addr()), false, now())
         .is_err());
 
     let mut server = default_server();
     assert!(server
-        .migrate(loopback(), loopback(), false, now())
+        .migrate(Some(addr()), Some(addr()), false, now())
         .is_err());
     connect_force_idle(&mut client, &mut server);
 
     assert!(server
-        .migrate(loopback(), loopback(), false, now())
+        .migrate(Some(addr()), Some(addr()), false, now())
         .is_err());
 
     client.close(now(), 0, "closing");
     assert!(client
-        .migrate(loopback(), loopback(), false, now())
+        .migrate(Some(addr()), Some(addr()), false, now())
         .is_err());
     let close = client.process(None, now()).dgram();
 
     let dgram = server.process(close, now()).dgram();
     assert!(server
-        .migrate(loopback(), loopback(), false, now())
+        .migrate(Some(addr()), Some(addr()), false, now())
         .is_err());
 
     client.process_input(dgram.unwrap(), now());
     assert!(client
-        .migrate(loopback(), loopback(), false, now())
+        .migrate(Some(addr()), Some(addr()), false, now())
         .is_err());
+}
+
+#[test]
+fn migration_invalid_address() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    // Providing neither address is pointless and therefore an error.
+    assert_eq!(
+        client.migrate(None, None, true, now()).unwrap_err(),
+        Error::InvalidMigration
+    );
+
+    // Providing a zero port number isn't valid.
+    let mut zero_port = addr();
+    zero_port.set_port(0);
+    assert_eq!(
+        client
+            .migrate(None, Some(zero_port), true, now())
+            .unwrap_err(),
+        Error::InvalidMigration
+    );
+    assert_eq!(
+        client
+            .migrate(Some(zero_port), None, true, now())
+            .unwrap_err(),
+        Error::InvalidMigration
+    );
+
+    // An unspecified remote address is bad.
+    let mut remote_unspecified = addr();
+    remote_unspecified.set_ip(IpAddr::V6(Ipv6Addr::from(0)));
+    assert_eq!(
+        client
+            .migrate(None, Some(remote_unspecified), true, now())
+            .unwrap_err(),
+        Error::InvalidMigration
+    );
+
+    // Mixed address families is bad.
+    assert_eq!(
+        client
+            .migrate(Some(addr()), Some(addr_v4()), true, now())
+            .unwrap_err(),
+        Error::InvalidMigration
+    );
+    assert_eq!(
+        client
+            .migrate(Some(addr_v4()), Some(addr()), true, now())
+            .unwrap_err(),
+        Error::InvalidMigration
+    );
+
+    // Loopback to non-loopback is bad.
+    assert_eq!(
+        client
+            .migrate(Some(addr()), Some(loopback()), true, now())
+            .unwrap_err(),
+        Error::InvalidMigration
+    );
+    assert_eq!(
+        client
+            .migrate(Some(loopback()), Some(addr()), true, now())
+            .unwrap_err(),
+        Error::InvalidMigration
+    );
 }

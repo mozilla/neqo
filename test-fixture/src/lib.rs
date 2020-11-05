@@ -72,10 +72,10 @@ pub const DEFAULT_ALPN_H3: &[&str] = &["h3-29"];
 
 /// Create a default socket address.
 #[must_use]
-pub fn loopback() -> SocketAddr {
+pub fn addr() -> SocketAddr {
     // These could be const functions, but they aren't...
-    let localhost_v6 = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
-    SocketAddr::new(localhost_v6, 443)
+    let v6ip = IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1));
+    SocketAddr::new(v6ip, 443)
 }
 
 /// This connection ID generation scheme is the worst, but it doesn't produce collisions.
@@ -119,8 +119,8 @@ pub fn default_client() -> Connection {
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        loopback(),
-        loopback(),
+        addr(),
+        addr(),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
@@ -197,8 +197,8 @@ pub fn default_http3_client() -> Http3Client {
     Http3Client::new(
         DEFAULT_SERVER_NAME,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        loopback(),
-        loopback(),
+        addr(),
+        addr(),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
         &Http3Parameters {

@@ -20,7 +20,7 @@ use neqo_transport::{
     Connection, ConnectionError, ConnectionEvent, Error, Output, QuicVersion, State, StreamType,
 };
 use test_fixture::{
-    self, assertions, default_client, loopback, now, split_datagram, CountingConnectionIdGenerator,
+    self, addr, assertions, default_client, now, split_datagram, CountingConnectionIdGenerator,
 };
 
 use std::cell::RefCell;
@@ -218,11 +218,7 @@ fn drop_non_initial() {
     let mut bogus_data: Vec<u8> = header.into();
     bogus_data.resize(1200, 66);
 
-    let bogus = Datagram::new(
-        test_fixture::loopback(),
-        test_fixture::loopback(),
-        bogus_data,
-    );
+    let bogus = Datagram::new(test_fixture::addr(), test_fixture::addr(), bogus_data);
     assert!(server.process(Some(bogus), now()).dgram().is_none());
 }
 
@@ -594,7 +590,7 @@ fn vn_after_retry() {
     encoder.encode_vec(1, &client.odcid().unwrap()[..]);
     encoder.encode_vec(1, &[]);
     encoder.encode_uint(4, 0x5a5a_6a6a_u64);
-    let vn = Datagram::new(loopback(), loopback(), encoder);
+    let vn = Datagram::new(addr(), addr(), encoder);
 
     assert_ne!(
         client.process(Some(vn), now()).callback(),

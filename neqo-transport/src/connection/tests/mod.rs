@@ -15,7 +15,9 @@ use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
 use crate::path::PATH_MTU_V6;
 use crate::recovery::ACK_ONLY_SIZE_LIMIT;
-use crate::{CongestionControlAlgorithm, ConnectionIdDecoder, ConnectionIdGenerator, QuicVersion};
+use crate::{
+    CongestionControlAlgorithm, ConnectionIdDecoder, ConnectionIdGenerator, Error, QuicVersion,
+};
 
 use std::cell::RefCell;
 use std::convert::TryFrom;
@@ -25,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use neqo_common::{event::Provider, qdebug, qtrace, Datagram, Decoder};
 use neqo_crypto::{random, AllowZeroRtt, AuthenticationStatus, ResumptionToken};
-use test_fixture::{self, fixture_init, loopback, now};
+use test_fixture::{self, addr, fixture_init, now};
 
 // All the tests.
 mod cc;
@@ -92,8 +94,8 @@ pub fn default_client() -> Connection {
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        loopback(),
-        loopback(),
+        addr(),
+        addr(),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
@@ -155,6 +157,17 @@ fn handshake(
     }
     let _ = a.process(input, now);
     now
+}
+
+fn connect_fail(
+    client: &mut Connection,
+    server: &mut Connection,
+    client_error: Error,
+    server_error: Error,
+) {
+    handshake(client, server, now(), Duration::new(0, 0));
+    assert_error(client, &ConnectionError::Transport(client_error));
+    assert_error(server, &ConnectionError::Transport(server_error));
 }
 
 fn connect_with_rtt(

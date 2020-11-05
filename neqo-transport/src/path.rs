@@ -10,7 +10,7 @@
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -485,10 +485,9 @@ impl Path {
 
     /// Get the path MTU.  This is currently a fixed value.
     pub fn mtu(&self) -> usize {
-        if self.local.is_ipv4() {
-            PATH_MTU_V4
-        } else {
-            PATH_MTU_V6
+        match self.local.ip() {
+            IpAddr::V4(_) => PATH_MTU_V4,
+            IpAddr::V6(_) => PATH_MTU_V6,
         }
     }
 
