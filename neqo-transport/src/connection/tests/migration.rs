@@ -417,7 +417,7 @@ fn migration_client_empty_cid() {
 }
 
 /// Drive the handshake in the most expeditious fashion.
-/// Returns the packet containing HANDSHAKE_DONE from the server.
+/// Returns the packet containing `HANDSHAKE_DONE` from the server.
 fn fast_handshake(client: &mut Connection, server: &mut Connection) -> Option<Datagram> {
     let dgram = client.process_output(now()).dgram();
     let dgram = server.process(dgram, now()).dgram();
