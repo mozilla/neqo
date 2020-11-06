@@ -39,6 +39,7 @@ use neqo_transport::{
 use crate::old_https::Http09Server;
 
 const TIMER_TOKEN: Token = Token(0xffff_ffff);
+const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
 mod old_https;
 
@@ -166,6 +167,25 @@ impl Args {
             .chain(self.preferred_address_v6())
             .collect()
     }
+
+    fn now(&self) -> Instant {
+        if self.qns_test.is_some() {
+            // When NSS starts its anti-replay it blocks any acceptance of 0-RTT for a
+            // single period.  This ensures that an attacker that is able to force a
+            // server to reboot is unable to use that to flush the anti-replay buffers
+            // and have something replayed.
+            //
+            // However, this is a massive inconvenience for us when we are testing.
+            // As we can't initialize `AntiReplay` in the past (see `neqo_common::time`
+            // for why), fast forward time here so that the connections get times from
+            // in the future.
+            //
+            // This is NOT SAFE.  Don't do this.
+            Instant::now() + ANTI_REPLAY_WINDOW
+        } else {
+            Instant::now()
+        }
+    }
 }
 
 fn emit_packet(socket: &mut UdpSocket, out_dgram: Datagram) {
@@ -202,19 +222,19 @@ fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
 }
 
 trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram>) -> Output;
-    fn process_events(&mut self, args: &Args);
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+    fn process_events(&mut self, args: &Args, now: Instant);
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
     fn set_ciphers(&mut self, ciphers: &[Cipher]);
     fn validate_address(&mut self, when: ValidateAddress);
 }
 
 impl HttpServer for Http3Server {
-    fn process(&mut self, dgram: Option<Datagram>) -> Output {
-        self.process(dgram, Instant::now())
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        self.process(dgram, now)
     }
 
-    fn process_events(&mut self, args: &Args) {
+    fn process_events(&mut self, args: &Args, _now: Instant) {
         while let Some(event) = self.next_event() {
             match event {
                 Http3ServerEvent::Headers {
@@ -388,14 +408,15 @@ impl ServersRunner {
     }
 
     fn create_server(args: &Args) -> Box<dyn HttpServer> {
-        let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+        // Note: this is the exception to the case where we use `Args::now`.
+        let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)
             .expect("unable to setup anti-replay");
         let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
         let mut svr: Box<dyn HttpServer> = if args.use_old_http {
             Box::new(
                 Http09Server::new(
-                    Instant::now(),
+                    args.now(),
                     &[args.key.clone()],
                     &[args.alpn.clone()],
                     anti_replay,
@@ -406,7 +427,7 @@ impl ServersRunner {
             )
         } else {
             let mut server = Http3Server::new(
-                Instant::now(),
+                args.now(),
                 &[args.key.clone()],
                 &[args.alpn.clone()],
                 anti_replay,
@@ -432,7 +453,7 @@ impl ServersRunner {
     }
 
     fn process(&mut self, inx: usize, dgram: Option<Datagram>) -> bool {
-        match self.server.process(dgram) {
+        match self.server.process(dgram, self.args.now()) {
             Output::Datagram(dgram) => {
                 let socket = self.sockets.get_mut(inx).unwrap();
                 emit_packet(socket, dgram);
@@ -472,7 +493,7 @@ impl ServersRunner {
             } else {
                 let _ = self.process(inx, None);
             }
-            self.server.process_events(&self.args);
+            self.server.process_events(&self.args, self.args.now());
             if self.process(inx, None) {
                 self.active_sockets.insert(inx);
             }

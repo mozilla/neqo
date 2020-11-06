@@ -188,11 +188,11 @@ impl Http09Server {
 }
 
 impl HttpServer for Http09Server {
-    fn process(&mut self, dgram: Option<Datagram>) -> Output {
-        self.server.process(dgram, Instant::now())
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        self.server.process(dgram, now)
     }
 
-    fn process_events(&mut self, args: &Args) {
+    fn process_events(&mut self, args: &Args, now: Instant) {
         let active_conns = self.server.active_connections();
         for mut acr in active_conns {
             loop {
@@ -215,7 +215,7 @@ impl HttpServer for Http09Server {
                     ConnectionEvent::StateChange(State::Connected) => {
                         acr.connection()
                             .borrow_mut()
-                            .send_ticket(Instant::now(), b"hi!")
+                            .send_ticket(now, b"hi!")
                             .unwrap();
                     }
                     ConnectionEvent::StateChange(_)
