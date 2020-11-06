@@ -7,7 +7,7 @@
 // The class implementing a QUIC connection.
 
 use std::cell::RefCell;
-use std::cmp::max;
+use std::cmp::{max, min};
 use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::mem;
@@ -1688,7 +1688,7 @@ impl Connection {
                 self.quic_version,
                 grease_quic_bit,
             );
-            builder.set_limit(path.mtu() - tx.expansion());
+            builder.set_limit(min(path.amplification_limit(), path.mtu()) - tx.expansion());
             let _ = Self::add_packet_number(
                 &mut builder,
                 tx,
