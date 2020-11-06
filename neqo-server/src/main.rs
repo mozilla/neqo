@@ -452,10 +452,22 @@ impl ServersRunner {
         svr
     }
 
+    /// Tries to find a socket, but then just falls back to sending from the first.
+    fn find_socket(&mut self, addr: SocketAddr) -> &mut UdpSocket {
+        let (first, rest) = self.sockets.split_first_mut().unwrap();
+        rest.iter_mut()
+            .find(|s| {
+                s.local_addr()
+                    .ok()
+                    .map_or(false, |socket_addr| socket_addr == addr)
+            })
+            .unwrap_or(first)
+    }
+
     fn process(&mut self, inx: usize, dgram: Option<Datagram>) -> bool {
         match self.server.process(dgram, self.args.now()) {
             Output::Datagram(dgram) => {
-                let socket = self.sockets.get_mut(inx).unwrap();
+                let socket = self.find_socket(dgram.source());
                 emit_packet(socket, dgram);
                 true
             }
