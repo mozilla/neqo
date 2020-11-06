@@ -492,6 +492,8 @@ fn client(
         "h3-28" => QuicVersion::Draft28,
         "h3-29" => QuicVersion::Draft29,
         "h3-30" => QuicVersion::Draft30,
+        "h3-31" => QuicVersion::Draft31,
+        "h3-32" => QuicVersion::Draft32,
         _ => QuicVersion::default(),
     };
 
@@ -984,6 +986,8 @@ mod old {
             "hq-27" => (QuicVersion::Draft27, "hq-27"),
             "hq-28" => (QuicVersion::Draft28, "hq-28"),
             "hq-30" => (QuicVersion::Draft30, "hq-30"),
+            "hq-31" => (QuicVersion::Draft31, "hq-31"),
+            "hq-32" => (QuicVersion::Draft32, "hq-32"),
             _ => (QuicVersion::Draft29, "hq-29"),
         };
 
