@@ -8,7 +8,6 @@
 #![warn(clippy::use_self)]
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::fs::OpenOptions;
@@ -33,11 +32,14 @@ use neqo_crypto::{
 };
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
-use neqo_transport::{server::ValidateAddress, FixedConnectionIdManager, Output};
+use neqo_transport::{
+    server::ValidateAddress, FixedConnectionIdManager as RandomConnectionIdGenerator, Output,
+};
 
 use crate::old_https::Http09Server;
 
 const TIMER_TOKEN: Token = Token(0xffff_ffff);
+const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
 mod old_https;
 
@@ -48,20 +50,10 @@ struct Args {
     #[structopt(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[structopt(
-        name = "encoder-table-size",
-        short = "e",
-        long,
-        default_value = "16384"
-    )]
+    #[structopt(name = "encoder-table-size", long, default_value = "16384")]
     max_table_size_encoder: u64,
 
-    #[structopt(
-        name = "decoder-table-size",
-        short = "f",
-        long,
-        default_value = "16384"
-    )]
+    #[structopt(name = "decoder-table-size", long, default_value = "16384")]
     max_table_size_decoder: u64,
 
     #[structopt(short = "b", long, default_value = "10")]
@@ -106,6 +98,14 @@ struct Args {
     /// The set of TLS cipher suites to enable.
     /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
     ciphers: Vec<String>,
+
+    #[structopt(name = "preferred-address-v4", long)]
+    /// An IPv4 address for the server preferred address.
+    preferred_address_v4: Option<String>,
+
+    #[structopt(name = "preferred-address-v6", long)]
+    /// An IPv6 address for the server preferred address.
+    preferred_address_v6: Option<String>,
 }
 
 impl Args {
@@ -121,12 +121,31 @@ impl Args {
             .collect::<Vec<_>>()
     }
 
-    fn host_socket_addrs(&self) -> Vec<SocketAddr> {
+    fn listen_addresses(&self) -> Vec<SocketAddr> {
         self.hosts
             .iter()
             .filter_map(|host| host.to_socket_addrs().ok())
-            .flat_map(|x| x)
+            .flatten()
             .collect()
+    }
+
+    fn now(&self) -> Instant {
+        if self.qns_test.is_some() {
+            // When NSS starts its anti-replay it blocks any acceptance of 0-RTT for a
+            // single period.  This ensures that an attacker that is able to force a
+            // server to reboot is unable to use that to flush the anti-replay buffers
+            // and have something replayed.
+            //
+            // However, this is a massive inconvenience for us when we are testing.
+            // As we can't initialize `AntiReplay` in the past (see `neqo_common::time`
+            // for why), fast forward time here so that the connections get times from
+            // in the future.
+            //
+            // This is NOT SAFE.  Don't do this.
+            Instant::now() + ANTI_REPLAY_WINDOW
+        } else {
+            Instant::now()
+        }
     }
 }
 
@@ -164,19 +183,19 @@ fn qns_read_response(filename: &str) -> Option<Vec<u8>> {
 }
 
 trait HttpServer: Display {
-    fn process(&mut self, dgram: Option<Datagram>) -> Output;
-    fn process_events(&mut self, args: &Args);
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+    fn process_events(&mut self, args: &Args, now: Instant);
     fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
     fn set_ciphers(&mut self, ciphers: &[Cipher]);
     fn validate_address(&mut self, when: ValidateAddress);
 }
 
 impl HttpServer for Http3Server {
-    fn process(&mut self, dgram: Option<Datagram>) -> Output {
-        self.process(dgram, Instant::now())
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        self.process(dgram, now)
     }
 
-    fn process_events(&mut self, args: &Args) {
+    fn process_events(&mut self, args: &Args, _now: Instant) {
         while let Some(event) = self.next_event() {
             match event {
                 Http3ServerEvent::Headers {
@@ -241,35 +260,6 @@ impl HttpServer for Http3Server {
     }
 }
 
-fn process(
-    server: &mut dyn HttpServer,
-    svr_timeout: &mut Option<Timeout>,
-    inx: usize,
-    dgram: Option<Datagram>,
-    timer: &mut Timer<usize>,
-    socket: &mut UdpSocket,
-) -> bool {
-    match server.process(dgram) {
-        Output::Datagram(dgram) => {
-            emit_packet(socket, dgram);
-            true
-        }
-        Output::Callback(new_timeout) => {
-            if let Some(svr_timeout) = svr_timeout {
-                timer.cancel_timeout(svr_timeout);
-            }
-
-            qinfo!("Setting timeout of {:?} for {}", new_timeout, server);
-            *svr_timeout = Some(timer.set_timeout(new_timeout, inx));
-            false
-        }
-        Output::None => {
-            qdebug!("Output::None");
-            false
-        }
-    }
-}
-
 fn read_dgram(
     socket: &mut UdpSocket,
     local_address: &SocketAddr,
@@ -300,31 +290,36 @@ struct ServersRunner {
     args: Args,
     poll: Poll,
     hosts: Vec<SocketAddr>,
+    server: Box<dyn HttpServer>,
+    timeout: Option<Timeout>,
     sockets: Vec<UdpSocket>,
-    servers: HashMap<SocketAddr, (Box<dyn HttpServer>, Option<Timeout>)>,
+    active_sockets: HashSet<usize>,
     timer: Timer<usize>,
-    active_servers: HashSet<usize>,
 }
 
 impl ServersRunner {
     pub fn new(args: Args) -> Result<Self, io::Error> {
-        Ok(Self {
+        let server = Self::create_server(&args);
+        let mut runner = Self {
             args,
             poll: Poll::new()?,
+            hosts: Vec::new(),
+            server,
+            timeout: None,
             sockets: Vec::new(),
-            servers: HashMap::new(),
+            active_sockets: HashSet::new(),
             timer: Builder::default()
                 .tick_duration(Duration::from_millis(1))
                 .build::<usize>(),
-            hosts: Vec::new(),
-            active_servers: HashSet::new(),
-        })
+        };
+        runner.init()?;
+        Ok(runner)
     }
 
     /// Init Poll for all hosts. Create sockets, and a map of the
     /// socketaddrs to instances of the HttpServer handling that addr.
-    pub fn init(&mut self) -> Result<(), io::Error> {
-        self.hosts = self.args.host_socket_addrs();
+    fn init(&mut self) -> Result<(), io::Error> {
+        self.hosts = self.args.listen_addresses();
         if self.hosts.is_empty() {
             eprintln!("No valid hosts defined");
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts"));
@@ -347,11 +342,10 @@ impl ServersRunner {
                 Ok(s) => s,
             };
 
-            let res = socket.only_v6();
-            let also_v4 = if res.is_ok() && !res.unwrap() {
-                " as well as V4"
-            } else {
+            let also_v4 = if socket.only_v6().unwrap_or(true) {
                 ""
+            } else {
+                " as well as V4"
             };
             println!(
                 "Server waiting for connection on: {:?}{}",
@@ -366,8 +360,6 @@ impl ServersRunner {
             )?;
 
             self.sockets.push(socket);
-            self.servers
-                .insert(local_addr, (self.create_server(), None));
         }
 
         self.poll
@@ -376,45 +368,80 @@ impl ServersRunner {
         Ok(())
     }
 
-    fn create_server(&self) -> Box<dyn HttpServer> {
-        let anti_replay = AntiReplay::new(Instant::now(), Duration::from_secs(10), 7, 14)
+    fn create_server(args: &Args) -> Box<dyn HttpServer> {
+        // Note: this is the exception to the case where we use `Args::now`.
+        let anti_replay = AntiReplay::new(Instant::now(), ANTI_REPLAY_WINDOW, 7, 14)
             .expect("unable to setup anti-replay");
-        let cid_mgr = Rc::new(RefCell::new(FixedConnectionIdManager::new(10)));
+        let cid_mgr = Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10)));
 
-        let mut svr: Box<dyn HttpServer> = if self.args.use_old_http {
+        let mut svr: Box<dyn HttpServer> = if args.use_old_http {
             Box::new(
                 Http09Server::new(
-                    Instant::now(),
-                    &[self.args.key.clone()],
-                    &[self.args.alpn.clone()],
+                    args.now(),
+                    &[args.key.clone()],
+                    &[args.alpn.clone()],
                     anti_replay,
                     cid_mgr,
                 )
                 .expect("We cannot make a server!"),
             )
         } else {
-            Box::new(
-                Http3Server::new(
-                    Instant::now(),
-                    &[self.args.key.clone()],
-                    &[self.args.alpn.clone()],
-                    anti_replay,
-                    cid_mgr,
-                    QpackSettings {
-                        max_table_size_encoder: self.args.max_table_size_encoder,
-                        max_table_size_decoder: self.args.max_table_size_decoder,
-                        max_blocked_streams: self.args.max_blocked_streams,
-                    },
-                )
-                .expect("We cannot make a server!"),
+            let server = Http3Server::new(
+                args.now(),
+                &[args.key.clone()],
+                &[args.alpn.clone()],
+                anti_replay,
+                cid_mgr,
+                QpackSettings {
+                    max_table_size_encoder: args.max_table_size_encoder,
+                    max_table_size_decoder: args.max_table_size_decoder,
+                    max_blocked_streams: args.max_blocked_streams,
+                },
             )
+            .expect("We cannot make a server!");
+            Box::new(server)
         };
-        svr.set_ciphers(&self.args.get_ciphers());
-        svr.set_qlog_dir(self.args.qlog_dir.clone());
-        if self.args.retry {
+        svr.set_ciphers(&args.get_ciphers());
+        svr.set_qlog_dir(args.qlog_dir.clone());
+        if args.retry {
             svr.validate_address(ValidateAddress::Always);
         }
         svr
+    }
+
+    /// Tries to find a socket, but then just falls back to sending from the first.
+    fn find_socket(&mut self, addr: SocketAddr) -> &mut UdpSocket {
+        let (first, rest) = self.sockets.split_first_mut().unwrap();
+        rest.iter_mut()
+            .find(|s| {
+                s.local_addr()
+                    .ok()
+                    .map_or(false, |socket_addr| socket_addr == addr)
+            })
+            .unwrap_or(first)
+    }
+
+    fn process(&mut self, inx: usize, dgram: Option<Datagram>) -> bool {
+        match self.server.process(dgram, self.args.now()) {
+            Output::Datagram(dgram) => {
+                let socket = self.find_socket(dgram.source());
+                emit_packet(socket, dgram);
+                true
+            }
+            Output::Callback(new_timeout) => {
+                if let Some(to) = &self.timeout {
+                    self.timer.cancel_timeout(to);
+                }
+
+                qinfo!("Setting timeout of {:?} for socket {}", new_timeout, inx);
+                self.timeout = Some(self.timer.set_timeout(new_timeout, inx));
+                false
+            }
+            Output::None => {
+                qdebug!("Output::None");
+                false
+            }
+        }
     }
 
     fn process_datagrams_and_events(
@@ -422,53 +449,29 @@ impl ServersRunner {
         inx: usize,
         read_socket: bool,
     ) -> Result<(), io::Error> {
-        if let Some(socket) = self.sockets.get_mut(inx) {
-            if let Some((ref mut server, svr_timeout)) =
-                self.servers.get_mut(&socket.local_addr().unwrap())
-            {
-                if read_socket {
-                    loop {
-                        let dgram = read_dgram(socket, &self.hosts[inx])?;
-                        if dgram.is_none() {
-                            break;
-                        }
-                        let _ = process(
-                            &mut **server,
-                            svr_timeout,
-                            inx,
-                            dgram,
-                            &mut self.timer,
-                            socket,
-                        );
+        if self.sockets.get_mut(inx).is_some() {
+            if read_socket {
+                loop {
+                    let socket = self.sockets.get_mut(inx).unwrap();
+                    let dgram = read_dgram(socket, &self.hosts[inx])?;
+                    if dgram.is_none() {
+                        break;
                     }
-                } else {
-                    let _ = process(
-                        &mut **server,
-                        svr_timeout,
-                        inx,
-                        None,
-                        &mut self.timer,
-                        socket,
-                    );
+                    let _ = self.process(inx, dgram);
                 }
-                server.process_events(&self.args);
-                if process(
-                    &mut **server,
-                    svr_timeout,
-                    inx,
-                    None,
-                    &mut self.timer,
-                    socket,
-                ) {
-                    self.active_servers.insert(inx);
-                }
+            } else {
+                let _ = self.process(inx, None);
+            }
+            self.server.process_events(&self.args, self.args.now());
+            if self.process(inx, None) {
+                self.active_sockets.insert(inx);
             }
         }
         Ok(())
     }
 
     fn process_active_conns(&mut self) -> Result<(), io::Error> {
-        let curr_active = mem::take(&mut self.active_servers);
+        let curr_active = mem::take(&mut self.active_sockets);
         for inx in curr_active {
             self.process_datagrams_and_events(inx, false)?;
         }
@@ -489,7 +492,7 @@ impl ServersRunner {
             // If there are active servers do not block in poll.
             self.poll.poll(
                 &mut events,
-                if self.active_servers.is_empty() {
+                if self.active_sockets.is_empty() {
                     None
                 } else {
                     Some(Duration::from_millis(0))
@@ -541,6 +544,5 @@ fn main() -> Result<(), io::Error> {
     }
 
     let mut servers_runner = ServersRunner::new(args)?;
-    servers_runner.init()?;
     servers_runner.run()
 }
