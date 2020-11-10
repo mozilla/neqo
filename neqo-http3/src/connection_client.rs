@@ -5951,7 +5951,7 @@ mod tests {
         let mut server = TestServer::new();
         server.set_max_uni_stream(max_stream);
         let out = do_handshake_only(&mut client, &mut server);
-        let _out = client.process(out.dgram(), now());
+        client.process(out.dgram(), now());
         assert_closed(&client, &Error::StreamLimitError);
     }
 
