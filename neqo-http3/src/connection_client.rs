@@ -1050,7 +1050,7 @@ mod tests {
         }
     }
 
-    fn do_handshake_only(client: &mut Http3Client, server: &mut TestServer) -> Output {
+    fn handshake_only(client: &mut Http3Client, server: &mut TestServer) -> Output {
         assert_eq!(client.state(), Http3State::Initializing);
         let out = client.process(None, now());
         assert_eq!(client.state(), Http3State::Initializing);
@@ -1071,7 +1071,7 @@ mod tests {
 
     // Perform only Quic transport handshake.
     fn connect_only_transport_with(client: &mut Http3Client, server: &mut TestServer) {
-        let out = do_handshake_only(client, server);
+        let out = handshake_only(client, server);
 
         let out = client.process(out.dgram(), now());
         let connected = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Connected));
@@ -5946,26 +5946,27 @@ mod tests {
         assert!(server.conn.events().any(stop_sending_event));
     }
 
-    fn do_test_client_critical_stream_create_failed(max_stream: u64) {
+    fn handshake_client_error(client: &mut Http3Client, server: &mut TestServer, error: &Error) {
+        let out = handshake_only(client, server);
+        client.process(out.dgram(), now());
+        assert_closed(&client, error);
+    }
+
+    /// Client fails to create a control stream, since server does not allow it.
+    #[test]
+    fn client_control_stream_create_failed() {
         let mut client = default_http3_client();
         let mut server = TestServer::new();
-        server.set_max_uni_stream(max_stream);
-        let out = do_handshake_only(&mut client, &mut server);
-        client.process(out.dgram(), now());
-        assert_closed(&client, &Error::StreamLimitError);
+        server.set_max_uni_stream(0);
+        handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
     }
 
+    /// 2 streams isn't enough for control and QPACK streams.
     #[test]
-    fn test_client_control_stream_create_failed() {
-        // Client fails to create a control stream, since server
-        // does not allow to.
-        do_test_client_critical_stream_create_failed(0);
-    }
-
-    #[test]
-    fn test_client_qpack_stream_create_failed() {
-        // Client fails to create qpack streams, since server
-        // only allows to create 2 streams.
-        do_test_client_critical_stream_create_failed(2);
+    fn client_qpack_stream_create_failed() {
+        let mut client = default_http3_client();
+        let mut server = TestServer::new();
+        server.set_max_uni_stream(2);
+        handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
     }
 }
