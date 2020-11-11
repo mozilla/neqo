@@ -332,10 +332,10 @@ impl RecvMessage {
             MessageType::Response => {
                 let status = headers.iter().find(|(name, _value)| name == ":status");
                 if let Some((_name, value)) = status {
-                    let status_code = value.parse::<i32>().map_err(|_| Error::HttpInvalidHeader)?;
+                    let status_code = value.parse::<i32>().map_err(|_| Error::InvalidHeader)?;
                     Ok(status_code >= 100 && status_code < 200)
                 } else {
-                    Err(Error::HttpInvalidHeader)
+                    Err(Error::InvalidHeader)
                 }
             }
             MessageType::Request => Ok(false),
@@ -345,19 +345,19 @@ impl RecvMessage {
     fn track_pseudo(name: &str, state: &mut u8, message_type: &MessageType) -> Res<bool> {
         let (pseudo, bit) = if name.starts_with(':') {
             if *state & REGULAR_HEADER != 0 {
-                return Err(Error::HttpInvalidHeader);
+                return Err(Error::InvalidHeader);
             }
             let bit = match message_type {
                 MessageType::Response => match name {
                     ":status" => PSEUDO_HEADER_STATUS,
-                    _ => return Err(Error::HttpInvalidHeader),
+                    _ => return Err(Error::InvalidHeader),
                 },
                 MessageType::Request => match name {
                     ":method" => PSEUDO_HEADER_METHOD,
                     ":scheme" => PSEUDO_HEADER_SCHEME,
                     ":authority" => PSEUDO_HEADER_AUTHORITY,
                     ":path" => PSEUDO_HEADER_PATH,
-                    _ => return Err(Error::HttpInvalidHeader),
+                    _ => return Err(Error::InvalidHeader),
                 },
             };
             (true, bit)
@@ -369,7 +369,7 @@ impl RecvMessage {
             *state |= bit;
             Ok(pseudo)
         } else {
-            Err(Error::HttpInvalidHeader)
+            Err(Error::InvalidHeader)
         }
     }
 
@@ -388,7 +388,7 @@ impl RecvMessage {
             }
 
             if bytes.any(|b| matches!(b, 0 | 0x10 | 0x13 | 0x3a | 0x41..=0x5a)) {
-                return Err(Error::HttpInvalidHeader); // illegal characters.
+                return Err(Error::InvalidHeader); // illegal characters.
             }
 
             if matches!(
@@ -402,7 +402,7 @@ impl RecvMessage {
                     | "upgrade"
                     | "accept-encoding"
             ) {
-                return Err(Error::HttpInvalidHeader);
+                return Err(Error::InvalidHeader);
             }
         }
         // Clear the regular header bit, since we only check pseudo headers below.
@@ -418,7 +418,7 @@ impl RecvMessage {
             }
         };
         if pseudo_state & pseudo_header_mask != pseudo_header_mask {
-            return Err(Error::HttpInvalidHeader);
+            return Err(Error::InvalidHeader);
         }
 
         Ok(true)

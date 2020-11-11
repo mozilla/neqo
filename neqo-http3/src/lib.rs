@@ -62,7 +62,6 @@ pub enum Error {
     HttpRequestIncomplete,
     HttpConnect,
     HttpVersionFallback,
-    HttpInvalidHeader,
     QpackError(neqo_qpack::Error),
 
     // Internal errors from here.
@@ -83,6 +82,7 @@ pub enum Error {
     TransportStreamDoesNotExist,
     InvalidInput,
     FatalError,
+    InvalidHeader,
 }
 
 impl Error {
@@ -105,7 +105,6 @@ impl Error {
             Self::HttpRequestIncomplete => 0x10d,
             Self::HttpConnect => 0x10f,
             Self::HttpVersionFallback => 0x110,
-            Self::HttpInvalidHeader => 0x111,
             Self::QpackError(e) => e.code(),
             // These are all internal errors.
             _ => 3,
@@ -133,10 +132,7 @@ impl Error {
 
     #[must_use]
     pub fn stream_reset_error(&self) -> bool {
-        matches!(
-            self,
-            Self::HttpGeneralProtocolStream | Self::HttpInvalidHeader
-        )
+        matches!(self, Self::HttpGeneralProtocolStream | Self::InvalidHeader)
     }
 
     #[must_use]
