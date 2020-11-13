@@ -740,6 +740,7 @@ mod tests {
     };
     use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
     use crate::settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS};
+    use crate::Http3Server;
     use neqo_common::{event::Provider, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
@@ -750,7 +751,10 @@ mod tests {
     };
     use std::convert::TryFrom;
     use std::time::Duration;
-    use test_fixture::{default_server_h3, fixture_init, loopback, now, DEFAULT_SERVER_NAME};
+    use test_fixture::{
+        anti_replay, default_server_h3, fixture_init, loopback, now, DEFAULT_ALPN_H3, DEFAULT_KEYS,
+        DEFAULT_SERVER_NAME,
+    };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
         match client.state() {
@@ -763,6 +767,10 @@ mod tests {
 
     /// Create a http3 client with default configuration.
     pub fn default_http3_client() -> Http3Client {
+        default_http3_client_param(100)
+    }
+
+    pub fn default_http3_client_param(max_table_size: u64) -> Http3Client {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
@@ -773,8 +781,8 @@ mod tests {
             QuicVersion::default(),
             &Http3Parameters {
                 qpack_settings: QpackSettings {
-                    max_table_size_encoder: 100,
-                    max_table_size_decoder: 100,
+                    max_table_size_encoder: max_table_size,
+                    max_table_size_decoder: max_table_size,
                     max_blocked_streams: 100,
                 },
                 max_concurrent_push_streams: 5,
@@ -6062,5 +6070,114 @@ mod tests {
             (String::from(":method"), String::from("GET")),
             (String::from("content-type"), String::from("text/plain")),
         ]);
+    }
+
+    fn maybe_authenticate(conn: &mut Http3Client) {
+        let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
+        if conn.events().any(authentication_needed) {
+            conn.authenticated(AuthenticationStatus::Ok, now());
+        }
+    }
+
+    // Test that decoder stream type is always sent beofer any other instruction also
+    // in case when 0RTT is used.
+    #[test]
+    fn zerortt_request_use_dynamic_table() {
+        const MAX_TABLE_SIZE: u64 = 65536;
+        const MAX_BLOCKED_STREAMS: u16 = 5;
+        let mut client = default_http3_client_param(MAX_TABLE_SIZE);
+        let mut server = Http3Server::new(
+            now(),
+            DEFAULT_KEYS,
+            DEFAULT_ALPN_H3,
+            anti_replay(),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+            QpackSettings {
+                max_table_size_encoder: MAX_TABLE_SIZE,
+                max_table_size_decoder: MAX_TABLE_SIZE,
+                max_blocked_streams: MAX_BLOCKED_STREAMS,
+            },
+        )
+        .unwrap();
+
+        let mut datagram = None;
+        let is_done = |c: &Http3Client| matches!(c.state(), Http3State::Connected);
+        while !is_done(&mut client) {
+            let _ = maybe_authenticate(&mut client);
+            datagram = client.process(datagram, now()).dgram();
+            datagram = server.process(datagram, now()).dgram();
+        }
+
+        // exchannge qpack settings, server will send a token as well.
+        datagram = client.process(datagram, now()).dgram();
+        datagram = server.process(datagram, now()).dgram();
+        let _ = client.process(datagram, now()).dgram();
+
+        let token = client
+            .events()
+            .find_map(|e| {
+                if let Http3ClientEvent::ResumptionToken(token) = e {
+                    Some(token)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+
+        // Make a new connection.
+        let mut client = default_http3_client_param(MAX_TABLE_SIZE);
+        assert_eq!(client.state(), Http3State::Initializing);
+        client
+            .enable_resumption(now(), &token)
+            .expect("Set resumption token.");
+
+        assert_eq!(client.state(), Http3State::ZeroRtt);
+        let zerortt_event = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::ZeroRtt));
+        assert!(client.events().any(zerortt_event));
+
+        // Send a request using 0RTT data. This will trigger sending a HEADER_ACK on
+        // the decoder stream before stream id is written.
+        // The client will read HEADER_ACK (value: 0x80) as a stream type. To decode the stream
+        // type we will need 3 more byte (0x80 starts with 10 which is 4 byte encoded verint).
+        // 3 more bytes wil be the corect stream type (0x3) which will be added and to more
+        // requests that will trigger 2 HEADER_ACK. The client will cloed the stream and
+        // the server will trigger closing with error HttpClosedCriticalStream.
+        let _ = make_request(
+            &mut client,
+            true,
+            &[(String::from("myheaders"), String::from("myvalue"))],
+        );
+
+        let out = client.process(None, now());
+        let out = server.process(out.dgram(), now());
+
+        // Send a response
+        let out = client.process(out.dgram(), now());
+        let out = server.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let out = server.process(out.dgram(), now());
+        let _ = make_request(
+            &mut client,
+            true,
+            &[(String::from("myheaders2"), String::from("myvalue"))],
+        );
+        let out = client.process(out.dgram(), now());
+        let out = server.process(out.dgram(), now());
+        let _ = make_request(
+            &mut client,
+            true,
+            &[(String::from("myheaders3"), String::from("myvalue"))],
+        );
+        let out = client.process(out.dgram(), now());
+        let out = server.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let out = server.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let out = server.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let out = server.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let _ = server.process(out.dgram(), now());
+        assert_eq!(client.state(), Http3State::Connected);
     }
 }
