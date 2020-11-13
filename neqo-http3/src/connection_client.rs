@@ -6103,7 +6103,7 @@ mod tests {
         let mut datagram = None;
         let is_done = |c: &Http3Client| matches!(c.state(), Http3State::Connected);
         while !is_done(&mut client) {
-            let _ = maybe_authenticate(&mut client);
+            maybe_authenticate(&mut client);
             datagram = client.process(datagram, now()).dgram();
             datagram = server.process(datagram, now()).dgram();
         }
