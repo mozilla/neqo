@@ -737,8 +737,9 @@ mod tests {
     use neqo_common::{event::Provider, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
+    use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::{
-        CloseError, CongestionControlAlgorithm, ConnectionEvent, FixedConnectionIdManager,
+        CloseError, CongestionControlAlgorithm, ConnectionEvent, FixedConnectionIdManager, Output,
         QuicVersion, State, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
@@ -1038,10 +1039,18 @@ mod tests {
             };
             hframe.encode(encoder);
         }
+
+        pub fn set_max_uni_stream(&mut self, max_stream: u64) {
+            self.conn
+                .set_local_tparam(
+                    tparams::INITIAL_MAX_STREAMS_UNI,
+                    TransportParameter::Integer(max_stream),
+                )
+                .unwrap();
+        }
     }
 
-    // Perform only Quic transport handshake.
-    fn connect_only_transport_with(client: &mut Http3Client, server: &mut TestServer) {
+    fn handshake_only(client: &mut Http3Client, server: &mut TestServer) -> Output {
         assert_eq!(client.state(), Http3State::Initializing);
         let out = client.process(None, now());
         assert_eq!(client.state(), Http3State::Initializing);
@@ -1057,6 +1066,12 @@ mod tests {
         let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
         assert!(client.events().any(authentication_needed));
         client.authenticated(AuthenticationStatus::Ok, now());
+        out
+    }
+
+    // Perform only Quic transport handshake.
+    fn connect_only_transport_with(client: &mut Http3Client, server: &mut TestServer) {
+        let out = handshake_only(client, server);
 
         let out = client.process(out.dgram(), now());
         let connected = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Connected));
@@ -5929,5 +5944,29 @@ mod tests {
         } if stream_id == push_stream_id && app_error == Error::HttpGeneralProtocolStream.code())
         };
         assert!(server.conn.events().any(stop_sending_event));
+    }
+
+    fn handshake_client_error(client: &mut Http3Client, server: &mut TestServer, error: &Error) {
+        let out = handshake_only(client, server);
+        client.process(out.dgram(), now());
+        assert_closed(&client, error);
+    }
+
+    /// Client fails to create a control stream, since server does not allow it.
+    #[test]
+    fn client_control_stream_create_failed() {
+        let mut client = default_http3_client();
+        let mut server = TestServer::new();
+        server.set_max_uni_stream(0);
+        handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
+    }
+
+    /// 2 streams isn't enough for control and QPACK streams.
+    #[test]
+    fn client_qpack_stream_create_failed() {
+        let mut client = default_http3_client();
+        let mut server = TestServer::new();
+        server.set_max_uni_stream(2);
+        handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
     }
 }
