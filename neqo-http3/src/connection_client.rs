@@ -6079,13 +6079,43 @@ mod tests {
         }
     }
 
-    // Test that decoder stream type is always sent beofer any other instruction also
+    const MAX_TABLE_SIZE: u64 = 65536;
+    const MAX_BLOCKED_STREAMS: u16 = 5;
+
+    fn get_token(server: &mut Http3Server) -> ResumptionToken {
+        let mut client = default_http3_client_param(MAX_TABLE_SIZE);
+
+        let mut datagram = None;
+        let is_done = |c: &Http3Client| matches!(c.state(), Http3State::Connected);
+        while !is_done(&mut client) {
+            maybe_authenticate(&mut client);
+            datagram = client.process(datagram, now()).dgram();
+            datagram = server.process(datagram, now()).dgram();
+        }
+
+        // exchange qpack settings, server will send a token as well.
+        datagram = client.process(datagram, now()).dgram();
+        datagram = server.process(datagram, now()).dgram();
+        let _ = client.process(datagram, now()).dgram();
+
+        client
+            .events()
+            .find_map(|e| {
+                if let Http3ClientEvent::ResumptionToken(token) = e {
+                    Some(token)
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+    }
+
+    // Test that decoder stream type is always sent before any other instruction also
     // in case when 0RTT is used.
+    // A client will send a request that uses the dynamic table. This will trigger a header-ack
+    // from a server. We will use stats to check that a header-ack has been received.
     #[test]
     fn zerortt_request_use_dynamic_table() {
-        const MAX_TABLE_SIZE: u64 = 65536;
-        const MAX_BLOCKED_STREAMS: u16 = 5;
-        let mut client = default_http3_client_param(MAX_TABLE_SIZE);
         let mut server = Http3Server::new(
             now(),
             DEFAULT_KEYS,
@@ -6100,30 +6130,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut datagram = None;
-        let is_done = |c: &Http3Client| matches!(c.state(), Http3State::Connected);
-        while !is_done(&mut client) {
-            maybe_authenticate(&mut client);
-            datagram = client.process(datagram, now()).dgram();
-            datagram = server.process(datagram, now()).dgram();
-        }
-
-        // exchannge qpack settings, server will send a token as well.
-        datagram = client.process(datagram, now()).dgram();
-        datagram = server.process(datagram, now()).dgram();
-        let _ = client.process(datagram, now()).dgram();
-
-        let token = client
-            .events()
-            .find_map(|e| {
-                if let Http3ClientEvent::ResumptionToken(token) = e {
-                    Some(token)
-                } else {
-                    None
-                }
-            })
-            .unwrap();
-
+        let token = get_token(&mut server);
         // Make a new connection.
         let mut client = default_http3_client_param(MAX_TABLE_SIZE);
         assert_eq!(client.state(), Http3State::Initializing);
@@ -6135,49 +6142,29 @@ mod tests {
         let zerortt_event = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::ZeroRtt));
         assert!(client.events().any(zerortt_event));
 
-        // Send a request using 0RTT data. This will trigger sending a HEADER_ACK on
-        // the decoder stream before stream id is written.
-        // The client will read HEADER_ACK (value: 0x80) as a stream type. To decode the stream
-        // type we will need 3 more byte (0x80 starts with 10 which is 4 byte encoded verint).
-        // 3 more bytes wil be the corect stream type (0x3) which will be added and to more
-        // requests that will trigger 2 HEADER_ACK. The client will cloed the stream and
-        // the server will trigger closing with error HttpClosedCriticalStream.
+        // Make a request that uses the dynamic table.
         let _ = make_request(
             &mut client,
             true,
             &[(String::from("myheaders"), String::from("myvalue"))],
         );
+        // Assert that the request has used dynamic table. That will trigger a header_ack.
+        assert_eq!(client.qpack_encoder_stats().dynamic_table_references, 1);
 
-        let out = client.process(None, now());
-        let out = server.process(out.dgram(), now());
+        // Exchange packets until header-ack is received.
+        // These many packet exchange is needed, to get a header-ack.
+        // TODO this may be optimize at Http3Server.
+        let out = client.process(None, now()).dgram();
+        let out = server.process(out, now()).dgram();
+        let out = client.process(out, now()).dgram();
+        let out = server.process(out, now()).dgram();
+        let out = client.process(out, now()).dgram();
+        let out = server.process(out, now()).dgram();
+        let out = client.process(out, now()).dgram();
+        let out = server.process(out, now()).dgram();
+        let _ = client.process(out, now());
 
-        // Send a response
-        let out = client.process(out.dgram(), now());
-        let out = server.process(out.dgram(), now());
-        let out = client.process(out.dgram(), now());
-        let out = server.process(out.dgram(), now());
-        let _ = make_request(
-            &mut client,
-            true,
-            &[(String::from("myheaders2"), String::from("myvalue"))],
-        );
-        let out = client.process(out.dgram(), now());
-        let out = server.process(out.dgram(), now());
-        let _ = make_request(
-            &mut client,
-            true,
-            &[(String::from("myheaders3"), String::from("myvalue"))],
-        );
-        let out = client.process(out.dgram(), now());
-        let out = server.process(out.dgram(), now());
-        let out = client.process(out.dgram(), now());
-        let out = server.process(out.dgram(), now());
-        let out = client.process(out.dgram(), now());
-        let out = server.process(out.dgram(), now());
-        let out = client.process(out.dgram(), now());
-        let out = server.process(out.dgram(), now());
-        let out = client.process(out.dgram(), now());
-        let _ = server.process(out.dgram(), now());
-        assert_eq!(client.state(), Http3State::Connected);
+        // The header ack for the first request has been received.
+        assert_eq!(client.qpack_encoder_stats().header_acks_recv, 1);
     }
 }

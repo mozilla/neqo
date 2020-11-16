@@ -8,6 +8,7 @@ use crate::hframe::HFrame;
 use crate::Res;
 use neqo_common::{qtrace, Encoder};
 use neqo_transport::{Connection, StreamType};
+use std::convert::TryFrom;
 
 pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 
@@ -26,14 +27,9 @@ impl ::std::fmt::Display for ControlStreamLocal {
 
 impl ControlStreamLocal {
     pub fn new() -> Self {
-        let mut buf = Vec::new();
-        let mut enc = Encoder::default();
-        enc.encode_varint(HTTP3_UNI_STREAM_TYPE_CONTROL);
-        buf.append(&mut enc.into());
-
         Self {
             stream_id: None,
-            buf,
+            buf: vec![u8::try_from(HTTP3_UNI_STREAM_TYPE_CONTROL).unwrap()],
         }
     }
 
