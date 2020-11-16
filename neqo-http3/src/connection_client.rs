@@ -18,10 +18,10 @@ use neqo_common::{
     Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
-use neqo_qpack::{stats::Stats, QpackSettings};
+use neqo_qpack::{QpackSettings, Stats as QStats};
 use neqo_transport::{
     AppError, CongestionControlAlgorithm, Connection, ConnectionEvent, ConnectionId,
-    ConnectionIdManager, Output, QuicVersion, StreamId, StreamType, ZeroRttState,
+    ConnectionIdManager, Output, QuicVersion, Stats as TStats, StreamId, StreamType, ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -689,13 +689,18 @@ impl Http3Client {
     }
 
     #[must_use]
-    pub fn qpack_decoder_stats(&self) -> &Stats {
+    pub fn qpack_decoder_stats(&self) -> QStats {
         self.base_handler.qpack_decoder.stats()
     }
 
     #[must_use]
-    pub fn qpack_encoder_stats(&self) -> &Stats {
+    pub fn qpack_encoder_stats(&self) -> QStats {
         self.base_handler.qpack_encoder.stats()
+    }
+
+    #[must_use]
+    pub fn transport_stats(&self) -> TStats {
+        self.conn.stats()
     }
 
     fn reset_stream_on_error(&mut self, stream_id: u64, app_error: AppError) {
