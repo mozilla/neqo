@@ -90,7 +90,9 @@ impl Error {
     pub fn code(&self) -> AppError {
         match self {
             Self::HttpNoError => 0x100,
-            Self::HttpGeneralProtocol | Self::HttpGeneralProtocolStream => 0x101,
+            Self::HttpGeneralProtocol | Self::HttpGeneralProtocolStream | Self::InvalidHeader => {
+                0x101
+            }
             Self::HttpInternal => 0x102,
             Self::HttpStreamCreation => 0x103,
             Self::HttpClosedCriticalStream => 0x104,

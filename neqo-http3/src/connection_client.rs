@@ -5970,7 +5970,6 @@ mod tests {
         handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
     }
 
-    #[test]
     fn do_malformed_response_test(headers: &[Header]) {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
