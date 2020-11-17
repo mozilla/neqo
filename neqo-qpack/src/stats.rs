@@ -6,7 +6,7 @@
 
 // Tracking of some useful statistics.
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 /// `QPack` statistics
 pub struct Stats {
     pub dynamic_table_inserts: usize,

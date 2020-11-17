@@ -477,8 +477,8 @@ impl QPackEncoder {
     }
 
     #[must_use]
-    pub fn stats(&self) -> &Stats {
-        &self.stats
+    pub fn stats(&self) -> Stats {
+        self.stats.clone()
     }
 
     #[must_use]
