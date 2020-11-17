@@ -5801,7 +5801,7 @@ mod tests {
             e,
             Http3ClientEvent::Reset {
                 stream_id: request_stream_id,
-                error: Error::HttpGeneralProtocolStream.code(),
+                error: Error::InvalidHeader.code(),
                 local: true,
             }
         );
@@ -5814,7 +5814,7 @@ mod tests {
             matches!(e, ConnectionEvent::SendStreamStopSending {
             stream_id,
             app_error
-        } if stream_id == request_stream_id && app_error == Error::HttpGeneralProtocolStream.code())
+        } if stream_id == request_stream_id && app_error == Error::InvalidHeader.code())
         };
         assert!(server.conn.events().any(stop_sending_event));
 
@@ -5934,7 +5934,7 @@ mod tests {
             matches!(e, Http3ClientEvent::PushReset {
             push_id,
             error,
-        } if push_id == FIRST_PUSH_ID && error == Error::HttpGeneralProtocol.code())
+        } if push_id == FIRST_PUSH_ID && error == Error::InvalidHeader.code())
         };
 
         assert!(client.events().any(push_reset_event));
@@ -5947,7 +5947,7 @@ mod tests {
             matches!(e, ConnectionEvent::SendStreamStopSending {
             stream_id,
             app_error
-        } if stream_id == push_stream_id && app_error == Error::HttpGeneralProtocolStream.code())
+        } if stream_id == push_stream_id && app_error == Error::InvalidHeader.code())
         };
         assert!(server.conn.events().any(stop_sending_event));
     }
@@ -5974,5 +5974,93 @@ mod tests {
         let mut server = TestServer::new();
         server.set_max_uni_stream(2);
         handshake_client_error(&mut client, &mut server, &Error::StreamLimitError);
+    }
+
+    fn do_malformed_response_test(headers: &[Header]) {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        server.encode_headers(request_stream_id, &headers, &mut d);
+
+        // Send response
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        // Stream has been reset because of the malformed headers.
+        let e = client.events().next().unwrap();
+        assert_eq!(
+            e,
+            Http3ClientEvent::Reset {
+                stream_id: request_stream_id,
+                error: Error::InvalidHeader.code(),
+                local: true,
+            }
+        );
+    }
+
+    #[test]
+    fn malformed_response_pseudo_header_after_regular_header() {
+        do_malformed_response_test(&[
+            (String::from("content-type"), String::from("text/plain")),
+            (String::from(":status"), String::from("100")),
+        ]);
+    }
+
+    #[test]
+    fn malformed_response_undefined_pseudo_header() {
+        do_malformed_response_test(&[
+            (String::from(":status"), String::from("200")),
+            (String::from(":cheese"), String::from("200")),
+        ]);
+    }
+
+    #[test]
+    fn malformed_response_duplicate_pseudo_header() {
+        do_malformed_response_test(&[
+            (String::from(":status"), String::from("200")),
+            (String::from(":status"), String::from("100")),
+            (String::from("content-type"), String::from("text/plain")),
+        ]);
+    }
+
+    #[test]
+    fn malformed_response_uppercase_header() {
+        do_malformed_response_test(&[
+            (String::from(":status"), String::from("200")),
+            (String::from("content-Type"), String::from("text/plain")),
+        ]);
+    }
+
+    #[test]
+    fn malformed_response_excluded_header() {
+        do_malformed_response_test(&[
+            (String::from(":status"), String::from("200")),
+            (String::from("content-type"), String::from("text/plain")),
+            (String::from("connection"), String::from("close")),
+        ]);
+    }
+
+    #[test]
+    fn malformed_response_excluded_byte_in_header() {
+        do_malformed_response_test(&[
+            (String::from(":status"), String::from("200")),
+            (String::from("content:type"), String::from("text/plain")),
+        ]);
+    }
+
+    #[test]
+    fn malformed_response_request_header_in_response() {
+        do_malformed_response_test(&[
+            (String::from(":status"), String::from("200")),
+            (String::from(":method"), String::from("GET")),
+            (String::from("content-type"), String::from("text/plain")),
+        ]);
     }
 }
