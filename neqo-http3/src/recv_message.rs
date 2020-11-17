@@ -400,7 +400,6 @@ impl RecvMessage {
                     | "te"
                     | "transfer-encoding"
                     | "upgrade"
-                    | "accept-encoding"
             ) {
                 return Err(Error::InvalidHeader);
             }
