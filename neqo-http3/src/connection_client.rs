@@ -740,6 +740,7 @@ mod tests {
     };
     use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
     use crate::settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS};
+    use crate::Http3Server;
     use neqo_common::{event::Provider, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
@@ -750,7 +751,10 @@ mod tests {
     };
     use std::convert::TryFrom;
     use std::time::Duration;
-    use test_fixture::{default_server_h3, fixture_init, loopback, now, DEFAULT_SERVER_NAME};
+    use test_fixture::{
+        anti_replay, default_server_h3, fixture_init, loopback, now, DEFAULT_ALPN_H3, DEFAULT_KEYS,
+        DEFAULT_SERVER_NAME,
+    };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
         match client.state() {
@@ -763,6 +767,10 @@ mod tests {
 
     /// Create a http3 client with default configuration.
     pub fn default_http3_client() -> Http3Client {
+        default_http3_client_param(100)
+    }
+
+    pub fn default_http3_client_param(max_table_size: u64) -> Http3Client {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
@@ -773,8 +781,8 @@ mod tests {
             QuicVersion::default(),
             &Http3Parameters {
                 qpack_settings: QpackSettings {
-                    max_table_size_encoder: 100,
-                    max_table_size_decoder: 100,
+                    max_table_size_encoder: max_table_size,
+                    max_table_size_decoder: max_table_size,
                     max_blocked_streams: 100,
                 },
                 max_concurrent_push_streams: 5,
@@ -6062,5 +6070,101 @@ mod tests {
             (String::from(":method"), String::from("GET")),
             (String::from("content-type"), String::from("text/plain")),
         ]);
+    }
+
+    fn maybe_authenticate(conn: &mut Http3Client) {
+        let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
+        if conn.events().any(authentication_needed) {
+            conn.authenticated(AuthenticationStatus::Ok, now());
+        }
+    }
+
+    const MAX_TABLE_SIZE: u64 = 65536;
+    const MAX_BLOCKED_STREAMS: u16 = 5;
+
+    fn get_resumption_token(server: &mut Http3Server) -> ResumptionToken {
+        let mut client = default_http3_client_param(MAX_TABLE_SIZE);
+
+        let mut datagram = None;
+        let is_done = |c: &Http3Client| matches!(c.state(), Http3State::Connected);
+        while !is_done(&mut client) {
+            maybe_authenticate(&mut client);
+            datagram = client.process(datagram, now()).dgram();
+            datagram = server.process(datagram, now()).dgram();
+        }
+
+        // exchange qpack settings, server will send a token as well.
+        datagram = client.process(datagram, now()).dgram();
+        datagram = server.process(datagram, now()).dgram();
+        let _ = client.process(datagram, now()).dgram();
+
+        client
+            .events()
+            .find_map(|e| {
+                if let Http3ClientEvent::ResumptionToken(token) = e {
+                    Some(token)
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+    }
+
+    // Test that decoder stream type is always sent before any other instruction also
+    // in case when 0RTT is used.
+    // A client will send a request that uses the dynamic table. This will trigger a header-ack
+    // from a server. We will use stats to check that a header-ack has been received.
+    #[test]
+    fn zerortt_request_use_dynamic_table() {
+        let mut server = Http3Server::new(
+            now(),
+            DEFAULT_KEYS,
+            DEFAULT_ALPN_H3,
+            anti_replay(),
+            Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+            QpackSettings {
+                max_table_size_encoder: MAX_TABLE_SIZE,
+                max_table_size_decoder: MAX_TABLE_SIZE,
+                max_blocked_streams: MAX_BLOCKED_STREAMS,
+            },
+        )
+        .unwrap();
+
+        let token = get_resumption_token(&mut server);
+        // Make a new connection.
+        let mut client = default_http3_client_param(MAX_TABLE_SIZE);
+        assert_eq!(client.state(), Http3State::Initializing);
+        client
+            .enable_resumption(now(), &token)
+            .expect("Set resumption token.");
+
+        assert_eq!(client.state(), Http3State::ZeroRtt);
+        let zerortt_event = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::ZeroRtt));
+        assert!(client.events().any(zerortt_event));
+
+        // Make a request that uses the dynamic table.
+        let _ = make_request(
+            &mut client,
+            true,
+            &[(String::from("myheaders"), String::from("myvalue"))],
+        );
+        // Assert that the request has used dynamic table. That will trigger a header_ack.
+        assert_eq!(client.qpack_encoder_stats().dynamic_table_references, 1);
+
+        // Exchange packets until header-ack is received.
+        // These many packet exchange is needed, to get a header-ack.
+        // TODO this may be optimize at Http3Server.
+        let out = client.process(None, now()).dgram();
+        let out = server.process(out, now()).dgram();
+        let out = client.process(out, now()).dgram();
+        let out = server.process(out, now()).dgram();
+        let out = client.process(out, now()).dgram();
+        let out = server.process(out, now()).dgram();
+        let out = client.process(out, now()).dgram();
+        let out = server.process(out, now()).dgram();
+        let _ = client.process(out, now());
+
+        // The header ack for the first request has been received.
+        assert_eq!(client.qpack_encoder_stats().header_acks_recv, 1);
     }
 }
