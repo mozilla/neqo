@@ -6082,7 +6082,7 @@ mod tests {
     const MAX_TABLE_SIZE: u64 = 65536;
     const MAX_BLOCKED_STREAMS: u16 = 5;
 
-    fn get_token(server: &mut Http3Server) -> ResumptionToken {
+    fn get_resumption_token(server: &mut Http3Server) -> ResumptionToken {
         let mut client = default_http3_client_param(MAX_TABLE_SIZE);
 
         let mut datagram = None;
@@ -6130,7 +6130,7 @@ mod tests {
         )
         .unwrap();
 
-        let token = get_token(&mut server);
+        let token = get_resumption_token(&mut server);
         // Make a new connection.
         let mut client = default_http3_client_param(MAX_TABLE_SIZE);
         assert_eq!(client.state(), Http3State::Initializing);
