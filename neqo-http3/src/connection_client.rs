@@ -21,7 +21,8 @@ use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken,
 use neqo_qpack::{QpackSettings, Stats as QpackStats};
 use neqo_transport::{
     AppError, CongestionControlAlgorithm, Connection, ConnectionEvent, ConnectionId,
-    ConnectionIdManager, Output, QuicVersion, Stats as TransportStats, StreamId, StreamType, ZeroRttState,
+    ConnectionIdManager, Output, QuicVersion, Stats as TransportStats, StreamId, StreamType,
+    ZeroRttState,
 };
 use std::cell::RefCell;
 use std::fmt::Display;
