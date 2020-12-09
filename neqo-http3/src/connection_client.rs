@@ -6167,4 +6167,15 @@ mod tests {
         // The header ack for the first request has been received.
         assert_eq!(client.qpack_encoder_stats().header_acks_recv, 1);
     }
+
+    #[test]
+    fn client_close_with_long_reason_string() {
+        let (mut client, mut _server) = connect();
+        // Create a long string and use it as the close reason.
+        let long_reason = String::from_utf8([0x61; 2048].to_vec()).unwrap();
+        client.close(now(), Error::HttpGeneralProtocol.code(), long_reason);
+        // Process the output packet to test we don't hit the length assertion.
+        let _out = client.process(None, now());
+        assert_closed(&client, &Error::HttpGeneralProtocol);
+    }
 }
