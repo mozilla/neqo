@@ -1531,7 +1531,7 @@ impl Connection {
                 if let CloseError::Transport(_) = error_code {
                     builder.encode_varint(*frame_type);
                 }
-                let reason_len = min(min(reason_phrase.len(), 256), builder.remaining());
+                let reason_len = min(min(reason_phrase.len(), 256), builder.remaining() - 2);
                 builder.encode_vvec(&reason_phrase[..reason_len]);
             } else {
                 unreachable!();
