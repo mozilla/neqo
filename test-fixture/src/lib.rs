@@ -86,7 +86,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
-        &CongestionControlAlgorithm::NewReno,
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
     .expect("create a default client")
@@ -111,7 +111,7 @@ fn make_default_server(alpn: &[impl AsRef<str>]) -> Connection {
         DEFAULT_KEYS,
         alpn,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-        &CongestionControlAlgorithm::NewReno,
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
         None,
     )
@@ -165,7 +165,7 @@ pub fn default_http3_client() -> Http3Client {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
-        &CongestionControlAlgorithm::NewReno,
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
         &Http3Parameters {
             qpack_settings: QpackSettings {

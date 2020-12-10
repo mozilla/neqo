@@ -95,7 +95,7 @@ impl Http3Client {
         cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        cc_algorithm: &CongestionControlAlgorithm,
+        cc_algorithm: CongestionControlAlgorithm,
         quic_version: QuicVersion,
         http3_parameters: &Http3Parameters,
     ) -> Res<Self> {
@@ -776,7 +776,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
             loopback(),
             loopback(),
-            &CongestionControlAlgorithm::NewReno,
+            CongestionControlAlgorithm::NewReno,
             QuicVersion::default(),
             &Http3Parameters {
                 qpack_settings: QpackSettings {
@@ -3558,7 +3558,7 @@ mod tests {
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN_H3,
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-            &CongestionControlAlgorithm::NewReno,
+            CongestionControlAlgorithm::NewReno,
             QuicVersion::default(),
             None,
         )

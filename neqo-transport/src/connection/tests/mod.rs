@@ -56,7 +56,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
-        &CongestionControlAlgorithm::NewReno,
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
     )
     .expect("create a default client")
@@ -68,7 +68,7 @@ pub fn default_server() -> Connection {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-        &CongestionControlAlgorithm::NewReno,
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
         None,
     )

@@ -133,7 +133,7 @@ fn zero_rtt_send_reject() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-        &CongestionControlAlgorithm::NewReno,
+        CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
         None,
     )

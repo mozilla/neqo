@@ -317,7 +317,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        cc_algorithm: &CongestionControlAlgorithm,
+        cc_algorithm: CongestionControlAlgorithm,
         quic_version: QuicVersion,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
@@ -328,7 +328,7 @@ impl Connection {
             protocols,
             None,
             &ConnectionParameters {
-                cc_algorithm: *cc_algorithm,
+                cc_algorithm: cc_algorithm,
                 quic_version,
                 max_streams: None,
             },
@@ -344,7 +344,7 @@ impl Connection {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         cid_manager: CidMgr,
-        cc_algorithm: &CongestionControlAlgorithm,
+        cc_algorithm: CongestionControlAlgorithm,
         quic_version: QuicVersion,
         max_streams: Option<u64>,
     ) -> Res<Self> {
@@ -355,7 +355,7 @@ impl Connection {
             protocols,
             None,
             &ConnectionParameters {
-                cc_algorithm: *cc_algorithm,
+                cc_algorithm: cc_algorithm,
                 quic_version,
                 max_streams,
             },
@@ -449,7 +449,7 @@ impl Connection {
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new(&conn_params.cc_algorithm, stats.clone()),
+            loss_recovery: LossRecovery::new(conn_params.cc_algorithm, stats.clone()),
             events: ConnectionEvents::default(),
             new_token: NewTokenState::new(role),
             stats,

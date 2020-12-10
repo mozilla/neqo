@@ -411,7 +411,7 @@ impl Server {
             &self.certs,
             &self.protocols,
             Rc::clone(&cid_mgr) as _,
-            &CongestionControlAlgorithm::NewReno,
+            CongestionControlAlgorithm::NewReno,
             initial.quic_version,
             self.max_streams,
         );
