@@ -3560,6 +3560,7 @@ mod tests {
             Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
             &CongestionControlAlgorithm::NewReno,
             QuicVersion::default(),
+            None,
         )
         .unwrap();
         // Using a freshly initialized anti-replay context

@@ -180,6 +180,7 @@ fn crypto_frame_split() {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(6))),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
+        None,
     )
     .expect("create a server");
 

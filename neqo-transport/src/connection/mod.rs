@@ -323,6 +323,7 @@ impl Connection {
             None,
             cc_algorithm,
             quic_version,
+            None,
         )?;
         c.crypto.states.init(quic_version, Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
@@ -337,6 +338,7 @@ impl Connection {
         cid_manager: CidMgr,
         cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
+        max_streams: Option<u64>,
     ) -> Res<Self> {
         Self::new(
             Role::Server,
@@ -346,6 +348,7 @@ impl Connection {
             None,
             cc_algorithm,
             quic_version,
+            max_streams,
         )
     }
 
@@ -390,9 +393,24 @@ impl Connection {
         path: Option<Path>,
         cc_algorithm: &CongestionControlAlgorithm,
         quic_version: QuicVersion,
+        max_streams: Option<u64>,
     ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
+        if max_streams.is_some() {
+            let max_streams = max_streams.unwrap();
+            if max_streams > (1 << 60) {
+                return Err(Error::StreamLimitError);
+            }
+            tphandler
+                .borrow_mut()
+                .local
+                .set_integer(tparams::INITIAL_MAX_STREAMS_BIDI, max_streams);
+            tphandler
+                .borrow_mut()
+                .local
+                .set_integer(tparams::INITIAL_MAX_STREAMS_UNI, max_streams);
+        }
         let local_initial_source_cid = cid_manager.borrow_mut().generate_cid();
         tphandler.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,

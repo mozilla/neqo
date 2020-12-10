@@ -90,6 +90,10 @@ struct Args {
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
+    #[structopt(name = "max-streams", long)]
+    /// Set MAX_STREAMS limits.
+    max_streams: Option<u64>,
+
     #[structopt(name = "retry", long)]
     /// Force a retry
     retry: bool,
@@ -382,6 +386,7 @@ impl ServersRunner {
                     &[args.alpn.clone()],
                     anti_replay,
                     cid_mgr,
+                    args.max_streams,
                 )
                 .expect("We cannot make a server!"),
             )
@@ -523,7 +528,12 @@ fn main() -> Result<(), io::Error> {
     if let Some(testcase) = args.qns_test.as_ref() {
         match testcase.as_str() {
             "http3" => (),
-            "handshake" | "transfer" | "resumption" | "zerortt" | "multiconnect" => {
+            "zerortt" => {
+                args.use_old_http = true;
+                args.alpn = "hq-29".into();
+                args.max_streams = Some(100);
+            }
+            "handshake" | "transfer" | "resumption" | "multiconnect" => {
                 args.use_old_http = true;
                 args.alpn = "hq-29".into();
             }

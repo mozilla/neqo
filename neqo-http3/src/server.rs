@@ -61,6 +61,7 @@ impl Http3Server {
                 anti_replay,
                 Box::new(HttpZeroRttChecker::new(qpack_settings)),
                 cid_manager,
+                None,
             )?,
             qpack_settings,
             http3_handlers: HashMap::new(),

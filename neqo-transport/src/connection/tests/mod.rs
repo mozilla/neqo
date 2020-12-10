@@ -70,6 +70,7 @@ pub fn default_server() -> Connection {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
+        None,
     )
     .expect("create a default server");
     c.server_enable_0rtt(&test_fixture::anti_replay(), AllowZeroRtt {})

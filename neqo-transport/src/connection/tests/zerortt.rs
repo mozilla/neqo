@@ -135,6 +135,7 @@ fn zero_rtt_send_reject() {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
         &CongestionControlAlgorithm::NewReno,
         QuicVersion::default(),
+        None,
     )
     .unwrap();
     // Using a freshly initialized anti-replay context

@@ -176,6 +176,7 @@ fn make_server(quic_version: QuicVersion) -> Connection {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
         &CongestionControlAlgorithm::NewReno,
         quic_version,
+        None,
     )
     .expect("create a default server")
 }
