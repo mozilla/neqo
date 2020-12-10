@@ -225,6 +225,12 @@ impl AddressValidationInfo {
     }
 }
 
+struct ConnectionParameters {
+    pub quic_version: QuicVersion,
+    pub cc_algorithm: CongestionControlAlgorithm,
+    pub max_streams: Option<u64>,
+}
+
 /// A QUIC Connection
 ///
 /// First, create a new connection using `new_client()` or `new_server()`.
@@ -321,9 +327,11 @@ impl Connection {
             cid_manager,
             protocols,
             None,
-            cc_algorithm,
-            quic_version,
-            None,
+            &ConnectionParameters {
+                cc_algorithm: *cc_algorithm,
+                quic_version,
+                max_streams: None,
+            },
         )?;
         c.crypto.states.init(quic_version, Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
@@ -346,9 +354,11 @@ impl Connection {
             cid_manager,
             protocols,
             None,
-            cc_algorithm,
-            quic_version,
-            max_streams,
+            &ConnectionParameters {
+                cc_algorithm: *cc_algorithm,
+                quic_version,
+                max_streams,
+            },
         )
     }
 
@@ -391,25 +401,22 @@ impl Connection {
         cid_manager: CidMgr,
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
-        cc_algorithm: &CongestionControlAlgorithm,
-        quic_version: QuicVersion,
-        max_streams: Option<u64>,
+        conn_params: &ConnectionParameters,
     ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
-        if max_streams.is_some() {
-            let max_streams = max_streams.unwrap();
-            if max_streams > (1 << 60) {
+        if let Some(max) = conn_params.max_streams {
+            if max > (1 << 60) {
                 return Err(Error::StreamLimitError);
             }
             tphandler
                 .borrow_mut()
                 .local
-                .set_integer(tparams::INITIAL_MAX_STREAMS_BIDI, max_streams);
+                .set_integer(tparams::INITIAL_MAX_STREAMS_BIDI, max);
             tphandler
                 .borrow_mut()
                 .local
-                .set_integer(tparams::INITIAL_MAX_STREAMS_UNI, max_streams);
+                .set_integer(tparams::INITIAL_MAX_STREAMS_UNI, max);
         }
         let local_initial_source_cid = cid_manager.borrow_mut().generate_cid();
         tphandler.borrow_mut().local.set_bytes(
@@ -442,13 +449,13 @@ impl Connection {
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new(cc_algorithm, stats.clone()),
+            loss_recovery: LossRecovery::new(&conn_params.cc_algorithm, stats.clone()),
             events: ConnectionEvents::default(),
             new_token: NewTokenState::new(role),
             stats,
             qlog: NeqoQlog::disabled(),
             release_resumption_token_timer: None,
-            quic_version,
+            quic_version: conn_params.quic_version,
         };
         c.stats.borrow_mut().init(format!("{}", c));
         Ok(c)
