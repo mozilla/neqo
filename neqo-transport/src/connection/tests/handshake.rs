@@ -698,3 +698,61 @@ fn extra_initial_invalid_cid() {
     let nothing = client.process(Some(dgram_copy), now).dgram();
     assert!(nothing.is_none());
 }
+
+fn connect_version(version: QuicVersion) {
+    fixture_init();
+    let mut client = Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
+        loopback(),
+        loopback(),
+        &CongestionControlAlgorithm::NewReno,
+        version,
+    )
+    .unwrap();
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+        &CongestionControlAlgorithm::NewReno,
+        version,
+    )
+    .unwrap();
+    connect_force_idle(&mut client, &mut server);
+}
+
+#[test]
+fn connect_v1() {
+    connect_version(QuicVersion::Version1);
+}
+
+#[test]
+fn connect_27() {
+    connect_version(QuicVersion::Draft27);
+}
+
+#[test]
+fn connect_28() {
+    connect_version(QuicVersion::Draft28);
+}
+
+#[test]
+fn connect_29() {
+    connect_version(QuicVersion::Draft29);
+}
+
+#[test]
+fn connect_30() {
+    connect_version(QuicVersion::Draft30);
+}
+
+#[test]
+fn connect_31() {
+    connect_version(QuicVersion::Draft31);
+}
+
+#[test]
+fn connect_32() {
+    connect_version(QuicVersion::Draft32);
+}

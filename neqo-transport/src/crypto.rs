@@ -54,7 +54,12 @@ pub struct Crypto {
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
 
 impl Crypto {
-    pub fn new(mut agent: Agent, protocols: &[impl AsRef<str>], tphandler: TpHandler) -> Res<Self> {
+    pub fn new(
+        version: QuicVersion,
+        mut agent: Agent,
+        protocols: &[impl AsRef<str>],
+        tphandler: TpHandler,
+    ) -> Res<Self> {
         agent.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)?;
         agent.set_ciphers(&[
             TLS_AES_128_GCM_SHA256,
@@ -68,7 +73,16 @@ impl Crypto {
         if let Agent::Client(c) = &mut agent {
             c.enable_0rtt()?;
         }
-        agent.extension_handler(0xffa5, tphandler)?;
+        let extension = match version {
+            QuicVersion::Version1 => 0x39,
+            QuicVersion::Draft27
+            | QuicVersion::Draft28
+            | QuicVersion::Draft29
+            | QuicVersion::Draft30
+            | QuicVersion::Draft31
+            | QuicVersion::Draft32 => 0xffa5,
+        };
+        agent.extension_handler(extension, tphandler)?;
         Ok(Self {
             tls: agent,
             streams: Default::default(),

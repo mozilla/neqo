@@ -399,7 +399,7 @@ impl Connection {
             local_initial_source_cid.to_vec(),
         );
 
-        let crypto = Crypto::new(agent, protocols, tphandler.clone())?;
+        let crypto = Crypto::new(quic_version, agent, protocols, tphandler.clone())?;
 
         let stats = StatsCell::default();
         let c = Self {
