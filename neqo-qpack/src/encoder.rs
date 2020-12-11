@@ -557,14 +557,14 @@ mod tests {
             &mut self,
             stream_id: u64,
             headers: &[Header],
-            encoded_header_block: &[u8],
+            expected_encoding: &[u8],
             inst: &[u8],
         ) {
             let buf = self
                 .encoder
                 .encode_header_block(&mut self.conn, headers, stream_id)
                 .unwrap();
-            assert_eq!(&buf[..], encoded_header_block);
+            assert_eq!(&buf[..], expected_encoding);
             self.send_instructions(inst);
         }
 
@@ -1729,7 +1729,7 @@ mod tests {
             &[],
         );
 
-        // receive a stream canceled
+        // receive a stream canceled instruction.
         recv_instruction(&mut encoder, STREAM_CANCELED_ID_1);
 
         recv_instruction(&mut encoder, &[0x01]);
