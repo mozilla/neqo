@@ -15,7 +15,7 @@ use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
 use crate::path::PATH_MTU_V6;
 use crate::recovery::ACK_ONLY_SIZE_LIMIT;
-use crate::{CongestionControlAlgorithm, QuicVersion};
+use crate::ConnectionParameters;
 
 use std::cell::RefCell;
 use std::mem;
@@ -56,8 +56,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
         loopback(),
         loopback(),
-        CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        &ConnectionParameters::default(),
     )
     .expect("create a default client")
 }
@@ -68,9 +67,7 @@ pub fn default_server() -> Connection {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-        CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
-        None,
+        &ConnectionParameters::default(),
     )
     .expect("create a default server");
     c.server_enable_0rtt(&test_fixture::anti_replay(), AllowZeroRtt {})

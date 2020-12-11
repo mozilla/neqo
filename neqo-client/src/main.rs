@@ -19,7 +19,7 @@ use neqo_http3::{
 };
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionId, Error as TransportError,
+    Connection, ConnectionId, ConnectionParameters, Error as TransportError,
     FixedConnectionIdManager as EmptyConnectionIdGenerator, QuicVersion,
 };
 
@@ -503,8 +503,7 @@ fn client(
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::new(0))),
         local_addr,
         remote_addr,
-        CongestionControlAlgorithm::NewReno,
-        quic_protocol,
+        &ConnectionParameters::default().quic_version(quic_protocol),
     )?;
     let ciphers = args.get_ciphers();
     if !ciphers.is_empty() {
@@ -722,7 +721,7 @@ mod old {
     use neqo_common::{event::Provider, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
-        CongestionControlAlgorithm, Connection, ConnectionEvent, Error,
+        Connection, ConnectionEvent, ConnectionParameters, Error,
         FixedConnectionIdManager as EmptyConnectionIdGenerator, Output, QuicVersion, State,
         StreamType,
     };
@@ -998,8 +997,7 @@ mod old {
             Rc::new(RefCell::new(EmptyConnectionIdGenerator::new(0))),
             local_addr,
             remote_addr,
-            CongestionControlAlgorithm::NewReno,
-            quic_protocol,
+            &ConnectionParameters::default().quic_version(quic_protocol),
         )?;
 
         if let Some(tok) = token {

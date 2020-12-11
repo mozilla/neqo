@@ -225,10 +225,67 @@ impl AddressValidationInfo {
     }
 }
 
-struct ConnectionParameters {
-    pub quic_version: QuicVersion,
-    pub cc_algorithm: CongestionControlAlgorithm,
-    pub max_streams: Option<u64>,
+#[derive(Clone)]
+pub struct ConnectionParameters {
+    quic_version: QuicVersion,
+    cc_algorithm: CongestionControlAlgorithm,
+    max_streams_bidi: u64,
+    max_streams_uni: u64,
+}
+
+impl Default for ConnectionParameters {
+    fn default() -> Self {
+        Self {
+            quic_version: QuicVersion::default(),
+            cc_algorithm: CongestionControlAlgorithm::NewReno,
+            max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
+            max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
+        }
+    }
+}
+
+impl ConnectionParameters {
+    pub fn get_quic_version(&self) -> QuicVersion {
+        self.quic_version
+    }
+
+    pub fn quic_version(mut self, v: QuicVersion) -> Self {
+        self.quic_version = v;
+        self
+    }
+
+    pub fn get_cc_algorithm(&self) -> CongestionControlAlgorithm {
+        self.cc_algorithm
+    }
+
+    pub fn cc_algorithm(mut self, v: CongestionControlAlgorithm) -> Self {
+        self.cc_algorithm = v;
+        self
+    }
+
+    pub fn get_max_streams_bidi(&self) -> u64 {
+        self.max_streams_bidi
+    }
+
+    pub fn max_streams_bidi(mut self, v: u64) -> Res<Self> {
+        if v > (1 << 60) {
+            return Err(Error::StreamLimitError);
+        }
+        self.max_streams_bidi = v;
+        Ok(self)
+    }
+
+    pub fn get_max_streams_uni(&self) -> u64 {
+        self.max_streams_uni
+    }
+
+    pub fn max_streams_uni(mut self, v: u64) -> Res<Self> {
+        if v > (1 << 60) {
+            return Err(Error::StreamLimitError);
+        }
+        self.max_streams_uni = v;
+        Ok(self)
+    }
 }
 
 /// A QUIC Connection
@@ -317,8 +374,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        cc_algorithm: CongestionControlAlgorithm,
-        quic_version: QuicVersion,
+        conn_params: &ConnectionParameters,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let mut c = Self::new(
@@ -327,13 +383,11 @@ impl Connection {
             cid_manager,
             protocols,
             None,
-            &ConnectionParameters {
-                cc_algorithm: cc_algorithm,
-                quic_version,
-                max_streams: None,
-            },
+            conn_params,
         )?;
-        c.crypto.states.init(quic_version, Role::Client, &dcid);
+        c.crypto
+            .states
+            .init(conn_params.get_quic_version(), Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
         c.initialize_path(local_addr, remote_addr);
         Ok(c)
@@ -344,9 +398,7 @@ impl Connection {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         cid_manager: CidMgr,
-        cc_algorithm: CongestionControlAlgorithm,
-        quic_version: QuicVersion,
-        max_streams: Option<u64>,
+        conn_params: &ConnectionParameters,
     ) -> Res<Self> {
         Self::new(
             Role::Server,
@@ -354,11 +406,7 @@ impl Connection {
             cid_manager,
             protocols,
             None,
-            &ConnectionParameters {
-                cc_algorithm: cc_algorithm,
-                quic_version,
-                max_streams,
-            },
+            conn_params,
         )
     }
 
@@ -405,19 +453,14 @@ impl Connection {
     ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
-        if let Some(max) = conn_params.max_streams {
-            if max > (1 << 60) {
-                return Err(Error::StreamLimitError);
-            }
-            tphandler
-                .borrow_mut()
-                .local
-                .set_integer(tparams::INITIAL_MAX_STREAMS_BIDI, max);
-            tphandler
-                .borrow_mut()
-                .local
-                .set_integer(tparams::INITIAL_MAX_STREAMS_UNI, max);
-        }
+        tphandler.borrow_mut().local.set_integer(
+            tparams::INITIAL_MAX_STREAMS_BIDI,
+            conn_params.get_max_streams_bidi(),
+        );
+        tphandler.borrow_mut().local.set_integer(
+            tparams::INITIAL_MAX_STREAMS_UNI,
+            conn_params.get_max_streams_uni(),
+        );
         let local_initial_source_cid = cid_manager.borrow_mut().generate_cid();
         tphandler.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,

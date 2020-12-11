@@ -17,8 +17,9 @@ use neqo_crypto::{
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    Connection, ConnectionError, ConnectionEvent, Error, FixedConnectionIdManager, Output,
-    QuicVersion, State, StreamType, LOCAL_STREAM_LIMIT_BIDI, LOCAL_STREAM_LIMIT_UNI,
+    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, Error,
+    FixedConnectionIdManager, Output, QuicVersion, State, StreamType, LOCAL_STREAM_LIMIT_BIDI,
+    LOCAL_STREAM_LIMIT_UNI,
 };
 use test_fixture::{self, assertions, default_client, loopback, now, split_datagram};
 
@@ -38,7 +39,7 @@ fn default_server() -> Server {
         test_fixture::anti_replay(),
         Box::new(AllowZeroRtt {}),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
-        None,
+        ConnectionParameters::default(),
     )
     .expect("should create a server")
 }
@@ -951,7 +952,11 @@ fn max_streams() {
         test_fixture::anti_replay(),
         Box::new(AllowZeroRtt {}),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
-        Some(MAX_STREAMS),
+        ConnectionParameters::default()
+            .max_streams_bidi(MAX_STREAMS)
+            .unwrap()
+            .max_streams_uni(MAX_STREAMS)
+            .unwrap(),
     )
     .expect("should create a server");
 
@@ -983,7 +988,7 @@ fn max_streams_default() {
         test_fixture::anti_replay(),
         Box::new(AllowZeroRtt {}),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
-        None,
+        ConnectionParameters::default(),
     )
     .expect("should create a server");
 
