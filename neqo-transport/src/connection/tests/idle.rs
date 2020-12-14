@@ -58,6 +58,8 @@ fn asymmetric_idle_timeout() {
     server.idle_timeout = IdleTimeout::new(LOWER_TIMEOUT);
 
     // Now connect and force idleness manually.
+    // We do that by following what `force_idle` does and have each endpoint
+    // send two packets, which are delivered out of order.  See `force_idle`.
     connect(&mut client, &mut server);
     let c1 = send_something(&mut client, now());
     let c2 = send_something(&mut client, now());

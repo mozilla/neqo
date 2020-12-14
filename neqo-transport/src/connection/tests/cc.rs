@@ -7,7 +7,7 @@
 use super::super::{Connection, Output};
 use super::{
     assert_full_cwnd, connect_rtt_idle, cwnd_packets, default_client, default_server, fill_cwnd,
-    send_something, AT_LEAST_PTO, DEFAULT_RTT, POST_HANDSHAKE_CWND,
+    send_something, AT_LEAST_PTO, DEFAULT_RTT, FORCE_IDLE_CLIENT_1RTT_PACKETS, POST_HANDSHAKE_CWND,
 };
 use crate::cc::{CWND_MIN, MAX_DATAGRAM_SIZE};
 use crate::frame::StreamType;
@@ -135,7 +135,8 @@ fn cc_slow_start_to_cong_avoidance_recovery_period() {
     // Predict the packet number of the last packet sent.
     // We have already sent packets in `connect_rtt_idle`,
     // so include a fudge factor.
-    let flight1_largest = PacketNumber::try_from(c_tx_dgrams.len()).unwrap() + 3;
+    let flight1_largest =
+        PacketNumber::try_from(c_tx_dgrams.len() + FORCE_IDLE_CLIENT_1RTT_PACKETS).unwrap();
 
     // Server: Receive and generate ack
     now += DEFAULT_RTT / 2;

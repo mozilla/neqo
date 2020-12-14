@@ -558,7 +558,7 @@ fn reorder_1rtt() {
     now += RTT / 2;
     let s2 = server.process(c2, now).dgram();
     // The server has now received those packets, and saved them.
-    // The two additional are: an Initial ACK, a Handshake,
+    // The three additional are: an Initial ACK, a Handshake,
     // and a 1-RTT (containing NEW_CONNECTION_ID).
     assert_eq!(server.stats().packets_rx, PACKETS * 2 + 5);
     assert_eq!(server.stats().saved_datagrams, PACKETS);

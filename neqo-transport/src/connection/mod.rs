@@ -1537,11 +1537,9 @@ impl Connection {
 
     fn handle_migration(&mut self, path: &PathRef, d: &Datagram, migrate: bool, now: Instant) {
         if !migrate {
-            qtrace!([self], "{} No migration necessary", path.borrow());
             return;
         }
         if self.role == Role::Client {
-            qdebug!([self], "{} Ignoring migration by server", path.borrow());
             return;
         }
 

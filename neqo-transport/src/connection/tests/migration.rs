@@ -44,9 +44,8 @@ fn loopback() -> SocketAddr {
     SocketAddr::new(IpAddr::V6(Ipv6Addr::from(1)), 443)
 }
 
-fn change_path(d: &Datagram) -> Datagram {
-    let v4 = addr_v4();
-    Datagram::new(v4, v4, &d[..])
+fn change_path(d: &Datagram, a: SocketAddr) -> Datagram {
+    Datagram::new(a, a, &d[..])
 }
 
 fn new_port(a: SocketAddr) -> SocketAddr {
@@ -58,16 +57,20 @@ fn change_source_port(d: &Datagram) -> Datagram {
     Datagram::new(new_port(d.source()), d.destination(), &d[..])
 }
 
+fn assert_path(dgram: &Datagram, path_addr: SocketAddr) {
+    assert_eq!(dgram.source(), path_addr);
+    assert_eq!(dgram.destination(), path_addr);
+}
+
 fn assert_v4_path(dgram: &Datagram, padded: bool) {
-    assert_eq!(dgram.source(), addr_v4());
-    assert_eq!(dgram.destination(), addr_v4());
+    assert_path(dgram, addr_v4());
     if padded {
         assert_eq!(dgram.len(), PATH_MTU_V4);
     }
 }
+
 fn assert_v6_path(dgram: &Datagram, padded: bool) {
-    assert_eq!(dgram.source(), addr());
-    assert_eq!(dgram.destination(), addr());
+    assert_path(dgram, addr());
     if padded {
         assert_eq!(dgram.len(), PATH_MTU_V6);
     }
@@ -102,7 +105,7 @@ fn path_forwarding_attack() {
     connect_force_idle(&mut client, &mut server);
 
     let dgram = send_something(&mut client, now());
-    let dgram = change_path(&dgram);
+    let dgram = change_path(&dgram, addr_v4());
     server.process_input(dgram, now());
 
     // The server now probes the new (primary) path.
@@ -249,7 +252,7 @@ fn migrate_immediate_fail() {
     assert_ne!(pto, Duration::new(0, 0));
     now += pto;
 
-    // The client should fall back to the original path and
+    // The client should fall back to the original path and retire the connection ID.
     let fallback = client.process_output(now).dgram();
     assert_v6_path(&fallback.unwrap(), false);
     assert_eq!(client.stats().frame_tx.retire_connection_id, 1);
@@ -692,53 +695,34 @@ fn migration_invalid_address() {
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
+    let mut cant_migrate = |local, remote| {
+        assert_eq!(
+            client.migrate(local, remote, true, now()).unwrap_err(),
+            Error::InvalidMigration
+        )
+    };
+
     // Providing neither address is pointless and therefore an error.
-    assert_eq!(
-        client.migrate(None, None, true, now()).unwrap_err(),
-        Error::InvalidMigration
-    );
+    cant_migrate(None, None);
 
     // Providing a zero port number isn't valid.
     let mut zero_port = addr();
     zero_port.set_port(0);
-    assert_eq!(
-        client
-            .migrate(None, Some(zero_port), true, now())
-            .unwrap_err(),
-        Error::InvalidMigration
-    );
-    assert_eq!(
-        client
-            .migrate(Some(zero_port), None, true, now())
-            .unwrap_err(),
-        Error::InvalidMigration
-    );
+    cant_migrate(None, Some(zero_port));
+    cant_migrate(Some(zero_port), None);
 
     // An unspecified remote address is bad.
     let mut remote_unspecified = addr();
     remote_unspecified.set_ip(IpAddr::V6(Ipv6Addr::from(0)));
-    assert_eq!(
-        client
-            .migrate(None, Some(remote_unspecified), true, now())
-            .unwrap_err(),
-        Error::InvalidMigration
-    );
+    cant_migrate(None, Some(remote_unspecified));
 
     // Mixed address families is bad.
-    assert_eq!(
-        client
-            .migrate(Some(addr()), Some(addr_v4()), true, now())
-            .unwrap_err(),
-        Error::InvalidMigration
-    );
-    assert_eq!(
-        client
-            .migrate(Some(addr_v4()), Some(addr()), true, now())
-            .unwrap_err(),
-        Error::InvalidMigration
-    );
+    cant_migrate(Some(addr()), Some(addr_v4()));
+    cant_migrate(Some(addr_v4()), Some(addr()));
 
     // Loopback to non-loopback is bad.
+    cant_migrate(Some(addr()), Some(loopback()));
+    cant_migrate(Some(loopback()), Some(addr()));
     assert_eq!(
         client
             .migrate(Some(addr()), Some(loopback()), true, now())

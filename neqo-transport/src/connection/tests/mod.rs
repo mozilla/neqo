@@ -45,6 +45,8 @@ mod zerortt;
 const DEFAULT_RTT: Duration = Duration::from_millis(100);
 const AT_LEAST_PTO: Duration = Duration::from_secs(1);
 const DEFAULT_STREAM_DATA: &[u8] = b"message";
+/// The number of 1-RTT packets sent in `force_idle` by a client.
+const FORCE_IDLE_CLIENT_1RTT_PACKETS: usize = 3;
 
 /// WARNING!  In this module, this version of the generator needs to be used.
 /// This copies the implementation from
@@ -214,15 +216,18 @@ fn exchange_ticket(
     get_tokens(client).pop().expect("should have token")
 }
 
-/// Connect with an RTT and then force both peers to be idle.
 /// Getting the client and server to reach an idle state is surprisingly hard.
 /// The server sends `HANDSHAKE_DONE` at the end of the handshake, and the client
 /// doesn't immediately acknowledge it.  Reordering packets does the trick.
-fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Duration) -> Instant {
-    let mut now = connect_with_rtt(client, server, now(), rtt);
+fn force_idle(
+    client: &mut Connection,
+    server: &mut Connection,
+    rtt: Duration,
+    mut now: Instant,
+) -> Instant {
     // The client has sent NEW_CONNECTION_ID, so ensure that the server generates
     // an acknowledgment by sending some reordered packets.
-    qtrace!("connect_rtt_idle: send reordered client packets");
+    qtrace!("force_idle: send reordered client packets");
     let c1 = send_something(client, now);
     let c2 = send_something(client, now);
     now += rtt / 2;
@@ -230,7 +235,7 @@ fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Durat
     server.process_input(c1, now);
 
     // Now do the same for the server.  (The ACK is in the first one.)
-    qtrace!("connect_rtt_idle: send reordered server packets");
+    qtrace!("force_idle: send reordered server packets");
     let s1 = send_something(server, now);
     let s2 = send_something(server, now);
     now += rtt / 2;
@@ -248,6 +253,13 @@ fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Durat
         server.process(ack, now),
         Output::Callback(LOCAL_IDLE_TIMEOUT)
     );
+    now
+}
+
+/// Connect with an RTT and then force both peers to be idle.
+fn connect_rtt_idle(client: &mut Connection, server: &mut Connection, rtt: Duration) -> Instant {
+    let now = connect_with_rtt(client, server, now(), rtt);
+    let now = force_idle(client, server, rtt, now);
     // Drain events from both as well.
     let _ = client.events().count();
     let _ = server.events().count();
