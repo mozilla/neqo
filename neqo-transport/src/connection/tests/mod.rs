@@ -23,7 +23,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use neqo_common::{event::Provider, qdebug, qtrace, Datagram};
-use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
+use neqo_crypto::{AllowZeroRtt, AuthenticationStatus, DisallowZeroRtt, ResumptionToken};
 use test_fixture::{self, fixture_init, loopback, now};
 
 // All the tests.
@@ -74,6 +74,22 @@ pub fn default_server() -> Connection {
     .expect("create a default server");
     c.server_enable_0rtt(&test_fixture::anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
+    c
+}
+
+pub fn disallow_zerortt_server() -> Connection {
+    fixture_init();
+
+    let mut c = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+        &CongestionControlAlgorithm::NewReno,
+        QuicVersion::default(),
+    )
+    .expect("create a default server");
+    c.server_enable_0rtt(&test_fixture::anti_replay(), DisallowZeroRtt {})
+        .expect("reject 0-RTT");
     c
 }
 

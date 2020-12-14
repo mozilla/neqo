@@ -868,6 +868,15 @@ impl ZeroRttChecker for AllowZeroRtt {
 }
 
 #[derive(Debug)]
+pub struct DisallowZeroRtt {}
+impl ZeroRttChecker for DisallowZeroRtt {
+    fn check(&self, _token: &[u8]) -> ZeroRttCheckResult {
+        qwarn!("DisallowZeroRtt reject 0-RTT");
+        ZeroRttCheckResult::Reject
+    }
+}
+
+#[derive(Debug)]
 struct ZeroRttCheckState {
     fd: *mut ssl::PRFileDesc,
     checker: Pin<Box<dyn ZeroRttChecker>>,

@@ -4,16 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::super::{Connection, FixedConnectionIdManager};
-use super::{connect, default_client, default_server, exchange_ticket};
+use super::{connect, default_client, default_server, disallow_zerortt_server, exchange_ticket};
 use crate::events::ConnectionEvent;
 use crate::frame::StreamType;
-use crate::{CongestionControlAlgorithm, Error, QuicVersion};
+use crate::Error;
 
 use neqo_common::event::Provider;
-use neqo_crypto::{AllowZeroRtt, AntiReplay};
-use std::cell::RefCell;
-use std::rc::Rc;
 use test_fixture::{self, assertions, now};
 
 #[test]
@@ -129,22 +125,8 @@ fn zero_rtt_send_reject() {
     client
         .enable_resumption(now(), token)
         .expect("should set token");
-    let mut server = Connection::new_server(
-        test_fixture::DEFAULT_KEYS,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
-    )
-    .unwrap();
-    // Using a freshly initialized anti-replay context
-    // should result in the server rejecting 0-RTT.
-    let ar =
-        AntiReplay::new(now(), test_fixture::ANTI_REPLAY_WINDOW, 1, 3).expect("setup anti-replay");
-    server
-        .server_enable_0rtt(&ar, AllowZeroRtt {})
-        .expect("enable 0-RTT");
 
+    let mut server = disallow_zerortt_server();
     // Send ClientHello.
     let client_hs = client.process(None, now());
     assert!(client_hs.as_dgram_ref().is_some());
