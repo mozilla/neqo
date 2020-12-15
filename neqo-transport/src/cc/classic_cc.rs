@@ -395,7 +395,6 @@ mod tests {
     use crate::packet::{PacketNumber, PacketType};
     use crate::tracking::SentPacket;
     use std::convert::TryFrom;
-    use std::rc::Rc;
     use std::time::{Duration, Instant};
     use test_fixture::now;
 
@@ -430,27 +429,27 @@ mod tests {
         let sent_packets = vec![
             SentPacket::new(
                 PacketType::Short,
-                1,             // pn
-                time_before,   // time sent
-                true,          // ack eliciting
-                Rc::default(), // tokens
-                103,           // size
+                1,           // pn
+                time_before, // time sent
+                true,        // ack eliciting
+                Vec::new(),  // tokens
+                103,         // size
             ),
             SentPacket::new(
                 PacketType::Short,
-                2,             // pn
-                time_before,   // time sent
-                true,          // ack eliciting
-                Rc::default(), // tokens
-                105,           // size
+                2,           // pn
+                time_before, // time sent
+                true,        // ack eliciting
+                Vec::new(),  // tokens
+                105,         // size
             ),
             SentPacket::new(
                 PacketType::Short,
-                3,             // pn
-                time_after,    // time sent
-                true,          // ack eliciting
-                Rc::default(), // tokens
-                107,           // size
+                3,          // pn
+                time_after, // time sent
+                true,       // ack eliciting
+                Vec::new(), // tokens
+                107,        // size
             ),
         ];
 
@@ -499,7 +498,7 @@ mod tests {
             pn,
             now() + t,
             ack_eliciting,
-            Rc::default(),
+            Vec::new(),
             100,
         )
     }
@@ -670,7 +669,7 @@ mod tests {
                     u64::try_from(i).unwrap(),
                     by_pto(t),
                     true,
-                    Rc::default(),
+                    Vec::new(),
                     1000,
                 )
             })
@@ -731,7 +730,7 @@ mod tests {
             lost[0].pn,
             lost[0].time_sent,
             false,
-            Rc::default(),
+            Vec::new(),
             lost[0].size,
         );
         assert!(!persistent_congestion_by_pto(0, 0, &lost));

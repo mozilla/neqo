@@ -1698,7 +1698,7 @@ impl Connection {
                 pn,
                 now,
                 ack_eliciting,
-                Rc::new(tokens),
+                tokens,
                 encoder.len() - header_start,
             );
             if padded {
@@ -2220,7 +2220,7 @@ impl Connection {
     /// to retransmit the frame as needed.
     fn handle_lost_packets(&mut self, lost_packets: &[SentPacket]) {
         for lost in lost_packets {
-            for token in lost.tokens.as_ref() {
+            for token in &lost.tokens {
                 qdebug!([self], "Lost: {:?}", token);
                 match token {
                     RecoveryToken::Ack(_) => {}
@@ -2278,7 +2278,7 @@ impl Connection {
             now,
         );
         for acked in acked_packets {
-            for token in acked.tokens.as_ref() {
+            for token in &acked.tokens {
                 match token {
                     RecoveryToken::Ack(at) => self.acks.acked(at),
                     RecoveryToken::Stream(st) => self.send_streams.acked(st),
@@ -2708,7 +2708,7 @@ impl Connection {
         let stream = self
             .recv_streams
             .get_mut(&stream_id.into())
-            .ok_or_else(|| Error::InvalidStreamId)?;
+            .ok_or(Error::InvalidStreamId)?;
 
         let rb = stream.read(data)?;
         Ok((rb.0 as usize, rb.1))
@@ -2719,7 +2719,7 @@ impl Connection {
         let stream = self
             .recv_streams
             .get_mut(&stream_id.into())
-            .ok_or_else(|| Error::InvalidStreamId)?;
+            .ok_or(Error::InvalidStreamId)?;
 
         stream.stop_sending(err);
         Ok(())
