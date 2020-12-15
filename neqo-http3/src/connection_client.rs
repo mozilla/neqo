@@ -4790,7 +4790,7 @@ mod tests {
         // Connect and send a request
         let (mut client, _, _) = connect_and_send_request(true);
 
-        assert_eq!(client.cancel_push(6), Err(Error::InvalidStreamId));
+        assert_eq!(client.cancel_push(6), Err(Error::HttpId));
         assert_eq!(client.state(), Http3State::Connected);
     }
 
