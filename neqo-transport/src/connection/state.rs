@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use neqo_common::Encoder;
-use std::cmp::Ordering;
+use std::cmp::{min, Ordering};
 use std::mem;
 use std::rc::Rc;
 use std::time::Instant;
@@ -121,10 +121,9 @@ impl ClosingFrame {
     }
 
     pub fn write_frame(&self, builder: &mut PacketBuilder) {
-        // Allow 8 bytes for the reason phrase to ensure that the only reason
-        // that there is insufficient space to truncate is because the reason
-        // phrase is too long by at least 4 bytes.
-        if builder.remaining() < 1 + 8 + 8 + 8 + 8 {
+        // Allow 8 bytes for the reason phrase to ensure that if it needs to be
+        // truncated there is still at least a few bytes of the value.
+        if builder.remaining() < 1 + 8 + 8 + 2 + 8 {
             return;
         }
         match &self.error {
@@ -138,9 +137,11 @@ impl ClosingFrame {
                 builder.encode_varint(*code);
             }
         }
-        // Truncate the reason phrase if it doesn't fit.
-        let reason = if builder.remaining() < Encoder::vvec_len(self.reason_phrase.len()) {
-            &self.reason_phrase[..builder.remaining() - 4]
+        // Truncate the reason phrase if it doesn't fit.  As we send this frame in
+        // multiple packet number spaces, limit the overall size to 256.
+        let available = min(256, builder.remaining());
+        let reason = if available < Encoder::vvec_len(self.reason_phrase.len()) {
+            &self.reason_phrase[..available - 2]
         } else {
             &self.reason_phrase
         };
