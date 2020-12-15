@@ -15,6 +15,7 @@ use super::CongestionControl;
 
 use crate::cc::MAX_DATAGRAM_SIZE;
 use crate::qlog::{self, QlogMetric};
+use crate::sender::PACING_BURST_SIZE;
 use crate::tracking::SentPacket;
 use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::NeqoQlog, qtrace};
 
@@ -45,6 +46,10 @@ enum State {
 impl State {
     pub fn in_recovery(self) -> bool {
         matches!(self, Self::RecoveryStart | Self::Recovery)
+    }
+
+    pub fn is_slow_start(self) -> bool {
+        self == Self::SlowStart
     }
 
     /// These states are transient, we tell qlog on entry, but not on exit.
@@ -123,6 +128,20 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
 
     // Multi-packet version of OnPacketAckedCC
     fn on_packets_acked(&mut self, acked_pkts: &[SentPacket]) {
+        // Check whether we are app limited before acked packets are removed
+        // from bytes_in_flight.
+        let is_app_limited = self.app_limited();
+        qtrace!(
+            [self],
+            "app limited={}, bytes_in_flight:{}, cwnd: {}, slow_start: {} pacing/-burst_size: {}",
+            is_app_limited,
+            self.bytes_in_flight,
+            self.congestion_window,
+            self.state.is_slow_start(),
+            MAX_DATAGRAM_SIZE * PACING_BURST_SIZE,
+        );
+
+        let mut acked_bytes = 0;
         for pkt in acked_pkts.iter().filter(|pkt| pkt.cc_outstanding()) {
             assert!(self.bytes_in_flight >= pkt.size);
             self.bytes_in_flight -= pkt.size;
@@ -138,13 +157,13 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
                 qlog::metrics_updated(&mut self.qlog, &[QlogMetric::InRecovery(false)]);
             }
 
-            if self.app_limited() {
-                // Do not increase congestion_window if application limited.
-                continue;
-            }
-
-            self.acked_bytes += pkt.size;
+            acked_bytes += pkt.size;
         }
+
+        if !is_app_limited {
+            self.acked_bytes += acked_bytes;
+        }
+
         qtrace!([self], "ACK received, acked_bytes = {}", self.acked_bytes);
 
         // Slow start, up to the slow start threshold.
@@ -382,8 +401,13 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
     #[allow(clippy::unused_self)]
     fn app_limited(&self) -> bool {
-        //TODO(agrover): how do we get this info??
-        false
+        if self.bytes_in_flight >= self.congestion_window {
+            false
+        } else if self.state.is_slow_start() {
+            self.bytes_in_flight < self.congestion_window / 2
+        } else {
+            self.congestion_window > (self.bytes_in_flight + MAX_DATAGRAM_SIZE * PACING_BURST_SIZE)
+        }
     }
 }
 
@@ -391,7 +415,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 mod tests {
     use super::{ClassicCongestionControl, CWND_INITIAL, CWND_MIN, PERSISTENT_CONG_THRESH};
     use crate::cc::new_reno::NewReno;
-    use crate::cc::CongestionControl;
+    use crate::cc::{CongestionControl, CWND_INITIAL_PKTS, MAX_DATAGRAM_SIZE};
     use crate::packet::{PacketNumber, PacketType};
     use crate::tracking::SentPacket;
     use std::convert::TryFrom;
@@ -409,18 +433,18 @@ mod tests {
     /// Uses an odd expression because `Duration` arithmetic isn't `const`.
     const PC: Duration = Duration::from_nanos(100_000_000 * (PERSISTENT_CONG_THRESH as u64) + 1);
 
+    fn cwnd_is_default(cc: &ClassicCongestionControl<NewReno>) {
+        assert_eq!(cc.cwnd(), CWND_INITIAL);
+        assert_eq!(cc.ssthresh(), usize::MAX);
+    }
+
+    fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
+        assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
+        assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
+    }
+
     #[test]
     fn issue_876() {
-        fn cwnd_is_default(cc: &ClassicCongestionControl<NewReno>) {
-            assert_eq!(cc.cwnd(), CWND_INITIAL);
-            assert_eq!(cc.ssthresh(), usize::MAX);
-        }
-
-        fn cwnd_is_halved(cc: &ClassicCongestionControl<NewReno>) {
-            assert_eq!(cc.cwnd(), CWND_INITIAL / 2);
-            assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
-        }
-
         let mut cc = ClassicCongestionControl::new(NewReno::default());
         let time_now = now();
         let time_before = time_now - Duration::from_millis(100);
@@ -429,39 +453,69 @@ mod tests {
         let sent_packets = vec![
             SentPacket::new(
                 PacketType::Short,
-                1,           // pn
-                time_before, // time sent
-                true,        // ack eliciting
-                Vec::new(),  // tokens
-                103,         // size
+                1,                     // pn
+                time_before,           // time sent
+                true,                  // ack eliciting
+                Vec::new(),            // tokens
+                MAX_DATAGRAM_SIZE - 1, // size
             ),
             SentPacket::new(
                 PacketType::Short,
-                2,           // pn
-                time_before, // time sent
-                true,        // ack eliciting
-                Vec::new(),  // tokens
-                105,         // size
+                2,                     // pn
+                time_before,           // time sent
+                true,                  // ack eliciting
+                Vec::new(),            // tokens
+                MAX_DATAGRAM_SIZE - 2, // size
             ),
             SentPacket::new(
                 PacketType::Short,
-                3,          // pn
-                time_after, // time sent
-                true,       // ack eliciting
-                Vec::new(), // tokens
-                107,        // size
+                3,                 // pn
+                time_before,       // time sent
+                true,              // ack eliciting
+                Vec::new(),        // tokens
+                MAX_DATAGRAM_SIZE, // size
+            ),
+            SentPacket::new(
+                PacketType::Short,
+                4,                 // pn
+                time_before,       // time sent
+                true,              // ack eliciting
+                Vec::new(),        // tokens
+                MAX_DATAGRAM_SIZE, // size
+            ),
+            SentPacket::new(
+                PacketType::Short,
+                5,                 // pn
+                time_before,       // time sent
+                true,              // ack eliciting
+                Vec::new(),        // tokens
+                MAX_DATAGRAM_SIZE, // size
+            ),
+            SentPacket::new(
+                PacketType::Short,
+                6,                 // pn
+                time_before,       // time sent
+                true,              // ack eliciting
+                Vec::new(),        // tokens
+                MAX_DATAGRAM_SIZE, // size
+            ),
+            SentPacket::new(
+                PacketType::Short,
+                7,                     // pn
+                time_after,            // time sent
+                true,                  // ack eliciting
+                Vec::new(),            // tokens
+                MAX_DATAGRAM_SIZE - 3, // size
             ),
         ];
 
-        cc.on_packet_sent(&sent_packets[0]);
+        // Send some more packets so that the cc is not app-limited.
+        for p in sent_packets[..6].iter() {
+            cc.on_packet_sent(p);
+        }
         assert_eq!(cc.acked_bytes, 0);
         cwnd_is_default(&cc);
-        assert_eq!(cc.bytes_in_flight(), 103);
-
-        cc.on_packet_sent(&sent_packets[1]);
-        assert_eq!(cc.acked_bytes, 0);
-        cwnd_is_default(&cc);
-        assert_eq!(cc.bytes_in_flight(), 208);
+        assert_eq!(cc.bytes_in_flight(), 6 * MAX_DATAGRAM_SIZE - 3);
 
         cc.on_packets_lost(Some(time_now), None, PTO, &sent_packets[0..1]);
 
@@ -469,27 +523,27 @@ mod tests {
         assert!(cc.recovery_packet());
         assert_eq!(cc.acked_bytes, 0);
         cwnd_is_halved(&cc);
-        assert_eq!(cc.bytes_in_flight(), 105);
+        assert_eq!(cc.bytes_in_flight(), 5 * MAX_DATAGRAM_SIZE - 2);
 
         // Send a packet after recovery starts
-        cc.on_packet_sent(&sent_packets[2]);
+        cc.on_packet_sent(&sent_packets[6]);
         assert!(!cc.recovery_packet());
         cwnd_is_halved(&cc);
         assert_eq!(cc.acked_bytes, 0);
-        assert_eq!(cc.bytes_in_flight(), 212);
+        assert_eq!(cc.bytes_in_flight(), 6 * MAX_DATAGRAM_SIZE - 5);
 
         // and ack it. cwnd increases slightly
-        cc.on_packets_acked(&sent_packets[2..3]);
-        assert_eq!(cc.acked_bytes, sent_packets[2].size);
+        cc.on_packets_acked(&sent_packets[6..]);
+        assert_eq!(cc.acked_bytes, sent_packets[6].size);
         cwnd_is_halved(&cc);
-        assert_eq!(cc.bytes_in_flight(), 105);
+        assert_eq!(cc.bytes_in_flight(), 5 * MAX_DATAGRAM_SIZE - 2);
 
         // Packet from before is lost. Should not hurt cwnd.
         cc.on_packets_lost(Some(time_now), None, PTO, &sent_packets[1..2]);
         assert!(!cc.recovery_packet());
-        assert_eq!(cc.acked_bytes, sent_packets[2].size);
+        assert_eq!(cc.acked_bytes, sent_packets[6].size);
         cwnd_is_halved(&cc);
-        assert_eq!(cc.bytes_in_flight(), 0);
+        assert_eq!(cc.bytes_in_flight(), 4 * MAX_DATAGRAM_SIZE);
     }
 
     fn lost(pn: PacketNumber, ack_eliciting: bool, t: Duration) -> SentPacket {
@@ -762,5 +816,134 @@ mod tests {
     fn persistent_congestion_unsorted() {
         let lost = make_lost(&[PERSISTENT_CONG_THRESH + 2, 1]);
         assert!(!persistent_congestion_by_pto(0, 0, &lost));
+    }
+
+    #[test]
+    fn app_limited_slow_start() {
+        let mut cc = ClassicCongestionControl::new(NewReno::default());
+
+        for i in 0..CWND_INITIAL_PKTS {
+            let p = SentPacket::new(
+                PacketType::Short,
+                u64::try_from(i).unwrap(), // pn
+                now(),                     // time sent
+                true,                      // ack eliciting
+                Vec::new(),                // tokens
+                MAX_DATAGRAM_SIZE,         // size
+            );
+            cc.on_packet_sent(&p);
+        }
+        assert_eq!(cc.bytes_in_flight(), CWND_INITIAL);
+
+        for i in 0..4 {
+            let p = [SentPacket::new(
+                PacketType::Short,
+                u64::try_from(i).unwrap(), // pn
+                now(),                     // time sent
+                true,                      // ack eliciting
+                Vec::new(),                // tokens
+                MAX_DATAGRAM_SIZE,         // size
+            )];
+            cc.on_packets_acked(&p);
+
+            assert_eq!(
+                cc.bytes_in_flight(),
+                (CWND_INITIAL_PKTS - i - 1) * MAX_DATAGRAM_SIZE
+            );
+            assert_eq!(cc.cwnd(), (CWND_INITIAL_PKTS + i + 1) * MAX_DATAGRAM_SIZE);
+        }
+
+        // Now we are app limited
+        for i in 4..CWND_INITIAL_PKTS {
+            let p = [SentPacket::new(
+                PacketType::Short,
+                u64::try_from(i).unwrap(), // pn
+                now(),                     // time sent
+                true,                      // ack eliciting
+                Vec::new(),                // tokens
+                MAX_DATAGRAM_SIZE,         // size
+            )];
+            cc.on_packets_acked(&p);
+
+            assert_eq!(
+                cc.bytes_in_flight(),
+                (CWND_INITIAL_PKTS - i - 1) * MAX_DATAGRAM_SIZE
+            );
+            assert_eq!(cc.cwnd(), (CWND_INITIAL_PKTS + 4) * MAX_DATAGRAM_SIZE);
+        }
+    }
+
+    #[test]
+    fn app_limited_congestion_avoidance() {
+        const CWND_PKTS_CA: usize = CWND_INITIAL_PKTS / 2;
+
+        let mut cc = ClassicCongestionControl::new(NewReno::default());
+
+        // Change state to congestion avoidance by introducing loss.
+
+        let p_lost = SentPacket::new(
+            PacketType::Short,
+            1,                 // pn
+            now(),             // time sent
+            true,              // ack eliciting
+            Vec::new(),        // tokens
+            MAX_DATAGRAM_SIZE, // size
+        );
+        cc.on_packet_sent(&p_lost);
+        cwnd_is_default(&cc);
+        cc.on_packets_lost(Some(now()), None, PTO, &[p_lost]);
+        cwnd_is_halved(&cc);
+        let p_not_lost = SentPacket::new(
+            PacketType::Short,
+            1,                 // pn
+            now(),             // time sent
+            true,              // ack eliciting
+            Vec::new(),        // tokens
+            MAX_DATAGRAM_SIZE, // size
+        );
+        cc.on_packet_sent(&p_not_lost);
+        cc.on_packets_acked(&[p_not_lost]);
+        cwnd_is_halved(&cc);
+        // cc is app limited therefore cwnd in not increased.
+        assert_eq!(cc.acked_bytes, 0);
+
+        // Now we are in the congestion avoidance state.
+        let mut pkts = Vec::new();
+        for i in 0..CWND_PKTS_CA {
+            let p = SentPacket::new(
+                PacketType::Short,
+                u64::try_from(i + 3).unwrap(), // pn
+                now(),                         // time sent
+                true,                          // ack eliciting
+                Vec::new(),                    // tokens
+                MAX_DATAGRAM_SIZE,             // size
+            );
+            cc.on_packet_sent(&p);
+            pkts.push(p);
+        }
+        assert_eq!(cc.bytes_in_flight(), CWND_INITIAL / 2);
+
+        for i in 0..CWND_PKTS_CA - 2 {
+            cc.on_packets_acked(&pkts[i..=i]);
+
+            assert_eq!(
+                cc.bytes_in_flight(),
+                (CWND_PKTS_CA - i - 1) * MAX_DATAGRAM_SIZE
+            );
+            assert_eq!(cc.cwnd(), CWND_PKTS_CA * MAX_DATAGRAM_SIZE);
+            assert_eq!(cc.acked_bytes, MAX_DATAGRAM_SIZE * (i + 1));
+        }
+
+        // Now we are app limited
+        for i in CWND_PKTS_CA - 2..CWND_PKTS_CA {
+            cc.on_packets_acked(&pkts[i..=i]);
+
+            assert_eq!(
+                cc.bytes_in_flight(),
+                (CWND_PKTS_CA - i - 1) * MAX_DATAGRAM_SIZE
+            );
+            assert_eq!(cc.cwnd(), CWND_PKTS_CA * MAX_DATAGRAM_SIZE);
+            assert_eq!(cc.acked_bytes, MAX_DATAGRAM_SIZE * 3);
+        }
     }
 }
