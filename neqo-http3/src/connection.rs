@@ -218,11 +218,11 @@ impl Http3Connection {
         if fin {
             self.new_streams.remove(&stream_id);
             Ok(false)
-        } else if let Some(t) = stream_type {
-            self.new_streams.remove(&stream_id);
-            self.decode_new_stream(conn, t, stream_id)
         } else {
-            Ok(false)
+            stream_type.map_or(Ok(false), |t| {
+                self.new_streams.remove(&stream_id);
+                self.decode_new_stream(conn, t, stream_id)
+            })
         }
     }
 

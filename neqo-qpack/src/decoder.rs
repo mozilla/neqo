@@ -102,6 +102,7 @@ impl QPackDecoder {
         }
     }
 
+    #[allow(clippy::map_err_ignore)] // We don't care about qpack specifics here.
     fn execute_instruction(&mut self, instruction: DecodedEncoderInstruction) -> Res<()> {
         match instruction {
             DecodedEncoderInstruction::Capacity { value } => self.set_capacity(value)?,
@@ -161,6 +162,7 @@ impl QPackDecoder {
 
     /// # Errors
     ///     May return an error in case of any transport error. TODO: define transport errors.
+    #[allow(clippy::map_err_ignore)]
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         // Encode increment instruction if needed.
         let increment = self.table.base() - self.acked_inserts;

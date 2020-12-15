@@ -123,24 +123,24 @@ impl HeaderEncoder {
 
     pub fn encode_header_block_prefix(&mut self) {
         let tmp = mem::take(&mut self.buf);
-        let (enc_insert_cnt, delta, prefix) = if let Some(r) = self.max_dynamic_index_ref {
-            let req_insert_cnt = r + 1;
-            if req_insert_cnt <= self.base {
-                (
-                    req_insert_cnt % (2 * self.max_entries) + 1,
-                    self.base - req_insert_cnt,
-                    BASE_PREFIX_POSITIVE,
-                )
-            } else {
-                (
-                    req_insert_cnt % (2 * self.max_entries) + 1,
-                    req_insert_cnt - self.base - 1,
-                    BASE_PREFIX_NEGATIVE,
-                )
-            }
-        } else {
-            (0, self.base, BASE_PREFIX_POSITIVE)
-        };
+        let (enc_insert_cnt, delta, prefix) =
+            self.max_dynamic_index_ref
+                .map_or((0, self.base, BASE_PREFIX_POSITIVE), |r| {
+                    let req_insert_cnt = r + 1;
+                    if req_insert_cnt <= self.base {
+                        (
+                            req_insert_cnt % (2 * self.max_entries) + 1,
+                            self.base - req_insert_cnt,
+                            BASE_PREFIX_POSITIVE,
+                        )
+                    } else {
+                        (
+                            req_insert_cnt % (2 * self.max_entries) + 1,
+                            req_insert_cnt - self.base - 1,
+                            BASE_PREFIX_NEGATIVE,
+                        )
+                    }
+                });
         qtrace!(
             [self],
             "encode header block prefix max_dynamic_index_ref={:?}, base={}, enc_insert_cnt={}, delta={}, prefix={:?}.",
@@ -193,6 +193,7 @@ impl<'a> HeaderDecoder<'a> {
         }
     }
 
+    #[allow(clippy::map_err_ignore)]
     pub fn refers_dynamic_table(
         &mut self,
         max_entries: u64,
@@ -203,6 +204,7 @@ impl<'a> HeaderDecoder<'a> {
         Ok(self.req_insert_cnt != 0)
     }
 
+    #[allow(clippy::map_err_ignore)] // Not interested in the qpack details.
     pub fn decode_header_block(
         &mut self,
         table: &HeaderTable,
