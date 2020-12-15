@@ -155,7 +155,7 @@ impl QPackEncoder {
         }
     }
 
-    #[allow(clippy::map_err_ignore)]
+    #[allow(clippy::map_err_ignore, clippy::unknown_clippy_lints)]
     fn insert_count_instruction(&mut self, increment: u64) -> Res<()> {
         self.table
             .increment_acked(increment)

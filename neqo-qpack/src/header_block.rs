@@ -193,26 +193,28 @@ impl<'a> HeaderDecoder<'a> {
         }
     }
 
-    #[allow(clippy::map_err_ignore)]
     pub fn refers_dynamic_table(
         &mut self,
         max_entries: u64,
         total_num_of_inserts: u64,
     ) -> Res<bool> {
-        self.read_base(max_entries, total_num_of_inserts)
-            .map_err(|_| Error::DecompressionFailed)?;
+        Error::map_error(
+            self.read_base(max_entries, total_num_of_inserts),
+            Error::DecompressionFailed,
+        )?;
         Ok(self.req_insert_cnt != 0)
     }
 
-    #[allow(clippy::map_err_ignore)] // Not interested in the qpack details.
     pub fn decode_header_block(
         &mut self,
         table: &HeaderTable,
         max_entries: u64,
         total_num_of_inserts: u64,
     ) -> Res<HeaderDecoderResult> {
-        self.read_base(max_entries, total_num_of_inserts)
-            .map_err(|_| Error::DecompressionFailed)?;
+        Error::map_error(
+            self.read_base(max_entries, total_num_of_inserts),
+            Error::DecompressionFailed,
+        )?;
 
         if table.base() < self.req_insert_cnt {
             qtrace!(
@@ -225,42 +227,42 @@ impl<'a> HeaderDecoder<'a> {
         let mut h: Vec<Header> = Vec::new();
 
         while !self.buf.done() {
-            let b = self.buf.peek().map_err(|_| Error::DecompressionFailed)?;
+            let b = Error::map_error(self.buf.peek(), Error::DecompressionFailed)?;
             if HEADER_FIELD_INDEX_STATIC.cmp_prefix(b) {
-                h.push(
-                    self.read_indexed_static()
-                        .map_err(|_| Error::DecompressionFailed)?,
-                );
+                h.push(Error::map_error(
+                    self.read_indexed_static(),
+                    Error::DecompressionFailed,
+                )?);
             } else if HEADER_FIELD_INDEX_DYNAMIC.cmp_prefix(b) {
-                h.push(
-                    self.read_indexed_dynamic(table)
-                        .map_err(|_| Error::DecompressionFailed)?,
-                );
+                h.push(Error::map_error(
+                    self.read_indexed_dynamic(table),
+                    Error::DecompressionFailed,
+                )?);
             } else if HEADER_FIELD_INDEX_DYNAMIC_POST.cmp_prefix(b) {
-                h.push(
-                    self.read_indexed_dynamic_post(table)
-                        .map_err(|_| Error::DecompressionFailed)?,
-                );
+                h.push(Error::map_error(
+                    self.read_indexed_dynamic_post(table),
+                    Error::DecompressionFailed,
+                )?);
             } else if HEADER_FIELD_LITERAL_NAME_REF_STATIC.cmp_prefix(b) {
-                h.push(
-                    self.read_literal_with_name_ref_static()
-                        .map_err(|_| Error::DecompressionFailed)?,
-                );
+                h.push(Error::map_error(
+                    self.read_literal_with_name_ref_static(),
+                    Error::DecompressionFailed,
+                )?);
             } else if HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC.cmp_prefix(b) {
-                h.push(
-                    self.read_literal_with_name_ref_dynamic(table)
-                        .map_err(|_| Error::DecompressionFailed)?,
-                );
+                h.push(Error::map_error(
+                    self.read_literal_with_name_ref_dynamic(table),
+                    Error::DecompressionFailed,
+                )?);
             } else if HEADER_FIELD_LITERAL_NAME_LITERAL.cmp_prefix(b) {
-                h.push(
-                    self.read_literal_with_name_literal()
-                        .map_err(|_| Error::DecompressionFailed)?,
-                );
+                h.push(Error::map_error(
+                    self.read_literal_with_name_literal(),
+                    Error::DecompressionFailed,
+                )?);
             } else if HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST.cmp_prefix(b) {
-                h.push(
-                    self.read_literal_with_name_ref_dynamic_post(table)
-                        .map_err(|_| Error::DecompressionFailed)?,
-                );
+                h.push(Error::map_error(
+                    self.read_literal_with_name_ref_dynamic_post(table),
+                    Error::DecompressionFailed,
+                )?);
             } else {
                 unreachable!("All prefixes are covered");
             }

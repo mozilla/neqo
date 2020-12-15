@@ -190,9 +190,10 @@ impl Http3Client {
         qtrace!([self], "  settings {}", hex_with_len(&settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
         let mut settings = HSettings::default();
-        settings
-            .decode_frame_contents(&mut dec_settings)
-            .map_err(|_| Error::InvalidResumptionToken)?;
+        Error::map_error(
+            settings.decode_frame_contents(&mut dec_settings),
+            Error::InvalidResumptionToken,
+        )?;
         let tok = dec.decode_remainder();
         qtrace!([self], "  Transport token {}", hex(&tok));
         self.conn.enable_resumption(now, tok)?;
@@ -421,11 +422,9 @@ impl Http3Client {
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
         let stream_id = self.push_handler.borrow_mut().get_active_stream_id(push_id);
-        if let Some(id) = stream_id {
+        stream_id.map_or(Err(Error::InvalidStreamId), |id| {
             self.read_response_data(now, id, buf)
-        } else {
-            Err(Error::InvalidStreamId)
-        }
+        })
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
