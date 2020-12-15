@@ -19,7 +19,7 @@ use crate::path::PathRef;
 use crate::recovery::RecoveryToken;
 use crate::{ConnectionError, Error};
 
-#[derive(Clone, Debug, PartialEq, Ord, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 /// The state of the Connection.
 pub enum State {
     Init,
@@ -50,14 +50,20 @@ impl State {
     }
 }
 
-// Implement Ord so that we can enforce monotonic state progression.
+// Implement `PartialOrd` so that we can enforce monotonic state progression.
 impl PartialOrd for State {
-    #[allow(clippy::match_same_arms)] // Lint bug: rust-lang/rust-clippy#860
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for State {
+    fn cmp(&self, other: &Self) -> Ordering {
         if mem::discriminant(self) == mem::discriminant(other) {
-            return Some(Ordering::Equal);
+            return Ordering::Equal;
         }
-        Some(match (self, other) {
+        #[allow(clippy::match_same_arms)] // Lint bug: rust-lang/rust-clippy#860
+        match (self, other) {
             (Self::Init, _) => Ordering::Less,
             (_, Self::Init) => Ordering::Greater,
             (Self::WaitInitial, _) => Ordering::Less,
@@ -73,7 +79,7 @@ impl PartialOrd for State {
             (Self::Draining { .. }, _) => Ordering::Less,
             (_, Self::Draining { .. }) => Ordering::Greater,
             (Self::Closed(_), _) => unreachable!(),
-        })
+        }
     }
 }
 

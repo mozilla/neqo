@@ -165,12 +165,10 @@ impl Paths {
     #[must_use]
     fn select_primary(&mut self, path: &PathRef) -> Option<PathRef> {
         qinfo!([path.borrow()], "set as primary path");
-        let old_path = if let Some(old) = self.primary.replace(Rc::clone(path)) {
+        let old_path = self.primary.replace(Rc::clone(path)).map(|old| {
             old.borrow_mut().set_primary(false);
-            Some(old)
-        } else {
-            None
-        };
+            old
+        });
 
         // Swap the primary path into slot 0, so that it is protected from eviction.
         let idx = self
@@ -702,17 +700,19 @@ impl Path {
             0
         } else if self.is_valid() {
             usize::MAX
-        } else if let Some(limit) = self.received_bytes.checked_mul(3) {
-            let budget = if limit == 0 {
-                // If we have received absolutely nothing thus far, then this endpoint
-                // is the one initiating communication on this path.  Allow enough space for probing.
-                self.mtu() * 5
-            } else {
-                limit
-            };
-            budget.saturating_sub(self.sent_bytes)
         } else {
-            usize::MAX
+            self.received_bytes
+                .checked_mul(3)
+                .map_or(usize::MAX, |limit| {
+                    let budget = if limit == 0 {
+                        // If we have received absolutely nothing thus far, then this endpoint
+                        // is the one initiating communication on this path.  Allow enough space for probing.
+                        self.mtu() * 5
+                    } else {
+                        limit
+                    };
+                    budget.saturating_sub(self.sent_bytes)
+                })
         }
     }
 }
