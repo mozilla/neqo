@@ -20,7 +20,7 @@ use neqo_http3::{
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
     Connection, ConnectionId, ConnectionParameters, Error as TransportError,
-    FixedConnectionIdManager as EmptyConnectionIdGenerator, QuicVersion,
+    FixedConnectionIdManager as EmptyConnectionIdGenerator, QuicVersion, StreamType,
 };
 
 use std::cell::RefCell;
@@ -177,6 +177,9 @@ pub struct Args {
     /// The set of TLS cipher suites to enable.
     /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
     ciphers: Vec<String>,
+
+    #[structopt(subcommand)]
+    quic_parameters: QuicParameters,
 }
 
 impl Args {
@@ -190,6 +193,27 @@ impl Args {
                 _ => None,
             })
             .collect::<Vec<_>>()
+    }
+}
+
+#[derive(Debug, StructOpt)]
+struct QuicParameters {
+    #[structopt(long, default_value = "16")]
+    /// Set the MAX_STREAMS_BIDI limit.
+    max_streams_bidi: u64,
+
+    #[structopt(long, default_value = "16")]
+    /// Set the MAX_STREAMS_UNI limit.
+    max_streams_uni: u64,
+}
+
+impl QuicParameters {
+    fn get(&self) -> ConnectionParameters {
+        ConnectionParameters::default()
+            .max_streams(StreamType::BiDi, self.max_streams_bidi)
+            .unwrap()
+            .max_streams(StreamType::UniDi, self.max_streams_uni)
+            .unwrap()
     }
 }
 
@@ -503,7 +527,7 @@ fn client(
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::new(0))),
         local_addr,
         remote_addr,
-        &ConnectionParameters::default().quic_version(quic_protocol),
+        &args.quic_parameters.get().quic_version(quic_protocol),
     )?;
     let ciphers = args.get_ciphers();
     if !ciphers.is_empty() {
@@ -721,9 +745,8 @@ mod old {
     use neqo_common::{event::Provider, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
-        Connection, ConnectionEvent, ConnectionParameters, Error,
-        FixedConnectionIdManager as EmptyConnectionIdGenerator, Output, QuicVersion, State,
-        StreamType,
+        Connection, ConnectionEvent, Error, FixedConnectionIdManager as EmptyConnectionIdGenerator,
+        Output, QuicVersion, State, StreamType,
     };
 
     use super::{emit_datagram, get_output_file, Args};
@@ -997,7 +1020,7 @@ mod old {
             Rc::new(RefCell::new(EmptyConnectionIdGenerator::new(0))),
             local_addr,
             remote_addr,
-            &ConnectionParameters::default().quic_version(quic_protocol),
+            &args.quic_parameters.get().quic_version(quic_protocol),
         )?;
 
         if let Some(tok) = token {

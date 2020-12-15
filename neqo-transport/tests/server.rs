@@ -942,9 +942,16 @@ fn closed() {
     assert_eq!(res, Output::None);
 }
 
+fn can_create_streams(c: &mut Connection, t: StreamType, n: usize) {
+    for _ in 0..n {
+        c.stream_create(t).unwrap();
+    }
+    assert_eq!(c.stream_create(t), Err(Error::StreamLimitError));
+}
+
 #[test]
 fn max_streams() {
-    const MAX_STREAMS: u64 = 100;
+    const MAX_STREAMS: u64 = 40;
     let mut server = Server::new(
         now(),
         test_fixture::DEFAULT_KEYS,
@@ -953,9 +960,9 @@ fn max_streams() {
         Box::new(AllowZeroRtt {}),
         Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
         ConnectionParameters::default()
-            .max_streams_bidi(MAX_STREAMS)
+            .max_streams(StreamType::BiDi, MAX_STREAMS)
             .unwrap()
-            .max_streams_uni(MAX_STREAMS)
+            .max_streams(StreamType::UniDi, MAX_STREAMS)
             .unwrap(),
     )
     .expect("should create a server");
@@ -964,18 +971,15 @@ fn max_streams() {
     connect(&mut client, &mut server);
 
     // Make sure that we can create MAX_STREAMS uni- and bidirectional streams.
-    for _i in 0..MAX_STREAMS {
-        client.stream_create(StreamType::UniDi).unwrap();
-        client.stream_create(StreamType::BiDi).unwrap();
-    }
-
-    assert_eq!(
-        client.stream_create(StreamType::UniDi),
-        Err(Error::StreamLimitError)
+    can_create_streams(
+        &mut client,
+        StreamType::UniDi,
+        usize::try_from(MAX_STREAMS).unwrap(),
     );
-    assert_eq!(
-        client.stream_create(StreamType::BiDi),
-        Err(Error::StreamLimitError)
+    can_create_streams(
+        &mut client,
+        StreamType::BiDi,
+        usize::try_from(MAX_STREAMS).unwrap(),
     );
 }
 
@@ -996,21 +1000,14 @@ fn max_streams_default() {
     connect(&mut client, &mut server);
 
     // Make sure that we can create LOCAL_STREAM_LIMIT_UNI unidirectional streams
-    for _i in 0..LOCAL_STREAM_LIMIT_UNI {
-        client.stream_create(StreamType::UniDi).unwrap();
-    }
-
-    // Make sure that we can create LOCAL_STREAM_LIMIT_BIDI bidirectional streams
-    for _i in 0..LOCAL_STREAM_LIMIT_BIDI {
-        client.stream_create(StreamType::BiDi).unwrap();
-    }
-
-    assert_eq!(
-        client.stream_create(StreamType::UniDi),
-        Err(Error::StreamLimitError)
+    can_create_streams(
+        &mut client,
+        StreamType::UniDi,
+        usize::try_from(LOCAL_STREAM_LIMIT_UNI).unwrap(),
     );
-    assert_eq!(
-        client.stream_create(StreamType::BiDi),
-        Err(Error::StreamLimitError)
+    can_create_streams(
+        &mut client,
+        StreamType::BiDi,
+        usize::try_from(LOCAL_STREAM_LIMIT_BIDI).unwrap(),
     );
 }

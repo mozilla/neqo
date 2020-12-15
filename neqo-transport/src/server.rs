@@ -15,9 +15,9 @@ use neqo_crypto::{AntiReplay, Cipher, ZeroRttCheckResult, ZeroRttChecker};
 pub use crate::addr_valid::ValidateAddress;
 use crate::addr_valid::{AddressValidation, AddressValidationResult};
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
-use crate::connection::{Connection, ConnectionParameters, Output, State};
+use crate::connection::{Connection, Output, State};
 use crate::packet::{PacketBuilder, PacketType, PublicPacket};
-use crate::{QuicVersion, Res};
+use crate::{ConnectionParameters, QuicVersion, Res};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};

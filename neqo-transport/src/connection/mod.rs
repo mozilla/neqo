@@ -29,7 +29,6 @@ use neqo_crypto::{
 };
 
 use crate::addr_valid::{AddressValidation, NewTokenState};
-use crate::cc::CongestionControlAlgorithm;
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
 use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
@@ -53,6 +52,7 @@ use crate::tparams::{
     self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
 };
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
+use crate::ConnectionParameters;
 use crate::{AppError, ConnectionError, Error, Res};
 
 mod idle;
@@ -225,69 +225,6 @@ impl AddressValidationInfo {
     }
 }
 
-#[derive(Clone)]
-pub struct ConnectionParameters {
-    quic_version: QuicVersion,
-    cc_algorithm: CongestionControlAlgorithm,
-    max_streams_bidi: u64,
-    max_streams_uni: u64,
-}
-
-impl Default for ConnectionParameters {
-    fn default() -> Self {
-        Self {
-            quic_version: QuicVersion::default(),
-            cc_algorithm: CongestionControlAlgorithm::NewReno,
-            max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
-            max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
-        }
-    }
-}
-
-impl ConnectionParameters {
-    pub fn get_quic_version(&self) -> QuicVersion {
-        self.quic_version
-    }
-
-    pub fn quic_version(mut self, v: QuicVersion) -> Self {
-        self.quic_version = v;
-        self
-    }
-
-    pub fn get_cc_algorithm(&self) -> CongestionControlAlgorithm {
-        self.cc_algorithm
-    }
-
-    pub fn cc_algorithm(mut self, v: CongestionControlAlgorithm) -> Self {
-        self.cc_algorithm = v;
-        self
-    }
-
-    pub fn get_max_streams_bidi(&self) -> u64 {
-        self.max_streams_bidi
-    }
-
-    pub fn max_streams_bidi(mut self, v: u64) -> Res<Self> {
-        if v > (1 << 60) {
-            return Err(Error::StreamLimitError);
-        }
-        self.max_streams_bidi = v;
-        Ok(self)
-    }
-
-    pub fn get_max_streams_uni(&self) -> u64 {
-        self.max_streams_uni
-    }
-
-    pub fn max_streams_uni(mut self, v: u64) -> Res<Self> {
-        if v > (1 << 60) {
-            return Err(Error::StreamLimitError);
-        }
-        self.max_streams_uni = v;
-        Ok(self)
-    }
-}
-
 /// A QUIC Connection
 ///
 /// First, create a new connection using `new_client()` or `new_server()`.
@@ -455,11 +392,11 @@ impl Connection {
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
         tphandler.borrow_mut().local.set_integer(
             tparams::INITIAL_MAX_STREAMS_BIDI,
-            conn_params.get_max_streams_bidi(),
+            conn_params.get_max_streams(StreamType::BiDi),
         );
         tphandler.borrow_mut().local.set_integer(
             tparams::INITIAL_MAX_STREAMS_UNI,
-            conn_params.get_max_streams_uni(),
+            conn_params.get_max_streams(StreamType::UniDi),
         );
         let local_initial_source_cid = cid_manager.borrow_mut().generate_cid();
         tphandler.borrow_mut().local.set_bytes(
@@ -492,13 +429,13 @@ impl Connection {
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new(conn_params.cc_algorithm, stats.clone()),
+            loss_recovery: LossRecovery::new(conn_params.get_cc_algorithm(), stats.clone()),
             events: ConnectionEvents::default(),
             new_token: NewTokenState::new(role),
             stats,
             qlog: NeqoQlog::disabled(),
             release_resumption_token_timer: None,
-            quic_version: conn_params.quic_version,
+            quic_version: conn_params.get_quic_version(),
         };
         c.stats.borrow_mut().init(format!("{}", c));
         Ok(c)

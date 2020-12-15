@@ -33,7 +33,8 @@ use neqo_crypto::{
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    server::ValidateAddress, FixedConnectionIdManager as RandomConnectionIdGenerator, Output,
+    server::ValidateAddress, ConnectionParameters,
+    FixedConnectionIdManager as RandomConnectionIdGenerator, Output, StreamType,
 };
 
 use crate::old_https::Http09Server;
@@ -90,9 +91,8 @@ struct Args {
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
-    #[structopt(name = "max-streams", long, default_value = "16")]
-    /// Set the MAX_STREAMS_BIDI limit.
-    max_streams_bidi: u64,
+    #[structopt(subcommand)]
+    quic_parameters: QuicParameters,
 
     #[structopt(name = "retry", long)]
     /// Force a retry
@@ -150,6 +150,27 @@ impl Args {
         } else {
             Instant::now()
         }
+    }
+}
+
+#[derive(Debug, StructOpt)]
+struct QuicParameters {
+    #[structopt(long, default_value = "16")]
+    /// Set the MAX_STREAMS_BIDI limit.
+    max_streams_bidi: u64,
+
+    #[structopt(long, default_value = "16")]
+    /// Set the MAX_STREAMS_UNI limit.
+    max_streams_uni: u64,
+}
+
+impl QuicParameters {
+    fn get(&self) -> ConnectionParameters {
+        ConnectionParameters::default()
+            .max_streams(StreamType::BiDi, self.max_streams_bidi)
+            .unwrap()
+            .max_streams(StreamType::UniDi, self.max_streams_uni)
+            .unwrap()
     }
 }
 
@@ -386,7 +407,7 @@ impl ServersRunner {
                     &[args.alpn.clone()],
                     anti_replay,
                     cid_mgr,
-                    args.max_streams_bidi,
+                    args.quic_parameters.get(),
                 )
                 .expect("We cannot make a server!"),
             )
@@ -531,7 +552,7 @@ fn main() -> Result<(), io::Error> {
             "zerortt" => {
                 args.use_old_http = true;
                 args.alpn = "hq-29".into();
-                args.max_streams_bidi = 100;
+                args.quic_parameters.max_streams_bidi = 100;
             }
             "handshake" | "transfer" | "resumption" | "multiconnect" => {
                 args.use_old_http = true;

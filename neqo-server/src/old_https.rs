@@ -46,7 +46,7 @@ impl Http09Server {
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
-        max_streams_bidi: u64,
+        conn_params: ConnectionParameters,
     ) -> Result<Self, Error> {
         let server = Server::new(
             now,
@@ -55,9 +55,7 @@ impl Http09Server {
             anti_replay,
             Box::new(AllowZeroRtt {}),
             cid_manager,
-            ConnectionParameters::default()
-                .max_streams_bidi(max_streams_bidi)
-                .unwrap(),
+            conn_params,
         )?;
         Ok(Self {
             server,
