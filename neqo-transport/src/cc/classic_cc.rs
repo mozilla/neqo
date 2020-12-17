@@ -841,7 +841,6 @@ mod tests {
         }
         assert_eq!(cc.bytes_in_flight(), CWND_INITIAL);
 
-        assert!(LESS_THAN_CWND_PKTS < CWND_INITIAL_PKTS / 2);
         for i in 0..LESS_THAN_CWND_PKTS {
             let acked = SentPacket::new(
                 PacketType::Short,
