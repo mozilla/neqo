@@ -6,7 +6,7 @@
 
 use crate::frame::StreamType;
 use crate::{
-    CongestionControlAlgorithm, Error, QuicVersion, Res, LOCAL_STREAM_LIMIT_BIDI,
+    CongestionControlAlgorithm, QuicVersion, LOCAL_STREAM_LIMIT_BIDI,
     LOCAL_STREAM_LIMIT_UNI,
 };
 
@@ -57,9 +57,9 @@ impl ConnectionParameters {
         }
     }
 
-    pub fn max_streams(mut self, stream_type: StreamType, v: u64) -> Res<Self> {
+    pub fn max_streams(mut self, stream_type: StreamType, v: u64) -> Self {
         if v > (1 << 60) {
-            return Err(Error::StreamLimitError);
+            panic!("max_streams's parameter too big");
         }
         match stream_type {
             StreamType::BiDi => {
@@ -69,6 +69,6 @@ impl ConnectionParameters {
                 self.max_streams_uni = v;
             }
         }
-        Ok(self)
+        self
     }
 }

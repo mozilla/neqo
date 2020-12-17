@@ -168,9 +168,7 @@ impl QuicParameters {
     fn get(&self) -> ConnectionParameters {
         ConnectionParameters::default()
             .max_streams(StreamType::BiDi, self.max_streams_bidi)
-            .unwrap()
             .max_streams(StreamType::UniDi, self.max_streams_uni)
-            .unwrap()
     }
 }
 
