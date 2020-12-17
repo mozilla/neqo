@@ -508,7 +508,7 @@ fn pace() {
     }
     let gap = client.process_output(now).callback();
     assert_ne!(gap, Duration::new(0, 0));
-    // The lasst one will not be paced.
+    // The last one will not be paced.
     for _ in PACING_BURST_SIZE..cwnd_packets(POST_HANDSHAKE_CWND) - 1 {
         assert_eq!(client.process_output(now).callback(), gap);
         now += gap;

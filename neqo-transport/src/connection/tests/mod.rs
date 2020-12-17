@@ -248,7 +248,7 @@ fn fill_cwnd(src: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagr
 /// value could fail as a result of variations, so it's OK to just
 /// change this value, but it is good to first understand where the
 /// change came from.
-const POST_HANDSHAKE_CWND: usize = PATH_MTU_V6 * (CWND_INITIAL_PKTS);
+const POST_HANDSHAKE_CWND: usize = PATH_MTU_V6 * CWND_INITIAL_PKTS;
 
 /// Determine the number of packets required to fill the CWND.
 const fn cwnd_packets(data: usize) -> usize {

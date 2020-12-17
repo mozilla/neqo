@@ -48,7 +48,7 @@ impl State {
         matches!(self, Self::RecoveryStart | Self::Recovery)
     }
 
-    pub fn is_slow_start(self) -> bool {
+    pub fn in_slow_start(self) -> bool {
         self == Self::SlowStart
     }
 
@@ -133,11 +133,11 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         let is_app_limited = self.app_limited();
         qtrace!(
             [self],
-            "app limited={}, bytes_in_flight:{}, cwnd: {}, slow_start: {} pacing/-burst_size: {}",
+            "app limited={}, bytes_in_flight:{}, cwnd: {}, state: {:?} pacing_burst_size: {}",
             is_app_limited,
             self.bytes_in_flight,
             self.congestion_window,
-            self.state.is_slow_start(),
+            self.state,
             MAX_DATAGRAM_SIZE * PACING_BURST_SIZE,
         );
 
@@ -403,10 +403,15 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
     fn app_limited(&self) -> bool {
         if self.bytes_in_flight >= self.congestion_window {
             false
-        } else if self.state.is_slow_start() {
+        } else if self.state.in_slow_start() {
+            // Allow for potential doubling of the congestion window during slow start.
+            // That is, the application might not have been able to send enough to respond
+            // to increases to the congestion window.
             self.bytes_in_flight < self.congestion_window / 2
         } else {
-            self.congestion_window > (self.bytes_in_flight + MAX_DATAGRAM_SIZE * PACING_BURST_SIZE)
+            // We're not limited if the in-flight data is within a single burst of the
+            // congestion window.
+            (self.bytes_in_flight + MAX_DATAGRAM_SIZE * PACING_BURST_SIZE) < self.congestion_window
         }
     }
 }
@@ -450,7 +455,7 @@ mod tests {
         let time_before = time_now - Duration::from_millis(100);
         let time_after = time_now + Duration::from_millis(150);
 
-        let sent_packets = vec![
+        let sent_packets = &[
             SentPacket::new(
                 PacketType::Short,
                 1,                     // pn
@@ -510,7 +515,7 @@ mod tests {
         ];
 
         // Send some more packets so that the cc is not app-limited.
-        for p in sent_packets[..6].iter() {
+        for p in &sent_packets[..6] {
             cc.on_packet_sent(p);
         }
         assert_eq!(cc.acked_bytes, 0);
@@ -820,10 +825,11 @@ mod tests {
 
     #[test]
     fn app_limited_slow_start() {
+        const LESS_THAN_CWND_PKTS: usize = 4;
         let mut cc = ClassicCongestionControl::new(NewReno::default());
 
         for i in 0..CWND_INITIAL_PKTS {
-            let p = SentPacket::new(
+            let sent = SentPacket::new(
                 PacketType::Short,
                 u64::try_from(i).unwrap(), // pn
                 now(),                     // time sent
@@ -831,20 +837,21 @@ mod tests {
                 Vec::new(),                // tokens
                 MAX_DATAGRAM_SIZE,         // size
             );
-            cc.on_packet_sent(&p);
+            cc.on_packet_sent(&sent);
         }
         assert_eq!(cc.bytes_in_flight(), CWND_INITIAL);
 
-        for i in 0..4 {
-            let p = [SentPacket::new(
+        assert!(LESS_THAN_CWND_PKTS < CWND_INITIAL_PKTS / 2);
+        for i in 0..LESS_THAN_CWND_PKTS {
+            let acked = SentPacket::new(
                 PacketType::Short,
                 u64::try_from(i).unwrap(), // pn
                 now(),                     // time sent
                 true,                      // ack eliciting
                 Vec::new(),                // tokens
                 MAX_DATAGRAM_SIZE,         // size
-            )];
-            cc.on_packets_acked(&p);
+            );
+            cc.on_packets_acked(&[acked]);
 
             assert_eq!(
                 cc.bytes_in_flight(),
