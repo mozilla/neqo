@@ -961,7 +961,7 @@ fn max_streams() {
         Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
         ConnectionParameters::default()
             .max_streams(StreamType::BiDi, MAX_STREAMS)
-            .max_streams(StreamType::UniDi, MAX_STREAMS)
+            .max_streams(StreamType::UniDi, MAX_STREAMS),
     )
     .expect("should create a server");
 

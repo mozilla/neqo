@@ -6,8 +6,7 @@
 
 use crate::frame::StreamType;
 use crate::{
-    CongestionControlAlgorithm, QuicVersion, LOCAL_STREAM_LIMIT_BIDI,
-    LOCAL_STREAM_LIMIT_UNI,
+    CongestionControlAlgorithm, QuicVersion, LOCAL_STREAM_LIMIT_BIDI, LOCAL_STREAM_LIMIT_UNI,
 };
 
 /// ConnectionParameters use for setting intitial value for QUIC parameters.
