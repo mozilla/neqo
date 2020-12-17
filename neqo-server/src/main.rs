@@ -33,7 +33,8 @@ use neqo_crypto::{
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    server::ValidateAddress, FixedConnectionIdManager as RandomConnectionIdGenerator, Output,
+    server::ValidateAddress, ConnectionParameters,
+    FixedConnectionIdManager as RandomConnectionIdGenerator, Output, StreamType,
 };
 
 use crate::old_https::Http09Server;
@@ -89,6 +90,9 @@ struct Args {
     #[structopt(name = "use-old-http", short = "o", long)]
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
+
+    #[structopt(subcommand)]
+    quic_parameters: QuicParameters,
 
     #[structopt(name = "retry", long)]
     /// Force a retry
@@ -146,6 +150,25 @@ impl Args {
         } else {
             Instant::now()
         }
+    }
+}
+
+#[derive(Debug, StructOpt)]
+struct QuicParameters {
+    #[structopt(long, default_value = "16")]
+    /// Set the MAX_STREAMS_BIDI limit.
+    max_streams_bidi: u64,
+
+    #[structopt(long, default_value = "16")]
+    /// Set the MAX_STREAMS_UNI limit.
+    max_streams_uni: u64,
+}
+
+impl QuicParameters {
+    fn get(&self) -> ConnectionParameters {
+        ConnectionParameters::default()
+            .max_streams(StreamType::BiDi, self.max_streams_bidi)
+            .max_streams(StreamType::UniDi, self.max_streams_uni)
     }
 }
 
@@ -382,6 +405,7 @@ impl ServersRunner {
                     &[args.alpn.clone()],
                     anti_replay,
                     cid_mgr,
+                    args.quic_parameters.get(),
                 )
                 .expect("We cannot make a server!"),
             )
@@ -523,7 +547,12 @@ fn main() -> Result<(), io::Error> {
     if let Some(testcase) = args.qns_test.as_ref() {
         match testcase.as_str() {
             "http3" => (),
-            "handshake" | "transfer" | "resumption" | "zerortt" | "multiconnect" => {
+            "zerortt" => {
+                args.use_old_http = true;
+                args.alpn = "hq-29".into();
+                args.quic_parameters.max_streams_bidi = 100;
+            }
+            "handshake" | "transfer" | "resumption" | "multiconnect" => {
                 args.use_old_http = true;
                 args.alpn = "hq-29".into();
             }

@@ -21,7 +21,8 @@ use neqo_crypto::{AllowZeroRtt, AntiReplay, Cipher};
 use neqo_http3::Error;
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    ConnectionEvent, ConnectionIdManager as ConnectionIdGenerator, Output, State,
+    ConnectionEvent, ConnectionIdManager as ConnectionIdGenerator, ConnectionParameters, Output,
+    State,
 };
 
 use super::{qns_read_response, Args, HttpServer};
@@ -45,6 +46,7 @@ impl Http09Server {
         protocols: &[impl AsRef<str>],
         anti_replay: AntiReplay,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
+        conn_params: ConnectionParameters,
     ) -> Result<Self, Error> {
         let server = Server::new(
             now,
@@ -53,6 +55,7 @@ impl Http09Server {
             anti_replay,
             Box::new(AllowZeroRtt {}),
             cid_manager,
+            conn_params,
         )?;
         Ok(Self {
             server,

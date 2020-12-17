@@ -29,7 +29,6 @@ use neqo_crypto::{
 };
 
 use crate::addr_valid::{AddressValidation, NewTokenState};
-use crate::cc::CongestionControlAlgorithm;
 use crate::cid::{ConnectionId, ConnectionIdDecoder, ConnectionIdManager, ConnectionIdRef};
 use crate::crypto::{Crypto, CryptoDxState, CryptoSpace};
 use crate::dump::*;
@@ -53,6 +52,7 @@ use crate::tparams::{
     self, TransportParameter, TransportParameterId, TransportParameters, TransportParametersHandler,
 };
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
+use crate::ConnectionParameters;
 use crate::{AppError, ConnectionError, Error, Res};
 
 mod idle;
@@ -311,8 +311,7 @@ impl Connection {
         cid_manager: CidMgr,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        cc_algorithm: &CongestionControlAlgorithm,
-        quic_version: QuicVersion,
+        conn_params: &ConnectionParameters,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let mut c = Self::new(
@@ -321,10 +320,11 @@ impl Connection {
             cid_manager,
             protocols,
             None,
-            cc_algorithm,
-            quic_version,
+            conn_params,
         )?;
-        c.crypto.states.init(quic_version, Role::Client, &dcid);
+        c.crypto
+            .states
+            .init(conn_params.get_quic_version(), Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
         c.initialize_path(local_addr, remote_addr);
         Ok(c)
@@ -335,8 +335,7 @@ impl Connection {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         cid_manager: CidMgr,
-        cc_algorithm: &CongestionControlAlgorithm,
-        quic_version: QuicVersion,
+        conn_params: &ConnectionParameters,
     ) -> Res<Self> {
         Self::new(
             Role::Server,
@@ -344,8 +343,7 @@ impl Connection {
             cid_manager,
             protocols,
             None,
-            cc_algorithm,
-            quic_version,
+            conn_params,
         )
     }
 
@@ -388,11 +386,18 @@ impl Connection {
         cid_manager: CidMgr,
         protocols: &[impl AsRef<str>],
         path: Option<Path>,
-        cc_algorithm: &CongestionControlAlgorithm,
-        quic_version: QuicVersion,
+        conn_params: &ConnectionParameters,
     ) -> Res<Self> {
         let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
         Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
+        tphandler.borrow_mut().local.set_integer(
+            tparams::INITIAL_MAX_STREAMS_BIDI,
+            conn_params.get_max_streams(StreamType::BiDi),
+        );
+        tphandler.borrow_mut().local.set_integer(
+            tparams::INITIAL_MAX_STREAMS_UNI,
+            conn_params.get_max_streams(StreamType::UniDi),
+        );
         let local_initial_source_cid = cid_manager.borrow_mut().generate_cid();
         tphandler.borrow_mut().local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
@@ -424,13 +429,13 @@ impl Connection {
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new(cc_algorithm, stats.clone()),
+            loss_recovery: LossRecovery::new(conn_params.get_cc_algorithm(), stats.clone()),
             events: ConnectionEvents::default(),
             new_token: NewTokenState::new(role),
             stats,
             qlog: NeqoQlog::disabled(),
             release_resumption_token_timer: None,
-            quic_version,
+            quic_version: conn_params.get_quic_version(),
         };
         c.stats.borrow_mut().init(format!("{}", c));
         Ok(c)

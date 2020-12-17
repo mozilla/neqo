@@ -13,6 +13,7 @@ mod addr_valid;
 mod cc;
 mod cid;
 mod connection;
+mod connection_parameters;
 mod crypto;
 mod dump;
 mod events;
@@ -34,7 +35,11 @@ mod tracking;
 
 pub use self::cc::CongestionControlAlgorithm;
 pub use self::cid::{ConnectionId, ConnectionIdManager};
-pub use self::connection::{Connection, FixedConnectionIdManager, Output, State, ZeroRttState};
+pub use self::connection::{
+    Connection, FixedConnectionIdManager, Output, State, ZeroRttState, LOCAL_STREAM_LIMIT_BIDI,
+    LOCAL_STREAM_LIMIT_UNI,
+};
+pub use self::connection_parameters::ConnectionParameters;
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::frame::StreamType;
