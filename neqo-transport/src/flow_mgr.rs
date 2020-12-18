@@ -337,7 +337,13 @@ impl FlowMgr {
             };
             debug_assert!(!values.spilled());
 
-            if builder.remaining() >= values.iter().map(|&v| Encoder::varint_len(v)).sum() {
+            if builder.remaining()
+                >= Encoder::varint_len(frame.get_type())
+                    + values
+                        .iter()
+                        .map(|&v| Encoder::varint_len(v))
+                        .sum::<usize>()
+            {
                 builder.encode_varint(frame.get_type());
                 for v in values {
                     builder.encode_varint(v);

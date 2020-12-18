@@ -306,6 +306,7 @@ impl PacketBuilder {
     pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder> {
         if self.len() > self.limit {
             qwarn!("Packet contents are more than the limit");
+            debug_assert!(false);
             return Err(Error::InternalError);
         }
 

@@ -729,7 +729,7 @@ impl Display for Path {
         if let Some(entry) = self.remote_cid.as_ref() {
             write!(f, ":{}", entry.connection_id())?;
         }
-        write!(f, " {}->{}", self.local, self.remote,)?;
+        write!(f, " {}->{}", self.local, self.remote)?;
         Ok(())
     }
 }
