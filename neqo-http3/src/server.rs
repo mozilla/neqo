@@ -238,7 +238,7 @@ mod tests {
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_qpack::QpackSettings;
     use neqo_transport::{
-        CloseError, Connection, ConnectionEvent, State, StreamType, ZeroRttState,
+        Connection, ConnectionError, ConnectionEvent, State, StreamType, ZeroRttState,
     };
     use std::ops::{Deref, DerefMut};
     use test_fixture::{
@@ -271,7 +271,7 @@ mod tests {
     }
 
     fn assert_closed(hconn: &mut Http3Server, expected: &Error) {
-        let err = CloseError::Application(expected.code());
+        let err = ConnectionError::Application(expected.code());
         let closed = |e| {
             matches!(e,
             Http3ServerEvent::StateChange{ state: Http3State::Closing(e), .. }

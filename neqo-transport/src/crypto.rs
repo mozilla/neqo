@@ -148,7 +148,7 @@ impl Crypto {
                 self.tls.read_secret(TLS_EPOCH_ZERO_RTT),
             ),
         };
-        let secret = secret.ok_or(Error::InternalError)?;
+        let secret = secret.ok_or(Error::InternalError1)?;
         self.states.set_0rtt_keys(dir, &secret, cipher.unwrap());
         Ok(true)
     }
@@ -177,12 +177,12 @@ impl Crypto {
         let read_secret = self
             .tls
             .read_secret(TLS_EPOCH_HANDSHAKE)
-            .ok_or(Error::InternalError)?;
+            .ok_or(Error::InternalError2)?;
         let cipher = match self.tls.info() {
             None => self.tls.preinfo()?.cipher_suite(),
             Some(info) => Some(info.cipher_suite()),
         }
-        .ok_or(Error::InternalError)?;
+        .ok_or(Error::InternalError3)?;
         self.states
             .set_handshake_keys(&write_secret, &read_secret, cipher);
         qdebug!([self], "Handshake keys installed");
@@ -206,7 +206,7 @@ impl Crypto {
         let read_secret = self
             .tls
             .read_secret(TLS_EPOCH_APPLICATION_DATA)
-            .ok_or(Error::InternalError)?;
+            .ok_or(Error::InternalError4)?;
         self.states
             .set_application_read_key(read_secret, expire_0rtt)?;
         qdebug!([self], "application read keys installed");

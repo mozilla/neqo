@@ -743,7 +743,7 @@ mod tests {
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::{
-        CloseError, ConnectionEvent, ConnectionParameters, Output, State, RECV_BUFFER_SIZE,
+        ConnectionError, ConnectionEvent, ConnectionParameters, Output, State, RECV_BUFFER_SIZE,
         SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
@@ -756,7 +756,7 @@ mod tests {
     fn assert_closed(client: &Http3Client, expected: &Error) {
         match client.state() {
             Http3State::Closing(err) | Http3State::Closed(err) => {
-                assert_eq!(err, CloseError::Application(expected.code()))
+                assert_eq!(err, ConnectionError::Application(expected.code()))
             }
             _ => panic!("Wrong state {:?}", client.state()),
         };
@@ -3705,7 +3705,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3723,7 +3723,7 @@ mod tests {
                 HSetting::new(HSettingType::MaxTableCapacity, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3760,7 +3760,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(514)),
+            &Http3State::Closing(ConnectionError::Application(514)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3779,7 +3779,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3817,7 +3817,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 50),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3855,7 +3855,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 5000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3912,7 +3912,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }

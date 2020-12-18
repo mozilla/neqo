@@ -49,6 +49,8 @@ pub enum Error {
     HttpGeneralProtocol,
     HttpGeneralProtocolStream, //this is the same as the above but it should only close a stream not a connection.
     HttpInternal,
+    HttpInternal1,
+    HttpInternal2,
     HttpStreamCreation,
     HttpClosedCriticalStream,
     HttpFrameUnexpected,
@@ -93,7 +95,7 @@ impl Error {
             Self::HttpGeneralProtocol | Self::HttpGeneralProtocolStream | Self::InvalidHeader => {
                 0x101
             }
-            Self::HttpInternal => 0x102,
+            Self::HttpInternal | Self::HttpInternal1 | Self::HttpInternal2 => 0x102,
             Self::HttpStreamCreation => 0x103,
             Self::HttpClosedCriticalStream => 0x104,
             Self::HttpFrameUnexpected => 0x105,
@@ -119,6 +121,8 @@ impl Error {
             self,
             Self::HttpGeneralProtocol
                 | Self::HttpInternal
+                | Self::HttpInternal1
+                | Self::HttpInternal2
                 | Self::HttpStreamCreation
                 | Self::HttpClosedCriticalStream
                 | Self::HttpFrameUnexpected
@@ -192,8 +196,14 @@ impl Error {
     ///   Any error is mapped to the indicated type.
     fn map_error<R>(r: Result<R, impl Into<Self>>, err: Self) -> Result<R, Self> {
         Ok(r.map_err(|e| {
-            debug_assert!(!matches!(e.into(), Self::HttpInternal));
-            debug_assert!(!matches!(err, Self::HttpInternal));
+            debug_assert!(!matches!(
+                e.into(),
+                Self::HttpInternal | Self::HttpInternal1 | Self::HttpInternal2
+            ));
+            debug_assert!(!matches!(
+                err,
+                Self::HttpInternal | Self::HttpInternal1 | Self::HttpInternal2
+            ));
             err
         })?)
     }
@@ -209,7 +219,8 @@ impl From<QpackError> for Error {
     fn from(err: QpackError) -> Self {
         match err {
             QpackError::ClosedCriticalStream => Error::HttpClosedCriticalStream,
-            QpackError::InternalError => Error::HttpInternal,
+            QpackError::InternalError1 => Error::HttpInternal1,
+            QpackError::InternalError2 => Error::HttpInternal2,
             e => Self::QpackError(e),
         }
     }
