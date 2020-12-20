@@ -342,7 +342,7 @@ impl FlowMgr {
                 // A special case, just write it out and move on..
                 Frame::PathResponse { data } => {
                     stats.path_response += 1;
-                    if builder.remaining() < 1 + data.len() {
+                    if builder.remaining() >= 1 + data.len() {
                         builder.encode_varint(frame.get_type());
                         builder.encode(data);
                         tokens.push(RecoveryToken::Flow(self.next().unwrap()));
