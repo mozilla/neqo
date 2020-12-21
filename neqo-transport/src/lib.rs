@@ -56,12 +56,9 @@ const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
 #[allow(clippy::pub_enum_variant_names)]
 pub enum Error {
     NoError,
-    InternalError1,
-    InternalError2,
-    InternalError3,
-    InternalError4,
-    InternalError5,
-    InternalError6,
+    // Each time tihe error is return a different parameter is supply.
+    // This will be use to distinguish each occurance of this error.
+    InternalError(u16),
     ConnectionRefused,
     FlowControlError,
     StreamLimitError,

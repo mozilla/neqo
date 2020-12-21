@@ -434,7 +434,7 @@ impl Http3Connection {
             Ok(())
         } else {
             debug_assert!(false, "Zero rtt rejected in the wrong state.");
-            Err(Error::HttpInternal)
+            Err(Error::HttpInternal(3))
         }
     }
 
