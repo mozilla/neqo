@@ -240,7 +240,7 @@ impl SendMessage {
         if let SendMessageState::SendingInitialMessage { ref mut buf, fin } = self.state {
             let sent = Error::map_error(
                 conn.stream_send(self.stream_id, &buf),
-                Error::HttpInternal(5)
+                Error::HttpInternal(5),
             )?;
             qlog::h3_data_moved_down(&mut conn.qlog_mut(), self.stream_id, sent);
 
@@ -250,7 +250,7 @@ impl SendMessage {
                 if fin {
                     Error::map_error(
                         conn.stream_close_send(self.stream_id),
-                        Error::HttpInternal(6)
+                        Error::HttpInternal(6),
                     )?;
                     self.state = SendMessageState::Closed;
                     qtrace!([label], "done sending request");
