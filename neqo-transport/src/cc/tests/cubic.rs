@@ -4,7 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+
 use crate::cc::{
     classic_cc::{ClassicCongestionControl, CWND_INITIAL},
     cubic::{
@@ -140,15 +142,15 @@ fn tcp_phase() {
     // because of the proper byte counting and the credit it already had before entering this phase. Therefore
     // We will perform another round and compare it to expected increase using the cubic equation.
 
-    let cwnd_rtt_start = cubic.cwnd();
+    let cwnd_rtt_start_after_tcp = cubic.cwnd();
     let elapse_time = now - start_time - time_increase; // "- time_increase" because it is added above.
 
     // calculate new time_increase.
-    let time_increase = RTT / u32::try_from(cwnd_rtt_start / MAX_DATAGRAM_SIZE).unwrap();
-    let mut num_acks = 0; // count the number of acks. until cwnd is increased by MAX_DATAGRAM_SIZE.
+    let time_increase = RTT / u32::try_from(cwnd_rtt_start_after_tcp / MAX_DATAGRAM_SIZE).unwrap();
+    let mut num_acks2 = 0; // count the number of acks. until cwnd is increased by MAX_DATAGRAM_SIZE.
 
-    while cwnd_rtt_start == cubic.cwnd() {
-        num_acks += 1;
+    while cwnd_rtt_start_after_tcp == cubic.cwnd() {
+        num_acks2 += 1;
         ack_packet(&mut cubic, next_pn_ack, now);
         next_pn_ack += 1;
         next_pn_send = fill_cwnd(&mut cubic, next_pn_send, now);
@@ -156,11 +158,12 @@ fn tcp_phase() {
     }
 
     now -= time_increase; // "- time_increase" because it is added above.
-    let expected_ack_tcp_increase = (f64::try_from(u32::try_from(cwnd_rtt_start).unwrap()).unwrap()
-        / MAX_DATAGRAM_SIZE_F64
-        / CUBIC_ALPHA)
-        .round() as u64;
-    assert!(num_acks < expected_ack_tcp_increase);
+    let expected_ack_tcp_increase2 =
+        (f64::try_from(u32::try_from(cwnd_rtt_start_after_tcp).unwrap()).unwrap()
+            / MAX_DATAGRAM_SIZE_F64
+            / CUBIC_ALPHA)
+            .round() as u64;
+    assert!(num_acks2 < expected_ack_tcp_increase2);
 
     // The time needed to increase cwnd by MAX_DATAGRAM_SIZE using the cubic equation will be calculates from:
     // W_cubic(elapse_time + t_to_increase) - W_cubis(elapse_time) = MAX_DATAGRAM_SIZE =>
@@ -177,7 +180,7 @@ fn tcp_phase() {
     // num_acks is very close to the calculated value. The exact value is hard to calculate
     // because the proportional increase(i.e. curr_cwnd_f64 / (target - curr_cwnd_f64) * MAX_DATAGRAM_SIZE_F64)
     // and the byte counting.
-    assert_eq!(num_acks, expected_ack_cubic_increase + 2);
+    assert_eq!(num_acks2, expected_ack_cubic_increase + 2);
 }
 
 #[test]
@@ -236,7 +239,7 @@ fn congestion_event_slow_start() {
     let _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 0, now());
 
-    assert_eq!(cubic.last_max_cwnd(), 0.0);
+    assert!((cubic.last_max_cwnd() - 0.0).abs() < f64::EPSILON);
     // cwnd is increased by 1 in slow start phase, after an ack.
     assert_eq!(cubic.cwnd(), CWND_INITIAL + MAX_DATAGRAM_SIZE);
 
@@ -244,9 +247,8 @@ fn congestion_event_slow_start() {
     packet_lost(&mut cubic, 1);
 
     // last_max_cwnd is equal to cwnd before decrease.
-    assert_eq!(
-        cubic.last_max_cwnd(),
-        CWND_INITIAL_F64 + MAX_DATAGRAM_SIZE_F64
+    assert!(
+        (cubic.last_max_cwnd() - (CWND_INITIAL_F64 + MAX_DATAGRAM_SIZE_F64)).abs() < f64::EPSILON
     );
     assert_eq!(cubic.cwnd(), CWND_AFTER_LOSS_SLOW_START);
 }
@@ -269,7 +271,7 @@ fn congestion_event_congestion_avoidance() {
     // Trigger a congestion_event in slow start phase
     packet_lost(&mut cubic, 1);
 
-    assert_eq!(cubic.last_max_cwnd(), CWND_INITIAL_F64);
+    assert!((cubic.last_max_cwnd() - CWND_INITIAL_F64).abs() < f64::EPSILON);
     assert_eq!(cubic.cwnd(), CWND_AFTER_LOSS);
 }
 
@@ -286,15 +288,14 @@ fn congestion_event_congestion_avoidance_2() {
     let _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 0, now());
 
-    assert_eq!(cubic.last_max_cwnd(), CWND_INITIAL_10_F64);
+    assert!((cubic.last_max_cwnd() - CWND_INITIAL_10_F64).abs() < f64::EPSILON);
     assert_eq!(cubic.cwnd(), CWND_INITIAL);
 
     // Trigger a congestion_event in slow start phase
     packet_lost(&mut cubic, 1);
 
-    assert_eq!(
-        cubic.last_max_cwnd(),
-        CWND_INITIAL_F64 * CUBIC_FAST_CONVERGENCE
+    assert!(
+        (cubic.last_max_cwnd() - CWND_INITIAL_F64 * CUBIC_FAST_CONVERGENCE).abs() < f64::EPSILON
     );
     assert_eq!(cubic.cwnd(), CWND_AFTER_LOSS);
 }
