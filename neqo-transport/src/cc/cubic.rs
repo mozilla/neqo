@@ -27,7 +27,7 @@ pub const CUBIC_BETA_USIZE_QUOTIENT: usize = 7;
 pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
 
 /// The fast convergence ratio further reduces the congestion window when a congestion event
-/// occurs before reaching the previous W_max.
+/// occurs before reaching the previous 'W_max'.
 pub const CUBIC_FAST_CONVERGENCE: f64 = (1.0 + CUBIC_BETA) / 2.0;
 
 #[derive(Debug)]
@@ -66,6 +66,7 @@ impl Display for Cubic {
     }
 }
 
+#[allow(clippy::doc_markdown)]
 impl Cubic {
     /// Original equations is:
     /// K = cubic_root(W_max*(1-beta_cubic)/C) (Eq. 2 RFC8312)
@@ -88,6 +89,8 @@ impl Cubic {
 }
 
 impl WindowAdjustment for Cubic {
+    // This is because of the cast in the last line from f64 to usize.
+    #[allow(clippy::cast_possible_truncation)]
     fn on_packets_acked(
         &mut self,
         curr_cwnd: usize,
@@ -135,10 +138,10 @@ impl WindowAdjustment for Cubic {
         }
 
         if self.estimated_tcp_cwnd > curr_cwnd_f64 && self.estimated_tcp_cwnd > target {
-            let tcp_cnt =
+            let cnt_tcp_equation =
                 curr_cwnd_f64 / (self.estimated_tcp_cwnd - curr_cwnd_f64) * MAX_DATAGRAM_SIZE_F64;
-            if cnt > tcp_cnt {
-                cnt = tcp_cnt;
+            if cnt > cnt_tcp_equation {
+                cnt = cnt_tcp_equation;
             }
         }
 

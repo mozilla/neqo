@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[allow(clippy::cast_possible_truncation)]
+
 use crate::cc::{
     classic_cc::{ClassicCongestionControl, CWND_INITIAL},
     cubic::{
@@ -14,7 +16,6 @@ use crate::cc::{
 };
 use crate::packet::PacketType;
 use crate::tracking::SentPacket;
-//use neqo_common::qtrace;
 use std::convert::TryFrom;
 use std::time::{Duration, Instant};
 use test_fixture::now;
