@@ -10,12 +10,11 @@ use super::{
     send_something, DEFAULT_STREAM_DATA,
 };
 use crate::events::ConnectionEvent;
-use crate::frame::StreamType;
 use crate::recv_stream::RECV_BUFFER_SIZE;
 use crate::send_stream::SEND_BUFFER_SIZE;
 use crate::tparams::{self, TransportParameter};
 use crate::tracking::MAX_UNACKED_PKTS;
-use crate::{Error, StreamId};
+use crate::{Error, StreamId, StreamType};
 
 use neqo_common::{event::Provider, qdebug};
 use std::convert::TryFrom;

@@ -27,7 +27,6 @@ use neqo_crypto::{
 };
 
 use crate::addr_valid::{AddressValidation, NewTokenState};
-use crate::cc::CongestionControlAlgorithm;
 use crate::cid::{
     ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager, ConnectionIdRef,
     ConnectionIdStore, LOCAL_ACTIVE_CID_LIMIT,
@@ -37,7 +36,7 @@ use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{
-    AckRange, CloseError, Frame, FrameType, StreamType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
+    AckRange, CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
 };
 use crate::packet::{
@@ -49,7 +48,7 @@ use crate::recovery::{LossRecovery, RecoveryToken, SendProfile, GRANULARITY};
 use crate::recv_stream::{RecvStream, RecvStreams, RECV_BUFFER_SIZE};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::{Stats, StatsCell};
-use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
+use crate::stream_id::{StreamId, StreamIndex, StreamIndexes, StreamType};
 use crate::tparams::{
     self, PreferredAddress, TransportParameter, TransportParameterId, TransportParameters,
     TransportParametersHandler,
@@ -58,20 +57,19 @@ use crate::tracking::{AckTracker, PNSpace, SentPacket};
 use crate::{AppError, ConnectionError, Error, Res};
 
 mod idle;
+pub mod params;
 mod saved;
 mod state;
 
 use idle::IdleTimeout;
 pub use idle::LOCAL_IDLE_TIMEOUT;
+pub use params::ConnectionParameters;
 use saved::SavedDatagrams;
 use state::StateSignaling;
 pub use state::{ClosingFrame, State};
 
 #[derive(Debug, Default)]
 struct Packet(Vec<u8>);
-
-pub const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
-pub const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 
 /// The number of Initial packets that the client will send in response
 /// to receiving an undecryptable packet during the early part of the
@@ -263,7 +261,7 @@ pub struct Connection {
     /// A session ticket was received without NEW_TOKEN,
     /// this is when that turns into an event without NEW_TOKEN.
     release_resumption_token_timer: Option<Instant>,
-    quic_version: QuicVersion,
+    conn_params: ConnectionParameters,
 }
 
 impl Debug for Connection {
@@ -286,8 +284,7 @@ impl Connection {
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        cc_algorithm: &CongestionControlAlgorithm,
-        quic_version: QuicVersion,
+        conn_params: ConnectionParameters,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let mut c = Self::new(
@@ -295,10 +292,9 @@ impl Connection {
             Client::new(server_name)?.into(),
             cid_generator,
             protocols,
-            cc_algorithm,
-            quic_version,
+            conn_params,
         )?;
-        c.crypto.states.init(quic_version, Role::Client, &dcid);
+        c.crypto.states.init(c.version(), Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
         let path = Path::temporary(local_addr, remote_addr);
         c.setup_handshake_path(&Rc::new(RefCell::new(path)));
@@ -310,16 +306,14 @@ impl Connection {
         certs: &[impl AsRef<str>],
         protocols: &[impl AsRef<str>],
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
-        cc_algorithm: &CongestionControlAlgorithm,
-        quic_version: QuicVersion,
+        conn_params: ConnectionParameters,
     ) -> Res<Self> {
         Self::new(
             Role::Server,
             Server::new(certs)?.into(),
             cid_generator,
             protocols,
-            cc_algorithm,
-            quic_version,
+            conn_params,
         )
     }
 
@@ -332,7 +326,7 @@ impl Connection {
             .server_enable_0rtt(self.tps.clone(), anti_replay, zero_rtt_checker)
     }
 
-    fn set_tp_defaults(tps: &mut TransportParameters) {
+    fn set_tp_defaults(tps: &mut TransportParameters, conn_params: &ConnectionParameters) {
         tps.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
             u64::try_from(RECV_BUFFER_SIZE).unwrap(),
@@ -345,8 +339,6 @@ impl Connection {
             tparams::INITIAL_MAX_STREAM_DATA_UNI,
             u64::try_from(RECV_BUFFER_SIZE).unwrap(),
         );
-        tps.set_integer(tparams::INITIAL_MAX_STREAMS_BIDI, LOCAL_STREAM_LIMIT_BIDI);
-        tps.set_integer(tparams::INITIAL_MAX_STREAMS_UNI, LOCAL_STREAM_LIMIT_UNI);
         tps.set_integer(tparams::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
         tps.set_integer(
             tparams::IDLE_TIMEOUT,
@@ -358,6 +350,15 @@ impl Connection {
         );
         tps.set_empty(tparams::DISABLE_MIGRATION);
         tps.set_empty(tparams::GREASE_QUIC_BIT);
+
+        tps.set_integer(
+            tparams::INITIAL_MAX_STREAMS_BIDI,
+            conn_params.get_max_streams(StreamType::BiDi).as_u64(),
+        );
+        tps.set_integer(
+            tparams::INITIAL_MAX_STREAMS_UNI,
+            conn_params.get_max_streams(StreamType::UniDi).as_u64(),
+        );
     }
 
     fn new(
@@ -365,23 +366,26 @@ impl Connection {
         agent: Agent,
         cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>>,
         protocols: &[impl AsRef<str>],
-        cc_algorithm: &CongestionControlAlgorithm,
-        quic_version: QuicVersion,
+        conn_params: ConnectionParameters,
     ) -> Res<Self> {
-        let tphandler = Rc::new(RefCell::new(TransportParametersHandler::default()));
-        Self::set_tp_defaults(&mut tphandler.borrow_mut().local);
-
+        let mut tps = TransportParametersHandler::default();
+        Self::set_tp_defaults(&mut tps.local, &conn_params);
+        let indexes = StreamIndexes::new(
+            conn_params.get_max_streams(StreamType::BiDi),
+            conn_params.get_max_streams(StreamType::UniDi),
+        );
         // Setup the local connection ID.
         let local_initial_source_cid = cid_generator
             .borrow_mut()
             .generate_cid()
             .ok_or(Error::ConnectionIdsExhausted)?;
-        tphandler.borrow_mut().local.set_bytes(
+        tps.local.set_bytes(
             tparams::INITIAL_SOURCE_CONNECTION_ID,
             local_initial_source_cid.to_vec(),
         );
         let cid_manager = ConnectionIdManager::new(cid_generator, local_initial_source_cid.clone());
 
+        let tphandler = Rc::new(RefCell::new(tps));
         let crypto = Crypto::new(agent, protocols, tphandler.clone())?;
 
         let stats = StatsCell::default();
@@ -400,19 +404,19 @@ impl Connection {
             crypto,
             acks: AckTracker::default(),
             idle_timeout: IdleTimeout::default(),
-            indexes: StreamIndexes::new(),
+            indexes,
             connection_ids: ConnectionIdStore::default(),
             send_streams: SendStreams::default(),
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new(cc_algorithm, stats.clone()),
+            loss_recovery: LossRecovery::new(conn_params.get_cc_algorithm(), stats.clone()),
             events: ConnectionEvents::default(),
             new_token: NewTokenState::new(role),
             stats,
             qlog: NeqoQlog::disabled(),
             release_resumption_token_timer: None,
-            quic_version,
+            conn_params,
         };
         c.stats.borrow_mut().init(format!("{}", c));
         Ok(c)
@@ -718,6 +722,11 @@ impl Connection {
         &self.state
     }
 
+    /// The QUIC version in use.
+    pub fn version(&self) -> QuicVersion {
+        self.conn_params.get_quic_version()
+    }
+
     /// Get the 0-RTT state of the connection.
     pub fn zero_rtt_state(&self) -> &ZeroRttState {
         &self.zero_rtt_state
@@ -973,7 +982,7 @@ impl Connection {
 
         self.crypto
             .states
-            .init(self.quic_version, self.role, &retry_scid);
+            .init(self.version(), self.role, &retry_scid);
         self.address_validation = AddressValidationInfo::Retry {
             token: packet.token().to_vec(),
             retry_source_cid: retry_scid,
@@ -1076,7 +1085,7 @@ impl Connection {
                 self.loss_recovery.start_pacer(now);
                 self.crypto
                     .states
-                    .init(self.quic_version, self.role, &packet.dcid());
+                    .init(self.version(), self.role, &packet.dcid());
 
                 // We need to make sure that we set this transport parameter.
                 // This has to happen prior to processing the packet so that
@@ -1092,7 +1101,7 @@ impl Connection {
                 match packet.supported_versions() {
                     Ok(versions) => {
                         if versions.is_empty()
-                            || versions.contains(&self.quic_version.as_u32())
+                            || versions.contains(&self.version().as_u32())
                             || packet.dcid() != self.odcid().unwrap()
                             || matches!(self.address_validation, AddressValidationInfo::Retry { .. })
                         {
@@ -1669,6 +1678,7 @@ impl Connection {
     fn output_close(&mut self, close: ClosingFrame) -> Res<SendOption> {
         let mut encoder = Encoder::with_capacity(256);
         let grease_quic_bit = self.can_grease_quic_bit();
+        let version = self.version();
         for space in PNSpace::iter() {
             let (cspace, tx) = if let Some(crypto) = self.crypto.states.select_tx(*space) {
                 crypto
@@ -1683,7 +1693,7 @@ impl Connection {
                 encoder,
                 tx,
                 &AddressValidationInfo::None,
-                self.quic_version,
+                version,
                 grease_quic_bit,
             );
             builder.set_limit(min(path.amplification_limit(), path.mtu()) - tx.expansion());
@@ -1817,6 +1827,7 @@ impl Connection {
         let mut initial_sent = None;
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
+        let version = self.version();
 
         // Determine how we are sending packets (PTO, etc..).
         let mtu = path.borrow().mtu();
@@ -1844,7 +1855,7 @@ impl Connection {
                 encoder,
                 tx,
                 &self.address_validation,
-                self.quic_version,
+                version,
                 grease_quic_bit,
             );
             let pn = Self::add_packet_number(
@@ -2052,7 +2063,7 @@ impl Connection {
     }
 
     fn validate_cids(&mut self) -> Res<()> {
-        match self.quic_version {
+        match self.version() {
             QuicVersion::Draft27 => self.validate_cids_draft_27(),
             _ => self.validate_cids_draft_28_plus(),
         }
@@ -2543,7 +2554,10 @@ impl Connection {
 
         self.send_streams.clear();
         self.recv_streams.clear();
-        self.indexes = StreamIndexes::new();
+        self.indexes = StreamIndexes::new(
+            self.conn_params.get_max_streams(StreamType::BiDi),
+            self.conn_params.get_max_streams(StreamType::UniDi),
+        );
         self.crypto.states.discard_0rtt_keys();
         self.events.client_0rtt_rejected();
     }

@@ -12,12 +12,9 @@ use super::{
 use crate::addr_valid::{AddressValidation, ValidateAddress};
 use crate::cc::CWND_INITIAL_PKTS;
 use crate::events::ConnectionEvent;
-use crate::frame::StreamType;
 use crate::path::PATH_MTU_V6;
 use crate::recovery::ACK_ONLY_SIZE_LIMIT;
-use crate::{
-    CongestionControlAlgorithm, ConnectionIdDecoder, ConnectionIdGenerator, Error, QuicVersion,
-};
+use crate::{ConnectionIdDecoder, ConnectionIdGenerator, ConnectionParameters, Error, StreamType};
 
 use std::cell::RefCell;
 use std::convert::TryFrom;
@@ -98,8 +95,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .expect("create a default client")
 }
@@ -110,8 +106,7 @@ pub fn default_server() -> Connection {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .expect("create a default server");
     c.server_enable_0rtt(&test_fixture::anti_replay(), AllowZeroRtt {})
@@ -314,19 +309,16 @@ fn fill_cwnd(src: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagr
     (total_dgrams, now)
 }
 
-/// This magic number is the size of the client's CWND after a handshake
-/// managed by `connect_rtt_idle` completes (other connection attempts might
-/// produce different answers).
-/// This includes the initial congestion window, as increased as a result
-/// receiving acknowledgments for Initial and Handshake packets, which is
-/// at least one full packet (the first Initial) and a little extra.
+/// This magic number is the size of the client's CWND after the handshake completes.
+/// This is the same as the initial congestion window, because during the handshake
+/// the cc is app limited and cwnd is not increased.
 ///
 /// As we change how we build packets, or even as NSS changes,
 /// this number might be different.  The tests that depend on this
 /// value could fail as a result of variations, so it's OK to just
 /// change this value, but it is good to first understand where the
 /// change came from.
-const POST_HANDSHAKE_CWND: usize = PATH_MTU_V6 * (CWND_INITIAL_PKTS + 1) + 381;
+const POST_HANDSHAKE_CWND: usize = PATH_MTU_V6 * CWND_INITIAL_PKTS;
 
 /// Determine the number of packets required to fill the CWND.
 const fn cwnd_packets(data: usize) -> usize {

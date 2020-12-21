@@ -11,9 +11,7 @@ use super::{
 };
 use crate::path::{PATH_MTU_V4, PATH_MTU_V6};
 use crate::tparams::{self, PreferredAddress, TransportParameter};
-use crate::{
-    CongestionControlAlgorithm, ConnectionError, EmptyConnectionIdGenerator, Error, QuicVersion,
-};
+use crate::{ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error};
 
 use neqo_common::Datagram;
 use std::cell::RefCell;
@@ -412,8 +410,7 @@ fn migration_client_empty_cid() {
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         addr(),
         addr(),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .unwrap();
     migration(client);
@@ -472,8 +469,7 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         hs_client,
         hs_server,
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .unwrap();
     let mut server = default_server();
@@ -592,8 +588,7 @@ fn preferred_address_empty_cid() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .unwrap();
 
@@ -613,8 +608,7 @@ fn preferred_address_server_empty_cid() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .unwrap();
 

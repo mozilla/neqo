@@ -22,7 +22,7 @@ use neqo_http3::Error;
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
     tparams::PreferredAddress,
-    ConnectionEvent, ConnectionIdGenerator, Output, State,
+    ConnectionEvent, ConnectionIdGenerator, ConnectionParameters, Output, State,
 };
 
 use super::{qns_read_response, Args, HttpServer};
@@ -47,6 +47,7 @@ impl Http09Server {
         anti_replay: AntiReplay,
         cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         preferred_address: Option<PreferredAddress>,
+        conn_params: ConnectionParameters,
     ) -> Result<Self, Error> {
         let mut server = Server::new(
             now,
@@ -55,6 +56,7 @@ impl Http09Server {
             anti_replay,
             Box::new(AllowZeroRtt {}),
             cid_manager,
+            conn_params,
         )?;
         if let Some(spa) = preferred_address {
             server.set_preferred_address(spa);

@@ -9,8 +9,7 @@ use super::{
     connect, default_client, default_server, exchange_ticket, CountingConnectionIdGenerator,
 };
 use crate::events::ConnectionEvent;
-use crate::frame::StreamType;
-use crate::{CongestionControlAlgorithm, Error, QuicVersion};
+use crate::{ConnectionParameters, Error, StreamType};
 
 use neqo_common::event::Provider;
 use neqo_crypto::{AllowZeroRtt, AntiReplay};
@@ -140,8 +139,7 @@ fn zero_rtt_send_reject() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .unwrap();
     // Using a freshly initialized anti-replay context

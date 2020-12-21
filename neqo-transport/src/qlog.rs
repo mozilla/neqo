@@ -16,9 +16,10 @@ use qlog::{self, event::Event, PacketHeader, QuicFrame};
 use neqo_common::{hex, qinfo, qlog::NeqoQlog, Decoder};
 
 use crate::connection::State;
-use crate::frame::{self, Frame};
+use crate::frame::{CloseError, Frame};
 use crate::packet::{DecryptedPacket, PacketNumber, PacketType, PublicPacket};
 use crate::path::PathRef;
+use crate::stream_id::StreamType as NeqoStreamType;
 use crate::tparams::{self, TransportParametersHandler};
 use crate::tracking::SentPacket;
 use crate::QuicVersion;
@@ -372,8 +373,8 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             maximum_streams,
         } => QuicFrame::max_streams(
             match stream_type {
-                frame::StreamType::BiDi => qlog::StreamType::Bidirectional,
-                frame::StreamType::UniDi => qlog::StreamType::Unidirectional,
+                NeqoStreamType::BiDi => qlog::StreamType::Bidirectional,
+                NeqoStreamType::UniDi => qlog::StreamType::Unidirectional,
             },
             maximum_streams.as_u64().to_string(),
         ),
@@ -390,8 +391,8 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             stream_limit,
         } => QuicFrame::streams_blocked(
             match stream_type {
-                frame::StreamType::BiDi => qlog::StreamType::Bidirectional,
-                frame::StreamType::UniDi => qlog::StreamType::Unidirectional,
+                NeqoStreamType::BiDi => qlog::StreamType::Bidirectional,
+                NeqoStreamType::UniDi => qlog::StreamType::Unidirectional,
             },
             stream_limit.as_u64().to_string(),
         ),
@@ -418,8 +419,8 @@ fn frame_to_qlogframe(frame: &Frame) -> QuicFrame {
             reason_phrase,
         } => QuicFrame::connection_close(
             match error_code {
-                frame::CloseError::Transport(_) => qlog::ErrorSpace::TransportError,
-                frame::CloseError::Application(_) => qlog::ErrorSpace::ApplicationError,
+                CloseError::Transport(_) => qlog::ErrorSpace::TransportError,
+                CloseError::Application(_) => qlog::ErrorSpace::ApplicationError,
             },
             error_code.code(),
             0,

@@ -9,10 +9,10 @@ use super::{
     connect, connect_force_idle, connect_with_rtt, default_client, default_server,
     maybe_authenticate, send_something, AT_LEAST_PTO,
 };
-use crate::frame::StreamType;
 use crate::packet::PacketBuilder;
 use crate::tparams::{self, TransportParameter};
 use crate::tracking::PNSpace;
+use crate::StreamType;
 
 use neqo_common::Encoder;
 use std::time::Duration;

@@ -28,7 +28,7 @@ mod send_stream;
 mod sender;
 pub mod server;
 mod stats;
-mod stream_id;
+pub mod stream_id;
 pub mod tparams;
 mod tracking;
 
@@ -37,14 +37,13 @@ pub use self::cid::{
     ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
     EmptyConnectionIdGenerator, RandomConnectionIdGenerator,
 };
-pub use self::connection::{Connection, Output, State, ZeroRttState};
+pub use self::connection::{params::ConnectionParameters, Connection, Output, State, ZeroRttState};
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
-pub use self::frame::StreamType;
 pub use self::packet::QuicVersion;
 pub use self::sender::PacketSender;
 pub use self::stats::Stats;
-pub use self::stream_id::StreamId;
+pub use self::stream_id::{StreamId, StreamType};
 
 pub use self::recv_stream::RECV_BUFFER_SIZE;
 pub use self::send_stream::SEND_BUFFER_SIZE;

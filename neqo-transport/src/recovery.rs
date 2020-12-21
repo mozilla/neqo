@@ -614,7 +614,7 @@ pub(crate) struct LossRecovery {
 }
 
 impl LossRecovery {
-    pub fn new(alg: &CongestionControlAlgorithm, stats: StatsCell) -> Self {
+    pub fn new(alg: CongestionControlAlgorithm, stats: StatsCell) -> Self {
         Self {
             confirmed_time: None,
             pto_state: None,
@@ -1182,7 +1182,7 @@ mod tests {
 
     #[test]
     fn initial_rtt() {
-        let mut lr = LossRecovery::new(&CongestionControlAlgorithm::NewReno, StatsCell::default());
+        let mut lr = LossRecovery::new(CongestionControlAlgorithm::NewReno, StatsCell::default());
         lr.start_pacer(now());
         pace(&mut lr, 1);
         let rtt = ms!(100);
@@ -1197,7 +1197,7 @@ mod tests {
 
     /// Send `n` packets (using PACING), then acknowledge the first.
     fn setup_lr(n: u64) -> LossRecovery {
-        let mut lr = LossRecovery::new(&CongestionControlAlgorithm::NewReno, StatsCell::default());
+        let mut lr = LossRecovery::new(CongestionControlAlgorithm::NewReno, StatsCell::default());
         lr.start_pacer(now());
         pace(&mut lr, n);
         ack(&mut lr, 0, TEST_RTT);
@@ -1268,7 +1268,7 @@ mod tests {
     // Test time loss detection as part of handling a regular ACK.
     #[test]
     fn time_loss_detection_gap() {
-        let mut lr = LossRecovery::new(&CongestionControlAlgorithm::NewReno, StatsCell::default());
+        let mut lr = LossRecovery::new(CongestionControlAlgorithm::NewReno, StatsCell::default());
         lr.start_pacer(now());
         // Create a single packet gap, and have pn 0 time out.
         // This can't use the default pacing, which is too tight.
@@ -1355,21 +1355,21 @@ mod tests {
     #[test]
     #[should_panic(expected = "discarding application space")]
     fn drop_app() {
-        let mut lr = LossRecovery::new(&CongestionControlAlgorithm::NewReno, StatsCell::default());
+        let mut lr = LossRecovery::new(CongestionControlAlgorithm::NewReno, StatsCell::default());
         lr.discard(PNSpace::ApplicationData, now());
     }
 
     #[test]
     #[should_panic(expected = "dropping spaces out of order")]
     fn drop_out_of_order() {
-        let mut lr = LossRecovery::new(&CongestionControlAlgorithm::NewReno, StatsCell::default());
+        let mut lr = LossRecovery::new(CongestionControlAlgorithm::NewReno, StatsCell::default());
         lr.discard(PNSpace::Handshake, now());
     }
 
     #[test]
     #[should_panic(expected = "ACK on discarded space")]
     fn ack_after_drop() {
-        let mut lr = LossRecovery::new(&CongestionControlAlgorithm::NewReno, StatsCell::default());
+        let mut lr = LossRecovery::new(CongestionControlAlgorithm::NewReno, StatsCell::default());
         lr.start_pacer(now());
         lr.discard(PNSpace::Initial, now());
         lr.on_ack_received(
@@ -1383,7 +1383,7 @@ mod tests {
 
     #[test]
     fn drop_spaces() {
-        let mut lr = LossRecovery::new(&CongestionControlAlgorithm::NewReno, StatsCell::default());
+        let mut lr = LossRecovery::new(CongestionControlAlgorithm::NewReno, StatsCell::default());
         lr.start_pacer(now());
         lr.on_packet_sent(SentPacket::new(
             PacketType::Initial,
@@ -1451,7 +1451,7 @@ mod tests {
 
     #[test]
     fn rearm_pto_after_confirmed() {
-        let mut lr = LossRecovery::new(&CongestionControlAlgorithm::NewReno, StatsCell::default());
+        let mut lr = LossRecovery::new(CongestionControlAlgorithm::NewReno, StatsCell::default());
         lr.start_pacer(now());
         lr.on_packet_sent(SentPacket::new(
             PacketType::Handshake,
@@ -1487,7 +1487,7 @@ mod tests {
 
     #[test]
     fn no_pto_if_amplification_limited() {
-        let mut lr = LossRecovery::new(&CongestionControlAlgorithm::NewReno, StatsCell::default());
+        let mut lr = LossRecovery::new(CongestionControlAlgorithm::NewReno, StatsCell::default());
         lr.start_pacer(now());
         lr.on_packet_sent(SentPacket::new(
             PacketType::Initial,

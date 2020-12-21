@@ -10,12 +10,11 @@ use super::{
     send_something, AT_LEAST_PTO, DEFAULT_RTT, FORCE_IDLE_CLIENT_1RTT_PACKETS, POST_HANDSHAKE_CWND,
 };
 use crate::cc::{CWND_MIN, MAX_DATAGRAM_SIZE};
-use crate::frame::StreamType;
 use crate::packet::PacketNumber;
-use crate::path::PATH_MTU_V6;
 use crate::recovery::{ACK_ONLY_SIZE_LIMIT, PACKET_THRESHOLD};
 use crate::sender::PACING_BURST_SIZE;
 use crate::stats::MAX_PTO_COUNTS;
+use crate::stream_id::StreamType;
 use crate::tracking::MAX_UNACKED_PKTS;
 
 use neqo_common::{qdebug, qinfo, qtrace, Datagram};
@@ -295,11 +294,11 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance() {
     // accurate byte counting version of congestion avoidance.
     // Check over several increases to be sure.
     let mut expected_cwnd = client.loss_recovery.cwnd();
+    // Fill cwnd.
+    let (mut c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
+    now = next_now;
     for i in 0..5 {
         qinfo!("iteration {}", i);
-        // Client: Send more data
-        let (mut c_tx_dgrams, next_now) = fill_cwnd(&mut client, 0, now);
-        now = next_now;
 
         let c_tx_size: usize = c_tx_dgrams.iter().map(|d| d.len()).sum();
         qinfo!(
@@ -309,6 +308,10 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance() {
         );
         assert_eq!(c_tx_size, expected_cwnd);
 
+        // As acks arrive we will continue filling cwnd and save all packets
+        // from this cycle will be stored in next_c_tx_dgrams.
+        let mut next_c_tx_dgrams: Vec<Datagram> = Vec::new();
+
         // Until we process all the packets, the congestion window remains the same.
         // Note that we need the client to process ACK frames in stages, so split the
         // datagrams into two, ensuring that we allow for an ACK for each batch.
@@ -317,14 +320,23 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance() {
         for dgram in s_tx_dgram {
             assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
             client.process_input(dgram, now);
+            // make sure to fill cwnd again.
+            let (mut new_pkts, next_now) = fill_cwnd(&mut client, 0, now);
+            now = next_now;
+            next_c_tx_dgrams.append(&mut new_pkts);
         }
         let s_tx_dgram = ack_bytes(&mut server, 0, c_tx_dgrams, now);
         for dgram in s_tx_dgram {
             assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
             client.process_input(dgram, now);
+            // make sure to fill cwnd again.
+            let (mut new_pkts, next_now) = fill_cwnd(&mut client, 0, now);
+            now = next_now;
+            next_c_tx_dgrams.append(&mut new_pkts);
         }
         expected_cwnd += MAX_DATAGRAM_SIZE;
         assert_eq!(client.loss_recovery.cwnd(), expected_cwnd);
+        c_tx_dgrams = next_c_tx_dgrams;
     }
 }
 
@@ -489,13 +501,11 @@ fn pace() {
     }
     let gap = client.process_output(now).callback();
     assert_ne!(gap, Duration::new(0, 0));
-    for _ in 1 + PACING_BURST_SIZE..cwnd_packets(POST_HANDSHAKE_CWND) {
+    for _ in (1 + PACING_BURST_SIZE)..cwnd_packets(POST_HANDSHAKE_CWND) {
         match client.process_output(now) {
             Output::Callback(t) => assert_eq!(t, gap),
-            Output::Datagram(d) => {
-                // If the packet is small, then this is the last packet
-                // allowed in the CWND, which is not paced.
-                assert_ne!(PATH_MTU_V6, d.len());
+            Output::Datagram(_) => {
+                // The last packet might not be paced.
                 count += 1;
                 break;
             }
@@ -506,6 +516,8 @@ fn pace() {
         assert!(dgram.is_some());
         count += 1;
     }
+    let dgram = client.process_output(now).dgram();
+    assert!(dgram.is_none());
     assert_eq!(count, cwnd_packets(POST_HANDSHAKE_CWND));
     let fin = client.process_output(now).callback();
     assert_ne!(fin, Duration::new(0, 0));

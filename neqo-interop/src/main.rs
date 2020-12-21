@@ -12,8 +12,8 @@ use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionError, ConnectionEvent,
-    EmptyConnectionIdGenerator, Error, Output, QuicVersion, State, StreamType,
+    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
+    Error, Output, State, StreamType,
 };
 
 use std::cell::RefCell;
@@ -463,8 +463,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         nctx.local_addr,
         nctx.remote_addr,
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -605,8 +604,7 @@ fn test_h3_rz(
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         nctx.local_addr,
         nctx.remote_addr,
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
         &Http3Parameters {
             qpack_settings: QpackSettings {
                 max_table_size_encoder: 16384,
@@ -689,8 +687,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         nctx.local_addr,
         nctx.remote_addr,
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine

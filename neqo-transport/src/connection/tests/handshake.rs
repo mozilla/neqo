@@ -12,13 +12,10 @@ use super::{
 };
 use crate::connection::AddressValidation;
 use crate::events::ConnectionEvent;
-use crate::frame::StreamType;
 use crate::path::PATH_MTU_V6;
 use crate::server::ValidateAddress;
 use crate::tparams::TransportParameter;
-use crate::{
-    CongestionControlAlgorithm, ConnectionError, EmptyConnectionIdGenerator, Error, QuicVersion,
-};
+use crate::{ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType};
 
 use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AuthenticationStatus};
@@ -110,8 +107,7 @@ fn no_alpn() {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .unwrap();
     let mut server = default_server();
@@ -182,8 +178,7 @@ fn crypto_frame_split() {
         test_fixture::LONG_CERT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .expect("create a server");
 
@@ -240,8 +235,7 @@ fn chacha20poly1305() {
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         addr(),
         addr(),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .expect("create a default client");
     client.set_ciphers(&[TLS_CHACHA20_POLY1305_SHA256]).unwrap();

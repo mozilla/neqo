@@ -10,7 +10,7 @@ use neqo_common::{qtrace, Decoder};
 
 use crate::cid::MAX_CONNECTION_ID_LEN;
 use crate::packet::PacketType;
-use crate::stream_id::{StreamId, StreamIndex};
+use crate::stream_id::{StreamId, StreamIndex, StreamType};
 use crate::{AppError, ConnectionError, Error, Res, TransportError};
 
 use std::convert::TryFrom;
@@ -48,29 +48,6 @@ pub const FRAME_TYPE_HANDSHAKE_DONE: FrameType = 0x1e;
 const STREAM_FRAME_BIT_FIN: u64 = 0x01;
 const STREAM_FRAME_BIT_LEN: u64 = 0x02;
 const STREAM_FRAME_BIT_OFF: u64 = 0x04;
-
-#[derive(PartialEq, Debug, Copy, Clone, PartialOrd, Eq, Ord, Hash)]
-/// Bi-Directional or Uni-Directional.
-pub enum StreamType {
-    BiDi,
-    UniDi,
-}
-
-impl StreamType {
-    fn frame_type_bit(self) -> u64 {
-        match self {
-            Self::BiDi => 0,
-            Self::UniDi => 1,
-        }
-    }
-    fn from_type_bit(bit: u64) -> Self {
-        if (bit & 0x01) == 0 {
-            Self::BiDi
-        } else {
-            Self::UniDi
-        }
-    }
-}
 
 #[derive(PartialEq, Eq, Debug, PartialOrd, Ord, Clone, Copy)]
 pub enum CloseError {
@@ -197,6 +174,21 @@ pub enum Frame<'a> {
 }
 
 impl<'a> Frame<'a> {
+    fn get_stream_type_bit(stream_type: StreamType) -> u64 {
+        match stream_type {
+            StreamType::BiDi => 0,
+            StreamType::UniDi => 1,
+        }
+    }
+
+    fn stream_type_from_bit(bit: u64) -> StreamType {
+        if (bit & 0x01) == 0 {
+            StreamType::BiDi
+        } else {
+            StreamType::UniDi
+        }
+    }
+
     pub fn get_type(&self) -> FrameType {
         match self {
             Self::Padding => FRAME_TYPE_PADDING,
@@ -212,12 +204,12 @@ impl<'a> Frame<'a> {
             Self::MaxData { .. } => FRAME_TYPE_MAX_DATA,
             Self::MaxStreamData { .. } => FRAME_TYPE_MAX_STREAM_DATA,
             Self::MaxStreams { stream_type, .. } => {
-                FRAME_TYPE_MAX_STREAMS_BIDI + stream_type.frame_type_bit()
+                FRAME_TYPE_MAX_STREAMS_BIDI + Self::get_stream_type_bit(*stream_type)
             }
             Self::DataBlocked { .. } => FRAME_TYPE_DATA_BLOCKED,
             Self::StreamDataBlocked { .. } => FRAME_TYPE_STREAM_DATA_BLOCKED,
             Self::StreamsBlocked { stream_type, .. } => {
-                FRAME_TYPE_STREAMS_BLOCKED_BIDI + stream_type.frame_type_bit()
+                FRAME_TYPE_STREAMS_BLOCKED_BIDI + Self::get_stream_type_bit(*stream_type)
             }
             Self::NewConnectionId { .. } => FRAME_TYPE_NEW_CONNECTION_ID,
             Self::RetireConnectionId { .. } => FRAME_TYPE_RETIRE_CONNECTION_ID,
@@ -450,7 +442,7 @@ impl<'a> Frame<'a> {
                     return Err(Error::StreamLimitError);
                 }
                 Ok(Self::MaxStreams {
-                    stream_type: StreamType::from_type_bit(t),
+                    stream_type: Self::stream_type_from_bit(t),
                     maximum_streams: StreamIndex::new(m),
                 })
             }
@@ -463,7 +455,7 @@ impl<'a> Frame<'a> {
             }),
             FRAME_TYPE_STREAMS_BLOCKED_BIDI | FRAME_TYPE_STREAMS_BLOCKED_UNIDI => {
                 Ok(Self::StreamsBlocked {
-                    stream_type: StreamType::from_type_bit(t),
+                    stream_type: Self::stream_type_from_bit(t),
                     stream_limit: StreamIndex::new(dv(dec)?),
                 })
             }

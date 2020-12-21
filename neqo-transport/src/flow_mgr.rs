@@ -13,13 +13,13 @@ use std::mem;
 use neqo_common::{qinfo, qwarn, Encoder};
 use smallvec::{smallvec, SmallVec};
 
-use crate::frame::{Frame, StreamType};
+use crate::frame::Frame;
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RecvStreams;
 use crate::send_stream::SendStreams;
 use crate::stats::FrameStats;
-use crate::stream_id::{StreamId, StreamIndex, StreamIndexes};
+use crate::stream_id::{StreamId, StreamIndex, StreamIndexes, StreamType};
 use crate::AppError;
 
 type FlowFrame = Frame<'static>;

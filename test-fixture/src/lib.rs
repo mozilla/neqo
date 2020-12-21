@@ -12,8 +12,8 @@ use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatu
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder,
-    ConnectionIdGenerator, ConnectionIdRef, QuicVersion, State,
+    Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
+    ConnectionIdRef, ConnectionParameters, State,
 };
 
 use std::cell::RefCell;
@@ -121,8 +121,7 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .expect("create a default client")
 }
@@ -146,8 +145,7 @@ fn make_default_server(alpn: &[impl AsRef<str>]) -> Connection {
         DEFAULT_KEYS,
         alpn,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
     )
     .expect("create a default server");
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
@@ -199,8 +197,7 @@ pub fn default_http3_client() -> Http3Client {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        ConnectionParameters::default(),
         &Http3Parameters {
             qpack_settings: QpackSettings {
                 max_table_size_encoder: 100,

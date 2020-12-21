@@ -10,12 +10,12 @@ use super::{
     default_client, default_server, fill_cwnd, maybe_authenticate, send_and_receive,
     send_something, AT_LEAST_PTO, DEFAULT_RTT, POST_HANDSHAKE_CWND,
 };
-use crate::frame::StreamType;
 use crate::path::PATH_MTU_V6;
 use crate::recovery::PTO_PACKET_COUNT;
 use crate::stats::MAX_PTO_COUNTS;
 use crate::tparams::TransportParameter;
 use crate::tracking::ACK_DELAY;
+use crate::StreamType;
 
 use neqo_common::qdebug;
 use neqo_crypto::AuthenticationStatus;
