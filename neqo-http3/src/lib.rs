@@ -95,7 +95,7 @@ impl Error {
             Self::HttpGeneralProtocol | Self::HttpGeneralProtocolStream | Self::InvalidHeader => {
                 0x101
             }
-            Self::HttpInternal( .. ) => 0x102,
+            Self::HttpInternal(..) => 0x102,
             Self::HttpStreamCreation => 0x103,
             Self::HttpClosedCriticalStream => 0x104,
             Self::HttpFrameUnexpected => 0x105,
@@ -120,7 +120,7 @@ impl Error {
         matches!(
             self,
             Self::HttpGeneralProtocol
-                | Self::HttpInternal( .. )
+                | Self::HttpInternal(..)
                 | Self::HttpStreamCreation
                 | Self::HttpClosedCriticalStream
                 | Self::HttpFrameUnexpected
@@ -194,8 +194,8 @@ impl Error {
     ///   Any error is mapped to the indicated type.
     fn map_error<R>(r: Result<R, impl Into<Self>>, err: Self) -> Result<R, Self> {
         Ok(r.map_err(|e| {
-            debug_assert!(!matches!(e.into(), Self::HttpInternal( .. )));
-            debug_assert!(!matches!(err, Self::HttpInternal( .. )));
+            debug_assert!(!matches!(e.into(), Self::HttpInternal(..)));
+            debug_assert!(!matches!(err, Self::HttpInternal(..)));
             err
         })?)
     }
