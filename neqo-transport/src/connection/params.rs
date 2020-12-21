@@ -57,9 +57,7 @@ impl ConnectionParameters {
     }
 
     pub fn max_streams(mut self, stream_type: StreamType, v: u64) -> Self {
-        if v > (1 << 60) {
-            panic!("max_streams's parameter too big");
-        }
+        assert!(v <= (1 << 60), "max_streams's parameter too big");
         match stream_type {
             StreamType::BiDi => {
                 self.max_streams_bidi = v;

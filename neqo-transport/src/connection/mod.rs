@@ -56,6 +56,7 @@ use crate::ConnectionParameters;
 use crate::{AppError, ConnectionError, Error, Res};
 
 mod idle;
+pub mod params;
 mod saved;
 mod state;
 
