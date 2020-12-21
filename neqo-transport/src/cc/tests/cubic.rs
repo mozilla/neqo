@@ -5,7 +5,6 @@
 // except according to those terms.
 
 #[allow(clippy::cast_possible_truncation)]
-
 use crate::cc::{
     classic_cc::{ClassicCongestionControl, CWND_INITIAL},
     cubic::{
