@@ -48,7 +48,7 @@ pub use self::stream_id::{StreamId, StreamType};
 pub use self::recv_stream::RECV_BUFFER_SIZE;
 pub use self::send_stream::SEND_BUFFER_SIZE;
 
-type TransportError = u64;
+pub type TransportError = u64;
 const ERROR_APPLICATION_CLOSE: TransportError = 12;
 const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
 
