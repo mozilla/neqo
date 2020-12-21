@@ -87,7 +87,7 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 // test_fixture because they produce different - and incompatible - types.
 //
 // These are a direct copy of those functions.
-pub fn default_client() -> Connection {
+pub fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
     Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
@@ -95,23 +95,30 @@ pub fn default_client() -> Connection {
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         addr(),
         addr(),
-        ConnectionParameters::default(),
+        params,
     )
     .expect("create a default client")
 }
-pub fn default_server() -> Connection {
+pub fn default_client() -> Connection {
+    new_client(ConnectionParameters::default())
+}
+
+pub fn new_server(params: ConnectionParameters) -> Connection {
     fixture_init();
 
     let mut c = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default(),
+        params,
     )
     .expect("create a default server");
     c.server_enable_0rtt(&test_fixture::anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
     c
+}
+pub fn default_server() -> Connection {
+    new_server(ConnectionParameters::default())
 }
 
 /// If state is `AuthenticationNeeded` call `authenticated()`. This function will

@@ -7,7 +7,7 @@
 use super::super::{Connection, Output, State, StreamType};
 use super::{
     connect_fail, connect_force_idle, default_client, default_server, maybe_authenticate,
-    send_something,
+    new_client, new_server, send_something,
 };
 use crate::path::{PATH_MTU_V4, PATH_MTU_V6};
 use crate::tparams::{self, PreferredAddress, TransportParameter};
@@ -472,13 +472,12 @@ fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: So
         ConnectionParameters::default(),
     )
     .unwrap();
-    let mut server = default_server();
     let spa = if preferred.ip().is_ipv6() {
         PreferredAddress::new(None, Some(preferred))
     } else {
         PreferredAddress::new(Some(preferred), None)
     };
-    server.set_preferred_address(&spa).unwrap();
+    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
 
     let dgram = fast_handshake(&mut client, &mut server);
 
@@ -551,53 +550,63 @@ fn preferred_address_loopback() {
     preferred_address(a, a, new_port(a));
 }
 
-fn preferred_address_ignored(spa: &PreferredAddress) {
-    let mut client = default_client();
-    let mut server = default_server();
-    server.set_preferred_address(spa).unwrap();
-
-    let dgram = fast_handshake(&mut client, &mut server);
+fn expect_no_migration(client: &mut Connection, server: &mut Connection) {
+    let dgram = fast_handshake(client, server);
 
     // The client won't probe now, though it could; it remains idle.
     let out = client.process(dgram, now());
     assert_ne!(out.callback(), Duration::new(0, 0));
 
     // Data continues on the main path for the client.
-    let data = send_something(&mut client, now());
+    let data = send_something(client, now());
     assert_v6_path(&data, false);
     assert_eq!(client.stats().frame_tx.path_challenge, 0);
+}
+
+fn preferred_address_ignored(spa: PreferredAddress) {
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+
+    expect_no_migration(&mut client, &mut server);
 }
 
 /// Using a loopback address in the preferred address is ignored.
 #[test]
 fn preferred_address_ignore_loopback() {
-    preferred_address_ignored(&PreferredAddress::new(None, Some(loopback())));
+    preferred_address_ignored(PreferredAddress::new(None, Some(loopback())));
 }
 
 /// A preferred address in the wrong address family is ignored.
 #[test]
 fn preferred_address_ignore_different_family() {
-    preferred_address_ignored(&PreferredAddress::new(Some(addr_v4()), None));
+    preferred_address_ignored(PreferredAddress::new(Some(addr_v4()), None));
+}
+
+/// Disabling preferred addresses at the client means that it ignores a perfectly
+/// good preferred address.
+#[test]
+fn preferred_address_disabled_client() {
+    let mut client = new_client(ConnectionParameters::default().disable_preferred_address());
+    let mut preferred = addr();
+    preferred.set_ip(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2)));
+    let spa = PreferredAddress::new(None, Some(preferred));
+    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+
+    expect_no_migration(&mut client, &mut server);
 }
 
 #[test]
 fn preferred_address_empty_cid() {
     fixture_init();
 
-    let mut server = Connection::new_server(
+    let spa = PreferredAddress::new(None, Some(new_port(addr())));
+    let res = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        ConnectionParameters::default(),
-    )
-    .unwrap();
-
-    assert_eq!(
-        server
-            .set_preferred_address(&PreferredAddress::new(None, Some(new_port(addr()))))
-            .unwrap_err(),
-        Error::ConnectionIdsExhausted
+        ConnectionParameters::default().preferred_address(spa),
     );
+    assert_eq!(res.unwrap_err(), Error::ConnectionIdsExhausted);
 }
 
 /// A server cannot include a preferred address if it chooses an empty connection ID.

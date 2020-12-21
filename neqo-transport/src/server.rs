@@ -415,11 +415,6 @@ impl Server {
             c.set_retry_cids(odcid, initial.src_cid, initial.dst_cid);
         }
         c.set_validation(Rc::clone(&self.address_validation));
-        if let Some(spa) = &self.preferred_address {
-            if c.set_preferred_address(spa).is_err() {
-                qwarn!([self], "Unable to set preferred address");
-            }
-        }
         c.set_qlog(self.create_qlog_trace(attempt_key));
     }
 

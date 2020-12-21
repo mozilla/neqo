@@ -5,19 +5,32 @@
 // except according to those terms.
 
 use crate::stream_id::{StreamIndex, StreamType};
+use crate::tparams::PreferredAddress;
 use crate::{CongestionControlAlgorithm, QuicVersion};
 
 const LOCAL_STREAM_LIMIT_BIDI: StreamIndex = StreamIndex::new(16);
 const LOCAL_STREAM_LIMIT_UNI: StreamIndex = StreamIndex::new(16);
 
+/// What to do with preferred addresses.
+#[derive(Debug, Clone)]
+pub enum PreferredAddressConfig {
+    /// Disabled, whether for client or server.
+    Disabled,
+    /// Enabled at a client, disabled at a server.
+    Default,
+    /// Enabled at both client and server.
+    Address(PreferredAddress),
+}
+
 /// ConnectionParameters use for setting intitial value for QUIC parameters.
 /// This collect like initial limits, protocol version and congestion control.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ConnectionParameters {
     quic_version: QuicVersion,
     cc_algorithm: CongestionControlAlgorithm,
     max_streams_bidi: StreamIndex,
     max_streams_uni: StreamIndex,
+    preferred_address: PreferredAddressConfig,
 }
 
 impl Default for ConnectionParameters {
@@ -27,6 +40,7 @@ impl Default for ConnectionParameters {
             cc_algorithm: CongestionControlAlgorithm::NewReno,
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
+            preferred_address: PreferredAddressConfig::Default,
         }
     }
 }
@@ -68,5 +82,21 @@ impl ConnectionParameters {
             }
         }
         self
+    }
+
+    /// Set a preferred address (which only has an effect for a server).
+    pub fn preferred_address(mut self, preferred: PreferredAddress) -> Self {
+        self.preferred_address = PreferredAddressConfig::Address(preferred);
+        self
+    }
+
+    /// Disable the use of preferred addresses.
+    pub fn disable_preferred_address(mut self) -> Self {
+        self.preferred_address = PreferredAddressConfig::Disabled;
+        self
+    }
+
+    pub fn get_preferred_address(&self) -> &PreferredAddressConfig {
+        &self.preferred_address
     }
 }

@@ -49,10 +49,7 @@ use crate::recv_stream::{RecvStream, RecvStreams, RECV_BUFFER_SIZE};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::{Stats, StatsCell};
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes, StreamType};
-use crate::tparams::{
-    self, PreferredAddress, TransportParameter, TransportParameterId, TransportParameters,
-    TransportParametersHandler,
-};
+use crate::tparams::{self, TransportParameter, TransportParameters, TransportParametersHandler};
 use crate::tracking::{AckTracker, PNSpace, SentPacket};
 use crate::{AppError, ConnectionError, Error, Res};
 
@@ -64,6 +61,7 @@ mod state;
 use idle::IdleTimeout;
 pub use idle::LOCAL_IDLE_TIMEOUT;
 pub use params::ConnectionParameters;
+use params::PreferredAddressConfig;
 use saved::SavedDatagrams;
 use state::StateSignaling;
 pub use state::{ClosingFrame, State};
@@ -326,7 +324,7 @@ impl Connection {
             .server_enable_0rtt(self.tps.clone(), anti_replay, zero_rtt_checker)
     }
 
-    fn set_tp_defaults(tps: &mut TransportParameters, conn_params: &ConnectionParameters) {
+    fn set_tp_defaults(tps: &mut TransportParameters) {
         tps.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
             u64::try_from(RECV_BUFFER_SIZE).unwrap(),
@@ -350,15 +348,36 @@ impl Connection {
         );
         tps.set_empty(tparams::DISABLE_MIGRATION);
         tps.set_empty(tparams::GREASE_QUIC_BIT);
+    }
 
-        tps.set_integer(
+    /// Read connection parameters and update transport parameters.
+    fn read_parameters(&mut self) -> Res<()> {
+        self.tps.borrow_mut().local.set_integer(
             tparams::INITIAL_MAX_STREAMS_BIDI,
-            conn_params.get_max_streams(StreamType::BiDi).as_u64(),
+            self.conn_params.get_max_streams(StreamType::BiDi).as_u64(),
         );
-        tps.set_integer(
+        self.tps.borrow_mut().local.set_integer(
             tparams::INITIAL_MAX_STREAMS_UNI,
-            conn_params.get_max_streams(StreamType::UniDi).as_u64(),
+            self.conn_params.get_max_streams(StreamType::UniDi).as_u64(),
         );
+
+        // Set the preferred address transport parameter if this is a server.
+        if let PreferredAddressConfig::Address(preferred) = self.conn_params.get_preferred_address()
+        {
+            if self.role == Role::Server {
+                let (cid, srt) = self.cid_manager.preferred_address_cid()?;
+                self.tps.borrow_mut().local.set(
+                    tparams::PREFERRED_ADDRESS,
+                    TransportParameter::PreferredAddress {
+                        v4: preferred.ipv4(),
+                        v6: preferred.ipv6(),
+                        cid,
+                        srt,
+                    },
+                );
+            }
+        }
+        Ok(())
     }
 
     fn new(
@@ -369,11 +388,7 @@ impl Connection {
         conn_params: ConnectionParameters,
     ) -> Res<Self> {
         let mut tps = TransportParametersHandler::default();
-        Self::set_tp_defaults(&mut tps.local, &conn_params);
-        let indexes = StreamIndexes::new(
-            conn_params.get_max_streams(StreamType::BiDi),
-            conn_params.get_max_streams(StreamType::UniDi),
-        );
+        Self::set_tp_defaults(&mut tps.local);
         // Setup the local connection ID.
         let local_initial_source_cid = cid_generator
             .borrow_mut()
@@ -389,7 +404,12 @@ impl Connection {
         let crypto = Crypto::new(agent, protocols, tphandler.clone())?;
 
         let stats = StatsCell::default();
-        let c = Self {
+        let indexes = StreamIndexes::new(
+            conn_params.get_max_streams(StreamType::BiDi),
+            conn_params.get_max_streams(StreamType::UniDi),
+        );
+
+        let mut c = Self {
             role,
             state: State::Init,
             paths: Paths::default(),
@@ -418,6 +438,7 @@ impl Connection {
             release_resumption_token_timer: None,
             conn_params,
         };
+        c.read_parameters()?;
         c.stats.borrow_mut().init(format!("{}", c));
         Ok(c)
     }
@@ -441,7 +462,13 @@ impl Connection {
     }
 
     /// Set a local transport parameter, possibly overriding a default value.
-    pub fn set_local_tparam(&self, tp: TransportParameterId, value: TransportParameter) -> Res<()> {
+    /// In general, this method should not be used.  This only sets transport parameters
+    /// without dealing with other aspects of setting the value.
+    pub fn set_local_tparam(
+        &self,
+        tp: crate::tparams::TransportParameterId,
+        value: TransportParameter,
+    ) -> Res<()> {
         if *self.state() == State::Init {
             self.tps.borrow_mut().local.set(tp, value);
             Ok(())
@@ -1511,7 +1538,14 @@ impl Connection {
     }
 
     fn migrate_to_preferred_address(&mut self, now: Instant) -> Res<()> {
-        let spa = self.tps.borrow_mut().remote().get_preferred_address();
+        let spa = if matches!(
+            self.conn_params.get_preferred_address(),
+            PreferredAddressConfig::Disabled
+        ) {
+            None
+        } else {
+            self.tps.borrow_mut().remote().get_preferred_address()
+        };
         if let Some((addr, cid)) = spa {
             // The connection ID isn't special, so just save it.
             self.connection_ids.add_remote(cid)?;
@@ -1561,20 +1595,6 @@ impl Connection {
                 path.borrow()
             );
         }
-    }
-
-    /// Set a preferred address.
-    pub fn set_preferred_address(&mut self, preferred: &PreferredAddress) -> Res<()> {
-        let (cid, srt) = self.cid_manager.preferred_address_cid()?;
-        self.set_local_tparam(
-            tparams::PREFERRED_ADDRESS,
-            TransportParameter::PreferredAddress {
-                v4: preferred.ipv4(),
-                v6: preferred.ipv6(),
-                cid,
-                srt,
-            },
-        )
     }
 
     fn output(&mut self, now: Instant) -> SendOption {

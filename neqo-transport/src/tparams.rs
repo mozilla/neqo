@@ -49,6 +49,7 @@ tpids! {
     GREASE_QUIC_BIT = 0x2ab2,
 }
 
+#[derive(Clone, Debug)]
 pub struct PreferredAddress {
     v4: Option<SocketAddr>,
     v6: Option<SocketAddr>,
