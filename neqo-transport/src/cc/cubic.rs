@@ -27,7 +27,7 @@ pub const CUBIC_BETA_USIZE_QUOTIENT: usize = 7;
 pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
 
 /// The fast convergence ratio further reduces the congestion window when a congestion event
-/// occurs before reaching the previous 'W_max'.
+/// occurs before reaching the previous `W_max`.
 pub const CUBIC_FAST_CONVERGENCE: f64 = (1.0 + CUBIC_BETA) / 2.0;
 
 #[derive(Debug)]
@@ -91,6 +91,7 @@ impl Cubic {
 impl WindowAdjustment for Cubic {
     // This is because of the cast in the last line from f64 to usize.
     #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_sign_loss)]
     fn on_packets_acked(
         &mut self,
         curr_cwnd: usize,
