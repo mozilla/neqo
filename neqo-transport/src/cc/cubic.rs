@@ -32,7 +32,7 @@ pub const CUBIC_FAST_CONVERGENCE: f64 = 0.85; // (1.0 + CUBIC_BETA) / 2.0;
 fn convert_to_f64(v: usize) -> f64 {
     assert!(v < (1 << 53));
     let mut f_64 = f64::try_from(u32::try_from(v >> 21).unwrap()).unwrap();
-    f_64 *= 2097152.0; // f_64 <<= 21
+    f_64 *= 2_097_152.0; // f_64 <<= 21
     f_64 += f64::try_from(u32::try_from(v & 0x1f_ffff).unwrap()).unwrap();
     f_64
 }
