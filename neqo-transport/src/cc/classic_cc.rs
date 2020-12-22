@@ -87,8 +87,9 @@ pub trait WindowAdjustment: Display + Debug {
         now: Instant,
     ) -> usize;
     /// This function is called when a congestion event has beed detected and it
-    /// returns new (decreased) values of curr_cwnd and acked_bytes.
+    /// returns new (decreased) values of `curr_cwnd` and `acked_bytes`.
     fn on_congestion_event(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize);
+    fn on_app_limited(&mut self);
     #[cfg(test)]
     fn last_max_cwnd(&self) -> f64;
     #[cfg(test)]
@@ -176,7 +177,8 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         }
 
         if is_app_limited {
-            new_acked = 0;
+            self.cc_algorithm.on_app_limited();
+            return;
         }
 
         qtrace!([self], "ACK received, acked_bytes = {}", self.acked_bytes);

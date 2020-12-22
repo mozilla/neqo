@@ -175,6 +175,12 @@ impl WindowAdjustment for Cubic {
         )
     }
 
+    fn on_app_limited(&mut self) {
+        // Reset ca_epoch_start. Let it start again when the congestion controller
+        // exits the app-limited period.
+        self.ca_epoch_start = None;
+    }
+
     #[cfg(test)]
     fn last_max_cwnd(&self) -> f64 {
         self.last_max_cwnd
