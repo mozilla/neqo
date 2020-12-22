@@ -19,16 +19,23 @@ use std::convert::TryFrom;
 // C is a constant fixed to determine the aggressiveness of window
 // increase  in high BDP networks.
 pub const CUBIC_C: f64 = 0.4;
-// beta_cubic is the CUBIC multiplication decrease factor
-const CUBIC_BETA: f64 = 0.7;
 pub const CUBIC_ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7);
 
+// CUBIC_BETA = 0.7;
 pub const CUBIC_BETA_USIZE_QUOTIENT: usize = 7;
 pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
 
 /// The fast convergence ratio further reduces the congestion window when a congestion event
 /// occurs before reaching the previous `W_max`.
-pub const CUBIC_FAST_CONVERGENCE: f64 = (1.0 + CUBIC_BETA) / 2.0;
+pub const CUBIC_FAST_CONVERGENCE: f64 = 0.85; // (1.0 + CUBIC_BETA) / 2.0;
+
+fn convert_to_f64(v: usize) -> f64 {
+    assert!(v < (1 << 53));
+    let mut f_64 = f64::try_from(u32::try_from(v >> 21).unwrap()).unwrap();
+    f_64 *= 2097152.0; // f_64 <<= 21
+    f_64 += f64::try_from(u32::try_from(v & 0x1f_ffff).unwrap()).unwrap();
+    f_64
+}
 
 #[derive(Debug)]
 pub struct Cubic {
@@ -83,6 +90,7 @@ impl Cubic {
     }
 
     /// W_cubic(t) = C*(t-K)^3 + W_max (Eq. 1)
+    /// t is relative to the start of the congestion avoidance phase and it is in seconds.
     fn w_cubic(&self, t: f64) -> f64 {
         CUBIC_C * (t - self.k).powi(3) * MAX_DATAGRAM_SIZE_F64 + self.w_max
     }
@@ -95,17 +103,17 @@ impl WindowAdjustment for Cubic {
     fn on_packets_acked(
         &mut self,
         curr_cwnd: usize,
-        acked_bytes: usize,
+        new_acked_bytes: usize,
         min_rtt: Duration,
         now: Instant,
     ) -> usize {
-        let curr_cwnd_f64 = f64::try_from(u32::try_from(curr_cwnd).unwrap()).unwrap();
-        self.tcp_acked_bytes += f64::try_from(u32::try_from(acked_bytes).unwrap()).unwrap();
+        let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
+        self.tcp_acked_bytes += f64::try_from(u32::try_from(new_acked_bytes).unwrap()).unwrap();
         if self.ca_epoch_start.is_none() {
             // This is a start of a new congestion avoidance phase.
             self.ca_epoch_start = Some(now);
-            // reset acked_bytes and estimated_tcp_cwnd;
-            self.tcp_acked_bytes = f64::try_from(u32::try_from(acked_bytes).unwrap()).unwrap();
+            // reset tcp_acked_bytes and estimated_tcp_cwnd;
+            self.tcp_acked_bytes = f64::try_from(u32::try_from(new_acked_bytes).unwrap()).unwrap();
             self.estimated_tcp_cwnd = curr_cwnd_f64;
             if self.last_max_cwnd <= curr_cwnd_f64 {
                 self.w_max = curr_cwnd_f64;
@@ -117,13 +125,10 @@ impl WindowAdjustment for Cubic {
             qtrace!([self], "New epoch");
         }
 
-        let time_ca = (now + min_rtt
-            - if let Some(t) = self.ca_epoch_start {
-                t
-            } else {
-                now
-            })
-        .as_secs_f64();
+        let time_ca = self
+            .ca_epoch_start
+            .map_or(min_rtt, |t| now + min_rtt - t)
+            .as_secs_f64();
         let target = self.w_cubic(time_ca);
 
         let mut cnt = if target > curr_cwnd_f64 {
@@ -146,13 +151,13 @@ impl WindowAdjustment for Cubic {
             }
         }
 
-        // Limit increas to max 1 MSS per 2 ack packets.
+        // Limit increase to max 1 MSS per 2 ack packets.
         cnt = cnt.max(2.0 * MAX_DATAGRAM_SIZE_F64);
         cnt as usize
     }
 
     fn on_congestion_event(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize) {
-        let curr_cwnd_f64 = f64::try_from(u32::try_from(curr_cwnd).unwrap()).unwrap();
+        let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         // Fast Convergence
         // check cwnd + MAX_DATAGRAM_SIZE instead of cwnd because with cwnd in bytes, cwnd may be slightly off.
         self.last_max_cwnd = if curr_cwnd_f64 + MAX_DATAGRAM_SIZE_F64 < self.last_max_cwnd {

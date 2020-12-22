@@ -32,7 +32,7 @@ impl WindowAdjustment for NewReno {
     fn on_packets_acked(
         &mut self,
         curr_cwnd: usize,
-        _acked_bytes: usize,
+        _new_acked_bytes: usize,
         _min_rtt: Duration,
         _now: Instant,
     ) -> usize {

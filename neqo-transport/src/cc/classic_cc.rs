@@ -76,13 +76,18 @@ impl State {
 }
 
 pub trait WindowAdjustment: Display + Debug {
+    /// This is called when an ack is received.
+    /// The function calculates the amount of acked bytes congestion controller needs
+    /// to collect before increasing its cwnd by `MAX_DATAGRAM_SIZE`.
     fn on_packets_acked(
         &mut self,
         curr_cwnd: usize,
-        acked_bytes: usize,
+        new_acked_bytes: usize,
         min_rtt: Duration,
         now: Instant,
     ) -> usize;
+    /// This function is called when a congestion event has beed detected and it
+    /// returns new (decreased) values of curr_cwnd and acked_bytes.
     fn on_congestion_event(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize);
     #[cfg(test)]
     fn last_max_cwnd(&self) -> f64;
@@ -191,18 +196,21 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         }
         // Congestion avoidance, above the slow start threshold.
         if self.congestion_window >= self.ssthresh {
-            let bytes =
+            // The following function return the amount acked bytes a controller needs
+            // to collect to be allowed to increase its cwnd by MAX_DATAGRAM_SIZE.
+            let byte_cnt =
                 self.cc_algorithm
                     .on_packets_acked(self.congestion_window, new_acked, min_rtt, now);
-            // If enough creadit has been accumulated already, apply them gently.
-            if self.acked_bytes >= bytes {
+            // If enough credit has been accumulated already, apply them gradually.
+            // If we have sudden increase in allowed rate we actually increase cwnd gently.
+            if self.acked_bytes >= byte_cnt {
                 self.acked_bytes = 0;
                 self.congestion_window += MAX_DATAGRAM_SIZE;
             }
             self.acked_bytes += new_acked;
-            if self.acked_bytes >= bytes {
-                let d = self.acked_bytes / bytes;
-                self.acked_bytes -= d * bytes;
+            if self.acked_bytes >= byte_cnt {
+                let d = self.acked_bytes / byte_cnt;
+                self.acked_bytes -= d * byte_cnt;
                 self.congestion_window += d * MAX_DATAGRAM_SIZE;
                 qinfo!([self], "congestion avoidance += {}", d * MAX_DATAGRAM_SIZE);
             }
@@ -459,7 +467,9 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClassicCongestionControl, CWND_INITIAL, CWND_MIN, PERSISTENT_CONG_THRESH};
+    use super::{
+        ClassicCongestionControl, WindowAdjustment, CWND_INITIAL, CWND_MIN, PERSISTENT_CONG_THRESH,
+    };
     use crate::cc::cubic::{Cubic, CUBIC_BETA_USIZE_DIVISOR, CUBIC_BETA_USIZE_QUOTIENT};
     use crate::cc::new_reno::NewReno;
     use crate::cc::{CongestionControl, CWND_INITIAL_PKTS, MAX_DATAGRAM_SIZE};
@@ -513,296 +523,175 @@ mod tests {
         }
     }
 
-    fn persistent_congestion(
-        cc_alg: CongestionControlAlgorithm,
-        lost_packets: &[SentPacket],
-    ) -> bool {
-        let mut cc = congestion_control(cc_alg);
-        for p in lost_packets {
-            cc.on_packet_sent(p);
-        }
+    fn persistent_congestion(lost_packets: &[SentPacket], persistent_expected: bool) {
+        for cc_alg in &[
+            CongestionControlAlgorithm::NewReno,
+            CongestionControlAlgorithm::Cubic,
+        ] {
+            let mut cc = congestion_control(*cc_alg);
+            for p in lost_packets {
+                cc.on_packet_sent(p);
+            }
 
-        cc.on_packets_lost(Some(now()), None, PTO, lost_packets);
-        if cc.cwnd() == CWND_INITIAL / 2
-            || cc.cwnd() == CWND_INITIAL * CUBIC_BETA_USIZE_QUOTIENT / CUBIC_BETA_USIZE_DIVISOR
-        {
-            false
-        } else if cc.cwnd() == CWND_MIN {
-            true
-        } else {
-            panic!("unexpected cwnd");
+            cc.on_packets_lost(Some(now()), None, PTO, lost_packets);
+
+            let expected_cwnd_no_persistent_congestion = match cc_alg {
+                CongestionControlAlgorithm::NewReno => CWND_INITIAL / 2,
+                CongestionControlAlgorithm::Cubic => {
+                    CWND_INITIAL * CUBIC_BETA_USIZE_QUOTIENT / CUBIC_BETA_USIZE_DIVISOR
+                }
+            };
+            let persistent = if cc.cwnd() == expected_cwnd_no_persistent_congestion {
+                false
+            } else if cc.cwnd() == CWND_MIN {
+                true
+            } else {
+                panic!("unexpected cwnd");
+            };
+            assert_eq!(persistent, persistent_expected);
         }
     }
 
     /// A span of exactly the PC threshold only reduces the window on loss.
     #[test]
     fn persistent_congestion_none() {
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
-            &[lost(1, true, ZERO), lost(2, true, SUB_PC),]
-        ));
-
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[lost(1, true, ZERO), lost(2, true, SUB_PC),]
-        ));
+        persistent_congestion(&[lost(1, true, ZERO), lost(2, true, SUB_PC)], false);
     }
 
     /// A span of just more than the PC threshold causes persistent congestion.
     #[test]
     fn persistent_congestion_simple() {
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
-            &[lost(1, true, ZERO), lost(2, true, PC),]
-        ));
-
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[lost(1, true, ZERO), lost(2, true, PC),]
-        ));
+        persistent_congestion(&[lost(1, true, ZERO), lost(2, true, PC)], true);
     }
 
     /// Both packets need to be ack-eliciting.
     #[test]
     fn persistent_congestion_non_ack_eliciting() {
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
-            &[lost(1, false, ZERO), lost(2, true, PC),]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
-            &[lost(1, true, ZERO), lost(2, false, PC),]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[lost(1, false, ZERO), lost(2, true, PC),]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[lost(1, true, ZERO), lost(2, false, PC),]
-        ));
+        persistent_congestion(&[lost(1, false, ZERO), lost(2, true, PC)], false);
+        persistent_congestion(&[lost(1, true, ZERO), lost(2, false, PC)], false);
     }
 
     /// Packets in the middle, of any type, are OK.
     #[test]
     fn persistent_congestion_middle() {
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
-            &[lost(1, true, ZERO), lost(2, false, RTT), lost(3, true, PC),]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
-            &[lost(1, true, ZERO), lost(2, true, RTT), lost(3, true, PC),]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[lost(1, true, ZERO), lost(2, false, RTT), lost(3, true, PC),]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[lost(1, true, ZERO), lost(2, true, RTT), lost(3, true, PC),]
-        ));
+        persistent_congestion(
+            &[lost(1, true, ZERO), lost(2, false, RTT), lost(3, true, PC)],
+            true,
+        );
+        persistent_congestion(
+            &[lost(1, true, ZERO), lost(2, true, RTT), lost(3, true, PC)],
+            true,
+        );
     }
 
     /// Leading non-ack-eliciting packets are skipped.
     #[test]
     fn persistent_congestion_leading_non_ack_eliciting() {
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
-            &[lost(1, false, ZERO), lost(2, true, RTT), lost(3, true, PC),]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
+        persistent_congestion(
+            &[lost(1, false, ZERO), lost(2, true, RTT), lost(3, true, PC)],
+            false,
+        );
+        persistent_congestion(
             &[
                 lost(1, false, ZERO),
                 lost(2, true, RTT),
                 lost(3, true, RTT + PC),
-            ]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[lost(1, false, ZERO), lost(2, true, RTT), lost(3, true, PC),]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[
-                lost(1, false, ZERO),
-                lost(2, true, RTT),
-                lost(3, true, RTT + PC),
-            ]
-        ));
+            ],
+            true,
+        );
     }
 
     /// Trailing non-ack-eliciting packets aren't relevant.
     #[test]
     fn persistent_congestion_trailing_non_ack_eliciting() {
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
+        persistent_congestion(
             &[
                 lost(1, true, ZERO),
                 lost(2, true, PC),
                 lost(3, false, PC + EPSILON),
-            ]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
+            ],
+            true,
+        );
+        persistent_congestion(
             &[
                 lost(1, true, ZERO),
                 lost(2, true, SUB_PC),
                 lost(3, false, PC),
-            ]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[
-                lost(1, true, ZERO),
-                lost(2, true, PC),
-                lost(3, false, PC + EPSILON),
-            ]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[
-                lost(1, true, ZERO),
-                lost(2, true, SUB_PC),
-                lost(3, false, PC),
-            ]
-        ));
+            ],
+            false,
+        );
     }
 
     /// Gaps in the middle, of any type, restart the count.
     #[test]
     fn persistent_congestion_gap_reset() {
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
-            &[lost(1, true, ZERO), lost(3, true, PC),]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
+        persistent_congestion(&[lost(1, true, ZERO), lost(3, true, PC)], false);
+        persistent_congestion(
             &[
                 lost(1, true, ZERO),
                 lost(2, true, RTT),
                 lost(4, true, GAP),
                 lost(5, true, GAP + PTO * PERSISTENT_CONG_THRESH),
-            ]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[lost(1, true, ZERO), lost(3, true, PC),]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[
-                lost(1, true, ZERO),
-                lost(2, true, RTT),
-                lost(4, true, GAP),
-                lost(5, true, GAP + PTO * PERSISTENT_CONG_THRESH),
-            ]
-        ));
+            ],
+            false,
+        );
     }
 
     /// A span either side of a gap will cause persistent congestion.
     #[test]
     fn persistent_congestion_gap_or() {
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
+        persistent_congestion(
             &[
                 lost(1, true, ZERO),
                 lost(2, true, PC),
                 lost(4, true, GAP),
                 lost(5, true, GAP + PTO),
-            ]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
+            ],
+            true,
+        );
+        persistent_congestion(
             &[
                 lost(1, true, ZERO),
                 lost(2, true, PTO),
                 lost(4, true, GAP),
                 lost(5, true, GAP + PC),
-            ]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[
-                lost(1, true, ZERO),
-                lost(2, true, PC),
-                lost(4, true, GAP),
-                lost(5, true, GAP + PTO),
-            ]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[
-                lost(1, true, ZERO),
-                lost(2, true, PTO),
-                lost(4, true, GAP),
-                lost(5, true, GAP + PC),
-            ]
-        ));
+            ],
+            true,
+        );
     }
 
     /// A gap only restarts after an ack-eliciting packet.
     #[test]
     fn persistent_congestion_gap_non_ack_eliciting() {
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
+        persistent_congestion(
             &[
                 lost(1, true, ZERO),
                 lost(2, true, PTO),
                 lost(4, false, GAP),
                 lost(5, true, GAP + PC),
-            ]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
+            ],
+            false,
+        );
+        persistent_congestion(
             &[
                 lost(1, true, ZERO),
                 lost(2, true, PTO),
                 lost(4, false, GAP),
                 lost(5, true, GAP + RTT),
                 lost(6, true, GAP + RTT + SUB_PC),
-            ]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::NewReno,
+            ],
+            false,
+        );
+        persistent_congestion(
             &[
                 lost(1, true, ZERO),
                 lost(2, true, PTO),
                 lost(4, false, GAP),
                 lost(5, true, GAP + RTT),
                 lost(6, true, GAP + RTT + PC),
-            ]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[
-                lost(1, true, ZERO),
-                lost(2, true, PTO),
-                lost(4, false, GAP),
-                lost(5, true, GAP + PC),
-            ]
-        ));
-        assert!(!persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[
-                lost(1, true, ZERO),
-                lost(2, true, PTO),
-                lost(4, false, GAP),
-                lost(5, true, GAP + RTT),
-                lost(6, true, GAP + RTT + SUB_PC),
-            ]
-        ));
-        assert!(persistent_congestion(
-            CongestionControlAlgorithm::Cubic,
-            &[
-                lost(1, true, ZERO),
-                lost(2, true, PTO),
-                lost(4, false, GAP),
-                lost(5, true, GAP + RTT),
-                lost(6, true, GAP + RTT + PC),
-            ]
-        ));
+            ],
+            true,
+        );
     }
 
     /// Get a time, in multiples of `PTO`, relative to `now()`.
@@ -832,33 +721,12 @@ mod tests {
     /// Call `detect_persistent_congestion` using times relative to now and the fixed PTO time.
     /// `last_ack` and `rtt_time` are times in multiples of `PTO`, relative to `now()`,
     /// for the time of the largest acknowledged and the first RTT sample, respectively.
-    fn persistent_congestion_by_pto_newreno(
+    fn persistent_congestion_by_pto<T: WindowAdjustment>(
+        mut cc: ClassicCongestionControl<T>,
         last_ack: u32,
         rtt_time: u32,
         lost: &[SentPacket],
     ) -> bool {
-        let mut cc = ClassicCongestionControl::new(NewReno::default());
-        assert_eq!(cc.cwnd(), CWND_INITIAL);
-
-        let last_ack = Some(by_pto(last_ack));
-        let rtt_time = Some(by_pto(rtt_time));
-
-        // Persistent congestion is never declared if the RTT time is `None`.
-        cc.detect_persistent_congestion(None, None, PTO, lost);
-        assert_eq!(cc.cwnd(), CWND_INITIAL);
-        cc.detect_persistent_congestion(None, last_ack, PTO, lost);
-        assert_eq!(cc.cwnd(), CWND_INITIAL);
-
-        cc.detect_persistent_congestion(rtt_time, last_ack, PTO, lost);
-        cc.cwnd() == CWND_MIN
-    }
-
-    fn persistent_congestion_by_pto_cubic(
-        last_ack: u32,
-        rtt_time: u32,
-        lost: &[SentPacket],
-    ) -> bool {
-        let mut cc = ClassicCongestionControl::new(Cubic::default());
         assert_eq!(cc.cwnd(), CWND_INITIAL);
 
         let last_ack = Some(by_pto(last_ack));
@@ -878,16 +746,36 @@ mod tests {
     #[test]
     fn persistent_congestion_no_lost() {
         let lost = make_lost(&[]);
-        assert!(!persistent_congestion_by_pto_newreno(0, 0, &lost));
-        assert!(!persistent_congestion_by_pto_cubic(0, 0, &lost));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(NewReno::default()),
+            0,
+            0,
+            &lost
+        ));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(Cubic::default()),
+            0,
+            0,
+            &lost
+        ));
     }
 
     /// No persistent congestion can be had if there is only one lost packet.
     #[test]
     fn persistent_congestion_one_lost() {
         let lost = make_lost(&[1]);
-        assert!(!persistent_congestion_by_pto_newreno(0, 0, &lost));
-        assert!(!persistent_congestion_by_pto_cubic(0, 0, &lost));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(NewReno::default()),
+            0,
+            0,
+            &lost
+        ));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(Cubic::default()),
+            0,
+            0,
+            &lost
+        ));
     }
 
     /// Persistent congestion can't happen based on old packets.
@@ -896,12 +784,42 @@ mod tests {
         // Packets sent prior to either the last acknowledged or the first RTT
         // sample are not considered.  So 0 is ignored.
         let lost = make_lost(&[0, PERSISTENT_CONG_THRESH + 1, PERSISTENT_CONG_THRESH + 2]);
-        assert!(!persistent_congestion_by_pto_newreno(1, 1, &lost));
-        assert!(!persistent_congestion_by_pto_newreno(0, 1, &lost));
-        assert!(!persistent_congestion_by_pto_newreno(1, 0, &lost));
-        assert!(!persistent_congestion_by_pto_cubic(1, 1, &lost));
-        assert!(!persistent_congestion_by_pto_cubic(0, 1, &lost));
-        assert!(!persistent_congestion_by_pto_cubic(1, 0, &lost));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(NewReno::default()),
+            1,
+            1,
+            &lost
+        ));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(NewReno::default()),
+            0,
+            1,
+            &lost
+        ));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(NewReno::default()),
+            1,
+            0,
+            &lost
+        ));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(Cubic::default()),
+            1,
+            1,
+            &lost
+        ));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(Cubic::default()),
+            0,
+            1,
+            &lost
+        ));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(Cubic::default()),
+            1,
+            0,
+            &lost
+        ));
     }
 
     /// Persistent congestion doesn't start unless the packet is ack-eliciting.
@@ -916,8 +834,18 @@ mod tests {
             Vec::new(),
             lost[0].size,
         );
-        assert!(!persistent_congestion_by_pto_newreno(0, 0, &lost));
-        assert!(!persistent_congestion_by_pto_cubic(0, 0, &lost));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(NewReno::default()),
+            0,
+            0,
+            &lost
+        ));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(Cubic::default()),
+            0,
+            0,
+            &lost
+        ));
     }
 
     /// Detect persistent congestion.  Note that the first lost packet needs to have a time
@@ -926,8 +854,18 @@ mod tests {
     #[test]
     fn persistent_congestion_min() {
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
-        assert!(persistent_congestion_by_pto_newreno(0, 0, &lost));
-        assert!(persistent_congestion_by_pto_cubic(0, 0, &lost));
+        assert!(persistent_congestion_by_pto(
+            ClassicCongestionControl::new(NewReno::default()),
+            0,
+            0,
+            &lost
+        ));
+        assert!(persistent_congestion_by_pto(
+            ClassicCongestionControl::new(Cubic::default()),
+            0,
+            0,
+            &lost
+        ));
     }
 
     /// Make sure that not having a previous largest acknowledged also results
@@ -952,10 +890,27 @@ mod tests {
     /// The code asserts on ordering errors.
     #[test]
     #[should_panic]
-    fn persistent_congestion_unsorted() {
+    fn persistent_congestion_unsorted_newreno() {
         let lost = make_lost(&[PERSISTENT_CONG_THRESH + 2, 1]);
-        assert!(!persistent_congestion_by_pto_newreno(0, 0, &lost));
-        assert!(!persistent_congestion_by_pto_cubic(0, 0, &lost));
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(NewReno::default()),
+            0,
+            0,
+            &lost
+        ));
+    }
+
+    /// The code asserts on ordering errors.
+    #[test]
+    #[should_panic]
+    fn persistent_congestion_unsorted_cubic() {
+        let lost = make_lost(&[PERSISTENT_CONG_THRESH + 2, 1]);
+        assert!(!persistent_congestion_by_pto(
+            ClassicCongestionControl::new(Cubic::default()),
+            0,
+            0,
+            &lost
+        ));
     }
 
     #[test]
