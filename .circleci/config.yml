@@ -80,6 +80,13 @@ jobs:
             cargo run --bin neqo-client -- 'https://127.0.0.1:4433/'
 
       - run:
+          name: Internal Errors Check
+          command: |
+            all_internal_errors=($(find . -name '*.rs' -print | xargs -I {} sed '/Error::\(InternalError\|HttpInternal(\)/s/.*\(Error::[a-zA-Z]*([0-9]*)\)/\1/')); \
+            unique_internal_errors=($(for e in "${all_internal_errors[@]}"; do echo "$e"; done | sort | uniq)); \
+            [[ "${#all_internal_errors[@]}" -eq "${#unique_internal_errors[@]}" ]]
+
+      - run:
           name: "Prepare for Caching"
           command: "git gc --auto"
 
