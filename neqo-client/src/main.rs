@@ -19,8 +19,8 @@ use neqo_http3::{
 };
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    Connection, ConnectionId, ConnectionParameters, Error as TransportError,
-    FixedConnectionIdManager as EmptyConnectionIdGenerator, QuicVersion, StreamType,
+    stream_id::StreamIndex, Connection, ConnectionId, ConnectionParameters,
+    EmptyConnectionIdGenerator, Error as TransportError, QuicVersion, StreamType,
 };
 
 use std::cell::RefCell;
@@ -210,8 +210,8 @@ struct QuicParameters {
 impl QuicParameters {
     fn get(&self) -> ConnectionParameters {
         ConnectionParameters::default()
-            .max_streams(StreamType::BiDi, self.max_streams_bidi)
-            .max_streams(StreamType::UniDi, self.max_streams_uni)
+            .max_streams(StreamType::BiDi, StreamIndex::new(self.max_streams_bidi))
+            .max_streams(StreamType::UniDi, StreamIndex::new(self.max_streams_uni))
     }
 }
 
@@ -522,10 +522,10 @@ fn client(
     let mut transport = Connection::new_client(
         hostname,
         &[&args.alpn],
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::new(0))),
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         local_addr,
         remote_addr,
-        &args.quic_parameters.get().quic_version(quic_protocol),
+        args.quic_parameters.get().quic_version(quic_protocol),
     )?;
     let ciphers = args.get_ciphers();
     if !ciphers.is_empty() {
@@ -743,8 +743,8 @@ mod old {
     use neqo_common::{event::Provider, Datagram};
     use neqo_crypto::{AuthenticationStatus, ResumptionToken};
     use neqo_transport::{
-        Connection, ConnectionEvent, Error, FixedConnectionIdManager as EmptyConnectionIdGenerator,
-        Output, QuicVersion, State, StreamType,
+        Connection, ConnectionEvent, EmptyConnectionIdGenerator, Error, Output, QuicVersion, State,
+        StreamType,
     };
 
     use super::{emit_datagram, get_output_file, Args};
@@ -1015,10 +1015,10 @@ mod old {
         let mut client = Connection::new_client(
             origin,
             &[alpn],
-            Rc::new(RefCell::new(EmptyConnectionIdGenerator::new(0))),
+            Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
             local_addr,
             remote_addr,
-            &args.quic_parameters.get().quic_version(quic_protocol),
+            args.quic_parameters.get().quic_version(quic_protocol),
         )?;
 
         if let Some(tok) = token {

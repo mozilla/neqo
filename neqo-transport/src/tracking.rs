@@ -412,7 +412,8 @@ impl RecvdPackets {
     }
 
     /// Add the packet to the tracked set.
-    pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) {
+    /// Return true if the packet was the largest received so far.
+    pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) -> bool {
         let next_in_order_pn = self.ranges.front().map_or(0, |pr| pr.largest + 1);
         qdebug!(
             [self],
@@ -425,9 +426,12 @@ impl RecvdPackets {
         self.trim_ranges();
 
         // The new addition was the largest, so update the time we use for calculating ACK delay.
-        if pn >= next_in_order_pn {
+        let largest = if pn >= next_in_order_pn {
             self.largest_pn_time = Some(now);
-        }
+            true
+        } else {
+            false
+        };
 
         if ack_eliciting {
             self.pkts_since_last_ack += 1;
@@ -451,6 +455,7 @@ impl RecvdPackets {
             }
             qdebug!([self], "Set ACK timer to {:?}", self.ack_time);
         }
+        largest
     }
 
     /// Check if the packet is a duplicate.

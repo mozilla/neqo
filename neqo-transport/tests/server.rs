@@ -17,11 +17,13 @@ use neqo_crypto::{
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
-    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, Error,
-    FixedConnectionIdManager, Output, QuicVersion, State, StreamType, LOCAL_STREAM_LIMIT_BIDI,
-    LOCAL_STREAM_LIMIT_UNI,
+    stream_id::StreamIndex,
+    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, Error, Output, QuicVersion,
+    State, StreamType,
 };
-use test_fixture::{self, assertions, default_client, loopback, now, split_datagram};
+use test_fixture::{
+    self, addr, assertions, default_client, now, split_datagram, CountingConnectionIdGenerator,
+};
 
 use std::cell::RefCell;
 use std::convert::TryFrom;
@@ -38,7 +40,7 @@ fn default_server() -> Server {
         test_fixture::DEFAULT_ALPN,
         test_fixture::anti_replay(),
         Box::new(AllowZeroRtt {}),
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         ConnectionParameters::default(),
     )
     .expect("should create a server")
@@ -219,11 +221,7 @@ fn drop_non_initial() {
     let mut bogus_data: Vec<u8> = header.into();
     bogus_data.resize(1200, 66);
 
-    let bogus = Datagram::new(
-        test_fixture::loopback(),
-        test_fixture::loopback(),
-        bogus_data,
-    );
+    let bogus = Datagram::new(test_fixture::addr(), test_fixture::addr(), bogus_data);
     assert!(server.process(Some(bogus), now()).dgram().is_none());
 }
 
@@ -595,7 +593,7 @@ fn vn_after_retry() {
     encoder.encode_vec(1, &client.odcid().unwrap()[..]);
     encoder.encode_vec(1, &[]);
     encoder.encode_uint(4, 0x5a5a_6a6a_u64);
-    let vn = Datagram::new(loopback(), loopback(), encoder);
+    let vn = Datagram::new(addr(), addr(), encoder);
 
     assert_ne!(
         client.process(Some(vn), now()).callback(),
@@ -942,7 +940,7 @@ fn closed() {
     assert_eq!(res, Output::None);
 }
 
-fn can_create_streams(c: &mut Connection, t: StreamType, n: usize) {
+fn can_create_streams(c: &mut Connection, t: StreamType, n: u64) {
     for _ in 0..n {
         c.stream_create(t).unwrap();
     }
@@ -958,10 +956,10 @@ fn max_streams() {
         test_fixture::DEFAULT_ALPN,
         test_fixture::anti_replay(),
         Box::new(AllowZeroRtt {}),
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         ConnectionParameters::default()
-            .max_streams(StreamType::BiDi, MAX_STREAMS)
-            .max_streams(StreamType::UniDi, MAX_STREAMS),
+            .max_streams(StreamType::BiDi, StreamIndex::new(MAX_STREAMS))
+            .max_streams(StreamType::UniDi, StreamIndex::new(MAX_STREAMS)),
     )
     .expect("should create a server");
 
@@ -969,16 +967,8 @@ fn max_streams() {
     connect(&mut client, &mut server);
 
     // Make sure that we can create MAX_STREAMS uni- and bidirectional streams.
-    can_create_streams(
-        &mut client,
-        StreamType::UniDi,
-        usize::try_from(MAX_STREAMS).unwrap(),
-    );
-    can_create_streams(
-        &mut client,
-        StreamType::BiDi,
-        usize::try_from(MAX_STREAMS).unwrap(),
-    );
+    can_create_streams(&mut client, StreamType::UniDi, MAX_STREAMS);
+    can_create_streams(&mut client, StreamType::BiDi, MAX_STREAMS);
 }
 
 #[test]
@@ -989,7 +979,7 @@ fn max_streams_default() {
         test_fixture::DEFAULT_ALPN,
         test_fixture::anti_replay(),
         Box::new(AllowZeroRtt {}),
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(9))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         ConnectionParameters::default(),
     )
     .expect("should create a server");
@@ -997,15 +987,9 @@ fn max_streams_default() {
     let mut client = default_client();
     connect(&mut client, &mut server);
 
-    // Make sure that we can create LOCAL_STREAM_LIMIT_UNI unidirectional streams
-    can_create_streams(
-        &mut client,
-        StreamType::UniDi,
-        usize::try_from(LOCAL_STREAM_LIMIT_UNI).unwrap(),
-    );
-    can_create_streams(
-        &mut client,
-        StreamType::BiDi,
-        usize::try_from(LOCAL_STREAM_LIMIT_BIDI).unwrap(),
-    );
+    // Make sure that we can create streams up to the local limit.
+    let local_limit_unidi = ConnectionParameters::default().get_max_streams(StreamType::UniDi);
+    can_create_streams(&mut client, StreamType::UniDi, local_limit_unidi.as_u64());
+    let local_limit_bidi = ConnectionParameters::default().get_max_streams(StreamType::BiDi);
+    can_create_streams(&mut client, StreamType::BiDi, local_limit_bidi.as_u64());
 }

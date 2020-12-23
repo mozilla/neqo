@@ -12,8 +12,8 @@ use neqo_crypto::{init, AuthenticationStatus, ResumptionToken};
 use neqo_http3::{Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3State};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, Error,
-    FixedConnectionIdManager, Output, State, StreamType,
+    Connection, ConnectionError, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
+    Error, Output, State, StreamType,
 };
 
 use std::cell::RefCell;
@@ -460,10 +460,10 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
     let mut client = Connection::new_client(
         peer.host,
         &test.alpn(),
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         nctx.local_addr,
         nctx.remote_addr,
-        &ConnectionParameters::default(),
+        ConnectionParameters::default(),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -601,10 +601,10 @@ fn test_h3_rz(
 
     let handler = Http3Client::new(
         peer.host,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         nctx.local_addr,
         nctx.remote_addr,
-        &ConnectionParameters::default(),
+        ConnectionParameters::default(),
         &Http3Parameters {
             qpack_settings: QpackSettings {
                 max_table_size_encoder: 16384,
@@ -684,10 +684,10 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
     let mut client = Connection::new_client(
         peer.host,
         &["hq-28"],
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(0))),
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
         nctx.local_addr,
         nctx.remote_addr,
-        &ConnectionParameters::default(),
+        ConnectionParameters::default(),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine

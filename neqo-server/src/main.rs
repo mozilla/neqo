@@ -33,8 +33,8 @@ use neqo_crypto::{
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    server::ValidateAddress, ConnectionParameters,
-    FixedConnectionIdManager as RandomConnectionIdGenerator, Output, StreamType,
+    server::ValidateAddress, stream_id::StreamIndex, tparams::PreferredAddress,
+    ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
 };
 
 use crate::old_https::Http09Server;
@@ -125,11 +125,50 @@ impl Args {
             .collect::<Vec<_>>()
     }
 
+    fn get_sock_addr<F>(opt: &Option<String>, v: &str, f: F) -> Option<SocketAddr>
+    where
+        F: FnMut(&SocketAddr) -> bool,
+    {
+        let addr = opt
+            .iter()
+            .flat_map(|spa| spa.to_socket_addrs().ok())
+            .flatten()
+            .find(f);
+        if opt.is_some() != addr.is_some() {
+            panic!(
+                "unable to resolve '{}' to an {} address",
+                opt.as_ref().unwrap(),
+                v
+            );
+        }
+        addr
+    }
+
+    fn preferred_address_v4(&self) -> Option<SocketAddr> {
+        Self::get_sock_addr(&self.preferred_address_v4, "IPv4", |addr| addr.is_ipv4())
+    }
+
+    fn preferred_address_v6(&self) -> Option<SocketAddr> {
+        Self::get_sock_addr(&self.preferred_address_v6, "IPv6", |addr| addr.is_ipv6())
+    }
+
+    fn preferred_address(&self) -> Option<PreferredAddress> {
+        let v4 = self.preferred_address_v4();
+        let v6 = self.preferred_address_v6();
+        if v4.is_none() && v6.is_none() {
+            None
+        } else {
+            Some(PreferredAddress::new(v4, v6))
+        }
+    }
+
     fn listen_addresses(&self) -> Vec<SocketAddr> {
         self.hosts
             .iter()
             .filter_map(|host| host.to_socket_addrs().ok())
             .flatten()
+            .chain(self.preferred_address_v4())
+            .chain(self.preferred_address_v6())
             .collect()
     }
 
@@ -167,8 +206,8 @@ struct QuicParameters {
 impl QuicParameters {
     fn get(&self) -> ConnectionParameters {
         ConnectionParameters::default()
-            .max_streams(StreamType::BiDi, self.max_streams_bidi)
-            .max_streams(StreamType::UniDi, self.max_streams_uni)
+            .max_streams(StreamType::BiDi, StreamIndex::new(self.max_streams_bidi))
+            .max_streams(StreamType::UniDi, StreamIndex::new(self.max_streams_uni))
     }
 }
 
@@ -405,12 +444,13 @@ impl ServersRunner {
                     &[args.alpn.clone()],
                     anti_replay,
                     cid_mgr,
+                    args.preferred_address(),
                     args.quic_parameters.get(),
                 )
                 .expect("We cannot make a server!"),
             )
         } else {
-            let server = Http3Server::new(
+            let mut server = Http3Server::new(
                 args.now(),
                 &[args.key.clone()],
                 &[args.alpn.clone()],
@@ -423,6 +463,9 @@ impl ServersRunner {
                 },
             )
             .expect("We cannot make a server!");
+            if let Some(spa) = args.preferred_address() {
+                server.set_preferred_address(spa);
+            }
             Box::new(server)
         };
         svr.set_ciphers(&args.get_ciphers());
