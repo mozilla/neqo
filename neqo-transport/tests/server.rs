@@ -13,7 +13,7 @@ use neqo_crypto::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf,
     hp::HpKey,
-    AllowZeroRtt, AuthenticationStatus, ResumptionToken,
+    AllowZeroRtt, AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker,
 };
 use neqo_transport::{
     server::{ActiveConnectionRef, Server, ValidateAddress},
@@ -992,4 +992,42 @@ fn max_streams_default() {
     can_create_streams(&mut client, StreamType::UniDi, local_limit_unidi.as_u64());
     let local_limit_bidi = ConnectionParameters::default().get_max_streams(StreamType::BiDi);
     can_create_streams(&mut client, StreamType::BiDi, local_limit_bidi.as_u64());
+}
+
+#[derive(Debug)]
+struct RejectZeroRtt {}
+impl ZeroRttChecker for RejectZeroRtt {
+    fn check(&self, _token: &[u8]) -> ZeroRttCheckResult {
+        ZeroRttCheckResult::Reject
+    }
+}
+
+#[test]
+fn max_streams_after_0rtt_rejection() {
+    const MAX_STREAMS: u64 = 40;
+    let mut server = Server::new(
+        now(),
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        test_fixture::anti_replay(),
+        Box::new(RejectZeroRtt {}),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        ConnectionParameters::default()
+            .max_streams(StreamType::BiDi, StreamIndex::new(MAX_STREAMS))
+            .max_streams(StreamType::UniDi, StreamIndex::new(MAX_STREAMS)),
+    )
+    .expect("should create a server");
+    let token = get_ticket(&mut server);
+
+    let mut client = default_client();
+    client.enable_resumption(now(), &token).unwrap();
+    let _ = client.stream_create(StreamType::BiDi).unwrap();
+    let dgram = client.process_output(now()).dgram();
+    let dgram = server.process(dgram, now()).dgram();
+    let dgram = client.process(dgram, now()).dgram();
+    assert!(dgram.is_some()); // We're far enough along to complete the test now.
+
+    // Make sure that we can create MAX_STREAMS uni- and bidirectional streams.
+    can_create_streams(&mut client, StreamType::UniDi, MAX_STREAMS);
+    can_create_streams(&mut client, StreamType::BiDi, MAX_STREAMS);
 }
