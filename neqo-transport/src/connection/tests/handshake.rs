@@ -379,12 +379,12 @@ fn reorder_05rtt_with_0rtt() {
     maybe_authenticate(&mut client);
     let c4 = client.process(None, now).dgram();
     assert_eq!(*client.state(), State::Connected);
-    assert_eq!(client.loss_recovery.rtt(), RTT);
+    assert_eq!(client.paths.rtt(), RTT);
 
     now += RTT / 2;
     server.process_input(c4.unwrap(), now);
     assert_eq!(*server.state(), State::Confirmed);
-    assert_eq!(server.loss_recovery.rtt(), RTT);
+    assert_eq!(server.paths.rtt(), RTT);
 }
 
 /// Test that a server that coalesces 0.5 RTT with handshake packets
@@ -508,12 +508,12 @@ fn reorder_handshake() {
     now += RTT / 2;
     let s3 = server.process(c3, now).dgram();
     assert_eq!(*server.state(), State::Confirmed);
-    assert_eq!(server.loss_recovery.rtt(), RTT);
+    assert_eq!(server.paths.rtt(), RTT);
 
     now += RTT / 2;
     client.process_input(s3.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
-    assert_eq!(client.loss_recovery.rtt(), RTT);
+    assert_eq!(client.paths.rtt(), RTT);
 }
 
 #[test]
@@ -558,11 +558,11 @@ fn reorder_1rtt() {
     assert_eq!(server.stats().saved_datagrams, PACKETS);
     assert_eq!(server.stats().dropped_rx, 1);
     assert_eq!(*server.state(), State::Confirmed);
-    assert_eq!(server.loss_recovery.rtt(), RTT);
+    assert_eq!(server.paths.rtt(), RTT);
 
     now += RTT / 2;
     client.process_input(s2.unwrap(), now);
-    assert_eq!(client.loss_recovery.rtt(), RTT);
+    assert_eq!(client.paths.rtt(), RTT);
 
     // All the stream data that was sent should now be available.
     let streams = server

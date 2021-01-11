@@ -181,8 +181,8 @@ fn connect_with_rtt(
     assert_eq!(*client.state(), State::Confirmed);
     assert_eq!(*server.state(), State::Confirmed);
 
-    assert_eq!(client.loss_recovery.rtt(), rtt);
-    assert_eq!(server.loss_recovery.rtt(), rtt);
+    assert_eq!(client.paths.rtt(), rtt);
+    assert_eq!(server.paths.rtt(), rtt);
     now
 }
 

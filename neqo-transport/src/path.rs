@@ -20,6 +20,7 @@ use crate::frame::{
 };
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
+use crate::rtt::RttEstimate;
 use crate::stats::FrameStats;
 
 use neqo_common::{hex, qdebug, qinfo, qtrace, Datagram, Encoder};
@@ -75,7 +76,13 @@ impl Paths {
                     None
                 }
             })
-            .unwrap_or_else(|| Rc::new(RefCell::new(Path::temporary(local, remote))))
+            .unwrap_or_else(|| {
+                let mut p = Path::temporary(local, remote);
+                if let Some(primary) = self.primary.as_ref() {
+                    p.set_initial_rtt(primary.borrow().rtt().estimate());
+                }
+                Rc::new(RefCell::new(p))
+            })
     }
 
     /// Find the path, but allow for rebinding.  That matches the pair of addresses
@@ -332,6 +339,19 @@ impl Paths {
     pub fn acked_retire_cid(&mut self, acked: u64) {
         self.to_retire.retain(|&seqno| seqno != acked);
     }
+
+    /// Get an estimate of the RTT on the primary path.
+    #[cfg(test)]
+    pub fn rtt(&self) -> Duration {
+        // Rather than have this fail when there is no active path,
+        // make a new RTT esimate and interrogate that.
+        // That is more expensive, but it should be rare and breaking encapsulation
+        // is worse, especially as this is only used in tests.
+        self.primary_fallible()
+            .map_or(RttEstimate::default().estimate(), |p| {
+                p.borrow().rtt().estimate()
+            })
+    }
 }
 
 /// The state of a path with respect to address validation.
@@ -394,6 +414,9 @@ pub struct Path {
     /// A path challenge was received and PATH_RESPONSE has not been sent.
     challenge: Option<[u8; 8]>,
 
+    /// The round trip time estimate for this path.
+    rtt: RttEstimate,
+
     /// The number of bytes received on this path.
     /// Note that this value might saturate on a long-lived connection,
     /// but we only use it before the path is validated.
@@ -415,6 +438,7 @@ impl Path {
             state: ProbeState::ProbeNeeded { probe_count: 0 },
             validated: None,
             challenge: None,
+            rtt: RttEstimate::default(),
             received_bytes: 0,
             sent_bytes: 0,
         }
@@ -682,6 +706,26 @@ impl Path {
         } else {
             None
         }
+    }
+
+    /// Get the RTT estimator for this path.
+    pub fn rtt(&self) -> &RttEstimate {
+        &self.rtt
+    }
+
+    /// Mutably borrow the RTT estimator for this path.
+    pub fn rtt_mut(&mut self) -> &mut RttEstimate {
+        &mut self.rtt
+    }
+
+    /// Pass on RTT configuration: the maximum acknowledgment delay of the peer.
+    pub fn set_max_ack_delay(&mut self, mad: Duration) {
+        self.rtt.set_max_ack_delay(mad);
+    }
+
+    /// Initialize the RTT for the path based on an existing estimate.
+    pub fn set_initial_rtt(&mut self, rtt: Duration) {
+        self.rtt.set_initial(rtt);
     }
 
     /// Record received bytes for the path.

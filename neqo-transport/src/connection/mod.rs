@@ -12,6 +12,7 @@ use std::convert::TryFrom;
 use std::fmt::{self, Debug};
 use std::mem;
 use std::net::{IpAddr, SocketAddr};
+use std::ops::RangeInclusive;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
@@ -36,7 +37,7 @@ use crate::dump::*;
 use crate::events::{ConnectionEvent, ConnectionEvents};
 use crate::flow_mgr::FlowMgr;
 use crate::frame::{
-    AckRange, CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
+    CloseError, Frame, FrameType, FRAME_TYPE_CONNECTION_CLOSE_APPLICATION,
     FRAME_TYPE_CONNECTION_CLOSE_TRANSPORT,
 };
 use crate::packet::{
@@ -44,7 +45,7 @@ use crate::packet::{
 };
 use crate::path::{Path, PathRef, Paths};
 use crate::qlog;
-use crate::recovery::{LossRecovery, RecoveryToken, SendProfile, GRANULARITY};
+use crate::recovery::{LossRecovery, RecoveryToken, SendProfile};
 use crate::recv_stream::{RecvStream, RecvStreams, RECV_BUFFER_SIZE};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::{Stats, StatsCell};
@@ -534,6 +535,7 @@ impl Connection {
     fn make_resumption_token(&mut self) -> ResumptionToken {
         debug_assert_eq!(self.role, Role::Client);
         debug_assert!(self.crypto.has_resumption_token());
+        let rtt = self.paths.primary().borrow().rtt().estimate();
         self.crypto
             .create_resumption_token(
                 self.new_token.take_token(),
@@ -542,9 +544,20 @@ impl Connection {
                     .remote
                     .as_ref()
                     .expect("should have transport parameters"),
-                u64::try_from(self.loss_recovery.rtt().as_millis()).unwrap_or(0),
+                u64::try_from(rtt.as_millis()).unwrap_or(0),
             )
             .unwrap()
+    }
+
+    /// Get the simplest PTO calculation for all those cases where we need
+    /// a value of this approximate order.  Don't use this for loss recovery,
+    /// only use it where a more precise value is not important.
+    fn pto(&self) -> Duration {
+        self.paths
+            .primary()
+            .borrow()
+            .rtt()
+            .pto(PNSpace::ApplicationData)
     }
 
     fn create_resumption_token(&mut self, now: Instant) {
@@ -583,8 +596,7 @@ impl Connection {
             };
 
             if arm {
-                self.release_resumption_token_timer =
-                    Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData));
+                self.release_resumption_token_timer = Some(now + 3 * self.pto());
             }
         }
     }
@@ -604,8 +616,7 @@ impl Connection {
         if self.crypto.has_resumption_token() {
             let token = self.make_resumption_token();
             if self.crypto.has_resumption_token() {
-                self.release_resumption_token_timer =
-                    Some(now + 3 * self.loss_recovery.pto_raw(PNSpace::ApplicationData));
+                self.release_resumption_token_timer = Some(now + 3 * self.pto());
             }
             Some(token)
         } else {
@@ -633,9 +644,8 @@ impl Connection {
         );
         let mut dec = Decoder::from(token.as_ref());
 
-        let smoothed_rtt =
-            Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);
-        qtrace!([self], "  RTT {:?}", smoothed_rtt);
+        let rtt = Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);
+        qtrace!([self], "  RTT {:?}", rtt);
 
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!([self], "  transport parameters {}", hex(&tp_slice));
@@ -663,9 +673,7 @@ impl Connection {
         if !init_token.is_empty() {
             self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
         }
-        if smoothed_rtt > GRANULARITY {
-            self.loss_recovery.set_initial_rtt(smoothed_rtt);
-        }
+        self.paths.primary().borrow_mut().set_initial_rtt(rtt);
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
@@ -842,7 +850,7 @@ impl Connection {
             return;
         }
 
-        let pto = self.loss_recovery.pto_raw(PNSpace::ApplicationData);
+        let pto = self.pto();
         if self.idle_timeout.expired(now, pto) {
             qinfo!([self], "idle timeout expired");
             self.set_state(State::Closed(ConnectionError::Transport(
@@ -856,7 +864,9 @@ impl Connection {
         let res = self.crypto.states.check_key_update(now);
         self.absorb_error(now, res);
 
-        let lost = self.loss_recovery.timeout(now);
+        let lost = self
+            .loss_recovery
+            .timeout(self.paths.primary().borrow().rtt(), now);
         self.handle_lost_packets(&lost);
         qlog::packets_lost(&mut self.qlog, &lost);
 
@@ -892,31 +902,36 @@ impl Connection {
             delays.push(ack_time);
         }
 
-        let pto = self.loss_recovery.pto_raw(PNSpace::ApplicationData);
-        let idle_time = self.idle_timeout.expiry(now, pto);
-        qtrace!([self], "Idle timer {:?}", idle_time);
-        delays.push(idle_time);
+        if let Some(p) = self.paths.primary_fallible() {
+            let path = p.borrow();
+            let rtt = path.rtt();
+            let pto = rtt.pto(PNSpace::ApplicationData);
 
-        if let Some(lr_time) = self.loss_recovery.next_timeout() {
-            qtrace!([self], "Loss recovery timer {:?}", lr_time);
-            delays.push(lr_time);
+            let idle_time = self.idle_timeout.expiry(now, pto);
+            qtrace!([self], "Idle timer {:?}", idle_time);
+            delays.push(idle_time);
+
+            if let Some(lr_time) = self.loss_recovery.next_timeout(rtt) {
+                qtrace!([self], "Loss recovery timer {:?}", lr_time);
+                delays.push(lr_time);
+            }
+
+            if paced {
+                if let Some(pace_time) = self.loss_recovery.next_paced(rtt.estimate()) {
+                    qtrace!([self], "Pacing timer {:?}", pace_time);
+                    delays.push(pace_time);
+                }
+            }
+
+            if let Some(path_time) = self.paths.next_timeout(pto) {
+                qtrace!([self], "Path probe timer {:?}", path_time);
+                delays.push(path_time);
+            }
         }
 
         if let Some(key_update_time) = self.crypto.states.update_time() {
             qtrace!([self], "Key update timer {:?}", key_update_time);
             delays.push(key_update_time);
-        }
-
-        if paced {
-            if let Some(pace_time) = self.loss_recovery.next_paced() {
-                qtrace!([self], "Pacing timer {:?}", pace_time);
-                delays.push(pace_time);
-            }
-        }
-
-        if let Some(path_time) = self.paths.next_timeout(pto) {
-            qtrace!([self], "Path probe timer {:?}", path_time);
-            delays.push(path_time);
         }
 
         // `release_resumption_token_timer` is not considered here, because
@@ -1020,7 +1035,8 @@ impl Connection {
     fn discard_keys(&mut self, space: PNSpace, now: Instant) {
         if self.crypto.discard(space) {
             qinfo!([self], "Drop packet number space {}", space);
-            self.loss_recovery.discard(space, now);
+            let path = self.paths.primary();
+            self.loss_recovery.discard(space, path.borrow().rtt(), now);
             self.acks.drop_space(space);
         }
     }
@@ -1259,6 +1275,7 @@ impl Connection {
         let mut dcid = None;
 
         qtrace!([self], "{} input {}", path.borrow(), hex(&**d));
+        let pto = path.borrow().rtt().pto(PNSpace::ApplicationData);
 
         // Handle each packet in the datagram.
         while !slc.is_empty() {
@@ -1281,7 +1298,6 @@ impl Connection {
 
             qtrace!([self], "Received unverified packet {:?}", packet);
 
-            let pto = self.loss_recovery.pto_raw(PNSpace::ApplicationData);
             match packet.decrypt(&mut self.crypto.states, now + pto) {
                 Ok(payload) => {
                     // OK, we have a valid packet.
@@ -1850,11 +1866,12 @@ impl Connection {
         let version = self.version();
 
         // Determine how we are sending packets (PTO, etc..).
+        let rtt = path.borrow().rtt().estimate();
         let mtu = path.borrow().mtu();
         let amplification_limit = path.borrow().amplification_limit();
         let profile = self
             .loss_recovery
-            .send_profile(now, mtu, amplification_limit);
+            .send_profile(rtt, now, mtu, amplification_limit);
         qdebug!([self], "output_path send_profile {:?}", profile);
 
         // Frames for different epochs must go in different packets, but then these
@@ -1932,7 +1949,7 @@ impl Connection {
             );
             if padded {
                 needs_padding = false;
-                self.loss_recovery.on_packet_sent(sent);
+                self.loss_recovery.on_packet_sent(sent, rtt);
             } else if pt == PacketType::Initial && (self.role == Role::Client || ack_eliciting) {
                 // Packets containing Initial packets might need padding, and we want to
                 // track that padding along with the Initial packet.  So defer tracking.
@@ -1942,7 +1959,7 @@ impl Connection {
                 if pt == PacketType::Handshake && self.role == Role::Client {
                     needs_padding = false;
                 }
-                self.loss_recovery.on_packet_sent(sent);
+                self.loss_recovery.on_packet_sent(sent, rtt);
             }
 
             if *space == PNSpace::Handshake {
@@ -1967,7 +1984,7 @@ impl Connection {
                     initial.size += mtu - packets.len();
                     packets.resize(mtu, 0);
                 }
-                self.loss_recovery.on_packet_sent(initial);
+                self.loss_recovery.on_packet_sent(initial, rtt);
             }
             path.borrow_mut().add_sent(packets.len());
             Ok(SendOption::Yes(path.borrow().datagram(packets)))
@@ -2011,7 +2028,7 @@ impl Connection {
 
     fn get_closing_period_time(&self, now: Instant) -> Instant {
         // Spec says close time should be at least PTO times 3.
-        now + (self.loss_recovery.pto_raw(PNSpace::ApplicationData) * 3)
+        now + (self.pto() * 3)
     }
 
     /// Close the connection.
@@ -2072,8 +2089,10 @@ impl Connection {
                 .primary()
                 .borrow_mut()
                 .set_reset_token(reset_token);
+
             let mad = Duration::from_millis(remote.get_integer(tparams::MAX_ACK_DELAY));
-            self.loss_recovery.set_peer_max_ack_delay(mad);
+            self.paths.primary().borrow_mut().set_max_ack_delay(mad);
+
             let max_active_cids = remote.get_integer(tparams::ACTIVE_CONNECTION_ID_LIMIT);
             self.cid_manager.set_limit(max_active_cids);
         }
@@ -2250,14 +2269,9 @@ impl Connection {
                 first_ack_range,
                 ack_ranges,
             } => {
-                self.handle_ack(
-                    space,
-                    largest_acknowledged,
-                    ack_delay,
-                    first_ack_range,
-                    ack_ranges,
-                    now,
-                )?;
+                let ranges =
+                    Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
+                self.handle_ack(path, space, largest_acknowledged, ranges, ack_delay, now)?;
             }
             Frame::ResetStream {
                 stream_id,
@@ -2509,30 +2523,26 @@ impl Connection {
         }
     }
 
-    fn handle_ack(
+    fn handle_ack<R>(
         &mut self,
+        path: &PathRef,
         space: PNSpace,
         largest_acknowledged: u64,
+        ack_ranges: R,
         ack_delay: u64,
-        first_ack_range: u64,
-        ack_ranges: Vec<AckRange>,
         now: Instant,
-    ) -> Res<()> {
-        qinfo!(
-            [self],
-            "Rx ACK space={}, largest_acked={}, first_ack_range={}, ranges={:?}",
-            space,
-            largest_acknowledged,
-            first_ack_range,
-            ack_ranges
-        );
+    ) -> Res<()>
+    where
+        R: IntoIterator<Item = RangeInclusive<u64>> + Debug,
+        R::IntoIter: ExactSizeIterator,
+    {
+        qinfo!([self], "Rx ACK space={}, ranges={:?}", space, ack_ranges);
 
-        let acked_ranges =
-            Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
+            path.borrow_mut().rtt_mut(),
             space,
             largest_acknowledged,
-            acked_ranges,
+            ack_ranges,
             self.decode_ack_delay(ack_delay),
             now,
         );
@@ -2607,7 +2617,7 @@ impl Connection {
         }
 
         // Setting application keys has to occur after 0-RTT rejection.
-        let pto = self.loss_recovery.pto_raw(PNSpace::ApplicationData);
+        let pto = self.pto();
         self.crypto.install_application_keys(now + pto)?;
         self.process_tps()?;
         self.set_state(State::Connected);
@@ -2990,11 +3000,6 @@ impl Connection {
 
         stream.stop_sending(err);
         Ok(())
-    }
-
-    #[cfg(test)]
-    pub fn get_pto(&self) -> Duration {
-        self.loss_recovery.pto_raw(PNSpace::ApplicationData)
     }
 }
 
