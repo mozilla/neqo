@@ -91,7 +91,7 @@ struct Args {
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
-    #[structopt(subcommand)]
+    #[structopt(flatten)]
     quic_parameters: QuicParameters,
 
     #[structopt(name = "retry", long)]
