@@ -42,7 +42,6 @@ pub use self::connection::{params::ConnectionParameters, Connection, Output, Sta
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::packet::QuicVersion;
-pub use self::sender::PacketSender;
 pub use self::stats::Stats;
 pub use self::stream_id::{StreamId, StreamType};
 

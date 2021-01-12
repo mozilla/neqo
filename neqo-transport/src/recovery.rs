@@ -12,24 +12,24 @@ use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::mem;
 use std::ops::RangeInclusive;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use smallvec::{smallvec, SmallVec};
 
-use neqo_common::{qdebug, qinfo, qlog::NeqoQlog, qtrace};
+use neqo_common::{qdebug, qlog::NeqoQlog, qtrace, qwarn};
 
-use crate::cc::CongestionControlAlgorithm;
 use crate::cid::ConnectionIdEntry;
 use crate::connection::LOCAL_IDLE_TIMEOUT;
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
 use crate::packet::PacketNumber;
+use crate::path::Path;
 use crate::qlog::{self, QlogMetric};
 use crate::rtt::RttEstimate;
 use crate::send_stream::StreamRecoveryToken;
 use crate::stats::{Stats, StatsCell};
 use crate::tracking::{AckToken, PNSpace, PNSpaceSet, SentPacket};
-use crate::PacketSender;
 
 pub(crate) const PACKET_THRESHOLD: u64 = 3;
 /// `ACK_ONLY_SIZE_LIMIT` is the minimum size of the congestion window.
@@ -399,7 +399,7 @@ impl LossRecoverySpaces {
     /// outstanding, so that those can be marked as lost.
     /// # Panics
     /// If the space has already been removed.
-    pub fn drop_space(&mut self, space: PNSpace) -> Vec<SentPacket> {
+    pub fn drop_space(&mut self, space: PNSpace) -> impl IntoIterator<Item = SentPacket> {
         let sp = match space {
             PNSpace::Initial => self.spaces.pop(),
             PNSpace::Handshake => {
@@ -411,7 +411,7 @@ impl LossRecoverySpaces {
         };
         let mut sp = sp.unwrap();
         assert_eq!(sp.space(), space, "dropping spaces out of order");
-        sp.remove_ignored().collect()
+        sp.remove_ignored()
     }
 
     pub fn get(&self, space: PNSpace) -> Option<&LossRecoverySpace> {
@@ -499,31 +499,20 @@ pub(crate) struct LossRecovery {
     /// When the handshake was confirmed, if it has been.
     confirmed_time: Option<Instant>,
     pto_state: Option<PtoState>,
-    packet_sender: PacketSender,
     spaces: LossRecoverySpaces,
     qlog: NeqoQlog,
     stats: StatsCell,
 }
 
 impl LossRecovery {
-    pub fn new(alg: CongestionControlAlgorithm, stats: StatsCell) -> Self {
+    pub fn new(stats: StatsCell) -> Self {
         Self {
             confirmed_time: None,
             pto_state: None,
-            packet_sender: PacketSender::new(alg),
             spaces: LossRecoverySpaces::default(),
             qlog: NeqoQlog::default(),
             stats,
         }
-    }
-
-    #[cfg(test)]
-    pub fn cwnd(&self) -> usize {
-        self.packet_sender.cwnd()
-    }
-
-    pub fn cwnd_avail(&self) -> usize {
-        self.packet_sender.cwnd_avail()
     }
 
     pub fn largest_acknowledged_pn(&self, pn_space: PNSpace) -> Option<PacketNumber> {
@@ -531,7 +520,6 @@ impl LossRecovery {
     }
 
     pub fn set_qlog(&mut self, qlog: NeqoQlog) {
-        self.packet_sender.set_qlog(qlog.clone());
         self.qlog = qlog;
     }
 
@@ -544,22 +532,26 @@ impl LossRecovery {
             .unwrap()
             .largest_acked
             .is_none());
-        self.spaces
+        let mut dropped = self
+            .spaces
             .get_mut(PNSpace::ApplicationData)
             .unwrap()
             .remove_ignored()
-            .inspect(|p| self.packet_sender.discard(&p))
-            .collect()
+            .collect::<Vec<_>>();
+        for p in &mut dropped {
+            p.discard();
+        }
+        dropped
     }
 
     pub fn on_packet_sent(&mut self, sent_packet: SentPacket, rtt: Duration) {
         let pn_space = PNSpace::from(sent_packet.pt);
         qdebug!([self], "packet {}-{} sent", pn_space, sent_packet.pn);
         if let Some(space) = self.spaces.get_mut(pn_space) {
-            self.packet_sender.on_packet_sent(&sent_packet, rtt);
+            sent_packet.sent(rtt);
             space.on_packet_sent(sent_packet);
         } else {
-            qinfo!(
+            qwarn!(
                 [self],
                 "ignoring {}-{} from dropped space",
                 pn_space,
@@ -579,6 +571,36 @@ impl LossRecovery {
         let confirmed = self.confirmed_time.map_or(false, |t| t < send_time);
         let sample = now - send_time;
         rtt.update(&mut self.qlog, sample, ack_delay, confirmed, now);
+    }
+
+    fn report_by_path(mut packets: &[SentPacket], mut f: impl FnMut(&mut Path, &[SentPacket])) {
+        // This assumes that switches in path are rare and so reporting lost packets in slices
+        // is not only efficient, but doesn't confuse the congestion controller.
+        // This is not true when we probe new paths, so it might be worth doing something.  Later.
+        while let Some(first) = packets.first() {
+            let end = 1 + packets[1..]
+                .iter()
+                .take_while(|x| Rc::ptr_eq(first.path(), x.path()))
+                .count();
+            let mut path = first.path().borrow_mut();
+            f(&mut *path, &packets[..end]);
+            packets = &packets[end..];
+        }
+    }
+
+    fn report_lost(lost: &[SentPacket], pn_space: PNSpace, prev_largest_acked: Option<Instant>) {
+        Self::report_by_path(lost, |path, lost| {
+            let pto = path.rtt().pto(pn_space); // Important: the base PTO, not adjusted.
+            let first_rtt_sample = path.rtt().first_sample_time();
+            path.sender_mut()
+                .on_packets_lost(first_rtt_sample, prev_largest_acked, pto, lost);
+        });
+    }
+
+    fn report_acked(acked: &[SentPacket]) {
+        Self::report_by_path(acked, |path, acked| {
+            path.sender_mut().on_packets_acked(acked);
+        });
     }
 
     /// Returns (acked packets, lost packets)
@@ -645,15 +667,12 @@ impl LossRecovery {
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
         // backoff, so that we can determine persistent congestion.
-        let pto_raw = rtt.pto(pn_space);
-        let first_rtt_sample = rtt.first_sample_time();
-        self.packet_sender
-            .on_packets_lost(first_rtt_sample, prev_largest_acked, pto_raw, &lost);
+        Self::report_lost(&lost, pn_space, prev_largest_acked);
 
         // This must happen after on_packets_lost. If in recovery, this could
         // take us out, and then lost packets will start a new recovery period
         // when it shouldn't.
-        self.packet_sender.on_packets_acked(&acked_packets);
+        Self::report_acked(&acked_packets);
 
         self.pto_state = None;
 
@@ -664,12 +683,15 @@ impl LossRecovery {
     /// We also need to pretend that they never happened for the purposes of congestion control.
     pub fn retry(&mut self) -> Vec<SentPacket> {
         self.pto_state = None;
-        let packet_sender = &mut self.packet_sender;
-        self.spaces
+        let mut dropped = self
+            .spaces
             .iter_mut()
             .flat_map(LossRecoverySpace::remove_ignored)
-            .inspect(|p| packet_sender.discard(&p))
-            .collect()
+            .collect::<Vec<_>>();
+        for p in &mut dropped {
+            p.discard();
+        }
+        dropped
     }
 
     fn confirmed(&mut self, rtt: &RttEstimate, now: Instant) {
@@ -688,8 +710,8 @@ impl LossRecovery {
     /// Discard state for a given packet number space.
     pub fn discard(&mut self, space: PNSpace, rtt: &RttEstimate, now: Instant) {
         qdebug!([self], "Reset loss recovery state for {}", space);
-        for p in self.spaces.drop_space(space) {
-            self.packet_sender.discard(&p);
+        for mut p in self.spaces.drop_space(space) {
+            p.discard();
         }
 
         // We just made progress, so discard PTO count.
@@ -827,18 +849,16 @@ impl LossRecovery {
         qtrace!([self], "timeout {:?}", now);
 
         let loss_delay = rtt.loss_delay();
-        let first_rtt_sample = rtt.first_sample_time();
 
         let mut lost_packets = Vec::new();
         for space in self.spaces.iter_mut() {
             let first = lost_packets.len(); // The first packet lost in this space.
             let pto = Self::pto_period_inner(rtt, self.pto_state.as_ref(), space.space());
             space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
-            self.packet_sender.on_packets_lost(
-                first_rtt_sample,
-                space.largest_acked_sent_time,
-                rtt.pto(space.space()), // Important: the base value.
+            Self::report_lost(
                 &lost_packets[first..],
+                space.space(),
+                space.largest_acked_sent_time,
             );
         }
         self.stats.borrow_mut().lost += lost_packets.len();
@@ -847,27 +867,13 @@ impl LossRecovery {
         lost_packets
     }
 
-    /// Start the packet pacer.
-    pub fn start_pacer(&mut self, now: Instant) {
-        self.packet_sender.start_pacer(now);
-    }
-
-    /// Get the next time that a paced packet might be sent.
-    pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {
-        self.packet_sender.next_paced(rtt)
-    }
-
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
     #[allow(clippy::option_if_let_else, clippy::unknown_clippy_lints)]
-    pub fn send_profile(
-        &mut self,
-        rtt: Duration,
-        now: Instant,
-        mtu: usize,
-        amplification_limit: usize,
-    ) -> SendProfile {
+    pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
         qdebug!([self], "get send profile {:?}", now);
+        let sender = path.sender();
+        let mtu = path.mtu();
         if let Some(profile) = self
             .pto_state
             .as_mut()
@@ -875,15 +881,18 @@ impl LossRecovery {
         {
             profile
         } else {
-            let limit = min(self.cwnd_avail(), amplification_limit);
+            let limit = min(sender.cwnd_avail(), path.amplification_limit());
             if limit > mtu {
                 // More than an MTU available; we might need to pace.
-                if self.next_paced(rtt).map_or(false, |t| t > now) {
+                if sender
+                    .next_paced(path.rtt().estimate())
+                    .map_or(false, |t| t > now)
+                {
                     SendProfile::new_paced()
                 } else {
                     SendProfile::new_limited(mtu)
                 }
-            } else if self.packet_sender.recovery_packet() {
+            } else if sender.recovery_packet() {
                 // After entering recovery, allow a packet to be sent immediately.
                 // This uses the PTO machinery, probing in all spaces. This will
                 // result in a PING being sent in every active space.
@@ -903,7 +912,8 @@ impl ::std::fmt::Display for LossRecovery {
 
 #[cfg(test)]
 mod tests {
-    use super::{CongestionControlAlgorithm, LossRecovery, LossRecoverySpace, PNSpace, SentPacket};
+    use super::{LossRecovery, LossRecoverySpace, PNSpace, SentPacket};
+    use crate::cc::CongestionControlAlgorithm;
     use crate::packet::PacketType;
     use crate::rtt::RttEstimate;
     use crate::stats::{Stats, StatsCell};

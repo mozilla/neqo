@@ -18,6 +18,7 @@ use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::packet::{PacketBuilder, PacketNumber, PacketType};
+use crate::path::PathRef;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
 
@@ -136,6 +137,7 @@ pub struct SentPacket {
     pub pn: PacketNumber,
     ack_eliciting: bool,
     pub time_sent: Instant,
+    path: PathRef,
     pub tokens: Vec<RecoveryToken>,
 
     time_declared_lost: Option<Instant>,
@@ -151,6 +153,7 @@ impl SentPacket {
         pn: PacketNumber,
         time_sent: Instant,
         ack_eliciting: bool,
+        path: PathRef,
         tokens: Vec<RecoveryToken>,
         size: usize,
     ) -> Self {
@@ -159,6 +162,7 @@ impl SentPacket {
             pn,
             time_sent,
             ack_eliciting,
+            path,
             tokens,
             time_declared_lost: None,
             pto: false,
@@ -176,6 +180,11 @@ impl SentPacket {
         self.time_declared_lost.is_some()
     }
 
+    /// A reference to a reference to the path on which this packet was sent.
+    pub fn path(&self) -> &PathRef {
+        &self.path
+    }
+
     /// Whether accounting for the loss or acknowledgement in the
     /// congestion controller is pending.
     /// Returns `true` if the packet counts as being "in flight",
@@ -184,6 +193,14 @@ impl SentPacket {
     /// but we don't send PADDING, so we don't track that.
     pub fn cc_outstanding(&self) -> bool {
         self.ack_eliciting() && !self.lost()
+    }
+
+    /// Mark the packet as sent.
+    pub fn sent(&self, rtt: Duration) {
+        self.path
+            .borrow_mut()
+            .sender_mut()
+            .on_packet_sent(self, rtt);
     }
 
     /// Declare the packet as lost.  Returns `true` if this is the first time.
@@ -201,6 +218,11 @@ impl SentPacket {
     pub fn expired(&self, now: Instant, expiration_period: Duration) -> bool {
         self.time_declared_lost
             .map_or(false, |loss_time| (loss_time + expiration_period) <= now)
+    }
+
+    /// Discard this packet, for outstanding packets when a packet number space is discarded.
+    pub fn discard(&mut self) {
+        self.path.borrow_mut().sender_mut().discard(&self);
     }
 
     /// Whether the packet contents were cleared out after a PTO.

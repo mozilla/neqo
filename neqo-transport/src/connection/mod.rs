@@ -284,6 +284,7 @@ impl Connection {
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
         conn_params: ConnectionParameters,
+        now: Instant,
     ) -> Res<Self> {
         let dcid = ConnectionId::generate_initial();
         let mut c = Self::new(
@@ -295,8 +296,14 @@ impl Connection {
         )?;
         c.crypto.states.init(c.version(), Role::Client, &dcid);
         c.original_destination_cid = Some(dcid);
-        let path = Path::temporary(local_addr, remote_addr);
-        c.setup_handshake_path(&Rc::new(RefCell::new(path)));
+        let path = Path::temporary(
+            local_addr,
+            remote_addr,
+            c.conn_params.get_cc_algorithm(),
+            NeqoQlog::default(),
+            now,
+        );
+        c.setup_handshake_path(&Rc::new(RefCell::new(path)), now);
         Ok(c)
     }
 
@@ -431,7 +438,7 @@ impl Connection {
             recv_streams: RecvStreams::default(),
             flow_mgr: Rc::new(RefCell::new(FlowMgr::default())),
             state_signaling: StateSignaling::Idle,
-            loss_recovery: LossRecovery::new(conn_params.get_cc_algorithm(), stats.clone()),
+            loss_recovery: LossRecovery::new(stats.clone()),
             events: ConnectionEvents::default(),
             new_token: NewTokenState::new(role),
             stats,
@@ -447,6 +454,7 @@ impl Connection {
     /// Set or clear the qlog for this connection.
     pub fn set_qlog(&mut self, qlog: NeqoQlog) {
         self.loss_recovery.set_qlog(qlog.clone());
+        self.paths.set_qlog(qlog.clone());
         self.qlog = qlog;
     }
 
@@ -673,7 +681,7 @@ impl Connection {
         if !init_token.is_empty() {
             self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
         }
-        self.paths.primary().borrow_mut().set_initial_rtt(rtt);
+        self.paths.primary().borrow_mut().rtt_mut().set_initial(rtt);
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
@@ -917,7 +925,7 @@ impl Connection {
             }
 
             if paced {
-                if let Some(pace_time) = self.loss_recovery.next_paced(rtt.estimate()) {
+                if let Some(pace_time) = path.sender().next_paced(rtt.estimate()) {
                     qtrace!([self], "Pacing timer {:?}", pace_time);
                     delays.push(pace_time);
                 }
@@ -1125,7 +1133,6 @@ impl Connection {
                     packet.dcid()
                 );
                 self.set_state(State::WaitInitial);
-                self.loss_recovery.start_pacer(now);
                 self.crypto
                     .states
                     .init(self.version(), self.role, &packet.dcid());
@@ -1244,7 +1251,7 @@ impl Connection {
         now: Instant,
     ) {
         if self.state == State::WaitInitial {
-            self.start_handshake(path, &packet);
+            self.start_handshake(path, &packet, now);
         }
         if self.state.connected() {
             self.handle_migration(path, d, migrate, now);
@@ -1262,9 +1269,12 @@ impl Connection {
     /// This takes two times: when the datagram was received, and the current time.
     fn input(&mut self, d: Datagram, received: Instant, now: Instant) {
         // First determine the path.
-        let path = self
-            .paths
-            .find_path_with_rebinding(d.destination(), d.source());
+        let path = self.paths.find_path_with_rebinding(
+            d.destination(),
+            d.source(),
+            self.conn_params.get_cc_algorithm(),
+            now,
+        );
         path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
         self.capture_error(Some(path), now, 0, res).ok();
@@ -1410,7 +1420,7 @@ impl Connection {
     /// During connection setup, the first path needs to be setup.
     /// This uses the connection IDs that were provided during the handshake
     /// to setup that path.
-    fn setup_handshake_path(&mut self, path: &PathRef) {
+    fn setup_handshake_path(&mut self, path: &PathRef, now: Instant) {
         self.paths.make_permanent(
             &path,
             Some(self.local_initial_source_cid.clone()),
@@ -1424,6 +1434,7 @@ impl Connection {
                     .clone(),
             ),
         );
+        path.borrow_mut().set_valid(now);
     }
 
     /// If the path isn't permanent, assign it a connection ID to make it so.
@@ -1457,7 +1468,7 @@ impl Connection {
             // First try to fill in handshake details.
             if packet.packet_type() == PacketType::Initial {
                 self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
-                self.setup_handshake_path(&path);
+                self.setup_handshake_path(&path, now);
             } else {
                 // Otherwise try to get a usable connection ID.
                 let _ = self.ensure_permanent(&path);
@@ -1465,7 +1476,7 @@ impl Connection {
         }
     }
 
-    fn start_handshake(&mut self, path: &PathRef, packet: &PublicPacket) {
+    fn start_handshake(&mut self, path: &PathRef, packet: &PublicPacket, now: Instant) {
         qtrace!([self], "starting handshake");
         debug_assert_eq!(packet.packet_type(), PacketType::Initial);
         self.remote_initial_source_cid = Some(ConnectionId::from(packet.scid()));
@@ -1477,7 +1488,7 @@ impl Connection {
             self.original_destination_cid = Some(dcid.clone());
             self.cid_manager.add_odcid(dcid);
             // Make a path on which to run the handshake.
-            self.setup_handshake_path(path);
+            self.setup_handshake_path(path, now);
 
             self.zero_rtt_state = match self.crypto.enable_0rtt(self.role) {
                 Ok(true) => {
@@ -1541,7 +1552,9 @@ impl Connection {
             return Err(Error::InvalidMigration);
         }
 
-        let path = self.paths.find_path(local, remote);
+        let path = self
+            .paths
+            .find_path(local, remote, self.conn_params.get_cc_algorithm(), now);
         self.ensure_permanent(&path)?;
         qinfo!(
             [self],
@@ -1868,10 +1881,7 @@ impl Connection {
         // Determine how we are sending packets (PTO, etc..).
         let rtt = path.borrow().rtt().estimate();
         let mtu = path.borrow().mtu();
-        let amplification_limit = path.borrow().amplification_limit();
-        let profile = self
-            .loss_recovery
-            .send_profile(rtt, now, mtu, amplification_limit);
+        let profile = self.loss_recovery.send_profile(&*path.borrow(), now);
         qdebug!([self], "output_path send_profile {:?}", profile);
 
         // Frames for different epochs must go in different packets, but then these
@@ -1944,6 +1954,7 @@ impl Connection {
                 pn,
                 now,
                 ack_eliciting,
+                Rc::clone(path),
                 tokens,
                 encoder.len() - header_start,
             );
@@ -2012,11 +2023,9 @@ impl Connection {
         qinfo!([self], "client_start");
         debug_assert_eq!(self.role, Role::Client);
         qlog::client_connection_started(&mut self.qlog, &self.paths.primary());
-        self.loss_recovery.start_pacer(now);
 
         self.handshake(now, PNSpace::Initial, None)?;
         self.set_state(State::WaitInitial);
-        self.paths.primary().borrow_mut().set_valid(now);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.role)? {
             qdebug!([self], "Enabled 0-RTT");
             ZeroRttState::Sending

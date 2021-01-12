@@ -122,6 +122,7 @@ pub fn default_client() -> Connection {
         addr(),
         addr(),
         ConnectionParameters::default(),
+        now(),
     )
     .expect("create a default client")
 }
@@ -206,6 +207,7 @@ pub fn default_http3_client() -> Http3Client {
             },
             max_concurrent_push_streams: 10,
         },
+        now(),
     )
     .expect("create a default client")
 }

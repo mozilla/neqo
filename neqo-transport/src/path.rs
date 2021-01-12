@@ -14,6 +14,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use crate::cc::CongestionControlAlgorithm;
 use crate::cid::{ConnectionId, ConnectionIdRef, RemoteConnectionIdEntry};
 use crate::frame::{
     FRAME_TYPE_PATH_CHALLENGE, FRAME_TYPE_PATH_RESPONSE, FRAME_TYPE_RETIRE_CONNECTION_ID,
@@ -21,9 +22,10 @@ use crate::frame::{
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::rtt::RttEstimate;
+use crate::sender::PacketSender;
 use crate::stats::FrameStats;
 
-use neqo_common::{hex, qdebug, qinfo, qtrace, Datagram, Encoder};
+use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder};
 use neqo_crypto::random;
 
 /// This is the MTU that we assume when using IPv6.
@@ -61,12 +63,21 @@ pub struct Paths {
 
     /// Connection IDs that need to be retired.
     to_retire: Vec<u64>,
+
+    /// QLog handler.
+    qlog: NeqoQlog,
 }
 
 impl Paths {
     /// Find the path for the given addresses.
     /// This might be a temporary path.
-    pub fn find_path(&self, local: SocketAddr, remote: SocketAddr) -> PathRef {
+    pub fn find_path(
+        &self,
+        local: SocketAddr,
+        remote: SocketAddr,
+        cc: CongestionControlAlgorithm,
+        now: Instant,
+    ) -> PathRef {
         self.paths
             .iter()
             .find_map(|p| {
@@ -77,7 +88,7 @@ impl Paths {
                 }
             })
             .unwrap_or_else(|| {
-                let mut p = Path::temporary(local, remote);
+                let mut p = Path::temporary(local, remote, cc, self.qlog.clone(), now);
                 if let Some(primary) = self.primary.as_ref() {
                     p.set_initial_rtt(primary.borrow().rtt().estimate());
                 }
@@ -89,7 +100,13 @@ impl Paths {
     /// to paths that match the remote address only based on IP addres, not port.
     /// We use this when the other side migrates to skip address validation and
     /// creating a new path.
-    pub fn find_path_with_rebinding(&self, local: SocketAddr, remote: SocketAddr) -> PathRef {
+    pub fn find_path_with_rebinding(
+        &self,
+        local: SocketAddr,
+        remote: SocketAddr,
+        cc: CongestionControlAlgorithm,
+        now: Instant,
+    ) -> PathRef {
         self.paths
             .iter()
             .find_map(|p| {
@@ -108,7 +125,15 @@ impl Paths {
                     }
                 })
             })
-            .unwrap_or_else(|| Rc::new(RefCell::new(Path::temporary(local, remote))))
+            .unwrap_or_else(|| {
+                Rc::new(RefCell::new(Path::temporary(
+                    local,
+                    remote,
+                    cc,
+                    self.qlog.clone(),
+                    now,
+                )))
+            })
     }
 
     /// Get a reference to the primary path.  This will assert if there is no primary
@@ -352,6 +377,13 @@ impl Paths {
                 p.borrow().rtt().estimate()
             })
     }
+
+    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+        for p in &mut self.paths {
+            p.borrow_mut().set_qlog(qlog.clone());
+        }
+        self.qlog = qlog;
+    }
 }
 
 /// The state of a path with respect to address validation.
@@ -416,6 +448,8 @@ pub struct Path {
 
     /// The round trip time estimate for this path.
     rtt: RttEstimate,
+    /// A packet sender for the path, which includes congestion control and a pacer.
+    sender: PacketSender,
 
     /// The number of bytes received on this path.
     /// Note that this value might saturate on a long-lived connection,
@@ -428,7 +462,15 @@ pub struct Path {
 impl Path {
     /// Create a path from addresses and a remote connection ID.
     /// This is used for migration and for new datagrams.
-    pub fn temporary(local: SocketAddr, remote: SocketAddr) -> Self {
+    pub fn temporary(
+        local: SocketAddr,
+        remote: SocketAddr,
+        cc: CongestionControlAlgorithm,
+        qlog: NeqoQlog,
+        now: Instant,
+    ) -> Self {
+        let mut sender = PacketSender::new(cc, now);
+        sender.set_qlog(qlog);
         Self {
             local,
             remote,
@@ -439,6 +481,7 @@ impl Path {
             validated: None,
             challenge: None,
             rtt: RttEstimate::default(),
+            sender,
             received_bytes: 0,
             sent_bytes: 0,
         }
@@ -718,6 +761,16 @@ impl Path {
         &mut self.rtt
     }
 
+    /// Read-only access to the owned sender.
+    pub fn sender(&self) -> &PacketSender {
+        &self.sender
+    }
+
+    /// Mutable access to the owned sender.
+    pub fn sender_mut(&mut self) -> &mut PacketSender {
+        &mut self.sender
+    }
+
     /// Pass on RTT configuration: the maximum acknowledgment delay of the peer.
     pub fn set_max_ack_delay(&mut self, mad: Duration) {
         self.rtt.set_max_ack_delay(mad);
@@ -758,6 +811,11 @@ impl Path {
                     budget.saturating_sub(self.sent_bytes)
                 })
         }
+    }
+
+    /// Update the QLog instance.
+    pub fn set_qlog(&mut self, qlog: NeqoQlog) {
+        self.sender.set_qlog(qlog);
     }
 }
 

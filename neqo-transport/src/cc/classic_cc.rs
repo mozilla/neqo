@@ -420,12 +420,17 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
 mod tests {
     use super::{ClassicCongestionControl, CWND_INITIAL, CWND_MIN, PERSISTENT_CONG_THRESH};
     use crate::cc::new_reno::NewReno;
-    use crate::cc::{CongestionControl, CWND_INITIAL_PKTS, MAX_DATAGRAM_SIZE};
+    use crate::cc::{
+        CongestionControl, CongestionControlAlgorithm, CWND_INITIAL_PKTS, MAX_DATAGRAM_SIZE,
+    };
     use crate::packet::{PacketNumber, PacketType};
+    use crate::path::{Path, PathRef};
     use crate::tracking::SentPacket;
+    use std::cell::RefCell;
     use std::convert::TryFrom;
+    use std::rc::Rc;
     use std::time::{Duration, Instant};
-    use test_fixture::now;
+    use test_fixture::{addr, fixture_init, now};
 
     const PTO: Duration = Duration::from_millis(100);
     const RTT: Duration = Duration::from_millis(98);
@@ -448,67 +453,86 @@ mod tests {
         assert_eq!(cc.ssthresh(), CWND_INITIAL / 2);
     }
 
+    fn path() -> PathRef {
+        fixture_init();
+        Rc::new(RefCell::new(Path::temporary(
+            addr(),
+            addr(),
+            CongestionControlAlgorithm::NewReno,
+            neqo_common::qlog::NeqoQlog::default(),
+            now(),
+        )))
+    }
+
     #[test]
     fn issue_876() {
         let mut cc = ClassicCongestionControl::new(NewReno::default());
         let time_now = now();
+        let path = path();
         let time_before = time_now - Duration::from_millis(100);
         let time_after = time_now + Duration::from_millis(150);
 
         let sent_packets = &[
             SentPacket::new(
                 PacketType::Short,
-                1,                     // pn
-                time_before,           // time sent
-                true,                  // ack eliciting
+                1,           // pn
+                time_before, // time sent
+                true,        // ack eliciting
+                path,
                 Vec::new(),            // tokens
                 MAX_DATAGRAM_SIZE - 1, // size
             ),
             SentPacket::new(
                 PacketType::Short,
-                2,                     // pn
-                time_before,           // time sent
-                true,                  // ack eliciting
+                2,           // pn
+                time_before, // time sent
+                true,        // ack eliciting
+                path,
                 Vec::new(),            // tokens
                 MAX_DATAGRAM_SIZE - 2, // size
             ),
             SentPacket::new(
                 PacketType::Short,
-                3,                 // pn
-                time_before,       // time sent
-                true,              // ack eliciting
+                3,           // pn
+                time_before, // time sent
+                true,        // ack eliciting
+                path,
                 Vec::new(),        // tokens
                 MAX_DATAGRAM_SIZE, // size
             ),
             SentPacket::new(
                 PacketType::Short,
-                4,                 // pn
-                time_before,       // time sent
-                true,              // ack eliciting
+                4,           // pn
+                time_before, // time sent
+                true,        // ack eliciting
+                path,
                 Vec::new(),        // tokens
                 MAX_DATAGRAM_SIZE, // size
             ),
             SentPacket::new(
                 PacketType::Short,
-                5,                 // pn
-                time_before,       // time sent
-                true,              // ack eliciting
+                5,           // pn
+                time_before, // time sent
+                true,        // ack eliciting
+                path,
                 Vec::new(),        // tokens
                 MAX_DATAGRAM_SIZE, // size
             ),
             SentPacket::new(
                 PacketType::Short,
-                6,                 // pn
-                time_before,       // time sent
-                true,              // ack eliciting
+                6,           // pn
+                time_before, // time sent
+                true,        // ack eliciting
+                path,
                 Vec::new(),        // tokens
                 MAX_DATAGRAM_SIZE, // size
             ),
             SentPacket::new(
                 PacketType::Short,
-                7,                     // pn
-                time_after,            // time sent
-                true,                  // ack eliciting
+                7,          // pn
+                time_after, // time sent
+                true,       // ack eliciting
+                path,
                 Vec::new(),            // tokens
                 MAX_DATAGRAM_SIZE - 3, // size
             ),
@@ -529,7 +553,6 @@ mod tests {
         assert_eq!(cc.acked_bytes, 0);
         cwnd_is_halved(&cc);
         assert_eq!(cc.bytes_in_flight(), 5 * MAX_DATAGRAM_SIZE - 2);
-
         // Send a packet after recovery starts
         cc.on_packet_sent(&sent_packets[6]);
         assert!(!cc.recovery_packet());
@@ -557,6 +580,7 @@ mod tests {
             pn,
             now() + t,
             ack_eliciting,
+            path(),
             Vec::new(),
             100,
         )
@@ -728,6 +752,7 @@ mod tests {
                     u64::try_from(i).unwrap(),
                     by_pto(t),
                     true,
+                    path(),
                     Vec::new(),
                     1000,
                 )
@@ -789,6 +814,7 @@ mod tests {
             lost[0].pn,
             lost[0].time_sent,
             false,
+            path(),
             Vec::new(),
             lost[0].size,
         );

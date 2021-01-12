@@ -25,29 +25,29 @@ pub const PACING_BURST_SIZE: usize = 2;
 #[derive(Debug)]
 pub struct PacketSender {
     cc: Box<dyn CongestionControl>,
-    pacer: Option<Pacer>,
+    pacer: Pacer,
 }
 
 impl Display for PacketSender {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.cc)?;
-        if let Some(p) = &self.pacer {
-            write!(f, " {}", p)?;
-        }
-        Ok(())
+        write!(f, "{} {}", self.cc, self.pacer)
     }
 }
 
 impl PacketSender {
     #[must_use]
-    pub fn new(alg: CongestionControlAlgorithm) -> Self {
+    pub fn new(alg: CongestionControlAlgorithm, now: Instant) -> Self {
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
                     Box::new(ClassicCongestionControl::new(NewReno::default()))
                 }
             },
-            pacer: None,
+            pacer: Pacer::new(
+                now,
+                MAX_DATAGRAM_SIZE * PACING_BURST_SIZE,
+                MAX_DATAGRAM_SIZE,
+            ),
         }
     }
 
@@ -92,26 +92,15 @@ impl PacketSender {
 
     pub fn on_packet_sent(&mut self, pkt: &SentPacket, rtt: Duration) {
         self.pacer
-            .as_mut()
-            .unwrap()
             .spend(pkt.time_sent, rtt, self.cc.cwnd(), pkt.size);
         self.cc.on_packet_sent(pkt);
-    }
-
-    pub fn start_pacer(&mut self, now: Instant) {
-        // Start the pacer with a small burst size.
-        self.pacer = Some(Pacer::new(
-            now,
-            MAX_DATAGRAM_SIZE * PACING_BURST_SIZE,
-            MAX_DATAGRAM_SIZE,
-        ));
     }
 
     #[must_use]
     pub fn next_paced(&self, rtt: Duration) -> Option<Instant> {
         // Only pace if there are bytes in flight.
         if self.cc.bytes_in_flight() > 0 {
-            Some(self.pacer.as_ref().unwrap().next(rtt, self.cc.cwnd()))
+            Some(self.pacer.next(rtt, self.cc.cwnd()))
         } else {
             None
         }

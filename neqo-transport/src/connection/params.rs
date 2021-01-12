@@ -23,7 +23,8 @@ pub enum PreferredAddressConfig {
 }
 
 /// ConnectionParameters use for setting intitial value for QUIC parameters.
-/// This collect like initial limits, protocol version and congestion control.
+/// This collects configuration like initial limits, protocol version, and
+/// congestion control algorithm.
 #[derive(Debug, Clone)]
 pub struct ConnectionParameters {
     quic_version: QuicVersion,
