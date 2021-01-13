@@ -74,7 +74,7 @@ jobs:
       - run:
           name: Command-line Utilities
           command: |
-            cargo run --bin neqo-server -- '[::]:4433' & spid=$!; \
+            cargo run --bin neqo-server -- '[::1]:4433' & spid=$!; \
             cargo run --bin neqo-client -- 'https://[::1]:4433/'; r=$?; \
             kill -9 $spid; [ "$r" -eq 0 ]
 
