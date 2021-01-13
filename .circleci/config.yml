@@ -74,9 +74,10 @@ jobs:
       - run:
           name: Command-line Utilities
           command: |
-            cargo run --bin neqo-server -- '[::1]:4433' & spid=$!; \
-            cargo run --bin neqo-client -- 'https://[::1]:4433/'; r=$?; \
-            kill -9 $spid; [ "$r" -eq 0 ]
+            set -e; spid=""; \
+            trap '[ -z "$spid" ] || kill -9 "$spid"' EXIT; \
+            cargo run --bin neqo-server -- '0.0.0.0:4433' & spid=$!; \
+            cargo run --bin neqo-client -- 'https://127.0.0.1:4433/'
 
       - run:
           name: "Prepare for Caching"
