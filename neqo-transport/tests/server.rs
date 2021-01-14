@@ -226,6 +226,91 @@ fn drop_non_initial() {
 }
 
 #[test]
+fn drop_short_initial() {
+    const CID: &[u8] = &[55; 8]; // not a real connection ID
+    let mut server = default_server();
+
+    // This too small to be an Initial, but it is otherwise plausible.
+    let mut header = neqo_common::Encoder::with_capacity(1199);
+    header
+        .encode_byte(0xca)
+        .encode_uint(4, QuicVersion::default().as_u32())
+        .encode_vec(1, CID)
+        .encode_vec(1, CID);
+    let mut bogus_data: Vec<u8> = header.into();
+    bogus_data.resize(1199, 66);
+
+    let bogus = Datagram::new(test_fixture::addr(), test_fixture::addr(), bogus_data);
+    assert!(server.process(Some(bogus), now()).dgram().is_none());
+}
+
+/// Verify that the server can read 0-RTT properly.  A more robust server would buffer
+/// 0-RTT before the handshake begins and let 0-RTT arrive for a short periiod after
+/// the handshake completes, but ours is for testing so it only allows 0-RTT while
+/// the handshake is running.
+#[test]
+fn zero_rtt() {
+    let mut server = default_server();
+    let token = get_ticket(&mut server);
+
+    // Discharge the old connection so that we don't have to worry about it.
+    let mut now = now();
+    let t = server.process(None, now).callback();
+    now += t;
+    assert_eq!(server.process(None, now), Output::None);
+    assert_eq!(server.active_connections().len(), 1);
+
+    let start_time = now;
+    let mut client = default_client();
+    client.enable_resumption(now, &token).unwrap();
+
+    let mut client_send = || {
+        let client_stream = client.stream_create(StreamType::UniDi).unwrap();
+        client.stream_send(client_stream, &[1, 2, 3]).unwrap();
+        match client.process(None, now) {
+            Output::Datagram(d) => d,
+            Output::Callback(t) => {
+                // Pacing...
+                now += t;
+                client.process(None, now).dgram().unwrap()
+            }
+            Output::None => panic!(),
+        }
+    };
+
+    // Now generate a bunch of 0-RTT packets...
+    let c1 = client_send();
+    assertions::assert_coalesced_0rtt(&c1);
+    let c2 = client_send();
+    let c3 = client_send();
+    let c4 = client_send();
+
+    // 0-RTT packets that arrive before the handshake get dropped.
+    let _ = server.process(Some(c2), now);
+    assert!(server.active_connections().is_empty());
+
+    // Now handshake and let another 0-RTT packet in.
+    let shs = server.process(Some(c1), now).dgram();
+    let _ = server.process(Some(c3), now);
+    // The server will have received two STREAM frames now if it processed both packets.
+    let active = server.active_connections();
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].borrow().stats().frame_rx.stream, 2);
+
+    // Complete the handshake.  As the client was pacing 0-RTT packets, extend the time
+    // a little so that the pacer doesn't prevent the Finished from being sent.
+    now += now - start_time;
+    let cfin = client.process(shs, now).dgram();
+    let _ = server.process(cfin, now);
+
+    // The server will drop this last 0-RTT packet.
+    let _ = server.process(Some(c4), now);
+    let active = server.active_connections();
+    assert_eq!(active.len(), 1);
+    assert_eq!(active[0].borrow().stats().frame_rx.stream, 2);
+}
+
+#[test]
 fn retry_basic() {
     let mut server = default_server();
     server.set_validation(ValidateAddress::Always);
@@ -282,9 +367,7 @@ fn get_ticket(server: &mut Server) -> ResumptionToken {
     let dgram = server.process(None, now()).dgram();
     client.process_input(dgram.unwrap(), now()); // Consume ticket, ignore output.
 
-    // Calling active_connections clears the set of active connections.
-    assert_eq!(server.active_connections().len(), 1);
-    client
+    let ticket = client
         .events()
         .find_map(|e| {
             if let ConnectionEvent::ResumptionToken(token) = e {
@@ -293,7 +376,15 @@ fn get_ticket(server: &mut Server) -> ResumptionToken {
                 None
             }
         })
-        .unwrap()
+        .unwrap();
+
+    // Have the client close the connection and then let the server clean up.
+    client.close(now(), 0, "got a ticket");
+    let dgram = client.process_output(now()).dgram();
+    let _ = server.process(dgram, now());
+    // Calling active_connections clears the set of active connections.
+    assert_eq!(server.active_connections().len(), 1);
+    ticket
 }
 
 // Attempt a retry with 0-RTT, and have 0-RTT packets sent with the second ClientHello.
