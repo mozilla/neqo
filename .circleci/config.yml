@@ -81,8 +81,7 @@ jobs:
 
       - run:
           name: Internal Errors Check
-          command: |
-            ./check_internal_errors
+          command: ./check_internal_errors
 
       - run:
           name: "Prepare for Caching"

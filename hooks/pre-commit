@@ -34,3 +34,6 @@ if ! errors=($(cargo fmt -- --check -l)); then
     done
     exit 1
 fi
+
+# Check internal errors
+./check_internal_errors
