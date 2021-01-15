@@ -48,8 +48,8 @@ pub enum Error {
     HttpNoError,
     HttpGeneralProtocol,
     HttpGeneralProtocolStream, //this is the same as the above but it should only close a stream not a connection.
-    // Each time tihe error is return a different parameter is supply.
-    // This will be use to distinguish each occurance of this error.
+    // When using this error, you need to provide a value that is unique, which
+    // will allow the specific error to be identified.  This will be validated in CI.
     HttpInternal(u16),
     HttpStreamCreation,
     HttpClosedCriticalStream,
@@ -211,7 +211,6 @@ impl From<QpackError> for Error {
     fn from(err: QpackError) -> Self {
         match err {
             QpackError::ClosedCriticalStream => Error::HttpClosedCriticalStream,
-            QpackError::InternalError(i) => Error::HttpInternal(10 + i),
             e => Self::QpackError(e),
         }
     }
