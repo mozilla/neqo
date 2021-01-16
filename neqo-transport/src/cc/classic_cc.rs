@@ -79,7 +79,7 @@ pub trait WindowAdjustment: Display + Debug {
     /// This is called when an ack is received.
     /// The function calculates the amount of acked bytes congestion controller needs
     /// to collect before increasing its cwnd by `MAX_DATAGRAM_SIZE`.
-    fn on_packets_acked(
+    fn bytes_for_cwnd_increase(
         &mut self,
         curr_cwnd: usize,
         new_acked_bytes: usize,
@@ -88,7 +88,8 @@ pub trait WindowAdjustment: Display + Debug {
     ) -> usize;
     /// This function is called when a congestion event has beed detected and it
     /// returns new (decreased) values of `curr_cwnd` and `acked_bytes`.
-    fn on_congestion_event(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize);
+    fn reduce_cwnd(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize);
+    /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
     #[cfg(test)]
     fn last_max_cwnd(&self) -> f64;
@@ -200,9 +201,12 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         if self.congestion_window >= self.ssthresh {
             // The following function return the amount acked bytes a controller needs
             // to collect to be allowed to increase its cwnd by MAX_DATAGRAM_SIZE.
-            let byte_cnt =
-                self.cc_algorithm
-                    .on_packets_acked(self.congestion_window, new_acked, min_rtt, now);
+            let byte_cnt = self.cc_algorithm.bytes_for_cwnd_increase(
+                self.congestion_window,
+                new_acked,
+                min_rtt,
+                now,
+            );
             // If enough credit has been accumulated already, apply them gradually.
             // If we have sudden increase in allowed rate we actually increase cwnd gently.
             if self.acked_bytes >= byte_cnt {
@@ -211,6 +215,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             }
             self.acked_bytes += new_acked;
             if self.acked_bytes >= byte_cnt {
+                // We are counting the number of whole multiples of byte_cnt.
                 let d = self.acked_bytes / byte_cnt;
                 self.acked_bytes -= d * byte_cnt;
                 self.congestion_window += d * MAX_DATAGRAM_SIZE;
@@ -428,7 +433,7 @@ impl<T: WindowAdjustment> ClassicCongestionControl<T> {
         if self.after_recovery_start(last_packet) {
             let (cwnd, acked_bytes) = self
                 .cc_algorithm
-                .on_congestion_event(self.congestion_window, self.acked_bytes);
+                .reduce_cwnd(self.congestion_window, self.acked_bytes);
             self.congestion_window = max(cwnd, CWND_MIN);
             self.acked_bytes = acked_bytes;
             self.ssthresh = self.congestion_window;

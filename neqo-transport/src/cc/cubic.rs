@@ -6,11 +6,10 @@
 
 #![deny(clippy::pedantic)]
 
-use std::cmp::max;
 use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
-use crate::cc::{classic_cc::WindowAdjustment, CWND_MIN, MAX_DATAGRAM_SIZE_F64};
+use crate::cc::{classic_cc::WindowAdjustment, MAX_DATAGRAM_SIZE_F64};
 use neqo_common::qtrace;
 use std::convert::TryFrom;
 
@@ -28,6 +27,8 @@ pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
 /// The fast convergence ratio further reduces the congestion window when a congestion event
 /// occurs before reaching the previous `W_max`.
 pub const CUBIC_FAST_CONVERGENCE: f64 = 0.85; // (1.0 + CUBIC_BETA) / 2.0;
+
+const MIN_INCREASE: f64 = 2.0;
 
 fn convert_to_f64(v: usize) -> f64 {
     assert!(v < (1 << 53));
@@ -94,13 +95,28 @@ impl Cubic {
     fn w_cubic(&self, t: f64) -> f64 {
         CUBIC_C * (t - self.k).powi(3) * MAX_DATAGRAM_SIZE_F64 + self.w_max
     }
+
+    fn start_epoch(&mut self, curr_cwnd_f64: f64, new_acked_f64: f64, now: Instant) {
+        self.ca_epoch_start = Some(now);
+        // reset tcp_acked_bytes and estimated_tcp_cwnd;
+        self.tcp_acked_bytes = new_acked_f64;
+        self.estimated_tcp_cwnd = curr_cwnd_f64;
+        if self.last_max_cwnd <= curr_cwnd_f64 {
+            self.w_max = curr_cwnd_f64;
+            self.k = 0.0;
+        } else {
+            self.w_max = self.last_max_cwnd;
+            self.k = self.calc_k(curr_cwnd_f64);
+        }
+        qtrace!([self], "New epoch");
+    }
 }
 
 impl WindowAdjustment for Cubic {
     // This is because of the cast in the last line from f64 to usize.
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::cast_sign_loss)]
-    fn on_packets_acked(
+    fn bytes_for_cwnd_increase(
         &mut self,
         curr_cwnd: usize,
         new_acked_bytes: usize,
@@ -108,34 +124,19 @@ impl WindowAdjustment for Cubic {
         now: Instant,
     ) -> usize {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
-        self.tcp_acked_bytes += f64::try_from(u32::try_from(new_acked_bytes).unwrap()).unwrap();
+        let new_acked_f64 = convert_to_f64(new_acked_bytes);
         if self.ca_epoch_start.is_none() {
             // This is a start of a new congestion avoidance phase.
-            self.ca_epoch_start = Some(now);
-            // reset tcp_acked_bytes and estimated_tcp_cwnd;
-            self.tcp_acked_bytes = f64::try_from(u32::try_from(new_acked_bytes).unwrap()).unwrap();
-            self.estimated_tcp_cwnd = curr_cwnd_f64;
-            if self.last_max_cwnd <= curr_cwnd_f64 {
-                self.w_max = curr_cwnd_f64;
-                self.k = 0.0;
-            } else {
-                self.w_max = self.last_max_cwnd;
-                self.k = self.calc_k(curr_cwnd_f64);
-            }
-            qtrace!([self], "New epoch");
+            self.start_epoch(curr_cwnd_f64, new_acked_f64, now);
+        } else {
+            self.tcp_acked_bytes += new_acked_f64;
         }
 
         let time_ca = self
             .ca_epoch_start
             .map_or(min_rtt, |t| now + min_rtt - t)
             .as_secs_f64();
-        let target = self.w_cubic(time_ca);
-
-        let mut cnt = if target > curr_cwnd_f64 {
-            curr_cwnd_f64 / (target - curr_cwnd_f64) * MAX_DATAGRAM_SIZE_F64
-        } else {
-            100.0 * curr_cwnd_f64
-        };
+        let target_cubic = self.w_cubic(time_ca);
 
         let tcp_cnt = self.estimated_tcp_cwnd / CUBIC_ALPHA;
         while self.tcp_acked_bytes > tcp_cnt {
@@ -143,22 +144,28 @@ impl WindowAdjustment for Cubic {
             self.estimated_tcp_cwnd += MAX_DATAGRAM_SIZE_F64;
         }
 
-        if self.estimated_tcp_cwnd > curr_cwnd_f64 && self.estimated_tcp_cwnd > target {
-            let cnt_tcp_equation =
-                curr_cwnd_f64 / (self.estimated_tcp_cwnd - curr_cwnd_f64) * MAX_DATAGRAM_SIZE_F64;
-            if cnt > cnt_tcp_equation {
-                cnt = cnt_tcp_equation;
-            }
-        }
+        let target_cwnd = target_cubic.max(self.estimated_tcp_cwnd);
 
-        // Limit increase to max 1 MSS per 2 ack packets.
-        cnt = cnt.max(2.0 * MAX_DATAGRAM_SIZE_F64);
-        cnt as usize
+        // Calculate the number of bytes that would need to be acknowledged for an increase
+        // of `MAX_DATAGRAM_SIZE` to match the increase of `target - cwnd / cwnd` as defined
+        // in the specification (Sections 4.4 and 4.5).
+        // The amount of data required therefore reduces asymptotically as the target increases.
+        // If the target is not significantly higher than the congestion window, require a very large
+        // amount of acknowledged data (effectively block increases).
+        let mut acked_to_increase =
+            MAX_DATAGRAM_SIZE_F64 * curr_cwnd_f64 / (target_cwnd - curr_cwnd_f64).max(1.0);
+
+        // Limit increase to max 1 MSS per MIN_INCREASE ack packets.
+        // This is basicaly limiting target to (1 + 1/MIN_INCREASE)cwnd.
+        acked_to_increase = acked_to_increase.max(MIN_INCREASE * MAX_DATAGRAM_SIZE_F64);
+        acked_to_increase as usize
     }
 
-    fn on_congestion_event(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize) {
+    fn reduce_cwnd(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize) {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         // Fast Convergence
+        // If congestion event occurs before the maximum congestion window before the last congestion event,
+        // we reduce the the maximum congestion window and therby w_max.
         // check cwnd + MAX_DATAGRAM_SIZE instead of cwnd because with cwnd in bytes, cwnd may be slightly off.
         self.last_max_cwnd = if curr_cwnd_f64 + MAX_DATAGRAM_SIZE_F64 < self.last_max_cwnd {
             curr_cwnd_f64 * CUBIC_FAST_CONVERGENCE
@@ -167,10 +174,7 @@ impl WindowAdjustment for Cubic {
         };
         self.ca_epoch_start = None;
         (
-            max(
-                curr_cwnd * CUBIC_BETA_USIZE_QUOTIENT / CUBIC_BETA_USIZE_DIVISOR,
-                CWND_MIN,
-            ),
+            curr_cwnd * CUBIC_BETA_USIZE_QUOTIENT / CUBIC_BETA_USIZE_DIVISOR,
             acked_bytes * CUBIC_BETA_USIZE_QUOTIENT / CUBIC_BETA_USIZE_DIVISOR,
         )
     }

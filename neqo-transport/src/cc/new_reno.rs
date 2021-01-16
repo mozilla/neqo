@@ -29,7 +29,7 @@ impl Display for NewReno {
 }
 
 impl WindowAdjustment for NewReno {
-    fn on_packets_acked(
+    fn bytes_for_cwnd_increase(
         &mut self,
         curr_cwnd: usize,
         _new_acked_bytes: usize,
@@ -39,7 +39,7 @@ impl WindowAdjustment for NewReno {
         curr_cwnd
     }
 
-    fn on_congestion_event(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize) {
+    fn reduce_cwnd(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize) {
         (curr_cwnd / 2, acked_bytes / 2)
     }
 
