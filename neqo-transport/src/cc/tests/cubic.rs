@@ -124,7 +124,7 @@ fn tcp_phase() {
 
     let cwnd_rtt_start = cubic.cwnd();
     // cwnd_rtt_start has change, therefore calculate new time_increase (the time
-    // between acks if they are ideally paced over a RTT.).
+    // between acks if they are ideally paced over a RTT).
     let time_increase = RTT / u32::try_from(cwnd_rtt_start / MAX_DATAGRAM_SIZE).unwrap();
     let mut num_acks = 0; // count the number of acks. until cwnd is increased by MAX_DATAGRAM_SIZE.
 
@@ -216,16 +216,16 @@ fn cubic_phase() {
                 + CWND_INITIAL_10_F64)
                 .round() as usize;
 
-        assert_within(cubic.cwnd(), expected, &MAX_DATAGRAM_SIZE);
+        assert_within(cubic.cwnd(), expected, MAX_DATAGRAM_SIZE);
     }
     assert_eq!(cubic.cwnd(), CWND_INITIAL_10);
 }
 
-fn assert_within<T: Sub<Output = T> + PartialOrd>(value: T, expected: T, margin: &T) {
+fn assert_within<T: Sub<Output = T> + PartialOrd + Copy>(value: T, expected: T, margin: T) {
     if value >= expected {
-        assert!(value - expected < *margin);
+        assert!(value - expected < margin);
     } else {
-        assert!(expected - value < *margin);
+        assert!(expected - value < margin);
     }
 }
 
@@ -236,7 +236,7 @@ fn congestion_event_slow_start() {
     let _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 0, now());
 
-    assert_within(cubic.last_max_cwnd(), 0.0, &f64::EPSILON);
+    assert_within(cubic.last_max_cwnd(), 0.0, f64::EPSILON);
 
     // cwnd is increased by 1 in slow start phase, after an ack.
     assert_eq!(cubic.cwnd(), CWND_INITIAL + MAX_DATAGRAM_SIZE);
@@ -248,7 +248,7 @@ fn congestion_event_slow_start() {
     assert_within(
         cubic.last_max_cwnd(),
         CWND_INITIAL_F64 + MAX_DATAGRAM_SIZE_F64,
-        &f64::EPSILON,
+        f64::EPSILON,
     );
     assert_eq!(cubic.cwnd(), CWND_AFTER_LOSS_SLOW_START);
 }
@@ -271,7 +271,7 @@ fn congestion_event_congestion_avoidance() {
     // Trigger a congestion_event in slow start phase
     packet_lost(&mut cubic, 1);
 
-    assert_within(cubic.last_max_cwnd(), CWND_INITIAL_F64, &f64::EPSILON);
+    assert_within(cubic.last_max_cwnd(), CWND_INITIAL_F64, f64::EPSILON);
     assert_eq!(cubic.cwnd(), CWND_AFTER_LOSS);
 }
 
@@ -288,7 +288,7 @@ fn congestion_event_congestion_avoidance_2() {
     let _ = fill_cwnd(&mut cubic, 0, now());
     ack_packet(&mut cubic, 0, now());
 
-    assert_within(cubic.last_max_cwnd(), CWND_INITIAL_10_F64, &f64::EPSILON);
+    assert_within(cubic.last_max_cwnd(), CWND_INITIAL_10_F64, f64::EPSILON);
     assert_eq!(cubic.cwnd(), CWND_INITIAL);
 
     // Trigger a congestion_event.
@@ -297,7 +297,7 @@ fn congestion_event_congestion_avoidance_2() {
     assert_within(
         cubic.last_max_cwnd(),
         CWND_INITIAL_F64 * CUBIC_FAST_CONVERGENCE,
-        &f64::EPSILON,
+        f64::EPSILON,
     );
     assert_eq!(cubic.cwnd(), CWND_AFTER_LOSS);
 }

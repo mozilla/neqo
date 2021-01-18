@@ -28,7 +28,12 @@ pub const CUBIC_BETA_USIZE_DIVISOR: usize = 10;
 /// occurs before reaching the previous `W_max`.
 pub const CUBIC_FAST_CONVERGENCE: f64 = 0.85; // (1.0 + CUBIC_BETA) / 2.0;
 
-const MIN_INCREASE: f64 = 2.0;
+/// The minimum number of multiples of the datagram size that need
+/// to be received to cause an increase in the congestion window.
+/// When there is no loss, Cubic can return to exponential increase, but
+/// this value reduces the magnitude of the resulting growth by a constant factor.
+/// A value of 1.0 would mean a return to the rate used in slow start.
+const EXPONENTIAL_GROWTH_REDUCTION: f64 = 2.0;
 
 fn convert_to_f64(v: usize) -> f64 {
     assert!(v < (1 << 53));
@@ -155,9 +160,10 @@ impl WindowAdjustment for Cubic {
         let mut acked_to_increase =
             MAX_DATAGRAM_SIZE_F64 * curr_cwnd_f64 / (target_cwnd - curr_cwnd_f64).max(1.0);
 
-        // Limit increase to max 1 MSS per MIN_INCREASE ack packets.
-        // This is basicaly limiting target to (1 + 1/MIN_INCREASE)cwnd.
-        acked_to_increase = acked_to_increase.max(MIN_INCREASE * MAX_DATAGRAM_SIZE_F64);
+        // Limit increase to max 1 MSS per EXPONENTIAL_GROWTH_REDUCTION ack packets.
+        // This effectively limits target_cwnd to (1 + 1 / EXPONENTIAL_GROWTH_REDUCTION) cwnd.
+        acked_to_increase =
+            acked_to_increase.max(EXPONENTIAL_GROWTH_REDUCTION * MAX_DATAGRAM_SIZE_F64);
         acked_to_increase as usize
     }
 
@@ -165,7 +171,7 @@ impl WindowAdjustment for Cubic {
         let curr_cwnd_f64 = convert_to_f64(curr_cwnd);
         // Fast Convergence
         // If congestion event occurs before the maximum congestion window before the last congestion event,
-        // we reduce the the maximum congestion window and therby w_max.
+        // we reduce the the maximum congestion window and thereby W_max.
         // check cwnd + MAX_DATAGRAM_SIZE instead of cwnd because with cwnd in bytes, cwnd may be slightly off.
         self.last_max_cwnd = if curr_cwnd_f64 + MAX_DATAGRAM_SIZE_F64 < self.last_max_cwnd {
             curr_cwnd_f64 * CUBIC_FAST_CONVERGENCE

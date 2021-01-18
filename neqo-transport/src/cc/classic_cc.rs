@@ -88,6 +88,8 @@ pub trait WindowAdjustment: Display + Debug {
     ) -> usize;
     /// This function is called when a congestion event has beed detected and it
     /// returns new (decreased) values of `curr_cwnd` and `acked_bytes`.
+    /// This value can be very small; the calling code is responsible for ensuring that the
+    /// congestion window doesn't drop below the minimum of `CWND_MIN`.
     fn reduce_cwnd(&mut self, curr_cwnd: usize, acked_bytes: usize) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
@@ -201,7 +203,7 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
         if self.congestion_window >= self.ssthresh {
             // The following function return the amount acked bytes a controller needs
             // to collect to be allowed to increase its cwnd by MAX_DATAGRAM_SIZE.
-            let byte_cnt = self.cc_algorithm.bytes_for_cwnd_increase(
+            let bytes_for_increase = self.cc_algorithm.bytes_for_cwnd_increase(
                 self.congestion_window,
                 new_acked,
                 min_rtt,
@@ -209,18 +211,19 @@ impl<T: WindowAdjustment> CongestionControl for ClassicCongestionControl<T> {
             );
             // If enough credit has been accumulated already, apply them gradually.
             // If we have sudden increase in allowed rate we actually increase cwnd gently.
-            if self.acked_bytes >= byte_cnt {
+            if self.acked_bytes >= bytes_for_increase {
                 self.acked_bytes = 0;
                 self.congestion_window += MAX_DATAGRAM_SIZE;
             }
             self.acked_bytes += new_acked;
-            if self.acked_bytes >= byte_cnt {
-                // We are counting the number of whole multiples of byte_cnt.
-                let d = self.acked_bytes / byte_cnt;
-                self.acked_bytes -= d * byte_cnt;
-                self.congestion_window += d * MAX_DATAGRAM_SIZE;
-                qinfo!([self], "congestion avoidance += {}", d * MAX_DATAGRAM_SIZE);
+            if self.acked_bytes >= bytes_for_increase {
+                self.acked_bytes -= bytes_for_increase;
+                self.congestion_window += MAX_DATAGRAM_SIZE; // or is this the current MTU?
             }
+            // The number of bytes we require can go down over time with Cubic.
+            // That might result in an excessive rate of increase, so limit the number of unused
+            // acknowledged bytes after increasing the congestion window twice.
+            self.acked_bytes = min(bytes_for_increase, self.acked_bytes);
         }
         qlog::metrics_updated(
             &mut self.qlog,
@@ -530,33 +533,42 @@ mod tests {
         }
     }
 
-    fn persistent_congestion(lost_packets: &[SentPacket], persistent_expected: bool) {
-        for cc_alg in &[
-            CongestionControlAlgorithm::NewReno,
-            CongestionControlAlgorithm::Cubic,
-        ] {
-            let mut cc = congestion_control(*cc_alg);
-            for p in lost_packets {
-                cc.on_packet_sent(p);
-            }
-
-            cc.on_packets_lost(Some(now()), None, PTO, lost_packets);
-
-            let expected_cwnd_no_persistent_congestion = match cc_alg {
-                CongestionControlAlgorithm::NewReno => CWND_INITIAL / 2,
-                CongestionControlAlgorithm::Cubic => {
-                    CWND_INITIAL * CUBIC_BETA_USIZE_QUOTIENT / CUBIC_BETA_USIZE_DIVISOR
-                }
-            };
-            let persistent = if cc.cwnd() == expected_cwnd_no_persistent_congestion {
-                false
-            } else if cc.cwnd() == CWND_MIN {
-                true
-            } else {
-                panic!("unexpected cwnd");
-            };
-            assert_eq!(persistent, persistent_expected);
+    fn persistent_congestion_by_algorithm(
+        cc_alg: CongestionControlAlgorithm,
+        reduced_cwnd: usize,
+        lost_packets: &[SentPacket],
+        persistent_expected: bool,
+    ) {
+        let mut cc = congestion_control(cc_alg);
+        for p in lost_packets {
+            cc.on_packet_sent(p);
         }
+
+        cc.on_packets_lost(Some(now()), None, PTO, lost_packets);
+
+        let persistent = if cc.cwnd() == reduced_cwnd {
+            false
+        } else if cc.cwnd() == CWND_MIN {
+            true
+        } else {
+            panic!("unexpected cwnd");
+        };
+        assert_eq!(persistent, persistent_expected);
+    }
+
+    fn persistent_congestion(lost_packets: &[SentPacket], persistent_expected: bool) {
+        persistent_congestion_by_algorithm(
+            CongestionControlAlgorithm::NewReno,
+            CWND_INITIAL / 2,
+            lost_packets,
+            persistent_expected,
+        );
+        persistent_congestion_by_algorithm(
+            CongestionControlAlgorithm::Cubic,
+            CWND_INITIAL * CUBIC_BETA_USIZE_QUOTIENT / CUBIC_BETA_USIZE_DIVISOR,
+            lost_packets,
+            persistent_expected,
+        );
     }
 
     /// A span of exactly the PC threshold only reduces the window on loss.
