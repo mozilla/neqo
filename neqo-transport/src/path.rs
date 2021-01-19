@@ -21,6 +21,7 @@ use crate::frame::{
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
+use crate::{Error, Res};
 
 use neqo_common::{hex, qdebug, qinfo, qtrace, Datagram, Encoder};
 use neqo_crypto::random;
@@ -312,7 +313,7 @@ impl Paths {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) {
+    ) -> Res<()> {
         while let Some(seqno) = self.to_retire.pop() {
             if builder.remaining() < 1 + Encoder::varint_len(seqno) {
                 self.to_retire.push(seqno);
@@ -320,9 +321,13 @@ impl Paths {
             }
             builder.encode_varint(FRAME_TYPE_RETIRE_CONNECTION_ID);
             builder.encode_varint(seqno);
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(20));
+            }
             tokens.push(RecoveryToken::RetireConnectionId(seqno));
             stats.retire_connection_id += 1;
         }
+        Ok(())
     }
 
     pub fn lost_retire_cid(&mut self, lost: u64) {
@@ -599,9 +604,9 @@ impl Path {
         stats: &mut FrameStats,
         mtu: bool, // Whether the packet we're writing into will be a full MTU.
         now: Instant,
-    ) -> bool {
+    ) -> Res<bool> {
         if builder.remaining() < 9 {
-            return false;
+            return Ok(false);
         }
 
         // Send PATH_RESPONSE.
@@ -609,6 +614,9 @@ impl Path {
             qtrace!([self], "Responding to path challenge {}", hex(&challenge));
             builder.encode_varint(FRAME_TYPE_PATH_RESPONSE);
             builder.encode(&challenge[..]);
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(21));
+            }
 
             // These frames are not retransmitted in the usual fashion.
             // There is no token, therefore we need to count `all` specially.
@@ -616,7 +624,7 @@ impl Path {
             stats.all += 1;
 
             if builder.remaining() < 9 {
-                return true;
+                return Ok(true);
             }
             true
         } else {
@@ -629,6 +637,9 @@ impl Path {
             let data = <[u8; 8]>::try_from(&random(8)[..]).unwrap();
             builder.encode_varint(FRAME_TYPE_PATH_CHALLENGE);
             builder.encode(&data);
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(22));
+            }
 
             // As above, no recovery token.
             stats.path_challenge += 1;
@@ -640,9 +651,9 @@ impl Path {
                 mtu,
                 sent: now,
             };
-            true
+            Ok(true)
         } else {
-            resp_sent
+            Ok(resp_sent)
         }
     }
 
