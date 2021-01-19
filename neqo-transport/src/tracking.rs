@@ -20,6 +20,7 @@ use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 use crate::packet::{PacketBuilder, PacketNumber, PacketType};
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
+use crate::{Error, Res};
 
 use smallvec::{smallvec, SmallVec};
 
@@ -636,9 +637,15 @@ impl AckTracker {
         now: Instant,
         builder: &mut PacketBuilder,
         stats: &mut FrameStats,
-    ) -> Option<RecoveryToken> {
-        self.get_mut(pn_space)
-            .and_then(|space| space.write_frame(now, builder, stats))
+    ) -> Res<Option<RecoveryToken>> {
+        let res = self
+            .get_mut(pn_space)
+            .and_then(|space| space.write_frame(now, builder, stats));
+
+        if builder.len() > builder.limit() {
+            return Err(Error::InternalError(24));
+        }
+        Ok(res)
     }
 }
 
@@ -848,12 +855,14 @@ mod tests {
             .set_received(*NOW, 0, true);
         // The reference time for `ack_time` has to be in the past or we filter out the timer.
         assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
-        let token = tracker.write_frame(
-            PNSpace::Initial,
-            *NOW,
-            &mut builder,
-            &mut FrameStats::default(),
-        );
+        let token = tracker
+            .write_frame(
+                PNSpace::Initial,
+                *NOW,
+                &mut builder,
+                &mut FrameStats::default(),
+            )
+            .unwrap();
         assert!(token.is_some());
 
         // Mark another packet as received so we have cause to send another ACK in that space.
@@ -875,6 +884,7 @@ mod tests {
                 &mut builder,
                 &mut FrameStats::default()
             )
+            .unwrap()
             .is_none());
         if let RecoveryToken::Ack(tok) = token.unwrap() {
             tracker.acked(&tok); // Should be a noop.
@@ -895,12 +905,14 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         builder.set_limit(10);
 
-        let token = tracker.write_frame(
-            PNSpace::Initial,
-            *NOW,
-            &mut builder,
-            &mut FrameStats::default(),
-        );
+        let token = tracker
+            .write_frame(
+                PNSpace::Initial,
+                *NOW,
+                &mut builder,
+                &mut FrameStats::default(),
+            )
+            .unwrap();
         assert!(token.is_none());
         assert_eq!(builder.len(), 1); // Only the short packet header has been added.
     }
@@ -921,12 +933,14 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         builder.set_limit(32);
 
-        let token = tracker.write_frame(
-            PNSpace::Initial,
-            *NOW,
-            &mut builder,
-            &mut FrameStats::default(),
-        );
+        let token = tracker
+            .write_frame(
+                PNSpace::Initial,
+                *NOW,
+                &mut builder,
+                &mut FrameStats::default(),
+            )
+            .unwrap();
         assert!(token.is_some());
 
         let mut dec = builder.as_decoder();

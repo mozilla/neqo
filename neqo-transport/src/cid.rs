@@ -497,10 +497,10 @@ impl ConnectionIdManager {
         entry: &ConnectionIdEntry<[u8; 16]>,
         builder: &mut PacketBuilder,
         stats: &mut FrameStats,
-    ) -> bool {
+    ) -> Res<bool> {
         let len = 1 + Encoder::varint_len(entry.seqno) + 1 + 1 + entry.cid.len() + 16;
         if builder.remaining() < len {
-            return false;
+            return Ok(false);
         }
 
         builder.encode_varint(FRAME_TYPE_NEW_CONNECTION_ID);
@@ -508,9 +508,12 @@ impl ConnectionIdManager {
         builder.encode_varint(0u64);
         builder.encode_vec(1, &entry.cid);
         builder.encode(&entry.srt);
+        if builder.len() > builder.limit() {
+            return Err(Error::InternalError(8));
+        }
 
         stats.new_connection_id += 1;
-        true
+        Ok(true)
     }
 
     pub fn write_frames(
@@ -518,14 +521,14 @@ impl ConnectionIdManager {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) {
+    ) -> Res<()> {
         if self.generator.deref().borrow().generates_empty_cids() {
             debug_assert_eq!(self.generator.borrow_mut().generate_cid().unwrap().len(), 0);
-            return;
+            return Ok(());
         }
 
         while let Some(entry) = self.lost_new_connection_id.pop() {
-            if self.write_entry(&entry, builder, stats) {
+            if self.write_entry(&entry, builder, stats)? {
                 tokens.push(RecoveryToken::NewConnectionId(entry));
             } else {
                 // This shouldn't happen often.
@@ -550,10 +553,11 @@ impl ConnectionIdManager {
                     .add_local(ConnectionIdEntry::new(seqno, cid.clone(), ()));
 
                 let entry = ConnectionIdEntry::new(seqno, cid, srt);
-                debug_assert!(self.write_entry(&entry, builder, stats));
+                debug_assert!(self.write_entry(&entry, builder, stats)?);
                 tokens.push(RecoveryToken::NewConnectionId(entry));
             }
         }
+        Ok(())
     }
 
     pub fn lost(&mut self, entry: &ConnectionIdEntry<[u8; 16]>) {

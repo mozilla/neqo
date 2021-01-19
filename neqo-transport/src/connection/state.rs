@@ -17,7 +17,7 @@ use crate::frame::{
 use crate::packet::PacketBuilder;
 use crate::path::PathRef;
 use crate::recovery::RecoveryToken;
-use crate::{ConnectionError, Error};
+use crate::{ConnectionError, Error, Res};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// The state of the Connection.
@@ -185,13 +185,16 @@ impl StateSignaling {
         *self = Self::HandshakeDone
     }
 
-    pub fn write_done(&mut self, builder: &mut PacketBuilder) -> Option<RecoveryToken> {
+    pub fn write_done(&mut self, builder: &mut PacketBuilder) -> Res<Option<RecoveryToken>> {
         if matches!(self, Self::HandshakeDone) && builder.remaining() >= 1 {
             *self = Self::Idle;
             builder.encode_varint(FRAME_TYPE_HANDSHAKE_DONE);
-            Some(RecoveryToken::HandshakeDone)
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(14));
+            }
+            Ok(Some(RecoveryToken::HandshakeDone))
         } else {
-            None
+            Ok(None)
         }
     }
 

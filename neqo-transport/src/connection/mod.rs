@@ -1633,7 +1633,7 @@ impl Connection {
         address_validation: &AddressValidationInfo,
         quic_version: QuicVersion,
         grease_quic_bit: bool,
-    ) -> (PacketType, PacketBuilder) {
+    ) -> Res<(PacketType, PacketBuilder)> {
         let pt = PacketType::from(cspace);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {}", path.remote_cid());
@@ -1656,17 +1656,17 @@ impl Connection {
         };
         builder.scramble(grease_quic_bit);
         if pt == PacketType::Initial {
-            builder.initial_token(address_validation.token());
+            builder.initial_token(address_validation.token())?;
         }
 
-        (pt, builder)
+        Ok((pt, builder))
     }
 
     fn add_packet_number(
         builder: &mut PacketBuilder,
         tx: &CryptoDxState,
         largest_acknowledged: Option<PacketNumber>,
-    ) -> PacketNumber {
+    ) -> Res<PacketNumber> {
         // Get the packet number and work out how long it is.
         let pn = tx.next_pn();
         let unacked_range = if let Some(la) = largest_acknowledged {
@@ -1680,8 +1680,8 @@ impl Connection {
             - usize::try_from(unacked_range.leading_zeros() / 8).unwrap();
         // pn_len can't be zero (unacked_range is > 0)
         // TODO(mt) also use `4*path CWND/path MTU` to set a minimum length.
-        builder.pn(pn, pn_len);
-        pn
+        builder.pn(pn, pn_len)?;
+        Ok(pn)
     }
 
     fn can_grease_quic_bit(&self) -> bool {
@@ -1715,13 +1715,19 @@ impl Connection {
                 &AddressValidationInfo::None,
                 version,
                 grease_quic_bit,
-            );
+            )?;
             builder.set_limit(min(path.amplification_limit(), path.mtu()) - tx.expansion());
+            if builder.limit() > 2048 {
+                return Err(Error::InternalError(9));
+            }
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(25));
+            }
             let _ = Self::add_packet_number(
                 &mut builder,
                 tx,
                 self.loss_recovery.largest_acknowledged_pn(*space),
-            );
+            )?;
 
             // ConnectionError::Application is only allowed at 1RTT.
             let sanitized = if *space == PNSpace::ApplicationData {
@@ -1733,6 +1739,9 @@ impl Connection {
                 .as_ref()
                 .unwrap_or(&close)
                 .write_frame(&mut builder);
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(10));
+            }
             encoder = builder.build(tx)?;
         }
 
@@ -1750,14 +1759,14 @@ impl Connection {
         builder: &mut PacketBuilder,
         mut pad: bool,
         now: Instant,
-    ) -> (Vec<RecoveryToken>, bool, bool) {
+    ) -> Res<(Vec<RecoveryToken>, bool, bool)> {
         let mut tokens = Vec::new();
         let stats = &mut self.stats.borrow_mut().frame_tx;
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
 
         let ack_token = if primary {
-            self.acks.write_frame(space, now, builder, stats)
+            self.acks.write_frame(space, now, builder, stats)?
         } else {
             None
         };
@@ -1770,7 +1779,7 @@ impl Connection {
             // The probing code needs to know so it can track that.
             if path
                 .borrow_mut()
-                .write_frames(builder, stats, full_mtu, now)
+                .write_frames(builder, stats, full_mtu, now)?
             {
                 pad = true;
                 ack_eliciting = true;
@@ -1782,18 +1791,18 @@ impl Connection {
             if let Some(t) = ack_token {
                 tokens.push(t);
             }
-            return (tokens, false, false);
+            return Ok((tokens, false, false));
         }
 
         if primary {
             if space == PNSpace::ApplicationData && self.role == Role::Server {
-                if let Some(t) = self.state_signaling.write_done(builder) {
+                if let Some(t) = self.state_signaling.write_done(builder)? {
                     tokens.push(t);
                     stats.handshake_done += 1;
                 }
             }
 
-            if let Some(t) = self.crypto.streams.write_frame(space, builder) {
+            if let Some(t) = self.crypto.streams.write_frame(space, builder)? {
                 tokens.push(t);
                 stats.crypto += 1;
             }
@@ -1801,12 +1810,13 @@ impl Connection {
             if space == PNSpace::ApplicationData {
                 self.flow_mgr
                     .borrow_mut()
-                    .write_frames(builder, &mut tokens, stats);
+                    .write_frames(builder, &mut tokens, stats)?;
 
-                self.send_streams.write_frames(builder, &mut tokens, stats);
-                self.new_token.write_frames(builder, &mut tokens, stats);
-                self.cid_manager.write_frames(builder, &mut tokens, stats);
-                self.paths.write_frames(builder, &mut tokens, stats);
+                self.send_streams
+                    .write_frames(builder, &mut tokens, stats)?;
+                self.new_token.write_frames(builder, &mut tokens, stats)?;
+                self.cid_manager.write_frames(builder, &mut tokens, stats)?;
+                self.paths.write_frames(builder, &mut tokens, stats)?;
             }
         }
 
@@ -1816,6 +1826,9 @@ impl Connection {
             // Nothing ack-eliciting and we need to probe; send PING.
             debug_assert_ne!(builder.remaining(), 0);
             builder.encode_varint(crate::frame::FRAME_TYPE_PING);
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(11));
+            }
             stats.ping += 1;
             stats.all += 1;
             ack_eliciting = true;
@@ -1829,7 +1842,7 @@ impl Connection {
         // And avoid padding if we don't have a full MTU available.
         pad &= ack_eliciting && space == PNSpace::ApplicationData && full_mtu;
         if pad {
-            builder.pad();
+            builder.pad()?;
             stats.padding += 1;
             stats.all += 1;
         }
@@ -1838,7 +1851,7 @@ impl Connection {
             tokens.push(t);
         }
         stats.all += tokens.len();
-        (tokens, ack_eliciting, pad)
+        Ok((tokens, ack_eliciting, pad))
     }
 
     /// Build a datagram, possibly from multiple packets (for different PN
@@ -1877,12 +1890,12 @@ impl Connection {
                 &self.address_validation,
                 version,
                 grease_quic_bit,
-            );
+            )?;
             let pn = Self::add_packet_number(
                 &mut builder,
                 tx,
                 self.loss_recovery.largest_acknowledged_pn(*space),
-            );
+            )?;
             let payload_start = builder.len();
 
             // Work out if we have space left.
@@ -1894,10 +1907,16 @@ impl Connection {
             }
             let limit = profile.limit() - aead_expansion;
             builder.set_limit(limit);
+            if builder.limit() > 2048 {
+                return Err(Error::InternalError(12));
+            }
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(13));
+            }
 
             // Add frames to the packet.
             let (tokens, ack_eliciting, padded) =
-                self.write_frames(path, *space, &profile, &mut builder, needs_padding, now);
+                self.write_frames(path, *space, &profile, &mut builder, needs_padding, now)?;
 
             if builder.packet_empty() {
                 // Nothing to include in this packet.
