@@ -39,7 +39,7 @@ pub use connection_client::Http3Parameters;
 pub use hframe::HFrameReader;
 pub use neqo_qpack::Header;
 pub use server::Http3Server;
-pub use server_events::Http3ServerEvent;
+pub use server_events::{ClientRequestStream, Http3ServerEvent};
 
 type Res<T> = Result<T, Error>;
 

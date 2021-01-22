@@ -240,6 +240,7 @@ mod tests {
     use neqo_transport::{
         Connection, ConnectionError, ConnectionEvent, State, StreamType, ZeroRttState,
     };
+    use std::collections::HashMap;
     use std::ops::{Deref, DerefMut};
     use test_fixture::{
         anti_replay, default_client, fixture_init, now, CountingConnectionIdGenerator,
@@ -1070,5 +1071,40 @@ mod tests {
             },
             &ZeroRttState::AcceptedClient,
         );
+    }
+
+    #[test]
+    fn test_hashing_request_streams() {
+        let (mut hconn, mut peer_conn) = connect();
+
+        let request_stream_id_1 = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        // Send only request headers for now.
+        peer_conn
+            .stream_send(request_stream_id_1, &REQUEST_WITH_BODY)
+            .unwrap();
+
+        let request_stream_id_2 = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        // Send only request headers for now.
+        peer_conn
+            .stream_send(request_stream_id_2, &REQUEST_WITH_BODY)
+            .unwrap();
+
+        let out = peer_conn.process(None, now());
+        hconn.process(out.dgram(), now());
+
+        let mut requests = HashMap::new();
+        while let Some(event) = hconn.next_event() {
+            match event {
+                Http3ServerEvent::Headers { request, .. } => {
+                    assert!(requests.get(&request).is_none());
+                    requests.insert(request, 0);
+                }
+                Http3ServerEvent::Data { request, .. } => {
+                    assert!(requests.get(&request).is_some());
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(requests.len(), 2);
     }
 }
