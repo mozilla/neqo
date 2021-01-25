@@ -1074,7 +1074,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hashing_request_streams() {
+    fn client_request_hash() {
         let (mut hconn, mut peer_conn) = connect();
 
         let request_stream_id_1 = peer_conn.stream_create(StreamType::BiDi).unwrap();

@@ -50,7 +50,7 @@ impl ClientRequestStream {
 
     /// Supply a response to a request.
     /// # Errors
-    /// It may return InvalidStreamId if a stream does not exist anymore.
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn set_response(&mut self, headers: &[Header], data: &[u8]) -> Res<()> {
         qinfo!([self], "Set new response.");
         self.handler
@@ -60,7 +60,7 @@ impl ClientRequestStream {
 
     /// Request a peer to stop sending a request.
     /// # Errors
-    /// It may return InvalidStreamId if a stream does not exist anymore.
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn stream_stop_sending(&mut self, app_error: AppError) -> Res<()> {
         qdebug!(
             [self],
@@ -76,7 +76,7 @@ impl ClientRequestStream {
 
     /// Reset a stream/request.
     /// # Errors
-    /// It may return InvalidStreamId if a stream does not exist anymore
+    /// It may return `InvalidStreamId` if a stream does not exist anymore
     pub fn stream_reset(&mut self, app_error: AppError) -> Res<()> {
         qdebug!([self], "reset error:{}.", app_error);
         self.handler.borrow_mut().stream_reset(
