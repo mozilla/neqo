@@ -610,11 +610,11 @@ pub struct ActiveConnectionRef {
 }
 
 impl ActiveConnectionRef {
-    pub fn borrow<'a>(&'a self) -> impl Deref<Target = Connection> + 'a {
+    pub fn borrow(&self) -> impl Deref<Target = Connection> + '_ {
         std::cell::Ref::map(self.c.borrow(), |c| &c.c)
     }
 
-    pub fn borrow_mut<'a>(&'a mut self) -> impl DerefMut<Target = Connection> + 'a {
+    pub fn borrow_mut(&mut self) -> impl DerefMut<Target = Connection> + '_ {
         std::cell::RefMut::map(self.c.borrow_mut(), |c| &mut c.c)
     }
 

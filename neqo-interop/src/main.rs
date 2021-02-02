@@ -159,11 +159,7 @@ impl Handler for PreConnectHandler {
         if client.events().any(authentication_needed) {
             client.authenticated(AuthenticationStatus::Ok, Instant::now());
         }
-        match client.state() {
-            State::Connected => false,
-            State::Closing { .. } => false,
-            _ => true,
-        }
+        !matches!(client.state(), State::Connected | State::Closing { .. })
     }
 }
 
@@ -666,11 +662,7 @@ struct VnHandler {}
 
 impl Handler for VnHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
-        match client.state() {
-            State::Connected => false,
-            State::Closing { .. } => false,
-            _ => true,
-        }
+        !matches!(client.state(), State::Connected | State::Closing { .. })
     }
 
     fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
