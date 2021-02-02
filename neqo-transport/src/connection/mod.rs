@@ -1035,10 +1035,10 @@ impl Connection {
         path.borrow().is_stateless_reset(token)
     }
 
-    fn check_stateless_reset<'a, 'b>(
-        &'a mut self,
+    fn check_stateless_reset(
+        &mut self,
         path: &PathRef,
-        d: &'b Datagram,
+        d: &Datagram,
         first: bool,
         now: Instant,
     ) -> Res<()> {
