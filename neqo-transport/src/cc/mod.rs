@@ -9,9 +9,11 @@
 
 use crate::path::PATH_MTU_V6;
 use crate::tracking::SentPacket;
+use crate::Error;
 use neqo_common::qlog::NeqoQlog;
 
 use std::fmt::{Debug, Display};
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 mod classic_cc;
@@ -56,6 +58,19 @@ pub trait CongestionControl: Display + Debug {
 pub enum CongestionControlAlgorithm {
     NewReno,
     Cubic,
+}
+
+// A `FromStr` implementation so that this can be used in command-line interfaces.
+impl FromStr for CongestionControlAlgorithm {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "newreno" | "reno" => Ok(Self::NewReno),
+            "cubic" => Ok(Self::Cubic),
+            _ => Err(Error::InvalidInput),
+        }
+    }
 }
 
 #[cfg(test)]
