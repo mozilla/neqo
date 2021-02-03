@@ -19,8 +19,9 @@ use neqo_http3::{
 };
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    stream_id::StreamIndex, Connection, ConnectionId, ConnectionParameters,
-    EmptyConnectionIdGenerator, Error as TransportError, QuicVersion, StreamType,
+    stream_id::StreamIndex, CongestionControlAlgorithm, Connection, ConnectionId,
+    ConnectionParameters, EmptyConnectionIdGenerator, Error as TransportError, QuicVersion,
+    StreamType,
 };
 
 use std::cell::RefCell;
@@ -205,6 +206,10 @@ struct QuicParameters {
     #[structopt(long, default_value = "16")]
     /// Set the MAX_STREAMS_UNI limit.
     max_streams_uni: u64,
+
+    #[structopt(long = "cc", default_value = "newreno")]
+    /// The congestion controller to use.
+    congestion_control: CongestionControlAlgorithm,
 }
 
 impl QuicParameters {
@@ -212,6 +217,7 @@ impl QuicParameters {
         ConnectionParameters::default()
             .max_streams(StreamType::BiDi, StreamIndex::new(self.max_streams_bidi))
             .max_streams(StreamType::UniDi, StreamIndex::new(self.max_streams_uni))
+            .cc_algorithm(self.congestion_control)
     }
 }
 
