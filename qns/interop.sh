@@ -13,7 +13,7 @@ case "$ROLE" in
   client)
     /wait-for-it.sh sim:57832 -s -t 30
     sleep 5
-    RUST_LOG=debug RUST_BACKTRACE=1 neqo-client --cc cubic --qns-test "$TESTCASE"
+    RUST_LOG=debug RUST_BACKTRACE=1 neqo-client --cc cubic --qns-test "$TESTCASE" \
         --qlog-dir "$QLOGDIR" --output-dir /downloads $REQUESTS
     ;;
 
