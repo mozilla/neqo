@@ -159,11 +159,7 @@ impl Handler for PreConnectHandler {
         if client.events().any(authentication_needed) {
             client.authenticated(AuthenticationStatus::Ok, Instant::now());
         }
-        match client.state() {
-            State::Connected => false,
-            State::Closing { .. } => false,
-            _ => true,
-        }
+        !matches!(client.state(), State::Connected | State::Closing { .. })
     }
 }
 
@@ -464,6 +460,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
         nctx.local_addr,
         nctx.remote_addr,
         ConnectionParameters::default(),
+        Instant::now(),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -613,6 +610,7 @@ fn test_h3_rz(
             },
             max_concurrent_push_streams: 0,
         },
+        Instant::now(),
     );
     if handler.is_err() {
         return Err(String::from("ERROR: creating a client failed"));
@@ -666,11 +664,7 @@ struct VnHandler {}
 
 impl Handler for VnHandler {
     fn handle(&mut self, client: &mut Connection) -> bool {
-        match client.state() {
-            State::Connected => false,
-            State::Closing { .. } => false,
-            _ => true,
-        }
+        !matches!(client.state(), State::Connected | State::Closing { .. })
     }
 
     fn rewrite_out(&mut self, d: &Datagram) -> Option<Datagram> {
@@ -688,6 +682,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
         nctx.local_addr,
         nctx.remote_addr,
         ConnectionParameters::default(),
+        Instant::now(),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine

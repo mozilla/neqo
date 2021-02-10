@@ -12,7 +12,6 @@ use std::cmp::{max, min};
 use std::collections::BTreeMap;
 use std::mem;
 use std::ops::RangeInclusive;
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use smallvec::{smallvec, SmallVec};
@@ -24,7 +23,7 @@ use crate::connection::LOCAL_IDLE_TIMEOUT;
 use crate::crypto::CryptoRecoveryToken;
 use crate::flow_mgr::FlowControlRecoveryToken;
 use crate::packet::PacketNumber;
-use crate::path::Path;
+use crate::path::{Path, PathRef};
 use crate::qlog::{self, QlogMetric};
 use crate::rtt::RttEstimate;
 use crate::send_stream::StreamRecoveryToken;
@@ -289,6 +288,13 @@ impl LossRecoverySpace {
             .map(|(_, v)| v)
     }
 
+    /// Remove the primary path marking on any packets this is tracking.
+    fn migrate(&mut self) {
+        for pkt in self.sent_packets.values_mut() {
+            pkt.clear_primary_path();
+        }
+    }
+
     /// Remove old packets that we've been tracking in case they get acknowledged.
     /// We try to keep these around until a probe is sent for them, so it is
     /// important that `cd` is set to at least the current PTO time; otherwise we
@@ -523,7 +529,7 @@ impl LossRecovery {
         self.qlog = qlog;
     }
 
-    pub fn drop_0rtt(&mut self) -> Vec<SentPacket> {
+    pub fn drop_0rtt(&mut self, primary_path: &PathRef) -> Vec<SentPacket> {
         // The largest acknowledged or loss_time should still be unset.
         // The client should not have received any ACK frames when it drops 0-RTT.
         assert!(self
@@ -538,17 +544,18 @@ impl LossRecovery {
             .unwrap()
             .remove_ignored()
             .collect::<Vec<_>>();
+        let mut path = primary_path.borrow_mut();
         for p in &mut dropped {
-            p.discard();
+            path.discard_packet(p);
         }
         dropped
     }
 
-    pub fn on_packet_sent(&mut self, sent_packet: SentPacket, rtt: Duration) {
+    pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: SentPacket) {
         let pn_space = PNSpace::from(sent_packet.pt);
         qdebug!([self], "packet {}-{} sent", pn_space, sent_packet.pn);
         if let Some(space) = self.spaces.get_mut(pn_space) {
-            sent_packet.sent(rtt);
+            path.borrow_mut().packet_sent(&mut sent_packet);
             space.on_packet_sent(sent_packet);
         } else {
             qwarn!(
@@ -573,40 +580,10 @@ impl LossRecovery {
         rtt.update(&mut self.qlog, sample, ack_delay, confirmed, now);
     }
 
-    fn report_by_path(mut packets: &[SentPacket], mut f: impl FnMut(&mut Path, &[SentPacket])) {
-        // This assumes that switches in path are rare and so reporting lost packets in slices
-        // is not only efficient, but doesn't confuse the congestion controller.
-        // This is not true when we probe new paths, so it might be worth doing something.  Later.
-        while let Some(first) = packets.first() {
-            let end = 1 + packets[1..]
-                .iter()
-                .take_while(|x| Rc::ptr_eq(first.path(), x.path()))
-                .count();
-            let mut path = first.path().borrow_mut();
-            f(&mut *path, &packets[..end]);
-            packets = &packets[end..];
-        }
-    }
-
-    fn report_lost(lost: &[SentPacket], pn_space: PNSpace, prev_largest_acked: Option<Instant>) {
-        Self::report_by_path(lost, |path, lost| {
-            let pto = path.rtt().pto(pn_space); // Important: the base PTO, not adjusted.
-            let first_rtt_sample = path.rtt().first_sample_time();
-            path.sender_mut()
-                .on_packets_lost(first_rtt_sample, prev_largest_acked, pto, lost);
-        });
-    }
-
-    fn report_acked(acked: &[SentPacket]) {
-        Self::report_by_path(acked, |path, acked| {
-            path.sender_mut().on_packets_acked(acked);
-        });
-    }
-
     /// Returns (acked packets, lost packets)
     pub fn on_ack_received<R>(
         &mut self,
-        rtt: &mut RttEstimate,
+        primary_path: &PathRef,
         pn_space: PNSpace,
         largest_acked: u64,
         acked_ranges: R,
@@ -644,8 +621,13 @@ impl LossRecovery {
             // packet was ack-eliciting, update the RTT. (-recovery 5.1)
             let largest_acked_pkt = acked_packets.first().expect("must be there");
             space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent);
-            if any_ack_eliciting {
-                self.rtt_sample(rtt, largest_acked_pkt.time_sent, now, ack_delay);
+            if any_ack_eliciting && largest_acked_pkt.on_primary_path() {
+                self.rtt_sample(
+                    primary_path.borrow_mut().rtt_mut(),
+                    largest_acked_pkt.time_sent,
+                    now,
+                    ack_delay,
+                );
             }
         }
 
@@ -654,11 +636,12 @@ impl LossRecovery {
         // We need to ensure that we have sent any PTO probes before they are removed
         // as we rely on the count of in-flight packets to determine whether to send
         // another probe.  Removing them too soon would result in not sending on PTO.
-        let cleanup_delay = self.pto_period(rtt, pn_space);
+        let loss_delay = primary_path.borrow().rtt().loss_delay();
+        let cleanup_delay = self.pto_period(primary_path.borrow().rtt(), pn_space);
         let mut lost = Vec::new();
         self.spaces.get_mut(pn_space).unwrap().detect_lost_packets(
             now,
-            rtt.loss_delay(),
+            loss_delay,
             cleanup_delay,
             &mut lost,
         );
@@ -667,12 +650,16 @@ impl LossRecovery {
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
         // backoff, so that we can determine persistent congestion.
-        Self::report_lost(&lost, pn_space, prev_largest_acked);
+        primary_path
+            .borrow_mut()
+            .on_packets_lost(prev_largest_acked, pn_space, &lost);
 
         // This must happen after on_packets_lost. If in recovery, this could
         // take us out, and then lost packets will start a new recovery period
         // when it shouldn't.
-        Self::report_acked(&acked_packets);
+        primary_path
+            .borrow_mut()
+            .on_packets_acked(&acked_packets, now);
 
         self.pto_state = None;
 
@@ -681,15 +668,16 @@ impl LossRecovery {
 
     /// When receiving a retry, get all the sent packets so that they can be flushed.
     /// We also need to pretend that they never happened for the purposes of congestion control.
-    pub fn retry(&mut self) -> Vec<SentPacket> {
+    pub fn retry(&mut self, primary_path: &PathRef) -> Vec<SentPacket> {
         self.pto_state = None;
         let mut dropped = self
             .spaces
             .iter_mut()
             .flat_map(LossRecoverySpace::remove_ignored)
             .collect::<Vec<_>>();
+        let mut path = primary_path.borrow_mut();
         for p in &mut dropped {
-            p.discard();
+            path.discard_packet(p);
         }
         dropped
     }
@@ -707,11 +695,22 @@ impl LossRecovery {
         }
     }
 
+    /// This function is called when the connection migrates.
+    /// It marks all packets that are outstanding as having being sent on a non-primary path.
+    /// This way failure to deliver on the old path doesn't count against the congestion
+    /// control state on the new path and the RTT measurements don't apply either.
+    pub fn migrate(&mut self) {
+        for space in self.spaces.iter_mut() {
+            space.migrate();
+        }
+    }
+
     /// Discard state for a given packet number space.
-    pub fn discard(&mut self, space: PNSpace, rtt: &RttEstimate, now: Instant) {
+    pub fn discard(&mut self, primary_path: &PathRef, space: PNSpace, now: Instant) {
         qdebug!([self], "Reset loss recovery state for {}", space);
-        for mut p in self.spaces.drop_space(space) {
-            p.discard();
+        let mut path = primary_path.borrow_mut();
+        for p in self.spaces.drop_space(space) {
+            path.discard_packet(&p);
         }
 
         // We just made progress, so discard PTO count.
@@ -720,7 +719,7 @@ impl LossRecovery {
         self.pto_state = None;
 
         if space == PNSpace::Handshake {
-            self.confirmed(rtt, now);
+            self.confirmed(path.rtt(), now);
         }
     }
 
@@ -845,25 +844,30 @@ impl LossRecovery {
         }
     }
 
-    pub fn timeout(&mut self, rtt: &RttEstimate, now: Instant) -> Vec<SentPacket> {
+    pub fn timeout(&mut self, primary_path: &PathRef, now: Instant) -> Vec<SentPacket> {
         qtrace!([self], "timeout {:?}", now);
 
-        let loss_delay = rtt.loss_delay();
+        let loss_delay = primary_path.borrow().rtt().loss_delay();
 
         let mut lost_packets = Vec::new();
         for space in self.spaces.iter_mut() {
             let first = lost_packets.len(); // The first packet lost in this space.
-            let pto = Self::pto_period_inner(rtt, self.pto_state.as_ref(), space.space());
-            space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
-            Self::report_lost(
-                &lost_packets[first..],
+            let pto = Self::pto_period_inner(
+                primary_path.borrow().rtt(),
+                self.pto_state.as_ref(),
                 space.space(),
+            );
+            space.detect_lost_packets(now, loss_delay, pto, &mut lost_packets);
+
+            primary_path.borrow_mut().on_packets_lost(
                 space.largest_acked_sent_time,
+                space.space(),
+                &lost_packets[first..],
             );
         }
         self.stats.borrow_mut().lost += lost_packets.len();
 
-        self.maybe_fire_pto(rtt, now, &mut lost_packets);
+        self.maybe_fire_pto(primary_path.borrow().rtt(), now, &mut lost_packets);
         lost_packets
     }
 
@@ -912,15 +916,20 @@ impl ::std::fmt::Display for LossRecovery {
 
 #[cfg(test)]
 mod tests {
-    use super::{LossRecovery, LossRecoverySpace, PNSpace, SentPacket};
+    use super::{LossRecovery, LossRecoverySpace, PNSpace, SendProfile, SentPacket};
     use crate::cc::CongestionControlAlgorithm;
+    use crate::cid::{ConnectionId, ConnectionIdEntry};
     use crate::packet::PacketType;
+    use crate::path::{Path, PathRef};
     use crate::rtt::RttEstimate;
     use crate::stats::{Stats, StatsCell};
+    use neqo_common::qlog::NeqoQlog;
+    use std::cell::RefCell;
     use std::convert::TryInto;
     use std::ops::{Deref, DerefMut, RangeInclusive};
+    use std::rc::Rc;
     use std::time::{Duration, Instant};
-    use test_fixture::now;
+    use test_fixture::{addr, now};
 
     // Shorthand for a time in milliseconds.
     const fn ms(t: u64) -> Duration {
@@ -934,11 +943,11 @@ mod tests {
 
     struct Fixture {
         lr: LossRecovery,
-        rtt: RttEstimate,
+        path: PathRef,
     }
 
-    // This shadows functions on the base object so that the RTT estimator
-    // is used consistently and the tests use the same RTT.
+    // This shadows functions on the base object so that the path and RTT estimator
+    // is used consistently in the tests.  It also simplifies the function signatures.
     impl Fixture {
         pub fn on_ack_received(
             &mut self,
@@ -949,7 +958,7 @@ mod tests {
             now: Instant,
         ) -> (Vec<SentPacket>, Vec<SentPacket>) {
             self.lr.on_ack_received(
-                &mut self.rtt,
+                &self.path,
                 pn_space,
                 largest_acked,
                 acked_ranges,
@@ -959,27 +968,42 @@ mod tests {
         }
 
         pub fn on_packet_sent(&mut self, sent_packet: SentPacket) {
-            self.lr.on_packet_sent(sent_packet, TEST_RTT)
+            self.lr.on_packet_sent(&self.path, sent_packet)
         }
 
         pub fn timeout(&mut self, now: Instant) -> Vec<SentPacket> {
-            self.lr.timeout(&self.rtt, now)
+            self.lr.timeout(&self.path, now)
         }
 
         pub fn next_timeout(&mut self) -> Option<Instant> {
-            self.lr.next_timeout(&self.rtt)
+            self.lr.next_timeout(self.path.borrow().rtt())
         }
 
         pub fn discard(&mut self, space: PNSpace, now: Instant) {
-            self.lr.discard(space, &self.rtt, now)
+            self.lr.discard(&self.path, space, now)
+        }
+
+        pub fn pto_time(&self, space: PNSpace) -> Option<Instant> {
+            self.lr.pto_time(self.path.borrow().rtt(), space)
+        }
+
+        pub fn send_profile(&mut self, now: Instant) -> SendProfile {
+            self.lr.send_profile(&self.path.borrow(), now)
         }
     }
 
     impl Default for Fixture {
         fn default() -> Self {
+            const CC: CongestionControlAlgorithm = CongestionControlAlgorithm::NewReno;
+            let mut path = Path::temporary(addr(), addr(), CC, NeqoQlog::default(), now());
+            path.make_permanent(
+                None,
+                ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), [0; 16]),
+            );
+            path.set_primary(true);
             Self {
-                lr: LossRecovery::new(CongestionControlAlgorithm::NewReno, StatsCell::default()),
-                rtt: RttEstimate::default(),
+                lr: LossRecovery::new(StatsCell::default()),
+                path: Rc::new(RefCell::new(path)),
             }
         }
     }
@@ -1007,17 +1031,19 @@ mod tests {
         rttvar: Duration,
         min_rtt: Duration,
     ) {
+        let p = lr.path.borrow();
+        let rtt = p.rtt();
         println!(
             "rtts: {:?} {:?} {:?} {:?}",
-            lr.rtt.latest(),
-            lr.rtt.estimate(),
-            lr.rtt.rttvar(),
-            lr.rtt.minimum(),
+            rtt.latest(),
+            rtt.estimate(),
+            rtt.rttvar(),
+            rtt.minimum(),
         );
-        assert_eq!(lr.rtt.latest(), latest_rtt, "latest RTT");
-        assert_eq!(lr.rtt.estimate(), smoothed_rtt, "smoothed RTT");
-        assert_eq!(lr.rtt.rttvar(), rttvar, "RTT variance");
-        assert_eq!(lr.rtt.minimum(), min_rtt, "min RTT");
+        assert_eq!(rtt.latest(), latest_rtt, "latest RTT");
+        assert_eq!(rtt.estimate(), smoothed_rtt, "smoothed RTT");
+        assert_eq!(rtt.rttvar(), rttvar, "RTT variance");
+        assert_eq!(rtt.minimum(), min_rtt, "min RTT");
     }
 
     fn assert_sent_times(
@@ -1122,7 +1148,6 @@ mod tests {
     #[test]
     fn initial_rtt() {
         let mut lr = Fixture::default();
-        lr.start_pacer(now());
         pace(&mut lr, 1);
         let rtt = ms(100);
         ack(&mut lr, 0, rtt);
@@ -1133,7 +1158,6 @@ mod tests {
     /// Send `n` packets (using PACING), then acknowledge the first.
     fn setup_lr(n: u64) -> Fixture {
         let mut lr = Fixture::default();
-        lr.start_pacer(now());
         pace(&mut lr, n);
         ack(&mut lr, 0, TEST_RTT);
         assert_rtts(&lr, TEST_RTT, TEST_RTT, TEST_RTTVAR, TEST_RTT);
@@ -1204,7 +1228,6 @@ mod tests {
     #[test]
     fn time_loss_detection_gap() {
         let mut lr = Fixture::default();
-        lr.start_pacer(now());
         // Create a single packet gap, and have pn 0 time out.
         // This can't use the default pacing, which is too tight.
         // So send two packets with 1/4 RTT between them.  Acknowledge pn 1 after 1 RTT.
@@ -1275,7 +1298,8 @@ mod tests {
     #[test]
     fn big_gap_loss() {
         let mut lr = setup_lr(5); // This sends packets 0-4 and acknowledges pn 0.
-                                  // Acknowledge just 2-4, which will cause pn 1 to be marked as lost.
+
+        // Acknowledge just 2-4, which will cause pn 1 to be marked as lost.
         assert_eq!(super::PACKET_THRESHOLD, 3);
         let (_, lost) = lr.on_ack_received(
             PNSpace::ApplicationData,
@@ -1305,7 +1329,6 @@ mod tests {
     #[should_panic(expected = "ACK on discarded space")]
     fn ack_after_drop() {
         let mut lr = Fixture::default();
-        lr.start_pacer(now());
         lr.discard(PNSpace::Initial, now());
         lr.on_ack_received(
             PNSpace::Initial,
@@ -1319,7 +1342,6 @@ mod tests {
     #[test]
     fn drop_spaces() {
         let mut lr = Fixture::default();
-        lr.start_pacer(now());
         lr.on_packet_sent(SentPacket::new(
             PacketType::Initial,
             0,
@@ -1387,7 +1409,6 @@ mod tests {
     #[test]
     fn rearm_pto_after_confirmed() {
         let mut lr = Fixture::default();
-        lr.start_pacer(now());
         lr.on_packet_sent(SentPacket::new(
             PacketType::Handshake,
             0,
@@ -1405,16 +1426,16 @@ mod tests {
             ON_SENT_SIZE,
         ));
 
-        assert_eq!(lr.pto_time(&lr.rtt, PNSpace::ApplicationData), None);
+        assert_eq!(lr.pto_time(PNSpace::ApplicationData), None);
         lr.discard(PNSpace::Initial, pn_time(1));
-        assert_eq!(lr.pto_time(&lr.rtt, PNSpace::ApplicationData), None);
+        assert_eq!(lr.pto_time(PNSpace::ApplicationData), None);
 
         // Expiring state after the PTO on the ApplicationData space has
         // expired should result in setting a PTO state.
         let default_pto = RttEstimate::default().pto(PNSpace::ApplicationData);
         let expected_pto = pn_time(2) + default_pto;
         lr.discard(PNSpace::Handshake, expected_pto);
-        let profile = lr.send_profile(TEST_RTT, expected_pto, 10000, 10000);
+        let profile = lr.send_profile(now());
         assert!(profile.pto.is_some());
         assert!(!profile.should_probe(PNSpace::Initial));
         assert!(!profile.should_probe(PNSpace::Handshake));
@@ -1424,10 +1445,18 @@ mod tests {
     #[test]
     fn no_pto_if_amplification_limited() {
         let mut lr = Fixture::default();
-        lr.start_pacer(now());
+        // Eat up the amplification limit by telling the path that we've sent a giant packet.
+        {
+            const SPARE: usize = 10;
+            let mut path = lr.path.borrow_mut();
+            let limit = path.amplification_limit();
+            path.add_sent(limit - SPARE);
+            assert_eq!(path.amplification_limit(), SPARE);
+        }
+
         lr.on_packet_sent(SentPacket::new(
             PacketType::Initial,
-            0,
+            1,
             now(),
             true,
             Vec::new(),
@@ -1436,8 +1465,8 @@ mod tests {
 
         let handshake_pto = RttEstimate::default().pto(PNSpace::Handshake);
         let expected_pto = now() + handshake_pto;
-        assert_eq!(lr.pto_time(&lr.rtt, PNSpace::Initial), Some(expected_pto));
-        let profile = lr.send_profile(TEST_RTT, expected_pto, 10000, 10);
+        assert_eq!(lr.pto_time(PNSpace::Initial), Some(expected_pto));
+        let profile = lr.send_profile(now());
         assert!(profile.ack_only(PNSpace::Initial));
         assert!(profile.pto.is_none());
         assert!(!profile.should_probe(PNSpace::Initial));

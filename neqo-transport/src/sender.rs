@@ -9,8 +9,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 use crate::cc::{
-    ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, NewReno,
-    MAX_DATAGRAM_SIZE,
+    ClassicCongestionControl, CongestionControl, CongestionControlAlgorithm, Cubic, NewReno,
 };
 use crate::pace::Pacer;
 use crate::tracking::SentPacket;
@@ -36,18 +35,17 @@ impl Display for PacketSender {
 
 impl PacketSender {
     #[must_use]
-    pub fn new(alg: CongestionControlAlgorithm, now: Instant) -> Self {
+    pub fn new(alg: CongestionControlAlgorithm, mtu: usize, now: Instant) -> Self {
         Self {
             cc: match alg {
                 CongestionControlAlgorithm::NewReno => {
                     Box::new(ClassicCongestionControl::new(NewReno::default()))
                 }
+                CongestionControlAlgorithm::Cubic => {
+                    Box::new(ClassicCongestionControl::new(Cubic::default()))
+                }
             },
-            pacer: Pacer::new(
-                now,
-                MAX_DATAGRAM_SIZE * PACING_BURST_SIZE,
-                MAX_DATAGRAM_SIZE,
-            ),
+            pacer: Pacer::new(now, mtu * PACING_BURST_SIZE, mtu),
         }
     }
 
@@ -66,9 +64,8 @@ impl PacketSender {
         self.cc.cwnd_avail()
     }
 
-    // Multi-packet version of OnPacketAckedCC
-    pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket]) {
-        self.cc.on_packets_acked(acked_pkts);
+    pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], min_rtt: Duration, now: Instant) {
+        self.cc.on_packets_acked(acked_pkts, min_rtt, now);
     }
 
     pub fn on_packets_lost(
@@ -88,6 +85,12 @@ impl PacketSender {
 
     pub fn discard(&mut self, pkt: &SentPacket) {
         self.cc.discard(pkt);
+    }
+
+    /// When we migrate, the congestion controller for the previously active path drops
+    /// all bytes in flight.
+    pub fn discard_in_flight(&mut self) {
+        self.cc.discard_in_flight();
     }
 
     pub fn on_packet_sent(&mut self, pkt: &SentPacket, rtt: Duration) {

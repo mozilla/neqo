@@ -238,8 +238,9 @@ mod tests {
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_qpack::QpackSettings;
     use neqo_transport::{
-        CloseError, Connection, ConnectionEvent, State, StreamType, ZeroRttState,
+        Connection, ConnectionError, ConnectionEvent, State, StreamType, ZeroRttState,
     };
+    use std::collections::HashMap;
     use std::ops::{Deref, DerefMut};
     use test_fixture::{
         anti_replay, default_client, fixture_init, now, CountingConnectionIdGenerator,
@@ -271,7 +272,7 @@ mod tests {
     }
 
     fn assert_closed(hconn: &mut Http3Server, expected: &Error) {
-        let err = CloseError::Application(expected.code());
+        let err = ConnectionError::Application(expected.code());
         let closed = |e| {
             matches!(e,
             Http3ServerEvent::StateChange{ state: Http3State::Closing(e), .. }
@@ -1070,5 +1071,40 @@ mod tests {
             },
             &ZeroRttState::AcceptedClient,
         );
+    }
+
+    #[test]
+    fn client_request_hash() {
+        let (mut hconn, mut peer_conn) = connect();
+
+        let request_stream_id_1 = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        // Send only request headers for now.
+        peer_conn
+            .stream_send(request_stream_id_1, &REQUEST_WITH_BODY)
+            .unwrap();
+
+        let request_stream_id_2 = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        // Send only request headers for now.
+        peer_conn
+            .stream_send(request_stream_id_2, &REQUEST_WITH_BODY)
+            .unwrap();
+
+        let out = peer_conn.process(None, now());
+        hconn.process(out.dgram(), now());
+
+        let mut requests = HashMap::new();
+        while let Some(event) = hconn.next_event() {
+            match event {
+                Http3ServerEvent::Headers { request, .. } => {
+                    assert!(requests.get(&request).is_none());
+                    requests.insert(request, 0);
+                }
+                Http3ServerEvent::Data { request, .. } => {
+                    assert!(requests.get(&request).is_some());
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(requests.len(), 2);
     }
 }

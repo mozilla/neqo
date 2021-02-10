@@ -20,7 +20,7 @@ use crate::recv_stream::RecvStreams;
 use crate::send_stream::SendStreams;
 use crate::stats::FrameStats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes, StreamType};
-use crate::AppError;
+use crate::{AppError, Error, Res};
 
 type FlowFrame = Frame<'static>;
 pub type FlowControlRecoveryToken = FlowFrame;
@@ -277,7 +277,7 @@ impl FlowMgr {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) {
+    ) -> Res<()> {
         while let Some(frame) = self.peek() {
             // All these frames are bags of varints, so we can just extract the
             // varints and use common code for writing.
@@ -348,11 +348,15 @@ impl FlowMgr {
                 for v in values {
                     builder.encode_varint(v);
                 }
+                if builder.len() > builder.limit() {
+                    return Err(Error::InternalError(16));
+                }
                 tokens.push(RecoveryToken::Flow(self.next().unwrap()));
             } else {
-                return;
+                return Ok(());
             }
         }
+        Ok(())
     }
 }
 

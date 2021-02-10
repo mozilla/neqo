@@ -148,7 +148,6 @@ impl RttEstimate {
         self.rttvar
     }
 
-    #[cfg(test)]
     pub fn minimum(&self) -> Duration {
         self.min_rtt
     }

@@ -108,6 +108,7 @@ fn no_alpn() {
         addr(),
         addr(),
         ConnectionParameters::default(),
+        now(),
     )
     .unwrap();
     let mut server = default_server();
@@ -236,6 +237,7 @@ fn chacha20poly1305() {
         addr(),
         addr(),
         ConnectionParameters::default(),
+        now(),
     )
     .expect("create a default client");
     client.set_ciphers(&[TLS_CHACHA20_POLY1305_SHA256]).unwrap();
@@ -715,6 +717,12 @@ fn anti_amplification() {
     assert_eq!(s_init1.len(), PATH_MTU_V6);
     let s_init2 = server.process_output(now).dgram().unwrap();
     assert_eq!(s_init2.len(), PATH_MTU_V6);
+
+    // Skip the gap for pacing here.
+    let s_pacing = server.process_output(now).callback();
+    assert_ne!(s_pacing, Duration::new(0, 0));
+    now += s_pacing;
+
     let s_init3 = server.process_output(now).dgram().unwrap();
     assert_eq!(s_init3.len(), PATH_MTU_V6);
     let cb = server.process_output(now).callback();

@@ -18,9 +18,9 @@ use neqo_common::{qdebug, qinfo, qtrace, qwarn};
 use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 
 use crate::packet::{PacketBuilder, PacketNumber, PacketType};
-use crate::path::PathRef;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
+use crate::{Error, Res};
 
 use smallvec::{smallvec, SmallVec};
 
@@ -137,7 +137,7 @@ pub struct SentPacket {
     pub pn: PacketNumber,
     ack_eliciting: bool,
     pub time_sent: Instant,
-    path: PathRef,
+    primary_path: bool,
     pub tokens: Vec<RecoveryToken>,
 
     time_declared_lost: Option<Instant>,
@@ -153,7 +153,6 @@ impl SentPacket {
         pn: PacketNumber,
         time_sent: Instant,
         ack_eliciting: bool,
-        path: PathRef,
         tokens: Vec<RecoveryToken>,
         size: usize,
     ) -> Self {
@@ -162,7 +161,7 @@ impl SentPacket {
             pn,
             time_sent,
             ack_eliciting,
-            path,
+            primary_path: true,
             tokens,
             time_declared_lost: None,
             pto: false,
@@ -175,14 +174,20 @@ impl SentPacket {
         self.ack_eliciting
     }
 
+    /// Returns `true` if the packet was sent on the primary path.
+    pub fn on_primary_path(&self) -> bool {
+        self.primary_path
+    }
+
+    /// Clears the flag that had this packet on the primary path.
+    /// Used when migrating to clear out state.
+    pub fn clear_primary_path(&mut self) {
+        self.primary_path = false;
+    }
+
     /// Whether the packet has been declared lost.
     pub fn lost(&self) -> bool {
         self.time_declared_lost.is_some()
-    }
-
-    /// A reference to a reference to the path on which this packet was sent.
-    pub fn path(&self) -> &PathRef {
-        &self.path
     }
 
     /// Whether accounting for the loss or acknowledgement in the
@@ -192,15 +197,12 @@ impl SentPacket {
     /// Note that this should count packets that contain only ACK and PADDING,
     /// but we don't send PADDING, so we don't track that.
     pub fn cc_outstanding(&self) -> bool {
-        self.ack_eliciting() && !self.lost()
+        self.ack_eliciting() && self.on_primary_path() && !self.lost()
     }
 
-    /// Mark the packet as sent.
-    pub fn sent(&self, rtt: Duration) {
-        self.path
-            .borrow_mut()
-            .sender_mut()
-            .on_packet_sent(self, rtt);
+    /// Whether hte packet should be tracked as in-flight.
+    pub fn cc_in_flight(&self) -> bool {
+        self.ack_eliciting() && self.on_primary_path()
     }
 
     /// Declare the packet as lost.  Returns `true` if this is the first time.
@@ -218,11 +220,6 @@ impl SentPacket {
     pub fn expired(&self, now: Instant, expiration_period: Duration) -> bool {
         self.time_declared_lost
             .map_or(false, |loss_time| (loss_time + expiration_period) <= now)
-    }
-
-    /// Discard this packet, for outstanding packets when a packet number space is discarded.
-    pub fn discard(&mut self) {
-        self.path.borrow_mut().sender_mut().discard(&self);
     }
 
     /// Whether the packet contents were cleared out after a PTO.
@@ -658,9 +655,15 @@ impl AckTracker {
         now: Instant,
         builder: &mut PacketBuilder,
         stats: &mut FrameStats,
-    ) -> Option<RecoveryToken> {
-        self.get_mut(pn_space)
-            .and_then(|space| space.write_frame(now, builder, stats))
+    ) -> Res<Option<RecoveryToken>> {
+        let res = self
+            .get_mut(pn_space)
+            .and_then(|space| space.write_frame(now, builder, stats));
+
+        if builder.len() > builder.limit() {
+            return Err(Error::InternalError(24));
+        }
+        Ok(res)
     }
 }
 
@@ -870,12 +873,14 @@ mod tests {
             .set_received(*NOW, 0, true);
         // The reference time for `ack_time` has to be in the past or we filter out the timer.
         assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
-        let token = tracker.write_frame(
-            PNSpace::Initial,
-            *NOW,
-            &mut builder,
-            &mut FrameStats::default(),
-        );
+        let token = tracker
+            .write_frame(
+                PNSpace::Initial,
+                *NOW,
+                &mut builder,
+                &mut FrameStats::default(),
+            )
+            .unwrap();
         assert!(token.is_some());
 
         // Mark another packet as received so we have cause to send another ACK in that space.
@@ -897,6 +902,7 @@ mod tests {
                 &mut builder,
                 &mut FrameStats::default()
             )
+            .unwrap()
             .is_none());
         if let RecoveryToken::Ack(tok) = token.unwrap() {
             tracker.acked(&tok); // Should be a noop.
@@ -917,12 +923,14 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         builder.set_limit(10);
 
-        let token = tracker.write_frame(
-            PNSpace::Initial,
-            *NOW,
-            &mut builder,
-            &mut FrameStats::default(),
-        );
+        let token = tracker
+            .write_frame(
+                PNSpace::Initial,
+                *NOW,
+                &mut builder,
+                &mut FrameStats::default(),
+            )
+            .unwrap();
         assert!(token.is_none());
         assert_eq!(builder.len(), 1); // Only the short packet header has been added.
     }
@@ -943,12 +951,14 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         builder.set_limit(32);
 
-        let token = tracker.write_frame(
-            PNSpace::Initial,
-            *NOW,
-            &mut builder,
-            &mut FrameStats::default(),
-        );
+        let token = tracker
+            .write_frame(
+                PNSpace::Initial,
+                *NOW,
+                &mut builder,
+                &mut FrameStats::default(),
+            )
+            .unwrap();
         assert!(token.is_some());
 
         let mut dec = builder.as_decoder();

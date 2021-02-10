@@ -24,6 +24,8 @@ use crate::recovery::RecoveryToken;
 use crate::rtt::RttEstimate;
 use crate::sender::PacketSender;
 use crate::stats::FrameStats;
+use crate::tracking::{PNSpace, SentPacket};
+use crate::{Error, Res};
 
 use neqo_common::{hex, qdebug, qinfo, qlog::NeqoQlog, qtrace, Datagram, Encoder};
 use neqo_crypto::random;
@@ -219,15 +221,18 @@ impl Paths {
     /// is forcibly marked as valid and the path is used immediately.
     /// Otherwise, migration will occur after probing succeeds.
     /// The path is always probed and will be abandoned if probing fails.
-    pub fn migrate(&mut self, path: &PathRef, force: bool, now: Instant) {
+    /// Returns `true` if the path was migrated.
+    pub fn migrate(&mut self, path: &PathRef, force: bool, now: Instant) -> bool {
         debug_assert!(!self.is_temporary(path));
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
             let _ = self.select_primary(path);
+            self.migration_target = None;
         } else {
             self.migration_target = Some(Rc::clone(path));
         }
         path.borrow_mut().probe();
+        self.migration_target.is_none()
     }
 
     /// Process elapsed time for active paths.
@@ -320,7 +325,11 @@ impl Paths {
     }
 
     /// A `PATH_RESPONSE` was received.
-    pub fn path_response(&mut self, response: [u8; 8], now: Instant) {
+    /// Returns `true` if migration occurred.
+    #[must_use]
+    pub fn path_response(&mut self, response: [u8; 8], now: Instant) -> bool {
+        // TODO(mt) consider recording an RTT measurement here as we don't train
+        // RTT for non-primary paths.
         for p in &self.paths {
             if p.borrow_mut().path_response(response, now) {
                 // The response was accepted.  If this path is one we intend
@@ -332,10 +341,12 @@ impl Paths {
                 {
                     let primary = self.migration_target.take();
                     let _ = self.select_primary(&primary.unwrap());
+                    return true;
                 }
                 break;
             }
         }
+        false
     }
 
     /// Write out any `RETIRE_CONNECTION_ID` frames that are outstanding.
@@ -344,7 +355,7 @@ impl Paths {
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
-    ) {
+    ) -> Res<()> {
         while let Some(seqno) = self.to_retire.pop() {
             if builder.remaining() < 1 + Encoder::varint_len(seqno) {
                 self.to_retire.push(seqno);
@@ -352,9 +363,13 @@ impl Paths {
             }
             builder.encode_varint(FRAME_TYPE_RETIRE_CONNECTION_ID);
             builder.encode_varint(seqno);
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(20));
+            }
             tokens.push(RecoveryToken::RetireConnectionId(seqno));
             stats.retire_connection_id += 1;
         }
+        Ok(())
     }
 
     pub fn lost_retire_cid(&mut self, lost: u64) {
@@ -469,7 +484,7 @@ impl Path {
         qlog: NeqoQlog,
         now: Instant,
     ) -> Self {
-        let mut sender = PacketSender::new(cc, now);
+        let mut sender = PacketSender::new(cc, Self::mtu_by_addr(remote.ip()), now);
         sender.set_qlog(qlog);
         Self {
             local,
@@ -500,7 +515,7 @@ impl Path {
     /// By adding a remote connection ID, we make the path permanent
     /// and one that we will later send packets on.
     /// If `local_cid` is `None`, the existing value will be kept.
-    fn make_permanent(
+    pub(crate) fn make_permanent(
         &mut self,
         local_cid: Option<ConnectionId>,
         remote_cid: RemoteConnectionIdEntry,
@@ -527,9 +542,13 @@ impl Path {
     }
 
     /// Set whether this path is primary.
-    fn set_primary(&mut self, primary: bool) {
+    pub(crate) fn set_primary(&mut self, primary: bool) {
         qtrace!([self], "Make primary {}", primary);
+        debug_assert!(self.remote_cid.is_some());
         self.primary = primary;
+        if !primary {
+            self.sender.discard_in_flight();
+        }
     }
 
     /// Set the current path as valid.  This updates the time that the path was
@@ -548,12 +567,16 @@ impl Path {
         }
     }
 
-    /// Get the path MTU.  This is currently a fixed value.
-    pub fn mtu(&self) -> usize {
-        match self.local.ip() {
+    fn mtu_by_addr(addr: IpAddr) -> usize {
+        match addr {
             IpAddr::V4(_) => PATH_MTU_V4,
             IpAddr::V6(_) => PATH_MTU_V6,
         }
+    }
+
+    /// Get the path MTU.  This is currently fixed based on IP version.
+    pub fn mtu(&self) -> usize {
+        Self::mtu_by_addr(self.remote.ip())
     }
 
     /// Get the first local connection ID.
@@ -666,9 +689,9 @@ impl Path {
         stats: &mut FrameStats,
         mtu: bool, // Whether the packet we're writing into will be a full MTU.
         now: Instant,
-    ) -> bool {
+    ) -> Res<bool> {
         if builder.remaining() < 9 {
-            return false;
+            return Ok(false);
         }
 
         // Send PATH_RESPONSE.
@@ -676,6 +699,9 @@ impl Path {
             qtrace!([self], "Responding to path challenge {}", hex(&challenge));
             builder.encode_varint(FRAME_TYPE_PATH_RESPONSE);
             builder.encode(&challenge[..]);
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(21));
+            }
 
             // These frames are not retransmitted in the usual fashion.
             // There is no token, therefore we need to count `all` specially.
@@ -683,7 +709,7 @@ impl Path {
             stats.all += 1;
 
             if builder.remaining() < 9 {
-                return true;
+                return Ok(true);
             }
             true
         } else {
@@ -696,6 +722,9 @@ impl Path {
             let data = <[u8; 8]>::try_from(&random(8)[..]).unwrap();
             builder.encode_varint(FRAME_TYPE_PATH_CHALLENGE);
             builder.encode(&data);
+            if builder.len() > builder.limit() {
+                return Err(Error::InternalError(22));
+            }
 
             // As above, no recovery token.
             stats.path_challenge += 1;
@@ -707,9 +736,9 @@ impl Path {
                 mtu,
                 sent: now,
             };
-            true
+            Ok(true)
         } else {
-            resp_sent
+            Ok(resp_sent)
         }
     }
 
@@ -766,11 +795,6 @@ impl Path {
         &self.sender
     }
 
-    /// Mutable access to the owned sender.
-    pub fn sender_mut(&mut self) -> &mut PacketSender {
-        &mut self.sender
-    }
-
     /// Pass on RTT configuration: the maximum acknowledgment delay of the peer.
     pub fn set_max_ack_delay(&mut self, mad: Duration) {
         self.rtt.set_max_ack_delay(mad);
@@ -789,6 +813,42 @@ impl Path {
     /// Record sent bytes for the path.
     pub fn add_sent(&mut self, count: usize) {
         self.sent_bytes = self.sent_bytes.saturating_add(count);
+    }
+
+    /// Record a packet as having been sent on this path.
+    pub fn packet_sent(&mut self, sent: &mut SentPacket) {
+        if !self.is_primary() {
+            sent.clear_primary_path();
+        }
+        self.sender.on_packet_sent(sent, self.rtt.estimate());
+    }
+
+    /// Discard a packet that previously might have been in-flight.
+    pub fn discard_packet(&mut self, sent: &SentPacket) {
+        self.sender.discard(sent);
+    }
+
+    /// Record packets as acknowledged with the sender.
+    pub fn on_packets_acked(&mut self, acked_pkts: &[SentPacket], now: Instant) {
+        debug_assert!(self.is_primary());
+        self.sender
+            .on_packets_acked(acked_pkts, self.rtt.minimum(), now);
+    }
+
+    /// Record packets as lost with the sender.
+    pub fn on_packets_lost(
+        &mut self,
+        prev_largest_acked_sent: Option<Instant>,
+        space: PNSpace,
+        lost_packets: &[SentPacket],
+    ) {
+        debug_assert!(self.is_primary());
+        self.sender.on_packets_lost(
+            self.rtt.first_sample_time(),
+            prev_largest_acked_sent,
+            self.rtt.pto(space), // Important: the base PTO, not adjusted.
+            lost_packets,
+        )
     }
 
     /// Get the number of bytes that can be written to this path.
@@ -813,7 +873,7 @@ impl Path {
         }
     }
 
-    /// Update the QLog instance.
+    /// Update the `NeqoQLog` instance.
     pub fn set_qlog(&mut self, qlog: NeqoQlog) {
         self.sender.set_qlog(qlog);
     }

@@ -253,12 +253,14 @@ fn idle_caching() {
     let crypto = server
         .crypto
         .streams
-        .write_frame(PNSpace::Initial, &mut builder);
+        .write_frame(PNSpace::Initial, &mut builder)
+        .unwrap();
     assert!(crypto.is_some());
     let crypto = server
         .crypto
         .streams
-        .write_frame(PNSpace::Initial, &mut builder);
+        .write_frame(PNSpace::Initial, &mut builder)
+        .unwrap();
     assert!(crypto.is_none());
     let dgram = server.process_output(middle).dgram();
 

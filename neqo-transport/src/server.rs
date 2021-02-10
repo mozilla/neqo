@@ -461,6 +461,33 @@ impl Server {
         }
     }
 
+    /// Handle 0-RTT packets that were sent with the client's choice of connection ID.
+    /// Most 0-RTT will arrive this way.  A client can usually send 1-RTT after it
+    /// receives a connection ID from the server.
+    fn handle_0rtt(
+        &mut self,
+        dgram: Datagram,
+        dcid: ConnectionId,
+        now: Instant,
+    ) -> Option<Datagram> {
+        let attempt_key = AttemptKey {
+            remote_address: dgram.source(),
+            odcid: dcid,
+        };
+        if let Some(c) = self.active_attempts.get(&attempt_key) {
+            qdebug!(
+                [self],
+                "Handle 0-RTT for existing connection attempt {:?}",
+                attempt_key
+            );
+            let c = Rc::clone(c);
+            self.process_connection(c, Some(dgram), now)
+        } else {
+            qdebug!([self], "Dropping 0-RTT for unknown connection");
+            None
+        }
+    }
+
     fn process_input(&mut self, dgram: Datagram, now: Instant) -> Option<Datagram> {
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
@@ -486,17 +513,25 @@ impl Server {
             return None;
         }
 
-        if dgram.len() < MIN_INITIAL_PACKET_SIZE {
-            qtrace!([self], "Bogus packet: too short");
-            return None;
-        }
         match packet.packet_type() {
             PacketType::Initial => {
+                if dgram.len() < MIN_INITIAL_PACKET_SIZE {
+                    qdebug!([self], "Drop initial: too short");
+                    return None;
+                }
                 // Copy values from `packet` because they are currently still borrowing from `dgram`.
                 let initial = InitialDetails::new(&packet);
                 self.handle_initial(initial, dgram, now)
             }
+            PacketType::ZeroRtt => {
+                let dcid = ConnectionId::from(packet.dcid());
+                self.handle_0rtt(dgram, dcid, now)
+            }
             PacketType::OtherVersion => {
+                if dgram.len() < MIN_INITIAL_PACKET_SIZE {
+                    qdebug!([self], "Unsupported version: too short");
+                    return None;
+                }
                 let vn = PacketBuilder::version_negotiation(packet.scid(), packet.dcid());
                 Some(Datagram::new(dgram.destination(), dgram.source(), vn))
             }
@@ -575,11 +610,11 @@ pub struct ActiveConnectionRef {
 }
 
 impl ActiveConnectionRef {
-    pub fn borrow<'a>(&'a self) -> impl Deref<Target = Connection> + 'a {
+    pub fn borrow(&self) -> impl Deref<Target = Connection> + '_ {
         std::cell::Ref::map(self.c.borrow(), |c| &c.c)
     }
 
-    pub fn borrow_mut<'a>(&'a mut self) -> impl DerefMut<Target = Connection> + 'a {
+    pub fn borrow_mut(&mut self) -> impl DerefMut<Target = Connection> + '_ {
         std::cell::RefMut::map(self.c.borrow_mut(), |c| &mut c.c)
     }
 

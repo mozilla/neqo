@@ -34,7 +34,8 @@ use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
     server::ValidateAddress, stream_id::StreamIndex, tparams::PreferredAddress,
-    ConnectionParameters, Output, RandomConnectionIdGenerator, StreamType,
+    CongestionControlAlgorithm, ConnectionParameters, Output, RandomConnectionIdGenerator,
+    StreamType,
 };
 
 use crate::old_https::Http09Server;
@@ -91,7 +92,7 @@ struct Args {
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
-    #[structopt(subcommand)]
+    #[structopt(flatten)]
     quic_parameters: QuicParameters,
 
     #[structopt(name = "retry", long)]
@@ -201,6 +202,10 @@ struct QuicParameters {
     #[structopt(long, default_value = "16")]
     /// Set the MAX_STREAMS_UNI limit.
     max_streams_uni: u64,
+
+    #[structopt(long = "cc", default_value = "newreno")]
+    /// The congestion controller to use.
+    congestion_control: CongestionControlAlgorithm,
 }
 
 impl QuicParameters {
@@ -208,6 +213,7 @@ impl QuicParameters {
         ConnectionParameters::default()
             .max_streams(StreamType::BiDi, StreamIndex::new(self.max_streams_bidi))
             .max_streams(StreamType::UniDi, StreamIndex::new(self.max_streams_uni))
+            .cc_algorithm(self.congestion_control)
     }
 }
 

@@ -19,8 +19,9 @@ use neqo_http3::{
 };
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    stream_id::StreamIndex, Connection, ConnectionId, ConnectionParameters,
-    EmptyConnectionIdGenerator, Error as TransportError, QuicVersion, StreamType,
+    stream_id::StreamIndex, CongestionControlAlgorithm, Connection, ConnectionId,
+    ConnectionParameters, EmptyConnectionIdGenerator, Error as TransportError, QuicVersion,
+    StreamType,
 };
 
 use std::cell::RefCell;
@@ -178,7 +179,7 @@ pub struct Args {
     /// From: TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256.
     ciphers: Vec<String>,
 
-    #[structopt(subcommand)]
+    #[structopt(flatten)]
     quic_parameters: QuicParameters,
 }
 
@@ -205,6 +206,10 @@ struct QuicParameters {
     #[structopt(long, default_value = "16")]
     /// Set the MAX_STREAMS_UNI limit.
     max_streams_uni: u64,
+
+    #[structopt(long = "cc", default_value = "newreno")]
+    /// The congestion controller to use.
+    congestion_control: CongestionControlAlgorithm,
 }
 
 impl QuicParameters {
@@ -212,6 +217,7 @@ impl QuicParameters {
         ConnectionParameters::default()
             .max_streams(StreamType::BiDi, StreamIndex::new(self.max_streams_bidi))
             .max_streams(StreamType::UniDi, StreamIndex::new(self.max_streams_uni))
+            .cc_algorithm(self.congestion_control)
     }
 }
 
@@ -526,6 +532,7 @@ fn client(
         local_addr,
         remote_addr,
         args.quic_parameters.get().quic_version(quic_protocol),
+        Instant::now(),
     )?;
     let ciphers = args.get_ciphers();
     if !ciphers.is_empty() {
@@ -1019,6 +1026,7 @@ mod old {
             local_addr,
             remote_addr,
             args.quic_parameters.get().quic_version(quic_protocol),
+            Instant::now(),
         )?;
 
         if let Some(tok) = token {
