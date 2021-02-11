@@ -46,6 +46,7 @@ use crate::path::{Path, PathRef, Paths};
 use crate::qlog;
 use crate::recovery::{LossRecovery, RecoveryToken, SendProfile, GRANULARITY};
 use crate::recv_stream::{RecvStream, RecvStreams, RECV_BUFFER_SIZE};
+pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 use crate::send_stream::{SendStream, SendStreams};
 use crate::stats::{Stats, StatsCell};
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes, StreamType};
@@ -1748,6 +1749,72 @@ impl Connection {
         Ok(SendOption::Yes(close.path().borrow().datagram(encoder)))
     }
 
+    /// Write the frames that are exchanged in the application data space.
+    fn write_appdata_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+    ) -> Res<()> {
+        let stats = &mut self.stats.borrow_mut().frame_tx;
+
+        if self.role == Role::Server {
+            if let Some(t) = self.state_signaling.write_done(builder)? {
+                tokens.push(t);
+                stats.handshake_done += 1;
+            }
+        }
+
+        self.send_streams
+            .write_frames(TransmissionPriority::Critical, builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.crypto
+            .write_frame(PNSpace::ApplicationData, builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.flow_mgr
+            .borrow_mut()
+            .write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.send_streams
+            .write_frames(TransmissionPriority::High, builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.cid_manager.write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.paths.write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.send_streams
+            .write_frames(TransmissionPriority::Normal, builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.new_token.write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.send_streams
+            .write_frames(TransmissionPriority::Low, builder, tokens, stats)?;
+        Ok(())
+    }
+
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
@@ -1761,12 +1828,12 @@ impl Connection {
         now: Instant,
     ) -> Res<(Vec<RecoveryToken>, bool, bool)> {
         let mut tokens = Vec::new();
-        let stats = &mut self.stats.borrow_mut().frame_tx;
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
 
         let ack_token = if primary {
-            self.acks.write_frame(space, now, builder, stats)?
+            self.acks
+                .write_frame(space, now, builder, &mut self.stats.borrow_mut().frame_tx)?
         } else {
             None
         };
@@ -1777,10 +1844,12 @@ impl Connection {
         if space == PNSpace::ApplicationData && self.state.connected() {
             // Probes should only be padded if the full MTU is available.
             // The probing code needs to know so it can track that.
-            if path
-                .borrow_mut()
-                .write_frames(builder, stats, full_mtu, now)?
-            {
+            if path.borrow_mut().write_frames(
+                builder,
+                &mut self.stats.borrow_mut().frame_tx,
+                full_mtu,
+                now,
+            )? {
                 pad = true;
                 ack_eliciting = true;
             }
@@ -1795,31 +1864,19 @@ impl Connection {
         }
 
         if primary {
-            if space == PNSpace::ApplicationData && self.role == Role::Server {
-                if let Some(t) = self.state_signaling.write_done(builder)? {
-                    tokens.push(t);
-                    stats.handshake_done += 1;
-                }
-            }
-
-            if let Some(t) = self.crypto.streams.write_frame(space, builder)? {
-                tokens.push(t);
-                stats.crypto += 1;
-            }
-
             if space == PNSpace::ApplicationData {
-                self.flow_mgr
-                    .borrow_mut()
-                    .write_frames(builder, &mut tokens, stats)?;
-
-                self.send_streams
-                    .write_frames(builder, &mut tokens, stats)?;
-                self.new_token.write_frames(builder, &mut tokens, stats)?;
-                self.cid_manager.write_frames(builder, &mut tokens, stats)?;
-                self.paths.write_frames(builder, &mut tokens, stats)?;
+                self.write_appdata_frames(builder, &mut tokens)?;
+            } else {
+                self.crypto.write_frame(
+                    space,
+                    builder,
+                    &mut tokens,
+                    &mut self.stats.borrow_mut().frame_tx,
+                )?;
             }
         }
 
+        let stats = &mut self.stats.borrow_mut().frame_tx;
         // Anything - other than ACK - that registered a token wants an acknowledgment.
         ack_eliciting |= !tokens.is_empty();
         if !ack_eliciting && profile.should_probe(space) {
@@ -2930,6 +2987,21 @@ impl Connection {
                 new_id.as_u64()
             }
         })
+    }
+
+    /// Set the priority of a stream.
+    /// # Errors
+    /// `InvalidStreamId` the stream does not exist.
+    pub fn stream_priority(
+        &mut self,
+        stream_id: u64,
+        transmission: TransmissionPriority,
+        retransmission: RetransmissionPriority,
+    ) -> Res<()> {
+        self.send_streams
+            .get_mut(stream_id.into())?
+            .set_priority(transmission, retransmission);
+        Ok(())
     }
 
     /// Send data on a stream.

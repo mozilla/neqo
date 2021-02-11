@@ -7,10 +7,11 @@
 // Buffering data to send until it is acked.
 
 use std::cell::RefCell;
-use std::cmp::{max, min};
+use std::cmp::{max, min, Ordering};
 use std::collections::{BTreeMap, VecDeque};
 use std::convert::{TryFrom, TryInto};
 use std::mem;
+use std::ops::Add;
 use std::rc::Rc;
 
 use indexmap::IndexMap;
@@ -28,6 +29,97 @@ use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
 
 pub const SEND_BUFFER_SIZE: usize = 0x10_0000; // 1 MiB
+
+/// The priority that is assigned to sending data for the stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransmissionPriority {
+    /// This stream is more important than the functioning of the connection.
+    /// Don't use this priority unless the stream really is that important.
+    /// A stream at this priority can starve out other connection functions,
+    /// including flow control.
+    Critical,
+    /// The stream is very important.  Stream data will be written ahead of
+    /// some of the less critical connection functions, like path validation,
+    /// connection ID management, and session tickets.
+    Important,
+    /// High priority streams are important, but not enough to disrupt
+    /// connection operation.
+    High,
+    /// The default priority.
+    Normal,
+    /// Low priority streams get sent last.
+    Low,
+}
+
+impl Default for TransmissionPriority {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
+
+impl PartialOrd for TransmissionPriority {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TransmissionPriority {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self == other {
+            return Ordering::Equal;
+        }
+        match (self, other) {
+            (Self::Critical, _) => Ordering::Greater,
+            (_, Self::Critical) => Ordering::Less,
+            (Self::Important, _) => Ordering::Greater,
+            (_, Self::Important) => Ordering::Less,
+            (Self::High, _) => Ordering::Greater,
+            (_, Self::High) => Ordering::Less,
+            (Self::Normal, _) => Ordering::Greater,
+            (_, Self::Normal) => Ordering::Less,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Add<RetransmissionPriority> for TransmissionPriority {
+    type Output = Self;
+    fn add(self, rhs: RetransmissionPriority) -> Self::Output {
+        match rhs {
+            RetransmissionPriority::Critical => Self::Critical,
+            RetransmissionPriority::Important => Self::Important,
+            RetransmissionPriority::Increased => match self {
+                Self::Critical => Self::Critical,
+                Self::Important | Self::High => Self::Important,
+                Self::Normal => Self::High,
+                Self::Low => Self::Normal,
+            },
+            RetransmissionPriority::Same => self,
+        }
+    }
+}
+
+/// If data is lost, this determines the priority that applies to retransmissions
+/// of that data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetransmissionPriority {
+    /// Prioritize retransmission of this data over everything else.
+    /// Even the health of the connection.
+    Critical,
+    /// Make retransmission of this data important.
+    Important,
+    /// Increase the priority of retransmissions (the default).
+    /// Transmissions of `Critical` or `Important` aren't elevated further.
+    Increased,
+    /// Keep the priority the same for transmissions.
+    Same,
+}
+
+impl Default for RetransmissionPriority {
+    fn default() -> Self {
+        Self::Increased
+    }
+}
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum RangeState {
@@ -459,6 +551,9 @@ pub struct SendStream {
     state: SendStreamState,
     flow_mgr: Rc<RefCell<FlowMgr>>,
     conn_events: ConnectionEvents,
+    priority: TransmissionPriority,
+    retransmission_priority: RetransmissionPriority,
+    retransmission_offset: u64,
 }
 
 impl SendStream {
@@ -474,6 +569,9 @@ impl SendStream {
             state: SendStreamState::Ready,
             flow_mgr,
             conn_events,
+            priority: TransmissionPriority::default(),
+            retransmission_priority: RetransmissionPriority::default(),
+            retransmission_offset: 0,
         };
         if ss.avail() > 0 {
             ss.conn_events.send_stream_writable(stream_id);
@@ -481,10 +579,31 @@ impl SendStream {
         ss
     }
 
+    pub fn set_priority(
+        &mut self,
+        transmission: TransmissionPriority,
+        retransmission: RetransmissionPriority,
+    ) {
+        self.priority = transmission;
+        self.retransmission_priority = retransmission;
+    }
+
     /// Return the next range to be sent, if any.
-    pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
+    fn next_bytes(&mut self, retransmission_only: bool) -> Option<(u64, &[u8])> {
         match self.state {
-            SendStreamState::Send { ref send_buf } => send_buf.next_bytes(),
+            SendStreamState::Send { ref send_buf } => {
+                send_buf.next_bytes().map(|(offset, slice)| {
+                    let len = if retransmission_only && self.retransmission_offset > offset {
+                        min(
+                            usize::try_from(self.retransmission_offset - offset).unwrap(),
+                            slice.len(),
+                        )
+                    } else {
+                        slice.len()
+                    };
+                    (offset, &slice[..len])
+                })
+            }
             SendStreamState::DataSent {
                 ref send_buf,
                 fin_sent,
@@ -536,10 +655,22 @@ impl SendStream {
         (length, false)
     }
 
-    pub fn write_frame(&mut self, builder: &mut PacketBuilder) -> Res<Option<RecoveryToken>> {
+    pub fn write_frame(
+        &mut self,
+        priority: TransmissionPriority,
+        builder: &mut PacketBuilder,
+    ) -> Res<Option<RecoveryToken>> {
+        let retransmission = if priority == self.priority {
+            false
+        } else if priority == self.priority + self.retransmission_priority {
+            true
+        } else {
+            return Ok(None);
+        };
+
         let id = self.stream_id;
         let final_size = self.final_size();
-        if let Some((offset, data)) = self.next_bytes() {
+        if let Some((offset, data)) = self.next_bytes(retransmission) {
             let overhead = 1 // Frame type
                 + Encoder::varint_len(id.as_u64())
                 + if offset > 0 {
@@ -629,6 +760,10 @@ impl SendStream {
     }
 
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
+        self.retransmission_offset = max(
+            self.retransmission_offset,
+            offset + u64::try_from(len).unwrap(),
+        );
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_lost(offset, len);
         }
@@ -869,12 +1004,14 @@ impl SendStreams {
 
     pub(crate) fn write_frames(
         &mut self,
+        priority: TransmissionPriority,
         builder: &mut PacketBuilder,
         tokens: &mut Vec<RecoveryToken>,
         stats: &mut FrameStats,
     ) -> Res<()> {
+        qtrace!("write STREAM frames at priority {:?}", priority);
         for (_, stream) in self {
-            if let Some(t) = stream.write_frame(builder)? {
+            if let Some(t) = stream.write_frame(priority, builder)? {
                 tokens.push(t);
                 stats.stream += 1;
             }
@@ -1320,8 +1457,13 @@ mod tests {
         // Write a small frame: no fin.
         let written = builder.len();
         builder.set_limit(written + 6);
-        ss.write_frames(&mut builder, &mut tokens, &mut FrameStats::default())
-            .unwrap();
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 6);
         assert_eq!(tokens.len(), 1);
         let f1_token = tokens.remove(0);
@@ -1330,8 +1472,13 @@ mod tests {
         // Write the rest: fin.
         let written = builder.len();
         builder.set_limit(written + 200);
-        ss.write_frames(&mut builder, &mut tokens, &mut FrameStats::default())
-            .unwrap();
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 10);
         assert_eq!(tokens.len(), 1);
         let f2_token = tokens.remove(0);
@@ -1339,8 +1486,13 @@ mod tests {
 
         // Should be no more data to frame.
         let written = builder.len();
-        ss.write_frames(&mut builder, &mut tokens, &mut FrameStats::default())
-            .unwrap();
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        )
+        .unwrap();
         assert_eq!(builder.len(), written);
         assert!(tokens.is_empty());
 
@@ -1354,8 +1506,13 @@ mod tests {
         // Next frame should not set fin even though stream has fin but frame
         // does not include end of stream
         let written = builder.len();
-        ss.write_frames(&mut builder, &mut tokens, &mut FrameStats::default())
-            .unwrap();
+        ss.write_frames(
+            TransmissionPriority::default() + RetransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 7); // Needs a length this time.
         assert_eq!(tokens.len(), 1);
         let f4_token = tokens.remove(0);
@@ -1370,8 +1527,13 @@ mod tests {
 
         // Next frame should set fin because it includes end of stream
         let written = builder.len();
-        ss.write_frames(&mut builder, &mut tokens, &mut FrameStats::default())
-            .unwrap();
+        ss.write_frames(
+            TransmissionPriority::default() + RetransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 10);
         assert_eq!(tokens.len(), 1);
         let f5_token = tokens.remove(0);
@@ -1394,22 +1556,37 @@ mod tests {
 
         let mut tokens = Vec::new();
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
-        ss.write_frames(&mut builder, &mut tokens, &mut FrameStats::default())
-            .unwrap();
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        )
+        .unwrap();
         let f1_token = tokens.remove(0);
         assert!(matches!(&f1_token, RecoveryToken::Stream(x) if x.offset == 0));
         assert!(matches!(&f1_token, RecoveryToken::Stream(x) if x.length == 10));
         assert!(matches!(&f1_token, RecoveryToken::Stream(x) if !x.fin));
 
         // Should be no more data to frame
-        ss.write_frames(&mut builder, &mut tokens, &mut FrameStats::default())
-            .unwrap();
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        )
+        .unwrap();
         assert!(tokens.is_empty());
 
         ss.get_mut(StreamId::from(0)).unwrap().close();
 
-        ss.write_frames(&mut builder, &mut tokens, &mut FrameStats::default())
-            .unwrap();
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        )
+        .unwrap();
         let f2_token = tokens.remove(0);
         assert!(matches!(&f2_token, RecoveryToken::Stream(x) if x.offset == 10));
         assert!(matches!(&f2_token, RecoveryToken::Stream(x) if x.length == 0));
@@ -1423,8 +1600,13 @@ mod tests {
         }
 
         // Next frame should set fin
-        ss.write_frames(&mut builder, &mut tokens, &mut FrameStats::default())
-            .unwrap();
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        )
+        .unwrap();
         let f3_token = tokens.remove(0);
         assert!(matches!(&f3_token, RecoveryToken::Stream(x) if x.offset == 10));
         assert!(matches!(&f3_token, RecoveryToken::Stream(x) if x.length == 0));
@@ -1438,8 +1620,13 @@ mod tests {
         }
 
         // Next frame should set fin and include all data
-        ss.write_frames(&mut builder, &mut tokens, &mut FrameStats::default())
-            .unwrap();
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        )
+        .unwrap();
         let f4_token = tokens.remove(0);
         assert!(matches!(&f4_token, RecoveryToken::Stream(x) if x.offset == 0));
         assert!(matches!(&f4_token, RecoveryToken::Stream(x) if x.length == 10));
@@ -1471,7 +1658,7 @@ mod tests {
 
         // assert non-atomic write works
         assert_eq!(s.send(b"abc").unwrap(), 2);
-        assert_eq!(s.next_bytes(), Some((0, &b"ab"[..])));
+        assert_eq!(s.next_bytes(false), Some((0, &b"ab"[..])));
         // STREAM_DATA_BLOCKED is not sent yet.
         assert!(flow_mgr.borrow_mut().next().is_none());
 
@@ -1498,7 +1685,7 @@ mod tests {
 
         // assert non-atomic write works
         assert_eq!(s.send(b"abcd").unwrap(), 3);
-        assert_eq!(s.next_bytes(), Some((2, &b"abc"[..])));
+        assert_eq!(s.next_bytes(false), Some((2, &b"abc"[..])));
         // DATA_BLOCKED is not sent yet.
         assert!(flow_mgr.borrow_mut().next().is_none());
 
@@ -1566,7 +1753,10 @@ mod tests {
 
         // No frame should be sent here.
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
-        assert!(s.write_frame(&mut builder).unwrap().is_none());
+        assert!(s
+            .write_frame(TransmissionPriority::default(), &mut builder)
+            .unwrap()
+            .is_none());
     }
 
     /// Create a `SendStream` and force it into a state where it believes that
@@ -1606,7 +1796,9 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         let header_len = builder.len();
         builder.set_limit(header_len + space);
-        let token = s.write_frame(&mut builder).unwrap();
+        let token = s
+            .write_frame(TransmissionPriority::default(), &mut builder)
+            .unwrap();
         qtrace!("STREAM frame: {}", hex_with_len(&builder[header_len..]));
         token.is_some()
     }
@@ -1700,7 +1892,9 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         let header_len = builder.len();
         builder.set_limit(header_len + DATA16384.len() + 2);
-        let token = s.write_frame(&mut builder).unwrap();
+        let token = s
+            .write_frame(TransmissionPriority::default(), &mut builder)
+            .unwrap();
         assert!(token.is_some());
         // Expect STREAM + FIN only.
         assert_eq!(&builder[header_len..header_len + 2], &[0b1001, 0]);
@@ -1715,7 +1909,9 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         let header_len = builder.len();
         builder.set_limit(header_len + DATA16384.len() + 3);
-        let token = s.write_frame(&mut builder).unwrap();
+        let token = s
+            .write_frame(TransmissionPriority::default(), &mut builder)
+            .unwrap();
         assert!(token.is_some());
         // Expect STREAM + LEN + FIN.
         assert_eq!(
@@ -1741,7 +1937,9 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         let header_len = builder.len();
         builder.set_limit(header_len + 66);
-        let token = s.write_frame(&mut builder).unwrap();
+        let token = s
+            .write_frame(TransmissionPriority::default(), &mut builder)
+            .unwrap();
         assert!(token.is_some());
         // Expect STREAM + FIN only.
         assert_eq!(&builder[header_len..header_len + 2], &[0b1001, 0]);
@@ -1752,7 +1950,9 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         let header_len = builder.len();
         builder.set_limit(header_len + 67);
-        let token = s.write_frame(&mut builder).unwrap();
+        let token = s
+            .write_frame(TransmissionPriority::default(), &mut builder)
+            .unwrap();
         assert!(token.is_some());
         // Expect STREAM + LEN, not FIN.
         assert_eq!(&builder[header_len..header_len + 3], &[0b1010, 0, 63]);

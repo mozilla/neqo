@@ -25,6 +25,7 @@ use crate::packet::{PacketBuilder, PacketNumber, QuicVersion};
 use crate::recovery::RecoveryToken;
 use crate::recv_stream::RxStreamOrderer;
 use crate::send_stream::TxBuffer;
+use crate::stats::FrameStats;
 use crate::tparams::{TpZeroRttChecker, TransportParameters, TransportParametersHandler};
 use crate::tracking::PNSpace;
 use crate::{Error, Res};
@@ -223,6 +224,16 @@ impl Crypto {
             self.streams.send(PNSpace::from(r.epoch), &r.data);
         }
         Ok(())
+    }
+
+    pub fn write_frame(
+        &mut self,
+        space: PNSpace,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) -> Res<()> {
+        self.streams.write_frame(space, builder, tokens, stats)
     }
 
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
@@ -1241,14 +1252,16 @@ impl CryptoStreams {
         &mut self,
         space: PNSpace,
         builder: &mut PacketBuilder,
-    ) -> Res<Option<RecoveryToken>> {
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) -> Res<()> {
         let cs = self.get_mut(space).unwrap();
         if let Some((offset, data)) = cs.tx.next_bytes() {
             let mut header_len = 1 + Encoder::varint_len(offset) + 1;
 
             // Don't bother if there isn't room for the header and some data.
             if builder.remaining() < header_len + 1 {
-                return Ok(None);
+                return Ok(());
             }
             // Calculate length of data based on the minimum of:
             // - available data
@@ -1268,14 +1281,14 @@ impl CryptoStreams {
             cs.tx.mark_as_sent(offset, length);
 
             qdebug!("CRYPTO for {} offset={}, len={}", space, offset, length);
-            Ok(Some(RecoveryToken::Crypto(CryptoRecoveryToken {
+            tokens.push(RecoveryToken::Crypto(CryptoRecoveryToken {
                 space,
                 offset,
                 length,
-            })))
-        } else {
-            Ok(None)
+            }));
+            stats.crypto += 1;
         }
+        Ok(())
     }
 }
 
