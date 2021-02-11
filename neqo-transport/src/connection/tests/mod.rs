@@ -33,6 +33,7 @@ mod handshake;
 mod idle;
 mod keys;
 mod migration;
+mod priority;
 mod recovery;
 mod resumption;
 mod stream;

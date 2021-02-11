@@ -36,14 +36,14 @@ pub enum TransmissionPriority {
     /// This stream is more important than the functioning of the connection.
     /// Don't use this priority unless the stream really is that important.
     /// A stream at this priority can starve out other connection functions,
-    /// including flow control.
+    /// including flow control, which could be very bad.
     Critical,
     /// The stream is very important.  Stream data will be written ahead of
     /// some of the less critical connection functions, like path validation,
     /// connection ID management, and session tickets.
     Important,
     /// High priority streams are important, but not enough to disrupt
-    /// connection operation.
+    /// connection operation.  They go ahead of session tickets though.
     High,
     /// The default priority.
     Normal,
@@ -86,15 +86,19 @@ impl Add<RetransmissionPriority> for TransmissionPriority {
     type Output = Self;
     fn add(self, rhs: RetransmissionPriority) -> Self::Output {
         match rhs {
-            RetransmissionPriority::Critical => Self::Critical,
-            RetransmissionPriority::Important => Self::Important,
-            RetransmissionPriority::Increased => match self {
+            RetransmissionPriority::Fixed(fixed) => fixed,
+            RetransmissionPriority::Same => self,
+            RetransmissionPriority::Higher => match self {
                 Self::Critical => Self::Critical,
                 Self::Important | Self::High => Self::Important,
                 Self::Normal => Self::High,
                 Self::Low => Self::Normal,
             },
-            RetransmissionPriority::Same => self,
+            RetransmissionPriority::MuchHigher => match self {
+                Self::Critical | Self::Important => Self::Critical,
+                Self::High | Self::Normal => Self::Important,
+                Self::Low => Self::High,
+            },
         }
     }
 }
@@ -103,21 +107,25 @@ impl Add<RetransmissionPriority> for TransmissionPriority {
 /// of that data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetransmissionPriority {
-    /// Prioritize retransmission of this data over everything else.
-    /// Even the health of the connection.
-    Critical,
-    /// Make retransmission of this data important.
-    Important,
-    /// Increase the priority of retransmissions (the default).
-    /// Transmissions of `Critical` or `Important` aren't elevated further.
-    Increased,
-    /// Keep the priority the same for transmissions.
+    /// Prioritize retransmission at a fixed priority.
+    /// With this, it is possible to prioritize retransmissions lower than transmissions.
+    /// Doing that can create a deadlock with flow control which might cause the connection
+    /// to stall unless new data stops arriving fast enough that retransmissions can complete.
+    Fixed(TransmissionPriority),
+    /// Don't increase priority for retransmission.  This is probably not a good idea
+    /// as it could mean starving flow control.
     Same,
+    /// Increase the priority of retransmissions (the default).
+    /// Retransmissions of `Critical` or `Important` aren't elevated at all.
+    Higher,
+    /// Increase the priority of retransmissions a lot.
+    /// This is useful for streams that are particularly exposed to head-of-line blocking.
+    MuchHigher,
 }
 
 impl Default for RetransmissionPriority {
     fn default() -> Self {
-        Self::Increased
+        Self::Higher
     }
 }
 
@@ -589,19 +597,30 @@ impl SendStream {
     }
 
     /// Return the next range to be sent, if any.
+    /// If this is a retransmission, cut off what is sent at the retransmission
+    /// offset.
     fn next_bytes(&mut self, retransmission_only: bool) -> Option<(u64, &[u8])> {
         match self.state {
             SendStreamState::Send { ref send_buf } => {
-                send_buf.next_bytes().map(|(offset, slice)| {
-                    let len = if retransmission_only && self.retransmission_offset > offset {
-                        min(
-                            usize::try_from(self.retransmission_offset - offset).unwrap(),
-                            slice.len(),
-                        )
+                send_buf.next_bytes().and_then(|(offset, slice)| {
+                    if retransmission_only {
+                        qtrace!(
+                            [self],
+                            "next_bytes apply retransmission limit at {}",
+                            self.retransmission_offset
+                        );
+                        if self.retransmission_offset > offset {
+                            let len = min(
+                                usize::try_from(self.retransmission_offset - offset).unwrap(),
+                                slice.len(),
+                            );
+                            Some((offset, &slice[..len]))
+                        } else {
+                            None
+                        }
                     } else {
-                        slice.len()
-                    };
-                    (offset, &slice[..len])
+                        Some((offset, slice))
+                    }
                 })
             }
             SendStreamState::DataSent {
@@ -679,14 +698,14 @@ impl SendStream {
                     0
                 };
             if overhead > builder.remaining() {
-                qtrace!("SendStream::write_frame no space for header");
+                qtrace!([self], "write_frame no space for header");
                 return Ok(None);
             }
 
             let (length, fill) = Self::length_and_fill(data.len(), builder.remaining() - overhead);
             let fin = final_size.map_or(false, |fs| fs == offset + u64::try_from(length).unwrap());
             if length == 0 && !fin {
-                qtrace!("SendStream::write_frame no data, no fin");
+                qtrace!([self], "write_frame no data, no fin");
                 return Ok(None);
             }
 
@@ -755,7 +774,11 @@ impl SendStream {
                         .transition(SendStreamState::DataRecvd { final_size });
                 }
             }
-            _ => qtrace!("mark_as_acked called from state {}", self.state.name()),
+            _ => qtrace!(
+                [self],
+                "mark_as_acked called from state {}",
+                self.state.name()
+            ),
         }
     }
 
@@ -763,6 +786,11 @@ impl SendStream {
         self.retransmission_offset = max(
             self.retransmission_offset,
             offset + u64::try_from(len).unwrap(),
+        );
+        qtrace!(
+            [self],
+            "mark_as_lost retransmission offset={}",
+            self.retransmission_offset
         );
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_lost(offset, len);
@@ -824,10 +852,10 @@ impl SendStream {
             | SendStreamState::Send { .. }
             | SendStreamState::DataSent { .. }
             | SendStreamState::DataRecvd { .. } => {
-                qtrace!("Reset acked while in {} state?", self.state.name())
+                qtrace!([self], "Reset acked while in {} state?", self.state.name())
             }
             SendStreamState::ResetSent => self.state.transition(SendStreamState::ResetRecvd),
-            SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
+            SendStreamState::ResetRecvd => qtrace!([self], "already in ResetRecvd state"),
         };
     }
 
@@ -857,7 +885,7 @@ impl SendStream {
 
     fn send_internal(&mut self, buf: &[u8], atomic: bool) -> Res<usize> {
         if buf.is_empty() {
-            qerror!("zero-length send on stream {}", self.stream_id.as_u64());
+            qerror!([self], "zero-length send on stream");
             return Err(Error::InvalidInput);
         }
 
@@ -917,10 +945,10 @@ impl SendStream {
                     fin_acked: false,
                 });
             }
-            SendStreamState::DataSent { .. } => qtrace!("already in DataSent state"),
-            SendStreamState::DataRecvd { .. } => qtrace!("already in DataRecvd state"),
-            SendStreamState::ResetSent => qtrace!("already in ResetSent state"),
-            SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
+            SendStreamState::DataSent { .. } => qtrace!([self], "already in DataSent state"),
+            SendStreamState::DataRecvd { .. } => qtrace!([self], "already in DataRecvd state"),
+            SendStreamState::ResetSent => qtrace!([self], "already in ResetSent state"),
+            SendStreamState::ResetRecvd => qtrace!([self], "already in ResetRecvd state"),
         }
     }
 
@@ -953,6 +981,12 @@ impl SendStream {
             SendStreamState::ResetSent => qtrace!("already in ResetSent state"),
             SendStreamState::ResetRecvd => qtrace!("already in ResetRecvd state"),
         };
+    }
+}
+
+impl ::std::fmt::Display for SendStream {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "SendStream {}", self.stream_id)
     }
 }
 
@@ -1010,7 +1044,7 @@ impl SendStreams {
         stats: &mut FrameStats,
     ) -> Res<()> {
         qtrace!("write STREAM frames at priority {:?}", priority);
-        for (_, stream) in self {
+        for stream in self.0.values_mut() {
             if let Some(t) = stream.write_frame(priority, builder)? {
                 tokens.push(t);
                 stats.stream += 1;

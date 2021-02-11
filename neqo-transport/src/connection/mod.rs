@@ -1770,15 +1770,24 @@ impl Connection {
             return Ok(());
         }
 
-        self.crypto
-            .write_frame(PNSpace::ApplicationData, builder, tokens, stats)?;
+        self.flow_mgr
+            .borrow_mut()
+            .write_frames(builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
 
-        self.flow_mgr
-            .borrow_mut()
-            .write_frames(builder, tokens, stats)?;
+        self.send_streams
+            .write_frames(TransmissionPriority::Important, builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        self.cid_manager.write_frames(builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+        self.paths.write_frames(builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
@@ -1789,23 +1798,19 @@ impl Connection {
             return Ok(());
         }
 
-        self.cid_manager.write_frames(builder, tokens, stats)?;
+        self.crypto
+            .write_frame(PNSpace::ApplicationData, builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
 
-        self.paths.write_frames(builder, tokens, stats)?;
+        self.new_token.write_frames(builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
 
         self.send_streams
             .write_frames(TransmissionPriority::Normal, builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
-        }
-
-        self.new_token.write_frames(builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
