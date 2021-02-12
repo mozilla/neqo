@@ -1750,6 +1750,7 @@ impl Connection {
     }
 
     /// Write the frames that are exchanged in the application data space.
+    /// The order of calls here determines the relative priority of frames.
     fn write_appdata_frames(
         &mut self,
         builder: &mut PacketBuilder,
@@ -1783,6 +1784,7 @@ impl Connection {
             return Ok(());
         }
 
+        // NEW_CONNECTION_ID and RETIRE_CONNECTION_ID.
         self.cid_manager.write_frames(builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
@@ -1798,19 +1800,20 @@ impl Connection {
             return Ok(());
         }
 
+        self.send_streams
+            .write_frames(TransmissionPriority::Normal, builder, tokens, stats)?;
+        if builder.remaining() < 2 {
+            return Ok(());
+        }
+
+        // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
+        // Both of these are only used for resumption and so can be relatively low priority.
         self.crypto
             .write_frame(PNSpace::ApplicationData, builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }
-
         self.new_token.write_frames(builder, tokens, stats)?;
-        if builder.remaining() < 2 {
-            return Ok(());
-        }
-
-        self.send_streams
-            .write_frames(TransmissionPriority::Normal, builder, tokens, stats)?;
         if builder.remaining() < 2 {
             return Ok(());
         }

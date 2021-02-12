@@ -6,10 +6,13 @@
 
 use super::super::{Connection, Error, Output};
 use super::{connect, default_client, default_server, fill_cwnd, maybe_authenticate};
+use crate::addr_valid::{AddressValidation, ValidateAddress};
 use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 use crate::{ConnectionEvent, StreamType};
 
 use neqo_common::event::Provider;
+use std::cell::RefCell;
+use std::rc::Rc;
 use test_fixture::{self, now};
 
 const BLOCK_SIZE: usize = 4_096;
@@ -62,9 +65,9 @@ fn relative() {
     let mut server = default_server();
     connect(&mut client, &mut server);
 
-    // Normal is created first, but it is lower priority.
-    let normal = client.stream_create(StreamType::UniDi).unwrap();
-    fill_stream(&mut client, normal);
+    // id_normal is created first, but it is lower priority.
+    let id_normal = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, id_normal);
     let high = client.stream_create(StreamType::UniDi).unwrap();
     fill_stream(&mut client, high);
     client
@@ -78,10 +81,60 @@ fn relative() {
     let dgram = client.process_output(now()).dgram();
     server.process_input(dgram.unwrap(), now());
 
-    // The "normal" stream will get a `NewStream` event, but no data.
+    // The "id_normal" stream will get a `NewStream` event, but no data.
     for e in server.events() {
         if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-            assert_ne!(stream_id, normal);
+            assert_ne!(stream_id, id_normal);
+        }
+    }
+}
+
+/// Higher priority streams get sent ahead of lower ones, even when
+/// the higher priority stream is written to later.
+#[test]
+fn reprioritize() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // id_normal is created first, but it is lower priority.
+    let id_normal = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, id_normal);
+    let id_high = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, id_high);
+    client
+        .stream_priority(
+            id_high,
+            TransmissionPriority::High,
+            RetransmissionPriority::default(),
+        )
+        .unwrap();
+
+    let dgram = client.process_output(now()).dgram();
+    server.process_input(dgram.unwrap(), now());
+
+    // The "id_normal" stream will get a `NewStream` event, but no data.
+    for e in server.events() {
+        if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+            assert_ne!(stream_id, id_normal);
+        }
+    }
+
+    // When the high priority stream drops in priority, the streams are equal
+    // priority and so their stream ID determines what is sent.
+    client
+        .stream_priority(
+            id_high,
+            TransmissionPriority::Normal,
+            RetransmissionPriority::default(),
+        )
+        .unwrap();
+    let dgram = client.process_output(now()).dgram();
+    server.process_input(dgram.unwrap(), now());
+
+    for e in server.events() {
+        if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+            assert_ne!(stream_id, id_high);
         }
     }
 }
@@ -95,11 +148,11 @@ fn repairing_loss() {
     let mut now = now();
 
     // Send a few packets at low priority, lose one.
-    let low = client.stream_create(StreamType::UniDi).unwrap();
-    fill_stream(&mut client, low);
+    let id_low = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, id_low);
     client
         .stream_priority(
-            low,
+            id_low,
             TransmissionPriority::Low,
             RetransmissionPriority::Higher,
         )
@@ -110,7 +163,7 @@ fn repairing_loss() {
         match client.process_output(now) {
             Output::Datagram(d) => server.process_input(d, now),
             Output::Callback(delay) => now += delay,
-            _ => unreachable!(),
+            Output::None => unreachable!(),
         }
     }
 
@@ -118,19 +171,19 @@ fn repairing_loss() {
     let ack = server.process_output(now).dgram();
     let _ = server.events().count(); // Drain events.
 
-    let normal = client.stream_create(StreamType::UniDi).unwrap();
-    fill_stream(&mut client, normal);
+    let id_normal = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, id_normal);
 
     let dgram = client.process(ack, now).dgram();
     assert_eq!(client.stats().lost, 1); // Client should have noticed the loss.
     server.process_input(dgram.unwrap(), now);
 
-    // Only the "normal" stream has data as the retransmission of the data from
-    // the lost packet is more important than the high priority stream.
+    // Only the normal priority stream has data as the retransmission of the data
+    // from the lost packet is more important than new data from the high priority stream.
     for e in server.events() {
         println!("Event: {:?}", e);
         if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
-            assert_eq!(stream_id, low);
+            assert_eq!(stream_id, id_low);
         }
     }
 
@@ -141,7 +194,7 @@ fn repairing_loss() {
     let dgram = client.process_output(now).dgram();
     server.process_input(dgram.unwrap(), now);
     assert!(server.events().any(
-        |e| matches!(e, ConnectionEvent::RecvStreamReadable { stream_id } if stream_id == normal),
+        |e| matches!(e, ConnectionEvent::RecvStreamReadable { stream_id } if stream_id == id_normal),
     ));
 }
 
@@ -155,6 +208,8 @@ fn critical() {
     // That allows this to test that critical streams pre-empt most frame types.
     let dgram = client.process_output(now).dgram();
     let dgram = server.process(dgram, now).dgram();
+    client.process_input(dgram.unwrap(), now);
+    maybe_authenticate(&mut client);
 
     let id = server.stream_create(StreamType::UniDi).unwrap();
     server
@@ -164,49 +219,183 @@ fn critical() {
             RetransmissionPriority::default(),
         )
         .unwrap();
+
     // Can't use fill_cwnd here because the server is blocked on the amplification
     // limit, so it can't fill the congestion window.
+    while server.stream_create(StreamType::UniDi).is_ok() {}
+
     fill_stream(&mut server, id);
-    let stats_before = server.stats();
-    let mut packets = Vec::new();
-    // Get some packets.
-    while let Output::Datagram(dgram) = server.process_output(now) {
-        packets.push(dgram);
-    }
-    let stats_after = server.stats();
-    assert_eq!(stats_after.frame_tx.crypto, stats_before.frame_tx.crypto);
-    assert_eq!(stats_after.frame_tx.stream_data_blocked, 0);
-    assert_eq!(stats_after.frame_tx.new_connection_id, 0);
-    assert_eq!(stats_after.frame_tx.new_token, 0);
-    assert_eq!(stats_after.frame_tx.handshake_done, 0);
+    let stats_before = server.stats().frame_tx;
+    let dgram = server.process_output(now).dgram();
+    let stats_after = server.stats().frame_tx;
+    assert_eq!(stats_after.crypto, stats_before.crypto);
+    assert_eq!(stats_after.streams_blocked, 0);
+    assert_eq!(stats_after.new_connection_id, 0);
+    assert_eq!(stats_after.new_token, 0);
+    assert_eq!(stats_after.handshake_done, 0);
 
-    // Complete the handshake.  Read the bytes.
-    client.process_input(dgram.unwrap(), now);
-    maybe_authenticate(&mut client);
-    for p in packets {
-        client.process_input(p, now);
-    }
-
-    // Drain the stream so we can go again.
-    loop {
-        let mut buf = [0; BLOCK_SIZE];
-        let (count, end) = client.stream_recv(id, &mut buf).unwrap();
-        assert!(!end);
-        if count == 0 {
-            break;
-        }
-    }
-    // Finish the handshake and send an ACK for all those packets.
-    let dgram = client.process_output(now).dgram();
+    // Complete the handshake.
+    let dgram = client.process(dgram, now).dgram();
     server.process_input(dgram.unwrap(), now);
 
     // Critical beats everything but HANDSHAKE_DONE.
-    let stats_before = server.stats();
+    let stats_before = server.stats().frame_tx;
     let _ = fill_cwnd(&mut server, id, now);
-    let stats_after = server.stats();
-    assert_eq!(stats_after.frame_tx.crypto, stats_before.frame_tx.crypto);
-    assert_eq!(stats_after.frame_tx.stream_data_blocked, 0);
-    assert_eq!(stats_after.frame_tx.new_connection_id, 0);
-    assert_eq!(stats_after.frame_tx.new_token, 0);
-    assert_eq!(stats_after.frame_tx.handshake_done, 1);
+    let stats_after = server.stats().frame_tx;
+    assert_eq!(stats_after.crypto, stats_before.crypto);
+    assert_eq!(stats_after.streams_blocked, 0);
+    assert_eq!(stats_after.new_connection_id, 0);
+    assert_eq!(stats_after.new_token, 0);
+    assert_eq!(stats_after.handshake_done, 1);
+}
+
+#[test]
+fn important() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let now = now();
+
+    // Rather than connect, send stream data in 0.5-RTT.
+    // That allows this to test that important streams pre-empt most frame types.
+    let dgram = client.process_output(now).dgram();
+    let dgram = server.process(dgram, now).dgram();
+    client.process_input(dgram.unwrap(), now);
+    maybe_authenticate(&mut client);
+
+    let id = server.stream_create(StreamType::UniDi).unwrap();
+    server
+        .stream_priority(
+            id,
+            TransmissionPriority::Important,
+            RetransmissionPriority::default(),
+        )
+        .unwrap();
+    fill_stream(&mut server, id);
+
+    // Important beats everything but flow control.
+    // Make enough streams to get a STREAMS_BLOCKED frame out.
+    while server.stream_create(StreamType::UniDi).is_ok() {}
+
+    let stats_before = server.stats().frame_tx;
+    let dgram = server.process_output(now).dgram();
+    let stats_after = server.stats().frame_tx;
+    assert_eq!(stats_after.crypto, stats_before.crypto);
+    assert_eq!(stats_after.streams_blocked, 1);
+    assert_eq!(stats_after.new_connection_id, 0);
+    assert_eq!(stats_after.new_token, 0);
+    assert_eq!(stats_after.handshake_done, 0);
+    assert_eq!(stats_after.stream, stats_before.stream + 1);
+
+    // Complete the handshake.
+    let dgram = client.process(dgram, now).dgram();
+    server.process_input(dgram.unwrap(), now);
+
+    // Important beats everything but flow control.
+    let stats_before = server.stats().frame_tx;
+    let _ = fill_cwnd(&mut server, id, now);
+    let stats_after = server.stats().frame_tx;
+    assert_eq!(stats_after.crypto, stats_before.crypto);
+    assert_eq!(stats_after.streams_blocked, 1);
+    assert_eq!(stats_after.new_connection_id, 0);
+    assert_eq!(stats_after.new_token, 0);
+    assert_eq!(stats_after.handshake_done, 1);
+    assert!(stats_after.stream > stats_before.stream);
+}
+
+#[test]
+fn high_normal() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let now = now();
+
+    // Rather than connect, send stream data in 0.5-RTT.
+    // That allows this to test that important streams pre-empt most frame types.
+    let dgram = client.process_output(now).dgram();
+    let dgram = server.process(dgram, now).dgram();
+    client.process_input(dgram.unwrap(), now);
+    maybe_authenticate(&mut client);
+
+    let id = server.stream_create(StreamType::UniDi).unwrap();
+    server
+        .stream_priority(
+            id,
+            TransmissionPriority::High,
+            RetransmissionPriority::default(),
+        )
+        .unwrap();
+    fill_stream(&mut server, id);
+
+    // Important beats everything but flow control.
+    // Make enough streams to get a STREAMS_BLOCKED frame out.
+    while server.stream_create(StreamType::UniDi).is_ok() {}
+
+    let stats_before = server.stats().frame_tx;
+    let dgram = server.process_output(now).dgram();
+    let stats_after = server.stats().frame_tx;
+    assert_eq!(stats_after.crypto, stats_before.crypto);
+    assert_eq!(stats_after.streams_blocked, 1);
+    assert_eq!(stats_after.new_connection_id, 0);
+    assert_eq!(stats_after.new_token, 0);
+    assert_eq!(stats_after.handshake_done, 0);
+    assert_eq!(stats_after.stream, stats_before.stream + 1);
+
+    // Complete the handshake.
+    let dgram = client.process(dgram, now).dgram();
+    server.process_input(dgram.unwrap(), now);
+
+    // High or Normal doesn't beat NEW_CONNECTION_ID,
+    // but they beat CRYPTO/NEW_TOKEN.
+    let stats_before = server.stats().frame_tx;
+    server.send_ticket(now, &[]).unwrap();
+    let _ = fill_cwnd(&mut server, id, now);
+    let stats_after = server.stats().frame_tx;
+    assert_eq!(stats_after.crypto, stats_before.crypto);
+    assert_eq!(stats_after.streams_blocked, 1);
+    assert_ne!(stats_after.new_connection_id, 0); // Note: > 0
+    assert_eq!(stats_after.new_token, 0);
+    assert_eq!(stats_after.handshake_done, 1);
+    assert!(stats_after.stream > stats_before.stream);
+}
+
+#[test]
+fn low() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let now = now();
+    // Use address validation; note that we need to hold a strong reference
+    // as the server will only hold a weak reference.
+    let validation = Rc::new(RefCell::new(
+        AddressValidation::new(now, ValidateAddress::Never).unwrap(),
+    ));
+    server.set_validation(Rc::clone(&validation));
+    connect(&mut client, &mut server);
+
+    let id = server.stream_create(StreamType::UniDi).unwrap();
+    server
+        .stream_priority(
+            id,
+            TransmissionPriority::Low,
+            RetransmissionPriority::default(),
+        )
+        .unwrap();
+    fill_stream(&mut server, id);
+
+    // Send a session ticket and make it big enough to require a whole packet.
+    // The resulting CRYPTO frame beats out the stream data.
+    let stats_before = server.stats().frame_tx;
+    server.send_ticket(now, &[0; 2048]).unwrap();
+    let _ = server.process_output(now);
+    let stats_after = server.stats().frame_tx;
+    assert_eq!(stats_after.crypto, stats_before.crypto + 1);
+    assert_eq!(stats_after.stream, stats_before.stream);
+
+    // The above can't test if NEW_TOKEN wins because once that fits in a packet,
+    // it is very hard to ensure that the STREAM frame won't also fit.
+    // However, we can ensure that the next packet doesn't consist of just STREAM.
+    let stats_before = server.stats().frame_tx;
+    let _ = server.process_output(now);
+    let stats_after = server.stats().frame_tx;
+    assert_eq!(stats_after.crypto, stats_before.crypto + 1);
+    assert_eq!(stats_after.new_token, 1);
+    assert_eq!(stats_after.stream, stats_before.stream + 1);
 }
