@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+if [[ "$1" == "-v" ]]; then
+    verbose=1
+    shift
+else
+    verbose=
+fi
+
+if [[ "$#" -ge 1 ]]; then
+    files=("$@")
+else
+    files=($(find . -name '*.rs' -print | sed -e 's~^\./~~;/^target\//d'))
+fi
+
+dirs=($(for f in "${files[@]}"; do echo "${f%%/*}"; done | uniq))
+
+find_internal_errors() {
+    d="$1"
+    shift
+    for f in "$@"; do
+        if [[ "${f#$d/}" != "$f" ]]; then
+            sed -e '/Error::\(InternalError\|HttpInternal(\)/{s/.*[^a-zA-Z]\([a-zA-Z]*Error::[a-zA-Z]*([0-9]*)\).*/\1/;t;};d' "$f"
+        fi
+    done
+}
+
+err=0
+for d in "${dirs[@]}"; do
+    all=($(find_internal_errors "$d" "${files[@]}"))
+    print_all() { for e in "${all[@]}"; do echo "$e"; done; }
+    if [[ -n "$verbose" ]]; then
+        echo "$d:"
+        print_all | paste /dev/null /dev/stdin
+    fi
+    unique=($(print_all | sort | uniq))
+    if [[ "${#all[@]}" -ne "${#unique[@]}" ]]; then
+        echo "Found ${#all[@]} internal errors, but only ${#unique[@]} unique values." 1>&2
+        err=1
+    fi
+done
+exit $err

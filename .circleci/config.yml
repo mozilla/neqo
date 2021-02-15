@@ -68,8 +68,20 @@ jobs:
           command: cargo clippy -v --all-targets --tests
 
       - run:
-          name: Test
+          name: Unit Tests
           command: cargo test -v
+
+      - run:
+          name: Command-line Utilities
+          command: |
+            set -e; spid=""; \
+            trap '[ -z "$spid" ] || kill -9 "$spid"' EXIT; \
+            cargo run --bin neqo-server -- '0.0.0.0:4433' & spid=$!; \
+            cargo run --bin neqo-client -- 'https://127.0.0.1:4433/'
+
+      - run:
+          name: Internal Errors Check
+          command: ./check_internal_errors
 
       - run:
           name: "Prepare for Caching"

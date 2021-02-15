@@ -8,15 +8,17 @@
 #![warn(clippy::pedantic)]
 
 use neqo_common::{event::Provider, Datagram, Decoder};
-use neqo_crypto::{init_db, AllowZeroRtt, AntiReplay, AuthenticationStatus};
+use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, ConnectionEvent, FixedConnectionIdManager, QuicVersion,
-    State,
+    Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
+    ConnectionIdRef, ConnectionParameters, State,
 };
 
 use std::cell::RefCell;
+use std::cmp::max;
+use std::convert::TryFrom;
 use std::mem;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::rc::Rc;
@@ -70,10 +72,43 @@ pub const DEFAULT_ALPN_H3: &[&str] = &["h3-29"];
 
 /// Create a default socket address.
 #[must_use]
-pub fn loopback() -> SocketAddr {
+pub fn addr() -> SocketAddr {
     // These could be const functions, but they aren't...
-    let localhost_v6 = IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
-    SocketAddr::new(localhost_v6, 443)
+    let v6ip = IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1));
+    SocketAddr::new(v6ip, 443)
+}
+
+/// This connection ID generation scheme is the worst, but it doesn't produce collisions.
+/// It produces a connection ID with a length byte, 4 counter bytes and random padding.
+#[derive(Debug, Default)]
+pub struct CountingConnectionIdGenerator {
+    counter: u32,
+}
+
+impl ConnectionIdDecoder for CountingConnectionIdGenerator {
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        let len = usize::from(dec.peek_byte().unwrap());
+        dec.decode(len).map(ConnectionIdRef::from)
+    }
+}
+
+impl ConnectionIdGenerator for CountingConnectionIdGenerator {
+    fn generate_cid(&mut self) -> Option<ConnectionId> {
+        let mut r = random(20);
+        // Randomize length, but ensure that the connection ID is long
+        // enough to pass for an original destination connection ID.
+        r[0] = max(8, 5 + ((r[0] >> 4) & r[0]));
+        r[1] = u8::try_from(self.counter >> 24).unwrap();
+        r[2] = u8::try_from((self.counter >> 16) & 0xff).unwrap();
+        r[3] = u8::try_from((self.counter >> 8) & 0xff).unwrap();
+        r[4] = u8::try_from(self.counter & 0xff).unwrap();
+        self.counter += 1;
+        Some(ConnectionId::from(&r[..usize::from(r[0])]))
+    }
+
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
 }
 
 /// Create a transport client with default configuration.
@@ -83,11 +118,10 @@ pub fn default_client() -> Connection {
     Connection::new_client(
         DEFAULT_SERVER_NAME,
         DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
-        loopback(),
-        loopback(),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        addr(),
+        addr(),
+        ConnectionParameters::default(),
     )
     .expect("create a default client")
 }
@@ -110,9 +144,8 @@ fn make_default_server(alpn: &[impl AsRef<str>]) -> Connection {
     let mut c = Connection::new_server(
         DEFAULT_KEYS,
         alpn,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        ConnectionParameters::default(),
     )
     .expect("create a default server");
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
@@ -161,11 +194,10 @@ pub fn default_http3_client() -> Http3Client {
     fixture_init();
     Http3Client::new(
         DEFAULT_SERVER_NAME,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
-        loopback(),
-        loopback(),
-        &CongestionControlAlgorithm::NewReno,
-        QuicVersion::default(),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        addr(),
+        addr(),
+        ConnectionParameters::default(),
         &Http3Parameters {
             qpack_settings: QpackSettings {
                 max_table_size_encoder: 100,
@@ -187,7 +219,7 @@ pub fn default_http3_server() -> Http3Server {
         DEFAULT_KEYS,
         DEFAULT_ALPN_H3,
         anti_replay(),
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         QpackSettings {
             max_table_size_encoder: 100,
             max_table_size_decoder: 100,

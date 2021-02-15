@@ -55,7 +55,7 @@ where
     .try_with(|aead| f(&aead.borrow()))
     .map_err(|e| {
         qerror!("Unable to access Retry AEAD: {:?}", e);
-        Error::InternalError
+        Error::InternalError(6)
     })?
 }
 

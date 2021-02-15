@@ -33,7 +33,9 @@ use neqo_crypto::{
 use neqo_http3::{Error, Http3Server, Http3ServerEvent};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
-    server::ValidateAddress, FixedConnectionIdManager as RandomConnectionIdGenerator, Output,
+    server::ValidateAddress, stream_id::StreamIndex, tparams::PreferredAddress,
+    CongestionControlAlgorithm, ConnectionParameters, Output, RandomConnectionIdGenerator,
+    StreamType,
 };
 
 use crate::old_https::Http09Server;
@@ -90,6 +92,9 @@ struct Args {
     /// Use http 0.9 instead of HTTP/3
     use_old_http: bool,
 
+    #[structopt(flatten)]
+    quic_parameters: QuicParameters,
+
     #[structopt(name = "retry", long)]
     /// Force a retry
     retry: bool,
@@ -121,11 +126,50 @@ impl Args {
             .collect::<Vec<_>>()
     }
 
+    fn get_sock_addr<F>(opt: &Option<String>, v: &str, f: F) -> Option<SocketAddr>
+    where
+        F: FnMut(&SocketAddr) -> bool,
+    {
+        let addr = opt
+            .iter()
+            .flat_map(|spa| spa.to_socket_addrs().ok())
+            .flatten()
+            .find(f);
+        if opt.is_some() != addr.is_some() {
+            panic!(
+                "unable to resolve '{}' to an {} address",
+                opt.as_ref().unwrap(),
+                v
+            );
+        }
+        addr
+    }
+
+    fn preferred_address_v4(&self) -> Option<SocketAddr> {
+        Self::get_sock_addr(&self.preferred_address_v4, "IPv4", |addr| addr.is_ipv4())
+    }
+
+    fn preferred_address_v6(&self) -> Option<SocketAddr> {
+        Self::get_sock_addr(&self.preferred_address_v6, "IPv6", |addr| addr.is_ipv6())
+    }
+
+    fn preferred_address(&self) -> Option<PreferredAddress> {
+        let v4 = self.preferred_address_v4();
+        let v6 = self.preferred_address_v6();
+        if v4.is_none() && v6.is_none() {
+            None
+        } else {
+            Some(PreferredAddress::new(v4, v6))
+        }
+    }
+
     fn listen_addresses(&self) -> Vec<SocketAddr> {
         self.hosts
             .iter()
             .filter_map(|host| host.to_socket_addrs().ok())
             .flatten()
+            .chain(self.preferred_address_v4())
+            .chain(self.preferred_address_v6())
             .collect()
     }
 
@@ -146,6 +190,30 @@ impl Args {
         } else {
             Instant::now()
         }
+    }
+}
+
+#[derive(Debug, StructOpt)]
+struct QuicParameters {
+    #[structopt(long, default_value = "16")]
+    /// Set the MAX_STREAMS_BIDI limit.
+    max_streams_bidi: u64,
+
+    #[structopt(long, default_value = "16")]
+    /// Set the MAX_STREAMS_UNI limit.
+    max_streams_uni: u64,
+
+    #[structopt(long = "cc", default_value = "newreno")]
+    /// The congestion controller to use.
+    congestion_control: CongestionControlAlgorithm,
+}
+
+impl QuicParameters {
+    fn get(&self) -> ConnectionParameters {
+        ConnectionParameters::default()
+            .max_streams(StreamType::BiDi, StreamIndex::new(self.max_streams_bidi))
+            .max_streams(StreamType::UniDi, StreamIndex::new(self.max_streams_uni))
+            .cc_algorithm(self.congestion_control)
     }
 }
 
@@ -382,11 +450,13 @@ impl ServersRunner {
                     &[args.alpn.clone()],
                     anti_replay,
                     cid_mgr,
+                    args.preferred_address(),
+                    args.quic_parameters.get(),
                 )
                 .expect("We cannot make a server!"),
             )
         } else {
-            let server = Http3Server::new(
+            let mut server = Http3Server::new(
                 args.now(),
                 &[args.key.clone()],
                 &[args.alpn.clone()],
@@ -399,6 +469,9 @@ impl ServersRunner {
                 },
             )
             .expect("We cannot make a server!");
+            if let Some(spa) = args.preferred_address() {
+                server.set_preferred_address(spa);
+            }
             Box::new(server)
         };
         svr.set_ciphers(&args.get_ciphers());
@@ -523,7 +596,12 @@ fn main() -> Result<(), io::Error> {
     if let Some(testcase) = args.qns_test.as_ref() {
         match testcase.as_str() {
             "http3" => (),
-            "handshake" | "transfer" | "resumption" | "zerortt" | "multiconnect" => {
+            "zerortt" => {
+                args.use_old_http = true;
+                args.alpn = "hq-29".into();
+                args.quic_parameters.max_streams_bidi = 100;
+            }
+            "handshake" | "transfer" | "resumption" | "multiconnect" => {
                 args.use_old_http = true;
                 args.alpn = "hq-29".into();
             }

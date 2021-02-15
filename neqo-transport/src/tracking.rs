@@ -12,7 +12,6 @@ use std::cmp::min;
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::ops::{Index, IndexMut};
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use neqo_common::{qdebug, qinfo, qtrace, qwarn};
@@ -21,6 +20,7 @@ use neqo_crypto::{Epoch, TLS_EPOCH_HANDSHAKE, TLS_EPOCH_INITIAL};
 use crate::packet::{PacketBuilder, PacketNumber, PacketType};
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
+use crate::{Error, Res};
 
 use smallvec::{smallvec, SmallVec};
 
@@ -137,7 +137,7 @@ pub struct SentPacket {
     pub pn: PacketNumber,
     ack_eliciting: bool,
     pub time_sent: Instant,
-    pub tokens: Rc<Vec<RecoveryToken>>,
+    pub tokens: Vec<RecoveryToken>,
 
     time_declared_lost: Option<Instant>,
     /// After a PTO, this is true when the packet has been released.
@@ -152,7 +152,7 @@ impl SentPacket {
         pn: PacketNumber,
         time_sent: Instant,
         ack_eliciting: bool,
-        tokens: Rc<Vec<RecoveryToken>>,
+        tokens: Vec<RecoveryToken>,
         size: usize,
     ) -> Self {
         Self {
@@ -200,11 +200,8 @@ impl SentPacket {
     /// Ask whether this tracked packet has been declared lost for long enough
     /// that it can be expired and no longer tracked.
     pub fn expired(&self, now: Instant, expiration_period: Duration) -> bool {
-        if let Some(loss_time) = self.time_declared_lost {
-            (loss_time + expiration_period) <= now
-        } else {
-            false
-        }
+        self.time_declared_lost
+            .map_or(false, |loss_time| (loss_time + expiration_period) <= now)
     }
 
     /// Whether the packet contents were cleared out after a PTO.
@@ -416,7 +413,8 @@ impl RecvdPackets {
     }
 
     /// Add the packet to the tracked set.
-    pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) {
+    /// Return true if the packet was the largest received so far.
+    pub fn set_received(&mut self, now: Instant, pn: PacketNumber, ack_eliciting: bool) -> bool {
         let next_in_order_pn = self.ranges.front().map_or(0, |pr| pr.largest + 1);
         qdebug!(
             [self],
@@ -429,9 +427,12 @@ impl RecvdPackets {
         self.trim_ranges();
 
         // The new addition was the largest, so update the time we use for calculating ACK delay.
-        if pn >= next_in_order_pn {
+        let largest = if pn >= next_in_order_pn {
             self.largest_pn_time = Some(now);
-        }
+            true
+        } else {
+            false
+        };
 
         if ack_eliciting {
             self.pkts_since_last_ack += 1;
@@ -455,6 +456,7 @@ impl RecvdPackets {
             }
             qdebug!([self], "Set ACK timer to {:?}", self.ack_time);
         }
+        largest
     }
 
     /// Check if the packet is a duplicate.
@@ -635,9 +637,15 @@ impl AckTracker {
         now: Instant,
         builder: &mut PacketBuilder,
         stats: &mut FrameStats,
-    ) -> Option<RecoveryToken> {
-        self.get_mut(pn_space)
-            .and_then(|space| space.write_frame(now, builder, stats))
+    ) -> Res<Option<RecoveryToken>> {
+        let res = self
+            .get_mut(pn_space)
+            .and_then(|space| space.write_frame(now, builder, stats));
+
+        if builder.len() > builder.limit() {
+            return Err(Error::InternalError(24));
+        }
+        Ok(res)
     }
 }
 
@@ -847,12 +855,14 @@ mod tests {
             .set_received(*NOW, 0, true);
         // The reference time for `ack_time` has to be in the past or we filter out the timer.
         assert!(tracker.ack_time(*NOW - Duration::from_millis(1)).is_some());
-        let token = tracker.write_frame(
-            PNSpace::Initial,
-            *NOW,
-            &mut builder,
-            &mut FrameStats::default(),
-        );
+        let token = tracker
+            .write_frame(
+                PNSpace::Initial,
+                *NOW,
+                &mut builder,
+                &mut FrameStats::default(),
+            )
+            .unwrap();
         assert!(token.is_some());
 
         // Mark another packet as received so we have cause to send another ACK in that space.
@@ -874,6 +884,7 @@ mod tests {
                 &mut builder,
                 &mut FrameStats::default()
             )
+            .unwrap()
             .is_none());
         if let RecoveryToken::Ack(tok) = token.unwrap() {
             tracker.acked(&tok); // Should be a noop.
@@ -894,12 +905,14 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         builder.set_limit(10);
 
-        let token = tracker.write_frame(
-            PNSpace::Initial,
-            *NOW,
-            &mut builder,
-            &mut FrameStats::default(),
-        );
+        let token = tracker
+            .write_frame(
+                PNSpace::Initial,
+                *NOW,
+                &mut builder,
+                &mut FrameStats::default(),
+            )
+            .unwrap();
         assert!(token.is_none());
         assert_eq!(builder.len(), 1); // Only the short packet header has been added.
     }
@@ -920,12 +933,14 @@ mod tests {
         let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
         builder.set_limit(32);
 
-        let token = tracker.write_frame(
-            PNSpace::Initial,
-            *NOW,
-            &mut builder,
-            &mut FrameStats::default(),
-        );
+        let token = tracker
+            .write_frame(
+                PNSpace::Initial,
+                *NOW,
+                &mut builder,
+                &mut FrameStats::default(),
+            )
+            .unwrap();
         assert!(token.is_some());
 
         let mut dec = builder.as_decoder();

@@ -9,9 +9,9 @@
 
 use neqo_common::Datagram;
 use neqo_transport::{
-    CongestionControlAlgorithm, Connection, FixedConnectionIdManager, QuicVersion, State,
+    Connection, ConnectionParameters, QuicVersion, RandomConnectionIdGenerator, State,
 };
-use test_fixture::{self, loopback, now};
+use test_fixture::{self, addr, now};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -255,9 +255,8 @@ fn make_server(quic_version: QuicVersion) -> Connection {
     Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
-        &CongestionControlAlgorithm::NewReno,
-        quic_version,
+        Rc::new(RefCell::new(RandomConnectionIdGenerator::new(5))),
+        ConnectionParameters::default().quic_version(quic_version),
     )
     .expect("create a default server")
 }
@@ -265,7 +264,7 @@ fn make_server(quic_version: QuicVersion) -> Connection {
 fn process_client_initial(quic_version: QuicVersion, packet: &[u8]) {
     let mut server = make_server(quic_version);
 
-    let dgram = Datagram::new(loopback(), loopback(), packet);
+    let dgram = Datagram::new(addr(), addr(), packet);
     assert_eq!(*server.state(), State::Init);
     let out = server.process(Some(dgram), now());
     assert_eq!(*server.state(), State::Handshaking);

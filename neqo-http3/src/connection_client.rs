@@ -20,8 +20,8 @@ use neqo_common::{
 use neqo_crypto::{agent::CertificateInfo, AuthenticationStatus, ResumptionToken, SecretAgentInfo};
 use neqo_qpack::{QpackSettings, Stats as QpackStats};
 use neqo_transport::{
-    AppError, CongestionControlAlgorithm, Connection, ConnectionEvent, ConnectionId,
-    ConnectionIdManager, Output, QuicVersion, Stats as TransportStats, StreamId, StreamType,
+    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator,
+    ConnectionParameters, Output, QuicVersion, Stats as TransportStats, StreamId, StreamType,
     ZeroRttState,
 };
 use std::cell::RefCell;
@@ -93,22 +93,20 @@ impl Http3Client {
     /// the socket can't be created or configured.
     pub fn new(
         server_name: &str,
-        cid_manager: Rc<RefCell<dyn ConnectionIdManager>>,
+        cid_manager: Rc<RefCell<dyn ConnectionIdGenerator>>,
         local_addr: SocketAddr,
         remote_addr: SocketAddr,
-        cc_algorithm: &CongestionControlAlgorithm,
-        quic_version: QuicVersion,
+        conn_params: ConnectionParameters,
         http3_parameters: &Http3Parameters,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
             Connection::new_client(
                 server_name,
-                &[alpn_from_quic_version(quic_version)],
+                &[alpn_from_quic_version(conn_params.get_quic_version())],
                 cid_manager,
                 local_addr,
                 remote_addr,
-                cc_algorithm,
-                quic_version,
+                conn_params,
             )?,
             http3_parameters,
         ))
@@ -191,9 +189,10 @@ impl Http3Client {
         qtrace!([self], "  settings {}", hex_with_len(&settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
         let mut settings = HSettings::default();
-        settings
-            .decode_frame_contents(&mut dec_settings)
-            .map_err(|_| Error::InvalidResumptionToken)?;
+        Error::map_error(
+            settings.decode_frame_contents(&mut dec_settings),
+            Error::InvalidResumptionToken,
+        )?;
         let tok = dec.decode_remainder();
         qtrace!([self], "  Transport token {}", hex(&tok));
         self.conn.enable_resumption(now, tok)?;
@@ -422,11 +421,9 @@ impl Http3Client {
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
         let stream_id = self.push_handler.borrow_mut().get_active_stream_id(push_id);
-        if let Some(id) = stream_id {
+        stream_id.map_or(Err(Error::InvalidStreamId), |id| {
             self.read_response_data(now, id, buf)
-        } else {
-            Err(Error::InvalidStreamId)
-        }
+        })
     }
 
     pub fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
@@ -747,20 +744,20 @@ mod tests {
     use neqo_qpack::encoder::QPackEncoder;
     use neqo_transport::tparams::{self, TransportParameter};
     use neqo_transport::{
-        CloseError, CongestionControlAlgorithm, ConnectionEvent, FixedConnectionIdManager, Output,
-        QuicVersion, State, RECV_BUFFER_SIZE, SEND_BUFFER_SIZE,
+        ConnectionError, ConnectionEvent, ConnectionParameters, Output, State, RECV_BUFFER_SIZE,
+        SEND_BUFFER_SIZE,
     };
     use std::convert::TryFrom;
     use std::time::Duration;
     use test_fixture::{
-        anti_replay, default_server_h3, fixture_init, loopback, now, DEFAULT_ALPN_H3, DEFAULT_KEYS,
-        DEFAULT_SERVER_NAME,
+        addr, anti_replay, default_server_h3, fixture_init, now, CountingConnectionIdGenerator,
+        DEFAULT_ALPN_H3, DEFAULT_KEYS, DEFAULT_SERVER_NAME,
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
         match client.state() {
             Http3State::Closing(err) | Http3State::Closed(err) => {
-                assert_eq!(err, CloseError::Application(expected.code()))
+                assert_eq!(err, ConnectionError::Application(expected.code()))
             }
             _ => panic!("Wrong state {:?}", client.state()),
         };
@@ -775,11 +772,10 @@ mod tests {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(3))),
-            loopback(),
-            loopback(),
-            &CongestionControlAlgorithm::NewReno,
-            QuicVersion::default(),
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            addr(),
+            addr(),
+            ConnectionParameters::default(),
             &Http3Parameters {
                 qpack_settings: QpackSettings {
                     max_table_size_encoder: max_table_size,
@@ -3559,9 +3555,8 @@ mod tests {
         let mut server = Connection::new_server(
             test_fixture::DEFAULT_KEYS,
             test_fixture::DEFAULT_ALPN_H3,
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(10))),
-            &CongestionControlAlgorithm::NewReno,
-            QuicVersion::default(),
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            ConnectionParameters::default(),
         )
         .unwrap();
         // Using a freshly initialized anti-replay context
@@ -3711,7 +3706,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3729,7 +3724,7 @@ mod tests {
                 HSetting::new(HSettingType::MaxTableCapacity, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3766,7 +3761,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(514)),
+            &Http3State::Closing(ConnectionError::Application(514)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3785,7 +3780,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3823,7 +3818,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 50),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3861,7 +3856,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 5000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -3918,7 +3913,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseError::Application(265)),
+            &Http3State::Closing(ConnectionError::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -4792,7 +4787,7 @@ mod tests {
         // Connect and send a request
         let (mut client, _, _) = connect_and_send_request(true);
 
-        assert_eq!(client.cancel_push(6), Err(Error::InvalidStreamId));
+        assert_eq!(client.cancel_push(6), Err(Error::HttpId));
         assert_eq!(client.state(), Http3State::Connected);
     }
 
@@ -6122,7 +6117,7 @@ mod tests {
             DEFAULT_KEYS,
             DEFAULT_ALPN_H3,
             anti_replay(),
-            Rc::new(RefCell::new(FixedConnectionIdManager::new(5))),
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             QpackSettings {
                 max_table_size_encoder: MAX_TABLE_SIZE,
                 max_table_size_decoder: MAX_TABLE_SIZE,
@@ -6167,16 +6162,5 @@ mod tests {
 
         // The header ack for the first request has been received.
         assert_eq!(client.qpack_encoder_stats().header_acks_recv, 1);
-    }
-
-    #[test]
-    fn client_close_with_long_reason_string() {
-        let (mut client, mut _server) = connect();
-        // Create a long string and use it as the close reason.
-        let long_reason = String::from_utf8([0x61; 2048].to_vec()).unwrap();
-        client.close(now(), Error::HttpGeneralProtocol.code(), long_reason);
-        // Process the output packet to test we don't hit the length assertion.
-        let _out = client.process(None, now());
-        assert_closed(&client, &Error::HttpGeneralProtocol);
     }
 }
