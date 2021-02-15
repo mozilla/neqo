@@ -243,7 +243,8 @@ impl Handle {
     /// a little hysteresis that smoothes out fluctuations.
     pub fn update(&mut self, period: Duration) {
         self.hysteresis[self.hysteresis_index] = Period::from(period);
-        self.hysteresis_index = self.hysteresis_index % self.hysteresis.len();
+        self.hysteresis_index += 1;
+        self.hysteresis_index %= self.hysteresis.len();
 
         let mut first = Period::MAX;
         let mut second = Period::MAX;
