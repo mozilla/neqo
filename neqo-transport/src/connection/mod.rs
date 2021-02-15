@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 use smallvec::SmallVec;
 
 use neqo_common::{
-    event::Provider as EventProvider, hex, hex_snip_middle, qdebug, qerror, qinfo, qlog::NeqoQlog,
-    qtrace, qwarn, Datagram, Decoder, Encoder, Role,
+    event::Provider as EventProvider, hex, hex_snip_middle, hrtime, qdebug, qerror, qinfo,
+    qlog::NeqoQlog, qtrace, qwarn, Datagram, Decoder, Encoder, Role,
 };
 use neqo_crypto::{
     agent::CertificateInfo, random, Agent, AntiReplay, AuthenticationStatus, Cipher, Client,
@@ -260,6 +260,7 @@ pub struct Connection {
     /// this is when that turns into an event without NEW_TOKEN.
     release_resumption_token_timer: Option<Instant>,
     conn_params: ConnectionParameters,
+    hrtime: hrtime::Handle,
 }
 
 impl Debug for Connection {
@@ -275,6 +276,10 @@ impl Debug for Connection {
 }
 
 impl Connection {
+    /// A long default for timer resolution, so that we don't tax the
+    /// system too hard when we don't need to.
+    const LOOSE_TIMER_RESOLUTION: Duration = Duration::from_millis(50);
+
     /// Create a new QUIC connection with Client role.
     pub fn new_client(
         server_name: &str,
@@ -437,6 +442,7 @@ impl Connection {
             qlog: NeqoQlog::disabled(),
             release_resumption_token_timer: None,
             conn_params,
+            hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
         };
         c.read_parameters()?;
         c.stats.borrow_mut().init(format!("{}", c));
@@ -883,6 +889,7 @@ impl Connection {
 
         // Only one timer matters when closing...
         if let State::Closing { timeout, .. } | State::Draining { timeout, .. } = self.state {
+            self.hrtime.update(Self::LOOSE_TIMER_RESOLUTION);
             return timeout.duration_since(now);
         }
 
@@ -933,7 +940,9 @@ impl Connection {
             max(now, earliest).duration_since(now)
         );
         debug_assert!(earliest > now);
-        max(now, earliest).duration_since(now)
+        let delay = max(now, earliest).duration_since(now);
+        self.hrtime.update(delay / 4);
+        delay
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken

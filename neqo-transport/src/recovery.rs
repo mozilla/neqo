@@ -30,7 +30,9 @@ use crate::stats::{Stats, StatsCell};
 use crate::tracking::{AckToken, PNSpace, PNSpaceSet, SentPacket};
 use crate::PacketSender;
 
-pub const GRANULARITY: Duration = Duration::from_millis(20);
+/// The smallest time that the system timer is capable of delivering on.
+/// See `neqo_common::hrtime` for details on this.
+pub const GRANULARITY: Duration = Duration::from_millis(1);
 /// The default value for the maximum time a peer can delay acknowledgment
 /// of an ack-eliciting packet.
 pub const MAX_ACK_DELAY: Duration = Duration::from_millis(25);
