@@ -299,23 +299,29 @@ impl Time {
     #[allow(clippy::unused_self)] // Only on some platforms is it unused.
     fn start(&self) {
         #[cfg(target_os = "macos")]
-        if let Some(p) = self.active {
-            mac::set_realtime(p.scaled(self.scale));
-        } else {
-            mac::set_thread_policy(self.deflt.clone());
+        {
+            if let Some(p) = self.active {
+                mac::set_realtime(p.scaled(self.scale));
+            } else {
+                mac::set_thread_policy(self.deflt.clone());
+            }
         }
 
         #[cfg(windows)]
-        if let Some(p) = self.active {
-            assert_eq!(0, unsafe { win::timeBeginPeriod(p.as_uint()) });
+        {
+            if let Some(p) = self.active {
+                assert_eq!(0, unsafe { win::timeBeginPeriod(p.as_uint()) });
+            }
         }
     }
 
     #[allow(clippy::unused_self)] // Only on some platforms is it unused.
     fn stop(&self) {
         #[cfg(windows)]
-        if let Some(p) = self.active {
-            assert_eq!(0, unsafe { win::timeEndPeriod(p.as_uint()) });
+        {
+            if let Some(p) = self.active {
+                assert_eq!(0, unsafe { win::timeEndPeriod(p.as_uint()) });
+            }
         }
     }
 
@@ -367,8 +373,10 @@ impl Drop for Time {
         self.stop();
 
         #[cfg(target_os = "macos")]
-        if self.active.is_some() {
-            mac::set_thread_policy(self.deflt);
+        {
+            if self.active.is_some() {
+                mac::set_thread_policy(self.deflt);
+            }
         }
     }
 }
