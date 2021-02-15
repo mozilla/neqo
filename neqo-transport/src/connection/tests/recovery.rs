@@ -105,7 +105,7 @@ fn pto_works_ping() {
 
     // Nothing to do, should return callback
     let cb = client.process(None, now).callback();
-    assert_eq!(cb, Duration::from_millis(45));
+    assert_eq!(cb, Duration::from_millis(26)); // MAX_ACK_DELAY + GRANULARITY
 
     // Process these by server, skipping pkt0
     let srv0 = server.process(Some(pkt1), now).dgram();
