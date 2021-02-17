@@ -712,6 +712,7 @@ fn connect_version(version: QuicVersion) {
         addr(),
         addr(),
         ConnectionParameters::default().quic_version(version),
+        now(),
     )
     .unwrap();
     let mut server = Connection::new_server(
