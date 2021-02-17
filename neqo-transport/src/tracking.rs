@@ -137,6 +137,7 @@ pub struct SentPacket {
     pub pn: PacketNumber,
     ack_eliciting: bool,
     pub time_sent: Instant,
+    primary_path: bool,
     pub tokens: Vec<RecoveryToken>,
 
     time_declared_lost: Option<Instant>,
@@ -160,6 +161,7 @@ impl SentPacket {
             pn,
             time_sent,
             ack_eliciting,
+            primary_path: true,
             tokens,
             time_declared_lost: None,
             pto: false,
@@ -170,6 +172,17 @@ impl SentPacket {
     /// Returns `true` if the packet will elicit an ACK.
     pub fn ack_eliciting(&self) -> bool {
         self.ack_eliciting
+    }
+
+    /// Returns `true` if the packet was sent on the primary path.
+    pub fn on_primary_path(&self) -> bool {
+        self.primary_path
+    }
+
+    /// Clears the flag that had this packet on the primary path.
+    /// Used when migrating to clear out state.
+    pub fn clear_primary_path(&mut self) {
+        self.primary_path = false;
     }
 
     /// Whether the packet has been declared lost.
@@ -184,7 +197,12 @@ impl SentPacket {
     /// Note that this should count packets that contain only ACK and PADDING,
     /// but we don't send PADDING, so we don't track that.
     pub fn cc_outstanding(&self) -> bool {
-        self.ack_eliciting() && !self.lost()
+        self.ack_eliciting() && self.on_primary_path() && !self.lost()
+    }
+
+    /// Whether the packet should be tracked as in-flight.
+    pub fn cc_in_flight(&self) -> bool {
+        self.ack_eliciting() && self.on_primary_path()
     }
 
     /// Declare the packet as lost.  Returns `true` if this is the first time.

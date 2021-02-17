@@ -532,6 +532,7 @@ fn client(
         local_addr,
         remote_addr,
         args.quic_parameters.get().quic_version(quic_protocol),
+        Instant::now(),
     )?;
     let ciphers = args.get_ciphers();
     if !ciphers.is_empty() {
@@ -1025,6 +1026,7 @@ mod old {
             local_addr,
             remote_addr,
             args.quic_parameters.get().quic_version(quic_protocol),
+            Instant::now(),
         )?;
 
         if let Some(tok) = token {

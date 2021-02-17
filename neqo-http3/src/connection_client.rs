@@ -97,6 +97,7 @@ impl Http3Client {
         remote_addr: SocketAddr,
         conn_params: ConnectionParameters,
         http3_parameters: &Http3Parameters,
+        now: Instant,
     ) -> Res<Self> {
         Ok(Self::new_with_conn(
             Connection::new_client(
@@ -106,6 +107,7 @@ impl Http3Client {
                 local_addr,
                 remote_addr,
                 conn_params,
+                now,
             )?,
             http3_parameters,
         ))
@@ -783,6 +785,7 @@ mod tests {
                 },
                 max_concurrent_push_streams: 5,
             },
+            now(),
         )
         .expect("create a default client")
     }
