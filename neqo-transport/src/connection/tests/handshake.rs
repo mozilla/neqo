@@ -15,7 +15,10 @@ use crate::events::ConnectionEvent;
 use crate::path::PATH_MTU_V6;
 use crate::server::ValidateAddress;
 use crate::tparams::TransportParameter;
-use crate::{ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, StreamType};
+use crate::{
+    ConnectionError, ConnectionParameters, EmptyConnectionIdGenerator, Error, QuicVersion,
+    StreamType,
+};
 
 use neqo_common::{event::Provider, qdebug, Datagram};
 use neqo_crypto::{constants::TLS_CHACHA20_POLY1305_SHA256, AuthenticationStatus};
@@ -698,6 +701,62 @@ fn extra_initial_invalid_cid() {
     let dgram_copy = Datagram::new(hs.destination(), hs.source(), copy);
     let nothing = client.process(Some(dgram_copy), now).dgram();
     assert!(nothing.is_none());
+}
+
+fn connect_version(version: QuicVersion) {
+    fixture_init();
+    let mut client = Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        addr(),
+        addr(),
+        ConnectionParameters::default().quic_version(version),
+    )
+    .unwrap();
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        ConnectionParameters::default().quic_version(version),
+    )
+    .unwrap();
+    connect_force_idle(&mut client, &mut server);
+}
+
+#[test]
+fn connect_v1() {
+    connect_version(QuicVersion::Version1);
+}
+
+#[test]
+fn connect_27() {
+    connect_version(QuicVersion::Draft27);
+}
+
+#[test]
+fn connect_28() {
+    connect_version(QuicVersion::Draft28);
+}
+
+#[test]
+fn connect_29() {
+    connect_version(QuicVersion::Draft29);
+}
+
+#[test]
+fn connect_30() {
+    connect_version(QuicVersion::Draft30);
+}
+
+#[test]
+fn connect_31() {
+    connect_version(QuicVersion::Draft31);
+}
+
+#[test]
+fn connect_32() {
+    connect_version(QuicVersion::Draft32);
 }
 
 #[test]

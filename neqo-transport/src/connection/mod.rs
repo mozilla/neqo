@@ -409,7 +409,12 @@ impl Connection {
         let cid_manager = ConnectionIdManager::new(cid_generator, local_initial_source_cid.clone());
 
         let tphandler = Rc::new(RefCell::new(tps));
-        let crypto = Crypto::new(agent, protocols, tphandler.clone())?;
+        let crypto = Crypto::new(
+            conn_params.get_quic_version(),
+            agent,
+            protocols,
+            Rc::clone(&tphandler),
+        )?;
 
         let stats = StatsCell::default();
         let indexes = StreamIndexes::new(
