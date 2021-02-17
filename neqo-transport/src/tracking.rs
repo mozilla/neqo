@@ -200,7 +200,7 @@ impl SentPacket {
         self.ack_eliciting() && self.on_primary_path() && !self.lost()
     }
 
-    /// Whether hte packet should be tracked as in-flight.
+    /// Whether the packet should be tracked as in-flight.
     pub fn cc_in_flight(&self) -> bool {
         self.ack_eliciting() && self.on_primary_path()
     }
