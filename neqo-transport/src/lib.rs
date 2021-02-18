@@ -24,6 +24,7 @@ mod path;
 mod qlog;
 mod recovery;
 mod recv_stream;
+mod rtt;
 mod send_stream;
 mod sender;
 pub mod server;
@@ -41,7 +42,6 @@ pub use self::connection::{params::ConnectionParameters, Connection, Output, Sta
 pub use self::events::{ConnectionEvent, ConnectionEvents};
 pub use self::frame::CloseError;
 pub use self::packet::QuicVersion;
-pub use self::sender::PacketSender;
 pub use self::stats::Stats;
 pub use self::stream_id::{StreamId, StreamType};
 

@@ -91,6 +91,7 @@ impl From<CryptoSpace> for PacketType {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum QuicVersion {
+    Version1,
     Draft27,
     Draft28,
     Draft29,
@@ -102,6 +103,7 @@ pub enum QuicVersion {
 impl QuicVersion {
     pub fn as_u32(self) -> Version {
         match self {
+            Self::Version1 => 1,
             Self::Draft27 => 0xff00_0000 + 27,
             Self::Draft28 => 0xff00_0000 + 28,
             Self::Draft29 => 0xff00_0000 + 29,
@@ -122,7 +124,9 @@ impl TryFrom<Version> for QuicVersion {
     type Error = Error;
 
     fn try_from(ver: Version) -> Res<Self> {
-        if ver == 0xff00_0000 + 27 {
+        if ver == 1 {
+            Ok(Self::Version1)
+        } else if ver == 0xff00_0000 + 27 {
             Ok(Self::Draft27)
         } else if ver == 0xff00_0000 + 28 {
             Ok(Self::Draft28)
@@ -424,6 +428,7 @@ impl PacketBuilder {
         encoder.encode(&[0; 4]); // Zero version == VN.
         encoder.encode_vec(1, dcid);
         encoder.encode_vec(1, scid);
+        encoder.encode_uint(4, QuicVersion::Version1.as_u32());
         encoder.encode_uint(4, QuicVersion::Draft27.as_u32());
         encoder.encode_uint(4, QuicVersion::Draft28.as_u32());
         encoder.encode_uint(4, QuicVersion::Draft29.as_u32());
@@ -1099,6 +1104,11 @@ mod tests {
         assert!(encoder.is_empty());
     }
 
+    const SAMPLE_RETRY_V1: &[u8] = &[
+        0xff, 0x00, 0x00, 0x00, 0x01, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
+        0x74, 0x6f, 0x6b, 0x65, 0x6e, 0x04, 0xa2, 0x65, 0xba, 0x2e, 0xff, 0x4d, 0x82, 0x90, 0x58,
+        0xfb, 0x3f, 0x0f, 0x24, 0x96, 0xba,
+    ];
     const SAMPLE_RETRY_27: &[u8] = &[
         0xff, 0xff, 0x00, 0x00, 0x1b, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5,
         0x74, 0x6f, 0x6b, 0x65, 0x6e, 0xa5, 0x23, 0xcb, 0x5b, 0xa5, 0x24, 0x69, 0x5f, 0x65, 0x69,
@@ -1159,6 +1169,11 @@ mod tests {
     }
 
     #[test]
+    fn build_retry_v1() {
+        build_retry_single(QuicVersion::Version1, SAMPLE_RETRY_V1);
+    }
+
+    #[test]
     fn build_retry_27() {
         build_retry_single(QuicVersion::Draft27, SAMPLE_RETRY_27);
     }
@@ -1194,10 +1209,13 @@ mod tests {
         // Odds are approximately 1 in 8 that the full comparison doesn't happen
         // for a given version.
         for _ in 0..32 {
+            build_retry_v1();
             build_retry_27();
             build_retry_28();
             build_retry_29();
             build_retry_30();
+            build_retry_31();
+            build_retry_32();
         }
     }
 
@@ -1278,9 +1296,9 @@ mod tests {
 
     const SAMPLE_VN: &[u8] = &[
         0x80, 0x00, 0x00, 0x00, 0x00, 0x08, 0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, 0xb5, 0x08,
-        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0xff, 0x00, 0x00, 0x1b, 0xff, 0x00, 0x00,
-        0x1c, 0xff, 0x00, 0x00, 0x1d, 0xff, 0x00, 0x00, 0x1e, 0xff, 0x00, 0x00, 0x1f, 0xff, 0x00,
-        0x00, 0x20, 0x0a, 0x0a, 0x0a, 0x0a,
+        0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08, 0x00, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00,
+        0x1b, 0xff, 0x00, 0x00, 0x1c, 0xff, 0x00, 0x00, 0x1d, 0xff, 0x00, 0x00, 0x1e, 0xff, 0x00,
+        0x00, 0x1f, 0xff, 0x00, 0x00, 0x20, 0x0a, 0x0a, 0x0a, 0x0a,
     ];
 
     #[test]

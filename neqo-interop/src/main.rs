@@ -460,6 +460,7 @@ fn test_connect(nctx: &NetworkCtx, test: &Test, peer: &Peer) -> Result<Connectio
         nctx.local_addr,
         nctx.remote_addr,
         ConnectionParameters::default(),
+        Instant::now(),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine
@@ -609,6 +610,7 @@ fn test_h3_rz(
             },
             max_concurrent_push_streams: 0,
         },
+        Instant::now(),
     );
     if handler.is_err() {
         return Err(String::from("ERROR: creating a client failed"));
@@ -680,6 +682,7 @@ fn test_vn(nctx: &NetworkCtx, peer: &Peer) -> Result<Connection, String> {
         nctx.local_addr,
         nctx.remote_addr,
         ConnectionParameters::default(),
+        Instant::now(),
     )
     .expect("must succeed");
     // Temporary here to help out the type inference engine

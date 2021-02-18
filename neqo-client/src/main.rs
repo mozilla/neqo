@@ -516,6 +516,7 @@ fn client(
     urls: &[Url],
 ) -> Res<()> {
     let quic_protocol = match args.alpn.as_str() {
+        "h3" => QuicVersion::Version1,
         "h3-27" => QuicVersion::Draft27,
         "h3-28" => QuicVersion::Draft28,
         "h3-29" => QuicVersion::Draft29,
@@ -532,6 +533,7 @@ fn client(
         local_addr,
         remote_addr,
         args.quic_parameters.get().quic_version(quic_protocol),
+        Instant::now(),
     )?;
     let ciphers = args.get_ciphers();
     if !ciphers.is_empty() {
@@ -1010,6 +1012,7 @@ mod old {
         token: Option<ResumptionToken>,
     ) -> Res<Option<ResumptionToken>> {
         let (quic_protocol, alpn) = match args.alpn.as_str() {
+            "hq" => (QuicVersion::Version1, "hq"),
             "hq-27" => (QuicVersion::Draft27, "hq-27"),
             "hq-28" => (QuicVersion::Draft28, "hq-28"),
             "hq-30" => (QuicVersion::Draft30, "hq-30"),
@@ -1025,6 +1028,7 @@ mod old {
             local_addr,
             remote_addr,
             args.quic_parameters.get().quic_version(quic_protocol),
+            Instant::now(),
         )?;
 
         if let Some(tok) = token {
