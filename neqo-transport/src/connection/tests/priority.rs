@@ -89,8 +89,7 @@ fn relative() {
     }
 }
 
-/// Higher priority streams get sent ahead of lower ones, even when
-/// the higher priority stream is written to later.
+/// Check that changing priority has effect on the next packet that is sent.
 #[test]
 fn reprioritize() {
     let mut client = default_client();
@@ -178,8 +177,8 @@ fn repairing_loss() {
     assert_eq!(client.stats().lost, 1); // Client should have noticed the loss.
     server.process_input(dgram.unwrap(), now);
 
-    // Only the normal priority stream has data as the retransmission of the data
-    // from the lost packet is more important than new data from the high priority stream.
+    // Only the low priority stream has data as the retransmission of the data from
+    // the lost packet is now more important than new data from the high priority stream.
     for e in server.events() {
         println!("Event: {:?}", e);
         if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
