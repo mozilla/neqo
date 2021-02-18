@@ -12,7 +12,6 @@ use std::cmp::max;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::mem;
-use std::ops::Bound::{Included, Unbounded};
 use std::rc::Rc;
 
 use smallvec::SmallVec;
@@ -69,10 +68,8 @@ impl RxStreamOrderer {
             return;
         }
 
-        let extend = if let Some((&prev_start, prev_vec)) = self
-            .data_ranges
-            .range_mut((Unbounded, Included(new_start)))
-            .next_back()
+        let extend = if let Some((&prev_start, prev_vec)) =
+            self.data_ranges.range_mut(..=new_start).next_back()
         {
             let prev_end = prev_start + u64::try_from(prev_vec.len()).unwrap();
             if new_end > prev_end {
@@ -150,7 +147,7 @@ impl RxStreamOrderer {
             if extend {
                 let (_, buf) = self
                     .data_ranges
-                    .range_mut((Unbounded, Included(new_start)))
+                    .range_mut(..=new_start)
                     .next_back()
                     .unwrap();
                 buf.extend_from_slice(to_add);
