@@ -1987,11 +1987,17 @@ impl Connection {
                 version,
                 grease_quic_bit,
             )?;
-            let pn = Self::add_packet_number(
+            let pn = if let Ok(pn) = Self::add_packet_number(
                 &mut builder,
                 tx,
                 self.loss_recovery.largest_acknowledged_pn(*space),
-            )?;
+            ) {
+                pn
+            } else {
+                // No space for a packet of this type.
+                encoder = builder.abort();
+                continue;
+            };
             let payload_start = builder.len();
 
             // Work out if we have space left.
