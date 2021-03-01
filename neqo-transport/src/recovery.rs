@@ -28,6 +28,7 @@ use crate::qlog::{self, QlogMetric};
 use crate::rtt::RttEstimate;
 use crate::send_stream::StreamRecoveryToken;
 use crate::stats::{Stats, StatsCell};
+use crate::stream_id::StreamId;
 use crate::tracking::{AckToken, PNSpace, PNSpaceSet, SentPacket};
 
 pub(crate) const PACKET_THRESHOLD: u64 = 3;
@@ -49,6 +50,9 @@ pub enum RecoveryToken {
     NewToken(usize),
     NewConnectionId(ConnectionIdEntry<[u8; 16]>),
     RetireConnectionId(u64),
+    DataBlocked(u64),
+    StreamDataBlocked { stream_id: StreamId, limit: u64 },
+    ResetStream { stream_id: StreamId },
 }
 
 /// `SendProfile` tells a sender how to send packets.
