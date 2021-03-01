@@ -482,6 +482,26 @@ impl RecvStream {
         }
     }
 
+    /// Send a flow control update.
+    /// This is used when a peer declares that they are blocked.
+    /// This sends `MAX_STREAM_DATA` if there is any increase possible.
+    pub fn send_flowc_update(&mut self) {
+        if let RecvStreamState::Recv {
+            max_bytes,
+            max_stream_data,
+            recv_buf,
+        } = &mut self.state
+        {
+            let new_max = recv_buf.retired() + *max_bytes;
+            if new_max > *max_stream_data {
+                *max_stream_data = new_max;
+                self.flow_mgr
+                    .borrow_mut()
+                    .max_stream_data(self.stream_id, new_max)
+            }
+        }
+    }
+
     pub fn max_stream_data(&self) -> Option<u64> {
         self.state.max_stream_data()
     }

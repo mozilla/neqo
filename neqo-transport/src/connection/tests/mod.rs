@@ -313,6 +313,10 @@ fn fill_cwnd(c: &mut Connection, stream: u64, mut now: Instant) -> (Vec<Datagram
         }
     }
 
+    qtrace!(
+        "fill_cwnd sent {} bytes",
+        total_dgrams.iter().map(|d| d.len()).sum::<usize>()
+    );
     (total_dgrams, now)
 }
 
