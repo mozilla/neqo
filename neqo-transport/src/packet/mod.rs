@@ -284,7 +284,7 @@ impl PacketBuilder {
     /// Add a packet number of the given size.
     /// For a long header packet, this also inserts a dummy length.
     /// The length is filled in after calling `build`.
-    pub fn pn(&mut self, pn: PacketNumber, pn_len: usize) -> Res<()> {
+    pub fn pn(&mut self, pn: PacketNumber, pn_len: usize) {
         // Reserve space for a length in long headers.
         if self.is_long() {
             self.offsets.len = self.encoder.len();
@@ -303,13 +303,6 @@ impl PacketBuilder {
         self.encoder[self.header.start] |= u8::try_from(pn_len - 1).unwrap();
         self.header.end = self.encoder.len();
         self.pn = pn;
-
-        if self.len() > self.limit {
-            qwarn!("Packet contents are more than the limit");
-            debug_assert!(false);
-            return Err(Error::InternalError(19));
-        }
-        Ok(())
     }
 
     fn write_len(&mut self, expansion: usize) {
@@ -884,7 +877,7 @@ mod tests {
             &ConnectionId::from(SERVER_CID),
         );
         builder.initial_token(&[]).unwrap();
-        builder.pn(1, 2).unwrap();
+        builder.pn(1, 2);
         builder.encode(&SAMPLE_INITIAL_PAYLOAD);
         let packet = builder.build(&mut prot).expect("build");
         assert_eq!(&packet[..], SAMPLE_INITIAL);
@@ -945,7 +938,7 @@ mod tests {
         fixture_init();
         let mut builder =
             PacketBuilder::short(Encoder::new(), true, &ConnectionId::from(SERVER_CID));
-        builder.pn(0, 1).unwrap();
+        builder.pn(0, 1);
         builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
         let packet = builder
             .build(&mut CryptoDxState::test_default())
@@ -961,7 +954,7 @@ mod tests {
             let mut builder =
                 PacketBuilder::short(Encoder::new(), true, &ConnectionId::from(SERVER_CID));
             builder.scramble(true);
-            builder.pn(0, 1).unwrap();
+            builder.pn(0, 1);
             firsts.push(builder[0]);
         }
         let is_set = |bit| move |v| v & bit == bit;
@@ -1024,14 +1017,14 @@ mod tests {
             &ConnectionId::from(SERVER_CID),
             &ConnectionId::from(CLIENT_CID),
         );
-        builder.pn(0, 1).unwrap();
+        builder.pn(0, 1);
         builder.encode(&[0; 3]);
         let encoder = builder.build(&mut prot).expect("build");
         assert_eq!(encoder.len(), 45);
         let first = encoder.clone();
 
         let mut builder = PacketBuilder::short(encoder, false, &ConnectionId::from(SERVER_CID));
-        builder.pn(1, 3).unwrap();
+        builder.pn(1, 3);
         builder.encode(&[0]); // Minimal size (packet number is big enough).
         let encoder = builder.build(&mut prot).expect("build");
         assert_eq!(
@@ -1058,7 +1051,7 @@ mod tests {
             &ConnectionId::from(&[][..]),
             &ConnectionId::from(&[][..]),
         );
-        builder.pn(0, 1).unwrap();
+        builder.pn(0, 1);
         builder.encode(&[1, 2, 3]);
         let packet = builder.build(&mut CryptoDxState::test_default()).unwrap();
         assert_eq!(&packet[..], EXPECTED);
@@ -1077,7 +1070,7 @@ mod tests {
                 &ConnectionId::from(&[][..]),
                 &ConnectionId::from(&[][..]),
             );
-            builder.pn(0, 1).unwrap();
+            builder.pn(0, 1);
             builder.scramble(true);
             if (builder[0] & PACKET_BIT_FIXED_QUIC) == 0 {
                 found_unset = true;
@@ -1099,7 +1092,7 @@ mod tests {
             &ConnectionId::from(SERVER_CID),
         );
         builder.initial_token(&[]).unwrap();
-        builder.pn(1, 2).unwrap();
+        builder.pn(1, 2);
         let encoder = builder.abort();
         assert!(encoder.is_empty());
     }

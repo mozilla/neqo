@@ -1697,11 +1697,12 @@ impl Connection {
         Ok((pt, builder))
     }
 
+    #[must_use]
     fn add_packet_number(
         builder: &mut PacketBuilder,
         tx: &CryptoDxState,
         largest_acknowledged: Option<PacketNumber>,
-    ) -> Res<PacketNumber> {
+    ) -> PacketNumber {
         // Get the packet number and work out how long it is.
         let pn = tx.next_pn();
         let unacked_range = if let Some(la) = largest_acknowledged {
@@ -1715,8 +1716,8 @@ impl Connection {
             - usize::try_from(unacked_range.leading_zeros() / 8).unwrap();
         // pn_len can't be zero (unacked_range is > 0)
         // TODO(mt) also use `4*path CWND/path MTU` to set a minimum length.
-        builder.pn(pn, pn_len)?;
-        Ok(pn)
+        builder.pn(pn, pn_len);
+        pn
     }
 
     fn can_grease_quic_bit(&self) -> bool {
@@ -1762,7 +1763,7 @@ impl Connection {
                 &mut builder,
                 tx,
                 self.loss_recovery.largest_acknowledged_pn(*space),
-            )?;
+            );
 
             // ConnectionError::Application is only allowed at 1RTT.
             let sanitized = if *space == PNSpace::ApplicationData {
@@ -1991,7 +1992,7 @@ impl Connection {
                 &mut builder,
                 tx,
                 self.loss_recovery.largest_acknowledged_pn(*space),
-            )?;
+            );
             let payload_start = builder.len();
 
             // Work out if we have space left.
