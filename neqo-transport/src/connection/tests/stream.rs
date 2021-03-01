@@ -570,8 +570,8 @@ fn increase_flow_control_bidi() {
     assert_eq!(server.stats().frame_rx.max_stream_data, msd_before + 1);
 
     // server can write more data.
-    let written = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
-    assert_eq!(u64::try_from(written).unwrap(), RECV_BUFFER_INCREMENT);
+    let written_inc = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    assert_eq!(u64::try_from(written_inc).unwrap(), RECV_BUFFER_INCREMENT);
 }
 
 #[test]
@@ -602,6 +602,6 @@ fn increase_flow_control_uni() {
     assert_eq!(server.stats().frame_rx.max_stream_data, msd_before + 1);
 
     // now server can wrie more data.
-    let written = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
-    assert_eq!(u64::try_from(written).unwrap(), RECV_BUFFER_INCREMENT);
+    let written_inc = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
+    assert_eq!(u64::try_from(written_inc).unwrap(), RECV_BUFFER_INCREMENT);
 }

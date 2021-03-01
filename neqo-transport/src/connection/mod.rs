@@ -3115,9 +3115,9 @@ impl Connection {
         Ok(())
     }
 
-    /// Increases max_stream_data for stream_id.
-    /// ###Errors
-    /// Returns `InvalidStreamId` if a stream_id does not exist or receiveing
+    /// Increases `max_stream_data` for `stream_id`.
+    /// # Errors
+    /// Returns `InvalidStreamId` if a `stream_id` does not exist or receiveing
     /// side is closed.
     pub fn increase_max_stream_data(&mut self, stream_id: u64, increase: u64) -> Res<()> {
         let stream = self
