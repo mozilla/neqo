@@ -486,6 +486,21 @@ impl RecvStream {
         self.state.max_stream_data()
     }
 
+    pub fn increase_max_stream_data(&mut self, increase: u64) {
+        if let RecvStreamState::Recv {
+            max_bytes,
+            max_stream_data,
+            ..
+        } = &mut self.state
+        {
+            *max_bytes += increase;
+            *max_stream_data += increase;
+            self.flow_mgr
+                .borrow_mut()
+                .max_stream_data(self.stream_id, *max_stream_data)
+        }
+    }
+
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.state,

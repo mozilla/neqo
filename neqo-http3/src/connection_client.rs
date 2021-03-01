@@ -689,6 +689,11 @@ impl Http3Client {
         Ok(())
     }
 
+    pub fn increase_max_stream_data(&mut self, stream_id: u64, increase: u64) -> Res<()> {
+        self.conn.increase_max_stream_data(stream_id, increase)?;
+        Ok(())
+    }
+
     #[must_use]
     pub fn qpack_decoder_stats(&self) -> QpackStats {
         self.base_handler.qpack_decoder.stats()

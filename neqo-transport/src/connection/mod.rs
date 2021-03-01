@@ -335,15 +335,7 @@ impl Connection {
 
     fn set_tp_defaults(tps: &mut TransportParameters) {
         tps.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
-            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
-        );
-        tps.set_integer(
             tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
-            u64::try_from(RECV_BUFFER_SIZE).unwrap(),
-        );
-        tps.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_UNI,
             u64::try_from(RECV_BUFFER_SIZE).unwrap(),
         );
         tps.set_integer(tparams::INITIAL_MAX_DATA, LOCAL_MAX_DATA);
@@ -361,6 +353,14 @@ impl Connection {
 
     /// Read connection parameters and update transport parameters.
     fn read_parameters(&mut self) -> Res<()> {
+        self.tps.borrow_mut().local.set_integer(
+            tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+            self.conn_params.get_max_stream_data(StreamType::BiDi),
+        );
+        self.tps.borrow_mut().local.set_integer(
+            tparams::INITIAL_MAX_STREAM_DATA_UNI,
+            self.conn_params.get_max_stream_data(StreamType::UniDi),
+        );
         self.tps.borrow_mut().local.set_integer(
             tparams::INITIAL_MAX_STREAMS_BIDI,
             self.conn_params.get_max_streams(StreamType::BiDi).as_u64(),
@@ -3112,6 +3112,20 @@ impl Connection {
             .ok_or(Error::InvalidStreamId)?;
 
         stream.stop_sending(err);
+        Ok(())
+    }
+
+    /// Increases max_stream_data for stream_id.
+    /// ###Errors
+    /// Returns `InvalidStreamId` if a stream_id does not exist or receiveing
+    /// side is closed.
+    pub fn increase_max_stream_data(&mut self, stream_id: u64, increase: u64) -> Res<()> {
+        let stream = self
+            .recv_streams
+            .get_mut(&stream_id.into())
+            .ok_or(Error::InvalidStreamId)?;
+
+        stream.increase_max_stream_data(increase);
         Ok(())
     }
 }
