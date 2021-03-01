@@ -1668,7 +1668,7 @@ impl Connection {
         address_validation: &AddressValidationInfo,
         quic_version: QuicVersion,
         grease_quic_bit: bool,
-    ) -> Res<(PacketType, PacketBuilder)> {
+    ) -> (PacketType, PacketBuilder) {
         let pt = PacketType::from(cspace);
         let mut builder = if pt == PacketType::Short {
             qdebug!("Building Short dcid {}", path.remote_cid());
@@ -1689,12 +1689,14 @@ impl Connection {
                 path.local_cid(),
             )
         };
-        builder.scramble(grease_quic_bit);
-        if pt == PacketType::Initial {
-            builder.initial_token(address_validation.token())?;
+        if builder.remaining() > 0 {
+            builder.scramble(grease_quic_bit);
+            if pt == PacketType::Initial {
+                builder.initial_token(address_validation.token());
+            }
         }
 
-        Ok((pt, builder))
+        (pt, builder)
     }
 
     #[must_use]
@@ -1751,19 +1753,18 @@ impl Connection {
                 &AddressValidationInfo::None,
                 version,
                 grease_quic_bit,
-            )?;
-            builder.set_limit(min(path.amplification_limit(), path.mtu()) - tx.expansion());
-            if builder.limit() > 2048 {
-                return Err(Error::InternalError(9));
-            }
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(25));
-            }
+            );
             let _ = Self::add_packet_number(
                 &mut builder,
                 tx,
                 self.loss_recovery.largest_acknowledged_pn(*space),
             );
+            if builder.remaining() < 2 {
+                encoder = builder.abort();
+                break;
+            }
+            builder.set_limit(min(path.amplification_limit(), path.mtu()) - tx.expansion());
+            debug_assert!(builder.limit() <= 2048);
 
             // ConnectionError::Application is only allowed at 1RTT.
             let sanitized = if *space == PNSpace::ApplicationData {
@@ -1987,31 +1988,28 @@ impl Connection {
                 &self.address_validation,
                 version,
                 grease_quic_bit,
-            )?;
+            );
             let pn = Self::add_packet_number(
                 &mut builder,
                 tx,
                 self.loss_recovery.largest_acknowledged_pn(*space),
             );
-            let payload_start = builder.len();
+            if builder.remaining() < 2 {
+                encoder = builder.abort();
+                break;
+            }
 
             // Work out if we have space left.
             let aead_expansion = tx.expansion();
-            if builder.len() + aead_expansion > profile.limit() {
-                // No space for a packet of this type.
+            builder.set_limit(profile.limit() - aead_expansion);
+            debug_assert!(builder.limit() <= 2048);
+            if builder.remaining() < 2 {
                 encoder = builder.abort();
-                continue;
-            }
-            let limit = profile.limit() - aead_expansion;
-            builder.set_limit(limit);
-            if builder.limit() > 2048 {
-                return Err(Error::InternalError(12));
-            }
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(13));
+                break;
             }
 
             // Add frames to the packet.
+            let payload_start = builder.len();
             let (tokens, ack_eliciting, padded) =
                 self.write_frames(path, *space, &profile, &mut builder, needs_padding, now)?;
 

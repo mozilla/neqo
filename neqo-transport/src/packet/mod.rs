@@ -173,13 +173,28 @@ impl PacketBuilder {
     }
 
     /// Start building a short header packet.
+    ///
+    /// This doesn't fail if there isn't enough space; instead it returns a builder that
+    /// has no available space left.  This allows the caller to extract the encoder
+    /// and any packets that might have been added before as adding a packet header is
+    /// only likely to fail if there are other packets already written.
+    ///
+    /// If, after calling this method, `remaining()` returns 0, then call `abort()` to get
+    /// the encoder back.
     #[allow(clippy::unknown_clippy_lints)] // Until we require rust 1.45.
     #[allow(clippy::reversed_empty_ranges)]
     pub fn short(mut encoder: Encoder, key_phase: bool, dcid: impl AsRef<[u8]>) -> Self {
+        let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
-        encoder.encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | (u8::from(key_phase) << 2));
-        encoder.encode(dcid.as_ref());
-        let limit = Self::infer_limit(&encoder);
+        // Check that there is enough space for the header.
+        // 5 = 1 (first byte) + 4 (packet number)
+        if limit > encoder.len() && 5 + dcid.as_ref().len() < limit - encoder.len() {
+            encoder
+                .encode_byte(PACKET_BIT_SHORT | PACKET_BIT_FIXED_QUIC | (u8::from(key_phase) << 2));
+            encoder.encode(dcid.as_ref());
+        } else {
+            limit = 0;
+        }
         Self {
             encoder,
             pn: u64::max_value(),
@@ -196,6 +211,8 @@ impl PacketBuilder {
     /// Start building a long header packet.
     /// For an Initial packet you will need to call initial_token(),
     /// even if the token is empty.
+    ///
+    /// See `short()` for more on how to handle this in cases where there is no space.
     #[allow(clippy::unknown_clippy_lints)] // Until we require rust 1.45.
     #[allow(clippy::reversed_empty_ranges)] // For initializing an empty range.
     pub fn long(
@@ -205,12 +222,21 @@ impl PacketBuilder {
         dcid: impl AsRef<[u8]>,
         scid: impl AsRef<[u8]>,
     ) -> Self {
+        let mut limit = Self::infer_limit(&encoder);
         let header_start = encoder.len();
-        encoder.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | pt.code() << 4);
-        encoder.encode_uint(4, quic_version.as_u32());
-        encoder.encode_vec(1, dcid.as_ref());
-        encoder.encode_vec(1, scid.as_ref());
-        let limit = Self::infer_limit(&encoder);
+        // Check that there is enough space for the header.
+        // 11 = 1 (first byte) + 4 (version) + 2 (dcid+scid length) + 4 (packet number)
+        if limit > encoder.len()
+            && 11 + dcid.as_ref().len() + scid.as_ref().len() < limit - encoder.len()
+        {
+            encoder.encode_byte(PACKET_BIT_LONG | PACKET_BIT_FIXED_QUIC | pt.code() << 4);
+            encoder.encode_uint(4, quic_version.as_u32());
+            encoder.encode_vec(1, dcid.as_ref());
+            encoder.encode_vec(1, scid.as_ref());
+        } else {
+            limit = 0;
+        }
+
         Self {
             encoder,
             pn: u64::max_value(),
@@ -242,7 +268,7 @@ impl PacketBuilder {
     /// How many bytes remain against the size limit for the builder.
     #[must_use]
     pub fn remaining(&self) -> usize {
-        self.limit - self.encoder.len()
+        self.limit.checked_sub(self.encoder.len()).unwrap_or(0)
     }
 
     /// Pad with "PADDING" frames.
@@ -258,6 +284,7 @@ impl PacketBuilder {
 
     /// Add unpredictable values for unprotected parts of the packet.
     pub fn scramble(&mut self, quic_bit: bool) {
+        debug_assert!(self.len() > self.header.start);
         let mask = if quic_bit { PACKET_BIT_FIXED_QUIC } else { 0 }
             | if self.is_long() { 0 } else { PACKET_BIT_SPIN };
         let first = self.header.start;
@@ -266,25 +293,29 @@ impl PacketBuilder {
 
     /// For an Initial packet, encode the token.
     /// If you fail to do this, then you will not get a valid packet.
-    pub fn initial_token(&mut self, token: &[u8]) -> Res<()> {
+    pub fn initial_token(&mut self, token: &[u8]) {
         debug_assert_eq!(
             self.encoder[self.header.start] & 0xb0,
             PACKET_BIT_LONG | PACKET_TYPE_INITIAL << 4
         );
-        self.encoder.encode_vvec(token);
-
-        if self.len() > self.limit {
-            qwarn!("Packet contents are more than the limit");
-            debug_assert!(false);
-            return Err(Error::InternalError(18));
+        if Encoder::vvec_len(token.len()) < self.remaining() {
+            self.encoder.encode_vvec(token);
+        } else {
+            self.limit = 0;
         }
-        Ok(())
     }
 
     /// Add a packet number of the given size.
     /// For a long header packet, this also inserts a dummy length.
     /// The length is filled in after calling `build`.
+    /// Does nothing if there isn't 4 bytes available; if `remaining()` returns
+    /// 0 at any point, call `abort()`.
     pub fn pn(&mut self, pn: PacketNumber, pn_len: usize) {
+        if self.remaining() < 4 {
+            self.limit = 0;
+            return;
+        }
+
         // Reserve space for a length in long headers.
         if self.is_long() {
             self.offsets.len = self.encoder.len();
@@ -876,7 +907,7 @@ mod tests {
             &ConnectionId::from(&[][..]),
             &ConnectionId::from(SERVER_CID),
         );
-        builder.initial_token(&[]).unwrap();
+        builder.initial_token(&[]);
         builder.pn(1, 2);
         builder.encode(&SAMPLE_INITIAL_PAYLOAD);
         let packet = builder.build(&mut prot).expect("build");
@@ -1091,10 +1122,41 @@ mod tests {
             &ConnectionId::from(&[][..]),
             &ConnectionId::from(SERVER_CID),
         );
-        builder.initial_token(&[]).unwrap();
+        assert_ne!(builder.remaining(), 0);
+        builder.initial_token(&[]);
+        assert_ne!(builder.remaining(), 0);
         builder.pn(1, 2);
+        assert_ne!(builder.remaining(), 0);
         let encoder = builder.abort();
         assert!(encoder.is_empty());
+    }
+
+    #[test]
+    fn build_insufficient_space() {
+        fixture_init();
+
+        let mut builder = PacketBuilder::short(
+            Encoder::with_capacity(100),
+            true,
+            &ConnectionId::from(SERVER_CID),
+        );
+        builder.pn(0, 1);
+        // Pad, but not up to the full capacity. Leave enough space for the
+        // AEAD expansion and some extra, but not for an entire long header.
+        builder.set_limit(75);
+        builder.pad().unwrap();
+        let encoder = builder.build(&mut CryptoDxState::test_default()).unwrap();
+        let encoder_copy = encoder.clone();
+
+        let builder = PacketBuilder::long(
+            encoder,
+            PacketType::Initial,
+            QuicVersion::default(),
+            &ConnectionId::from(SERVER_CID),
+            &ConnectionId::from(SERVER_CID),
+        );
+        assert_eq!(builder.remaining(), 0);
+        assert_eq!(builder.abort(), encoder_copy);
     }
 
     const SAMPLE_RETRY_V1: &[u8] = &[
