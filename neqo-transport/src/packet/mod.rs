@@ -308,8 +308,8 @@ impl PacketBuilder {
     /// Add a packet number of the given size.
     /// For a long header packet, this also inserts a dummy length.
     /// The length is filled in after calling `build`.
-    /// Does nothing if there isn't 4 bytes available; if `remaining()` returns
-    /// 0 at any point, call `abort()`.
+    /// Does nothing if there isn't 4 bytes available other than render this builder
+    /// unusable; if `remaining()` returns 0 at any point, call `abort()`.
     pub fn pn(&mut self, pn: PacketNumber, pn_len: usize) {
         if self.remaining() < 4 {
             self.limit = 0;
