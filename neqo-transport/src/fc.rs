@@ -28,9 +28,12 @@ where
     limit: u64,
     /// How much of that limit we've used.
     used: u64,
-    /// The point at which blocking occurred.
-    /// Note: a value of 0 is reserved to mean no blocking;
-    /// all other values are one higher than the values used in `limit`.
+    /// The point at which blocking occurred.  This is updated each time
+    /// the sender decides that it is blocked.  It only ever changes
+    /// when blocking occurs.  This ensures that blocking at any given limit
+    /// is only reported once.
+    /// Note: All values are one greater than the corresponding `limit` to
+    /// allow distinguishing between blocking at a limit of 0 and no blocking.
     blocked_at: u64,
     /// Whether a blocked frame should be sent.
     blocked_frame: bool,
@@ -91,7 +94,7 @@ where
 
     /// Return whether a blocking frame needs to be sent.
     /// This is `Some` with the active limit if `blocked` has been called,
-    /// if a blocking frame has not been sent, and
+    /// if a blocking frame has not been sent (or it has been lost), and
     /// if the blocking condition remains.
     fn blocked_needed(&self) -> Option<u64> {
         if self.blocked_frame && self.limit < self.blocked_at {
@@ -181,8 +184,8 @@ mod test {
         let mut fc = SenderFlowControl::new((), 10);
         fc.consume(10);
         assert_eq!(fc.available(), 0);
-        fc.update(5);
-        assert_eq!(fc.available(), 0); // Small update has no effect.
+        fc.update(5); // An update lower than the current limit does nothing.
+        assert_eq!(fc.available(), 0);
         fc.update(15);
         assert_eq!(fc.available(), 5);
         fc.consume(3);
@@ -194,7 +197,7 @@ mod test {
         let mut fc = SenderFlowControl::new((), 10);
         fc.blocked();
         assert_eq!(fc.blocked_needed(), Some(10));
-        fc.update(5);
+        fc.update(5); // An update lower than the current limit does nothing.
         assert_eq!(fc.blocked_needed(), Some(10));
         fc.update(11);
         assert_eq!(fc.blocked_needed(), None);
