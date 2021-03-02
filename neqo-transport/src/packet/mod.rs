@@ -268,7 +268,7 @@ impl PacketBuilder {
     /// How many bytes remain against the size limit for the builder.
     #[must_use]
     pub fn remaining(&self) -> usize {
-        self.limit.checked_sub(self.encoder.len()).unwrap_or(0)
+        self.limit.saturating_sub(self.encoder.len())
     }
 
     /// Pad with "PADDING" frames.
