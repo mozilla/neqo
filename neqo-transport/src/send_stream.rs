@@ -671,7 +671,7 @@ impl SendStream {
         (length, false)
     }
 
-    /// Write a `STREAM` frame, return true if it was written.
+    /// Maybe write a `STREAM` frame.
     fn write_stream_frame(
         &mut self,
         priority: TransmissionPriority,
@@ -762,6 +762,7 @@ impl SendStream {
         }
     }
 
+    /// Maybe write a `RESET_STREAM` frame.
     pub fn write_reset_frame(
         &mut self,
         p: TransmissionPriority,
@@ -811,6 +812,7 @@ impl SendStream {
         }
     }
 
+    /// Maybe write a `STREAM_DATA_BLOCKED` frame.
     pub fn write_blocked_frame(
         &mut self,
         priority: TransmissionPriority,
