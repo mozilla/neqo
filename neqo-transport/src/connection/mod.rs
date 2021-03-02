@@ -1759,6 +1759,7 @@ impl Connection {
                 tx,
                 self.loss_recovery.largest_acknowledged_pn(*space),
             );
+            // The builder will set the limit to 0 if there isn't enough space for the header.
             if builder.remaining() < 2 {
                 encoder = builder.abort();
                 break;
@@ -1994,6 +1995,7 @@ impl Connection {
                 tx,
                 self.loss_recovery.largest_acknowledged_pn(*space),
             );
+            // The builder will set the limit to 0 if there isn't enough space for the header.
             if builder.remaining() < 2 {
                 encoder = builder.abort();
                 break;
