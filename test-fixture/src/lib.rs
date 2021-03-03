@@ -68,7 +68,7 @@ pub const DEFAULT_SERVER_NAME: &str = "example.com";
 pub const DEFAULT_KEYS: &[&str] = &["key"];
 pub const LONG_CERT_KEYS: &[&str] = &["A long cert"];
 pub const DEFAULT_ALPN: &[&str] = &["alpn"];
-pub const DEFAULT_ALPN_H3: &[&str] = &["h3-29"];
+pub const DEFAULT_ALPN_H3: &[&str] = &["h3"];
 
 /// Create a default socket address.
 #[must_use]
