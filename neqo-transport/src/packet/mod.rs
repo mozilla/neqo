@@ -161,6 +161,8 @@ pub struct PacketBuilder {
     header: Range<usize>,
     offsets: PacketBuilderOffsets,
     limit: usize,
+    /// Whether to pad the packet before construction.
+    padding: bool,
 }
 
 impl PacketBuilder {
@@ -205,6 +207,7 @@ impl PacketBuilder {
                 len: 0,
             },
             limit,
+            padding: false,
         }
     }
 
@@ -247,6 +250,7 @@ impl PacketBuilder {
                 len: 0,
             },
             limit,
+            padding: false,
         }
     }
 
@@ -271,15 +275,21 @@ impl PacketBuilder {
         self.limit.saturating_sub(self.encoder.len())
     }
 
-    /// Pad with "PADDING" frames.
-    pub fn pad(&mut self) -> Res<()> {
-        self.encoder.pad_to(self.limit, 0);
-        if self.len() > self.limit {
-            qwarn!("Packet contents are more than the limit");
-            debug_assert!(false);
-            return Err(Error::InternalError(17));
+    /// Mark the packet as needing padding (or not).
+    pub fn enable_padding(&mut self, needs_padding: bool) {
+        self.padding = needs_padding;
+    }
+
+    /// Maybe pad with "PADDING" frames.
+    /// Only does so if padding was needed and this is a short packet.
+    /// Returns true if padding was added.
+    pub fn pad(&mut self) -> bool {
+        if self.padding && !self.is_long() {
+            self.encoder.pad_to(self.limit, 0);
+            true
+        } else {
+            false
         }
-        Ok(())
     }
 
     /// Add unpredictable values for unprotected parts of the packet.
@@ -1144,7 +1154,8 @@ mod tests {
         // Pad, but not up to the full capacity. Leave enough space for the
         // AEAD expansion and some extra, but not for an entire long header.
         builder.set_limit(75);
-        builder.pad().unwrap();
+        builder.enable_padding(true);
+        assert!(builder.pad());
         let encoder = builder.build(&mut CryptoDxState::test_default()).unwrap();
         let encoder_copy = encoder.clone();
 
