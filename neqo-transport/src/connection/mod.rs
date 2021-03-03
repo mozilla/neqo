@@ -1882,12 +1882,10 @@ impl Connection {
         space: PNSpace,
         profile: &SendProfile,
         builder: &mut PacketBuilder,
-        mut pad: bool,
         now: Instant,
     ) -> Res<(Vec<RecoveryToken>, bool, bool)> {
         let mut tokens = Vec::new();
         let primary = path.borrow().is_primary();
-        let mut ack_eliciting = false;
 
         let ack_token = if primary {
             self.acks
@@ -1895,6 +1893,7 @@ impl Connection {
         } else {
             None
         };
+        let ack_end = builder.len();
 
         // Avoid sending probes until the handshake completes,
         // but send them even when we don't have space.
@@ -1908,8 +1907,7 @@ impl Connection {
                 full_mtu,
                 now,
             )? {
-                pad = true;
-                ack_eliciting = true;
+                builder.enable_padding(true);
             }
         }
 
@@ -1935,9 +1933,9 @@ impl Connection {
         }
 
         let stats = &mut self.stats.borrow_mut().frame_tx;
-        // Anything - other than ACK - that registered a token wants an acknowledgment.
-        ack_eliciting |= !tokens.is_empty();
-        if !ack_eliciting && profile.should_probe(space) {
+        // Anything written after an ACK already elicits acknowledgment.
+        // If we need to probe and nothing has been written, send a PING.
+        if builder.len() == ack_end && profile.should_probe(space) {
             // Nothing ack-eliciting and we need to probe; send PING.
             debug_assert_ne!(builder.remaining(), 0);
             builder.encode_varint(crate::frame::FRAME_TYPE_PING);
@@ -1946,27 +1944,28 @@ impl Connection {
             }
             stats.ping += 1;
             stats.all += 1;
-            ack_eliciting = true;
         }
         // If this is not the primary path, this should be ack-eliciting.
+        let ack_eliciting = builder.len() > ack_end;
         debug_assert!(primary || ack_eliciting);
 
         // Add padding.  Only pad 1-RTT packets so that we don't prevent coalescing.
         // And avoid padding packets that otherwise only contain ACK because adding PADDING
         // causes those packets to consume congestion window, which is not tracked (yet).
         // And avoid padding if we don't have a full MTU available.
-        pad &= ack_eliciting && space == PNSpace::ApplicationData && full_mtu;
-        if pad {
-            builder.pad()?;
+        let padded = if ack_eliciting && full_mtu && builder.pad() {
             stats.padding += 1;
             stats.all += 1;
-        }
+            true
+        } else {
+            false
+        };
 
         if let Some(t) = ack_token {
             tokens.push(t);
         }
         stats.all += tokens.len();
-        Ok((tokens, ack_eliciting, pad))
+        Ok((tokens, ack_eliciting, padded))
     }
 
     /// Build a datagram, possibly from multiple packets (for different PN
@@ -2014,9 +2013,10 @@ impl Connection {
                 break;
             }
 
-            // Work out if we have space left.
+            // Configure the limits and padding for this packet.
             let aead_expansion = tx.expansion();
             builder.set_limit(profile.limit() - aead_expansion);
+            builder.enable_padding(needs_padding);
             debug_assert!(builder.limit() <= 2048);
             if builder.remaining() < 2 {
                 encoder = builder.abort();
@@ -2026,8 +2026,7 @@ impl Connection {
             // Add frames to the packet.
             let payload_start = builder.len();
             let (tokens, ack_eliciting, padded) =
-                self.write_frames(path, *space, &profile, &mut builder, needs_padding, now)?;
-
+                self.write_frames(path, *space, &profile, &mut builder, now)?;
             if builder.packet_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
