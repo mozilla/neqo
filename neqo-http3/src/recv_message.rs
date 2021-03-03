@@ -106,9 +106,8 @@ impl RecvMessage {
             RecvMessageState::WaitingForResponseHeaders {..} => {
                 if header_block.is_empty() {
                     return Err(Error::HttpGeneralProtocolStream);
-                } else {
-                    self.state = RecvMessageState::DecodingHeaders { header_block, fin };
                 }
+                    self.state = RecvMessageState::DecodingHeaders { header_block, fin };
              }
             RecvMessageState::WaitingForData { ..} => {
                 // TODO implement trailers, for now just ignore them.

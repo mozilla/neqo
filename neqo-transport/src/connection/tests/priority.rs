@@ -12,6 +12,7 @@ use crate::{ConnectionEvent, StreamType};
 
 use neqo_common::event::Provider;
 use std::cell::RefCell;
+use std::mem;
 use std::rc::Rc;
 use test_fixture::{self, now};
 
@@ -239,7 +240,7 @@ fn critical() {
 
     // Critical beats everything but HANDSHAKE_DONE.
     let stats_before = server.stats().frame_tx;
-    let _ = fill_cwnd(&mut server, id, now);
+    mem::drop(fill_cwnd(&mut server, id, now));
     let stats_after = server.stats().frame_tx;
     assert_eq!(stats_after.crypto, stats_before.crypto);
     assert_eq!(stats_after.streams_blocked, 0);
@@ -291,7 +292,7 @@ fn important() {
 
     // Important beats everything but flow control.
     let stats_before = server.stats().frame_tx;
-    let _ = fill_cwnd(&mut server, id, now);
+    mem::drop(fill_cwnd(&mut server, id, now));
     let stats_after = server.stats().frame_tx;
     assert_eq!(stats_after.crypto, stats_before.crypto);
     assert_eq!(stats_after.streams_blocked, 1);
@@ -346,7 +347,7 @@ fn high_normal() {
     // but they beat CRYPTO/NEW_TOKEN.
     let stats_before = server.stats().frame_tx;
     server.send_ticket(now, &[]).unwrap();
-    let _ = fill_cwnd(&mut server, id, now);
+    mem::drop(fill_cwnd(&mut server, id, now));
     let stats_after = server.stats().frame_tx;
     assert_eq!(stats_after.crypto, stats_before.crypto);
     assert_eq!(stats_after.streams_blocked, 1);
