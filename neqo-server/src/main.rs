@@ -74,7 +74,7 @@ struct Args {
     /// Name of key from NSS database.
     key: String,
 
-    #[structopt(short = "a", long, default_value = "h3-29")]
+    #[structopt(short = "a", long, default_value = "h3")]
     /// ALPN labels to negotiate.
     ///
     /// This server still only does HTTP3 no matter what the ALPN says.
@@ -588,6 +588,8 @@ impl ServersRunner {
 }
 
 fn main() -> Result<(), io::Error> {
+    const HQ_INTEROP: &str = "hq-interop";
+
     let mut args = Args::from_args();
     assert!(!args.key.is_empty(), "Need at least one key");
 
@@ -598,23 +600,23 @@ fn main() -> Result<(), io::Error> {
             "http3" => (),
             "zerortt" => {
                 args.use_old_http = true;
-                args.alpn = "hq-29".into();
+                args.alpn = String::from(HQ_INTEROP);
                 args.quic_parameters.max_streams_bidi = 100;
             }
             "handshake" | "transfer" | "resumption" | "multiconnect" => {
                 args.use_old_http = true;
-                args.alpn = "hq-29".into();
+                args.alpn = String::from(HQ_INTEROP);
             }
             "chacha20" => {
                 args.use_old_http = true;
-                args.alpn = "hq-29".into();
+                args.alpn = String::from(HQ_INTEROP);
                 args.ciphers.clear();
                 args.ciphers
                     .extend_from_slice(&[String::from("TLS_CHACHA20_POLY1305_SHA256")]);
             }
             "retry" => {
                 args.use_old_http = true;
-                args.alpn = "hq-29".into();
+                args.alpn = String::from(HQ_INTEROP);
                 args.retry = true;
             }
             _ => exit(127),

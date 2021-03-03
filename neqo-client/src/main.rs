@@ -110,7 +110,7 @@ impl KeyUpdateState {
     about = "A basic QUIC HTTP/0.9 and HTTP/3 client."
 )]
 pub struct Args {
-    #[structopt(short = "a", long, default_value = "h3-29")]
+    #[structopt(short = "a", long, default_value = "h3")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP/3 no matter what the ALPN says.
@@ -1012,13 +1012,13 @@ mod old {
         token: Option<ResumptionToken>,
     ) -> Res<Option<ResumptionToken>> {
         let (quic_protocol, alpn) = match args.alpn.as_str() {
-            "hq" => (QuicVersion::Version1, "hq"),
             "hq-27" => (QuicVersion::Draft27, "hq-27"),
             "hq-28" => (QuicVersion::Draft28, "hq-28"),
+            "hq-29" => (QuicVersion::Draft29, "hq-29"),
             "hq-30" => (QuicVersion::Draft30, "hq-30"),
             "hq-31" => (QuicVersion::Draft31, "hq-31"),
             "hq-32" => (QuicVersion::Draft32, "hq-32"),
-            _ => (QuicVersion::Draft29, "hq-29"),
+            _ => (QuicVersion::Version1, "hq-interop"),
         };
 
         let mut client = Connection::new_client(
