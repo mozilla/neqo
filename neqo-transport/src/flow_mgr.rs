@@ -16,7 +16,6 @@ use smallvec::{smallvec, SmallVec};
 use crate::frame::{write_varint_frame, Frame};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
-use crate::recv_stream::RecvStreams;
 use crate::stats::FrameStats;
 use crate::stream_id::{StreamId, StreamIndex, StreamIndexes, StreamType};
 use crate::{AppError, Res};
@@ -26,9 +25,6 @@ pub type FlowControlRecoveryToken = FlowFrame;
 
 #[derive(Debug, Default)]
 pub struct FlowMgr {
-    // Discriminant as key ensures only 1 of every frame type will be queued.
-    from_conn: HashMap<mem::Discriminant<FlowFrame>, FlowFrame>,
-
     // (id, discriminant) as key ensures only 1 of every frame type per stream
     // will be queued.
     from_streams: HashMap<(StreamId, mem::Discriminant<FlowFrame>), FlowFrame>,
@@ -39,13 +35,6 @@ pub struct FlowMgr {
 }
 
 impl FlowMgr {
-    // -- frames scoped on connection --
-
-    pub fn max_data(&mut self, maximum_data: u64) {
-        let frame = Frame::MaxData { maximum_data };
-        self.from_conn.insert(mem::discriminant(&frame), frame);
-    }
-
     // -- frames scoped on stream --
 
     /// Indicate to sending remote we are no longer interested in the stream
@@ -56,26 +45,6 @@ impl FlowMgr {
         };
         self.from_streams
             .insert((stream_id, mem::discriminant(&frame)), frame);
-    }
-
-    /// Update sending remote with more credits
-    pub fn max_stream_data(&mut self, stream_id: StreamId, maximum_stream_data: u64) {
-        let frame = Frame::MaxStreamData {
-            stream_id,
-            maximum_stream_data,
-        };
-        self.from_streams
-            .insert((stream_id, mem::discriminant(&frame)), frame);
-    }
-
-    /// Don't send stream data updates if no more data is coming
-    pub fn clear_max_stream_data(&mut self, stream_id: StreamId) {
-        let frame = Frame::MaxStreamData {
-            stream_id,
-            maximum_stream_data: 0,
-        };
-        self.from_streams
-            .remove(&(stream_id, mem::discriminant(&frame)));
     }
 
     // -- frames scoped on stream type --
@@ -99,9 +68,7 @@ impl FlowMgr {
     }
 
     pub fn peek(&self) -> Option<&Frame> {
-        if let Some(key) = self.from_conn.keys().next() {
-            self.from_conn.get(key)
-        } else if let Some(key) = self.from_streams.keys().next() {
+        if let Some(key) = self.from_streams.keys().next() {
             self.from_streams.get(key)
         } else if let Some(key) = self.from_stream_types.keys().next() {
             self.from_stream_types.get(key)
@@ -110,12 +77,7 @@ impl FlowMgr {
         }
     }
 
-    pub(crate) fn lost(
-        &mut self,
-        token: &FlowControlRecoveryToken,
-        recv_streams: &mut RecvStreams,
-        indexes: &mut StreamIndexes,
-    ) {
+    pub(crate) fn lost(&mut self, token: &FlowControlRecoveryToken, indexes: &mut StreamIndexes) {
         match *token {
             // Resend MaxStreams if lost (with updated value)
             Frame::MaxStreams { stream_type, .. } => {
@@ -144,13 +106,6 @@ impl FlowMgr {
                 stream_id,
                 application_error_code,
             } => self.stop_sending(stream_id, application_error_code),
-            Frame::MaxStreamData { stream_id, .. } => {
-                if let Some(rs) = recv_streams.get_mut(&stream_id) {
-                    if let Some(msd) = rs.max_stream_data() {
-                        self.max_stream_data(stream_id, msd)
-                    }
-                }
-            }
             _ => qwarn!("Unexpected Flow frame {:?} lost, not re-sent", token),
         }
     }
@@ -178,7 +133,6 @@ impl FlowMgr {
                 Frame::StreamsBlocked { stream_limit, .. } => {
                     (smallvec![stream_limit.as_u64()], &mut stats.streams_blocked)
                 }
-                Frame::MaxData { maximum_data } => (smallvec![*maximum_data], &mut stats.max_data),
                 Frame::MaxStreamData {
                     stream_id,
                     maximum_stream_data,
@@ -207,11 +161,6 @@ impl Iterator for FlowMgr {
 
     /// Used by generator to get a flow control frame.
     fn next(&mut self) -> Option<Self::Item> {
-        let first_key = self.from_conn.keys().next();
-        if let Some(&first_key) = first_key {
-            return self.from_conn.remove(&first_key);
-        }
-
         let first_key = self.from_streams.keys().next();
         if let Some(&first_key) = first_key {
             return self.from_streams.remove(&first_key);

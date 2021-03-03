@@ -53,6 +53,8 @@ pub enum RecoveryToken {
     DataBlocked(u64),
     StreamDataBlocked { stream_id: StreamId, limit: u64 },
     ResetStream { stream_id: StreamId },
+    MaxData(u64),
+    MaxStreamData { stream_id: StreamId, max_data: u64 },
 }
 
 /// `SendProfile` tells a sender how to send packets.

@@ -17,7 +17,11 @@ use std::rc::Rc;
 use smallvec::SmallVec;
 
 use crate::events::ConnectionEvents;
+use crate::fc::ReceiverFlowControl;
 use crate::flow_mgr::FlowMgr;
+use crate::packet::PacketBuilder;
+use crate::recovery::RecoveryToken;
+use crate::stats::FrameStats;
 use crate::stream_id::StreamId;
 use crate::{AppError, Error, Res};
 use neqo_common::qtrace;
@@ -267,9 +271,8 @@ impl RxStreamOrderer {
 // Because a dead_code warning is easier than clippy::unused_self, see https://github.com/rust-lang/rust/issues/68408
 enum RecvStreamState {
     Recv {
+        fc: ReceiverFlowControl<StreamId>,
         recv_buf: RxStreamOrderer,
-        max_bytes: u64, // Maximum size of recv_buf
-        max_stream_data: u64,
     },
     SizeKnown {
         recv_buf: RxStreamOrderer,
@@ -284,11 +287,10 @@ enum RecvStreamState {
 }
 
 impl RecvStreamState {
-    fn new(max_bytes: u64) -> Self {
+    fn new(max_bytes: u64, stream_id: StreamId) -> Self {
         Self::Recv {
+            fc: ReceiverFlowControl::new(stream_id, max_bytes),
             recv_buf: RxStreamOrderer::new(),
-            max_bytes,
-            max_stream_data: max_bytes,
         }
     }
 
@@ -317,15 +319,6 @@ impl RecvStreamState {
             _ => None,
         }
     }
-
-    fn max_stream_data(&self) -> Option<u64> {
-        match self {
-            Self::Recv {
-                max_stream_data, ..
-            } => Some(*max_stream_data),
-            _ => None,
-        }
-    }
 }
 
 /// Implement a QUIC receive stream.
@@ -346,7 +339,7 @@ impl RecvStream {
     ) -> Self {
         Self {
             stream_id,
-            state: RecvStreamState::new(max_stream_data),
+            state: RecvStreamState::new(max_stream_data, stream_id),
             flow_mgr,
             conn_events,
         }
@@ -363,12 +356,6 @@ impl RecvStream {
             self.state.name(),
             new_state.name()
         );
-
-        if let RecvStreamState::Recv { .. } = &self.state {
-            self.flow_mgr
-                .borrow_mut()
-                .clear_max_stream_data(self.stream_id)
-        }
 
         if let RecvStreamState::DataRead = new_state {
             self.conn_events.recv_stream_complete(self.stream_id);
@@ -391,13 +378,9 @@ impl RecvStream {
         }
 
         match &mut self.state {
-            RecvStreamState::Recv {
-                recv_buf,
-                max_stream_data,
-                ..
-            } => {
-                if new_end > *max_stream_data {
-                    qtrace!("Stream RX window {} exceeded: {}", max_stream_data, new_end);
+            RecvStreamState::Recv { recv_buf, fc, .. } => {
+                if !fc.check_allowed(new_end) {
+                    qtrace!("Stream RX window exceeded: {}", new_end);
                     return Err(Error::FlowControlError);
                 }
 
@@ -461,24 +444,8 @@ impl RecvStream {
     /// If we should tell the sender they have more credit, return an offset
     pub fn maybe_send_flowc_update(&mut self) {
         // Only ever needed if actively receiving and not in SizeKnown state
-        if let RecvStreamState::Recv {
-            max_bytes,
-            max_stream_data,
-            recv_buf,
-        } = &mut self.state
-        {
-            // Algo: send an update if app has consumed more than half
-            // the data in the current window
-            // TODO(agrover@mozilla.com): This algo is not great but
-            // should prevent Silly Window Syndrome. Spec refers to using
-            // highest seen offset somehow? RTT maybe?
-            let maybe_new_max = recv_buf.retired() + *max_bytes;
-            if maybe_new_max > (*max_bytes / 2) + *max_stream_data {
-                *max_stream_data = maybe_new_max;
-                self.flow_mgr
-                    .borrow_mut()
-                    .max_stream_data(self.stream_id, maybe_new_max)
-            }
+        if let RecvStreamState::Recv { fc, recv_buf } = &mut self.state {
+            fc.retired(recv_buf.retired());
         }
     }
 
@@ -486,24 +453,9 @@ impl RecvStream {
     /// This is used when a peer declares that they are blocked.
     /// This sends `MAX_STREAM_DATA` if there is any increase possible.
     pub fn send_flowc_update(&mut self) {
-        if let RecvStreamState::Recv {
-            max_bytes,
-            max_stream_data,
-            recv_buf,
-        } = &mut self.state
-        {
-            let new_max = recv_buf.retired() + *max_bytes;
-            if new_max > *max_stream_data {
-                *max_stream_data = new_max;
-                self.flow_mgr
-                    .borrow_mut()
-                    .max_stream_data(self.stream_id, new_max)
-            }
+        if let RecvStreamState::Recv { fc, .. } = &mut self.state {
+            fc.send_flowc_update();
         }
-    }
-
-    pub fn max_stream_data(&self) -> Option<u64> {
-        self.state.max_stream_data()
     }
 
     pub fn is_terminal(&self) -> bool {
@@ -557,12 +509,42 @@ impl RecvStream {
             }
         }
     }
+
+    /// Maybe write a `MAX_STREAM_DATA` frame.
+    pub fn write_frame(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) -> Res<()> {
+        // Send MAX_STREAM_DATA at normal priority always.
+        if let RecvStreamState::Recv { fc, .. } = &mut self.state {
+            fc.write_frames(builder, tokens, stats)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn max_stream_data_lost(&mut self, maximum_data: u64) {
+        if let RecvStreamState::Recv { fc, .. } = &mut self.state {
+            fc.lost(maximum_data);
+        }
+    }
+
+    #[cfg(test)]
+    pub fn has_frames_to_write(&self) -> bool {
+        if let RecvStreamState::Recv { fc, .. } = &self.state {
+            fc.max_data_needed().is_some()
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frame::Frame;
+    use neqo_common::Encoder;
     use std::ops::Range;
 
     fn recv_ranges(ranges: &[Range<u64>], available: usize) {
@@ -997,23 +979,26 @@ mod tests {
         let mut buf = vec![0u8; RECV_BUFFER_SIZE + 100]; // Make it overlarge
 
         s.maybe_send_flowc_update();
-        assert_eq!(s.flow_mgr.borrow().peek(), None);
+        assert!(!s.has_frames_to_write());
         s.inbound_stream_frame(false, 0, &frame1).unwrap();
         s.maybe_send_flowc_update();
-        assert_eq!(s.flow_mgr.borrow().peek(), None);
+        assert!(!s.has_frames_to_write());
         assert_eq!(s.read(&mut buf).unwrap(), (RECV_BUFFER_SIZE, false));
         assert_eq!(s.data_ready(), false);
         s.maybe_send_flowc_update();
 
         // flow msg generated!
-        assert!(s.flow_mgr.borrow().peek().is_some());
+        assert!(s.has_frames_to_write());
 
         // consume it
-        s.flow_mgr.borrow_mut().next().unwrap();
+        let mut builder = PacketBuilder::short(Encoder::new(), false, &[]);
+        let mut token = Vec::new();
+        s.write_frame(&mut builder, &mut token, &mut FrameStats::default())
+            .unwrap();
 
         // it should be gone
         s.maybe_send_flowc_update();
-        assert_eq!(s.flow_mgr.borrow().peek(), None);
+        assert!(!s.has_frames_to_write());
     }
 
     #[test]
@@ -1030,7 +1015,7 @@ mod tests {
         );
 
         s.maybe_send_flowc_update();
-        assert_eq!(s.flow_mgr.borrow().peek(), None);
+        assert!(!s.has_frames_to_write());
         s.inbound_stream_frame(false, 0, &frame1).unwrap();
         s.inbound_stream_frame(false, RX_STREAM_DATA_WINDOW, &[1; 1])
             .unwrap_err();
@@ -1086,48 +1071,11 @@ mod tests {
         );
 
         s.inbound_stream_frame(false, 0, &frame1).unwrap();
-        flow_mgr.borrow_mut().max_stream_data(stream_id, 100);
-        assert!(matches!(
-            s.flow_mgr.borrow().peek().unwrap(),
-            Frame::MaxStreamData { .. }
-        ));
+        let mut buf = [0; RECV_BUFFER_SIZE];
+        s.read(&mut buf).unwrap();
+        assert!(s.has_frames_to_write());
         s.inbound_stream_frame(true, RX_STREAM_DATA_WINDOW, &[])
             .unwrap();
-        assert!(matches!(s.flow_mgr.borrow().peek(), None));
-    }
-
-    #[test]
-    fn resend_flowc_if_lost() {
-        let flow_mgr = Rc::new(RefCell::new(FlowMgr::default()));
-        let conn_events = ConnectionEvents::default();
-
-        let frame1 = &[0; RECV_BUFFER_SIZE];
-        let stream_id = StreamId::from(67);
-        let mut s = RecvStream::new(
-            stream_id,
-            RX_STREAM_DATA_WINDOW,
-            Rc::clone(&flow_mgr),
-            conn_events,
-        );
-
-        // A flow control update is queued
-        s.inbound_stream_frame(false, 0, frame1).unwrap();
-        flow_mgr.borrow_mut().max_stream_data(stream_id, 100);
-        // Generates frame
-        assert!(matches!(
-            s.flow_mgr.borrow_mut().next().unwrap(),
-            Frame::MaxStreamData { .. }
-        ));
-        // Nothing else queued
-        assert!(matches!(s.flow_mgr.borrow().peek(), None));
-        // Asking for another one won't get you one
-        s.maybe_send_flowc_update();
-        assert!(matches!(s.flow_mgr.borrow().peek(), None));
-        // But if lost, another frame is generated
-        flow_mgr.borrow_mut().max_stream_data(stream_id, 100);
-        assert!(matches!(
-            s.flow_mgr.borrow_mut().next().unwrap(),
-            Frame::MaxStreamData { .. }
-        ));
+        assert!(!s.has_frames_to_write());
     }
 }

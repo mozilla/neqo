@@ -7,7 +7,10 @@
 // Tracks possibly-redundant flow control signals from other code and converts
 // into flow control frames needing to be sent to the remote.
 
-use crate::frame::{write_varint_frame, FRAME_TYPE_DATA_BLOCKED, FRAME_TYPE_STREAM_DATA_BLOCKED};
+use crate::frame::{
+    write_varint_frame, FRAME_TYPE_DATA_BLOCKED, FRAME_TYPE_MAX_DATA, FRAME_TYPE_MAX_STREAM_DATA,
+    FRAME_TYPE_STREAM_DATA_BLOCKED,
+};
 use crate::packet::PacketBuilder;
 use crate::recovery::RecoveryToken;
 use crate::stats::FrameStats;
@@ -161,9 +164,131 @@ impl SenderFlowControl<StreamId> {
     }
 }
 
+#[derive(Debug)]
+pub struct ReceiverFlowControl<T>
+where
+    T: Debug + Sized,
+{
+    /// The thing that we're counting for.
+    subject: T,
+    /// Max amount of outstanding data
+    max_wnd: u64,
+    // Last max data sent.
+    max_data: u64,
+    // Retired bytes.
+    retired: u64,
+    frame_pending: bool,
+}
+
+impl<T> ReceiverFlowControl<T>
+where
+    T: Debug + Sized,
+{
+    /// Make a new instance with the initial value and subject.
+    pub fn new(subject: T, max_bytes: u64) -> Self {
+        Self {
+            subject,
+            max_wnd: max_bytes,
+            max_data: max_bytes,
+            retired: 0,
+            frame_pending: false,
+        }
+    }
+
+    /// Check if received data exceeds the allowed flow control limit.
+    pub fn check_allowed(&self, new_end: u64) -> bool {
+        new_end <= self.max_data
+    }
+
+    /// Some data has been read, retired them and maybe send flow control
+    /// update.
+    pub fn retired(&mut self, retired: u64) {
+        if retired <= self.retired {
+            return;
+        }
+
+        self.retired = retired;
+        let maybe_new_max = self.retired + self.max_wnd;
+        if maybe_new_max > (self.max_wnd / 2) + self.max_data {
+            self.max_data = maybe_new_max;
+            self.frame_pending = true;
+        }
+    }
+
+    /// This function is called when STREAM_DATA_BLOCKED frame is received.
+    /// The flow control willl try to send an update if possible.
+    pub fn send_flowc_update(&mut self) {
+        let new_max = self.retired + self.max_wnd;
+        if new_max > self.max_data {
+            self.max_data = new_max;
+            self.frame_pending = true;
+        }
+    }
+
+    pub fn max_data_needed(&self) -> Option<u64> {
+        if self.frame_pending {
+            Some(self.max_data)
+        } else {
+            None
+        }
+    }
+
+    pub fn lost(&mut self, maximum_data: u64) {
+        if maximum_data == self.max_data {
+            self.frame_pending = true;
+        }
+    }
+
+    fn max_data_sent(&mut self) {
+        self.frame_pending = false;
+    }
+}
+
+impl ReceiverFlowControl<()> {
+    pub fn write_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) -> Res<()> {
+        if let Some(max_data) = self.max_data_needed() {
+            if write_varint_frame(builder, &[FRAME_TYPE_MAX_DATA, max_data])? {
+                stats.max_data += 1;
+                tokens.push(RecoveryToken::MaxData(max_data));
+                self.max_data_sent();
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ReceiverFlowControl<StreamId> {
+    pub fn write_frames(
+        &mut self,
+        builder: &mut PacketBuilder,
+        tokens: &mut Vec<RecoveryToken>,
+        stats: &mut FrameStats,
+    ) -> Res<()> {
+        if let Some(max_data) = self.max_data_needed() {
+            if write_varint_frame(
+                builder,
+                &[FRAME_TYPE_MAX_STREAM_DATA, self.subject.as_u64(), max_data],
+            )? {
+                stats.max_stream_data += 1;
+                tokens.push(RecoveryToken::MaxStreamData {
+                    stream_id: self.subject,
+                    max_data,
+                });
+                self.max_data_sent();
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::SenderFlowControl;
+    use super::{ReceiverFlowControl, SenderFlowControl};
 
     #[test]
     fn blocked_at_zero() {
@@ -235,5 +360,53 @@ mod test {
         fc.blocked_sent();
         fc.lost(10);
         assert_eq!(fc.blocked_needed(), None);
+    }
+
+    #[test]
+    fn do_no_need_max_data_frame_at_start() {
+        let fc = ReceiverFlowControl::new((), 0);
+        assert_eq!(fc.max_data_needed(), None);
+    }
+
+    #[test]
+    fn max_data_after_bytes_retired() {
+        let mut fc = ReceiverFlowControl::new((), 100);
+        fc.retired(49);
+        assert_eq!(fc.max_data_needed(), None);
+        fc.retired(51);
+        assert_eq!(fc.max_data_needed(), Some(151));
+    }
+
+    #[test]
+    fn need_max_data_frame_after_loss() {
+        let mut fc = ReceiverFlowControl::new((), 100);
+        fc.retired(100);
+        assert_eq!(fc.max_data_needed(), Some(200));
+        fc.max_data_sent();
+        assert_eq!(fc.max_data_needed(), None);
+        fc.lost(200);
+        assert_eq!(fc.max_data_needed(), Some(200));
+    }
+
+    #[test]
+    fn no_max_data_frame_after_old_loss() {
+        let mut fc = ReceiverFlowControl::new((), 100);
+        fc.retired(51);
+        assert_eq!(fc.max_data_needed(), Some(151));
+        fc.max_data_sent();
+        assert_eq!(fc.max_data_needed(), None);
+        fc.retired(102);
+        assert_eq!(fc.max_data_needed(), Some(202));
+        fc.max_data_sent();
+        assert_eq!(fc.max_data_needed(), None);
+        fc.lost(151);
+        assert_eq!(fc.max_data_needed(), None);
+    }
+
+    #[test]
+    fn force_send_max_data() {
+        let mut fc = ReceiverFlowControl::new((), 100);
+        fc.retired(10);
+        assert_eq!(fc.max_data_needed(), None);
     }
 }

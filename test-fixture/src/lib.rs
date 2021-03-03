@@ -13,7 +13,7 @@ use neqo_http3::{Http3Client, Http3Parameters, Http3Server};
 use neqo_qpack::QpackSettings;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
-    ConnectionIdRef, ConnectionParameters, State,
+    ConnectionIdRef, ConnectionParameters, State, StreamType,
 };
 
 use std::cell::RefCell;
@@ -131,6 +131,25 @@ pub fn default_client() -> Connection {
 #[must_use]
 pub fn default_server() -> Connection {
     make_default_server(DEFAULT_ALPN)
+}
+
+/// Create a transport server with an initial `max_stream_data` value.
+#[must_use]
+pub fn default_server_max_stream_data(max_stream_data: u64) -> Connection {
+    fixture_init();
+
+    let mut c = Connection::new_server(
+        DEFAULT_KEYS,
+        DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        ConnectionParameters::default()
+            .max_stream_data(StreamType::UniDi, max_stream_data)
+            .max_stream_data(StreamType::BiDi, max_stream_data),
+    )
+    .expect("create a default server");
+    c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
+        .expect("enable 0-RTT");
+    c
 }
 
 /// Create a transport server with default configuration.
