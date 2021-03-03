@@ -10,6 +10,7 @@
 use std::cell::RefCell;
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
+use std::mem;
 use std::net::{IpAddr, SocketAddr};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -226,7 +227,7 @@ impl Paths {
         debug_assert!(!self.is_temporary(path));
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
-            let _ = self.select_primary(path);
+            mem::drop(self.select_primary(path));
             self.migration_target = None;
         } else {
             self.migration_target = Some(Rc::clone(path));
@@ -268,7 +269,7 @@ impl Paths {
                 // Need a clone as `fallback` is borrowed from `self`.
                 let path = Rc::clone(fallback);
                 qinfo!([path.borrow()], "Failing over after primary path failed");
-                let _ = self.select_primary(&path);
+                mem::drop(self.select_primary(&path));
                 true
             } else {
                 false
@@ -340,7 +341,7 @@ impl Paths {
                     .map_or(false, |target| Rc::ptr_eq(target, p))
                 {
                     let primary = self.migration_target.take();
-                    let _ = self.select_primary(&primary.unwrap());
+                    mem::drop(self.select_primary(&primary.unwrap()));
                     return true;
                 }
                 break;

@@ -1005,21 +1005,21 @@ impl Connection {
         self.process_output(now)
     }
 
-    fn handle_retry(&mut self, packet: &PublicPacket) -> Res<()> {
+    fn handle_retry(&mut self, packet: &PublicPacket) {
         qinfo!([self], "received Retry");
         if matches!(self.address_validation, AddressValidationInfo::Retry { .. }) {
             self.stats.borrow_mut().pkt_dropped("Extra Retry");
-            return Ok(());
+            return;
         }
         if packet.token().is_empty() {
             self.stats.borrow_mut().pkt_dropped("Retry without a token");
-            return Ok(());
+            return;
         }
         if !packet.is_valid_retry(&self.original_destination_cid.as_ref().unwrap()) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Retry with bad integrity tag");
-            return Ok(());
+            return;
         }
         // At this point, we should only have the connection ID that we generated.
         // Update to the one that the server prefers.
@@ -1044,7 +1044,6 @@ impl Connection {
             token: packet.token().to_vec(),
             retry_source_cid: retry_scid,
         };
-        Ok(())
     }
 
     fn discard_keys(&mut self, space: PNSpace, now: Instant) {
@@ -1184,7 +1183,7 @@ impl Connection {
                 }
             }
             (PacketType::Retry, State::WaitInitial, Role::Client) => {
-                self.handle_retry(packet)?;
+                self.handle_retry(packet);
                 return Ok(PreprocessResult::Next);
             }
             (PacketType::Handshake, State::WaitInitial, Role::Client)
@@ -2379,7 +2378,7 @@ impl Connection {
             } => {
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(space, largest_acknowledged, ranges, ack_delay, now)?;
+                self.handle_ack(space, largest_acknowledged, ranges, ack_delay, now);
             }
             Frame::ResetStream {
                 stream_id,
@@ -2635,8 +2634,7 @@ impl Connection {
         ack_ranges: R,
         ack_delay: u64,
         now: Instant,
-    ) -> Res<()>
-    where
+    ) where
         R: IntoIterator<Item = RangeInclusive<u64>> + Debug,
         R::IntoIter: ExactSizeIterator,
     {
@@ -2675,7 +2673,6 @@ impl Connection {
         let stats = &mut self.stats.borrow_mut().frame_rx;
         stats.ack += 1;
         stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
-        Ok(())
     }
 
     /// When the server rejects 0-RTT we need to drop a bunch of stuff.

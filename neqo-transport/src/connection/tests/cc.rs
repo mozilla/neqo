@@ -19,6 +19,7 @@ use crate::tracking::MAX_UNACKED_PKTS;
 
 use neqo_common::{qdebug, qinfo, qtrace, Datagram};
 use std::convert::TryFrom;
+use std::mem;
 use std::time::{Duration, Instant};
 
 // Get the current congestion window for the connection.
@@ -361,7 +362,7 @@ fn cc_slow_start_to_persistent_congestion_no_acks() {
 
     // Server: Receive and generate ack
     now += DEFAULT_RTT / 2;
-    let _ = ack_bytes(&mut server, 0, c_tx_dgrams, now);
+    mem::drop(ack_bytes(&mut server, 0, c_tx_dgrams, now));
 
     // ACK lost.
     induce_persistent_congestion(&mut client, &mut server, now);
@@ -414,7 +415,7 @@ fn cc_persistent_congestion_to_slow_start() {
 
     // Server: Receive and generate ack
     now += Duration::from_millis(10);
-    let _ = ack_bytes(&mut server, 0, c_tx_dgrams, now);
+    mem::drop(ack_bytes(&mut server, 0, c_tx_dgrams, now));
 
     // ACK lost.
 
