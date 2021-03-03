@@ -1160,7 +1160,10 @@ impl Connection {
                         if versions.is_empty()
                             || versions.contains(&self.version().as_u32())
                             || packet.dcid() != self.odcid().unwrap()
-                            || matches!(self.address_validation, AddressValidationInfo::Retry { .. })
+                            || matches!(
+                                self.address_validation,
+                                AddressValidationInfo::Retry { .. }
+                            )
                         {
                             // Ignore VersionNegotiation packets that contain the current version.
                             // Or don't have the right connection ID.
@@ -2750,7 +2753,10 @@ impl Connection {
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {
             // Only tolerate a regression in state if the new state is closing
             // and the connection is already closed.
-            debug_assert!(matches!(state, State::Closing { .. } | State::Draining { .. }));
+            debug_assert!(matches!(
+                state,
+                State::Closing { .. } | State::Draining { .. }
+            ));
             debug_assert!(self.state.closed());
         }
     }

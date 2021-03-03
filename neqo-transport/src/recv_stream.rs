@@ -1087,7 +1087,10 @@ mod tests {
 
         s.inbound_stream_frame(false, 0, &frame1).unwrap();
         flow_mgr.borrow_mut().max_stream_data(stream_id, 100);
-        assert!(matches!(s.flow_mgr.borrow().peek().unwrap(), Frame::MaxStreamData{..}));
+        assert!(matches!(
+            s.flow_mgr.borrow().peek().unwrap(),
+            Frame::MaxStreamData { .. }
+        ));
         s.inbound_stream_frame(true, RX_STREAM_DATA_WINDOW, &[])
             .unwrap();
         assert!(matches!(s.flow_mgr.borrow().peek(), None));
@@ -1122,6 +1125,9 @@ mod tests {
         assert!(matches!(s.flow_mgr.borrow().peek(), None));
         // But if lost, another frame is generated
         flow_mgr.borrow_mut().max_stream_data(stream_id, 100);
-        assert!(matches!(s.flow_mgr.borrow_mut().next().unwrap(), Frame::MaxStreamData{..}));
+        assert!(matches!(
+            s.flow_mgr.borrow_mut().next().unwrap(),
+            Frame::MaxStreamData { .. }
+        ));
     }
 }

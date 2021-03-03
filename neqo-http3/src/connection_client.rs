@@ -226,7 +226,10 @@ impl Http3Client {
         S: AsRef<str> + Display,
     {
         qinfo!([self], "Close the connection error={} msg={}.", error, msg);
-        if !matches!(self.base_handler.state, Http3State::Closing(_)| Http3State::Closed(_)) {
+        if !matches!(
+            self.base_handler.state,
+            Http3State::Closing(_) | Http3State::Closed(_)
+        ) {
             self.push_handler.borrow_mut().clear();
             self.conn.close(now, error, msg);
             self.base_handler.close(error);
@@ -4468,28 +4471,21 @@ mod tests {
         let any_push_event = |e| {
             matches!(
                 e,
-                Http3ClientEvent::PushPromise{..}
-                | Http3ClientEvent::PushHeaderReady{..}
-                | Http3ClientEvent::PushDataReadable{..})
+                Http3ClientEvent::PushPromise { .. }
+                    | Http3ClientEvent::PushHeaderReady { .. }
+                    | Http3ClientEvent::PushDataReadable { .. }
+            )
         };
         client.events().any(any_push_event)
     }
 
     fn check_data_readable(client: &mut Http3Client) -> bool {
-        let any_data_event = |e| {
-            matches!(
-                e,
-                Http3ClientEvent::DataReadable{..})
-        };
+        let any_data_event = |e| matches!(e, Http3ClientEvent::DataReadable { .. });
         client.events().any(any_data_event)
     }
 
     fn check_header_ready(client: &mut Http3Client) -> bool {
-        let any_event = |e| {
-            matches!(
-                e,
-                Http3ClientEvent::HeaderReady{..})
-        };
+        let any_event = |e| matches!(e, Http3ClientEvent::HeaderReady { .. });
         client.events().any(any_event)
     }
 
@@ -4497,8 +4493,8 @@ mod tests {
         let any_event = |e| {
             matches!(
                 e,
-                Http3ClientEvent::HeaderReady{..}
-                | Http3ClientEvent::PushPromise{..})
+                Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::PushPromise { .. }
+            )
         };
         client.events().any(any_event)
     }
@@ -4744,7 +4740,7 @@ mod tests {
         send_push_promise_and_exchange_packets(&mut client, &mut server, request_stream_id_2, 5);
 
         // Check that we do not have a Http3ClientEvent::PushPromise.
-        let push_event = |e| matches!(e, Http3ClientEvent::PushPromise{ .. });
+        let push_event = |e| matches!(e, Http3ClientEvent::PushPromise { .. });
         assert!(!client.events().any(push_event));
     }
 

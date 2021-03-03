@@ -98,7 +98,12 @@ fn complete_connection(
     server: &mut Server,
     mut datagram: Option<Datagram>,
 ) -> ActiveConnectionRef {
-    let is_done = |c: &Connection| matches!(c.state(), State::Confirmed | State::Closing { .. } | State::Closed(..));
+    let is_done = |c: &Connection| {
+        matches!(
+            c.state(),
+            State::Confirmed | State::Closing { .. } | State::Closed(..)
+        )
+    };
     while !is_done(client) {
         let _ = test_fixture::maybe_authenticate(client);
         let out = client.process(datagram, now());
@@ -881,7 +886,7 @@ fn mitm_retry() {
     assert!(dgram.is_some()); // Client sending CLOSE_CONNECTIONs
     assert!(matches!(
         *client.state(),
-        State::Closing{
+        State::Closing {
             error: ConnectionError::Transport(Error::ProtocolViolation),
             ..
         }

@@ -1182,7 +1182,7 @@ impl CryptoStreams {
                     *self = Self::ApplicationData {
                         application: mem::take(application),
                     };
-                } else if matches!(self, Self::Initial {..}) {
+                } else if matches!(self, Self::Initial { .. }) {
                     panic!("Discarding handshake before initial discarded");
                 }
             }
