@@ -170,7 +170,12 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
     let mut a = client;
     let mut b = server;
     let mut datagram = None;
-    let is_done = |c: &Connection| matches!(c.state(), State::Confirmed | State::Closing { .. } | State::Closed(..));
+    let is_done = |c: &Connection| {
+        matches!(
+            c.state(),
+            State::Confirmed | State::Closing { .. } | State::Closed(..)
+        )
+    };
     while !is_done(a) {
         let _ = maybe_authenticate(a);
         let d = a.process(datagram, now());

@@ -146,7 +146,12 @@ fn handshake(
     let mut now = now;
 
     let mut input = None;
-    let is_done = |c: &mut Connection| matches!(c.state(), State::Confirmed | State::Closing { .. } | State::Closed(..));
+    let is_done = |c: &mut Connection| {
+        matches!(
+            c.state(),
+            State::Confirmed | State::Closing { .. } | State::Closed(..)
+        )
+    };
 
     while !is_done(a) {
         let _ = maybe_authenticate(a);

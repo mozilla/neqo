@@ -259,17 +259,22 @@ impl<'a> Frame<'a> {
     /// If the frame causes a recipient to generate an ACK within its
     /// advertised maximum acknowledgement delay.
     pub fn ack_eliciting(&self) -> bool {
-        !matches!(self, Self::Ack { .. } | Self::Padding | Self::ConnectionClose { .. })
+        !matches!(
+            self,
+            Self::Ack { .. } | Self::Padding | Self::ConnectionClose { .. }
+        )
     }
 
     /// If the frame can be sent in a path probe
     /// without initiating migration to that path.
     pub fn path_probing(&self) -> bool {
-        matches!(self,
+        matches!(
+            self,
             Self::Padding
-            | Self::NewConnectionId { .. }
-            | Self::PathChallenge { .. }
-            | Self::PathResponse { .. })
+                | Self::NewConnectionId { .. }
+                | Self::PathChallenge { .. }
+                | Self::PathResponse { .. }
+        )
     }
 
     /// Converts AckRanges as encoded in a ACK frame (see -transport

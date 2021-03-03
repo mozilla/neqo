@@ -268,7 +268,9 @@ impl RecvMessage {
                             if matches!(self.state, RecvMessageState::Closed) {
                                 break Ok(());
                             }
-                            if fin && !matches!(self.state, RecvMessageState::DecodingHeaders{..}) {
+                            if fin
+                                && !matches!(self.state, RecvMessageState::DecodingHeaders { .. })
+                            {
                                 break self.set_state_to_close_pending(post_readable_event);
                             }
                         }

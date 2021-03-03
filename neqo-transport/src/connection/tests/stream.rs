@@ -130,7 +130,7 @@ fn report_fin_when_stream_closed_wo_data() {
     server.stream_close_send(stream_id).unwrap();
     let out = server.process(None, now());
     let _ = client.process(out.dgram(), now());
-    let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
+    let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable { .. });
     assert!(client.events().any(stream_readable));
 }
 
@@ -203,7 +203,10 @@ fn max_data() {
 
     let evts = client.events().collect::<Vec<_>>();
     assert_eq!(evts.len(), 1);
-    assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
+    assert!(matches!(
+        evts[0],
+        ConnectionEvent::SendStreamWritable { .. }
+    ));
 }
 
 #[test]
@@ -221,7 +224,7 @@ fn do_not_accept_data_after_stop_sending() {
     let out = client.process(None, now());
     let _ = server.process(out.dgram(), now());
 
-    let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
+    let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable { .. });
     assert!(server.events().any(stream_readable));
 
     // Send one more packet from client. The packet should arrive after the server
@@ -504,7 +507,7 @@ fn no_dupdata_readable_events() {
     let _ = server.process(out.dgram(), now());
 
     // We have a data_readable event.
-    let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
+    let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable { .. });
     assert!(server.events().any(stream_readable));
 
     // Send one more data frame from client. The previous stream data has not been read yet,
@@ -536,7 +539,7 @@ fn no_dupdata_readable_events_empty_last_frame() {
     let _ = server.process(out.dgram(), now());
 
     // We have a data_readable event.
-    let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable {..});
+    let stream_readable = |e| matches!(e, ConnectionEvent::RecvStreamReadable { .. });
     assert!(server.events().any(stream_readable));
 
     // An empty frame with a fin will not produce a new DataReadable event, because

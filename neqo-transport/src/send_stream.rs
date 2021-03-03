@@ -933,7 +933,10 @@ impl SendStream {
     }
 
     pub fn is_terminal(&self) -> bool {
-        matches!(self.state, SendStreamState::DataRecvd { .. } | SendStreamState::ResetRecvd)
+        matches!(
+            self.state,
+            SendStreamState::DataRecvd { .. } | SendStreamState::ResetRecvd
+        )
     }
 
     pub fn send(&mut self, buf: &[u8]) -> Res<usize> {
@@ -974,7 +977,7 @@ impl SendStream {
             });
         }
 
-        if !matches!(self.state, SendStreamState::Send{..}) {
+        if !matches!(self.state, SendStreamState::Send { .. }) {
             return Err(Error::FinalSizeError);
         }
 
@@ -1502,7 +1505,10 @@ mod tests {
         s.set_max_stream_data(2);
         let evts = conn_events.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 1);
-        assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
+        assert!(matches!(
+            evts[0],
+            ConnectionEvent::SendStreamWritable { .. }
+        ));
         assert_eq!(s.send(b"hello").unwrap(), 2);
 
         // increasing to (conn:2, stream:4) will not generate an event or allow
@@ -1558,7 +1564,10 @@ mod tests {
         // an event.
         let evts = conn_events.events().collect::<Vec<_>>();
         assert_eq!(evts.len(), 1);
-        assert!(matches!(evts[0], ConnectionEvent::SendStreamWritable{..}));
+        assert!(matches!(
+            evts[0],
+            ConnectionEvent::SendStreamWritable { .. }
+        ));
     }
 
     #[test]
