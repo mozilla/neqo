@@ -1896,12 +1896,12 @@ impl Connection {
         let mut tokens = Vec::new();
         let primary = path.borrow().is_primary();
 
-        let ack_token = if primary {
-            self.acks
-                .write_frame(space, now, builder, &mut self.stats.borrow_mut().frame_tx)?
-        } else {
-            None
-        };
+        if primary {
+            let stats = &mut self.stats.borrow_mut().frame_tx;
+            if let Some(t) = self.acks.write_frame(space, now, builder, stats)? {
+                tokens.push(t);
+            }
+        }
         let ack_end = builder.len();
 
         // Avoid sending probes until the handshake completes,
@@ -1922,9 +1922,6 @@ impl Connection {
 
         if profile.ack_only(space) {
             // If we are CC limited we can only send acks!
-            if let Some(t) = ack_token {
-                tokens.push(t);
-            }
             return Ok((tokens, false, false));
         }
 
@@ -1932,27 +1929,37 @@ impl Connection {
             if space == PNSpace::ApplicationData {
                 self.write_appdata_frames(builder, &mut tokens)?;
             } else {
-                self.crypto.write_frame(
-                    space,
-                    builder,
-                    &mut tokens,
-                    &mut self.stats.borrow_mut().frame_tx,
-                )?;
+                let stats = &mut self.stats.borrow_mut().frame_tx;
+                self.crypto
+                    .write_frame(space, builder, &mut tokens, stats)?;
             }
         }
 
         let stats = &mut self.stats.borrow_mut().frame_tx;
         // Anything written after an ACK already elicits acknowledgment.
         // If we need to probe and nothing has been written, send a PING.
-        if builder.len() == ack_end && profile.should_probe(space) {
-            // Nothing ack-eliciting and we need to probe; send PING.
-            debug_assert_ne!(builder.remaining(), 0);
-            builder.encode_varint(crate::frame::FRAME_TYPE_PING);
-            if builder.len() > builder.limit() {
-                return Err(Error::InternalError(11));
+        if builder.len() == ack_end {
+            let probe = if profile.should_probe(space) {
+                // The packet might be empty, but we need to probe.
+                true
+            } else if !builder.packet_empty() {
+                // The packet only contains an ACK.  Check whether we want to
+                // force an ACK with a PING so we can stop tracking packets.
+                let pto = path.borrow().rtt().pto(PNSpace::ApplicationData);
+                self.loss_recovery.should_probe(pto, now)
+            } else {
+                false
+            };
+            if probe {
+                // Nothing ack-eliciting and we need to probe; send PING.
+                debug_assert_ne!(builder.remaining(), 0);
+                builder.encode_varint(crate::frame::FRAME_TYPE_PING);
+                if builder.len() > builder.limit() {
+                    return Err(Error::InternalError(11));
+                }
+                stats.ping += 1;
+                stats.all += 1;
             }
-            stats.ping += 1;
-            stats.all += 1;
         }
         // If this is not the primary path, this should be ack-eliciting.
         let ack_eliciting = builder.len() > ack_end;
@@ -1970,9 +1977,6 @@ impl Connection {
             false
         };
 
-        if let Some(t) = ack_token {
-            tokens.push(t);
-        }
         stats.all += tokens.len();
         Ok((tokens, ack_eliciting, padded))
     }
